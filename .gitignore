@@ -15,6 +15,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!src/**/lib/
 lib64/
 parts/
 sdist/
@@ -135,7 +136,8 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
+# .env is committed as template, .env.local contains secrets
+.env.local
 .envrc
 .venv
 env/
