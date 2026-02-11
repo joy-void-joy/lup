@@ -44,7 +44,7 @@ gh pr view <PR_NUMBER> --comments
 
 1. Display all review comments to the user, clearly formatted
 2. Show which reviews requested changes vs approved
-3. **Stop here.** Tell the user to fix the issues and re-run `/loop:rebase` to push updates.
+3. **Stop here.** Tell the user to fix the issues and re-run `/lup:rebase` to push updates.
 
 **If all reviews are approved (or no reviews yet but checks pass):**
 
@@ -83,7 +83,7 @@ git branch -D "$CURRENT_BRANCH" 2>/dev/null || true
 git push origin --delete "$CURRENT_BRANCH" 2>/dev/null || true
 ```
 
-Then warn the user that their current worktree corresponds to the now-merged branch. Suggest they run `/commit-commands:clean-gone` from the main worktree to remove this worktree, or navigate to the main worktree to continue working.
+Then warn the user that their current worktree corresponds to the now-merged branch. Suggest they run `/lup:clean-gone` from the main worktree to remove this worktree, or navigate to the main worktree to continue working.
 
 ### 6. Report
 

@@ -8,9 +8,9 @@ This script:
 4. Migrates the current Claude session to the new worktree
 
 Usage:
-    uv run python .claude/plugins/loop/scripts/new_worktree.py <name>
-    uv run python .claude/plugins/loop/scripts/new_worktree.py <name> --session-id <uuid>
-    uv run python .claude/plugins/loop/scripts/new_worktree.py <name> --no-sync
+    uv run python .claude/plugins/lup/scripts/new_worktree.py <name>
+    uv run python .claude/plugins/lup/scripts/new_worktree.py <name> --session-id <uuid>
+    uv run python .claude/plugins/lup/scripts/new_worktree.py <name> --no-sync
 """
 
 import shutil

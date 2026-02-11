@@ -1,11 +1,11 @@
 ---
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
-description: Create a new slash command in the loop plugin
+description: Create a new slash command in the lup plugin
 ---
 
 # Add New Command
 
-Create a new slash command in `.claude/plugins/loop/commands/`.
+Create a new slash command in `.claude/plugins/lup/commands/`.
 
 ## Your Task
 
@@ -25,7 +25,7 @@ Use AskUserQuestion to understand:
 
 ## Phase 2: Create the Command
 
-Create the file at `.claude/plugins/loop/commands/<name>.md`:
+Create the file at `.claude/plugins/lup/commands/<name>.md`:
 
 ```markdown
 ---
@@ -57,7 +57,7 @@ description: <one-line description>
 After creating the command:
 
 1. Show the user the file contents
-2. Explain how to invoke it: `/loop:<command-name>`
+2. Explain how to invoke it: `/lup:<command-name>`
 3. Ask if any adjustments are needed
 
 ## Template Examples

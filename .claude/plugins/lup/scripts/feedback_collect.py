@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Collect feedback data from agent sessions.
 
-This is a TEMPLATE script. Run `/loop:init` to customize it for your domain.
+This is a TEMPLATE script. Run `/lup:init` to customize it for your domain.
 
 The script should:
 1. Load session data from notes/sessions/
@@ -293,7 +293,7 @@ def check() -> None:
         print("Previous feedback collections: None")
 
     print("\nTo collect feedback, run:")
-    print("  uv run python .claude/plugins/loop/scripts/feedback_collect.py")
+    print("  uv run python .claude/plugins/lup/scripts/feedback_collect.py")
 
 
 if __name__ == "__main__":

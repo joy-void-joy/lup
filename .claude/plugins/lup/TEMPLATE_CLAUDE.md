@@ -16,6 +16,13 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manager.
 
+### Naming Convention
+
+- **Claude** = the meta-agent (Claude Code) that modifies the codebase, runs commands, and manages the development workflow
+- **Lup** = the SDK agent inside the code being built and improved — the agent that runs via the CLI and produces outputs
+
+When writing docs or prompts, use "Claude" when referring to the outer development agent and "Lup" (or your project name) when referring to the inner SDK agent.
+
 ### Important Context
 
 **[Add domain-specific context here. Examples:]**
@@ -29,11 +36,11 @@ Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manag
 
 ## Reference Files
 
-- **src/loop/agent/core.py**: Main agent orchestration
-- **src/loop/agent/subagents.py**: Subagent definitions
-- **src/loop/agent/tools/**: Tool implementations
-- **src/loop/environment/cli/__main__.py**: CLI application
-- **.claude/plugins/loop/scripts/**: Feedback loop scripts
+- **src/<project>/agent/core.py**: Main agent orchestration
+- **src/<project>/agent/subagents.py**: Subagent definitions
+- **src/<project>/agent/tools/**: Tool implementations
+- **src/<project>/environment/cli/__main__.py**: CLI application
+- **.claude/plugins/lup/scripts/**: Feedback loop scripts
 
 ## Commands
 
@@ -42,13 +49,13 @@ Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manag
 uv sync
 
 # Run a single agent session
-uv run python -m loop.environment.cli run "your task here"
+uv run python -m <project>.environment.cli run "your task here"
 
 # Run multiple sessions with auto-commit
-uv run python -m loop.environment.cli loop "task1" "task2" "task3"
+uv run python -m <project>.environment.cli loop "task1" "task2" "task3"
 
 # Commit uncommitted session results
-uv run python .claude/plugins/loop/scripts/commit_results.py
+uv run python .claude/plugins/lup/scripts/commit_results.py
 
 # Add a new dependency
 uv add <package-name>
@@ -66,20 +73,20 @@ uv run pytest
 
 **Do not hypothesize -- trace.** When debugging errors, find the actual logs and read the exact exception. Do not list "likely causes" or suggest the user check things. Open the log files yourself, grep for the error, read the traceback, and report what actually happened.
 
-Use `/loop:debug <error message>` to trace an error through the logs automatically.
+Use `/lup:debug <error message>` to trace an error through the logs automatically.
 
 ## Feedback Loop
 
 ```bash
 # Collect feedback from sessions
-uv run python .claude/plugins/loop/scripts/feedback_collect.py --all-time
+uv run python .claude/plugins/lup/scripts/feedback_collect.py --all-time
 
 # Analyze traces
-uv run python .claude/plugins/loop/scripts/trace_analysis.py list
-uv run python .claude/plugins/loop/scripts/trace_analysis.py show <session_id>
+uv run python .claude/plugins/lup/scripts/trace_analysis.py list
+uv run python .claude/plugins/lup/scripts/trace_analysis.py show <session_id>
 
 # Aggregate metrics
-uv run python .claude/plugins/loop/scripts/aggregate_metrics.py summary
+uv run python .claude/plugins/lup/scripts/aggregate_metrics.py summary
 ```
 
 ---
@@ -151,13 +158,13 @@ The codebase should read as a **monolithic source of truth** -- understandable w
 
 ## Helper Scripts
 
-The `.claude/plugins/loop/scripts/` directory contains reusable scripts. **Always use these scripts instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3`.
+The `.claude/plugins/lup/scripts/` directory contains reusable scripts. **Always use these scripts instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3`.
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLI interfaces. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
 ## Permission Hooks
 
-Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/loop/hooks/scripts/`:
+Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/lup/hooks/scripts/`:
 
 | Hook | Tool | Config |
 |---|---|---|
@@ -212,7 +219,7 @@ When improving the agent, prefer:
 
 ### Running the Feedback Loop
 
-1. **Collect feedback**: `uv run python .claude/plugins/loop/scripts/feedback_collect.py`
+1. **Collect feedback**: `uv run python .claude/plugins/lup/scripts/feedback_collect.py`
 2. **Read traces deeply**: Don't skip to aggregates. Read 5-10 sessions in detail.
 3. **Extract patterns**: Tool failures, capability requests, reasoning quality
 4. **Implement changes**: Fix tools -> Build requested capabilities -> Simplify prompts

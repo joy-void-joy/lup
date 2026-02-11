@@ -16,11 +16,11 @@ The user wants to MODIFY an existing slash command. Parse the arguments to deter
 
 The first word is the **command name** to modify. Everything after is the **delta** (what to change) or a **new description** (replace the command's behavior entirely), with an optional `--args` flag.
 
-**Basic:** `/loop:modify-command commit Add a step that runs ruff format before committing`
+**Basic:** `/lup:modify-command commit Add a step that runs ruff format before committing`
 - Command name: `commit`
 - Delta: "Add a step that runs ruff format before committing"
 
-**With args:** `/loop:modify-command debug Add verbose flag --args [error] [--verbose]`
+**With args:** `/lup:modify-command debug Add verbose flag --args [error] [--verbose]`
 - Command name: `debug`
 - Delta: "Add verbose flag"
 - New argument hints: `[error] [--verbose]`
@@ -37,10 +37,10 @@ If `$ARGUMENTS` is empty, ask the user:
 
 1. **Parse** the command name and delta from the arguments
 2. **Find** the command file -- search in these locations:
-   - `.claude/plugins/loop/commands/<name>.md` (plugin commands)
+   - `.claude/plugins/lup/commands/<name>.md` (plugin commands)
    - `.claude/commands/<name>.md` (project commands)
    - `~/.claude/commands/<name>.md` (personal commands)
-   - Also check for namespaced variants (e.g., `loop:name` -> `.claude/plugins/loop/commands/name.md`)
+   - Also check for namespaced variants (e.g., `lup:name` -> `.claude/plugins/lup/commands/name.md`)
 3. **Read** the current command file in full
 4. **Analyze** the delta -- determine whether the user wants to:
    - **Add** new behavior (append steps, add sections)

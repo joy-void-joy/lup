@@ -17,14 +17,14 @@ Based on the user's input above, explore the relevant parts of `.claude/` and br
 
 - `CLAUDE.md` - Project instructions and documentation
 - `settings.json` - Permissions and plugin configuration
-- `plugins/loop/` - Self-improvement loop plugin with commands, scripts, and agents
+- `plugins/lup/` - Self-improvement loop plugin with commands, scripts, and agents
 
 Read the relevant files based on what the user is asking about, then use AskUserQuestion to propose specific changes or additions.
 
 ## Plugin Structure Reference
 
 ```
-plugins/loop/
+plugins/lup/
 ├── .claude-plugin/plugin.json   # Plugin metadata
 ├── commands/                    # Slash commands
 │   ├── init.md                  # Domain initialization wizard
@@ -39,8 +39,8 @@ plugins/loop/
 
 ### When to Add to the Plugin
 
-- **Commands**: Reusable workflows invoked via `/loop:command-name`
-- **Scripts**: Python CLI tools run via `uv run python .claude/plugins/loop/scripts/X.py`
+- **Commands**: Reusable workflows invoked via `/lup:command-name`
+- **Scripts**: Python CLI tools run via `uv run python .claude/plugins/lup/scripts/X.py`
 - **Agents**: Subagent definitions for specialized tasks
 
 ## Brainstorming Principles

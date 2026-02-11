@@ -1,5 +1,5 @@
 {
-  "description": "Loop workflow hooks: permissions, pre-push quality checks, and test file protection",
+  "description": "Lup workflow hooks: permissions, pre-push quality checks, and test file protection",
   "hooks": {
     "PreToolUse": [
       {

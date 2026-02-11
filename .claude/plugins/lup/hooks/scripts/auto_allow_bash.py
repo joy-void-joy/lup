@@ -24,7 +24,7 @@ ALLOW_PATTERNS: list[str] = [
     r"^uv (sync|add|remove|lock)\b",
     r"^uv run (pyright|pytest|ruff)\b",
     r"^uv run \S+ --help$",
-    r"^uv run (python )?\.claude/plugins/loop/scripts/",
+    r"^uv run (python )?\.claude/plugins/lup/scripts/",
     r"^uv run (python )?\./tmp/\S+\.py\b",
 ]
 
@@ -32,15 +32,15 @@ DENY_PATTERNS: list[tuple[str, str]] = [
     # Block inline python execution -- create a script instead
     (
         r"^uv run python3? -c",
-        "Denied: inline python -c is not allowed. Create a script in .claude/plugins/loop/scripts/ or ./tmp/ instead.",
+        "Denied: inline python -c is not allowed. Create a script in .claude/plugins/lup/scripts/ or ./tmp/ instead.",
     ),
     (
         r"^uv run python3? <<",
-        "Denied: heredoc python is not allowed. Create a script in .claude/plugins/loop/scripts/ or ./tmp/ instead.",
+        "Denied: heredoc python is not allowed. Create a script in .claude/plugins/lup/scripts/ or ./tmp/ instead.",
     ),
     (
         r"^python3? ",
-        "Denied: bare python is not allowed. Use 'uv run python' or create a script in .claude/plugins/loop/scripts/.",
+        "Denied: bare python is not allowed. Use 'uv run python' or create a script in .claude/plugins/lup/scripts/.",
     ),
 ]
 

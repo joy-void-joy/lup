@@ -63,25 +63,25 @@ Let the conversation flow naturally. The goal is to understand the domain well e
 
 Based on the answers, generate or modify:
 
-### 1. `src/loop/agent/models.py`
+### 1. `src/lup/agent/models.py`
 Customize AgentOutput for the domain:
 - Add domain-specific fields (probability, move, response, etc.)
-- Add domain-specific columns to `src/loop/lib/scoring.py` CSV_COLUMNS
+- Add domain-specific columns to `src/lup/lib/scoring.py` CSV_COLUMNS
 
-### 2. `src/loop/agent/prompts.py`
+### 2. `src/lup/agent/prompts.py`
 Update the system prompt template for the domain.
 
-### 3. `src/loop/agent/subagents.py`
+### 3. `src/lup/agent/subagents.py`
 Create domain-appropriate subagents (researcher, analyzer, etc.)
 
-### 4. `src/loop/environment/cli/__main__.py`
+### 4. `src/lup/environment/cli/__main__.py`
 Customize the CLI for the domain's task format:
 - Update the `loop` command to accept domain-specific task inputs
 - Customize `_commit_results()` message format (e.g., `data(forecasts):` instead of `data(sessions):`)
 - Configure auto-commit behavior: enable/disable by default, target branch (main for data-only commits, or a dedicated branch)
 - Add domain-specific CLI commands if needed
 
-### 5. `src/loop/version.py`
+### 5. `src/lup/version.py`
 Set initial AGENT_VERSION and explain bump rules for this domain.
 
 ### 6. `feedback_collect.py`
@@ -105,7 +105,7 @@ After generating files:
 
 1. Run `uv run pyright` to check types
 2. Run `uv run ruff check .` to check lint
-3. Run `uv run python -m loop.environment.cli --help` to verify CLI
+3. Run `uv run python -m lup.environment.cli --help` to verify CLI
 4. Verify the feedback loop command references the right scripts
 5. Check that CLAUDE.md accurately describes the domain
 
@@ -113,20 +113,20 @@ After generating files:
 
 Once the scaffolding is generated, guide the user to:
 
-1. Run a few sessions: `uv run python -m loop.environment.cli loop "task1" "task2"`
+1. Run a few sessions: `uv run python -m lup.environment.cli loop "task1" "task2"`
 2. Review traces in `notes/traces/`
 3. Check scores in `notes/scores.csv`
-4. Use `/loop:feedback-loop` to analyze and improve
+4. Use `/lup:feedback-loop` to analyze and improve
 5. Iterate on the feedback collection as patterns emerge
 
 ## Key Files to Customize
 
-- `src/loop/agent/models.py` — Output schemas (AgentOutput, SessionResult)
-- `src/loop/agent/subagents.py` — Specialized subagents
-- `src/loop/agent/tool_policy.py` — Tool availability and MCP servers
-- `src/loop/agent/core.py` — Options building and orchestration
-- `src/loop/agent/prompts.py` — System prompt templates
-- `src/loop/environment/cli/__main__.py` — CLI with loop + auto-commit
-- `src/loop/lib/scoring.py` — CSV columns and score row building
-- `src/loop/version.py` — Agent version tracking
-- `.claude/plugins/loop/scripts/feedback_collect.py` — Feedback collection
+- `src/lup/agent/models.py` — Output schemas (AgentOutput, SessionResult)
+- `src/lup/agent/subagents.py` — Specialized subagents
+- `src/lup/agent/tool_policy.py` — Tool availability and MCP servers
+- `src/lup/agent/core.py` — Options building and orchestration
+- `src/lup/agent/prompts.py` — System prompt templates
+- `src/lup/environment/cli/__main__.py` — CLI with loop + auto-commit
+- `src/lup/lib/scoring.py` — CSV columns and score row building
+- `src/lup/version.py` — Agent version tracking
+- `.claude/plugins/lup/scripts/feedback_collect.py` — Feedback collection
