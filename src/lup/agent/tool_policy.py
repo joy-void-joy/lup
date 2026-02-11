@@ -9,8 +9,8 @@ Key patterns:
 4. Separate get_mcp_servers() and get_allowed_tools() methods
 
 Usage:
-    from loop.agent.config import settings
-    from loop.agent.tool_policy import ToolPolicy
+    from lup.agent.config import settings
+    from lup.agent.tool_policy import ToolPolicy
 
     policy = ToolPolicy.from_settings(settings)
     mcp_servers = policy.get_mcp_servers()
@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Self
 from pydantic import BaseModel, PrivateAttr, model_validator
 
 if TYPE_CHECKING:
-    from loop.agent.config import Settings
+    from lup.agent.config import Settings
 
 
 # =============================================================================

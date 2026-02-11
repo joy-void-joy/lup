@@ -8,13 +8,13 @@ The CLI is the domain-specific harness that:
 3. Auto-commits results after each session
 4. Manages application flow and lifecycle
 
-The feedback loop focuses on improving loop.agent.
+The feedback loop focuses on improving lup.agent.
 This code evolves with application requirements.
 
 Usage:
-    uv run python -m loop.environment.cli run "your task here"
-    uv run python -m loop.environment.cli run --session-id my-session "task"
-    uv run python -m loop.environment.cli loop "task1" "task2" "task3"
+    uv run python -m lup.environment.cli run "your task here"
+    uv run python -m lup.environment.cli run --session-id my-session "task"
+    uv run python -m lup.environment.cli loop "task1" "task2" "task3"
 """
 
 import asyncio
@@ -24,14 +24,14 @@ from typing import Annotated
 import sh
 import typer
 
-from loop.agent.config import settings
-from loop.agent.core import run_agent
-from loop.agent.models import SessionResult
+from lup.agent.config import settings
+from lup.agent.core import run_agent
+from lup.agent.models import SessionResult
 
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
-    name="loop",
+    name="lup",
     help="Self-improving agent CLI",
     no_args_is_help=True,
     add_completion=False,
@@ -156,7 +156,7 @@ def loop(
     post-processing for your domain.
 
     Example:
-        uv run python -m loop.environment.cli loop "task1" "task2" "task3"
+        uv run python -m lup.environment.cli loop "task1" "task2" "task3"
     """
     if verbose:
         logging.basicConfig(level=logging.DEBUG)

@@ -9,7 +9,7 @@ Key patterns:
 4. Permission hooks enforce the access control
 
 Usage:
-    from loop.lib import setup_notes, NotesConfig
+    from lup.lib import setup_notes, NotesConfig
 
     notes = setup_notes(session_id="12345", task_id="my-task")
     # notes.rw = directories agent can write to

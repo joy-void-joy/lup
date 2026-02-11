@@ -49,7 +49,7 @@ _TOOL_COLORS = [
 _color_cycle = itertools.cycle(_TOOL_COLORS)
 _id_to_color: dict[str, str] = {}
 _console = Console(highlight=False, markup=False)
-stream_log = logging.getLogger("loop.agent.stream")
+stream_log = logging.getLogger("lup.agent.stream")
 
 
 # ---------------------------------------------------------------------------

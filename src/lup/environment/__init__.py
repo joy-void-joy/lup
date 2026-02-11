@@ -6,7 +6,7 @@ This package contains the domain-specific scaffolding:
 - External system integration
 - Session lifecycle management
 
-The feedback loop focuses on improving loop.agent, not this code.
+The feedback loop focuses on improving lup.agent, not this code.
 However, this code evolves as the application requirements change.
 
 Structure:

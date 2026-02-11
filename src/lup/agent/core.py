@@ -28,14 +28,14 @@ from claude_agent_sdk import (
 
 from claude_agent_sdk import create_sdk_mcp_server
 
-from loop.agent.config import settings
-from loop.agent.models import AgentOutput, SessionResult, TokenUsage, get_output_schema
-from loop.agent.prompts import get_system_prompt
-from loop.agent.subagents import get_subagents
-from loop.agent.tool_policy import ToolPolicy
-from loop.agent.tools.example import EXAMPLE_TOOLS
-from loop.version import AGENT_VERSION
-from loop.lib import (
+from lup.agent.config import settings
+from lup.agent.models import AgentOutput, SessionResult, TokenUsage, get_output_schema
+from lup.agent.prompts import get_system_prompt
+from lup.agent.subagents import get_subagents
+from lup.agent.tool_policy import ToolPolicy
+from lup.agent.tools.example import EXAMPLE_TOOLS
+from lup.version import AGENT_VERSION
+from lup.lib import (
     HooksConfig,
     NotesConfig,
     TraceLogger,
@@ -73,7 +73,7 @@ def _build_options(notes_config: NotesConfig) -> ClaudeAgentOptions:
     permission_hooks = create_permission_hooks(notes_config.rw, notes_config.ro)
 
     # Compose hooks from multiple sources using merge_hooks():
-    #   from loop.lib import merge_hooks
+    #   from lup.lib import merge_hooks
     #   quality_hooks = create_post_tool_hooks()
     #   hooks = merge_hooks(permission_hooks, quality_hooks)
     hooks: HooksConfig = permission_hooks

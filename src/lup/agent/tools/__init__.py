@@ -4,7 +4,7 @@ This package contains:
 - example.py: Template MCP tools to customize for your domain
 - (add your domain-specific tools here)
 
-Utilities are re-exported from loop.lib for convenience:
+Utilities are re-exported from lup.lib for convenience:
 - metrics: Tool call tracking with @tracked decorator
 - retry: Retry decorator for API calls with exponential backoff
 - cache: TTL-based caching for API responses
@@ -12,7 +12,7 @@ Utilities are re-exported from loop.lib for convenience:
 """
 
 # Re-export utilities from lib for backward compatibility
-from loop.lib import (
+from lup.lib import (
     MetricsCollector,
     ToolMetrics,
     TTLCache,

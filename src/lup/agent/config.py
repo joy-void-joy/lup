@@ -10,7 +10,7 @@ Key patterns:
 5. Export to os.environ for external libraries
 
 Usage:
-    from loop.agent.config import settings
+    from lup.agent.config import settings
     print(settings.model)
 """
 

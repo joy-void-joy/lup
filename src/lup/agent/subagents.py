@@ -37,7 +37,7 @@ from claude_agent_sdk import AgentDefinition
 #
 # Example with conditional inclusion:
 #   def _research_tools() -> list[str]:
-#       from loop.agent.config import settings
+#       from lup.agent.config import settings
 #       tools = ["WebSearch", "WebFetch", "Read", "Glob"]
 #       if settings.exa_api_key:
 #           tools.append("mcp__search__search_exa")

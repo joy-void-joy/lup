@@ -14,7 +14,7 @@ from typing import Any
 
 from claude_agent_sdk import tool
 
-from loop.lib import tracked
+from lup.lib import tracked
 
 
 # --- Tool Implementations ---

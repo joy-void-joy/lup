@@ -13,7 +13,7 @@ import csv
 import logging
 from pathlib import Path
 
-from loop.agent.models import SessionResult
+from lup.agent.models import SessionResult
 
 logger = logging.getLogger(__name__)
 

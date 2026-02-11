@@ -9,7 +9,7 @@ Key patterns:
 4. Post-tool hooks for response inspection/injection
 
 Usage:
-    from loop.lib import merge_hooks, create_permission_hooks, HooksConfig
+    from lup.lib import merge_hooks, create_permission_hooks, HooksConfig
 
     permission_hooks = create_permission_hooks(rw_dirs, ro_dirs)
     custom_hooks = create_my_custom_hooks()
@@ -24,7 +24,7 @@ from typing import Any, Literal, TypedDict
 from claude_agent_sdk import HookMatcher
 from claude_agent_sdk.types import HookContext
 
-from loop.lib.notes import path_is_under
+from lup.lib.notes import path_is_under
 
 
 # Hook event types supported by the Claude Agent SDK

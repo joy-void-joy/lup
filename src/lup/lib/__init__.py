@@ -10,11 +10,11 @@ This package contains reusable abstractions that rarely change:
 - responses: MCP response formatting utilities
 - retry: Retry decorator for API calls
 
-Domain-specific code belongs in loop.agent, not here.
+Domain-specific code belongs in lup.agent, not here.
 """
 
-from loop.lib.cache import TTLCache, api_cache, cached, clear_cache, get_cache_stats
-from loop.lib.history import (
+from lup.lib.cache import TTLCache, api_cache, cached, clear_cache, get_cache_stats
+from lup.lib.history import (
     format_history_for_context,
     get_latest_session,
     list_all_sessions,
@@ -22,15 +22,15 @@ from loop.lib.history import (
     save_session,
     update_session_metadata,
 )
-from loop.lib.hooks import (
+from lup.lib.hooks import (
     HookEventType,
     HooksConfig,
     create_permission_hooks,
     create_post_tool_hooks,
     merge_hooks,
 )
-from loop.lib.mcp import create_sdk_mcp_server, tool
-from loop.lib.metrics import (
+from lup.lib.mcp import create_sdk_mcp_server, tool
+from lup.lib.metrics import (
     MetricsCollector,
     ToolMetrics,
     get_metrics_summary,
@@ -38,17 +38,17 @@ from loop.lib.metrics import (
     reset_metrics,
     tracked,
 )
-from loop.lib.notes import NotesConfig, path_is_under, setup_notes
-from loop.lib.responses import mcp_error, mcp_response, mcp_success
-from loop.lib.scoring import (
+from lup.lib.notes import NotesConfig, path_is_under, setup_notes
+from lup.lib.responses import mcp_error, mcp_response, mcp_success
+from lup.lib.scoring import (
     append_score_row,
     read_scores_csv,
     read_scores_for_task,
     read_scores_for_version,
     rebuild_scores_csv,
 )
-from loop.lib.retry import with_retry
-from loop.lib.trace import (
+from lup.lib.retry import with_retry
+from lup.lib.trace import (
     TraceLogger,
     format_block_markdown,
     normalize_content,
