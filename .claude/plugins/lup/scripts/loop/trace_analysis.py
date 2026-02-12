@@ -132,7 +132,9 @@ def search(
             for i, line in enumerate(lines):
                 if regex.search(line):
                     matches_found += 1
-                    typer.echo(f"\n--- {trace_file.relative_to(Path.cwd())}:{i+1} ---")
+                    typer.echo(
+                        f"\n--- {trace_file.relative_to(Path.cwd())}:{i + 1} ---"
+                    )
 
                     # Show context
                     start = max(0, i - context)

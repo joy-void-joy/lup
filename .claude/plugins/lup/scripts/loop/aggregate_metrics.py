@@ -152,11 +152,13 @@ def errors(
         metrics = s.get("tool_metrics", {})
         total_errors = metrics.get("total_errors", 0)
         if total_errors and total_errors > 0:
-            with_errors.append({
-                "session_id": s.get("_session_id"),
-                "errors": total_errors,
-                "by_tool": metrics.get("by_tool", {}),
-            })
+            with_errors.append(
+                {
+                    "session_id": s.get("_session_id"),
+                    "errors": total_errors,
+                    "by_tool": metrics.get("by_tool", {}),
+                }
+            )
 
     if not with_errors:
         typer.echo("No sessions with errors found")
@@ -185,9 +187,7 @@ def trends(
         raise typer.Exit(1)
 
     # Sort by timestamp
-    sessions_with_ts = [
-        s for s in sessions if s.get("timestamp")
-    ]
+    sessions_with_ts = [s for s in sessions if s.get("timestamp")]
     sessions_with_ts.sort(key=lambda x: x["timestamp"])
 
     if len(sessions_with_ts) < window:
@@ -210,16 +210,12 @@ def trends(
 
         # Error rate
         total_errors = sum(
-            s.get("tool_metrics", {}).get("total_errors", 0)
-            for s in window_sessions
+            s.get("tool_metrics", {}).get("total_errors", 0) for s in window_sessions
         )
         error_rate = total_errors / max(1, total_calls)
 
         # Cost
-        total_cost = sum(
-            s.get("cost_usd", 0) or 0
-            for s in window_sessions
-        )
+        total_cost = sum(s.get("cost_usd", 0) or 0 for s in window_sessions)
         avg_cost = total_cost / window
 
         # TODO: Add domain-specific trending metrics
