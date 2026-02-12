@@ -8,7 +8,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 This is a **self-improving agent template** built with the Claude Agent SDK. The template provides scaffolding for building agents that can review their own traces and improve over time through a structured feedback loop.
 
-Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manager.
+Built with Python 3.14+ and the Claude Agent SDK. Uses `uv` as the package manager.
 
 ### Naming Convention
 
@@ -17,10 +17,24 @@ Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manag
 
 ### Key Concepts
 
-- **Lup Package** (`src/lup/`): The package containing all code for the self-improving agent.
-  - **Agent Subpackage** (`src/lup/agent/`): The agent code that the feedback loop improves. Contains core orchestration, tools, subagents, and configuration.
-  - **Environment Subpackage** (`src/lup/environment/`): Domain-specific scaffolding (user interaction, game logic, etc.). Evolves with application requirements, but not via the feedback loop.
 - **Three-Level Meta Analysis**: Object (agent behavior), Meta (agent self-tracking), Meta-Meta (feedback loop process).
+
+### Three-Layer Architecture
+
+The `src/lup/` package has three distinct layers with different purposes and change velocities:
+
+| Layer | Path | Purpose | Changes via |
+|-------|------|---------|-------------|
+| **agent** | `src/lup/agent/` | Agent logistics — the code that makes the agent work and improves over time via the feedback loop. Prompts, tools, subagents, tool policies, orchestration. | Feedback loop |
+| **environment** | `src/lup/environment/` | Interface layer — everything that connects the agent to the outside world. CLI, Discord bot, API server, message debouncing, user interaction. | Application requirements |
+| **lib** | `src/lup/lib/` | Reusable abstractions — code that could be shared across projects. Hooks, tracing, metrics, caching, retries, MCP utilities. | Rarely; when building new capabilities |
+
+**Where does new code go?**
+
+- Agent reasoning, tool selection, prompt engineering → `agent/`
+- Discord message handling, CLI commands, API endpoints → `environment/`
+- Streaming utilities, retry decorators, trace formatting → `lib/`
+- If you'd copy it to another project, it belongs in `lib/`
 
 ---
 
@@ -57,7 +71,7 @@ uv sync
 # Add a new dependency (DO NOT modify pyproject.toml directly)
 uv add <package-name>
 
-# Format and lint
+# Format and lint (run these directly -- never use --check and edit manually)
 uv run ruff format .
 uv run ruff check .
 uv run pyright
@@ -255,7 +269,7 @@ data(outputs): add session batch results
 src/
 └── lup/
     ├── version.py              # Agent version tracking (bump on behavior changes)
-    ├── lib/                    # Reusable abstractions (rarely modified)
+    ├── lib/                    # Reusable cross-project abstractions
     │   ├── cache.py            # TTL caching for API responses
     │   ├── history.py          # Session storage/retrieval
     │   ├── hooks.py            # Claude Agent SDK hook utilities
@@ -266,7 +280,7 @@ src/
     │   ├── retry.py            # Retry decorator with backoff
     │   ├── scoring.py          # CSV result tracking and score generation
     │   └── trace.py            # Trace logging, color-coded console display
-    ├── agent/                  # Domain-specific code (feedback loop improves this)
+    ├── agent/                  # Agent logistics (improves via feedback loop)
     │   ├── core.py             # Main orchestration
     │   ├── config.py           # Settings via pydantic-settings
     │   ├── models.py           # Output models (customize for your domain)
@@ -275,7 +289,7 @@ src/
     │   ├── tool_policy.py      # Conditional tool availability
     │   └── tools/
     │       └── example.py      # Example MCP tools (customize)
-    └── environment/            # Domain scaffolding (user interaction, game logic)
+    └── environment/            # Interface layer (CLI, Discord, API server)
         └── cli/
             └── __main__.py     # Typer CLI (run + loop with auto-commit)
 ```
@@ -284,7 +298,7 @@ src/
 
 ### Primary Libraries
 
-- **claude-agent-sdk**: Primary framework for building agents (use `query()` for one-shot LLM calls with structured output)
+- **claude-agent-sdk**: Primary framework for building agents. **Always use `ClaudeSDKClient`** (stateful, bidirectional) instead of bare `query()` — it avoids async runtime issues and is more modular (tools, hooks, subagents)
 - **pydantic**: For data validation and settings
 - **pydantic-settings**: For configuration (not dotenv)
 
@@ -293,11 +307,11 @@ src/
 - **No bare `except Exception`** -- always catch specific exceptions
 - **Every function must specify input and output types**
 - **Never use `Any`** -- Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types. `Any` hides type errors and defeats static analysis.
-- **Use Python 3.12+ generics syntax**: `class A[T]`, not `Generic[T]`
-- Use `TypedDict` and Pydantic models for structured data
+- **Use Python 3.14+ features**: `class A[T]` generics, `type X = ...` aliases, deferred annotations
+- **Use Pydantic BaseModel** for validated models, **TypedDict** for unvalidated dict-like data. Never use dataclasses or plain dicts for structured data.
+- **Use `contextlib.contextmanager`** for setup/teardown patterns instead of manual on-off state management
 - Never manually parse Claude/agent output -- use structured outputs via Pydantic
 - **Never use `# type: ignore`** -- Ask the user how to properly fix type errors
-- **Use Pydantic BaseModel instead of dataclasses**
 
 ### No Regex/String Parsing for Structured Data
 
@@ -360,8 +374,8 @@ The codebase should read as a **monolithic source of truth** -- understandable w
 ### Tools
 
 - **uv**: Package manager. Use `uv add <package>` (never edit pyproject.toml directly)
-- **ruff**: Formatting and linting
-- **pyright**: Type checking
+- **ruff**: Formatting and linting. **Run `ruff format .` directly** -- never use `--check` followed by manual edits.
+- **pyright**: Type checking. **Use pyright LSP tools** (go-to-definition, find-references, rename-symbol) instead of grepping for symbols.
 
 ### Pyright LSP
 
@@ -564,14 +578,18 @@ When the user provides documentation links, incorporate that knowledge into CLAU
 
 ### The Bitter Lesson
 
-When improving the agent, prefer:
+**More tools and capabilities always trump prompt modification.** When improving the agent:
 
 | Do This | Not This |
 |---------|----------|
 | Add tools that provide data | Add prompt rules that constrain behavior |
-| Apply general principles | Apply specific pattern patches |
-| Provide state/context via tools | Use f-string prompt engineering |
+| Communicate principles and the *why* | Prescribe rigid mechanical procedures |
+| Give Lup more information and tools | Prescribe exact reasoning steps |
+| Set `model=opus 4.6`, `max_thinking_tokens=128_000-1` | Compensate for weak reasoning with complex prompts |
+| See what went wrong from first principles | Make small edits to patch one mistake |
 | Create subagents for specialized work | Build complex pipelines in main agent |
+
+**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" If the agent made one bad decision, the fix is almost never a prompt line about that specific decision. Instead: does the agent have enough context? Does it have the right tools? Is the model strong enough?
 
 ### Three Levels of Analysis
 
@@ -606,8 +624,8 @@ The `.env` file contains the template configuration. Create `.env.local` for you
 # .env.local - your secrets
 ANTHROPIC_API_KEY=your-key
 
-# Optional overrides
-# AGENT_MODEL=claude-sonnet-4-20250514
+# Optional overrides (defaults: opus 4.6, 128k thinking tokens)
+# AGENT_MODEL=claude-opus-4-6
 # AGENT_MAX_BUDGET_USD=5.00
 ```
 
@@ -622,7 +640,10 @@ Configuration is loaded via pydantic-settings. See `src/lup/agent/config.py` for
 # Anti-Patterns to Avoid
 
 - Adding numeric patches ("subtract 10% from estimates")
+- Prompting Lup with rigid mechanical procedures instead of guidelines and rationale
+- Adding absolute thresholds ("if X happens N times, do Y")
 - Adding rules the agent can't act on (no access to required data)
+- Making small edits to patch one mistake instead of finding the general cause
 - Skipping trace analysis to jump to aggregate statistics
 - Over-engineering initial implementations
 - Making changes in `lup.environment` when `lup.agent` is the right place
@@ -633,4 +654,5 @@ When proposing changes:
 1. Does this add a capability or just a rule?
 2. Would this help if the domain changed completely?
 3. Are we changing the right level (object/meta/meta-meta)?
+4. What general principle would have prevented this failure?
 4. What data would we need to validate this change worked?

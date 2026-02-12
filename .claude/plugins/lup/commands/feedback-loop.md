@@ -27,16 +27,22 @@ A good feedback loop session produces changes at multiple levels. If you only ma
 
 ## Guiding Principle: The Bitter Lesson
 
-Give the agent MORE capabilities and tools rather than MORE prescriptive rules.
+**More tools and capabilities always trump prompt modification.** Give the agent MORE information and tools rather than MORE prescriptive rules.
 
 | Prefer | Over |
 |--------|------|
 | Tools that provide data | Prompt rules that constrain behavior |
 | General principles | Specific pattern patches |
-| State/context via tools | F-string prompt engineering |
+| More tools and context | Step-by-step instructions in prompts |
+| `model=opus 4.6`, `max_thinking_tokens=128_000-1` | Complex prompts to compensate for weak reasoning |
+| First-principles analysis of failures | Small edits to patch one mistake |
 | Subagents for specialized work | Complex pipelines in main agent |
 
 **The test**: Would this change still help if the domain shifted completely? General principles yes, specific patches no.
+
+**When analyzing failures**: Ask "what general principle would have prevented this?" — not "what specific rule would catch this case?" If the agent made one bad decision, the fix is almost never a prompt line about that specific decision. Instead ask: does the agent have enough context? Does it have the right tools? Is the model strong enough?
+
+General guidelines and workflows in prompts are fine. What to avoid is rigid prescriptive steps the agent must follow mechanically, and absolute thresholds ("if X happens 3 times, do Y") that hard-code heuristics. The agent should understand *why* to do something, not just *what* to do.
 
 **Clarification**: The bitter lesson does NOT mean never modifying prompts. It's fine to add:
 - General guidance for categories of tasks
@@ -46,6 +52,8 @@ Give the agent MORE capabilities and tools rather than MORE prescriptive rules.
 What to AVOID:
 - Specific numeric patches ("always subtract 10% from initial estimate")
 - Rules that hard-code observations from specific sessions
+- Rigid prescriptive steps the agent must follow mechanically
+- Absolute thresholds ("if X happens N times, do Y")
 - Prescriptive formulas that will become outdated
 
 Keep the system prompt fresh - periodically review and remove guidance that no longer applies.
@@ -208,11 +216,15 @@ Prompt changes should:
 - ADD general principles that help across domains
 - REMOVE prescriptive rules that add complexity
 - PREFER "use tool X for Y" over "when pattern P, do Q"
+- COMMUNICATE goals, constraints, and the *why* — avoid rigid mechanical procedures
 
 **Do NOT add**:
 - Specific rules for specific task types
 - Numeric adjustments ("always add 10% margin")
 - Patches for observed patterns
+- Rigid mechanical procedures ("Step 1: always search, Step 2: always analyze...")
+- Absolute thresholds ("if confidence < 0.7, always add disclaimer")
+- Small edits to address a single failure — find the general principle instead
 
 ## Phase 5: Meta-Meta Level - Improve This Document
 
