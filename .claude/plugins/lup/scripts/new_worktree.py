@@ -1,177 +1,172 @@
 #!/usr/bin/env python3
-"""Create a new git worktree with Claude session migration.
+"""
+Create a new worktree with plugin cache refresh.
 
 This script:
-1. Creates a new worktree from the current branch
-2. Copies .env.local and logs/ to the new worktree
-3. Runs uv sync in the new worktree
-4. Migrates the current Claude session to the new worktree
+1. Creates a new git worktree branching from the current branch
+2. Runs uv sync in the new worktree
+3. Refreshes the local plugin cache and installs aib-workflow at project scope
 
 Usage:
-    uv run python .claude/plugins/lup/scripts/new_worktree.py <name>
-    uv run python .claude/plugins/lup/scripts/new_worktree.py <name> --session-id <uuid>
-    uv run python .claude/plugins/lup/scripts/new_worktree.py <name> --no-sync
+    uv run python .claude/scripts/new_worktree.py <worktree-name>
+
+Examples:
+    uv run python .claude/scripts/new_worktree.py my-feature
+    uv run python .claude/scripts/new_worktree.py fix-bug
 """
 
 import shutil
 from pathlib import Path
-from typing import Annotated
 
 import sh
 import typer
 
-app = typer.Typer(help="Create git worktrees with Claude session migration")
+app = typer.Typer(help="Create a new worktree with plugin cache refresh")
+
+PLUGIN_CACHE_DIR = (
+    Path.home() / ".claude" / "plugins" / "cache" / "local" / "aib-workflow"
+)
 
 
-def get_claude_session_dir() -> Path:
-    """Get the Claude projects directory."""
-    return Path.home() / ".claude" / "projects"
+def get_tree_dir() -> Path:
+    """Get the tree directory that contains worktrees."""
+    cwd = Path.cwd().resolve()
+
+    # Check if we're in a worktree (has .git file pointing to worktree dir)
+    git_path = cwd / ".git"
+    if git_path.exists() and git_path.is_file():
+        # We're in a worktree, go up to tree/ directory
+        if cwd.parent.name == "tree":
+            return cwd.parent
+
+    # Check if we're directly in a tree/ directory
+    if cwd.name == "tree":
+        return cwd
+
+    # Check if parent is the bare repo and has a tree/ subdirectory
+    for parent in cwd.parents:
+        tree_dir = parent / "tree"
+        if tree_dir.exists() and tree_dir.is_dir():
+            return tree_dir
+
+    typer.echo(f"Error: Could not find tree/ directory from {cwd}", err=True)
+    raise typer.Exit(1)
 
 
-def find_current_session(project_path: Path) -> tuple[Path, str] | None:
-    """Find the current Claude session for this project."""
-    session_dir = get_claude_session_dir()
-    if not session_dir.exists():
-        return None
-
-    # Claude uses a mangled path as the project identifier
-    # e.g., -home-user-project becomes the folder name
-    project_str = str(project_path.resolve())
-    mangled = project_str.replace("/", "-")
-    if mangled.startswith("-"):
-        mangled = mangled[1:]
-
-    project_session_dir = session_dir / mangled
-    if not project_session_dir.exists():
-        return None
-
-    # Find the most recent session file
-    session_files = list(project_session_dir.glob("*.jsonl"))
-    if not session_files:
-        return None
-
-    latest = max(session_files, key=lambda f: f.stat().st_mtime)
-    session_id = latest.stem
-
-    return project_session_dir, session_id
-
-
-def migrate_session(
-    old_project: Path,
-    new_project: Path,
-    session_id: str | None = None,
-) -> str | None:
-    """Migrate a Claude session to a new project path."""
-    session_info = find_current_session(old_project)
-    if not session_info:
-        return None
-
-    old_session_dir, current_session_id = session_info
-    session_id = session_id or current_session_id
-
-    session_file = old_session_dir / f"{session_id}.jsonl"
-    if not session_file.exists():
-        return None
-
-    # Create new session directory
-    new_project_str = str(new_project.resolve())
-    new_mangled = new_project_str.replace("/", "-")
-    if new_mangled.startswith("-"):
-        new_mangled = new_mangled[1:]
-
-    new_session_dir = get_claude_session_dir() / new_mangled
-    new_session_dir.mkdir(parents=True, exist_ok=True)
-
-    # Copy session file
-    new_session_file = new_session_dir / f"{session_id}.jsonl"
-    shutil.copy2(session_file, new_session_file)
-
-    return session_id
+GITIGNORED_DATA_DIRS = ["logs"]
 
 
 @app.command()
-def main(
-    name: Annotated[str, typer.Argument(help="Name for the worktree (e.g., feat-name)")],
-    session_id: Annotated[
-        str | None,
-        typer.Option("--session-id", "-s", help="Specific session ID to migrate"),
-    ] = None,
-    no_sync: Annotated[
-        bool,
-        typer.Option("--no-sync", help="Skip running uv sync"),
-    ] = False,
-    no_copy_data: Annotated[
-        bool,
-        typer.Option("--no-copy-data", help="Skip copying .env.local and logs/"),
-    ] = False,
-    base_branch: Annotated[
-        str | None,
-        typer.Option("--base", "-b", help="Base branch (default: current branch)"),
-    ] = None,
+def create(
+    name: str = typer.Argument(..., help="Name for the new worktree/branch"),
+    no_sync: bool = typer.Option(False, "--no-sync", help="Skip running uv sync"),
+    no_plugin_refresh: bool = typer.Option(
+        False, "--no-plugin-refresh", help="Skip plugin cache refresh and install"
+    ),
+    copy_data: bool = typer.Option(
+        True,
+        "--copy-data/--no-copy-data",
+        help="Copy gitignored data directories (notes/, logs/) to new worktree",
+    ),
 ) -> None:
-    """Create a new git worktree with Claude session migration."""
-    current_dir = Path.cwd()
+    """Create a new worktree with plugin cache refresh."""
+    cwd = Path.cwd().resolve()
+    tree_dir = get_tree_dir()
+    new_worktree_path = tree_dir / name
 
-    # Determine branch name
-    branch_name = f"feat/{name}" if not name.startswith("feat/") else name
-    worktree_name = name.replace("feat/", "")
-
-    # Worktree path - use tree/ directory
-    worktree_path = current_dir.parent / "tree" / worktree_name
-    if worktree_path.exists():
-        typer.echo(f"Error: Worktree path already exists: {worktree_path}")
+    if new_worktree_path.exists():
+        typer.echo(f"Error: {new_worktree_path} already exists", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"Creating worktree: {worktree_path}")
-    typer.echo(f"Branch: {branch_name}")
+    git = sh.Command("git")
+    uv = sh.Command("uv")
 
-    # Create worktree
+    # Get current branch name
     try:
-        if base_branch:
-            sh.git("worktree", "add", str(worktree_path), "-b", branch_name, base_branch)
-        else:
-            sh.git("worktree", "add", str(worktree_path), "-b", branch_name)
-    except sh.ErrorReturnCode as e:
-        typer.echo(f"Error creating worktree: {e.stderr.decode()}")
+        current_branch = str(git("branch", "--show-current", _tty_out=False)).strip()
+    except sh.ErrorReturnCode:
+        typer.echo("Error: Could not determine current branch", err=True)
         raise typer.Exit(1)
 
-    # Copy data files
-    if not no_copy_data:
-        env_local = current_dir / ".env.local"
-        if env_local.exists():
-            shutil.copy2(env_local, worktree_path / ".env.local")
-            typer.echo("Copied .env.local")
+    branch_name = name if "/" in name else name
 
-        logs_dir = current_dir / "logs"
-        if logs_dir.exists():
-            shutil.copytree(logs_dir, worktree_path / "logs", dirs_exist_ok=True)
-            typer.echo("Copied logs/")
+    typer.echo(f"Creating worktree '{name}' from branch '{current_branch}'...")
+    typer.echo(f"  Location: {new_worktree_path}")
+    typer.echo(f"  New branch: {branch_name}")
+    typer.echo()
 
-    # Run uv sync
+    # Create the worktree with a new branch
+    try:
+        git(
+            "worktree", "add", str(new_worktree_path), "-b", branch_name, _tty_out=False
+        )
+        typer.echo("✓ Worktree created")
+    except sh.ErrorReturnCode as e:
+        typer.echo(f"Error creating worktree: {e.stderr.decode()}", err=True)
+        raise typer.Exit(1)
+
+    # Copy .env.local if it exists
+    env_local = cwd / ".env.local"
+    if env_local.exists():
+        shutil.copy2(env_local, new_worktree_path / ".env.local")
+        typer.echo("✓ Copied .env.local")
+
+    # Copy gitignored data directories (notes/, logs/)
+    if copy_data:
+        for dir_name in GITIGNORED_DATA_DIRS:
+            source_dir = cwd / dir_name
+            target_dir = new_worktree_path / dir_name
+            if source_dir.exists() and source_dir.is_dir():
+                shutil.copytree(source_dir, target_dir)
+                typer.echo(f"✓ Copied {dir_name}/")
+
+    # Run uv sync in the new worktree
     if not no_sync:
         typer.echo("Running uv sync...")
         try:
-            sh.uv("sync", _cwd=str(worktree_path))
+            uv(
+                "sync",
+                "--all-groups",
+                "--all-extras",
+                _cwd=str(new_worktree_path),
+                _tty_out=False,
+            )
+            typer.echo("✓ Dependencies synced")
         except sh.ErrorReturnCode as e:
-            typer.echo(f"Warning: uv sync failed: {e.stderr.decode()}")
+            typer.echo(f"Warning: uv sync failed: {e.stderr.decode()}", err=True)
 
-    # Migrate Claude session
-    migrated_id = migrate_session(current_dir, worktree_path, session_id)
-    if migrated_id:
-        typer.echo(f"Migrated Claude session: {migrated_id}")
-    else:
-        typer.echo("No Claude session found to migrate")
+    # Refresh plugin cache and install at project scope
+    if not no_plugin_refresh:
+        if PLUGIN_CACHE_DIR.exists():
+            shutil.rmtree(PLUGIN_CACHE_DIR)
+            typer.echo("✓ Cleared plugin cache (aib-workflow)")
 
-    typer.echo("")
-    typer.echo("=" * 60)
-    typer.echo("Worktree created successfully!")
-    typer.echo("=" * 60)
-    typer.echo(f"\nTo use the new worktree:")
-    typer.echo(f"  cd {worktree_path}")
-    if migrated_id:
-        typer.echo(f"  claude --resume")
-    else:
-        typer.echo(f"  claude")
+        claude = sh.Command("claude")
+        try:
+            claude(
+                "plugin",
+                "install",
+                "aib-workflow@local",
+                "--scope",
+                "project",
+                _cwd=str(new_worktree_path),
+                _tty_out=False,
+            )
+            typer.echo("✓ Installed aib-workflow plugin (project scope)")
+        except sh.ErrorReturnCode as e:
+            typer.echo(f"Warning: plugin install failed: {e.stderr.decode()}", err=True)
+
+    typer.echo()
+    cd_command = f"cd /; cd {new_worktree_path}; claude"
+
+    # Try to copy to clipboard
+    try:
+        xclip = sh.Command("xclip")
+        xclip("-selection", "clipboard", _in=cd_command)
+        typer.echo(f"Done! Copied to clipboard: {cd_command}")
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        typer.echo("Done! To switch to the new worktree:")
+        typer.echo(f"  {cd_command}")
 
 
 if __name__ == "__main__":
