@@ -241,12 +241,11 @@ def history(
         typer.echo("No metrics files found")
         return
 
-    typer.echo(f"\n=== Feedback Collection History ===\n")
+    typer.echo("\n=== Feedback Collection History ===\n")
 
     for f in metrics_files[:limit]:
         try:
             data = json.loads(f.read_text())
-            ts = data.get("collection_timestamp", "")[:19]
             total = data.get("total_sessions", 0)
             with_outcomes = data.get("sessions_with_outcomes", 0)
             typer.echo(f"{f.name}: {total} sessions, {with_outcomes} with outcomes")
