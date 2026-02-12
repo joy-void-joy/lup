@@ -15,7 +15,6 @@ Customize:
 - Search patterns for your domain
 """
 
-import json
 import re
 from pathlib import Path
 
