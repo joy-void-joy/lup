@@ -85,7 +85,8 @@ def _build_options(notes_config: NotesConfig) -> ClaudeAgentOptions:
             "preset": "claude_code",
             "append": get_system_prompt(),
         },
-        max_thinking_tokens=settings.max_thinking_tokens or (64_000 - 1),
+        max_thinking_tokens=settings.max_thinking_tokens or (128_000 - 1),
+        extra_args={"no-session-persistence": None},
         permission_mode="bypassPermissions",
         hooks=hooks,  # type: ignore[arg-type]
         sandbox={
@@ -216,7 +217,10 @@ def _extract_sources(messages: list[AssistantMessage]) -> list[str]:
     sources: list[str] = []
     for msg in messages:
         for block in msg.content:
-            if isinstance(block, ToolUseBlock) and block.name in ("WebSearch", "WebFetch"):
+            if isinstance(block, ToolUseBlock) and block.name in (
+                "WebSearch",
+                "WebFetch",
+            ):
                 if isinstance(block.input, dict):
                     source = block.input.get("url") or block.input.get("query")
                     if source:
