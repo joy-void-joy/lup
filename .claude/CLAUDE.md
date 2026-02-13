@@ -330,6 +330,16 @@ src/
 - **Never use `# type: ignore`** -- Ask the user how to properly fix type errors
 - **Use Pydantic BaseModel instead of dataclasses**
 
+### Tool Input Schemas
+
+Define tool inputs as BaseModel classes with `Field(description=...)`. This gives you validation, type-safe access, defaults, and rich JSON Schema generation in one place.
+
+| Do This | Not This |
+|---------|----------|
+| `class SearchInput(BaseModel): query: str = Field(description="...")` | `{"query": str, "limit": int}` |
+| `SearchInput.model_json_schema()` for `@tool` schema | Hand-written dict schemas |
+| `SearchInput.model_validate(args)` then `params.query` | `args.get("query", "")` |
+
 ### No Regex/String Parsing for Structured Data
 
 Never use regex or string substitution to parse HTML, XML, JSON, or other structured formats. Use proper parsing libraries:
