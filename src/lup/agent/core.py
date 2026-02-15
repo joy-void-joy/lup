@@ -87,6 +87,7 @@ def _build_options(notes_config: NotesConfig) -> ClaudeAgentOptions:
         },
         max_thinking_tokens=settings.max_thinking_tokens or (64_000 - 1),
         permission_mode="bypassPermissions",
+        extra_args={"no-session-persistence": None},
         hooks=hooks,  # type: ignore[arg-type]
         sandbox={
             "enabled": True,

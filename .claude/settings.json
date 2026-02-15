@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch"
+      "WebSearch",
+      "Read(./.claude/settings.json.local*)"
     ],
     "deny": [
       "Read(./**/*.local*)"
