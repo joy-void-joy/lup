@@ -40,7 +40,7 @@ When writing docs or prompts, use "Claude" when referring to the outer developme
 - **src/<project>/agent/subagents.py**: Subagent definitions
 - **src/<project>/agent/tools/**: Tool implementations
 - **src/<project>/environment/cli/__main__.py**: CLI application
-- **.claude/plugins/lup/scripts/**: Feedback loop scripts
+- **src/<project>/devtools/**: Development and analysis CLI (lup-devtools)
 
 ## Commands
 
@@ -55,7 +55,7 @@ uv run python -m <project>.environment.cli run "your task here"
 uv run python -m <project>.environment.cli loop "task1" "task2" "task3"
 
 # Commit uncommitted session results
-uv run python .claude/plugins/lup/scripts/claude/commit_results.py
+uv run lup-devtools git commit-results
 
 # Add a new dependency
 uv add <package-name>
@@ -79,14 +79,14 @@ Use `/lup:debug <error message>` to trace an error through the logs automaticall
 
 ```bash
 # Collect feedback from sessions
-uv run python .claude/plugins/lup/scripts/loop/feedback_collect.py --all-time
+uv run lup-devtools feedback collect --all-time
 
 # Analyze traces
-uv run python .claude/plugins/lup/scripts/loop/trace_analysis.py list
-uv run python .claude/plugins/lup/scripts/loop/trace_analysis.py show <session_id>
+uv run lup-devtools trace list
+uv run lup-devtools trace show <session_id>
 
 # Aggregate metrics
-uv run python .claude/plugins/lup/scripts/loop/aggregate_metrics.py summary
+uv run lup-devtools metrics summary
 ```
 
 ---
@@ -166,11 +166,11 @@ The codebase should read as a **monolithic source of truth** -- understandable w
 
 # Tooling
 
-## Helper Scripts
+## lup-devtools
 
-The `.claude/plugins/lup/scripts/` directory contains reusable scripts. **Always use these scripts instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3`.
+All development tooling lives in `src/<project>/devtools/` and is exposed as the `lup-devtools` CLI. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3`. Use `tmp/*.py` for one-off scripts.
 
-**Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLI interfaces. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
+Run `uv run lup-devtools --help` for the full command tree.
 
 ## Permission Hooks
 
@@ -229,7 +229,7 @@ When improving the agent, prefer:
 
 ### Running the Feedback Loop
 
-1. **Collect feedback**: `uv run python .claude/plugins/lup/scripts/loop/feedback_collect.py`
+1. **Collect feedback**: `uv run lup-devtools feedback collect`
 2. **Read traces deeply**: Don't skip to aggregates. Read 5-10 sessions in detail.
 3. **Extract patterns**: Tool failures, capability requests, reasoning quality
 4. **Implement changes**: Fix tools -> Build requested capabilities -> Simplify prompts

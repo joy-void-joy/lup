@@ -105,8 +105,8 @@ uv run python -m lup.environment.cli loop "task1" "task2" "task3"
 uv run python -m lup.environment.cli loop --no-commit "task1" "task2"
 
 # Commit uncommitted session results
-uv run python .claude/plugins/lup/scripts/claude/commit_results.py
-uv run python .claude/plugins/lup/scripts/claude/commit_results.py --dry-run
+uv run lup-devtools git commit-results
+uv run lup-devtools git commit-results --dry-run
 
 uv run python -m lup.environment.cli --help
 ```
@@ -142,14 +142,14 @@ Use `/lup:debug <error message>` to trace an error through the logs automaticall
 
 ```bash
 # Collect feedback from sessions
-uv run python .claude/plugins/lup/scripts/loop/feedback_collect.py --all-time
+uv run lup-devtools feedback collect --all-time
 
 # Analyze traces
-uv run python .claude/plugins/lup/scripts/loop/trace_analysis.py list
-uv run python .claude/plugins/lup/scripts/loop/trace_analysis.py show <session_id>
+uv run lup-devtools trace list
+uv run lup-devtools trace show <session_id>
 
 # Aggregate metrics
-uv run python .claude/plugins/lup/scripts/loop/aggregate_metrics.py summary
+uv run lup-devtools metrics summary
 ```
 
 ---
@@ -198,7 +198,7 @@ Edit `src/lup/version.py`:
 
 ### Step 5: Update Feedback Collection
 
-Edit `.claude/plugins/lup/scripts/loop/feedback_collect.py`:
+Edit `src/lup/devtools/feedback.py`:
 - Implement `load_outcomes()` for your domain
 - Customize `compute_metrics()` for your metrics
 - Add domain-specific summary output
@@ -233,9 +233,9 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
    ```
 2. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
 3. Push the branch when the feature is complete (or periodically for backup)
-4. **`/lup:rebase`** -- Creates a clean rebase branch with atomic commits and opens a PR.
-5. **Review the PR** -- If changes are needed, fix them on the feature branch and re-run `/lup:rebase` (it force-pushes over the existing rebase branch, updating the PR).
-6. **`/lup:close`** -- Once the PR is approved, merges it and cleans up both branches (rebase + original) and remote refs.
+4. **`/lup:rebase`** -- Pushes the branch, opens a PR, then cleans up the commit history with `git reset --soft main` and force-pushes.
+5. **Review the PR** -- If changes are needed, fix them on the feature branch and re-run `/lup:rebase` (it rebuilds the history and force-pushes, updating the PR).
+6. **`/lup:close`** -- Once the PR is approved, merges it and cleans up the branch.
 
 ### Commit Guidelines
 
@@ -306,6 +306,16 @@ src/
     │   ├── tool_policy.py      # Conditional tool availability
     │   └── tools/
     │       └── example.py      # Example MCP tools (customize)
+    ├── devtools/               # Development CLI (lup-devtools entry point)
+    │   ├── main.py             # Root Typer app composing sub-apps
+    │   ├── api.py              # API inspection and module info
+    │   ├── dev.py              # Worktree management
+    │   ├── git.py              # Session commit operations
+    │   ├── sync.py             # Upstream sync tracking
+    │   ├── usage.py            # Claude Code usage display
+    │   ├── feedback.py         # Feedback collection
+    │   ├── trace.py            # Trace analysis
+    │   └── metrics.py          # Aggregate metrics
     └── environment/            # Domain scaffolding (user interaction, game logic)
         └── cli/
             └── __main__.py     # Typer CLI (run + loop with auto-commit)
@@ -329,6 +339,7 @@ src/
 - Never manually parse Claude/agent output -- use structured outputs via Pydantic
 - **Never use `# type: ignore`** -- Ask the user how to properly fix type errors
 - **Use Pydantic BaseModel instead of dataclasses**
+- **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
 
 ### Tool Input Schemas
 
@@ -441,85 +452,76 @@ The `pyright-lsp` plugin is enabled and provides code intelligence tools. **Use 
 
 # Tooling
 
-## Helper Scripts
+## lup-devtools
 
-The `.claude/plugins/lup/scripts/` directory contains reusable scripts. **Always use these scripts instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` -- these are denied by the Bash permission hook.
+All development tooling lives in `src/lup/devtools/` and is exposed as the `lup-devtools` CLI entry point. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` -- these are denied by the Bash permission hook.
 
-If you find yourself running the same command repeatedly, **create a script** in `.claude/plugins/lup/scripts/` and document it here.
+If you find yourself running the same command repeatedly, **add a command** to `src/lup/devtools/` and document it here. Use `tmp/*.py` for one-off scripts.
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLI interfaces. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
-### Claude Scripts (`scripts/claude/`)
+### Command tree
 
-Internal tooling for Claude (the meta-agent). Users don't typically run these directly. **Only put scripts here that are for Claude's internal use** (API inspection, module introspection, automated commits). User-facing scripts go in `scripts/` directly.
-
-#### inspect_api.py
-
-Explore package APIs -- never use `python -c "import ..."` or ad-hoc REPL commands.
-
-```bash
-uv run python .claude/plugins/lup/scripts/claude/inspect_api.py <module.Class>
-uv run python .claude/plugins/lup/scripts/claude/inspect_api.py <module.Class.method>
-uv run python .claude/plugins/lup/scripts/claude/inspect_api.py <module.Class> --help-full
+```
+lup-devtools
+├── api                     # API inspection and module info
+│   ├── inspect <path>      # Explore Python module/class/method APIs
+│   ├── module-path <mod>   # Show file path for a module
+│   ├── module-source <mod> # Show source code for a module
+│   ├── module-tree <mod>   # Show file tree for a package
+│   └── module-info <mod>   # Show detailed info about a module
+├── dev                     # Development tools
+│   └── worktree <name>     # Create git worktree with plugin refresh
+├── git                     # Git operations for sessions
+│   └── commit-results      # Commit uncommitted session results
+├── sync                    # Upstream sync tracking (/lup:update)
+│   ├── list                # Show tracked projects and sync status
+│   ├── log <project>       # Show commits since last sync
+│   ├── diff <project> <sha># Show full diff for a commit
+│   ├── mark-synced <proj>  # Mark project as synced at HEAD
+│   └── setup <name> <path> # Set local path for a project
+├── usage                   # Claude Code live usage display
+├── feedback                # Feedback collection
+│   ├── collect             # Collect feedback metrics from sessions
+│   └── check               # Check available feedback data
+├── trace                   # Trace analysis
+│   ├── list                # List available traces
+│   ├── show <id>           # Show trace for a session
+│   ├── search <pattern>    # Search traces for a regex pattern
+│   ├── errors              # Show sessions with errors
+│   └── capabilities        # Extract capability requests
+└── metrics                 # Aggregate metrics
+    ├── summary             # Show aggregate summary
+    ├── tools               # Show tool usage aggregates
+    ├── errors              # Show sessions with high error rates
+    ├── trends              # Show metric trends over time
+    └── history             # Show previous feedback collection runs
 ```
 
-#### module_info.py
-
-Get paths and source code for installed Python modules.
+### Examples
 
 ```bash
-uv run python .claude/plugins/lup/scripts/claude/module_info.py path <module>
-uv run python .claude/plugins/lup/scripts/claude/module_info.py source <module> [--lines N]
+# Explore a Python API
+uv run lup-devtools api inspect claude_agent_sdk.Agent
+
+# Create a worktree
+uv run lup-devtools dev worktree my-feature
+
+# Commit session results
+uv run lup-devtools git commit-results --dry-run
+
+# Check upstream sync status
+uv run lup-devtools sync list
+
+# Show usage
+uv run lup-devtools usage
+uv run lup-devtools usage --watch
+
+# Feedback loop
+uv run lup-devtools feedback collect --all-time
+uv run lup-devtools trace list
+uv run lup-devtools metrics summary
 ```
-
-#### commit_results.py
-
-Commit uncommitted session results (one commit per session).
-
-```bash
-uv run python .claude/plugins/lup/scripts/claude/commit_results.py
-uv run python .claude/plugins/lup/scripts/claude/commit_results.py --dry-run
-```
-
-#### downstream_sync.py
-
-Track upstream repos and review commits since last sync. Used by `/lup:update`.
-
-```bash
-uv run python .claude/plugins/lup/scripts/claude/downstream_sync.py list
-uv run python .claude/plugins/lup/scripts/claude/downstream_sync.py log <project>
-uv run python .claude/plugins/lup/scripts/claude/downstream_sync.py diff <project> <sha>
-uv run python .claude/plugins/lup/scripts/claude/downstream_sync.py mark-synced <project>
-uv run python .claude/plugins/lup/scripts/claude/downstream_sync.py setup <name> <path>
-```
-
-### User Scripts (`scripts/`)
-
-Scripts designed for direct human use. **Any script both Claude and the user may run belongs here**, not in `scripts/claude/`.
-
-#### usage.py
-
-Display live Claude Code usage with pacing bars. Fetches real-time utilization from the API (weekly, 5-hour, per-model) and supplements with stats-cache for daily breakdown.
-
-```bash
-uv run python .claude/plugins/lup/scripts/usage.py
-uv run python .claude/plugins/lup/scripts/usage.py --no-detail
-```
-
-#### new_worktree.py
-
-Create a new git worktree with setup.
-
-```bash
-uv run python .claude/plugins/lup/scripts/new_worktree.py <name> [--no-sync] [--no-copy-data]
-```
-
-Creates worktree, copies `.env.local` and data directories, runs `uv sync`.
-
-### Feedback Loop Scripts (`scripts/loop/`)
-
-Template scripts for the self-improvement loop. Customize after running `/lup:init`.
-See [Feedback Loop Scripts](#feedback-loop-scripts) above for usage.
 
 ## Permission Hooks
 
@@ -622,7 +624,7 @@ See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-d
 
 ### Running the Feedback Loop
 
-1. **Collect feedback**: `uv run python .claude/plugins/lup/scripts/loop/feedback_collect.py`
+1. **Collect feedback**: `uv run lup-devtools feedback collect`
 2. **Read traces deeply**: Don't skip to aggregates. Read 5-10 sessions in detail.
 3. **Extract patterns**: Tool failures, capability requests, reasoning quality
 4. **Implement changes**: Fix tools -> Build requested capabilities -> Simplify prompts
@@ -644,8 +646,7 @@ See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-d
 The `.env` file contains the template configuration. Create `.env.local` for your secrets (gitignored):
 
 ```bash
-# .env.local - your secrets
-ANTHROPIC_API_KEY=your-key
+# .env.local - your secrets (ANTHROPIC_API_KEY is read directly by the SDK from env)
 
 # Optional overrides
 # AGENT_MODEL=claude-sonnet-4-20250514
