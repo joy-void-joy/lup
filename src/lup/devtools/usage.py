@@ -607,7 +607,7 @@ def main(
             "-w",
             help="Continuously refresh the display.",
         ),
-    ] = False,
+    ] = True,
     interval: Annotated[
         int,
         typer.Option(
