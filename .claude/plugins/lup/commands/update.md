@@ -6,7 +6,9 @@ argument-hint: [focus area]
 
 # Update from Upstream
 
-Review commits from tracked upstream repositories (by default, the lup template repo) since the last sync. Classify each commit as portable or domain-specific, then apply selected improvements to the current project.
+Review commits from tracked downstream repositories since the last sync. Generalize domain-specific patterns back into the template as domain-neutral scaffolding, then apply selected improvements.
+
+**This repo is both a template and a scaffold.** Downstream repos customize the template (prompts, tools, models) but inherit the scaffold (agents, commands, hooks, workflows). When reviewing downstream changes, ask: "Did this pattern emerge from real use?" If yes, it probably belongs in the template — generalized, with domain-specific details removed.
 
 **Optional focus argument:** When a focus area is provided (e.g., `/lup:update hooks`, `/lup:update lib/cache`), only review and port commits that touch the specified area. **Do not mark as synced** — the sync pointer stays unchanged so a future `/lup:update` (without args) still reviews all commits from the same checkpoint.
 
@@ -60,29 +62,29 @@ uv run lup-devtools sync diff <project> <sha>
 
 Classify as:
 
-- **Portable**: General improvements that work for any project built on this template
+- **Portable as-is**: Improvements that apply directly without modification
   - `lib/` utilities (e.g., better `print_block`, new retry patterns, caching improvements)
   - Hook logic improvements (new permission patterns, better auto-allow rules)
-  - Script enhancements (better CLI, new analysis tools)
-  - Command updates (improved workflows, new phases)
   - Build/config improvements that generalize
-  - **Agent SDK usage patterns** (hooks, session config, structured output, tool patterns)
-  - **Agent core improvements** that generalize (error handling, log management, config patterns)
-  - **Scoring/metrics improvements** that apply to any domain (new columns, aggregation methods)
-  - **Feedback loop improvements** (collection, analysis, filtering)
   - **CLAUDE.md improvements** (coding standards, workflow tips, new guidelines)
 
-- **Domain-specific**: Tied to the upstream project's domain
-  - Domain models with no generalizable structure
-  - API integrations specific to a single external service
-  - Domain-specific prompts that can't be abstracted
-  - Data processing unique to that domain
+- **Portable as scaffold**: Domain-specific implementations that represent a generalizable *pattern*. These get ported with domain details replaced by template placeholders.
+  - **New agents** — A "version-reviewer" that uses Brier scores becomes a scaffold version-reviewer that uses generic outcome metrics
+  - **New commands** — A "leak-investigator" for retrodiction becomes a scaffold for investigator-style commands
+  - **Workflow improvements** — Offline mode for a specific API becomes a general "graceful degradation" pattern
+  - **Feedback loop updates** — Version-scoped analysis, new analysis phases, better templates
+  - **Agent SDK usage patterns** (hooks, session config, structured output, tool patterns)
+  - **Agent core improvements** that generalize (error handling, log management, config patterns)
+  - **Scoring/metrics improvements** (new columns, aggregation methods)
 
-- **Mixed**: Contains both portable and domain-specific parts
-  - Extract the portable patterns and present them separately
-  - Example: A commit adding a Metaculus API client is domain-specific, but its retry/rate-limiting pattern is portable
+- **Data-only or purely domain-specific**: Skip these
+  - Raw data commits (`data(outputs):`, `data(scores):`)
+  - API client code for a specific external service with no generalizable pattern
+  - Domain-specific prompts that encode knowledge irreducible to a template
 
-**The bias should be toward inclusion, not exclusion.** When a commit touches `agent/core.py`, `lib/`, `scoring.py`, or similar shared files, assume it's worth reviewing even if the commit message sounds domain-specific. Read the diff and ask yourself: "Could I generalize this to the template?"
+**The bias should be strongly toward inclusion.** Most code changes contain generalizable patterns even when they look domain-specific at first. A "Google Trends tool" commit is domain-specific, but if it introduces a new tool design pattern or a new way of structuring MCP responses, that pattern belongs in the template.
+
+**The key question is not "Is this portable?" but "What pattern does this represent?"** A downstream repo adds a version reviewer with Brier scores — the pattern is "structured agent version assessment." That pattern belongs in the template.
 
 When reviewing diffs, also read the full changed files in both repos for context. File-level diffs help you understand how a change fits into the broader codebase structure.
 
@@ -138,8 +140,8 @@ git commit -m "feat(lib): apply improvements from <project>"
 
 - **Commit-level review preserves intent** — review commits, not flat diffs, so you understand why each change was made
 - **File diffs provide context** — use full file diffs alongside commit diffs to understand how changes fit into the codebase
-- **Bias toward inclusion** — read every non-data commit's diff before dismissing it. Code changes often contain generalizable patterns even when the commit message sounds domain-specific.
+- **Generalize, don't dismiss** — when a downstream repo adds something domain-specific, ask "what pattern does this represent?" and port the pattern as scaffold. A forecasting-specific agent becomes a domain-neutral agent scaffold.
 - **Ask, don't skip** — when uncertain about a change, present it to the user with your reasoning and let them decide
-- **Adapt, don't copy** — upstream code may use different naming, patterns, or structure. Translate to fit the current project.
+- **Adapt, don't copy** — downstream code uses domain-specific naming, paths, and models. Replace these with template-appropriate equivalents (`lup` package paths, generic metrics, placeholder descriptions).
 - **Test after applying** — always run pyright/ruff/pytest after applying changes
 - **Mark synced even if nothing applied** — this advances the sync pointer so you don't re-review the same commits next time

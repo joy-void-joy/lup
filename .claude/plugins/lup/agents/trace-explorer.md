@@ -48,11 +48,19 @@ Trace files are typically in `notes/traces/<session_id>/`.
 
 1. **Understand the request**: The caller specifies which session IDs to analyze and what to look for (or asks for general pattern analysis).
 
-2. **Read session outputs first**: These are compact summaries. Start here to orient yourself before reading full traces.
+2. **Verify version context**: The caller should provide the agent version being analyzed. Before reading traces, retrieve the prompt that was active for that version:
+   ```bash
+   git show v<VERSION>:src/lup/agent/prompts.py
+   ```
+   Also check each trace's `agent_version` field (in the session output JSON) to confirm it matches the version being analyzed. Flag any mismatches — a trace from v0.2.0 analyzed as if it were v1.0.0 produces invalid conclusions.
 
-3. **Read full traces for ALL requested IDs**: Use the trace analysis script or read files directly. Don't skip traces -- you have the context budget, the main conversation doesn't.
+3. **Read session outputs first**: These are compact summaries. Start here to orient yourself before reading full traces. Pay close attention to what the agent says about its own needs, frustrations, and confidence.
 
-4. **Synthesize across all traces**: Find what's common. Find what's interesting. Quote liberally -- the main agent hasn't read these traces and needs the exact words to make good decisions.
+4. **Read full traces for ALL requested IDs**: Use the trace analysis script or read files directly. Don't skip traces -- you have the context budget, the main conversation doesn't.
+
+5. **Cross-reference with metrics**: Use `uv run lup-devtools trace show <id>` to get tool counts, errors, and timing data.
+
+6. **Synthesize across all traces**: Find what's common. Find what's interesting. Quote liberally -- the main agent hasn't read these traces and needs the exact words to make good decisions.
 
 ## Output Format
 
@@ -60,6 +68,11 @@ Return your findings in this exact structure:
 
 ```markdown
 ## Trace Analysis: [N] sessions analyzed
+
+### Version Context
+- **Analyzing version**: [X.Y.Z]
+- **Prompt retrieved from**: `git show vX.Y.Z:src/lup/agent/prompts.py`
+- **Version mismatches**: [list any traces whose agent_version differs from the target, or "none"]
 
 ### Tool Failure Patterns
 | Tool | Failure Mode | Affected Sessions | Frequency |
@@ -91,7 +104,9 @@ Which tools provided high-value information vs. low-value:
 - **Unused**: [tool] -- available but never called in any trace
 
 ### Per-Session Summary
-Brief summary of each analyzed session (1-2 lines each):
+Brief summary of each analyzed session, grouped by version (1-2 lines each):
+
+**v[X.Y.Z]** (N traces):
 | Session ID | Key Observation |
 |------------|----------------|
 | ... | [most notable thing about this trace] |

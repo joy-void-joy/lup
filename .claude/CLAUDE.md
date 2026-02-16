@@ -6,7 +6,12 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## Project Overview
 
-This is a **self-improving agent template** built with the Claude Agent SDK. The template provides scaffolding for building agents that can review their own traces and improve over time through a structured feedback loop.
+This is a **self-improving agent template and scaffold** built with the Claude Agent SDK. It serves two roles:
+
+1. **Template** — Code that downstream projects customize for their domain: agent prompts, tools, models, environment scaffolding. The `/lup:init` command walks through this customization.
+2. **Scaffold** — Agents, commands, hooks, and workflows that downstream projects inherit and extend. These provide the development workflow (commit, rebase, feedback loop) and analysis infrastructure (trace exploration, version comparison) that every project needs.
+
+When reviewing changes from downstream repos (`/lup:update`), the goal is to **generalize domain-specific patterns back into the template**. A downstream repo may add a forecasting-specific version reviewer — the template should get a domain-neutral version reviewer scaffold. The bias is toward inclusion: if a pattern emerged from real use, it likely belongs in the template.
 
 Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manager.
 

@@ -10,7 +10,24 @@ Clean up the commit history on the current feature branch, push it, and open (or
 
 ## Determine Base Branch
 
-If a base branch was provided as an argument, use it. Otherwise, use `AskUserQuestion` to ask which branch to rebase onto, offering `main` as the default and the option to specify a different branch.
+If a base branch was provided as an argument, use it. Otherwise, auto-detect the branch this was forked from:
+
+```bash
+# Get the current branch name
+current=$(git rev-parse --abbrev-ref HEAD)
+
+# Find the nearest ancestor branch by checking merge-base distance against all local branches
+# Exclude the current branch and HEAD
+for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -v "^${current}$"); do
+  merge_base=$(git merge-base "$branch" HEAD 2>/dev/null) || continue
+  # Count commits between merge-base and HEAD (fewer = closer fork point)
+  distance=$(git rev-list --count "$merge_base"..HEAD)
+  echo "$distance $branch"
+done | sort -n | head -1
+# Use the branch with the smallest distance (most recent fork point)
+```
+
+Pick the branch with the fewest commits since divergence. If auto-detection fails (no local branches share history), fall back to `AskUserQuestion`.
 
 Store the result as `<base>` — all references below use this value.
 
@@ -110,7 +127,7 @@ Before starting the rebase, ensure the branch is clean and passing all checks.
 
 6. **Force push to update the PR**:
    ```bash
-   git push --force-with-lease
+   git push --force
    ```
 
    Return the PR URL to the user when done. Include a commit list in the PR body:
@@ -132,6 +149,6 @@ Before starting the rebase, ensure the branch is clean and passing all checks.
 
 - **Never rebase main/master**
 - **Confirm before force push**
-- **Use --force-with-lease** not --force
+- **Use --force** (not --force-with-lease) — after `git reset --soft`, the local ref diverges from remote in a way that --force-with-lease rejects. Plain --force is correct since this command intentionally rewrites history.
 - **Keep meaningful history**: Don't squash everything into one commit
 - **Write good messages**: Future you will thank present you

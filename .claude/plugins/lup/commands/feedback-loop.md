@@ -179,6 +179,19 @@ Return the standard pattern report.
 - Tool usage patterns (high-value vs low-value tools)
 - 2-3 specific traces worth reading in full (outliers or interesting cases)
 
+**Other subagents for deeper analysis:**
+
+- **Version reviewer**: For a holistic assessment of a single past version (especially before prompt rewrites), use:
+  ```
+  Task(subagent_type="lup:version-reviewer", prompt="Review version [X.Y.Z]")
+  ```
+- **Version explorer**: For quick file retrieval and diffs across versions (e.g., "fetch me the prompt at v0.3" or "compare v0.3 and v1.0 prompts"):
+  ```
+  Task(subagent_type="lup:version-explorer", prompt="Compare v0.3.0 and v1.0.0")
+  ```
+
+The trace explorer finds cross-cutting patterns; the version reviewer explains why those patterns exist by connecting them to the prompt; the version explorer retrieves and diffs the actual code. You can run all three — they serve complementary purposes.
+
 ### 2b. Deep-Dive on Flagged Traces (Optional)
 
 The trace explorer flags 2-3 traces worth reading fully. **Only read these if the pattern
@@ -393,6 +406,7 @@ Write to `notes/feedback_loop/<timestamp>_analysis.md`:
 # Feedback Loop Analysis: YYYY-MM-DD
 
 ## Ground Truth Status
+- Agent version analyzed: X.Y.Z
 - Sessions with outcomes: N
 - Average success metric: X.XX (or "none yet - process analysis only")
 
@@ -434,6 +448,9 @@ Write to `notes/feedback_loop/<timestamp>_analysis.md`:
 | Object | Added X tool | Agent requested it in N traces |
 | Meta | Improved analysis queries | Was missing Y data |
 | Meta-Meta | Updated feedback-loop.md | Clarified Z section |
+
+## Evaluation Queue
+uv run python -m lup.environment.cli loop <session commands>
 ```
 
 ## Scripts Reference
