@@ -1,37 +1,171 @@
-"""MCP server utilities.
+"""Patched MCP server factory that preserves is_error from tool responses.
 
-Re-exports create_sdk_mcp_server from the Claude Agent SDK with usage examples.
+The Claude Agent SDK's `create_sdk_mcp_server` has bugs that prevent proper error
+propagation:
 
-Usage:
-    from pydantic import BaseModel, Field
-    from claude_agent_sdk import tool, create_sdk_mcp_server
+1. It discards `is_error` from dict responses, only extracting `content`
+2. Its query.py checks `is_error` (snake_case) but MCP's CallToolResult uses
+   `isError` (camelCase)
 
-    class MyInput(BaseModel):
-        param: str = Field(description="Parameter description")
+This module provides a fixed version that works around both issues.
 
-    @tool("my_tool", "Description", MyInput.model_json_schema())
-    async def my_tool(args: dict) -> dict:
-        params = MyInput.model_validate(args)
-        return {"content": [{"type": "text", "text": params.param}]}
+Use `create_mcp_server` instead of `create_sdk_mcp_server` from claude_agent_sdk.
 
-    server = create_sdk_mcp_server(
-        name="my-server",
-        version="1.0.0",
-        tools=[my_tool]
-    )
+SDK Compatibility
+-----------------
+Tested against: claude-agent-sdk>=0.1.26
+Last verified: 2026-02-04
 
-    # In ClaudeAgentOptions:
-    options = ClaudeAgentOptions(
-        mcp_servers={"my-server": server},
-        allowed_tools=["mcp__my-server__my_tool"],
-    )
+Maintenance Notes:
+- Check if these bugs are fixed in future SDK versions
+- If fixed, remove the patched code and alias `create_mcp_server = create_sdk_mcp_server`
+- Update pyproject.toml to require the fixed version minimum
+- Monitor SDK changelog for MCP-related changes
 
 Tool naming convention:
     After registration, tools are named: mcp__{server_name}__{tool_name}
     Example: mcp__my-server__my_tool
 """
 
-# Re-export from SDK for convenience
-from claude_agent_sdk import create_sdk_mcp_server, tool
+import logging
+from typing import Any, cast
 
-__all__ = ["create_sdk_mcp_server", "tool"]
+from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
+from claude_agent_sdk.types import McpSdkServerConfig
+from mcp.server import Server
+from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
+from pydantic import TypeAdapter
+
+logger = logging.getLogger(__name__)
+
+
+def _generate_json_schema(input_schema: type | dict[str, Any]) -> dict[str, Any]:
+    """Generate JSON Schema from input_schema (TypedDict, BaseModel, or dict).
+
+    Args:
+        input_schema: Either a dict (simple type mapping or full schema),
+                      a TypedDict class, or a Pydantic BaseModel class.
+
+    Returns:
+        A valid JSON Schema dict for MCP tool registration.
+    """
+    if isinstance(input_schema, dict):
+        # Already a full JSON schema
+        if "type" in input_schema and "properties" in input_schema:
+            return input_schema
+        # Simple type mapping dict like {"post_id": int, "query": str}
+        type_map = {
+            str: "string",
+            int: "integer",
+            float: "number",
+            bool: "boolean",
+            list: "array",
+        }
+        properties = {}
+        for param_name, param_type in input_schema.items():
+            properties[param_name] = {"type": type_map.get(param_type, "string")}
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties.keys()),
+        }
+
+    # TypedDict or Pydantic BaseModel - use TypeAdapter for schema generation
+    try:
+        adapter = TypeAdapter(input_schema)
+        return adapter.json_schema()
+    except TypeError as e:
+        logger.warning(
+            "TypeAdapter doesn't support %s: %s. Using empty schema.",
+            input_schema,
+            e,
+        )
+        return {"type": "object", "properties": {}}
+
+
+class _CallToolResultWithAlias(CallToolResult):
+    """CallToolResult with snake_case alias for SDK compatibility.
+
+    The Claude Agent SDK's query.py checks `is_error` (snake_case) but MCP's
+    CallToolResult uses `isError` (camelCase). This subclass adds a property
+    alias so both work.
+    """
+
+    @property
+    def is_error(self) -> bool:
+        """Snake_case alias for isError (SDK compatibility)."""
+        return self.isError
+
+
+def create_mcp_server(
+    name: str, version: str = "1.0.0", tools: list[SdkMcpTool[Any]] | None = None
+) -> McpSdkServerConfig:
+    """Create an in-process MCP server with proper is_error handling.
+
+    This is a patched version of claude_agent_sdk.create_sdk_mcp_server that
+    properly preserves the `is_error` flag from tool responses.
+
+    Args:
+        name: Unique identifier for the server.
+        version: Server version string.
+        tools: List of SdkMcpTool instances created with the @tool decorator.
+
+    Returns:
+        McpSdkServerConfig for use with ClaudeAgentOptions.mcp_servers.
+    """
+    server = Server(name, version=version)
+    server._tools = tools or []  # type: ignore[attr-defined]
+
+    if tools:
+        tool_map = {tool_def.name: tool_def for tool_def in tools}
+
+        @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
+        async def list_tools() -> list[Tool]:
+            """Return the list of available tools."""
+            tool_list = []
+            for tool_def in tools:
+                schema = _generate_json_schema(tool_def.input_schema)
+                tool_list.append(
+                    Tool(
+                        name=tool_def.name,
+                        description=tool_def.description,
+                        inputSchema=schema,
+                    )
+                )
+            return tool_list
+
+        @server.call_tool()  # type: ignore[untyped-decorator]
+        async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+            """Execute a tool by name with given arguments."""
+            if name not in tool_map:
+                raise ValueError(f"Tool '{name}' not found")
+
+            tool_def = tool_map[name]
+            result = await tool_def.handler(arguments)
+
+            # Extract is_error flag (FIX: SDK's wrapper discards this)
+            is_error = result.get("is_error", False)
+
+            # Convert content to MCP types
+            content: list[TextContent | ImageContent] = []
+            if "content" in result:
+                for item in result["content"]:
+                    if item.get("type") == "text":
+                        content.append(TextContent(type="text", text=item["text"]))
+                    if item.get("type") == "image":
+                        content.append(
+                            ImageContent(
+                                type="image",
+                                data=item["data"],
+                                mimeType=item["mimeType"],
+                            )
+                        )
+
+            return _CallToolResultWithAlias(
+                content=cast(list[ContentBlock], content), isError=is_error
+            )
+
+    return McpSdkServerConfig(type="sdk", name=name, instance=server)
+
+
+__all__ = ["create_mcp_server", "create_sdk_mcp_server", "tool"]

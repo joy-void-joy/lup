@@ -9,6 +9,7 @@ This package contains reusable abstractions that rarely change:
 - notes: RO/RW notes directory structure
 - responses: MCP response formatting utilities
 - retry: Retry decorator for API calls
+- sandbox: Docker-based Python sandbox for isolated code execution
 
 Domain-specific code belongs in lup.agent, not here.
 """
@@ -60,6 +61,11 @@ from lup.lib.scoring import (
     rebuild_scores_csv,
 )
 from lup.lib.retry import with_retry
+from lup.lib.sandbox import (
+    CodeExecutionTimeoutError,
+    Sandbox,
+    SandboxNotInitializedError,
+)
 from lup.lib.trace import (
     TraceEntry,
     TraceLogger,
@@ -120,6 +126,10 @@ __all__ = [
     "mcp_success",
     # Retry
     "with_retry",
+    # Sandbox
+    "CodeExecutionTimeoutError",
+    "Sandbox",
+    "SandboxNotInitializedError",
     # Scoring
     "append_score_row",
     "read_scores_csv",
