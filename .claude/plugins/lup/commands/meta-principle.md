@@ -118,9 +118,9 @@ Present findings and proposed changes one layer at a time. For each layer:
 - If an existing hook contradicts the principle, propose modifications.
 - Not every principle needs a hook — only propose one if mechanical enforcement makes sense.
 
-**Group 5: Scripts & automation**
-- Do the feedback loop scripts, commit scripts, or other automation reflect the principle?
-- Are there scripts that should exist to support the principle but don't?
+**Group 5: Devtools & automation** (`src/lup/devtools/`)
+- Do the devtools commands (feedback, trace, metrics, git, sync) reflect the principle?
+- Are there devtools commands that should exist to support the principle but don't?
 
 ## Phase 4: Execute Approved Changes
 

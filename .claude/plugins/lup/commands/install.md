@@ -35,6 +35,18 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 - `src/lup/lib/` — utilities (trace, hooks, metrics, scoring, cache, retry, notes, mcp, responses, history)
 - `src/lup/version.py` — version tracking pattern
 
+### DevTools CLI
+The `lup-devtools` CLI (`src/lup/devtools/`) gives Claude Code structured commands for development tasks that would otherwise require ad-hoc bash one-liners. Without it, Claude resorts to `python -c "..."` snippets or manual shell pipelines for trace analysis, feedback collection, and session management — which are fragile and unrepeatable. The devtools encode these workflows as proper CLI commands with argument parsing, output formatting, and error handling.
+- `src/lup/devtools/main.py` — root typer app composing sub-apps (entry point: `lup-devtools`)
+  - `api.py` — API inspection, module info
+  - `dev.py` — worktree management
+  - `git.py` — session commit operations
+  - `sync.py` — upstream sync tracking
+  - `usage.py` — Claude Code usage display
+  - `feedback.py` — feedback collection
+  - `trace.py` — trace analysis
+  - `metrics.py` — aggregate metrics
+
 ### Configuration Patterns
 - `.claude/settings.json` — settings structure
 - `downstream.json` — upstream sync tracking
@@ -81,8 +93,8 @@ These work in any repo:
 ### Portable if Python
 These port well to other Python projects:
 - **Library utilities**: hook composition, version tracking, retry, cache
-- **DevTools CLI pattern**: typer-based development tooling
-- **Upstream sync**: downstream.json + sync commands
+- **DevTools CLI**: The `lup-devtools` typer app structure — `main.py` composing sub-apps, `pyproject.toml` entry point. Even if the target doesn't need every subcommand, the skeleton (api, dev, git, sync) gives Claude Code reliable tooling instead of ad-hoc scripts.
+- **Upstream sync**: downstream.json + sync commands (`lup-devtools sync`)
 
 ### Portable if Agent SDK
 If the target repo uses (or will use) the Claude Agent SDK, the **self-improvement loop scaffolding** is the core value of lup — these are high-priority to port:
@@ -184,8 +196,9 @@ For each item being installed:
 2. `.claude/plugins/lup/hooks/hooks.json` (only reference hooks being installed)
 3. `.claude/plugins/lup/hooks/scripts/` — adapted hook scripts
 4. `.claude/plugins/lup/commands/` — selected commands
-5. `.claude/settings.json` — create or merge
-6. `.claude/CLAUDE.md` — create or extend
+5. `src/<project>/devtools/` — devtools CLI skeleton (if Python target, adapt package name and entry point)
+6. `.claude/settings.json` — create or merge
+7. `.claude/CLAUDE.md` — create or extend
 
 ## Phase 7: Verify & Report
 

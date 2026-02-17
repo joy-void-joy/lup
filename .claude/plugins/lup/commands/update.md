@@ -64,6 +64,7 @@ Classify as:
 
 - **Portable as-is**: Improvements that apply directly without modification
   - `lib/` utilities (e.g., better `print_block`, new retry patterns, caching improvements)
+  - `devtools/` CLI improvements (new subcommands, better output formatting, new analysis tools)
   - Hook logic improvements (new permission patterns, better auto-allow rules)
   - Build/config improvements that generalize
   - **CLAUDE.md improvements** (coding standards, workflow tips, new guidelines)
