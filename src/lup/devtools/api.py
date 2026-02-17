@@ -6,8 +6,9 @@ Combines inspect_api and module_info into one sub-app.
 import importlib
 import importlib.util
 import inspect
+from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 
@@ -39,7 +40,7 @@ def _resolve_object(path: str) -> tuple[object, str]:
 def _format_signature(obj: object, name: str) -> str:
     """Format the signature of a callable."""
     try:
-        sig = inspect.signature(obj)
+        sig = inspect.signature(cast(Callable[..., object], obj))
         return f"{name}{sig}"
     except (ValueError, TypeError):
         return name
