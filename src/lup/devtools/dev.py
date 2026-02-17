@@ -11,7 +11,32 @@ app = typer.Typer(no_args_is_help=True)
 
 PLUGIN_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache" / "local" / "lup"
 
-GITIGNORED_DATA_DIRS = ["logs"]
+GITIGNORED_EXTRAS = [
+    ".env.local",
+    "downstream.json.local",
+    ".claude/settings.local.json",
+    "logs",
+    "refs",
+]
+
+
+def _branch_exists(branch: str) -> bool:
+    """Check if a git branch exists (local only)."""
+    try:
+        sh.git("rev-parse", "--verify", f"refs/heads/{branch}")
+        return True
+    except sh.ErrorReturnCode:
+        return False
+
+
+def _worktree_is_registered(path: Path) -> bool:
+    """Check if a path is registered as a git worktree (even if dir is missing)."""
+    output = str(sh.git("worktree", "list", "--porcelain"))
+    resolved = str(path.resolve())
+    for line in output.splitlines():
+        if line.startswith("worktree ") and line.split(" ", 1)[1] == resolved:
+            return True
+    return False
 
 
 def _get_tree_dir() -> Path:
@@ -49,7 +74,7 @@ def worktree_cmd(
     ] = False,
     no_copy_data: Annotated[
         bool,
-        typer.Option("--no-copy-data", help="Skip copying .env.local and logs/"),
+        typer.Option("--no-copy-data", help="Skip copying gitignored extras"),
     ] = False,
     no_plugin_refresh: Annotated[
         bool,
@@ -60,7 +85,11 @@ def worktree_cmd(
         typer.Option("--base", "-b", help="Base branch (default: current branch)"),
     ] = None,
 ) -> None:
-    """Create a new git worktree with plugin cache refresh."""
+    """Create or re-attach a git worktree.
+
+    If the branch already exists, re-attaches it to a worktree directory.
+    If the branch doesn't exist, creates a new branch and worktree.
+    """
     current_dir = Path.cwd()
 
     branch_name = f"feat/{name}" if not name.startswith("feat/") else name
@@ -68,15 +97,31 @@ def worktree_cmd(
 
     tree_dir = _get_tree_dir()
     worktree_path = tree_dir / worktree_name
-    if worktree_path.exists():
-        typer.echo(f"Error: Worktree path already exists: {worktree_path}")
-        raise typer.Exit(1)
+    branch_already_exists = _branch_exists(branch_name)
 
-    typer.echo(f"Creating worktree: {worktree_path}")
-    typer.echo(f"Branch: {branch_name}")
+    # Handle existing worktree directory
+    if worktree_path.exists():
+        if _worktree_is_registered(worktree_path):
+            typer.echo(f"Worktree already active: {worktree_path}")
+            raise typer.Exit(0)
+        # Stale directory (worktree was pruned but dir remains) — clean up
+        typer.echo(f"Removing stale worktree directory: {worktree_path}")
+        shutil.rmtree(worktree_path)
+
+    # Prune stale worktree entries so git doesn't complain
+    sh.git("worktree", "prune")
+
+    if branch_already_exists:
+        typer.echo(f"Re-attaching worktree: {worktree_path}")
+        typer.echo(f"Existing branch: {branch_name}")
+    else:
+        typer.echo(f"Creating worktree: {worktree_path}")
+        typer.echo(f"New branch: {branch_name}")
 
     try:
-        if base_branch:
+        if branch_already_exists:
+            sh.git("worktree", "add", str(worktree_path), branch_name)
+        elif base_branch:
             sh.git(
                 "worktree", "add", str(worktree_path), "-b", branch_name, base_branch
             )
@@ -87,18 +132,18 @@ def worktree_cmd(
         raise typer.Exit(1)
 
     if not no_copy_data:
-        env_local = current_dir / ".env.local"
-        if env_local.exists():
-            shutil.copy2(env_local, worktree_path / ".env.local")
-            typer.echo("Copied .env.local")
-
-        for data_dir_name in GITIGNORED_DATA_DIRS:
-            data_dir = current_dir / data_dir_name
-            if data_dir.exists():
-                shutil.copytree(
-                    data_dir, worktree_path / data_dir_name, dirs_exist_ok=True
-                )
-                typer.echo(f"Copied {data_dir_name}/")
+        for rel_path in GITIGNORED_EXTRAS:
+            src = current_dir / rel_path
+            if not src.exists():
+                continue
+            dst = worktree_path / rel_path
+            if src.is_dir():
+                shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=True)
+                typer.echo(f"Copied {rel_path}/")
+            else:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                typer.echo(f"Copied {rel_path}")
 
     if not no_sync:
         typer.echo("Running uv sync...")
