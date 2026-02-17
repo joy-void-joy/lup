@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 DOWNSTREAM_FILE = Path("downstream.json")
 LOCAL_FILE = Path("downstream.json.local")
 CACHE_DIR = Path(".cache/downstream")
+REFS_DIR = Path("refs")
 
 _git = sh.Command("git").bake("--no-pager")
 
@@ -39,6 +40,22 @@ def _load_json(path: Path) -> dict[str, list[dict[str, str]]]:
 
 def _save_local(data: dict[str, list[dict[str, str]]]) -> None:
     LOCAL_FILE.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def _ensure_ref_symlink(name: str, target: str) -> None:
+    """Create or update refs/<name> symlink pointing to a resolved project path."""
+    REFS_DIR.mkdir(exist_ok=True)
+    link = REFS_DIR / name
+    target_path = Path(target).resolve()
+    if link.is_symlink():
+        if link.resolve() == target_path:
+            return
+        link.unlink()
+    elif link.exists():
+        logger.warning("refs/%s exists but is not a symlink, skipping", name)
+        return
+    link.symlink_to(target_path)
+    logger.debug("refs/%s -> %s", name, target_path)
 
 
 def load_projects() -> list[dict[str, str]]:
@@ -74,10 +91,11 @@ def find_project(name: str) -> dict[str, str]:
 def ensure_local(proj: dict[str, str]) -> str:
     """Ensure a project has a usable local path."""
     path = proj.get("path", "")
+    name = proj["name"]
     if path and Path(path).exists():
+        _ensure_ref_symlink(name, path)
         return path
 
-    name = proj["name"]
     cache_path = CACHE_DIR / name
     url = proj.get("url", "")
 
@@ -88,6 +106,7 @@ def ensure_local(proj: dict[str, str]) -> str:
             _git("-C", str(cache_path), "reset", "--hard", "origin/HEAD", "--quiet")
         except sh.ErrorReturnCode as e:
             typer.echo(f"Warning: fetch failed: {e.stderr.decode().strip()}")
+        _ensure_ref_symlink(name, str(cache_path))
         return str(cache_path)
 
     if url:
@@ -98,6 +117,7 @@ def ensure_local(proj: dict[str, str]) -> str:
         except sh.ErrorReturnCode as e:
             typer.echo(f"Clone failed: {e.stderr.decode().strip()}")
             raise typer.Exit(1)
+        _ensure_ref_symlink(name, str(cache_path))
         return str(cache_path)
 
     typer.echo(f"Project '{name}' has no local path or URL configured.")
@@ -127,13 +147,16 @@ def current_head(path: str) -> str:
 
 
 def _resolve_path(proj: dict[str, str]) -> tuple[str, bool]:
-    """Resolve project to a local path, return (path, exists)."""
+    """Resolve project to a local path, return (path, exists). Creates ref symlink if found."""
+    name = proj["name"]
     path = proj.get("path", "")
     if path and Path(path).exists():
+        _ensure_ref_symlink(name, path)
         return path, True
 
-    cache_path = CACHE_DIR / proj["name"]
+    cache_path = CACHE_DIR / name
     if cache_path.exists():
+        _ensure_ref_symlink(name, str(cache_path))
         return str(cache_path), True
 
     return proj.get("url", "NO PATH"), False
@@ -273,6 +296,7 @@ def setup_project(
         entry["last_synced_commit"] = current_head(str(resolved))
 
     _save_local(local_data)
+    _ensure_ref_symlink(name, str(resolved))
     typer.echo(f"Set '{name}' local path to {resolved}")
     if synced:
         typer.echo(f"  Marked as synced at {entry['last_synced_commit'][:8]}")

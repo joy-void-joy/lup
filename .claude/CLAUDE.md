@@ -275,7 +275,7 @@ meta(claude): update commit message guidelines
 data(outputs): add session batch results
 ```
 
-**Note:** The `worktrees/` directory is gitignored.
+**Note:** The `worktrees/` and `refs/` directories are gitignored. `refs/` contains symlinks to downstream projects, auto-created by `sync setup` and `sync ensure_local`.
 
 ## Editing Style
 
