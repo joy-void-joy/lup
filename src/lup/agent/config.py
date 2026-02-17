@@ -116,6 +116,12 @@ class Settings(BaseSettings):
         description="Timeout for HTTP requests",
     )
 
+    sandbox_timeout_seconds: int = Field(
+        default=30,
+        validation_alias="AGENT_SANDBOX_TIMEOUT_SECONDS",
+        description="Timeout for sandbox code execution",
+    )
+
     # ==========================================================================
     # RATE LIMITS / CONCURRENCY
     # ==========================================================================

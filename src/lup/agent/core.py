@@ -27,6 +27,7 @@ from claude_agent_sdk import (
 )
 
 from claude_agent_sdk import create_sdk_mcp_server
+from claude_agent_sdk.types import McpSdkServerConfig
 
 from lup.agent.config import settings
 from lup.agent.models import AgentOutput, SessionResult, TokenUsage, get_output_schema
@@ -38,6 +39,7 @@ from lup.version import AGENT_VERSION
 from lup.lib import (
     HooksConfig,
     NotesConfig,
+    Sandbox,
     TraceLogger,
     append_score_row,
     create_permission_hooks,
@@ -55,7 +57,11 @@ NOTES_PATH = Path("./notes")
 TRACES_PATH = NOTES_PATH / "traces"
 
 
-def _build_options(notes_config: NotesConfig) -> ClaudeAgentOptions:
+def _build_options(
+    notes_config: NotesConfig,
+    *,
+    sandbox_server: McpSdkServerConfig | None = None,
+) -> ClaudeAgentOptions:
     """Build ClaudeAgentOptions from settings and notes config.
 
     Separated from run_agent() so the option-building logic can be
@@ -68,6 +74,11 @@ def _build_options(notes_config: NotesConfig) -> ClaudeAgentOptions:
         version="1.0.0",
         tools=EXAMPLE_TOOLS,
     )
+
+    # Collect all MCP servers to register
+    additional_servers: list[McpSdkServerConfig] = [example_server]
+    if sandbox_server is not None:
+        additional_servers.append(sandbox_server)
 
     policy = ToolPolicy.from_settings(settings)
     permission_hooks = create_permission_hooks(notes_config.rw, notes_config.ro)
@@ -94,7 +105,7 @@ def _build_options(notes_config: NotesConfig) -> ClaudeAgentOptions:
             "autoAllowBashIfSandboxed": True,
             "allowUnsandboxedCommands": False,
         },
-        mcp_servers=policy.get_mcp_servers(example_server),
+        mcp_servers=policy.get_mcp_servers(*additional_servers),
         agents=get_subagents(),
         add_dirs=[str(d) for d in notes_config.all_dirs],
         allowed_tools=policy.get_allowed_tools(),
@@ -131,38 +142,48 @@ async def run_agent(
     trace_path = TRACES_PATH / session_id / f"{datetime.now().strftime('%H%M%S')}.md"
     trace_logger = TraceLogger(trace_path=trace_path, title=f"Session {session_id}")
 
-    options = _build_options(notes)
+    # --- Sandbox (optional, requires Docker) ---
+    # Customize: adjust pre_install, timeout, network_mode, or remove entirely
+    # if your agent doesn't need code execution.
+    sandbox = Sandbox(
+        session_id=session_id,
+        shared_dir=notes.session / "sandbox_shared",
+        timeout_seconds=settings.sandbox_timeout_seconds,
+    )
 
     collected_text: list[str] = []
     assistant_messages: list[AssistantMessage] = []
     result: ResultMessage | None = None
 
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(task)
+    with sandbox:
+        options = _build_options(notes, sandbox_server=sandbox.create_mcp_server())
 
-        async for message in client.receive_response():
-            match message:
-                case AssistantMessage():
-                    assistant_messages.append(message)
-                    for block in message.content:
-                        print_block(block)
-                        trace_logger.log_block(block)
-                        if isinstance(block, TextBlock):
-                            collected_text.append(block.text)
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(task)
 
-                case ResultMessage():
-                    result = message
-                    if message.is_error:
-                        raise RuntimeError(f"Agent error: {message.result}")
-
-                case SystemMessage():
-                    logger.info("System [%s]: %s", message.subtype, message.data)
-
-                case UserMessage():
-                    if isinstance(message.content, list):
+            async for message in client.receive_response():
+                match message:
+                    case AssistantMessage():
+                        assistant_messages.append(message)
                         for block in message.content:
                             print_block(block)
                             trace_logger.log_block(block)
+                            if isinstance(block, TextBlock):
+                                collected_text.append(block.text)
+
+                    case ResultMessage():
+                        result = message
+                        if message.is_error:
+                            raise RuntimeError(f"Agent error: {message.result}")
+
+                    case SystemMessage():
+                        logger.info("System [%s]: %s", message.subtype, message.data)
+
+                    case UserMessage():
+                        if isinstance(message.content, list):
+                            for block in message.content:
+                                print_block(block)
+                                trace_logger.log_block(block)
 
     if result is None:
         raise RuntimeError("No result received from agent")
