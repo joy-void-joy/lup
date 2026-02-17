@@ -78,7 +78,9 @@ def worktree_cmd(
     ] = False,
     no_plugin_refresh: Annotated[
         bool,
-        typer.Option("--no-plugin-refresh", help="Skip plugin cache refresh and install"),
+        typer.Option(
+            "--no-plugin-refresh", help="Skip plugin cache refresh and install"
+        ),
     ] = False,
     base_branch: Annotated[
         str | None,
