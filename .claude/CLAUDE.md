@@ -371,7 +371,11 @@ src/
 
 - **No bare `except Exception`** -- always catch specific exceptions
 - **Every function must specify input and output types**
-- **Never use `Any`** -- Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types. `Any` hides type errors and defeats static analysis.
+- **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** -- Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types. These erase type information and defeat static analysis.
+  - **MCP tool inputs**: The SDK types `@tool` handler args as `dict[str, Any]`. Always `BaseModel.model_validate(args)` immediately — don't pass around the raw dict.
+  - **MCP tool outputs**: Define a `TypedDict` for the return dict (the SDK types it as `dict[str, Any]` but we use our own typed wrapper).
+  - **SDK hooks**: Return `SyncHookJSONOutput` (TypedDict from `claude_agent_sdk.types`) — don't hand-build `dict[str, Any]`. Use the typed hook inputs (`PreToolUseHookInput`, etc.) and specific output types (`PreToolUseHookSpecificOutput`, etc.).
+  - **SDK types to prefer**: Use the SDK's own typed classes instead of raw dicts — `HookMatcher`, `AgentDefinition`, `ClaudeAgentOptions`, `McpServerConfig`, `PermissionResultAllow`/`Deny`, `ContentBlock`, `Message`, `TextBlock`, `ToolUseBlock`, `ToolResultBlock`. Import from top-level `claude_agent_sdk` when available; `SyncHookJSONOutput`, `HookEvent`, and hook-specific output types require `claude_agent_sdk.types`.
 - **Use Python 3.12+ generics syntax**: `class A[T]`, not `Generic[T]`
 - Use `TypedDict` and Pydantic models for structured data
 - Never manually parse Claude/agent output -- use structured outputs via Pydantic
