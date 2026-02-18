@@ -90,7 +90,13 @@ Rename `src/lup/` to `src/<project>/` where `<project>` is the name from Phase 1
 4. **Update CLI** (`src/<project>/environment/cli/__main__.py`):
    - `app = typer.Typer(name="lup", ...)` → `name="<project>"`
 
-5. **Update CLAUDE.md** — replace all `src/lup/` with `src/<project>/`, `lup.agent` with `<project>.agent`, etc. Use a script in `./tmp/` for bulk replacements.
+5. **Merge CLAUDE.md from template** — Perform a section-level merge using `TEMPLATE_CLAUDE.md` (located at `.claude/plugins/lup/TEMPLATE_CLAUDE.md`):
+   1. Read `TEMPLATE_CLAUDE.md` and replace all `<project>` placeholders with the actual project name
+   2. Read the existing `.claude/CLAUDE.md`
+   3. Compare sections: for each section in the adapted template, check if the existing CLAUDE.md already has that section (by heading match)
+   4. Add missing sections from the template into the existing CLAUDE.md
+   5. Leave existing sections untouched — don't overwrite content the project already has
+   6. Also do package-name replacements in the existing content: `src/lup/` → `src/<project>/`, `lup.agent` → `<project>.agent`, etc.
 
 6. **Update logger names** in `src/<project>/lib/trace.py`:
    - `"lup.agent.stream"` → `"<project>.agent.stream"`
@@ -135,10 +141,11 @@ Set initial AGENT_VERSION and explain bump rules for this domain.
 The main feedback collection script. Customize for the domain's ground truth type.
 
 ### 7. Update `CLAUDE.md`
-Add domain-specific sections:
-- Project overview with domain description
-- Commands specific to the domain
-- Metrics and feedback collection instructions
+The CLAUDE.md should already have the template sections from the Phase 2 merge. Now add domain-specific content based on the interview answers:
+- Fill in the Project Overview placeholder with the domain description
+- Add domain-specific commands and examples
+- Add metrics and feedback collection instructions relevant to this domain
+- Add any domain-specific context sections (Important Context, data sources, constraints)
 
 ### 8. Tool Description Standards
 

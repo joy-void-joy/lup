@@ -104,7 +104,7 @@ If the target repo uses (or will use) the Claude Agent SDK, the **self-improveme
 - **DevTools**: The full `lup-devtools` CLI (trace, feedback, metrics, git commit-results)
 - **Version tracking**: version.py pattern for tracking agent behavior changes
 - **Commands**: `init`, `feedback-loop`, `bump`, `update` — the self-improvement workflow
-- **TEMPLATE_CLAUDE.md**: Use as the basis for structuring their CLAUDE.md
+- **TEMPLATE_CLAUDE.md**: Section-level merge into the target's existing CLAUDE.md (add missing sections, leave existing ones)
 
 When the target has Agent SDK code, adapt the scaffolding to wrap their existing agent — don't replace it. The lup patterns (trace logging, scoring, feedback collection) layer on top of whatever agent they already have.
 
@@ -154,7 +154,7 @@ Be conservative — only install what clearly adds value. Typical candidates (bu
 - **Plugin infrastructure**: plugin.json, hooks.json, settings.json (local marketplace + plugin enablement)
 - **Permission hooks** adapted to the target's ecosystem (its build tool, test runner, linter, doc URLs)
 - **Generic commands** that work in any repo (git workflow, CLAUDE.md maintenance, meta, refactor, etc.)
-- **CLAUDE.md**: Extend if one exists (append clearly missing sections), or create from TEMPLATE_CLAUDE.md adapted for the target. Don't rewrite existing content.
+- **CLAUDE.md**: Perform a **section-level merge** using `TEMPLATE_CLAUDE.md` (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`). Read the template, adapt it for the target's project name and ecosystem, then compare sections against the target's existing CLAUDE.md. Add sections that are missing; leave existing sections untouched. If no CLAUDE.md exists, create one from the adapted template.
 - **If Agent SDK detected**: Also install the self-improvement scaffolding — this is lup's core value. The feedback loop commands, lib utilities (trace, scoring, metrics, hooks, version), devtools CLI pattern, session/trace directory structure, downstream.json for sync. Adapt to layer on top of the target's existing agent, not replace it.
 
 **Constraints** in non-interactive mode:
@@ -198,7 +198,7 @@ For each item being installed:
 4. `.claude/plugins/lup/commands/` — selected commands
 5. `src/<project>/devtools/` — devtools CLI skeleton (if Python target, adapt package name and entry point)
 6. `.claude/settings.json` — create or merge
-7. `.claude/CLAUDE.md` — create or extend
+7. `.claude/CLAUDE.md` — section-level merge from TEMPLATE_CLAUDE.md (read template → adapt for target → compare sections → add missing ones → leave existing untouched)
 
 ## Phase 7: Verify & Report
 

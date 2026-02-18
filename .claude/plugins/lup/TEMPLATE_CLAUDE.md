@@ -1,6 +1,8 @@
 # CLAUDE.md Template
 
-Use this as a starting point for your project's CLAUDE.md. Customize each section for your domain.
+This is the portable CLAUDE.md scaffold that lup installs into downstream projects. It contains conventions, workflow patterns, and coding standards that apply to any project using lup.
+
+**How it's used:** `/lup:init` and `/lup:install` perform a **section-level merge** — they compare this template's sections against the target's existing CLAUDE.md, add sections that are missing, and leave existing sections untouched. Placeholders like `<project>` are replaced with the actual project name.
 
 ---
 
