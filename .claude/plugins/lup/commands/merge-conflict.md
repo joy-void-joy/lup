@@ -21,16 +21,25 @@ Resolve all merge conflicts in the working tree after a failed merge or rebase.
    git diff --name-only --diff-filter=U
    ```
 
-2. **Understand the merge direction**:
+2. **Understand what this branch does**:
    - Identify which branch is being merged into which
-   - Check `git log --oneline -5 HEAD` and `git log --oneline -5 MERGE_HEAD` (or `REBASE_HEAD`) to understand both sides
-   - Use the user-provided context above to understand priorities (e.g., "prefer our changes for X", "main has the correct version of Y")
+   - Review commits since this branch diverged from the base (max 10):
+     ```bash
+     # Find the merge base and show branch commits
+     git log --oneline $(git merge-base HEAD MERGE_HEAD)..HEAD | head -10
+     ```
+   - Derive the **branch scope** -- a summary of everything this branch is about. If the branch does multiple things (e.g., "refactors CDF generation, adds new calibration tools, and fixes a test"), list all of them. The scope should cover the full set of intentional changes.
+   - Also check the other side to understand what changed there:
+     ```bash
+     git log --oneline $(git merge-base HEAD MERGE_HEAD)..MERGE_HEAD | head -10
+     ```
+   - Use the user-provided context above for additional priorities
 
 3. **For each conflicted file**:
    - Read the full file to see all conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
    - Understand what each side changed and why by reading the surrounding code
    - Check `git log --oneline -5 -- <file>` on both sides to understand the history
-   - **Classify each conflict** before resolving (see Resolution Decision Tree below)
+   - **Classify each conflict by branch scope** before resolving (see Resolution Decision Tree below)
    - Remove all conflict markers after resolution
 
 4. **Validate the resolution**:
@@ -61,18 +70,30 @@ Resolve all merge conflicts in the working tree after a failed merge or rebase.
 
 ## Resolution Decision Tree
 
-Classify each conflict hunk before resolving it:
+First classify each conflict hunk by **branch scope**, then resolve:
 
-### Auto-resolve (no user input needed)
+### Step A: Scope classification
 
-- **Non-overlapping additions** -- Both sides add different new content (imports, functions, config entries). Keep both.
-- **Clear superset** -- One side is a strict superset of the other (added lines without changing existing ones). Take the superset.
-- **Whitespace / formatting only** -- Indentation, trailing newlines, line wrapping. Take either side consistently.
+Using the branch scope summary from step 2, classify each conflict hunk:
+
+- **In-scope** -- The conflict is in code this branch intentionally changed (matches any part of the branch's purpose). **Take ours** (HEAD) -- this branch is the authority for these changes.
+- **Out-of-scope** -- The conflict is in code this branch didn't intentionally modify (unrelated to any of the branch's purposes). **Take theirs** (MERGE_HEAD) -- the other branch has the more intentional changes here.
+- **Mixed / ambiguous** -- Both sides made intentional changes to the same code, or you can't confidently classify. Proceed to Step B.
+
+### Step B: Resolve mixed/ambiguous conflicts
+
+For hunks that don't clearly fall into in-scope or out-of-scope:
+
+#### Auto-resolve (no user input needed)
+
+- **Non-overlapping additions** -- Both sides add different new content (imports, functions, config entries). Combine both.
+- **Clear superset** -- One side is a strict superset of the other. Take the superset.
+- **Whitespace / formatting only** -- Take either side consistently.
 - **Identical intent** -- Both sides made the same change with trivially different wording. Take either.
 
-### Ask the user (use AskUserQuestion)
+#### Ask the user (use AskUserQuestion)
 
-- **Different approaches** -- Both sides solve the same problem differently (e.g., different API patterns, different data structures). Present both approaches with context and ask which to keep or how to combine.
+- **Different approaches** -- Both sides solve the same problem differently. Present both approaches with context and ask which to keep or how to combine.
 - **Conflicting deletions vs additions** -- One side removes code the other side modifies. Show what was removed and what was changed, ask which direction to go.
 - **Structural reorganization** -- Both sides restructured the same section differently. Present the two structures and ask for preference.
 - **Ambiguous priority** -- When you genuinely can't tell which version is better or more complete without domain knowledge the user has.
