@@ -181,6 +181,10 @@ def loop(
         except RuntimeError as e:
             typer.echo(f"Error: {e}", err=True)
             continue
+        except Exception as e:
+            typer.echo(f"Unexpected error: {e}", err=True)
+            logger.exception("Unexpected error on task %d/%d", i, len(tasks))
+            continue
 
         if auto_commit:
             _commit_results()
