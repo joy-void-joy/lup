@@ -1,6 +1,6 @@
 ---
 allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
-argument-hint: [base-branch]
+argument-hint: [target-branch]
 description: Clean up commit history on the feature branch and open/update a PR
 ---
 
@@ -8,28 +8,19 @@ description: Clean up commit history on the feature branch and open/update a PR
 
 Clean up the commit history on the current feature branch, push it, and open (or update) a PR.
 
-## Determine Base Branch
+## Determine Branches
 
-If a base branch was provided as an argument, use it. Otherwise, auto-detect the branch this was forked from:
+### Base branch (`<base>`)
 
+Auto-detect the base branch -- the branch this feature branch diverged from. Use `main` as the default. Verify with:
 ```bash
-# Get the current branch name
-current=$(git rev-parse --abbrev-ref HEAD)
-
-# Find the nearest ancestor branch by checking merge-base distance against all local branches
-# Exclude the current branch and HEAD
-for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -v "^${current}$"); do
-  merge_base=$(git merge-base "$branch" HEAD 2>/dev/null) || continue
-  # Count commits between merge-base and HEAD (fewer = closer fork point)
-  distance=$(git rev-list --count "$merge_base"..HEAD)
-  echo "$distance $branch"
-done | sort -n | head -1
-# Use the branch with the smallest distance (most recent fork point)
+git merge-base --is-ancestor main HEAD && echo "main is ancestor"
 ```
+If `main` is not an ancestor (e.g., branch was created from another feature branch), use `AskUserQuestion` to ask which branch to use as base.
 
-Pick the branch with the fewest commits since divergence. If auto-detection fails (no local branches share history), fall back to `AskUserQuestion`.
+### PR target (`<target>`)
 
-Store the result as `<base>` — all references below use this value.
+If a target branch was provided as an argument, use it as the PR target. Otherwise, `<target>` defaults to `<base>`.
 
 **Scope:** Only rebase changes since the branch diverged from `<base>`. Do not touch commits that already exist on `<base>`.
 
@@ -88,12 +79,12 @@ Before starting the rebase, ensure the branch is clean and passing all checks.
 
    Check if a PR already exists:
    ```bash
-   gh pr list --head "<branch>" --state open --json number,url
+   gh pr list --head "<branch>" --base "<target>" --state open --json number,url
    ```
 
    **If no PR exists** (first run):
    ```bash
-   gh pr create --title "<conventional commit style title>" --body "$(cat <<'EOF'
+   gh pr create --base "<target>" --title "<conventional commit style title>" --body "$(cat <<'EOF'
    ## Summary
    <1-3 bullet points describing the changes>
    EOF
