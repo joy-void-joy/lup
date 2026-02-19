@@ -6,7 +6,8 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "Read(./.claude/settings.json.local*)"
+      "Read(./.claude/settings.json.local*)",
+      "Read(./downstream.json.local)"
     ],
     "deny": [
       "Read(./**/*.local*)"
