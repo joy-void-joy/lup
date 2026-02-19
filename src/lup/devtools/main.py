@@ -2,6 +2,7 @@
 
 import typer
 
+from lup.devtools.agent import app as agent_app
 from lup.devtools.api import app as api_app
 from lup.devtools.dev import app as dev_app
 from lup.devtools.feedback import app as feedback_app
@@ -17,6 +18,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+app.add_typer(agent_app, name="agent", help="Agent introspection and debugging")
 app.add_typer(api_app, name="api", help="API inspection and module info")
 app.add_typer(dev_app, name="dev", help="Development tools (worktrees)")
 app.add_typer(feedback_app, name="feedback", help="Feedback collection")
