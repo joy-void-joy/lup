@@ -18,11 +18,16 @@ from typing import Any, NamedTuple
 from rich.console import Console
 
 from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeSDKClient,
     ContentBlock,
+    ResultMessage,
+    SystemMessage,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
 )
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -68,6 +73,38 @@ def normalize_content(content: str | list[Any] | None) -> str:
                 texts.append(str(item.get("text", "")))
         return "\n".join(texts)
     return str(content)
+
+
+def _truncate_str(value: str, max_len: int = 500) -> str:
+    if len(value) > max_len:
+        return value[:max_len] + "..."
+    return value
+
+
+def _truncate_str_fields(obj: object, max_len: int = 500) -> object:
+    """Recursively truncate string values in a JSON-like structure."""
+    if isinstance(obj, dict):
+        return {k: _truncate_str_fields(v, max_len) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_truncate_str_fields(item, max_len) for item in obj]
+    if isinstance(obj, str):
+        return _truncate_str(obj, max_len)
+    return obj
+
+
+def format_tool_result(content: str | list[Any] | None, max_len: int = 500) -> str:
+    """Format tool result content for display.
+
+    If the content parses as a JSON dict, pretty-print it with string fields
+    truncated. Otherwise fall back to plain truncation.
+    """
+    text = normalize_content(content)
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return _truncate_str(text, max_len)
+    truncated = _truncate_str_fields(parsed, max_len)
+    return json.dumps(truncated, indent=2)
 
 
 def truncate_content(content: str | list[Any] | None, max_len: int = 500) -> str:
@@ -157,15 +194,15 @@ def print_block(block: ContentBlock, prefix: str = "") -> None:
             )
         case ToolResultBlock():
             color = _id_to_color.pop(block.tool_use_id, "default")
+            formatted = format_tool_result(block.content)
             print(f"{prefix}📋 Result ", end="")
-            _console.print(f"[{block.tool_use_id}]", style=color, end="")
-            print(": ", end="")
-            print(truncate_content(block.content, max_len=500))
+            _console.print(f"[{block.tool_use_id}]", style=color)
+            print(formatted)
             stream_log.info(
                 "%sTOOL_RESULT [%s]: %s",
                 prefix,
                 block.tool_use_id,
-                normalize_content(block.content),
+                formatted,
             )
         case _:
             print(f"{prefix}❓ {type(block).__name__}: {block}")
@@ -272,3 +309,72 @@ class TraceLogger(BaseModel):
         self.trace_path.write_text("\n".join(self.lines), encoding="utf-8")
         logger.info("Saved trace to %s", self.trace_path)
         return self.trace_path
+
+
+# ---------------------------------------------------------------------------
+# Response collector — reusable "call SDK, iterate blocks, print+log" pattern
+# ---------------------------------------------------------------------------
+
+
+class ResponseCollector:
+    """Collects, displays, and logs agent response messages.
+
+    Encapsulates the common pattern of iterating over SDK response messages,
+    printing and logging each content block, and collecting text and messages
+    for post-processing.
+
+    Usage::
+
+        collector = ResponseCollector(trace_logger=trace_logger)
+        result = await collector.collect(client)
+        # Access collector.assistant_messages, collector.collected_text, etc.
+    """
+
+    def __init__(
+        self,
+        trace_logger: TraceLogger | None = None,
+        prefix: str = "",
+    ) -> None:
+        self.blocks: list[ContentBlock] = []
+        self.messages: list[AssistantMessage | UserMessage] = []
+        self.result: ResultMessage | None = None
+        self._trace_logger = trace_logger
+        self._prefix = prefix
+
+    def _handle_block(self, block: ContentBlock) -> None:
+        """Print, log, and collect a single content block."""
+        self.blocks.append(block)
+        print_block(block, prefix=self._prefix)
+        if self._trace_logger:
+            self._trace_logger.log_block(block)
+
+    async def collect(self, client: ClaudeSDKClient) -> ResultMessage:
+        """Iterate response, print+log blocks, and return the result.
+
+        Raises:
+            RuntimeError: If the agent returns an error or no result.
+        """
+        async for message in client.receive_response():
+            match message:
+                case AssistantMessage():
+                    self.messages.append(message)
+                    for block in message.content:
+                        self._handle_block(block)
+
+                case ResultMessage():
+                    self.result = message
+                    if message.is_error:
+                        raise RuntimeError(f"Agent error: {message.result}")
+
+                case SystemMessage():
+                    logger.info("System [%s]: %s", message.subtype, message.data)
+
+                case UserMessage():
+                    self.messages.append(message)
+                    if isinstance(message.content, list):
+                        for block in message.content:
+                            self._handle_block(block)
+
+        if self.result is None:
+            raise RuntimeError("No result received from agent")
+        return self.result

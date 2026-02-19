@@ -67,9 +67,11 @@ from lup.lib.sandbox import (
     SandboxNotInitializedError,
 )
 from lup.lib.trace import (
+    ResponseCollector,
     TraceEntry,
     TraceLogger,
     format_block_markdown,
+    format_tool_result,
     normalize_content,
     print_block,
     truncate_content,
@@ -140,9 +142,11 @@ __all__ = [
     "read_scores_for_version",
     "rebuild_scores_csv",
     # Trace
+    "ResponseCollector",
     "TraceEntry",
     "TraceLogger",
     "format_block_markdown",
+    "format_tool_result",
     "normalize_content",
     "print_block",
     "truncate_content",
