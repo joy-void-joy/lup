@@ -42,6 +42,8 @@ BUILTIN_TOOLS: frozenset[str] = frozenset(
         "Grep",
         "Bash",
         "Task",
+        "TodoRead",
+        "TodoWrite",
     }
 )
 
