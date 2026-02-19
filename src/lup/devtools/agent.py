@@ -12,7 +12,6 @@ import io
 import json
 import logging
 import os
-import subprocess
 import sys
 import tempfile
 from typing import Annotated
@@ -37,39 +36,83 @@ app = typer.Typer(no_args_is_help=True)
 # ---------------------------------------------------------------------------
 
 
-def _print_model_source(model: type, label: str, indent: str = "    ") -> None:
+def _print_model_source(
+    out: io.StringIO, model: type, label: str, indent: str = "    "
+) -> None:
     """Print the Python source of a BaseModel class."""
-    typer.echo(f"\n{indent}{label}:")
+    out.write(f"\n{indent}{label}:\n")
     try:
-        source = inspect.getsource(model)
+        source = inspect_mod.getsource(model)
         for line in source.splitlines():
-            typer.echo(f"{indent}  {line}")
+            out.write(f"{indent}  {line}\n")
     except (OSError, TypeError):
-        typer.echo(f"{indent}  {model.__name__} (source unavailable)")
+        out.write(f"{indent}  {model.__name__} (source unavailable)\n")
 
 
-def _print_tool(tool: LupMcpTool) -> None:
-    """Print a single tool's information."""
+def _tool_location(tool: LupMcpTool) -> str:
+    """Get file:line for the tool handler (unwraps decorators)."""
+    handler = inspect_mod.unwrap(tool["sdk_tool"].handler)
+    try:
+        filepath = inspect_mod.getfile(handler)
+        filename = os.path.basename(filepath)
+        _, lineno = inspect_mod.getsourcelines(handler)
+        return f"{filename}:{lineno}"
+    except (OSError, TypeError):
+        return "?"
+
+
+def _tool_signature(tool: LupMcpTool) -> str:
+    """One-liner: input fields → output model name, file:line."""
+    input_model = tool["input_model"]
+    parts: list[str] = []
+    for name, f in input_model.model_fields.items():
+        ann = f.annotation
+        type_name = getattr(ann, "__name__", None) if ann is not None else None
+        parts.append(f"{name}: {type_name}" if type_name else name)
+    fields = ", ".join(parts)
+    output_model = tool.get("output_model")
+    output_part = f" → {output_model.__name__}" if output_model else ""
+    return f"({fields}){output_part}  [{_tool_location(tool)}]"
+
+
+def _print_tool_compact(out: io.StringIO, tool: LupMcpTool) -> None:
+    """Print a single tool as a one-liner."""
     sdk = tool["sdk_tool"]
-    typer.echo(f"\n  {sdk.name}")
-    typer.echo(f"  {'─' * len(sdk.name)}")
+    out.write(f"    {sdk.name}{_tool_signature(tool)}\n")
+
+
+def _print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
+    """Print a single tool with full description and schemas."""
+    sdk = tool["sdk_tool"]
+    out.write(f"\n  {sdk.name}\n")
+    out.write(f"  {'─' * len(sdk.name)}\n")
 
     desc_lines = sdk.description.split(". ")
     for line in desc_lines:
         line = line.strip()
         if line:
-            typer.echo(f"    {line}.")
+            out.write(f"    {line}.\n")
 
-    _print_model_source(tool["input_model"], "Input")
+    _print_model_source(out, tool["input_model"], "Input")
 
     output_model = tool.get("output_model")
     if output_model is not None:
-        _print_model_source(output_model, "Output")
+        _print_model_source(out, output_model, "Output")
+
+
+def _collect_tools_by_server() -> dict[str, list[LupMcpTool]]:
+    """Collect all LupMcpTool instances grouped by server name."""
+    return {
+        "example": list(EXAMPLE_TOOLS),
+    }
 
 
 def _collect_all_tools() -> list[LupMcpTool]:
     """Collect all LupMcpTool instances from known tool modules."""
-    return list(EXAMPLE_TOOLS)
+    tools: list[LupMcpTool] = []
+    for server_tools in _collect_tools_by_server().values():
+        tools.extend(server_tools)
+    return tools
 
 
 def _tool_to_dict(t: LupMcpTool) -> dict[str, object]:
@@ -83,6 +126,23 @@ def _tool_to_dict(t: LupMcpTool) -> dict[str, object]:
     }
 
 
+def _page_output(text: str) -> None:
+    """Write text through a pager (less) if stdout is a tty, otherwise print."""
+    if not sys.stdout.isatty():
+        sys.stdout.write(text)
+        return
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+    try:
+        tmp.write(text)
+        tmp.close()
+        less = sh.Command("less")
+        less("-R", "-F", "-X", tmp.name, _fg=True)
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        sys.stdout.write(text)
+    finally:
+        os.unlink(tmp.name)
+
+
 @app.command("inspect")
 def inspect_cmd(
     as_json: Annotated[
@@ -91,11 +151,12 @@ def inspect_cmd(
     ] = False,
     full: Annotated[
         bool,
-        typer.Option("--full", help="Show full system prompt (not truncated)"),
+        typer.Option("--full", help="Show full details (tool schemas, full prompt)"),
     ] = False,
 ) -> None:
     """Inspect the full agent configuration: tools, schemas, prompt, subagents."""
-    tools = _collect_all_tools()
+    tools_by_server = _collect_tools_by_server()
+    all_tools = _collect_all_tools()
     subagents = get_subagents()
     prompt = get_system_prompt()
 
@@ -103,7 +164,7 @@ def inspect_cmd(
         data: dict[str, object] = {
             "model": settings.model,
             "max_thinking_tokens": settings.max_thinking_tokens,
-            "tools": [_tool_to_dict(t) for t in tools],
+            "tools": [_tool_to_dict(t) for t in all_tools],
             "output_schema": AgentOutput.model_json_schema(),
             "subagents": {
                 name: {
@@ -118,49 +179,65 @@ def inspect_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    # --- Pretty-print mode ---
+    # --- Pretty-print mode (write to buffer, then page) ---
+    out = io.StringIO()
 
-    typer.echo("=" * 60)
-    typer.echo("  Agent Configuration")
-    typer.echo("=" * 60)
+    out.write("=" * 60 + "\n")
+    out.write("  Agent Configuration\n")
+    out.write("=" * 60 + "\n")
 
     # Model
-    typer.echo(f"\nModel: {settings.model}")
-    typer.echo(f"Max thinking tokens: {settings.max_thinking_tokens}")
+    out.write(f"\nModel: {settings.model}\n")
+    out.write(f"Max thinking tokens: {settings.max_thinking_tokens}\n")
 
-    # Tools
-    typer.echo(f"\n{'─' * 60}")
-    typer.echo(f"  MCP Tools ({len(tools)})")
-    typer.echo(f"{'─' * 60}")
-    for t in tools:
-        _print_tool(t)
+    # Tools grouped by server
+    total_tools = sum(len(ts) for ts in tools_by_server.values())
+    out.write(f"\n{'─' * 60}\n")
+    out.write(f"  MCP Tools ({total_tools})\n")
+    out.write(f"{'─' * 60}\n")
+    for server_name, server_tools in tools_by_server.items():
+        out.write(f"\n  {server_name} ({len(server_tools)} tools)\n")
+        for t in server_tools:
+            if full:
+                _print_tool_full(out, t)
+            else:
+                _print_tool_compact(out, t)
 
     # Agent output schema
-    typer.echo(f"\n{'─' * 60}")
-    typer.echo("  Agent Output Schema")
-    typer.echo(f"{'─' * 60}")
-    _print_model_source(AgentOutput, "AgentOutput", indent="  ")
+    out.write(f"\n{'─' * 60}\n")
+    out.write("  Agent Output Schema\n")
+    out.write(f"{'─' * 60}\n")
+    if full:
+        _print_model_source(out, AgentOutput, "AgentOutput", indent="  ")
+    else:
+        for name, f in AgentOutput.model_fields.items():
+            ann = f.annotation
+            type_name = getattr(ann, "__name__", None) if ann is not None else None
+            out.write(f"    {name}: {type_name or '?'}\n")
 
     # Subagents
-    typer.echo(f"\n{'─' * 60}")
-    typer.echo(f"  Subagents ({len(subagents)})")
-    typer.echo(f"{'─' * 60}")
+    out.write(f"\n{'─' * 60}\n")
+    out.write(f"  Subagents ({len(subagents)})\n")
+    out.write(f"{'─' * 60}\n")
     for name, agent in subagents.items():
-        typer.echo(f"\n  {name} (model: {agent.model})")
-        typer.echo(f"    {agent.description}")
+        out.write(f"\n  {name} (model: {agent.model})\n")
+        if full:
+            out.write(f"    {agent.description}\n")
         if agent.tools:
-            typer.echo(f"    Tools: {', '.join(agent.tools)}")
+            out.write(f"    Tools: {', '.join(agent.tools)}\n")
 
     # System prompt
-    typer.echo(f"\n{'─' * 60}")
-    typer.echo("  System Prompt")
-    typer.echo(f"{'─' * 60}")
+    out.write(f"\n{'─' * 60}\n")
+    out.write("  System Prompt\n")
+    out.write(f"{'─' * 60}\n")
     if full or len(prompt) <= 500:
-        typer.echo(prompt)
+        out.write(prompt + "\n")
     else:
-        typer.echo(f"{prompt[:500]}... ({len(prompt)} chars total, use --full to see all)")
+        out.write(f"{prompt[:500]}... ({len(prompt)} chars total, use --full to see all)\n")
 
-    typer.echo("")
+    out.write("\n")
+
+    _page_output(out.getvalue())
 
 
 # ---------------------------------------------------------------------------
