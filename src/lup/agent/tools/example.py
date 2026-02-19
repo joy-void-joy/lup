@@ -2,10 +2,10 @@
 
 This is a TEMPLATE. Create your own tools following this pattern.
 
-Key patterns from Claude Agent SDK docs:
-1. Use @tool decorator with (name, description, input_schema)
-2. Define input schemas as BaseModel with Field(description=...)
-3. Use Model.model_json_schema() for @tool and Model.model_validate(args) inside
+Key patterns:
+1. Use @lup_tool(name, description, InputModel, OutputModel) decorator
+2. Define input/output schemas as BaseModel with Field(description=...)
+3. Use Model.model_validate(args) inside the handler for type-safe access
 4. Return {"content": [{"type": "text", "text": "..."}]}
 5. Tool names become: mcp__{server_name}__{tool_name}
 
@@ -24,12 +24,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from claude_agent_sdk import tool
-
-from lup.lib import tracked
+from lup.lib import lup_tool, tracked
 
 
-# --- Input Schemas ---
+# --- Schemas ---
 # Define as BaseModel with Field(description=...) for validation + rich JSON Schema
 
 
@@ -40,17 +38,39 @@ class SearchInput(BaseModel):
     limit: int = Field(default=10, description="Maximum number of results to return")
 
 
+class SearchResult(BaseModel):
+    """A single search result."""
+
+    title: str = Field(description="Title of the result")
+    url: str = Field(description="URL of the result")
+
+
+class SearchOutput(BaseModel):
+    """Output from the search tool."""
+
+    query: str = Field(description="The query that was searched")
+    results: list[SearchResult] = Field(description="Matching search results")
+    count: int = Field(description="Total number of results")
+
+
 class FetchInput(BaseModel):
     """Input for the fetch tool."""
 
     url: str = Field(description="URL to fetch content from")
 
 
+class FetchOutput(BaseModel):
+    """Output from the fetch tool."""
+
+    url: str = Field(description="The URL that was fetched")
+    content: str = Field(description="Page content (may be truncated)")
+    status: int = Field(description="HTTP status code")
+
+
 # --- Tool Implementations ---
-# Use Model.model_json_schema() for @tool, Model.model_validate(args) inside
 
 
-@tool(
+@lup_tool(
     "search_example",
     (
         "Search for information using keyword queries. "
@@ -60,7 +80,8 @@ class FetchInput(BaseModel):
         "Returns a JSON object with {query, results: [{title, url}], count}. "
         "Replace this with your actual search implementation."
     ),
-    SearchInput.model_json_schema(),
+    SearchInput,
+    SearchOutput,
 )
 @tracked("search_example")
 async def search_example(args: dict[str, Any]) -> dict[str, Any]:
@@ -99,7 +120,7 @@ async def search_example(args: dict[str, Any]) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": json.dumps(result)}]}
 
 
-@tool(
+@lup_tool(
     "fetch_example",
     (
         "Fetch the full content of a web page by URL. "
@@ -110,7 +131,8 @@ async def search_example(args: dict[str, Any]) -> dict[str, Any]:
         "Returns a JSON object with {url, content, status}. "
         "Replace this with your actual fetch implementation."
     ),
-    FetchInput.model_json_schema(),
+    FetchInput,
+    FetchOutput,
 )
 @tracked("fetch_example")
 async def fetch_example(args: dict[str, Any]) -> dict[str, Any]:

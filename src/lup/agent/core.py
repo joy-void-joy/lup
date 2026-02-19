@@ -26,7 +26,6 @@ from claude_agent_sdk import (
     UserMessage,
 )
 
-from claude_agent_sdk import create_sdk_mcp_server
 from claude_agent_sdk.types import McpSdkServerConfig
 
 from lup.agent.config import settings
@@ -43,6 +42,8 @@ from lup.lib import (
     TraceLogger,
     append_score_row,
     create_permission_hooks,
+    create_sdk_mcp_server,
+    extract_sdk_tools,
     get_metrics_summary,
     log_metrics_summary,
     print_block,
@@ -72,7 +73,7 @@ def _build_options(
     example_server = create_sdk_mcp_server(
         name="example",
         version="1.0.0",
-        tools=EXAMPLE_TOOLS,
+        tools=extract_sdk_tools(EXAMPLE_TOOLS),
     )
 
     # Collect all MCP servers to register
