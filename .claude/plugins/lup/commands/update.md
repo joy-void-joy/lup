@@ -70,9 +70,11 @@ Classify as:
   - **CLAUDE.md improvements** (coding standards, workflow tips, new guidelines)
 
 - **Portable as scaffold**: Domain-specific implementations that represent a generalizable *pattern*. These get ported with domain details replaced by template placeholders.
-  - **New agents** — A "version-reviewer" that uses Brier scores becomes a scaffold version-reviewer that uses generic outcome metrics
+  - **New agents/subagents** — A "version-reviewer" that uses Brier scores becomes a scaffold version-reviewer that uses generic outcome metrics. A "forecast reviewer" sub-agent becomes a generic "reviewer" scaffold that critiques agent output.
+  - **New tools or tool patterns** — A domain-specific reflection tool becomes a scaffold for structured self-assessment tools. A tool that calls a sub-agent internally is a reusable pattern.
   - **New commands** — A "leak-investigator" for retrodiction becomes a scaffold for investigator-style commands
   - **Workflow improvements** — Offline mode for a specific API becomes a general "graceful degradation" pattern
+  - **Reusable lib patterns** — A "response collector" that prints+logs SDK blocks is a general utility. A JSON pretty-printer for tool results belongs in lib.
   - **Feedback loop updates** — Version-scoped analysis, new analysis phases, better templates
   - **Agent SDK usage patterns** (hooks, session config, structured output, tool patterns)
   - **Agent core improvements** that generalize (error handling, log management, config patterns)
