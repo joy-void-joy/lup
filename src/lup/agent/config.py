@@ -14,6 +14,7 @@ Usage:
 """
 
 import logging
+import os
 from typing import Self
 
 from pydantic import Field, model_validator
@@ -61,6 +62,16 @@ class Settings(BaseSettings):
     #     validation_alias="EXA_API_KEY",
     #     description="Exa search API key",
     # )
+
+    # ==========================================================================
+    # LLM ROUTING (optional)
+    # ==========================================================================
+
+    openrouter_api_key: str | None = Field(
+        default=None,
+        validation_alias="OPENROUTER_API_KEY",
+        description="OpenRouter API key (enables routing through OpenRouter when set)",
+    )
 
     # ==========================================================================
     # MODEL SETTINGS
@@ -135,3 +146,10 @@ class Settings(BaseSettings):
 
 # Singleton instance
 settings = Settings.model_validate({})
+
+# Route through OpenRouter when the key is set
+if settings.openrouter_api_key:
+    os.environ.setdefault("ANTHROPIC_BASE_URL", "https://openrouter.ai/api")
+    os.environ.setdefault("ANTHROPIC_AUTH_TOKEN", settings.openrouter_api_key)
+    os.environ.setdefault("ANTHROPIC_API_KEY", "")
+    logger.info("OpenRouter enabled — routing API calls through openrouter.ai")
