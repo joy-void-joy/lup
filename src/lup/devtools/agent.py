@@ -4,6 +4,7 @@ Commands:
 - inspect: Pretty-print the full agent configuration (tools, schemas, prompt, subagents)
 - serve-tools: Start SDK tools as an MCP stdio server (used by ``chat``)
 - chat: Launch an interactive ``claude`` session with the agent's tools and prompt
+- repl: Interactive REPL with the agent via the SDK (continuous session)
 """
 
 import asyncio
@@ -371,3 +372,125 @@ def chat_cmd(
                 os.unlink(mcp_config_path)
             except OSError:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# repl
+# ---------------------------------------------------------------------------
+
+
+_PROMPT = "\033[1;34m❯\033[0m "  # bold blue ❯
+
+
+async def _repl(
+    *,
+    model: str | None = None,
+    no_tools: bool = False,
+    no_prompt: bool = False,
+) -> None:
+    """Run the interactive REPL loop."""
+    from rich.console import Console
+    from rich.panel import Panel
+
+    from lup.lib import build_client, ResponseCollector
+    from lup.lib.mcp import create_mcp_server, extract_sdk_tools
+
+    console = Console(highlight=False)
+    effective_model = model or settings.model
+
+    mcp_servers: dict[str, object] = {}
+    if not no_tools:
+        example_server = create_mcp_server(
+            name="example",
+            version="1.0.0",
+            tools=extract_sdk_tools(EXAMPLE_TOOLS),
+        )
+        mcp_servers = {"example": example_server}
+
+    prompt = get_system_prompt() if not no_prompt else ""
+
+    # Welcome panel with server → tool listing
+    panel_lines = [
+        f"[bold]✻ Agent REPL[/bold]",
+        f"[dim]model:[/dim] {effective_model}",
+    ]
+    if not no_tools:
+        servers = _collect_tools_by_server()
+        for i, (name, tools) in enumerate(servers.items()):
+            is_last_server = i == len(servers) - 1
+            panel_lines.append(f"[dim]{'└' if is_last_server else '├'} {name}[/dim]")
+            for j, t in enumerate(tools):
+                is_last_tool = j == len(tools) - 1
+                branch = "  └" if is_last_tool else "  ├"
+                if not is_last_server:
+                    branch = f"[dim]│[/dim] {'└' if is_last_tool else '├'}"
+                panel_lines.append(f"[dim]{branch}[/dim] {t['sdk_tool'].name}")
+    else:
+        panel_lines.append("[dim]no tools[/dim]")
+    panel_lines += ["", "[dim]/quit to exit[/dim]"]
+
+    console.print()
+    console.print(Panel("\n".join(panel_lines), border_style="blue", expand=False))
+    console.print()
+
+    async with build_client(
+        model=effective_model,
+        system_prompt=prompt,
+        max_thinking_tokens=settings.max_thinking_tokens or (128_000 - 1),
+        permission_mode="bypassPermissions",
+        mcp_servers=mcp_servers if mcp_servers else None,
+        agents=get_subagents(),
+    ) as client:
+        while True:
+            try:
+                user_input = await asyncio.to_thread(input, _PROMPT)
+            except (EOFError, KeyboardInterrupt):
+                console.print()
+                break
+
+            stripped = user_input.strip()
+            if not stripped:
+                continue
+            if stripped in ("/quit", "/exit", "/q"):
+                break
+
+            await client.query(user_input)
+            collector = ResponseCollector(spaced=True)
+            try:
+                result = await collector.collect(client)
+                parts: list[str] = []
+                if result.duration_ms:
+                    secs = result.duration_ms / 1000
+                    parts.append(f"{secs:.1f}s")
+                if result.total_cost_usd:
+                    parts.append(f"${result.total_cost_usd:.4f}")
+                if parts:
+                    console.print(
+                        f"  [dim]{' · '.join(parts)}[/dim]"
+                    )
+                console.print()
+            except RuntimeError as e:
+                console.print(f"  [red]error:[/red] {e}")
+                console.print()
+            except KeyboardInterrupt:
+                console.print("\n[dim](interrupted)[/dim]")
+                await client.interrupt()
+
+
+@app.command("repl")
+def repl_cmd(
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Override the model"),
+    ] = None,
+    no_tools: Annotated[
+        bool,
+        typer.Option("--no-tools", help="Skip MCP tools"),
+    ] = False,
+    no_prompt: Annotated[
+        bool,
+        typer.Option("--no-prompt", help="Skip agent system prompt"),
+    ] = False,
+) -> None:
+    """Interactive REPL — continuous session with the agent via the SDK."""
+    asyncio.run(_repl(model=model, no_tools=no_tools, no_prompt=no_prompt))
