@@ -17,7 +17,6 @@ from typing import cast
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
-    ClaudeSDKClient,
     ContentBlock,
     TextBlock,
     ToolUseBlock,
@@ -25,6 +24,7 @@ from claude_agent_sdk import (
 
 from claude_agent_sdk.types import McpSdkServerConfig
 
+from lup.agent.client import run_query
 from lup.agent.config import settings
 from lup.agent.models import AgentOutput, SessionResult, TokenUsage, get_output_schema
 from lup.agent.prompts import get_system_prompt
@@ -163,14 +163,11 @@ async def run_agent(
         timeout_seconds=settings.sandbox_timeout_seconds,
     )
 
-    collector = ResponseCollector(trace_logger=trace_logger)
-
     with sandbox:
         options = _build_options(notes, sandbox_server=sandbox.create_mcp_server())
-
-        async with ClaudeSDKClient(options=options) as client:
-            await client.query(task)
-            await collector.collect(client)
+        collector = await run_query(
+            task, options=options, trace_logger=trace_logger,
+        )
 
     trace_logger.save()
     log_metrics_summary()

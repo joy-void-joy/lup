@@ -30,8 +30,8 @@ from typing import Any, TypedDict
 from claude_agent_sdk import TextBlock
 from pydantic import BaseModel, Field
 
-from lup.agent.client import build_client
-from lup.lib import LupMcpTool, ResponseCollector, lup_tool, mcp_success, tracked
+from lup.agent.client import run_query
+from lup.lib import LupMcpTool, lup_tool, mcp_success, tracked
 from lup.lib.reflect import ReflectionGate
 
 logger = logging.getLogger(__name__)
@@ -152,8 +152,9 @@ async def _run_reviewer(
 
     reviewer_prompt = "\n\n".join(prompt_sections)
 
-    collector = ResponseCollector(prefix="  ↳ [reviewer] ")
-    async with build_client(
+    collector = await run_query(
+        reviewer_prompt,
+        prefix="  ↳ [reviewer] ",
         model="claude-sonnet-4-6",
         system_prompt=_REVIEWER_SYSTEM_PROMPT.format(
             outputs_dir=outputs_dir or "N/A",
@@ -162,9 +163,7 @@ async def _run_reviewer(
         permission_mode="bypassPermissions",
         tools=["Read", "Glob", "Grep", "WebFetch"],
         max_turns=5,
-    ) as client:
-        await client.query(reviewer_prompt)
-        await collector.collect(client)
+    )
 
     texts = [b.text for b in collector.blocks if isinstance(b, TextBlock)]
     return "\n\n".join(texts) if texts else None
