@@ -27,9 +27,10 @@ import logging
 from pathlib import Path
 from typing import Any, TypedDict
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, TextBlock
+from claude_agent_sdk import TextBlock
 from pydantic import BaseModel, Field
 
+from lup.agent.client import build_client
 from lup.lib import LupMcpTool, ResponseCollector, lup_tool, mcp_success, tracked
 from lup.lib.reflect import ReflectionGate
 
@@ -151,7 +152,8 @@ async def _run_reviewer(
 
     reviewer_prompt = "\n\n".join(prompt_sections)
 
-    options = ClaudeAgentOptions(
+    collector = ResponseCollector(prefix="  ↳ [reviewer] ")
+    async with build_client(
         model="claude-sonnet-4-6",
         system_prompt=_REVIEWER_SYSTEM_PROMPT.format(
             outputs_dir=outputs_dir or "N/A",
@@ -160,11 +162,7 @@ async def _run_reviewer(
         permission_mode="bypassPermissions",
         tools=["Read", "Glob", "Grep", "WebFetch"],
         max_turns=5,
-        extra_args={"no-session-persistence": None},
-    )
-
-    collector = ResponseCollector(prefix="  ↳ [reviewer] ")
-    async with ClaudeSDKClient(options=options) as client:
+    ) as client:
         await client.query(reviewer_prompt)
         await collector.collect(client)
 
