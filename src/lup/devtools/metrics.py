@@ -9,7 +9,7 @@ from typing import Any
 
 import typer
 
-from lup.lib.paths import FEEDBACK_PATH, iter_session_dirs
+from lup.lib.paths import feedback_path, iter_session_dirs
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -204,11 +204,11 @@ def history(
     limit: int = typer.Option(10, "-n", "--limit", help="Max to show"),
 ) -> None:
     """Show previous feedback collection runs."""
-    if not FEEDBACK_PATH.exists():
+    if not feedback_path().exists():
         typer.echo("No feedback history found")
         return
 
-    metrics_files = sorted(FEEDBACK_PATH.glob("*_metrics.json"), reverse=True)
+    metrics_files = sorted(feedback_path().glob("*_metrics.json"), reverse=True)
     if not metrics_files:
         typer.echo("No metrics files found")
         return

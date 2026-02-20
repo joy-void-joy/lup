@@ -6,7 +6,7 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.lib.paths import SCORES_CSV_PATH, TRACES_PATH, iter_session_dirs
+from lup.lib.paths import iter_session_dirs, scores_csv_path, traces_path
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -72,8 +72,8 @@ def _commit_session(session_id: str, *, dry_run: bool = False) -> bool:
         paths.append(str(session_dir))
 
     # Also check for trace log dirs under each version
-    if TRACES_PATH.exists():
-        for ver_dir in TRACES_PATH.iterdir():
+    if traces_path().exists():
+        for ver_dir in traces_path().iterdir():
             if not ver_dir.is_dir():
                 continue
             log_dir = ver_dir / "logs" / session_id
@@ -96,9 +96,9 @@ def _commit_session(session_id: str, *, dry_run: bool = False) -> bool:
         except sh.ErrorReturnCode:
             pass
 
-    if SCORES_CSV_PATH.exists():
+    if scores_csv_path().exists():
         try:
-            git.add(str(SCORES_CSV_PATH))
+            git.add(str(scores_csv_path()))
         except sh.ErrorReturnCode:
             pass
 

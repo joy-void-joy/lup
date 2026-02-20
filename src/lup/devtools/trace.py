@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-from lup.lib.paths import TRACES_PATH, iter_session_dirs, iter_trace_log_files
+from lup.lib.paths import iter_session_dirs, iter_trace_log_files, traces_path
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -54,7 +54,7 @@ def show(
 
     if not trace_path:
         typer.echo(f"No trace found for session {session_id}")
-        typer.echo(f"Checked: {TRACES_PATH}")
+        typer.echo(f"Checked: {traces_path()}")
         raise typer.Exit(1)
 
     typer.echo(f"\n=== Trace for {session_id} ===")
@@ -78,14 +78,14 @@ def search(
     context: int = typer.Option(2, "-C", help="Lines of context around match"),
 ) -> None:
     """Search traces for a pattern."""
-    if not TRACES_PATH.exists():
+    if not traces_path().exists():
         typer.echo("No trace directories found")
         raise typer.Exit(1)
 
     regex = re.compile(pattern, re.IGNORECASE)
     matches_found = 0
 
-    search_paths: list[Path] = list(TRACES_PATH.rglob("*.md"))
+    search_paths: list[Path] = list(traces_path().rglob("*.md"))
 
     for trace_file in search_paths:
         try:
@@ -130,7 +130,7 @@ def errors(
     regex = re.compile("|".join(error_patterns), re.IGNORECASE)
     errors_by_session: dict[str, list[str]] = {}
 
-    search_paths: list[Path] = list(TRACES_PATH.rglob("*.md")) if TRACES_PATH.exists() else []
+    search_paths: list[Path] = list(traces_path().rglob("*.md")) if traces_path().exists() else []
 
     for trace_file in search_paths:
         try:
@@ -185,7 +185,7 @@ def list_traces(
 
     if not traces:
         typer.echo("No traces found")
-        typer.echo(f"Checked: {TRACES_PATH}")
+        typer.echo(f"Checked: {traces_path()}")
         return
 
     # Deduplicate by session_id, preferring logs
@@ -222,7 +222,7 @@ def capabilities() -> None:
     regex = re.compile("|".join(capability_patterns), re.IGNORECASE)
     requests: list[tuple[str, str]] = []
 
-    search_paths: list[Path] = list(TRACES_PATH.rglob("*.md")) if TRACES_PATH.exists() else []
+    search_paths: list[Path] = list(traces_path().rglob("*.md")) if traces_path().exists() else []
 
     for trace_file in search_paths:
         try:

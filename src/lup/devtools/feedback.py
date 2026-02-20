@@ -18,7 +18,7 @@ from typing import Annotated, Any
 import typer
 from pydantic import BaseModel
 
-from lup.lib.paths import FEEDBACK_PATH, TRACES_PATH, iter_session_dirs
+from lup.lib.paths import feedback_path, iter_session_dirs, traces_path
 
 app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
@@ -186,9 +186,9 @@ def collect(
     metrics = compute_metrics(results)
 
     if output is None:
-        FEEDBACK_PATH.mkdir(parents=True, exist_ok=True)
+        feedback_path().mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output = FEEDBACK_PATH / f"{timestamp}_metrics.json"
+        output = feedback_path() / f"{timestamp}_metrics.json"
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(metrics.model_dump_json(indent=2))
@@ -208,16 +208,16 @@ def check() -> None:
     print("\n=== Feedback Data Check ===\n")
 
     session_count = sum(1 for _ in iter_session_dirs())
-    print(f"Sessions: {session_count} (across all versions in {TRACES_PATH})")
+    print(f"Sessions: {session_count} (across all versions in {traces_path()})")
 
-    if TRACES_PATH.exists():
-        version_count = sum(1 for d in TRACES_PATH.iterdir() if d.is_dir())
-        print(f"Versions: {version_count} in {TRACES_PATH}")
+    if traces_path().exists():
+        version_count = sum(1 for d in traces_path().iterdir() if d.is_dir())
+        print(f"Versions: {version_count} in {traces_path()}")
     else:
-        print(f"Traces: No directory at {TRACES_PATH}")
+        print(f"Traces: No directory at {traces_path()}")
 
-    if FEEDBACK_PATH.exists():
-        feedback_files = list(FEEDBACK_PATH.glob("*_metrics.json"))
+    if feedback_path().exists():
+        feedback_files = list(feedback_path().glob("*_metrics.json"))
         print(f"Previous feedback collections: {len(feedback_files)}")
         if feedback_files:
             latest = sorted(feedback_files)[-1]
