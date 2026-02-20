@@ -119,7 +119,6 @@ Based on the answers from Phase 1, generate or modify:
 ### 1. `src/<project>/agent/models.py`
 Customize AgentOutput for the domain:
 - Add domain-specific fields (probability, move, response, etc.)
-- Add domain-specific columns to `src/<project>/lib/scoring.py` CSV_COLUMNS
 
 ### 2. `src/<project>/agent/prompts.py`
 Update the system prompt template for the domain. Focus on what the agent does and how to reason — tools self-document via their descriptions, so listing them in the prompt creates a second source of truth that drifts as tools change.
@@ -137,17 +136,29 @@ Customize the CLI for the domain's task format:
 ### 5. `src/<project>/version.py`
 Set initial AGENT_VERSION and explain bump rules for this domain.
 
-### 6. `feedback_collect.py`
+### 6. Configure Reflection
+
+Customize `src/<project>/agent/tools/reflect.py`:
+
+Ask the user:
+- Should the agent self-review before producing output? (default: yes — already wired in core.py)
+- Should there be a reviewer sub-agent? (default: yes, runs on Sonnet — adds latency but catches errors)
+- What domain-specific fields should reflection capture? (extend `ReflectInput` with fields like factor analysis, move evaluation, etc.)
+- Customize the reviewer prompt for the domain's common failure modes
+
+The reflection gate (`lib/reflect.py`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
+
+### 7. `feedback_collect.py`
 The main feedback collection script. Customize for the domain's ground truth type.
 
-### 7. Update `CLAUDE.md`
+### 8. Update `CLAUDE.md`
 The CLAUDE.md should already have the template sections from the Phase 2 merge. Now add domain-specific content based on the interview answers:
 - Fill in the Project Overview placeholder with the domain description
 - Add domain-specific commands and examples
 - Add metrics and feedback collection instructions relevant to this domain
 - Add any domain-specific context sections (Important Context, data sources, constraints)
 
-### 8. Tool Description Standards
+### 9. Tool Description Standards
 
 The agent discovers tools through their descriptions — a terse description means the agent can't tell when or why to use it. Each description should answer:
 
@@ -157,7 +168,7 @@ The agent discovers tools through their descriptions — a terse description mea
 
 See `src/<project>/agent/tools/example.py` for the pattern.
 
-### 9. Update `feedback-loop.md`
+### 10. Update `feedback-loop.md`
 Customize the feedback loop command for the domain's specific:
 - Ground truth type
 - Metrics to analyze
@@ -179,9 +190,8 @@ Once the scaffolding is generated, guide the user to:
 
 1. Run a few sessions: `uv run python -m <project>.environment.cli loop "task1" "task2"`
 2. Review traces in `notes/traces/`
-3. Check scores in `notes/scores.csv`
-4. Use `/lup:feedback-loop` to analyze and improve
-5. Iterate on the feedback collection as patterns emerge
+3. Use `/lup:feedback-loop` to analyze and improve
+4. Iterate on the feedback collection as patterns emerge
 
 ## Key Files to Customize
 
@@ -189,8 +199,8 @@ Once the scaffolding is generated, guide the user to:
 - `src/<project>/agent/subagents.py` — Specialized subagents
 - `src/<project>/agent/tool_policy.py` — Tool availability and MCP servers
 - `src/<project>/agent/core.py` — Options building and orchestration
+- `src/<project>/agent/tools/reflect.py` — Reflection tool and reviewer sub-agent
 - `src/<project>/agent/prompts.py` — System prompt templates
 - `src/<project>/environment/cli/__main__.py` — CLI with loop + auto-commit
-- `src/<project>/lib/scoring.py` — CSV columns and score row building
 - `src/<project>/version.py` — Agent version tracking
 - `src/lup/devtools/feedback.py` — Feedback collection

@@ -80,6 +80,18 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 **Library support:** `src/lup/lib/realtime.py` provides the `Scheduler` class (sleep/wake, debounce, scheduled actions, reminders, delayed actions) and hook factories (`create_stop_guard`, `create_pending_event_guard`). See the example tools in `src/lup/agent/tools/realtime.py`.
 
+### Reflection Pattern
+
+Agents produce better output when forced to self-assess before committing. The reflection pattern has three components:
+
+1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool the agent calls to record its self-assessment — confidence, key uncertainties, tool audit, process reflection. Optionally runs an independent reviewer sub-agent.
+2. **Reflection gate** (`lib/reflect.py`): A `ReflectionGate` flag tracker + `create_reflection_gate()` hook factory. Denies a target tool until the agent has reflected.
+3. **Wiring**: The gate blocks `StructuredOutput` (one-shot agents) or `sleep` (persistent agents) until reflection occurs.
+
+**Customizing reflection:** The gate mechanism in `lib/reflect.py` is domain-neutral and parametric. The reflection *tool* and its input model (`ReflectInput` in `agent/tools/reflect.py`) are domain-specific — add fields for your domain (e.g., factor analysis for forecasting, move evaluation for games). The reviewer prompt should target your domain's common failure modes.
+
+**When to skip the reviewer:** Set `skip_reviewer=True` for speed-sensitive or trivial tasks. The reviewer adds latency (separate Sonnet call with tool access) but catches calibration errors and reasoning gaps.
+
 ---
 
 # Getting Started
@@ -93,7 +105,7 @@ For agents that exist over time — maintaining conversations, monitoring system
 - **src/lup/agent/subagents.py**: Subagent definitions
 - **src/lup/agent/tool_policy.py**: Conditional tool availability
 - **src/lup/agent/tools/example.py**: Example MCP tools
-- **src/lup/agent/tools/review.py**: Forced self-review tool (runs reviewer sub-agent)
+- **src/lup/agent/tools/reflect.py**: Forced self-review tool with optional reviewer sub-agent
 
 **Library (reusable abstractions):**
 - **src/lup/lib/hooks.py**: Hook utilities and composition
@@ -101,7 +113,7 @@ For agents that exist over time — maintaining conversations, monitoring system
 - **src/lup/lib/trace.py**: Trace logging, output formatting, color-coded console display
 - **src/lup/lib/metrics.py**: Tool call tracking
 - **src/lup/lib/realtime.py**: Scheduler for persistent agents (sleep/wake, debounce, reminders)
-- **src/lup/lib/scoring.py**: CSV result tracking and score generation
+- **src/lup/lib/reflect.py**: Reflection gate (enforce reflect-before-output)
 - **src/lup/lib/throttle.py**: Rate limiting (concurrency + interval)
 
 **Top-level:**
@@ -215,11 +227,13 @@ Edit `src/lup/agent/tool_policy.py`:
 - Implement conditional availability logic
 - Add MCP server configurations
 
-### Step 5: Customize Scoring
+### Step 5: Configure Reflection
 
-Edit `src/lup/lib/scoring.py`:
-- Add domain-specific columns to `CSV_COLUMNS`
-- Customize `build_score_row()` for your output format
+Edit `src/lup/agent/tools/reflect.py`:
+- Customize `ReflectInput` fields for your domain (e.g., factor analysis for forecasting)
+- Customize the reviewer system prompt for your domain's failure modes
+- Decide whether the reviewer sub-agent adds value (adds latency but catches errors)
+- The gate in `core.py` is already wired — reflection is enforced by default
 
 ### Step 6: Set Agent Version
 
@@ -234,6 +248,7 @@ For agents that exist over time (conversations, monitoring, games), use the pers
 - Add Stop hook to prevent turn ending (`create_stop_guard`)
 - Implement sleep/context/reply tools from `agent/tools/realtime.py`
 - Replace the request-response `run_agent()` in `core.py` with a sleep/wake loop
+- The reflection gate also works here — gate `sleep` instead of `StructuredOutput`
 
 ### Step 8: Update Feedback Collection
 
@@ -334,9 +349,9 @@ src/
     │   ├── notes.py            # RO/RW directory structure
     │   ├── paths.py            # Centralized version-aware path constants and helpers
     │   ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
+    │   ├── reflect.py          # Reflection gate (enforce reflect-before-output)
     │   ├── responses.py        # MCP response formatting
     │   ├── retry.py            # Retry decorator with backoff
-    │   ├── scoring.py          # CSV result tracking and score generation
     │   ├── throttle.py         # Rate limiting (concurrency + interval)
     │   └── trace.py            # Trace logging, color-coded console display
     ├── agent/                  # Domain-specific code (feedback loop improves this)
@@ -349,7 +364,7 @@ src/
     │   └── tools/
     │       ├── example.py      # Example MCP tools (customize)
     │       ├── realtime.py     # Real-time tools template (sleep, context, reply)
-    │       └── review.py       # Forced self-review tool (reviewer sub-agent)
+    │       └── reflect.py     # Forced self-review tool (reviewer sub-agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
     │   ├── agent.py            # Agent introspection and debugging
@@ -462,6 +477,14 @@ The codebase should read as a **monolithic source of truth** -- understandable w
 - **Utilities belong in `lib/`** -- Functions like `print_block`, `TraceLogger`, formatters go in lib, not agent.
 - **`agent/` imports from `lib/`** -- The agent layer uses lib abstractions, never redefines them.
 - **Check before writing** -- Before creating a utility, search lib/ for existing implementations.
+
+### Parametric Library Design
+
+Files in `src/lup/lib/` must be **complete-as-is and configurable through function arguments** — never by modifying the source. Domain-specific code belongs in `agent/`. If a lib module requires subclassing or source modification to customize, it violates this principle.
+
+- **Use function parameters** for customization (callbacks, config objects, path overrides)
+- **Use `configure()`-style functions** for module-level state that needs overriding
+- **No imports from `agent/`** in lib code — the dependency arrow points one way
 
 ### Tools
 
@@ -705,7 +728,6 @@ See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-d
 - **Sessions**: Results saved to `notes/traces/<version>/sessions/<session_id>/`
 - **Outputs**: Task outputs saved to `notes/traces/<version>/outputs/<task_id>/`
 - **Traces**: Reasoning logs saved to `notes/traces/<version>/logs/<session_id>/`
-- **Scores**: Unified CSV at `notes/scores.csv` (appended per session, includes agent version)
 - **Metrics**: Tool calls, timing, errors via metrics tracking
 
 ---

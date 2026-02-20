@@ -229,6 +229,16 @@ For agents that exist over time, the architecture inverts: the agent is a **pers
 
 See `src/<project>/lib/realtime.py` for the Scheduler and `src/<project>/agent/tools/realtime.py` for template tools.
 
+### Reflection Pattern
+
+Agents produce better output when forced to self-assess before committing. The reflection pattern has three components:
+
+1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool for structured self-assessment with an optional reviewer sub-agent.
+2. **Reflection gate** (`lib/reflect.py`): Denies output/sleep until the agent has reflected.
+3. **Wiring**: The gate blocks `StructuredOutput` (one-shot) or `sleep` (persistent) until reflection occurs.
+
+Customize `ReflectInput` in `agent/tools/reflect.py` for your domain. The gate mechanism in `lib/reflect.py` is domain-neutral and parametric.
+
 ### Three Levels of Analysis
 
 1. **Object Level** -- The agent itself: tools, capabilities, behavior
