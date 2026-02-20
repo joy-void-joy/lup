@@ -30,7 +30,7 @@ from typing import Any, TypedDict
 from claude_agent_sdk import TextBlock
 from pydantic import BaseModel, Field
 
-from lup.agent.client import run_query
+from lup.lib.client import run_query
 from lup.lib import LupMcpTool, lup_tool, mcp_success, tracked
 from lup.lib.reflect import ReflectionGate
 

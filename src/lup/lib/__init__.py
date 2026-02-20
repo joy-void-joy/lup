@@ -16,8 +16,10 @@ Modules:
 - responses: MCP response formatting utilities
 - retry: Retry decorator for API calls
 - sandbox: Docker-based Python sandbox for isolated code execution
+- client: Centralized Agent SDK client creation (build_client, run_query, one_shot)
 """
 
+from lup.lib.client import build_client, one_shot, run_query
 from lup.lib.cache import TTLCache, api_cache, cached, clear_cache, get_cache_stats
 from lup.lib.history import (
     format_history_for_context,
@@ -76,6 +78,10 @@ from lup.lib.trace import (
 )
 
 __all__ = [
+    # Client
+    "build_client",
+    "one_shot",
+    "run_query",
     # Cache
     "TTLCache",
     "api_cache",

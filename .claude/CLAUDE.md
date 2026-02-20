@@ -113,6 +113,7 @@ Agents produce better output when forced to self-assess before committing. The r
 - **src/lup/lib/trace.py**: Trace logging, output formatting, color-coded console display
 - **src/lup/lib/metrics.py**: Tool call tracking
 - **src/lup/lib/realtime.py**: Scheduler for persistent agents (sleep/wake, debounce, reminders)
+- **src/lup/lib/client.py**: Centralized Agent SDK client (build_client, run_query, one_shot)
 - **src/lup/lib/reflect.py**: Reflection gate (enforce reflect-before-output)
 - **src/lup/lib/throttle.py**: Rate limiting (concurrency + interval)
 
@@ -341,6 +342,7 @@ src/
 └── lup/
     ├── version.py              # Agent version tracking (bump on behavior changes)
     ├── lib/                    # Reusable abstractions (rarely modified)
+    │   ├── client.py           # Agent SDK client (build_client, run_query, one_shot)
     │   ├── cache.py            # TTL caching for API responses
     │   ├── history.py          # Session storage/retrieval
     │   ├── hooks.py            # Claude Agent SDK hook utilities
@@ -477,6 +479,7 @@ The codebase should read as a **monolithic source of truth** -- understandable w
 - **Utilities belong in `lib/`** -- Functions like `print_block`, `TraceLogger`, formatters go in lib, not agent.
 - **`agent/` imports from `lib/`** -- The agent layer uses lib abstractions, never redefines them.
 - **Check before writing** -- Before creating a utility, search lib/ for existing implementations.
+- **Placement test** -- Does this module import from `agent/`? If no, it belongs in `lib/`, not `agent/`. Don't replicate downstream project file structure without re-evaluating.
 
 ### Parametric Library Design
 

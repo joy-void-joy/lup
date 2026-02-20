@@ -17,8 +17,7 @@ from typing import Any, overload
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from pydantic import BaseModel
 
-from lup.lib import ResponseCollector
-from lup.lib.trace import TraceLogger
+from lup.lib.trace import ResponseCollector, TraceLogger
 
 logger = logging.getLogger(__name__)
 
