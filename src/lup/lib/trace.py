@@ -337,17 +337,21 @@ class ResponseCollector:
         self,
         trace_logger: TraceLogger | None = None,
         prefix: str = "",
+        spaced: bool = False,
     ) -> None:
         self.blocks: list[ContentBlock] = []
         self.messages: list[AssistantMessage | UserMessage] = []
         self.result: ResultMessage | None = None
         self._trace_logger = trace_logger
         self._prefix = prefix
+        self._spaced = spaced
 
     def _handle_block(self, block: ContentBlock) -> None:
         """Print, log, and collect a single content block."""
         self.blocks.append(block)
         print_block(block, prefix=self._prefix)
+        if self._spaced:
+            print()
         if self._trace_logger:
             self._trace_logger.log_block(block)
 
