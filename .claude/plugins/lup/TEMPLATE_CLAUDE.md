@@ -1,17 +1,24 @@
 # CLAUDE.md Template
 
-This is the portable CLAUDE.md scaffold that lup installs into downstream projects. It contains conventions, workflow patterns, and coding standards that apply to any project using lup.
+This file exports portable sections from the upstream CLAUDE.md as a scaffold for downstream projects. It contains conventions, workflow patterns, and coding standards that apply to any project using lup.
 
-**How it's used:** `/lup:init` and `/lup:install` perform a **section-level merge** — they compare this template's sections against the target's existing CLAUDE.md, add sections that are missing, and leave existing sections untouched. Placeholders like `<project>` are replaced with the actual project name.
+**How it's used:** `/lup:init` and `/lup:install` perform a **section-level merge** — they use the `<!-- section: ... -->` markers below to identify independent merge units, compare them against the target's existing CLAUDE.md, add sections that are missing, and leave existing sections untouched. Placeholders like `<project>` are replaced with the actual project name.
 
 ---
 
+<!-- section: CLAUDE.md -->
 # CLAUDE.md
 
 This file provides guidance to Claude Code when working with code in this repository.
 
 **Note:** Modifying `CLAUDE.md` means modifying `.claude/CLAUDE.md` (this file).
 
+<!-- section: First Setup -->
+## First Setup
+
+**[IMPORTANT: Run `uv run lup-devtools sync mark-synced lup` to initialize upstream sync tracking, then delete this section.]**
+
+<!-- section: Project Overview -->
 ## Project Overview
 
 **[Describe your agent and what it does]**
@@ -34,6 +41,7 @@ When writing docs or prompts, use "Claude" when referring to the outer developme
 
 ---
 
+<!-- section: Getting Started -->
 # Getting Started
 
 ## Reference Files
@@ -93,6 +101,7 @@ uv run lup-devtools metrics summary
 
 ---
 
+<!-- section: Development Workflow -->
 # Development Workflow
 
 ## Git Workflow
@@ -125,6 +134,7 @@ Use conventional commit syntax: `type(scope): description`
 
 ---
 
+<!-- section: Code Style & Patterns -->
 # Code Style & Patterns
 
 ## Type Safety
@@ -166,6 +176,7 @@ The codebase should read as a **monolithic source of truth** -- understandable w
 
 ---
 
+<!-- section: Tooling -->
 # Tooling
 
 ## lup-devtools
@@ -196,6 +207,7 @@ The `pyright-lsp` plugin provides code intelligence. **Use these actively:**
 
 ---
 
+<!-- section: Process & Communication -->
 # Process & Communication
 
 ## Asking Questions
@@ -210,6 +222,7 @@ When questions involve Claude Code, Agent SDK, or Claude API:
 
 ---
 
+<!-- section: Self-Improvement Loop -->
 # Self-Improvement Loop
 
 ### The Bitter Lesson
@@ -255,6 +268,7 @@ Customize `ReflectInput` in `agent/tools/reflect.py` for your domain. The gate m
 
 ---
 
+<!-- section: Anti-Patterns to Avoid -->
 # Anti-Patterns to Avoid
 
 - Adding numeric patches ("subtract 10% from estimates")
