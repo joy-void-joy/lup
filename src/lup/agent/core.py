@@ -166,7 +166,9 @@ async def run_agent(
     with sandbox:
         options = _build_options(notes, sandbox_server=sandbox.create_mcp_server())
         collector = await run_query(
-            task, options=options, trace_logger=trace_logger,
+            task,
+            options=options,
+            trace_logger=trace_logger,
         )
 
     trace_logger.save()
@@ -204,9 +206,7 @@ def _build_result(
         agent_version=AGENT_VERSION,
         timestamp=datetime.now().isoformat(),
         output=output,
-        reasoning="".join(
-            b.text for b in collector.blocks if isinstance(b, TextBlock)
-        ),
+        reasoning="".join(b.text for b in collector.blocks if isinstance(b, TextBlock)),
         sources_consulted=_extract_sources(collector.blocks),
         duration_seconds=(result.duration_ms / 1000) if result.duration_ms else None,
         cost_usd=result.total_cost_usd,

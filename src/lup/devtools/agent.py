@@ -233,7 +233,9 @@ def inspect_cmd(
     if full or len(prompt) <= 500:
         out.write(prompt + "\n")
     else:
-        out.write(f"{prompt[:500]}... ({len(prompt)} chars total, use --full to see all)\n")
+        out.write(
+            f"{prompt[:500]}... ({len(prompt)} chars total, use --full to see all)\n"
+        )
 
     out.write("\n")
 
@@ -361,7 +363,9 @@ def chat_cmd(
         claude = sh.Command("claude")
         claude(*claude_args, _fg=True)
     except sh.CommandNotFound:
-        typer.echo("Error: 'claude' CLI not found. Install Claude Code first.", err=True)
+        typer.echo(
+            "Error: 'claude' CLI not found. Install Claude Code first.", err=True
+        )
         raise typer.Exit(1)
     except sh.ErrorReturnCode:
         pass  # claude exited normally or user quit

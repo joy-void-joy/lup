@@ -129,9 +129,7 @@ def worktree_cmd(
         if branch_already_exists:
             _git("worktree", "add", str(worktree_path), branch_name)
         elif base_branch:
-            _git(
-                "worktree", "add", str(worktree_path), "-b", branch_name, base_branch
-            )
+            _git("worktree", "add", str(worktree_path), "-b", branch_name, base_branch)
         else:
             _git("worktree", "add", str(worktree_path), "-b", branch_name)
     except sh.ErrorReturnCode as e:

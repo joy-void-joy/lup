@@ -130,7 +130,9 @@ def errors(
     regex = re.compile("|".join(error_patterns), re.IGNORECASE)
     errors_by_session: dict[str, list[str]] = {}
 
-    search_paths: list[Path] = list(traces_path().rglob("*.md")) if traces_path().exists() else []
+    search_paths: list[Path] = (
+        list(traces_path().rglob("*.md")) if traces_path().exists() else []
+    )
 
     for trace_file in search_paths:
         try:
@@ -222,7 +224,9 @@ def capabilities() -> None:
     regex = re.compile("|".join(capability_patterns), re.IGNORECASE)
     requests: list[tuple[str, str]] = []
 
-    search_paths: list[Path] = list(traces_path().rglob("*.md")) if traces_path().exists() else []
+    search_paths: list[Path] = (
+        list(traces_path().rglob("*.md")) if traces_path().exists() else []
+    )
 
     for trace_file in search_paths:
         try:

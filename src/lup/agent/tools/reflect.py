@@ -146,9 +146,7 @@ async def _run_reviewer(
         f"## Confidence: {validated.confidence:.0%}",
     ]
     if validated.key_uncertainties:
-        prompt_sections.append(
-            "## Key Uncertainties\n\n" + validated.key_uncertainties
-        )
+        prompt_sections.append("## Key Uncertainties\n\n" + validated.key_uncertainties)
 
     reviewer_prompt = "\n\n".join(prompt_sections)
 
