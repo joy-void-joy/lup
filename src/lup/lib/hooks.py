@@ -1,25 +1,34 @@
 """Hook utilities for the Claude Agent SDK.
 
 Provides composable hook primitives:
+
+PreToolUse hooks:
+- create_permission_hooks() — directory-based read/write access control
+- create_tool_allowlist_hook() — restrict agent to specific tools
+
+PostToolUse hooks:
+- create_nudge_hook() — inject system messages suggesting better alternatives
+- create_capture_hook() — extract data from sub-agent tool responses
+
+Composition:
 - HooksConfig type alias for type-safe hook configuration
 - merge_hooks() to compose multiple hook sources
-- create_permission_hooks() for directory-based access control
-- create_tool_allowlist_hook() for tool restriction
 
 Usage:
-    from lup.lib import merge_hooks, create_permission_hooks, HooksConfig
+    from lup.lib import merge_hooks, create_permission_hooks, create_nudge_hook
 
     permission_hooks = create_permission_hooks(rw_dirs, ro_dirs)
-    custom_hooks = create_my_custom_hooks()
-    combined = merge_hooks(permission_hooks, custom_hooks)
+    nudge_hooks = create_nudge_hook({"fetch_url": my_nudge_check})
+    combined = merge_hooks(permission_hooks, nudge_hooks)
 
     options = ClaudeAgentOptions(hooks=combined, ...)
 """
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, cast
 
-from claude_agent_sdk import HookInput, HookMatcher
+from claude_agent_sdk import HookInput, HookMatcher, PostToolUseHookInput
 from claude_agent_sdk.types import HookContext, SyncHookJSONOutput
 
 from lup.lib.notes import path_is_under
@@ -195,4 +204,97 @@ def create_tool_allowlist_hook(
         {
             "PreToolUse": [HookMatcher(hooks=[allowlist_hook])],
         },
+    )
+
+
+type NudgeCheck = Callable[[PostToolUseHookInput], str | None]
+"""Given a PostToolUse hook input, return a nudge message or None to skip."""
+
+
+def create_nudge_hook(
+    nudges: dict[str, NudgeCheck],
+) -> HooksConfig:
+    """Create a PostToolUse hook that nudges the agent toward better alternatives.
+
+    Instead of hard-blocking a tool via PreToolUse denial, this injects a
+    system message after the tool runs, suggesting a better approach. The
+    agent remains free to ignore the nudge.
+
+    Use this when an alternative tool or API exists but hard-blocking would
+    be too restrictive (the original tool still works, just suboptimally).
+
+    Args:
+        nudges: Mapping of tool_name to a check function. The check receives
+            the full PostToolUseHookInput and returns a nudge message string,
+            or None to skip the nudge for this invocation.
+
+    Returns:
+        Hooks configuration with a PostToolUse nudge hook.
+    """
+
+    async def nudge_hook(
+        input_data: HookInput,
+        _tool_use_id: str | None,
+        _context: HookContext,
+    ) -> SyncHookJSONOutput:
+        if input_data["hook_event_name"] != "PostToolUse":
+            return SyncHookJSONOutput()
+
+        tool_name = input_data["tool_name"]
+        check = nudges.get(tool_name)
+        if check is None:
+            return SyncHookJSONOutput()
+
+        message = check(cast(PostToolUseHookInput, input_data))
+        if message is None:
+            return SyncHookJSONOutput()
+
+        return SyncHookJSONOutput(systemMessage=message)
+
+    return cast(
+        HooksConfig,
+        {"PostToolUse": [HookMatcher(hooks=[nudge_hook])]},
+    )
+
+
+def create_capture_hook[T](
+    tool_name: str,
+    extract: Callable[[PostToolUseHookInput], list[T]],
+) -> tuple[HooksConfig, list[T]]:
+    """Create a PostToolUse hook that captures data from tool responses.
+
+    Extracts data from a sub-agent's tool responses into a shared list,
+    enabling side-channel data capture without requiring structured output
+    parsing. This is useful when running a sub-agent (e.g., a search agent)
+    and you want to collect data from its tool calls without requiring it
+    to produce a specific output format.
+
+    Args:
+        tool_name: The tool name to capture from (e.g., "WebSearch").
+        extract: Function that examines the PostToolUseHookInput and returns
+            items to capture. Called only when tool_name matches.
+
+    Returns:
+        (hooks_config, captured): The hook config to pass to merge_hooks,
+        and the shared list that accumulates items as the agent runs.
+    """
+    captured: list[T] = []
+
+    async def capture_hook(
+        input_data: HookInput,
+        _tool_use_id: str | None,
+        _context: HookContext,
+    ) -> SyncHookJSONOutput:
+        if input_data["hook_event_name"] != "PostToolUse":
+            return SyncHookJSONOutput()
+        if input_data["tool_name"] != tool_name:
+            return SyncHookJSONOutput()
+
+        items = extract(cast(PostToolUseHookInput, input_data))
+        captured.extend(items)
+        return SyncHookJSONOutput()
+
+    return (
+        cast(HooksConfig, {"PostToolUse": [HookMatcher(hooks=[capture_hook])]}),
+        captured,
     )
