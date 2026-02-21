@@ -155,20 +155,20 @@ class DailyBreakdown(BaseModel):
 
 # ── pacing thresholds ──────────────────────────────────────
 
-_PACE_COLOR_THRESHOLDS: list[tuple[float, str]] = [
+PACE_COLOR_THRESHOLDS: list[tuple[float, str]] = [
     (0.7, "bright_green"),
     (1.0, "bright_cyan"),
     (1.3, "bright_yellow"),
 ]
 
-_PACE_LABEL_THRESHOLDS: list[tuple[float, PaceLabel]] = [
+PACE_LABEL_THRESHOLDS: list[tuple[float, PaceLabel]] = [
     (0.5, PaceLabel(word="cruising", style="bold bright_green")),
     (0.85, PaceLabel(word="on track", style="bold bright_cyan")),
     (1.0, PaceLabel(word="on pace", style="bold bright_cyan")),
     (1.3, PaceLabel(word="ahead", style="bold bright_yellow")),
     (1.6, PaceLabel(word="running hot", style="bold bright_red")),
 ]
-_PACE_LABEL_DEFAULT = PaceLabel(word="heavy usage", style="bold red")
+PACE_LABEL_DEFAULT = PaceLabel(word="heavy usage", style="bold red")
 
 
 # ── API ────────────────────────────────────────────────────
@@ -267,20 +267,20 @@ def model_color(model_id: str) -> str:
 
 
 def pace_color(ratio: float) -> str:
-    for threshold, color in _PACE_COLOR_THRESHOLDS:
+    for threshold, color in PACE_COLOR_THRESHOLDS:
         if ratio <= threshold:
             return color
     return "bright_red"
 
 
 def pace_label(ratio: float) -> PaceLabel:
-    for threshold, label in _PACE_LABEL_THRESHOLDS:
+    for threshold, label in PACE_LABEL_THRESHOLDS:
         if ratio <= threshold:
             return label
-    return _PACE_LABEL_DEFAULT
+    return PACE_LABEL_DEFAULT
 
 
-def _place_label(text: str, position: int, line_width: int) -> str:
+def place_label(text: str, position: int, line_width: int) -> str:
     """Place a text label at a horizontal position in a fixed-width line."""
     line = [" "] * line_width
     for j, ch in enumerate(text):
@@ -353,16 +353,16 @@ def render_bucket(
 
     you_text = f"↑ you ({utilization:.0f}%)"
     you_pos = min(int((utilization / 100) * bar_width), bar_width - len(you_text))
-    out.append(_place_label(you_text, you_pos, line_width), style="dim")
+    out.append(place_label(you_text, you_pos, line_width), style="dim")
     out.append("\n")
 
     pace_text = f"↑ even ({linear_pct:.0f}%)"
     pace_pos = min(int((linear_pct / 100) * bar_width), line_width - len(pace_text))
-    out.append(_place_label(pace_text, pace_pos, line_width), style="dim")
+    out.append(place_label(pace_text, pace_pos, line_width), style="dim")
     out.append("\n")
 
 
-def _render_overage(out: Text, extra: ExtraUsage, bar_width: int) -> None:
+def render_overage(out: Text, extra: ExtraUsage, bar_width: int) -> None:
     """Render the extra usage (overage) section."""
     used = extra["used_credits"]
     limit = extra["monthly_limit"]
@@ -385,7 +385,7 @@ def _render_overage(out: Text, extra: ExtraUsage, bar_width: int) -> None:
     out.append("\n\n")
 
 
-def _render_daily_breakdown(
+def render_daily_breakdown(
     out: Text,
     seven_day: UsageBucket,
     stats: StatsCache,
@@ -546,10 +546,10 @@ def build_display(
 
     extra = usage.get("extra_usage")
     if extra and extra["is_enabled"]:
-        _render_overage(out, extra, bar_width)
+        render_overage(out, extra, bar_width)
 
     if show_detail and stats and seven_day and seven_day.get("resets_at"):
-        _render_daily_breakdown(out, seven_day, stats, bar_width)
+        render_daily_breakdown(out, seven_day, stats, bar_width)
 
     return Panel(
         out,
@@ -559,14 +559,14 @@ def build_display(
     )
 
 
-def _fetch_and_build(detail: bool, bar_width: int) -> Panel:
+def fetch_and_build(detail: bool, bar_width: int) -> Panel:
     """Fetch usage and build the display panel."""
     usage = fetch_usage()
     stats = load_stats() if detail else None
     return build_display(usage, stats, detail, bar_width)
 
 
-def _build_error_panel(message: str) -> Panel:
+def build_error_panel(message: str) -> Panel:
     out = Text()
     out.append(f"  {message}", style="red")
     out.append("\n  retrying...", style="dim")
@@ -616,7 +616,7 @@ def main(
 
     if not watch:
         try:
-            panel = _fetch_and_build(detail, bar_width)
+            panel = fetch_and_build(detail, bar_width)
         except httpx.HTTPStatusError as e:
             console.print(
                 f"[red]API error: {e.response.status_code}"
@@ -636,9 +636,9 @@ def main(
         style="dim",
     )
     try:
-        panel = _fetch_and_build(detail, bar_width)
+        panel = fetch_and_build(detail, bar_width)
     except (httpx.HTTPStatusError, httpx.ConnectError):
-        panel = _build_error_panel("Initial fetch failed")
+        panel = build_error_panel("Initial fetch failed")
 
     with Live(
         Group(panel, timestamp),
@@ -649,9 +649,9 @@ def main(
         while True:
             try:
                 time.sleep(interval)
-                panel = _fetch_and_build(detail, bar_width)
+                panel = fetch_and_build(detail, bar_width)
             except (httpx.HTTPStatusError, httpx.ConnectError) as e:
-                panel = _build_error_panel(str(e)[:120])
+                panel = build_error_panel(str(e)[:120])
             except KeyboardInterrupt:
                 break
             timestamp = Text(

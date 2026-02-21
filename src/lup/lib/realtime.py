@@ -135,7 +135,7 @@ class SchedulerState(TypedDict, total=False):
 # =====================================================================
 
 
-class _PendingReminder(BaseModel):
+class PendingReminder(BaseModel):
     """A scheduled self-prompt."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -181,7 +181,7 @@ class Scheduler:
         self._scheduled_action_fire_at: float | None = None
 
         # Reminders
-        self._reminders: list[_PendingReminder] = []
+        self._reminders: list[PendingReminder] = []
         self._fired_reminder_labels: list[str] = []
 
         # Delayed actions
@@ -225,9 +225,9 @@ class Scheduler:
                 self._wake_reason = "timer"
 
         self._wake.clear()
-        return self._build_sleep_result()
+        return self.build_sleep_result()
 
-    def _build_sleep_result(self) -> SleepResult:
+    def build_sleep_result(self) -> SleepResult:
         """Build the minimal wake result."""
         result = SleepResult(reason=self._wake_reason or "timer")
         if self._fired_reminder_labels:
@@ -268,7 +268,7 @@ class Scheduler:
             self._debounce_event.set()
 
         self._debounce_task = asyncio.create_task(
-            self._run_debounce(initial_seconds, quiet_seconds)
+            self.run_debounce(initial_seconds, quiet_seconds)
         )
 
     def extend_debounce(self) -> None:
@@ -276,7 +276,7 @@ class Scheduler:
         if self.debounce_active:
             self._debounce_event.set()
 
-    async def _run_debounce(self, initial_seconds: int, quiet_seconds: int) -> None:
+    async def run_debounce(self, initial_seconds: int, quiet_seconds: int) -> None:
         """Debounce timer: initial wait for activity, then quiet-period loop."""
         try:
             # Phase 1: wait for first activity
@@ -315,7 +315,7 @@ class Scheduler:
         self._scheduled_action_content = content
         self._scheduled_action_fire_at = asyncio.get_running_loop().time() + delay
         self._scheduled_action_task = asyncio.create_task(
-            self._run_scheduled_action(content, delay)
+            self.run_scheduled_action(content, delay)
         )
 
     def cancel_scheduled_action(self) -> None:
@@ -328,7 +328,7 @@ class Scheduler:
         self._scheduled_action_fire_at = None
         self._scheduled_action_task = None
 
-    async def _run_scheduled_action(self, content: str, delay: int) -> None:
+    async def run_scheduled_action(self, content: str, delay: int) -> None:
         """Scheduled action coroutine. Fires but does NOT wake the agent."""
         try:
             await asyncio.sleep(delay)
@@ -348,12 +348,10 @@ class Scheduler:
     def add_reminder(self, label: str, delay: int) -> None:
         """Schedule a self-prompt reminder that wakes the agent."""
         fire_at = asyncio.get_running_loop().time() + delay
-        task = asyncio.create_task(self._run_reminder(label, delay))
-        self._reminders.append(
-            _PendingReminder(task=task, label=label, fire_at=fire_at)
-        )
+        task = asyncio.create_task(self.run_reminder(label, delay))
+        self._reminders.append(PendingReminder(task=task, label=label, fire_at=fire_at))
 
-    async def _run_reminder(self, label: str, delay: int) -> None:
+    async def run_reminder(self, label: str, delay: int) -> None:
         """Reminder coroutine. Records label and wakes agent."""
         try:
             await asyncio.sleep(delay)
@@ -369,7 +367,7 @@ class Scheduler:
 
     def add_delayed_action(self, content: str, delay: int) -> None:
         """Schedule an action with a delay. Cancelled if an event arrives."""
-        task = asyncio.create_task(self._run_delayed_action(content, delay))
+        task = asyncio.create_task(self.run_delayed_action(content, delay))
         self._pending_actions.append((task, content))
 
     def cancel_delayed_actions(self) -> None:
@@ -380,7 +378,7 @@ class Scheduler:
                 self._ideas.append(content)
         self._pending_actions.clear()
 
-    async def _run_delayed_action(self, content: str, delay: int) -> None:
+    async def run_delayed_action(self, content: str, delay: int) -> None:
         """Delayed action coroutine."""
         try:
             await asyncio.sleep(delay)

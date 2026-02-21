@@ -36,7 +36,7 @@ from claude_agent_sdk import AgentDefinition
 # based on available API keys, session context, etc.
 #
 # Example with conditional inclusion:
-#   def _research_tools() -> list[str]:
+#   def research_tools() -> list[str]:
 #       from lup.agent.config import settings
 #       tools = ["WebSearch", "WebFetch", "Read", "Glob"]
 #       if settings.exa_api_key:
@@ -44,7 +44,7 @@ from claude_agent_sdk import AgentDefinition
 #       return tools
 
 
-def _research_tools() -> list[str]:
+def research_tools() -> list[str]:
     """Tools for research subagents."""
     return [
         "WebSearch",
@@ -55,7 +55,7 @@ def _research_tools() -> list[str]:
     ]
 
 
-def _analysis_tools() -> list[str]:
+def analysis_tools() -> list[str]:
     """Tools for analysis subagents."""
     return [
         "Read",
@@ -98,7 +98,7 @@ researcher = AgentDefinition(
         "verifies facts, and returns organized findings."
     ),
     prompt=RESEARCHER_PROMPT,
-    tools=_research_tools(),
+    tools=research_tools(),
     model="haiku",  # Use cheaper model for research tasks
 )
 
@@ -133,7 +133,7 @@ analyzer = AgentDefinition(
         "Identifies patterns, anomalies, and draws conclusions."
     ),
     prompt=ANALYZER_PROMPT,
-    tools=_analysis_tools(),
+    tools=analysis_tools(),
     model="haiku",
 )
 

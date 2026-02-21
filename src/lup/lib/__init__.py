@@ -34,7 +34,6 @@ from lup.lib.hooks import (
     HookEventType,
     HooksConfig,
     create_permission_hooks,
-    create_post_tool_hooks,
     create_tool_allowlist_hook,
     merge_hooks,
 )
@@ -106,7 +105,6 @@ __all__ = [
     "HookEventType",
     "HooksConfig",
     "create_permission_hooks",
-    "create_post_tool_hooks",
     "create_tool_allowlist_hook",
     "merge_hooks",
     # MCP

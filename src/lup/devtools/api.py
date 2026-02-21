@@ -20,7 +20,7 @@ app = typer.Typer(no_args_is_help=True)
 # ---------------------------------------------------------------------------
 
 
-def _resolve_object(path: str) -> tuple[object, str]:
+def resolve_object(path: str) -> tuple[object, str]:
     """Resolve a dotted path to a Python object."""
     parts = path.split(".")
 
@@ -37,7 +37,7 @@ def _resolve_object(path: str) -> tuple[object, str]:
     raise ValueError(f"Could not resolve: {path}")
 
 
-def _format_signature(obj: object, name: str) -> str:
+def format_signature(obj: object, name: str) -> str:
     """Format the signature of a callable."""
     try:
         sig = inspect.signature(cast(Callable[..., object], obj))
@@ -46,7 +46,7 @@ def _format_signature(obj: object, name: str) -> str:
         return name
 
 
-def _get_docstring(obj: object) -> str:
+def get_docstring(obj: object) -> str:
     """Get docstring, handling None."""
     doc = inspect.getdoc(obj)
     return doc if doc else "(no docstring)"
@@ -68,7 +68,7 @@ def inspect_cmd(
 ) -> None:
     """Inspect a Python module, class, or method."""
     try:
-        obj, name = _resolve_object(path)
+        obj, name = resolve_object(path)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -81,7 +81,7 @@ def inspect_cmd(
     typer.echo(f"Type: {obj_type}")
 
     if inspect.ismodule(obj):
-        typer.echo(f"\nDocstring:\n{_get_docstring(obj)}\n")
+        typer.echo(f"\nDocstring:\n{get_docstring(obj)}\n")
 
         members = []
         for member_name in dir(obj):
@@ -91,7 +91,7 @@ def inspect_cmd(
             if inspect.isclass(member):
                 members.append(f"  class {member_name}")
             elif inspect.isfunction(member):
-                members.append(f"  def {_format_signature(member, member_name)}")
+                members.append(f"  def {format_signature(member, member_name)}")
             elif not callable(member):
                 members.append(f"  {member_name} = {type(member).__name__}")
 
@@ -101,16 +101,16 @@ def inspect_cmd(
                 typer.echo(m)
 
     elif inspect.isclass(obj):
-        typer.echo(f"\nDocstring:\n{_get_docstring(obj)}\n")
+        typer.echo(f"\nDocstring:\n{get_docstring(obj)}\n")
 
         bases = [b.__name__ for b in obj.__bases__ if b is not object]
         if bases:
             typer.echo(f"Bases: {', '.join(bases)}")
 
         if hasattr(obj, "__init__"):
-            init_sig = _format_signature(obj.__init__, "__init__")
+            init_sig = format_signature(obj.__init__, "__init__")
             typer.echo(f"\n{init_sig}")
-            init_doc = _get_docstring(obj.__init__)
+            init_doc = get_docstring(obj.__init__)
             if init_doc != "(no docstring)":
                 typer.echo(f"  {init_doc[:200]}...")
 
@@ -124,7 +124,7 @@ def inspect_cmd(
                     continue
 
             if inspect.isfunction(member) or inspect.ismethod(member):
-                sig = _format_signature(member, member_name)
+                sig = format_signature(member, member_name)
                 methods.append(f"  def {sig}")
             elif isinstance(member, property):
                 methods.append(f"  @property {member_name}")
@@ -135,9 +135,9 @@ def inspect_cmd(
                 typer.echo(m)
 
     elif callable(obj):
-        sig = _format_signature(obj, name)
+        sig = format_signature(obj, name)
         typer.echo(f"\n{sig}")
-        typer.echo(f"\nDocstring:\n{_get_docstring(obj)}")
+        typer.echo(f"\nDocstring:\n{get_docstring(obj)}")
 
         try:
             source_file = inspect.getfile(obj)
@@ -148,7 +148,7 @@ def inspect_cmd(
 
     else:
         typer.echo(f"Value: {repr(obj)[:500]}")
-        typer.echo(f"\nDocstring:\n{_get_docstring(obj)}")
+        typer.echo(f"\nDocstring:\n{get_docstring(obj)}")
 
     typer.echo("")
 
@@ -158,7 +158,7 @@ def inspect_cmd(
 # ---------------------------------------------------------------------------
 
 
-def _find_module_path(module_name: str) -> Path | None:
+def find_module_path(module_name: str) -> Path | None:
     """Find the file path for a module."""
     try:
         spec = importlib.util.find_spec(module_name)
@@ -184,7 +184,7 @@ def module_path(
     ],
 ) -> None:
     """Show the file path for a module."""
-    path = _find_module_path(module)
+    path = find_module_path(module)
 
     if path is None:
         typer.echo(f"Error: Could not find module '{module}'", err=True)
@@ -209,7 +209,7 @@ def module_source(
     ] = 1,
 ) -> None:
     """Show source code for a module."""
-    path = _find_module_path(module)
+    path = find_module_path(module)
 
     if path is None:
         typer.echo(f"Error: Could not find module '{module}'", err=True)
@@ -248,7 +248,7 @@ def module_tree(
     module: Annotated[str, typer.Argument(help="Package name (e.g., 'requests')")],
 ) -> None:
     """Show the file tree for a package."""
-    path = _find_module_path(module)
+    path = find_module_path(module)
 
     if path is None:
         typer.echo(f"Error: Could not find module '{module}'", err=True)

@@ -79,7 +79,7 @@ async def run_session(
     return result
 
 
-def _commit_results() -> None:
+def commit_results() -> None:
     """Commit any uncommitted session results.
 
     TEMPLATE NOTE: This auto-commits session outputs (notes/sessions/,
@@ -103,7 +103,7 @@ def _commit_results() -> None:
         logger.warning("Auto-commit failed: %s", e)
 
 
-def _print_result(result: SessionResult) -> None:
+def print_result(result: SessionResult) -> None:
     """Print a session result summary."""
     typer.echo(f"\nSession: {result.session_id}")
     typer.echo(f"Output: {result.output.summary}")
@@ -133,7 +133,7 @@ def run(
         logging.basicConfig(level=logging.INFO)
 
     result = asyncio.run(run_session(task, session_id=session_id))
-    _print_result(result)
+    print_result(result)
 
 
 @app.command()
@@ -177,7 +177,7 @@ def loop(
             result = asyncio.run(run_session(task))
             results.append(result)
             total_cost += result.cost_usd or 0
-            _print_result(result)
+            print_result(result)
         except RuntimeError as e:
             typer.echo(f"Error: {e}", err=True)
             continue
@@ -187,7 +187,7 @@ def loop(
             continue
 
         if auto_commit:
-            _commit_results()
+            commit_results()
 
     typer.echo(f"\n{'=' * 60}")
     typer.echo(f"Completed {len(results)}/{len(tasks)} sessions")

@@ -27,7 +27,7 @@ import time
 from types import TracebackType
 
 
-class _LoopState:
+class LoopState:
     """Per-event-loop state for a Throttle instance."""
 
     __slots__ = ("semaphore", "last_request_time", "lock")
@@ -54,19 +54,19 @@ class Throttle:
     def __init__(self, max_concurrent: int, min_interval: float = 0.0) -> None:
         self._max_concurrent = max_concurrent
         self._min_interval = min_interval
-        self._state: dict[int, _LoopState] = {}
+        self._state: dict[int, LoopState] = {}
 
-    def _get_state(self) -> _LoopState:
+    def get_state(self) -> LoopState:
         loop = asyncio.get_running_loop()
         loop_id = id(loop)
         if loop_id not in self._state:
-            self._state[loop_id] = _LoopState(
+            self._state[loop_id] = LoopState(
                 asyncio.Semaphore(self._max_concurrent),
             )
         return self._state[loop_id]
 
     async def __aenter__(self) -> None:
-        state = self._get_state()
+        state = self.get_state()
         await state.semaphore.acquire()
         if self._min_interval > 0:
             async with state.lock:
@@ -83,4 +83,4 @@ class Throttle:
         _exc_val: BaseException | None,
         _exc_tb: TracebackType | None,
     ) -> None:
-        self._get_state().semaphore.release()
+        self.get_state().semaphore.release()

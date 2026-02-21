@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Color-coded tool use / result pairing
 # ---------------------------------------------------------------------------
 
-_TOOL_COLORS = [
+TOOL_COLORS = [
     "cyan",
     "green",
     "yellow",
@@ -52,9 +52,9 @@ _TOOL_COLORS = [
     "bright_blue",
     "bright_red",
 ]
-_color_cycle = itertools.cycle(_TOOL_COLORS)
-_id_to_color: dict[str, str] = {}
-_console = Console(highlight=False, markup=False)
+color_cycle = itertools.cycle(TOOL_COLORS)
+id_to_color: dict[str, str] = {}
+console = Console(highlight=False, markup=False)
 stream_log = logging.getLogger("lup.agent.stream")
 
 
@@ -76,20 +76,20 @@ def normalize_content(content: str | Sequence[object] | None) -> str:
     return str(content)
 
 
-def _truncate_str(value: str, max_len: int = 500) -> str:
+def truncate_str(value: str, max_len: int = 500) -> str:
     if len(value) > max_len:
         return value[:max_len] + "..."
     return value
 
 
-def _truncate_str_fields(obj: object, max_len: int = 500) -> object:
+def truncate_str_fields(obj: object, max_len: int = 500) -> object:
     """Recursively truncate string values in a JSON-like structure."""
     if isinstance(obj, dict):
-        return {k: _truncate_str_fields(v, max_len) for k, v in obj.items()}
+        return {k: truncate_str_fields(v, max_len) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [_truncate_str_fields(item, max_len) for item in obj]
+        return [truncate_str_fields(item, max_len) for item in obj]
     if isinstance(obj, str):
-        return _truncate_str(obj, max_len)
+        return truncate_str(obj, max_len)
     return obj
 
 
@@ -105,8 +105,8 @@ def format_tool_result(
     try:
         parsed = json.loads(text)
     except (json.JSONDecodeError, TypeError):
-        return _truncate_str(text, max_len)
-    truncated = _truncate_str_fields(parsed, max_len)
+        return truncate_str(text, max_len)
+    truncated = truncate_str_fields(parsed, max_len)
     return json.dumps(truncated, indent=2)
 
 
@@ -182,10 +182,10 @@ def print_block(block: ContentBlock, prefix: str = "") -> None:
             print(f"{prefix}💬 {block.text}")
             stream_log.info("%sTEXT: %s", prefix, block.text)
         case ToolUseBlock():
-            color = next(_color_cycle)
-            _id_to_color[block.id] = color
+            color = next(color_cycle)
+            id_to_color[block.id] = color
             print(f"{prefix}🔧 {block.name} ", end="")
-            _console.print(f"[{block.id}]", style=color)
+            console.print(f"[{block.id}]", style=color)
             if block.input:
                 print(json.dumps(block.input, indent=2))
             stream_log.info(
@@ -196,10 +196,10 @@ def print_block(block: ContentBlock, prefix: str = "") -> None:
                 json.dumps(block.input) if block.input else "",
             )
         case ToolResultBlock():
-            color = _id_to_color.pop(block.tool_use_id, "default")
+            color = id_to_color.pop(block.tool_use_id, "default")
             formatted = format_tool_result(block.content)
             print(f"{prefix}📋 Result ", end="")
-            _console.print(f"[{block.tool_use_id}]", style=color)
+            console.print(f"[{block.tool_use_id}]", style=color)
             print(formatted)
             stream_log.info(
                 "%sTOOL_RESULT [%s]: %s",
@@ -276,7 +276,7 @@ class TraceLogger(BaseModel):
                 )
             )
 
-    def _append_entry(self, content: str) -> None:
+    def append_entry(self, content: str) -> None:
         """Create and append a new trace entry."""
         self.lines.append(content)
         self.entries.append(
@@ -289,14 +289,14 @@ class TraceLogger(BaseModel):
 
     def log_block(self, block: ContentBlock) -> None:
         """Add a formatted block to the trace."""
-        self._append_entry(format_block_markdown(block))
+        self.append_entry(format_block_markdown(block))
 
     def log_text(self, text: str, heading: str | None = None) -> None:
         """Add raw text to the trace."""
         if heading:
-            self._append_entry(f"## {heading}\n\n{text}\n")
+            self.append_entry(f"## {heading}\n\n{text}\n")
         else:
-            self._append_entry(f"{text}\n")
+            self.append_entry(f"{text}\n")
 
     def read_entries(
         self,
@@ -346,7 +346,7 @@ class ResponseCollector:
         self._prefix = prefix
         self._spaced = spaced
 
-    def _handle_block(self, block: ContentBlock) -> None:
+    def handle_block(self, block: ContentBlock) -> None:
         """Print, log, and collect a single content block."""
         self.blocks.append(block)
         print_block(block, prefix=self._prefix)
@@ -366,7 +366,7 @@ class ResponseCollector:
                 case AssistantMessage():
                     self.messages.append(message)
                     for block in message.content:
-                        self._handle_block(block)
+                        self.handle_block(block)
 
                 case ResultMessage():
                     self.result = message
@@ -380,7 +380,7 @@ class ResponseCollector:
                     self.messages.append(message)
                     if isinstance(message.content, list):
                         for block in message.content:
-                            self._handle_block(block)
+                            self.handle_block(block)
 
         if self.result is None:
             raise RuntimeError("No result received from agent")

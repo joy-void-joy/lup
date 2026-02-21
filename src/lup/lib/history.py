@@ -147,7 +147,7 @@ def update_session_metadata(
 # -- Default formatter for format_history_for_context -------------------------
 
 
-def _default_session_formatter(session: SessionData) -> str:
+def default_session_formatter(session: SessionData) -> str:
     """Format a session dict as a markdown summary.
 
     Extracts common fields that most domains will have. Downstream
@@ -191,7 +191,7 @@ def format_history_for_context(
     if not sessions:
         return ""
 
-    fmt = formatter or _default_session_formatter
+    fmt = formatter or default_session_formatter
 
     lines = ["## Past Sessions\n"]
     for session in sessions[-max_sessions:]:

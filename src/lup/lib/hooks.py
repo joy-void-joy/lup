@@ -1,12 +1,10 @@
 """Hook utilities for the Claude Agent SDK.
 
-This is a TEMPLATE. Add hooks for your domain's needs.
-
-Key patterns:
-1. HooksConfig type alias for type-safe hook configuration
-2. merge_hooks() to compose multiple hook sources
-3. create_permission_hooks() for directory-based access control
-4. Post-tool hooks for response inspection/injection
+Provides composable hook primitives:
+- HooksConfig type alias for type-safe hook configuration
+- merge_hooks() to compose multiple hook sources
+- create_permission_hooks() for directory-based access control
+- create_tool_allowlist_hook() for tool restriction
 
 Usage:
     from lup.lib import merge_hooks, create_permission_hooks, HooksConfig
@@ -71,7 +69,7 @@ def merge_hooks(base: HooksConfig, additional: HooksConfig) -> HooksConfig:
     return merged
 
 
-def _allow_hook_output() -> SyncHookJSONOutput:
+def allow_hook_output() -> SyncHookJSONOutput:
     """Create an allow decision for PreToolUse hooks."""
     return SyncHookJSONOutput(
         hookSpecificOutput={
@@ -81,7 +79,7 @@ def _allow_hook_output() -> SyncHookJSONOutput:
     )
 
 
-def _deny_hook_output(reason: str) -> SyncHookJSONOutput:
+def deny_hook_output(reason: str) -> SyncHookJSONOutput:
     """Create a deny decision for PreToolUse hooks."""
     return SyncHookJSONOutput(
         hookSpecificOutput={
@@ -130,8 +128,8 @@ def create_permission_hooks(
                 if not file_path:
                     return SyncHookJSONOutput()
                 if path_is_under(file_path, rw_dirs):
-                    return _allow_hook_output()
-                return _deny_hook_output(
+                    return allow_hook_output()
+                return deny_hook_output(
                     f"{tool_name} denied. Allowed: {[str(d) for d in rw_dirs]}"
                 )
 
@@ -140,87 +138,31 @@ def create_permission_hooks(
                 if not file_path:
                     return SyncHookJSONOutput()
                 if path_is_under(file_path, all_readable):
-                    return _allow_hook_output()
-                return _deny_hook_output(
+                    return allow_hook_output()
+                return deny_hook_output(
                     f"Read denied. Allowed: {[str(d) for d in all_readable]}"
                 )
 
             case "Glob" | "Grep":
                 file_path = tool_input.get("path", "")
                 if not file_path:
-                    return _deny_hook_output(
+                    return deny_hook_output(
                         f"Path required for {tool_name}. "
                         f"Specify path in: {[str(d) for d in all_readable]}"
                     )
                 if path_is_under(file_path, all_readable):
-                    return _allow_hook_output()
-                return _deny_hook_output(
+                    return allow_hook_output()
+                return deny_hook_output(
                     f"{tool_name} denied. Allowed: {[str(d) for d in all_readable]}"
                 )
 
             case _:
-                return _allow_hook_output()
+                return allow_hook_output()
 
     return cast(
         HooksConfig,
         {
             "PreToolUse": [HookMatcher(hooks=[permission_hook])],
-        },
-    )
-
-
-# =============================================================================
-# EXAMPLE: Post-tool hook for response inspection
-# =============================================================================
-
-
-def create_post_tool_hooks() -> HooksConfig:
-    """Example: Create post-tool hooks for response inspection.
-
-    Customize this for your domain. Common uses:
-    - Detect poor-quality WebFetch responses (JS-rendered garbage)
-    - Inject system messages with alternative suggestions
-    - Log tool responses for debugging
-
-    Returns:
-        Hooks configuration for PostToolUse events.
-    """
-
-    async def example_post_hook(
-        input_data: HookInput,
-        _tool_use_id: str | None,
-        _context: HookContext,
-    ) -> SyncHookJSONOutput:
-        """Example post-tool hook."""
-        if input_data["hook_event_name"] != "PostToolUse":
-            return SyncHookJSONOutput()
-
-        tool_name = input_data["tool_name"]
-        tool_response = input_data["tool_response"]
-
-        if tool_name == "WebFetch":
-            content = ""
-            match tool_response:
-                case str():
-                    content = tool_response
-                case dict():
-                    content = str(tool_response.get("content", ""))
-
-            if len(content) < 100 and "loading" in content.lower():
-                return SyncHookJSONOutput(
-                    systemMessage=(
-                        "The WebFetch response appears to be a JS-rendered page "
-                        "that didn't load properly. Consider using a different "
-                        "tool or URL."
-                    )
-                )
-
-        return SyncHookJSONOutput()
-
-    return cast(
-        HooksConfig,
-        {
-            "PostToolUse": [HookMatcher(hooks=[example_post_hook])],
         },
     )
 
@@ -245,8 +187,8 @@ def create_tool_allowlist_hook(
 
         tool_name = input_data["tool_name"]
         if tool_name in allowed:
-            return _allow_hook_output()
-        return _deny_hook_output(f"Tool '{tool_name}' not in allowed list.")
+            return allow_hook_output()
+        return deny_hook_output(f"Tool '{tool_name}' not in allowed list.")
 
     return cast(
         HooksConfig,

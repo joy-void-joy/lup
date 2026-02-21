@@ -16,7 +16,7 @@ from typing import Any
 
 
 # Base system prompt template - customize for your domain
-_SYSTEM_PROMPT_TEMPLATE = """\
+SYSTEM_PROMPT_TEMPLATE = """\
 You are an AI agent. Today's date is {date}.
 
 ## Your Task
@@ -56,7 +56,7 @@ def get_system_prompt(
         The formatted system prompt.
     """
     effective_date = date or datetime.now()
-    prompt = _SYSTEM_PROMPT_TEMPLATE.format(date=effective_date.strftime("%Y-%m-%d"))
+    prompt = SYSTEM_PROMPT_TEMPLATE.format(date=effective_date.strftime("%Y-%m-%d"))
 
     # If MCP servers provided, append auto-generated tool docs
     if mcp_servers:

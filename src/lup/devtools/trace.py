@@ -13,7 +13,7 @@ from lup.lib.paths import iter_session_dirs, iter_trace_log_files, traces_path
 app = typer.Typer(no_args_is_help=True)
 
 
-def _find_trace(session_id: str) -> Path | None:
+def find_trace(session_id: str) -> Path | None:
     """Find the trace file for a session across all versions."""
     # Check versioned trace logs
     log_files = list(iter_trace_log_files(session_id=session_id))
@@ -29,7 +29,7 @@ def _find_trace(session_id: str) -> Path | None:
     return None
 
 
-def _load_trace(trace_path: Path) -> str:
+def load_trace(trace_path: Path) -> str:
     """Load trace content from a file or directory."""
     if trace_path.is_file():
         return trace_path.read_text(encoding="utf-8")
@@ -50,7 +50,7 @@ def show(
     full: bool = typer.Option(False, "-f", "--full", help="Show full trace"),
 ) -> None:
     """Show trace for a session."""
-    trace_path = _find_trace(session_id)
+    trace_path = find_trace(session_id)
 
     if not trace_path:
         typer.echo(f"No trace found for session {session_id}")
@@ -60,7 +60,7 @@ def show(
     typer.echo(f"\n=== Trace for {session_id} ===")
     typer.echo(f"Path: {trace_path}\n")
 
-    content = _load_trace(trace_path)
+    content = load_trace(trace_path)
 
     if full:
         typer.echo(content)
@@ -130,7 +130,9 @@ def errors(
     regex = re.compile("|".join(error_patterns), re.IGNORECASE)
     errors_by_session: dict[str, list[str]] = {}
 
-    search_paths: list[Path] = list(traces_path().rglob("*.md")) if traces_path().exists() else []
+    search_paths: list[Path] = (
+        list(traces_path().rglob("*.md")) if traces_path().exists() else []
+    )
 
     for trace_file in search_paths:
         try:
@@ -222,7 +224,9 @@ def capabilities() -> None:
     regex = re.compile("|".join(capability_patterns), re.IGNORECASE)
     requests: list[tuple[str, str]] = []
 
-    search_paths: list[Path] = list(traces_path().rglob("*.md")) if traces_path().exists() else []
+    search_paths: list[Path] = (
+        list(traces_path().rglob("*.md")) if traces_path().exists() else []
+    )
 
     for trace_file in search_paths:
         try:

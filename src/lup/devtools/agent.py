@@ -37,7 +37,7 @@ app = typer.Typer(no_args_is_help=True)
 # ---------------------------------------------------------------------------
 
 
-def _print_model_source(
+def print_model_source(
     out: io.StringIO, model: type, label: str, indent: str = "    "
 ) -> None:
     """Print the Python source of a BaseModel class."""
@@ -50,7 +50,7 @@ def _print_model_source(
         out.write(f"{indent}  {model.__name__} (source unavailable)\n")
 
 
-def _tool_location(tool: LupMcpTool) -> str:
+def tool_location(tool: LupMcpTool) -> str:
     """Get file:line for the tool handler (unwraps decorators)."""
     handler = inspect_mod.unwrap(tool["sdk_tool"].handler)
     try:
@@ -62,7 +62,7 @@ def _tool_location(tool: LupMcpTool) -> str:
         return "?"
 
 
-def _tool_signature(tool: LupMcpTool) -> str:
+def tool_signature(tool: LupMcpTool) -> str:
     """One-liner: input fields → output model name, file:line."""
     input_model = tool["input_model"]
     parts: list[str] = []
@@ -73,16 +73,16 @@ def _tool_signature(tool: LupMcpTool) -> str:
     fields = ", ".join(parts)
     output_model = tool.get("output_model")
     output_part = f" → {output_model.__name__}" if output_model else ""
-    return f"({fields}){output_part}  [{_tool_location(tool)}]"
+    return f"({fields}){output_part}  [{tool_location(tool)}]"
 
 
-def _print_tool_compact(out: io.StringIO, tool: LupMcpTool) -> None:
+def print_tool_compact(out: io.StringIO, tool: LupMcpTool) -> None:
     """Print a single tool as a one-liner."""
     sdk = tool["sdk_tool"]
-    out.write(f"    {sdk.name}{_tool_signature(tool)}\n")
+    out.write(f"    {sdk.name}{tool_signature(tool)}\n")
 
 
-def _print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
+def print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
     """Print a single tool with full description and schemas."""
     sdk = tool["sdk_tool"]
     out.write(f"\n  {sdk.name}\n")
@@ -94,29 +94,29 @@ def _print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
         if line:
             out.write(f"    {line}.\n")
 
-    _print_model_source(out, tool["input_model"], "Input")
+    print_model_source(out, tool["input_model"], "Input")
 
     output_model = tool.get("output_model")
     if output_model is not None:
-        _print_model_source(out, output_model, "Output")
+        print_model_source(out, output_model, "Output")
 
 
-def _collect_tools_by_server() -> dict[str, list[LupMcpTool]]:
+def collect_tools_by_server() -> dict[str, list[LupMcpTool]]:
     """Collect all LupMcpTool instances grouped by server name."""
     return {
         "example": list(EXAMPLE_TOOLS),
     }
 
 
-def _collect_all_tools() -> list[LupMcpTool]:
+def collect_all_tools() -> list[LupMcpTool]:
     """Collect all LupMcpTool instances from known tool modules."""
     tools: list[LupMcpTool] = []
-    for server_tools in _collect_tools_by_server().values():
+    for server_tools in collect_tools_by_server().values():
         tools.extend(server_tools)
     return tools
 
 
-def _tool_to_dict(t: LupMcpTool) -> dict[str, object]:
+def tool_to_dict(t: LupMcpTool) -> dict[str, object]:
     """Serialize a LupMcpTool for JSON output."""
     output_model = t.get("output_model")
     return {
@@ -127,7 +127,7 @@ def _tool_to_dict(t: LupMcpTool) -> dict[str, object]:
     }
 
 
-def _page_output(text: str) -> None:
+def page_output(text: str) -> None:
     """Write text through a pager (less) if stdout is a tty, otherwise print."""
     if not sys.stdout.isatty():
         sys.stdout.write(text)
@@ -156,8 +156,8 @@ def inspect_cmd(
     ] = False,
 ) -> None:
     """Inspect the full agent configuration: tools, schemas, prompt, subagents."""
-    tools_by_server = _collect_tools_by_server()
-    all_tools = _collect_all_tools()
+    tools_by_server = collect_tools_by_server()
+    all_tools = collect_all_tools()
     subagents = get_subagents()
     prompt = get_system_prompt()
 
@@ -165,7 +165,7 @@ def inspect_cmd(
         data: dict[str, object] = {
             "model": settings.model,
             "max_thinking_tokens": settings.max_thinking_tokens,
-            "tools": [_tool_to_dict(t) for t in all_tools],
+            "tools": [tool_to_dict(t) for t in all_tools],
             "output_schema": AgentOutput.model_json_schema(),
             "subagents": {
                 name: {
@@ -200,16 +200,16 @@ def inspect_cmd(
         out.write(f"\n  {server_name} ({len(server_tools)} tools)\n")
         for t in server_tools:
             if full:
-                _print_tool_full(out, t)
+                print_tool_full(out, t)
             else:
-                _print_tool_compact(out, t)
+                print_tool_compact(out, t)
 
     # Agent output schema
     out.write(f"\n{'─' * 60}\n")
     out.write("  Agent Output Schema\n")
     out.write(f"{'─' * 60}\n")
     if full:
-        _print_model_source(out, AgentOutput, "AgentOutput", indent="  ")
+        print_model_source(out, AgentOutput, "AgentOutput", indent="  ")
     else:
         for name, f in AgentOutput.model_fields.items():
             ann = f.annotation
@@ -234,11 +234,13 @@ def inspect_cmd(
     if full or len(prompt) <= 500:
         out.write(prompt + "\n")
     else:
-        out.write(f"{prompt[:500]}... ({len(prompt)} chars total, use --full to see all)\n")
+        out.write(
+            f"{prompt[:500]}... ({len(prompt)} chars total, use --full to see all)\n"
+        )
 
     out.write("\n")
 
-    _page_output(out.getvalue())
+    page_output(out.getvalue())
 
 
 # ---------------------------------------------------------------------------
@@ -246,15 +248,20 @@ def inspect_cmd(
 # ---------------------------------------------------------------------------
 
 
-def _run_stdio_server() -> None:
-    """Run the MCP stdio server with all SDK tools."""
+@app.command("serve-tools")
+def serve_tools_cmd() -> None:
+    """Start SDK tools as an MCP stdio server.
+
+    This is used by the ``chat`` command — claude CLI launches it as a subprocess.
+    Can also be used standalone for testing MCP tool integration.
+    """
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
     from mcp.types import Tool
 
-    from lup.lib.mcp import _generate_json_schema, extract_sdk_tools
+    from lup.lib.mcp import generate_json_schema, extract_sdk_tools
 
-    sdk_tools = extract_sdk_tools(_collect_all_tools())
+    sdk_tools = extract_sdk_tools(collect_all_tools())
     tool_map = {t.name: t for t in sdk_tools}
 
     server = Server("lup-tools", version="1.0.0")
@@ -263,7 +270,7 @@ def _run_stdio_server() -> None:
     async def list_tools() -> list[Tool]:
         tool_list = []
         for t in sdk_tools:
-            schema = _generate_json_schema(t.input_schema)
+            schema = generate_json_schema(t.input_schema)
             tool_list.append(
                 Tool(name=t.name, description=t.description, inputSchema=schema)
             )
@@ -284,16 +291,6 @@ def _run_stdio_server() -> None:
             await server.run(read_stream, write_stream, init_options)
 
     asyncio.run(run())
-
-
-@app.command("serve-tools")
-def serve_tools_cmd() -> None:
-    """Start SDK tools as an MCP stdio server.
-
-    This is used by the ``chat`` command — claude CLI launches it as a subprocess.
-    Can also be used standalone for testing MCP tool integration.
-    """
-    _run_stdio_server()
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +359,9 @@ def chat_cmd(
         claude = sh.Command("claude")
         claude(*claude_args, _fg=True)
     except sh.CommandNotFound:
-        typer.echo("Error: 'claude' CLI not found. Install Claude Code first.", err=True)
+        typer.echo(
+            "Error: 'claude' CLI not found. Install Claude Code first.", err=True
+        )
         raise typer.Exit(1)
     except sh.ErrorReturnCode:
         pass  # claude exited normally or user quit

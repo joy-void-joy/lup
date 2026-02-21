@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Reviewer system prompt (customize for your domain)
 # ---------------------------------------------------------------------------
 
-_REVIEWER_SYSTEM_PROMPT = """\
+REVIEWER_SYSTEM_PROMPT = """\
 You review the main agent's output before it is finalized. Your job is \
 to catch errors in reasoning, gaps in research, and miscalibrated confidence.
 
@@ -146,9 +146,7 @@ async def _run_reviewer(
         f"## Confidence: {validated.confidence:.0%}",
     ]
     if validated.key_uncertainties:
-        prompt_sections.append(
-            "## Key Uncertainties\n\n" + validated.key_uncertainties
-        )
+        prompt_sections.append("## Key Uncertainties\n\n" + validated.key_uncertainties)
 
     reviewer_prompt = "\n\n".join(prompt_sections)
 
@@ -156,7 +154,7 @@ async def _run_reviewer(
         reviewer_prompt,
         prefix="  ↳ [reviewer] ",
         model="claude-sonnet-4-6",
-        system_prompt=_REVIEWER_SYSTEM_PROMPT.format(
+        system_prompt=REVIEWER_SYSTEM_PROMPT.format(
             outputs_dir=outputs_dir or "N/A",
         ),
         max_thinking_tokens=8000,

@@ -84,7 +84,7 @@ class InstallPackageResult(TypedDict):
 # --- Helper functions ---
 
 
-def _decode_output(output: bytes | None) -> str:
+def decode_output(output: bytes | None) -> str:
     """Decode bytes output to string, handling None and errors."""
     if output is None:
         return ""
@@ -106,7 +106,7 @@ class ReplCrashedError(RuntimeError):
     """Raised when the persistent REPL process has exited unexpectedly."""
 
 
-_REPL_SERVER_SCRIPT = r"""
+REPL_SERVER_SCRIPT = r"""
 import json, signal, sys, time, traceback
 from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
@@ -230,11 +230,11 @@ class ReplSession:
             raise SandboxNotInitializedError("REPL not connected")
 
         request = json.dumps({"code": code, "timeout": timeout_seconds}) + "\n"
-        self._send(request.encode("utf-8"))
+        self.send(request.encode("utf-8"))
 
         deadline = time.monotonic() + timeout_seconds + 5
         try:
-            response = self._recv_response(deadline)
+            response = self.recv_response(deadline)
         except (SocketError, OSError) as e:
             raise ReplCrashedError(f"REPL exited: {e}") from e
 
@@ -250,7 +250,7 @@ class ReplSession:
             duration_ms=int(response.get("duration_ms", 0)),
         )
 
-    def _send(self, data: bytes) -> None:
+    def send(self, data: bytes) -> None:
         """Write raw bytes to the exec socket stdin."""
         try:
             sock = getattr(self._sock, "_sock", self._sock)
@@ -261,14 +261,14 @@ class ReplSession:
         except (BrokenPipeError, OSError) as e:
             raise ReplCrashedError(f"REPL write failed: {e}") from e
 
-    def _recv_response(self, deadline: float) -> dict[str, int | str]:
+    def recv_response(self, deadline: float) -> dict[str, int | str]:
         """Read Docker multiplex frames until a complete JSON line arrives."""
         stdout_buf = b""
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ReplCrashedError("Timed out waiting for REPL response")
-            self._set_socket_timeout(remaining)
+            self.set_socket_timeout(remaining)
 
             stream_type, size = next_frame_header(self._sock)
             if size < 0:
@@ -286,7 +286,7 @@ class ReplSession:
                         "REPL stderr: %s", data.decode("utf-8", errors="replace")
                     )
 
-    def _set_socket_timeout(self, timeout: float) -> None:
+    def set_socket_timeout(self, timeout: float) -> None:
         """Set timeout on the underlying socket."""
         sock = self._sock
         for candidate in [sock, getattr(sock, "_sock", None)]:
@@ -348,7 +348,7 @@ class Sandbox:
         """Check if the sandbox container is currently running."""
         return self._container is not None
 
-    def _remove_stale_container(self) -> None:
+    def remove_stale_container(self) -> None:
         """Remove a pre-existing container with the same name, if any."""
         if self._client is None:
             return
@@ -359,7 +359,7 @@ class Sandbox:
         except NotFound:
             pass
 
-    def _destroy_container(self) -> None:
+    def destroy_container(self) -> None:
         """Stop and remove the current container and its session volume."""
         if self._container is None:
             return
@@ -378,15 +378,9 @@ class Sandbox:
             except (NotFound, APIError):
                 pass
 
-    def _exec(self, cmd: str | list[str]) -> ExecResult:
-        """Execute a command in the container."""
-        if isinstance(cmd, str):
-            cmd = ["sh", "-c", cmd]
-        return self.container.exec_run(cmd, demux=False)
-
-    def _write_repl_script(self) -> None:
+    def write_repl_script(self) -> None:
         """Write the REPL server script into the container via tar archive."""
-        script_bytes = _REPL_SERVER_SCRIPT.encode("utf-8")
+        script_bytes = REPL_SERVER_SCRIPT.encode("utf-8")
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as tar:
             info = tarfile.TarInfo(name=".repl_server.py")
@@ -396,7 +390,7 @@ class Sandbox:
         buf.seek(0)
         self.container.put_archive("/workspace", buf)
 
-    def _run_pre_install(self) -> None:
+    def run_pre_install(self) -> None:
         """Pre-install packages for faster agent execution."""
         if self._pre_install is None:
             return
@@ -407,7 +401,7 @@ class Sandbox:
             logger.warning(
                 "Package pre-install failed (exit %d): %s",
                 result.exit_code,
-                _decode_output(result.output)[:500],
+                decode_output(result.output)[:500],
             )
         else:
             logger.info("Pre-installed packages successfully")
@@ -420,7 +414,7 @@ class Sandbox:
         """
         self._client = docker.from_env()
 
-        self._remove_stale_container()
+        self.remove_stale_container()
 
         self._shared_dir.mkdir(parents=True, exist_ok=True)
 
@@ -445,9 +439,9 @@ class Sandbox:
         )
 
         if self._network_mode != "none":
-            self._run_pre_install()
+            self.run_pre_install()
 
-        self._write_repl_script()
+        self.write_repl_script()
         assert self._client is not None
         assert self._container is not None
         self._repl = ReplSession(self._client, self._container, {})
@@ -459,7 +453,7 @@ class Sandbox:
             self._repl.stop()
             self._repl = None
         logger.info("Destroying sandbox container")
-        self._destroy_container()
+        self.destroy_container()
         self._client = None
 
     def __enter__(self) -> Self:
@@ -540,7 +534,7 @@ class Sandbox:
         cmd = ["uv", "pip", "install", "--system", *packages]
         result: ExecResult = self.container.exec_run(cmd, demux=False)
 
-        output_text = _decode_output(result.output)
+        output_text = decode_output(result.output)
 
         return InstallPackageResult(
             exit_code=result.exit_code,

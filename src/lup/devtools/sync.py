@@ -5,7 +5,7 @@ Mechanical helper for /lup:update. Two config files:
 - downstream.json (committed): declares upstream repos with URLs.
   Ships with the lup template GitHub URL by default.
 - downstream.json.local (gitignored): local paths, sync state, and overrides.
-  Overrides/extends downstream.json entries by project name.
+  Overrides downstream.json entries by project name, or adds local-only projects.
   Set "ignore": true to skip a project (useful when you ARE the upstream).
 
 The script merges both: .local entries override .json entries by name.
@@ -28,21 +28,21 @@ LOCAL_FILE = Path("downstream.json.local")
 CACHE_DIR = Path(".cache/downstream")
 REFS_DIR = Path("refs")
 
-_git = sh.Command("git").bake("--no-pager")
+git = sh.Command("git").bake("--no-pager")
 
 
-def _load_json(path: Path) -> dict[str, list[dict[str, str]]]:
+def load_json(path: Path) -> dict[str, list[dict[str, str]]]:
     if not path.exists():
         return {"projects": []}
     result: dict[str, list[dict[str, str]]] = json.loads(path.read_text())
     return result
 
 
-def _save_local(data: dict[str, list[dict[str, str]]]) -> None:
+def save_local(data: dict[str, list[dict[str, str]]]) -> None:
     LOCAL_FILE.write_text(json.dumps(data, indent=2) + "\n")
 
 
-def _ensure_ref_symlink(name: str, target: str) -> None:
+def ensure_ref_symlink(name: str, target: str) -> None:
     """Create or update refs/<name> symlink pointing to a resolved project path."""
     REFS_DIR.mkdir(exist_ok=True)
     link = REFS_DIR / name
@@ -60,8 +60,8 @@ def _ensure_ref_symlink(name: str, target: str) -> None:
 
 def load_projects() -> list[dict[str, str]]:
     """Load and merge projects from downstream.json + downstream.json.local."""
-    base = _load_json(DOWNSTREAM_FILE)
-    local = _load_json(LOCAL_FILE)
+    base = load_json(DOWNSTREAM_FILE)
+    local = load_json(LOCAL_FILE)
 
     merged: dict[str, dict[str, str]] = {}
     for p in base.get("projects", []):
@@ -93,7 +93,7 @@ def ensure_local(proj: dict[str, str]) -> str:
     path = proj.get("path", "")
     name = proj["name"]
     if path and Path(path).exists():
-        _ensure_ref_symlink(name, path)
+        ensure_ref_symlink(name, path)
         return path
 
     cache_path = CACHE_DIR / name
@@ -102,22 +102,22 @@ def ensure_local(proj: dict[str, str]) -> str:
     if cache_path.exists():
         typer.echo(f"Fetching latest for '{name}' from cache...")
         try:
-            _git("-C", str(cache_path), "fetch", "--quiet")
-            _git("-C", str(cache_path), "reset", "--hard", "origin/HEAD", "--quiet")
+            git("-C", str(cache_path), "fetch", "--quiet")
+            git("-C", str(cache_path), "reset", "--hard", "origin/HEAD", "--quiet")
         except sh.ErrorReturnCode as e:
             typer.echo(f"Warning: fetch failed: {e.stderr.decode().strip()}")
-        _ensure_ref_symlink(name, str(cache_path))
+        ensure_ref_symlink(name, str(cache_path))
         return str(cache_path)
 
     if url:
         typer.echo(f"Cloning '{name}' from {url}...")
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         try:
-            _git("clone", "--depth=200", url, str(cache_path))
+            git("clone", "--depth=200", url, str(cache_path))
         except sh.ErrorReturnCode as e:
             typer.echo(f"Clone failed: {e.stderr.decode().strip()}")
             raise typer.Exit(1)
-        _ensure_ref_symlink(name, str(cache_path))
+        ensure_ref_symlink(name, str(cache_path))
         return str(cache_path)
 
     typer.echo(f"Project '{name}' has no local path or URL configured.")
@@ -129,7 +129,7 @@ def ensure_local(proj: dict[str, str]) -> str:
 
 def git_in(path: str, *args: str) -> str:
     """Run git command in a specific directory."""
-    return str(_git("-C", path, *args)).strip()
+    return str(git("-C", path, *args)).strip()
 
 
 def commit_count(path: str, since: str) -> int:
@@ -146,17 +146,17 @@ def current_head(path: str) -> str:
     return git_in(path, "rev-parse", "HEAD")
 
 
-def _resolve_path(proj: dict[str, str]) -> tuple[str, bool]:
+def resolve_path(proj: dict[str, str]) -> tuple[str, bool]:
     """Resolve project to a local path, return (path, exists). Creates ref symlink if found."""
     name = proj["name"]
     path = proj.get("path", "")
     if path and Path(path).exists():
-        _ensure_ref_symlink(name, path)
+        ensure_ref_symlink(name, path)
         return path, True
 
     cache_path = CACHE_DIR / name
     if cache_path.exists():
-        _ensure_ref_symlink(name, str(cache_path))
+        ensure_ref_symlink(name, str(cache_path))
         return str(cache_path), True
 
     return proj.get("url", "NO PATH"), False
@@ -182,7 +182,7 @@ def list_projects_cmd() -> None:
         synced = p.get("last_synced_commit", "")
         synced_short = synced[:8] if synced else "never"
 
-        resolved, exists = _resolve_path(p)
+        resolved, exists = resolve_path(p)
         if not exists:
             print(
                 f"{p['name']:<20} {'?':<10} {synced_short:<12} {resolved} (run list after clone)"
@@ -241,7 +241,7 @@ def mark_synced(
 
     head = current_head(path)
 
-    local_data = _load_json(LOCAL_FILE)
+    local_data = load_json(LOCAL_FILE)
     local_projects = local_data.get("projects", [])
 
     entry = next((p for p in local_projects if p["name"] == project), None)
@@ -257,15 +257,13 @@ def mark_synced(
         )
         local_data["projects"] = local_projects
 
-    _save_local(local_data)
+    save_local(local_data)
     typer.echo(f"Marked '{project}' as synced at {head[:8]}.")
 
 
 @app.command("setup")
 def setup_project(
-    name: Annotated[
-        str, typer.Argument(help="Project name (must match downstream.json)")
-    ],
+    name: Annotated[str, typer.Argument(help="Project name")],
     path: Annotated[str, typer.Argument(help="Local path to the repo")],
     synced: Annotated[
         bool, typer.Option("--synced", help="Mark as already synced at current HEAD")
@@ -281,7 +279,7 @@ def setup_project(
         typer.echo(f"Not a git repository: {resolved}")
         raise typer.Exit(1)
 
-    local_data = _load_json(LOCAL_FILE)
+    local_data = load_json(LOCAL_FILE)
     local_projects = local_data.get("projects", [])
 
     entry = next((p for p in local_projects if p["name"] == name), None)
@@ -295,8 +293,8 @@ def setup_project(
     if synced:
         entry["last_synced_commit"] = current_head(str(resolved))
 
-    _save_local(local_data)
-    _ensure_ref_symlink(name, str(resolved))
+    save_local(local_data)
+    ensure_ref_symlink(name, str(resolved))
     typer.echo(f"Set '{name}' local path to {resolved}")
     if synced:
         typer.echo(f"  Marked as synced at {entry['last_synced_commit'][:8]}")

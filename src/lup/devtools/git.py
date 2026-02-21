@@ -11,7 +11,7 @@ from lup.lib.paths import iter_session_dirs, scores_csv_path, traces_path
 app = typer.Typer(no_args_is_help=True)
 
 
-def _get_uncommitted_session_ids() -> set[str]:
+def get_uncommitted_session_ids() -> set[str]:
     """Find session IDs with uncommitted result files.
 
     Parses git status for paths like:
@@ -42,7 +42,7 @@ def _get_uncommitted_session_ids() -> set[str]:
     return session_ids
 
 
-def _get_session_summary(session_id: str) -> str:
+def get_session_summary(session_id: str) -> str:
     """Read summary from the latest session JSON across all versions."""
     all_json: list[Path] = []
     for session_dir in iter_session_dirs(session_id=session_id):
@@ -62,7 +62,7 @@ def _get_session_summary(session_id: str) -> str:
         return f"session {session_id}"
 
 
-def _commit_session(session_id: str, *, dry_run: bool = False) -> bool:
+def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
     """Stage and commit files for a single session ID."""
     git = sh.Command("git")
     paths: list[str] = []
@@ -84,7 +84,7 @@ def _commit_session(session_id: str, *, dry_run: bool = False) -> bool:
         return False
 
     if dry_run:
-        summary = _get_session_summary(session_id)
+        summary = get_session_summary(session_id)
         print(f"  Would commit {session_id}: {summary}")
         for p in paths:
             print(f"    {p}")
@@ -106,7 +106,7 @@ def _commit_session(session_id: str, *, dry_run: bool = False) -> bool:
     if not diff:
         return False
 
-    summary = _get_session_summary(session_id)
+    summary = get_session_summary(session_id)
     slug = summary[:50].strip().rstrip(".")
     git.commit("-m", f"data(sessions): {slug}")
     print(f"  Committed {session_id}: {slug}")
@@ -120,7 +120,7 @@ def commit_results(
     ),
 ) -> None:
     """Commit all uncommitted session result files, one commit per session."""
-    session_ids = _get_uncommitted_session_ids()
+    session_ids = get_uncommitted_session_ids()
 
     if not session_ids:
         print("Nothing to commit.")
@@ -131,7 +131,7 @@ def commit_results(
     committed = 0
     for session_id in sorted(session_ids):
         try:
-            if _commit_session(session_id, dry_run=dry_run):
+            if commit_session(session_id, dry_run=dry_run):
                 committed += 1
         except sh.ErrorReturnCode as e:
             print(f"  Failed {session_id}: {e}")

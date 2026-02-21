@@ -14,7 +14,7 @@ from lup.lib.paths import feedback_path, iter_session_dirs
 app = typer.Typer(no_args_is_help=True)
 
 
-def _load_all_sessions() -> list[dict[str, Any]]:
+def load_all_sessions() -> list[dict[str, Any]]:
     """Load all session files across all versions."""
     sessions: list[dict[str, Any]] = []
 
@@ -33,7 +33,7 @@ def _load_all_sessions() -> list[dict[str, Any]]:
 @app.command("summary")
 def summary() -> None:
     """Show aggregate summary of all sessions."""
-    sessions = _load_all_sessions()
+    sessions = load_all_sessions()
     if not sessions:
         typer.echo("No sessions found")
         typer.echo("Checked all version directories under notes/traces/")
@@ -77,7 +77,7 @@ def summary() -> None:
 @app.command("tools")
 def tools() -> None:
     """Show tool usage aggregates."""
-    sessions = _load_all_sessions()
+    sessions = load_all_sessions()
     if not sessions:
         typer.echo("No sessions found")
         raise typer.Exit(1)
@@ -121,7 +121,7 @@ def errors(
     limit: int = typer.Option(20, "-n", "--limit", help="Max sessions to show"),
 ) -> None:
     """Show sessions with high error rates."""
-    sessions = _load_all_sessions()
+    sessions = load_all_sessions()
     if not sessions:
         typer.echo("No sessions found")
         raise typer.Exit(1)
@@ -160,7 +160,7 @@ def trends(
     window: int = typer.Option(10, "-w", "--window", help="Rolling window size"),
 ) -> None:
     """Show metric trends over time."""
-    sessions = _load_all_sessions()
+    sessions = load_all_sessions()
     if not sessions:
         typer.echo("No sessions found")
         raise typer.Exit(1)

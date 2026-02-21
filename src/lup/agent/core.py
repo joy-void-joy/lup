@@ -56,7 +56,7 @@ NOTES_PATH = Path("./notes")
 TRACES_PATH = NOTES_PATH / "traces"
 
 
-def _build_options(
+def build_options(
     notes_config: NotesConfig,
     *,
     sandbox_server: McpSdkServerConfig | None = None,
@@ -164,15 +164,17 @@ async def run_agent(
     )
 
     with sandbox:
-        options = _build_options(notes, sandbox_server=sandbox.create_mcp_server())
+        options = build_options(notes, sandbox_server=sandbox.create_mcp_server())
         collector = await run_query(
-            task, options=options, trace_logger=trace_logger,
+            task,
+            options=options,
+            trace_logger=trace_logger,
         )
 
     trace_logger.save()
     log_metrics_summary()
 
-    session_result = _build_result(
+    session_result = build_result(
         session_id=session_id,
         task_id=task_id,
         collector=collector,
@@ -183,7 +185,7 @@ async def run_agent(
     return session_result
 
 
-def _build_result(
+def build_result(
     *,
     session_id: str,
     task_id: str | None,
@@ -204,10 +206,8 @@ def _build_result(
         agent_version=AGENT_VERSION,
         timestamp=datetime.now().isoformat(),
         output=output,
-        reasoning="".join(
-            b.text for b in collector.blocks if isinstance(b, TextBlock)
-        ),
-        sources_consulted=_extract_sources(collector.blocks),
+        reasoning="".join(b.text for b in collector.blocks if isinstance(b, TextBlock)),
+        sources_consulted=extract_sources(collector.blocks),
         duration_seconds=(result.duration_ms / 1000) if result.duration_ms else None,
         cost_usd=result.total_cost_usd,
         token_usage=cast(TokenUsage, result.usage) if result.usage else None,
@@ -215,7 +215,7 @@ def _build_result(
     )
 
 
-def _extract_sources(blocks: list[ContentBlock]) -> list[str]:
+def extract_sources(blocks: list[ContentBlock]) -> list[str]:
     """Extract source URLs/queries from tool use blocks."""
     sources: list[str] = []
     for block in blocks:

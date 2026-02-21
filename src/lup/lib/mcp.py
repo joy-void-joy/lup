@@ -40,14 +40,14 @@ from pydantic import BaseModel, TypeAdapter
 logger = logging.getLogger(__name__)
 
 
-class _ToolResponse(TypedDict, total=False):
+class ToolResponse(TypedDict, total=False):
     """Shape of the dict returned by MCP tool handlers."""
 
     content: list[dict[str, str]]
     is_error: bool
 
 
-def _generate_json_schema(
+def generate_json_schema(
     input_schema: type | dict[str, type | str],
 ) -> dict[str, object]:
     """Generate JSON Schema from input_schema (TypedDict, BaseModel, or dict).
@@ -93,7 +93,7 @@ def _generate_json_schema(
         return {"type": "object", "properties": {}}
 
 
-class _CallToolResultWithAlias(CallToolResult):
+class CallToolResultWithAlias(CallToolResult):
     """CallToolResult with snake_case alias for SDK compatibility.
 
     The Claude Agent SDK's query.py checks `is_error` (snake_case) but MCP's
@@ -136,7 +136,7 @@ def create_mcp_server(
             """Return the list of available tools."""
             tool_list: list[Tool] = []
             for tool_def in tools:
-                schema = _generate_json_schema(tool_def.input_schema)
+                schema = generate_json_schema(tool_def.input_schema)
                 tool_list.append(
                     Tool(
                         name=tool_def.name,
@@ -153,7 +153,7 @@ def create_mcp_server(
                 raise ValueError(f"Tool '{name}' not found")
 
             tool_def = tool_map[name]
-            result = cast(_ToolResponse, await tool_def.handler(arguments))
+            result = cast(ToolResponse, await tool_def.handler(arguments))
 
             is_error = result.get("is_error", False)
 
@@ -172,21 +172,21 @@ def create_mcp_server(
                                 )
                             )
 
-            return _CallToolResultWithAlias(
+            return CallToolResultWithAlias(
                 content=cast(list[ContentBlock], content), isError=is_error
             )
 
     return McpSdkServerConfig(type="sdk", name=name, instance=server)
 
 
-class _LupMcpToolRequired(TypedDict):
+class LupMcpToolRequired(TypedDict):
     """Required fields for LupMcpTool."""
 
     sdk_tool: SdkMcpTool[Any]
     input_model: type[BaseModel]
 
 
-class LupMcpTool(_LupMcpToolRequired, total=False):
+class LupMcpTool(LupMcpToolRequired, total=False):
     """MCP tool with typed input/output models for introspection.
 
     Wraps ``SdkMcpTool`` and preserves the original BaseModel classes so that

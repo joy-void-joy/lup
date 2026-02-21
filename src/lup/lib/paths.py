@@ -28,7 +28,7 @@ from lup.version import AGENT_VERSION
 logger = logging.getLogger(__name__)
 
 
-def _find_project_root() -> Path:
+def find_project_root() -> Path:
     """Find project root by walking up to pyproject.toml."""
     current = Path(__file__).resolve().parent
     for parent in [current, *current.parents]:
@@ -40,9 +40,9 @@ def _find_project_root() -> Path:
 # -- Mutable path state -------------------------------------------------------
 # Auto-detected on first import; overridable via configure().
 
-_project_root = _find_project_root()
-_notes_path = _project_root / "notes"
-_runtime_logs_path = _project_root / "logs"
+PROJECT_ROOT = find_project_root()
+NOTES_DIR = PROJECT_ROOT / "notes"
+RUNTIME_LOGS_DIR = PROJECT_ROOT / "logs"
 
 
 def configure(
@@ -64,17 +64,17 @@ def configure(
         notes_dir: Override notes directory independently.
         logs_dir: Override runtime logs directory independently.
     """
-    global _project_root, _notes_path, _runtime_logs_path  # noqa: PLW0603
+    global PROJECT_ROOT, NOTES_DIR, RUNTIME_LOGS_DIR  # noqa: PLW0603
 
     if root is not None:
-        _project_root = root
-        _notes_path = root / "notes"
-        _runtime_logs_path = root / "logs"
+        PROJECT_ROOT = root
+        NOTES_DIR = root / "notes"
+        RUNTIME_LOGS_DIR = root / "logs"
 
     if notes_dir is not None:
-        _notes_path = notes_dir
+        NOTES_DIR = notes_dir
     if logs_dir is not None:
-        _runtime_logs_path = logs_dir
+        RUNTIME_LOGS_DIR = logs_dir
 
 
 # -- Public path accessors ----------------------------------------------------
@@ -82,46 +82,46 @@ def configure(
 
 def project_root() -> Path:
     """Return the project root directory."""
-    return _project_root
+    return PROJECT_ROOT
 
 
 def notes_path() -> Path:
     """Return the notes directory (``<root>/notes`` by default)."""
-    return _notes_path
+    return NOTES_DIR
 
 
 def runtime_logs_path() -> Path:
     """Return the runtime logs directory (``<root>/logs`` by default)."""
-    return _runtime_logs_path
+    return RUNTIME_LOGS_DIR
 
 
 def traces_path() -> Path:
     """Return ``notes/traces/``."""
-    return _notes_path / "traces"
+    return NOTES_DIR / "traces"
 
 
 def feedback_path() -> Path:
     """Return ``notes/feedback_loop/``."""
-    return _notes_path / "feedback_loop"
+    return NOTES_DIR / "feedback_loop"
 
 
 def scores_csv_path() -> Path:
     """Return ``notes/scores.csv``."""
-    return _notes_path / "scores.csv"
+    return NOTES_DIR / "scores.csv"
 
 
 # -- Timestamp helpers --------------------------------------------------------
 
-_TIMESTAMP_FMT = "%Y%m%d_%H%M%S"
-_TIMESTAMP_RE = re.compile(r"\d{8}_\d{6}")
+TIMESTAMP_FMT = "%Y%m%d_%H%M%S"
+TIMESTAMP_RE = re.compile(r"\d{8}_\d{6}")
 
 
 def parse_timestamp(name: str) -> datetime:
     """Parse the last YYYYMMDD_HHMMSS occurrence from a filename or string."""
-    matches = _TIMESTAMP_RE.findall(Path(name).stem)
+    matches = TIMESTAMP_RE.findall(Path(name).stem)
     if not matches:
         raise ValueError(f"No YYYYMMDD_HHMMSS timestamp found in: {name}")
-    return datetime.strptime(matches[-1], _TIMESTAMP_FMT)
+    return datetime.strptime(matches[-1], TIMESTAMP_FMT)
 
 
 # -- Write paths (version-specific) ------------------------------------------
@@ -145,7 +145,7 @@ def trace_logs_dir(version: str = AGENT_VERSION) -> Path:
 # -- Read paths (cross-version iteration) -------------------------------------
 
 
-def _version_dirs() -> list[Path]:
+def version_dirs() -> list[Path]:
     """Return all version directories under notes/traces/, sorted."""
     tp = traces_path()
     if not tp.exists():
@@ -161,7 +161,7 @@ def iter_session_dirs(
 
     Yields paths like: notes/traces/0.1.0/sessions/my-session/
     """
-    ver_dirs = [traces_path() / version] if version else _version_dirs()
+    ver_dirs = [traces_path() / version] if version else version_dirs()
 
     for ver_dir in ver_dirs:
         sessions_base = ver_dir / "sessions"
@@ -185,7 +185,7 @@ def iter_output_dirs(
 
     Yields paths like: notes/traces/0.1.0/outputs/my-task/
     """
-    ver_dirs = [traces_path() / version] if version else _version_dirs()
+    ver_dirs = [traces_path() / version] if version else version_dirs()
 
     for ver_dir in ver_dirs:
         outputs_base = ver_dir / "outputs"
@@ -203,7 +203,7 @@ def iter_output_dirs(
 
 def iter_trace_log_files(session_id: str | None = None) -> Iterator[Path]:
     """Iterate reasoning log files across all versions."""
-    for ver_dir in _version_dirs():
+    for ver_dir in version_dirs():
         logs_base = ver_dir / "logs"
         if not logs_base.exists():
             continue
