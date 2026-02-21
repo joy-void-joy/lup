@@ -5,10 +5,9 @@ out of the box and are configured through function arguments — never
 by modifying the source. Domain-specific code belongs in lup.agent.
 
 Modules:
-- cache: TTL-based caching for API responses
 - client: Centralized Agent SDK client creation (build_client, run_query, one_shot)
 - history: Session history storage and retrieval (generic, model-agnostic)
-- hooks: Claude Agent SDK hook utilities
+- hooks: Claude Agent SDK hook utilities (permission, nudge, capture)
 - metrics: Tool call tracking with @tracked decorator
 - mcp: MCP server creation utilities
 - notes: RO/RW notes directory structure
@@ -20,7 +19,6 @@ Modules:
 - sandbox: Docker-based Python sandbox for isolated code execution
 """
 
-from lup.lib.cache import TTLCache, api_cache, cached, clear_cache, get_cache_stats
 from lup.lib.client import build_client, one_shot, run_query
 from lup.lib.history import (
     format_history_for_context,
@@ -33,6 +31,9 @@ from lup.lib.history import (
 from lup.lib.hooks import (
     HookEventType,
     HooksConfig,
+    NudgeCheck,
+    create_capture_hook,
+    create_nudge_hook,
     create_permission_hooks,
     create_tool_allowlist_hook,
     merge_hooks,
@@ -84,12 +85,6 @@ from lup.lib.trace import (
 )
 
 __all__ = [
-    # Cache
-    "TTLCache",
-    "api_cache",
-    "cached",
-    "clear_cache",
-    "get_cache_stats",
     # Client
     "build_client",
     "one_shot",
@@ -104,6 +99,9 @@ __all__ = [
     # Hooks
     "HookEventType",
     "HooksConfig",
+    "NudgeCheck",
+    "create_capture_hook",
+    "create_nudge_hook",
     "create_permission_hooks",
     "create_tool_allowlist_hook",
     "merge_hooks",

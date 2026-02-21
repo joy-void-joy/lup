@@ -410,11 +410,11 @@ async def _repl(
 
     # Welcome panel with server → tool listing
     panel_lines = [
-        f"[bold]✻ Agent REPL[/bold]",
+        "[bold]✻ Agent REPL[/bold]",
         f"[dim]model:[/dim] {effective_model}",
     ]
     if not no_tools:
-        servers = _collect_tools_by_server()
+        servers = collect_tools_by_server()
         for i, (name, tools) in enumerate(servers.items()):
             is_last_server = i == len(servers) - 1
             panel_lines.append(f"[dim]{'└' if is_last_server else '├'} {name}[/dim]")

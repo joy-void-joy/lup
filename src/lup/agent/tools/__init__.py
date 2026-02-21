@@ -7,19 +7,12 @@ This package contains:
 Utilities are re-exported from lup.lib for convenience:
 - metrics: Tool call tracking with @tracked decorator
 - retry: Retry decorator for API calls with exponential backoff
-- cache: TTL-based caching for API responses
 - responses: MCP response formatting utilities
 """
 
-# Re-export utilities from lib for backward compatibility
 from lup.lib import (
     MetricsCollector,
     ToolMetrics,
-    TTLCache,
-    api_cache,
-    cached,
-    clear_cache,
-    get_cache_stats,
     get_metrics_summary,
     log_metrics_summary,
     mcp_error,
@@ -31,12 +24,6 @@ from lup.lib import (
 )
 
 __all__ = [
-    # Cache
-    "TTLCache",
-    "api_cache",
-    "cached",
-    "clear_cache",
-    "get_cache_stats",
     # Metrics
     "MetricsCollector",
     "ToolMetrics",
