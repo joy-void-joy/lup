@@ -35,7 +35,7 @@ from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 from claude_agent_sdk.types import McpSdkServerConfig
 from mcp.server import Server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -198,20 +198,20 @@ class LupMcpTool(LupMcpToolRequired, total=False):
     tags: list[str]
 
 
-def lup_tool(
+def lup_tool[T: BaseModel](
     name: str,
     description: str,
-    input_model: type[BaseModel],
+    input_model: type[T],
     output_model: type[BaseModel] | None = None,
 ) -> Callable[
-    [Callable[[Any], Awaitable[dict[str, Any]]]],
+    [Callable[[T], Awaitable[dict[str, Any]]]],
     LupMcpTool,
 ]:
     """Decorator for defining MCP tools with typed input/output models.
 
-    Like the SDK's ``@tool`` but accepts BaseModel classes directly and
-    stores them for introspection. The input schema is generated via
-    ``model_json_schema()`` automatically.
+    Like the SDK's ``@tool`` but accepts BaseModel classes directly,
+    stores them for introspection, and auto-validates input arguments.
+    The handler receives a validated model instance, not a raw dict.
 
     Args:
         name: Unique tool identifier (becomes ``mcp__{server}__{name}``).
@@ -222,15 +222,23 @@ def lup_tool(
     Returns:
         A decorator that wraps the async handler into a ``LupMcpTool``.
     """
+    from lup.lib.responses import mcp_error
 
     def decorator(
-        handler: Callable[[Any], Awaitable[dict[str, Any]]],
+        handler: Callable[[T], Awaitable[dict[str, Any]]],
     ) -> LupMcpTool:
+        async def wrapper(args: dict[str, Any]) -> dict[str, Any]:
+            try:
+                params = input_model.model_validate(args)
+            except ValidationError as e:
+                return mcp_error(f"Invalid input: {e}")
+            return await handler(params)
+
         sdk = SdkMcpTool(
             name=name,
             description=description,
             input_schema=input_model.model_json_schema(),
-            handler=handler,
+            handler=cast(Callable[[Any], Awaitable[dict[str, Any]]], wrapper),
         )
         result: LupMcpTool = {
             "sdk_tool": sdk,

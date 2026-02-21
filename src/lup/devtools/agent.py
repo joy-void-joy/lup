@@ -388,6 +388,8 @@ async def _repl(
     no_prompt: bool = False,
 ) -> None:
     """Run the interactive REPL loop."""
+    from contextlib import AsyncExitStack
+
     from rich.console import Console
     from rich.panel import Panel
 
@@ -398,6 +400,8 @@ async def _repl(
     effective_model = model or settings.model
 
     mcp_servers: dict[str, object] = {}
+    stack = AsyncExitStack()
+
     if not no_tools:
         example_server = create_mcp_server(
             name="example",
@@ -405,6 +409,9 @@ async def _repl(
             tools=extract_sdk_tools(EXAMPLE_TOOLS),
         )
         mcp_servers = {"example": example_server}
+
+        # Shutdown message — registered last so it runs first (LIFO)
+        stack.callback(lambda: console.print("[dim]Shutting down...[/dim]"))
 
     prompt = get_system_prompt() if not no_prompt else ""
 
@@ -426,54 +433,58 @@ async def _repl(
                 panel_lines.append(f"[dim]{branch}[/dim] {t['sdk_tool'].name}")
     else:
         panel_lines.append("[dim]no tools[/dim]")
-    panel_lines += ["", "[dim]/quit to exit[/dim]"]
+    panel_lines += ["", "[dim]/quit to exit · Ctrl-C to stop[/dim]"]
 
     console.print()
     console.print(Panel("\n".join(panel_lines), border_style="blue", width=60))
     console.print()
 
-    async with build_client(
-        model=effective_model,
-        system_prompt=prompt,
-        max_thinking_tokens=settings.max_thinking_tokens or (128_000 - 1),
-        permission_mode="bypassPermissions",
-        mcp_servers=mcp_servers if mcp_servers else None,
-        agents=get_subagents(),
-    ) as client:
-        while True:
-            try:
-                user_input = await asyncio.to_thread(input, _PROMPT)
-            except (EOFError, KeyboardInterrupt):
-                console.print()
-                break
+    try:
+        async with stack:
+            async with build_client(
+                model=effective_model,
+                system_prompt=prompt,
+                max_thinking_tokens=settings.max_thinking_tokens or (128_000 - 1),
+                permission_mode="bypassPermissions",
+                mcp_servers=mcp_servers if mcp_servers else None,
+                agents=get_subagents(),
+            ) as client:
+                while True:
+                    try:
+                        user_input = await asyncio.to_thread(input, _PROMPT)
+                    except (EOFError, KeyboardInterrupt, asyncio.CancelledError):
+                        console.print()
+                        break
 
-            stripped = user_input.strip()
-            if not stripped:
-                continue
-            if stripped in ("/quit", "/exit", "/q"):
-                break
+                    stripped = user_input.strip()
+                    if not stripped:
+                        continue
+                    if stripped in ("/quit", "/exit", "/q"):
+                        break
 
-            await client.query(user_input)
-            collector = ResponseCollector(spaced=True)
-            try:
-                result = await collector.collect(client)
-                parts: list[str] = []
-                if result.duration_ms:
-                    secs = result.duration_ms / 1000
-                    parts.append(f"{secs:.1f}s")
-                if result.total_cost_usd:
-                    parts.append(f"${result.total_cost_usd:.4f}")
-                if parts:
-                    console.print(
-                        f"  [dim]{' · '.join(parts)}[/dim]"
-                    )
-                console.print()
-            except RuntimeError as e:
-                console.print(f"  [red]error:[/red] {e}")
-                console.print()
-            except KeyboardInterrupt:
-                console.print("\n[dim](interrupted)[/dim]")
-                await client.interrupt()
+                    await client.query(user_input)
+                    collector = ResponseCollector(spaced=True)
+                    try:
+                        result = await collector.collect(client)
+                        parts: list[str] = []
+                        if result.duration_ms:
+                            secs = result.duration_ms / 1000
+                            parts.append(f"{secs:.1f}s")
+                        if result.total_cost_usd:
+                            parts.append(f"${result.total_cost_usd:.4f}")
+                        if parts:
+                            console.print(
+                                f"  [dim]{' · '.join(parts)}[/dim]"
+                            )
+                        console.print()
+                    except RuntimeError as e:
+                        console.print(f"  [red]error:[/red] {e}")
+                        console.print()
+                    except KeyboardInterrupt:
+                        console.print()
+                        break
+    except KeyboardInterrupt:
+        pass
 
 
 @app.command("repl")
@@ -492,4 +503,7 @@ def repl_cmd(
     ] = False,
 ) -> None:
     """Interactive REPL — continuous session with the agent via the SDK."""
-    asyncio.run(_repl(model=model, no_tools=no_tools, no_prompt=no_prompt))
+    try:
+        asyncio.run(_repl(model=model, no_tools=no_tools, no_prompt=no_prompt))
+    except KeyboardInterrupt:
+        pass
