@@ -13,9 +13,19 @@ import io
 import json
 import logging
 import os
+import signal
 import sys
 import tempfile
-from typing import Annotated
+import time
+from typing import TYPE_CHECKING, Annotated
+
+if TYPE_CHECKING:
+    from rich.console import Console
+
+    from claude_agent_sdk import ClaudeSDKClient
+    from claude_agent_sdk.types import ResultMessage
+
+    from lup.lib.trace import ResponseCollector
 
 import sh
 import typer
@@ -30,6 +40,43 @@ from lup.lib.mcp import LupMcpTool
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(no_args_is_help=True)
+
+_xclip = sh.Command("xclip")
+
+CLIPBOARD_IMAGE_MIMES = ("image/png", "image/jpeg", "image/webp")
+
+
+def read_clipboard_image() -> tuple[str, bytes] | None:
+    """Read image data from the system clipboard via xclip.
+
+    Returns ``(media_type, raw_bytes)`` or ``None`` when no image is available.
+    """
+    try:
+        targets = str(_xclip("-selection", "clipboard", "-o", "-t", "TARGETS"))
+    except (sh.ErrorReturnCode, sh.CommandNotFound):
+        return None
+
+    for mime in CLIPBOARD_IMAGE_MIMES:
+        if mime not in targets:
+            continue
+        try:
+            buf = io.BytesIO()
+            _xclip("-selection", "clipboard", "-o", "-t", mime, _out=buf)
+            data = buf.getvalue()
+            if data:
+                return (mime, data)
+        except sh.ErrorReturnCode:
+            continue
+    return None
+
+
+def read_clipboard_text() -> str | None:
+    """Read text from the system clipboard via xclip."""
+    try:
+        text = str(_xclip("-selection", "clipboard", "-o"))
+        return text if text else None
+    except (sh.ErrorReturnCode, sh.CommandNotFound):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +425,44 @@ def chat_cmd(
 # ---------------------------------------------------------------------------
 
 
-_PROMPT = "\033[1;34m❯\033[0m "  # bold blue ❯
+class _Interrupted(Exception):
+    """Raised when the user interrupts response collection via Ctrl-C."""
+
+
+async def _collect_interruptible(
+    client: "ClaudeSDKClient",
+    collector: "ResponseCollector",
+    console: "Console",
+) -> "ResultMessage":
+    """Collect response with Ctrl-C -> client.interrupt() support.
+
+    First Ctrl-C sends an interrupt signal to the CLI (graceful stop).
+    Second Ctrl-C cancels the collection task (force stop).
+    """
+    loop = asyncio.get_running_loop()
+    interrupt_count = 0
+
+    async def do_collect() -> "ResultMessage":
+        return await collector.collect(client)
+
+    collect_task = asyncio.create_task(do_collect())
+
+    def on_sigint() -> None:
+        nonlocal interrupt_count
+        interrupt_count += 1
+        if interrupt_count == 1:
+            console.print("\n  [dim]interrupting...[/dim]")
+            asyncio.ensure_future(client.interrupt())
+        else:
+            collect_task.cancel()
+
+    loop.add_signal_handler(signal.SIGINT, on_sigint)
+    try:
+        return await collect_task
+    except asyncio.CancelledError:
+        raise _Interrupted from None
+    finally:
+        loop.remove_signal_handler(signal.SIGINT)
 
 
 async def _repl(
@@ -390,11 +474,18 @@ async def _repl(
     """Run the interactive REPL loop."""
     from contextlib import AsyncExitStack
 
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import WordCompleter
+    from prompt_toolkit.formatted_text import FormattedText
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.styles import Style as PTStyle
     from rich.console import Console
     from rich.panel import Panel
 
-    from lup.lib import build_client, ResponseCollector
+    from lup.lib import build_client, ResponseCollector, save_images
     from lup.lib.mcp import create_mcp_server, extract_sdk_tools
+    from lup.lib.paths import project_root
 
     console = Console(highlight=False)
     effective_model = model or settings.model
@@ -433,11 +524,78 @@ async def _repl(
                 panel_lines.append(f"[dim]{branch}[/dim] {t['sdk_tool'].name}")
     else:
         panel_lines.append("[dim]no tools[/dim]")
-    panel_lines += ["", "[dim]/quit to exit · Ctrl-C to stop[/dim]"]
+    panel_lines += ["", "[dim]/quit · Ctrl-C stop · Ctrl-V paste image · Alt+Enter newline[/dim]"]
 
     console.print()
     console.print(Panel("\n".join(panel_lines), border_style="blue", width=60))
     console.print()
+
+    # -- prompt_toolkit session --
+    session_cost = 0.0
+    pending_images: list[tuple[str, bytes]] = []
+
+    def rprompt() -> FormattedText:
+        parts = [effective_model]
+        if pending_images:
+            n = len(pending_images)
+            parts.append(f"{n} img{'s' if n > 1 else ''}")
+        if session_cost:
+            parts.append(f"${session_cost:.4f}")
+        return FormattedText([("class:rprompt", " · ".join(parts))])
+
+    history_dir = project_root() / ".lup"
+    history_dir.mkdir(parents=True, exist_ok=True)
+
+    # Key bindings: Enter submits, Alt+Enter inserts newline
+    kb = KeyBindings()
+
+    @kb.add("escape", "enter")  # Alt+Enter or Esc then Enter
+    def newline_binding(event: object) -> None:
+        from prompt_toolkit.key_binding import KeyPressEvent
+
+        assert isinstance(event, KeyPressEvent)
+        event.current_buffer.newline()
+
+    @kb.add("enter")
+    def submit_binding(event: object) -> None:
+        from prompt_toolkit.key_binding import KeyPressEvent
+
+        assert isinstance(event, KeyPressEvent)
+        event.current_buffer.validate_and_handle()
+
+    @kb.add("c-v")
+    @kb.add("c-s-v")
+    def paste_binding(event: object) -> None:
+        from prompt_toolkit.key_binding import KeyPressEvent
+
+        assert isinstance(event, KeyPressEvent)
+        result = read_clipboard_image()
+        if result is not None:
+            pending_images.append(result)
+            n = len(pending_images)
+            console.print(f"[dim]{n} image{'s' if n > 1 else ''} attached (/drop to clear)[/dim]")
+        else:
+            text = read_clipboard_text()
+            if text:
+                event.current_buffer.insert_text(text)
+
+    pt_session: PromptSession[str] = PromptSession(
+        message=FormattedText([("class:prompt", "❯ ")]),
+        rprompt=rprompt,
+        style=PTStyle.from_dict({
+            "prompt": "fg:ansiblue bold",
+            "prompt-continuation": "fg:ansiblue",
+            "rprompt": "fg:#666666",
+        }),
+        history=FileHistory(str(history_dir / "repl_history")),
+        completer=WordCompleter(
+            ["/quit", "/exit", "/q", "/help", "/drop"],
+            sentence=True,
+        ),
+        key_bindings=kb,
+        multiline=True,
+        prompt_continuation=FormattedText([("class:prompt-continuation", "··· ")]),
+    )
 
     try:
         async with stack:
@@ -449,41 +607,72 @@ async def _repl(
                 mcp_servers=mcp_servers if mcp_servers else None,
                 agents=get_subagents(),
             ) as client:
+                last_input_sigint = 0.0
+
                 while True:
                     try:
-                        user_input = await asyncio.to_thread(input, _PROMPT)
-                    except (EOFError, KeyboardInterrupt, asyncio.CancelledError):
+                        user_input = await pt_session.prompt_async()
+                    except (EOFError, asyncio.CancelledError):
                         console.print()
                         break
+                    except KeyboardInterrupt:
+                        now = time.monotonic()
+                        if now - last_input_sigint < 2.0:
+                            console.print()
+                            break
+                        last_input_sigint = now
+                        console.print(
+                            "[dim]Press Ctrl-C again to exit[/dim]"
+                        )
+                        continue
 
+                    last_input_sigint = 0.0
                     stripped = user_input.strip()
                     if not stripped:
                         continue
                     if stripped in ("/quit", "/exit", "/q"):
                         break
+                    if stripped == "/drop":
+                        pending_images.clear()
+                        console.print("[dim]images cleared[/dim]")
+                        continue
 
-                    await client.query(user_input)
+                    console.print("[dim]thinking...[/dim]")
+                    if pending_images:
+                        images_dir = project_root() / ".lup" / "images"
+                        saved = save_images(pending_images, images_dir)
+                        path_list = ", ".join(str(p) for p in saved)
+                        query_text = (stripped + "\n\n" if stripped else "") + (
+                            f"[image attached: {path_list}]"
+                        )
+                        await client.query(query_text)
+                        pending_images.clear()
+                    else:
+                        await client.query(user_input)
                     collector = ResponseCollector(spaced=True)
                     try:
-                        result = await collector.collect(client)
+                        result = await _collect_interruptible(
+                            client, collector, console,
+                        )
                         parts: list[str] = []
                         if result.duration_ms:
                             secs = result.duration_ms / 1000
                             parts.append(f"{secs:.1f}s")
                         if result.total_cost_usd:
+                            session_cost += result.total_cost_usd
                             parts.append(f"${result.total_cost_usd:.4f}")
                         if parts:
                             console.print(
                                 f"  [dim]{' · '.join(parts)}[/dim]"
                             )
                         console.print()
+                    except _Interrupted:
+                        console.print("  [dim]interrupted[/dim]\n")
                     except RuntimeError as e:
-                        console.print(f"  [red]error:[/red] {e}")
-                        console.print()
-                    except KeyboardInterrupt:
-                        console.print()
-                        break
+                        console.print(f"  [red]error:[/red] {e}\n")
     except KeyboardInterrupt:
+        # Additional Ctrl+C during cleanup — containers will be cleaned
+        # on next start via stale container removal
         pass
 
 
