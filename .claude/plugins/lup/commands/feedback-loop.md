@@ -1,9 +1,111 @@
 ---
 allowed-tools: Bash, Read, Grep, Glob, Edit, Write, Task, WebSearch, AskUserQuestion
 description: Analyze sessions and improve the agent based on feedback and process quality
+argument-hint: [optional: paste a trace, reflection, or output for single-trace analysis]
 ---
 
 # Feedback Loop: Three Levels of Analysis
+
+## Single-Trace Mode
+
+**If the user pasted trace content as an argument**: $ARGUMENTS
+
+When trace content is provided, run a focused single-trace deep analysis instead of the full multi-session feedback loop. This mode analyzes one session in depth for tool use quality, reasoning soundness, workflow effectiveness, and pipeline health.
+
+### Step 1: Orient
+
+Read the pasted content and establish context:
+
+- **Task**: What was the agent trying to do?
+- **Agent version**: From metadata or version directory path
+- **Duration**: How long did the session take?
+- **Outcome**: What did the agent produce?
+
+State this context in 3-4 lines at the top of your report.
+
+### Step 2: Tool Use Audit
+
+Go through every tool call in the trace:
+
+**2a. Tool Call Inventory** — List every tool call with: tool name, what the agent was trying to learn, whether it succeeded, whether the result was useful.
+
+**2b. Tool Errors and Failures** — For each failed tool call: (1) what happened (quote the error), (2) why it failed (read the relevant tool in `src/lup/agent/tools/` to understand the failure mode), (3) was the agent's recovery reasonable, (4) is this a known issue or new bug (grep for the error pattern).
+
+**2c. Subtle Tool Bugs** — Cases where a tool *succeeded* but returned misleading or incomplete data. Search results that missed obvious sources, API data that was stale, tool results the agent misinterpreted.
+
+**2d. Missing Tool Calls** — Tools the agent *should* have called but didn't. Check against available tools in `src/lup/agent/tools/`.
+
+### Step 3: Workflow Assessment
+
+**3a. Information Gathering** — Did the agent gather enough evidence? Triangulate across sources? Front-load research or jump to conclusions early?
+
+**3b. Structured Reasoning** — Did the agent decompose the problem? Identify and weigh uncertainties? Consider base rates or priors?
+
+**3c. Self-Correction** — Did the agent update its view on new evidence? Flag its own uncertainty honestly?
+
+**3d. Efficiency** — Wasted tool calls? Proportional effort on important vs. trivial factors?
+
+### Step 4: Pipeline Health
+
+System-level problems separate from the agent's reasoning:
+
+- MCP connection issues (tools timing out, empty results)
+- Token/context pressure (reasoning truncated, limits hit)
+- Prompt issues (agent confused by instructions, didn't follow system prompt)
+- Hook behavior (permission hooks blocking valid operations)
+
+When you spot a pipeline issue, read the relevant source code (`src/lup/agent/core.py`, `src/lup/agent/prompts.py`, etc.).
+
+### Step 5: Report
+
+```markdown
+## Trace Review: [Task Description]
+
+**Context**: [task type] | [agent version] | [duration] | [outcome]
+
+### Tool Use
+- **Calls**: N total (N succeeded, N failed, N low-value)
+- **Errors**: [list each with brief explanation]
+- **Subtle issues**: [tools that succeeded but returned questionable data]
+- **Missing**: [tools the agent should have used]
+
+### Workflow
+- **Information gathering**: [adequate / rushed / thorough but unfocused]
+- **Structure**: [well-decomposed / ad-hoc / overly complex]
+- **Self-correction**: [evidence of updating views, or lack thereof]
+- **Efficiency**: [good / wasted N calls on X]
+
+### Reasoning
+- **Strengths**: [what the agent got right]
+- **Weaknesses**: [logical gaps, missed evidence, calibration issues]
+
+### Pipeline
+- **Issues found**: [system-level problems, or "none"]
+- **Source code investigation**: [what was found in src/ for each issue]
+
+### Bugs Found
+[For each bug — what happened, which source file, what the fix would be]
+
+### Actionable Takeaways
+1. [Most important finding — what to fix or improve]
+2. [Second priority]
+3. [Third priority]
+```
+
+### Rules
+
+- **Start from the trace.** Read every line of the pasted content before reaching for source code.
+- **Dig into source code only when the trace gives you a reason.** A tool error, a suspicious result, a pipeline hiccup — these warrant reading `src/`. Don't read source code preemptively.
+- **Quote the trace.** When you identify an issue, quote the exact lines that show it.
+- **Be specific about bugs.** "The search tool had issues" is useless. "web_search returned 0 results for query X — checking src/lup/agent/tools/example.py, the query is passed without filtering" is useful.
+- **Distinguish agent issues from system issues.** A bad search query is the agent's fault. A tool returning an error is a pipeline issue.
+- **Ask when the trace is ambiguous.** Use AskUserQuestion rather than guessing.
+
+**After completing single-trace analysis, stop.** Do not proceed to the full multi-session feedback loop below unless the user asks.
+
+---
+
+## Full Multi-Session Feedback Loop
 
 The feedback loop operates at three levels. Be clear about which level you're working at:
 
