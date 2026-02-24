@@ -16,12 +16,85 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, overload
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ContentBlock
+from claude_agent_sdk.types import AssistantMessage, ResultMessage, SystemMessage, UserMessage
 from pydantic import BaseModel
 
-from lup.lib.trace import ResponseCollector, TraceLogger
+from lup.lib.trace import TraceLogger, print_block
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Response collector — reusable "call SDK, iterate blocks, print+log" pattern
+# ---------------------------------------------------------------------------
+
+
+class ResponseCollector:
+    """Collects, displays, and logs agent response messages.
+
+    Encapsulates the common pattern of iterating over SDK response messages,
+    printing and logging each content block, and collecting text and messages
+    for post-processing.
+
+    Usage::
+
+        collector = ResponseCollector(trace_logger=trace_logger)
+        result = await collector.collect(client)
+        # Access collector.assistant_messages, collector.collected_text, etc.
+    """
+
+    def __init__(
+        self,
+        trace_logger: TraceLogger | None = None,
+        prefix: str = "",
+        spaced: bool = False,
+    ) -> None:
+        self.blocks: list[ContentBlock] = []
+        self.messages: list[AssistantMessage | UserMessage] = []
+        self.result: ResultMessage | None = None
+        self._trace_logger = trace_logger
+        self._prefix = prefix
+        self._spaced = spaced
+
+    def handle_block(self, block: ContentBlock) -> None:
+        """Print, log, and collect a single content block."""
+        self.blocks.append(block)
+        print_block(block, prefix=self._prefix)
+        if self._spaced:
+            print()
+        if self._trace_logger:
+            self._trace_logger.log_block(block)
+
+    async def collect(self, client: ClaudeSDKClient) -> ResultMessage:
+        """Iterate response, print+log blocks, and return the result.
+
+        Raises:
+            RuntimeError: If the agent returns an error or no result.
+        """
+        async for message in client.receive_response():
+            match message:
+                case AssistantMessage():
+                    self.messages.append(message)
+                    for block in message.content:
+                        self.handle_block(block)
+
+                case ResultMessage():
+                    self.result = message
+                    if message.is_error:
+                        raise RuntimeError(f"Agent error: {message.result}")
+
+                case SystemMessage():
+                    logger.info("System [%s]: %s", message.subtype, message.data)
+
+                case UserMessage():
+                    self.messages.append(message)
+                    if isinstance(message.content, list):
+                        for block in message.content:
+                            self.handle_block(block)
+
+        if self.result is None:
+            raise RuntimeError("No result received from agent")
+        return self.result
 
 
 @asynccontextmanager
@@ -159,3 +232,4 @@ def save_images(
             path.write_bytes(data)
         paths.append(path)
     return paths
+

@@ -19,7 +19,7 @@ Modules:
 - sandbox: Docker-based Python sandbox for isolated code execution
 """
 
-from lup.lib.client import build_client, one_shot, run_query, save_images
+from lup.lib.client import build_client, one_shot, run_query, save_images, ResponseCollector
 from lup.lib.history import (
     format_history_for_context,
     get_latest_session_json,
@@ -74,7 +74,6 @@ from lup.lib.sandbox import (
     SandboxNotInitializedError,
 )
 from lup.lib.trace import (
-    ResponseCollector,
     TraceEntry,
     TraceLogger,
     format_block_markdown,
