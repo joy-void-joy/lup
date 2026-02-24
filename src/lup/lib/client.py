@@ -1,31 +1,54 @@
-"""Centralized Agent SDK client creation.
+"""Centralized Agent SDK client creation and response collection.
 
 All Agent SDK client construction goes through this module to ensure
 consistent defaults (session persistence disabled for sub-agent calls).
 
-Three exports:
-- build_client(**kwargs) — AsyncContextManager[ClaudeSDKClient] with defaults
+Exports:
+- ResponseCollector — reusable "iterate, print, log, collect" pattern
+- build_client() — AsyncContextManager[ClaudeSDKClient] with defaults
 - run_query(prompt, ...) — query + collect in one call, returns ResponseCollector
 - one_shot(prompt, ...) — prompt->result convenience for tool-free LLM calls
 """
 
-import hashlib
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, overload
+from typing import Literal, overload
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ContentBlock
-from claude_agent_sdk.types import AssistantMessage, ResultMessage, SystemMessage, UserMessage
+from claude_agent_sdk.types import (
+    AgentDefinition,
+    AssistantMessage,
+    HookEvent,
+    HookMatcher,
+    McpServerConfig,
+    ResultMessage,
+    SystemMessage,
+    SystemPromptPreset,
+    ToolsPreset,
+    UserMessage,
+)
 from pydantic import BaseModel
 
 from lup.lib.trace import TraceLogger, print_block
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
-# Response collector — reusable "call SDK, iterate blocks, print+log" pattern
+# Output format types
+# ---------------------------------------------------------------------------
+
+JsonSchema = dict[str, object]
+"""Type alias for JSON Schema payloads (from ``BaseModel.model_json_schema()``)."""
+
+OutputFormat = dict[str, str | JsonSchema]
+"""SDK output format dict (e.g. ``{"type": "json_schema", "schema": ...}``)."""
+
+
+# ---------------------------------------------------------------------------
+# Response collector
 # ---------------------------------------------------------------------------
 
 
@@ -33,14 +56,20 @@ class ResponseCollector:
     """Collects, displays, and logs agent response messages.
 
     Encapsulates the common pattern of iterating over SDK response messages,
-    printing and logging each content block, and collecting text and messages
-    for post-processing.
+    printing and logging each content block, and collecting results for
+    post-processing.
+
+    ``blocks`` contains only assistant-produced content blocks.  Tool result
+    blocks are collected separately in ``tool_results``.
 
     Usage::
 
         collector = ResponseCollector(trace_logger=trace_logger)
         result = await collector.collect(client)
-        # Access collector.assistant_messages, collector.collected_text, etc.
+        # collector.blocks       — assistant content blocks
+        # collector.tool_results — user/tool-result content blocks
+        # collector.messages     — all assistant + user messages in order
+        # collector.result       — the final ResultMessage
     """
 
     def __init__(
@@ -50,23 +79,26 @@ class ResponseCollector:
         spaced: bool = False,
     ) -> None:
         self.blocks: list[ContentBlock] = []
+        self.tool_results: list[ContentBlock] = []
         self.messages: list[AssistantMessage | UserMessage] = []
         self.result: ResultMessage | None = None
-        self._trace_logger = trace_logger
-        self._prefix = prefix
-        self._spaced = spaced
+        self.trace_logger = trace_logger
+        self.prefix = prefix
+        self.spaced = spaced
 
-    def handle_block(self, block: ContentBlock) -> None:
-        """Print, log, and collect a single content block."""
-        self.blocks.append(block)
-        print_block(block, prefix=self._prefix)
-        if self._spaced:
+    def display_block(self, block: ContentBlock) -> None:
+        """Print, log, and optionally trace a content block."""
+        print_block(block, prefix=self.prefix)
+        if self.spaced:
             print()
-        if self._trace_logger:
-            self._trace_logger.log_block(block)
+        if self.trace_logger:
+            self.trace_logger.log_block(block)
 
     async def collect(self, client: ClaudeSDKClient) -> ResultMessage:
         """Iterate response, print+log blocks, and return the result.
+
+        Assistant blocks go into ``self.blocks``.  User message blocks
+        (tool results) are displayed but kept in ``self.tool_results``.
 
         Raises:
             RuntimeError: If the agent returns an error or no result.
@@ -76,7 +108,8 @@ class ResponseCollector:
                 case AssistantMessage():
                     self.messages.append(message)
                     for block in message.content:
-                        self.handle_block(block)
+                        self.blocks.append(block)
+                        self.display_block(block)
 
                 case ResultMessage():
                     self.result = message
@@ -90,36 +123,72 @@ class ResponseCollector:
                     self.messages.append(message)
                     if isinstance(message.content, list):
                         for block in message.content:
-                            self.handle_block(block)
+                            self.tool_results.append(block)
+                            self.display_block(block)
 
         if self.result is None:
             raise RuntimeError("No result received from agent")
         return self.result
 
 
+# ---------------------------------------------------------------------------
+# Client construction
+# ---------------------------------------------------------------------------
+
+
 @asynccontextmanager
 async def build_client(
-    # **kwargs: Any is intentional — forwarding to the typed ClaudeAgentOptions
-    # constructor. Python has no better typing for this pattern.
     *,
     options: ClaudeAgentOptions | None = None,
-    **kwargs: Any,
+    model: str | None = None,
+    system_prompt: str | SystemPromptPreset | None = None,
+    tools: list[str] | ToolsPreset | None = None,
+    allowed_tools: list[str] | None = None,
+    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"] | None = None,
+    mcp_servers: dict[str, McpServerConfig] | str | Path | None = None,
+    agents: dict[str, AgentDefinition] | None = None,
+    max_thinking_tokens: int | None = None,
+    max_turns: int | None = None,
+    max_budget_usd: float | None = None,
+    output_format: OutputFormat | None = None,
+    extra_args: dict[str, str | None] | None = None,
+    hooks: dict[HookEvent, list[HookMatcher]] | None = None,
 ) -> AsyncIterator[ClaudeSDKClient]:
     """Return a configured ClaudeSDKClient with project-wide defaults.
 
-    Pass either ``options`` (pre-built) or keyword arguments for
-    ClaudeAgentOptions (not both).
-
-    When using kwargs, always injects (caller wins on conflict):
-    - extra_args={"no-session-persistence": None}
+    Pass ``options`` (pre-built) to use as-is, or keyword arguments to
+    construct ClaudeAgentOptions.  When using keyword arguments, always
+    injects ``no-session-persistence`` into extra_args (caller wins on
+    conflict).
     """
     if options is None:
-        caller_extra: dict[str, object] = kwargs.pop("extra_args", None) or {}
-        merged_extra = {"no-session-persistence": None, **caller_extra}
-        options = ClaudeAgentOptions(extra_args=merged_extra, **kwargs)
+        merged_extra: dict[str, str | None] = {
+            "no-session-persistence": None,
+            **(extra_args or {}),
+        }
+        options = ClaudeAgentOptions(
+            model=model,
+            system_prompt=system_prompt,
+            tools=tools,
+            allowed_tools=allowed_tools if allowed_tools is not None else [],
+            permission_mode=permission_mode,
+            mcp_servers=mcp_servers if mcp_servers is not None else {},
+            agents=agents,
+            max_thinking_tokens=max_thinking_tokens,
+            max_turns=max_turns,
+            max_budget_usd=max_budget_usd,
+            output_format=output_format,
+            extra_args=merged_extra,
+            hooks=hooks,
+        )
 
     async with ClaudeSDKClient(options=options) as client:
         yield client
+
+
+# ---------------------------------------------------------------------------
+# Query helpers
+# ---------------------------------------------------------------------------
 
 
 async def run_query(
@@ -128,18 +197,45 @@ async def run_query(
     options: ClaudeAgentOptions | None = None,
     prefix: str = "",
     trace_logger: TraceLogger | None = None,
-    **kwargs: Any,
+    model: str | None = None,
+    system_prompt: str | SystemPromptPreset | None = None,
+    tools: list[str] | ToolsPreset | None = None,
+    allowed_tools: list[str] | None = None,
+    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"] | None = None,
+    mcp_servers: dict[str, McpServerConfig] | str | Path | None = None,
+    agents: dict[str, AgentDefinition] | None = None,
+    max_thinking_tokens: int | None = None,
+    max_turns: int | None = None,
+    max_budget_usd: float | None = None,
+    output_format: OutputFormat | None = None,
+    extra_args: dict[str, str | None] | None = None,
+    hooks: dict[HookEvent, list[HookMatcher]] | None = None,
 ) -> ResponseCollector:
     """Query an SDK client and collect the full response.
 
     Combines build_client + query + ResponseCollector.collect into a
-    single call. Pass either ``options`` or keyword arguments for
+    single call.  Pass either ``options`` or keyword arguments for
     ClaudeAgentOptions.
 
     Returns the ResponseCollector with .result, .blocks, .messages.
     """
     collector = ResponseCollector(prefix=prefix, trace_logger=trace_logger)
-    async with build_client(options=options, **kwargs) as client:
+    async with build_client(
+        options=options,
+        model=model,
+        system_prompt=system_prompt,
+        tools=tools,
+        allowed_tools=allowed_tools,
+        permission_mode=permission_mode,
+        mcp_servers=mcp_servers,
+        agents=agents,
+        max_thinking_tokens=max_thinking_tokens,
+        max_turns=max_turns,
+        max_budget_usd=max_budget_usd,
+        output_format=output_format,
+        extra_args=extra_args,
+        hooks=hooks,
+    ) as client:
         await client.query(prompt)
         await collector.collect(client)
     return collector
@@ -179,9 +275,9 @@ async def one_shot(
     Without output_type: returns the text result (str).
     With output_type: returns a validated Pydantic model from structured output.
     """
-    extra_kwargs: dict[str, Any] = {}
+    output_format: OutputFormat | None = None
     if output_type is not None:
-        extra_kwargs["output_format"] = {
+        output_format = {
             "type": "json_schema",
             "schema": output_type.model_json_schema(),
         }
@@ -192,44 +288,13 @@ async def one_shot(
         model=model,
         system_prompt=system_prompt,
         allowed_tools=[],
-        **extra_kwargs,
+        output_format=output_format,
     )
-    result = collector.result
-    if result is None:
-        return None
 
-    if output_type is not None and result.structured_output:
-        return output_type.model_validate(result.structured_output)
+    if collector.result is None:
+        return None
+    if output_type is not None and collector.result.structured_output:
+        return output_type.model_validate(collector.result.structured_output)
     if output_type is not None:
         return None
-    return result.result
-
-
-MIME_TO_EXT: dict[str, str] = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-}
-
-
-def save_images(
-    images: Sequence[tuple[str, bytes]],
-    images_dir: Path,
-) -> list[Path]:
-    """Save raw image data to disk, returning the written paths.
-
-    Files are named by a short content hash to avoid duplicates.
-    The directory is created if it doesn't exist.
-    """
-    images_dir.mkdir(parents=True, exist_ok=True)
-    paths: list[Path] = []
-    for media_type, data in images:
-        ext = MIME_TO_EXT.get(media_type, ".bin")
-        name = hashlib.sha256(data).hexdigest()[:12] + ext
-        path = images_dir / name
-        if not path.exists():
-            path.write_bytes(data)
-        paths.append(path)
-    return paths
-
+    return collector.result.result

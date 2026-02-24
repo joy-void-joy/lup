@@ -5,7 +5,8 @@ out of the box and are configured through function arguments — never
 by modifying the source. Domain-specific code belongs in lup.agent.
 
 Modules:
-- client: Centralized Agent SDK client creation (build_client, run_query, one_shot)
+- client: Agent SDK client creation and response collection
+- images: Image persistence utilities (save_images)
 - history: Session history storage and retrieval (generic, model-agnostic)
 - hooks: Claude Agent SDK hook utilities (permission, nudge, capture)
 - metrics: Tool call tracking with @tracked decorator
@@ -19,7 +20,14 @@ Modules:
 - sandbox: Docker-based Python sandbox for isolated code execution
 """
 
-from lup.lib.client import build_client, one_shot, run_query, save_images, ResponseCollector
+from lup.lib.client import (
+    OutputFormat,
+    ResponseCollector,
+    build_client,
+    one_shot,
+    run_query,
+)
+from lup.lib.images import save_images
 from lup.lib.history import (
     format_history_for_context,
     get_latest_session_json,
@@ -85,9 +93,12 @@ from lup.lib.trace import (
 
 __all__ = [
     # Client
+    "OutputFormat",
+    "ResponseCollector",
     "build_client",
     "one_shot",
     "run_query",
+    # Images
     "save_images",
     # History
     "format_history_for_context",
@@ -146,7 +157,6 @@ __all__ = [
     "Sandbox",
     "SandboxNotInitializedError",
     # Trace
-    "ResponseCollector",
     "TraceEntry",
     "TraceLogger",
     "format_block_markdown",
