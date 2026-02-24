@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from claude_agent_sdk import ClaudeSDKClient
     from claude_agent_sdk.types import ResultMessage
 
-    from lup.lib.trace import ResponseCollector
+    from lup.lib.client import ResponseCollector
 
 import sh
 import typer
@@ -483,6 +483,8 @@ async def _repl(
     from rich.console import Console
     from rich.panel import Panel
 
+    from claude_agent_sdk.types import McpServerConfig
+
     from lup.lib import build_client, ResponseCollector, save_images
     from lup.lib.mcp import create_mcp_server, extract_sdk_tools
     from lup.lib.paths import project_root
@@ -490,7 +492,7 @@ async def _repl(
     console = Console(highlight=False)
     effective_model = model or settings.model
 
-    mcp_servers: dict[str, object] = {}
+    mcp_servers: dict[str, McpServerConfig] = {}
     stack = AsyncExitStack()
 
     if not no_tools:
