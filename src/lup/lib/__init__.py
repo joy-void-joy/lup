@@ -88,6 +88,7 @@ from lup.lib.trace import (
     format_tool_result,
     normalize_content,
     print_block,
+    print_message,
     truncate_content,
 )
 
@@ -163,5 +164,6 @@ __all__ = [
     "format_tool_result",
     "normalize_content",
     "print_block",
+    "print_message",
     "truncate_content",
 ]

@@ -20,10 +20,8 @@ from rich.console import Console
 
 from claude_agent_sdk import (
     AssistantMessage,
-    ClaudeSDKClient,
     ContentBlock,
-    ResultMessage,
-    SystemMessage,
+    Message,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
@@ -162,17 +160,17 @@ def extract_block_info(block: ContentBlock) -> BlockInfo:
 # ---------------------------------------------------------------------------
 
 
-def print_block(block: ContentBlock, prefix: str = "") -> None:
+def print_block(
+    block: ContentBlock,
+    prefix: str = "",
+    trace_logger: "TraceLogger | None" = None,
+) -> None:
     """Print a content block with color-coded tool use/result pairing.
 
     ToolUseBlock and ToolResultBlock are linked by color: when a tool use
     is printed, its ID is assigned a color from a rotating palette. When
     the corresponding result arrives, the same color is used, making it
     easy to visually pair them.
-
-    Args:
-        block: A ContentBlock from the Claude Agent SDK.
-        prefix: Optional prefix for visual nesting.
     """
     match block:
         case ThinkingBlock():
@@ -210,6 +208,27 @@ def print_block(block: ContentBlock, prefix: str = "") -> None:
         case _:
             print(f"{prefix}❓ {type(block).__name__}: {block}")
             stream_log.info("%sUNKNOWN: %s: %s", prefix, type(block).__name__, block)
+
+    if trace_logger:
+        trace_logger.log_block(block)
+
+
+def print_message(
+    message: Message,
+    prefix: str = "",
+    trace_logger: "TraceLogger | None" = None,
+) -> None:
+    """Print all content blocks in a message and optionally trace-log them.
+
+    Handles AssistantMessage and UserMessage (which carry content blocks).
+    Other message types (SystemMessage, ResultMessage, StreamEvent) are
+    silently ignored.
+    """
+    match message:
+        case AssistantMessage() | UserMessage():
+            blocks = message.content if isinstance(message.content, list) else []
+            for block in blocks:
+                print_block(block, prefix=prefix, trace_logger=trace_logger)
 
 
 # ---------------------------------------------------------------------------
