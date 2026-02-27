@@ -43,7 +43,10 @@ from typing import TypedDict, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.lib.hooks import HooksConfig
+from claude_agent_sdk import HookInput, HookMatcher
+from claude_agent_sdk.types import HookContext, SyncHookJSONOutput
+
+from lup.lib.hooks import HooksConfig, block_hook_output
 from lup.lib.reflect import ReflectionGate
 
 logger = logging.getLogger(__name__)
@@ -474,8 +477,6 @@ def create_stop_guard() -> HooksConfig:
 
         hooks = merge_hooks(permission_hooks, create_stop_guard())
     """
-    from claude_agent_sdk import HookInput, HookMatcher
-    from claude_agent_sdk.types import HookContext, SyncHookJSONOutput
 
     async def stop_guard(
         input_data: HookInput,
@@ -486,9 +487,8 @@ def create_stop_guard() -> HooksConfig:
             return SyncHookJSONOutput()
         if input_data["stop_hook_active"]:
             return SyncHookJSONOutput()
-        return SyncHookJSONOutput(
-            decision="block",
-            reason="You cannot end your turn. Use sleep to pause between turns.",
+        return block_hook_output(
+            "You cannot end your turn. Use sleep to pause between turns."
         )
 
     return cast(
@@ -517,9 +517,6 @@ def create_pending_event_guard(
     Returns:
         HooksConfig with PreToolUse hooks.
     """
-    from claude_agent_sdk import HookInput, HookMatcher
-    from claude_agent_sdk.types import HookContext, SyncHookJSONOutput
-
     async def event_guard(
         input_data: HookInput,
         _tool_use_id: str | None,
@@ -541,9 +538,8 @@ def create_pending_event_guard(
         if not unread:
             return SyncHookJSONOutput()
 
-        return SyncHookJSONOutput(
-            decision="block",
-            reason=(f"Blocked — {unread} unread event(s). Call context first."),
+        return block_hook_output(
+            f"Blocked — {unread} unread event(s). Call context first."
         )
 
     return cast(

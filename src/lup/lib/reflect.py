@@ -45,7 +45,7 @@ from typing import cast
 from claude_agent_sdk import HookInput, HookMatcher
 from claude_agent_sdk.types import HookContext, SyncHookJSONOutput
 
-from lup.lib.hooks import HooksConfig
+from lup.lib.hooks import HooksConfig, allow_hook_output, deny_hook_output
 
 
 class ReflectionGate:
@@ -113,19 +113,8 @@ def create_reflection_gate(
         _context: HookContext,
     ) -> SyncHookJSONOutput:
         if gate.reflected:
-            return SyncHookJSONOutput(
-                hookSpecificOutput={
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "allow",
-                }
-            )
-        return SyncHookJSONOutput(
-            hookSpecificOutput={
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": message,
-            }
-        )
+            return allow_hook_output()
+        return deny_hook_output(message)
 
     return cast(
         HooksConfig,

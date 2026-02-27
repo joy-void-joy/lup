@@ -2,6 +2,11 @@
 
 Provides composable hook primitives:
 
+Output helpers:
+- allow_hook_output() — PreToolUse allow decision
+- deny_hook_output() — PreToolUse deny decision
+- block_hook_output() — block decision (Stop or PreToolUse)
+
 PreToolUse hooks:
 - create_permission_hooks() — directory-based read/write access control
 - create_tool_allowlist_hook() — restrict agent to specific tools
@@ -95,6 +100,15 @@ def deny_hook_output(reason: str) -> SyncHookJSONOutput:
             "permissionDecisionReason": reason,
         }
     )
+
+
+def block_hook_output(reason: str) -> SyncHookJSONOutput:
+    """Create a block decision for Stop or PreToolUse hooks.
+
+    Unlike deny (which is PreToolUse-specific via hookSpecificOutput),
+    block uses the top-level ``decision`` field and works across hook types.
+    """
+    return SyncHookJSONOutput(decision="block", reason=reason)
 
 
 def create_permission_hooks(
