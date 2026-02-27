@@ -229,7 +229,7 @@ class ReplSession:
         self.client = client
         self.container = container
         self.environment = environment
-        self.sock: Any = None
+        self.sock: Any = None  # Docker exec socket — no typed API exported by SDK
         self.exec_id: str | None = None
 
     def start(self) -> None:
@@ -488,8 +488,10 @@ class Sandbox:
             self.run_pre_install()
 
         self.write_repl_script()
-        assert self.docker_client is not None
-        assert self.active_container is not None
+        if self.docker_client is None or self.active_container is None:
+            raise SandboxNotInitializedError(
+                "Docker client or container not available after start"
+            )
         self.repl = ReplSession(self.docker_client, self.active_container, {})
         self.repl.start()
 
