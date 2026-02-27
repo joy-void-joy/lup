@@ -20,6 +20,8 @@ Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manag
 - **Claude** = the meta-agent (Claude Code) that modifies the codebase, runs commands, and manages the development workflow
 - **Lup** = the SDK agent inside the code being built and improved — the agent that runs via the CLI and produces outputs
 
+"Lup" is the framework's name for the inner agent, not a project-specific term — it stays as "Lup" in all downstream projects. Only the Python package directory (`src/lup/`) gets renamed; all framework vocabulary (`lup_tool`, `LupMcpTool`, `lup-devtools`, `.lup/`, `lup-tools`, etc.) stays as `lup`.
+
 ### Key Concepts
 
 - **Lup Package** (`src/lup/`): All code for the self-improving agent.
@@ -401,6 +403,14 @@ The codebase should read as a **monolithic source of truth** — understandable 
 - If logic exists in `lib/`, import it. Don't copy-paste.
 - Utilities belong in `lib/`, not `agent/`. `agent/` imports from `lib/`.
 - **Placement test:** Can this module be used as-is without templating or source modification? If yes → `lib/`. Quick proxy: does it import from `agent/`?
+
+### Imports: No Barrel Files
+
+**Never use `__init__.py` re-exports or `__all__`.** Import directly from the module that defines the symbol.
+
+- `from lup.lib.mcp import lup_tool` — not `from lup.lib import lup_tool`
+- `__init__.py` files should contain only the module docstring (no imports, no `__all__`)
+- Barrel files drift out of sync and hide real dependencies
 
 ### Naming: No Private Prefixes
 

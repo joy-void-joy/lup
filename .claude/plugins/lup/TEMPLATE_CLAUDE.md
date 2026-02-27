@@ -30,7 +30,7 @@ Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manag
 - **Claude** = the meta-agent (Claude Code) that modifies the codebase, runs commands, and manages the development workflow
 - **Lup** = the SDK agent inside the code being built and improved — the agent that runs via the CLI and produces outputs
 
-When writing docs or prompts, use "Claude" when referring to the outer development agent and "Lup" (or your project name) when referring to the inner SDK agent.
+"Lup" is the framework's name for the inner agent, not a project-specific term. Use "Claude" when referring to the outer development agent and "Lup" when referring to the inner SDK agent, regardless of the project's package name.
 
 ### Important Context
 

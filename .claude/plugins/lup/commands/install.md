@@ -204,13 +204,26 @@ For each item being installed:
 3. **Write to the target repo** — create directories as needed
 4. **Never overwrite** existing files without asking (even in non-interactive mode, warn and skip)
 
+### Renaming Rules
+
+**Only Python import paths change** to match the target's package name. All framework vocabulary stays as `lup`:
+
+| Changes (adapt to target package) | Stays as `lup` (framework identity) |
+|---|---|
+| `from lup.*` → `from <target>.*` imports | `lup-devtools` CLI entry point name |
+| `src/lup/` → `src/<target>/` paths | `@lup_tool(...)`, `LupMcpTool` |
+| `pyproject.toml` package name | `.claude/plugins/lup/`, `lup@local` |
+| Main CLI entry point name | `.lup/` state directory |
+| Logger module paths | `lup-tools`, `lup-sandbox-*`, `lup-mcp-*` |
+| | Naming convention ("Lup" = inner agent) |
+
 ### Installation Order
 
 1. `.claude/plugins/lup/.claude-plugin/plugin.json`
 2. `.claude/plugins/lup/hooks/hooks.json` (only reference hooks being installed)
 3. `.claude/plugins/lup/hooks/scripts/` — adapted hook scripts
 4. `.claude/plugins/lup/commands/` — selected commands
-5. `src/<project>/devtools/` — devtools CLI skeleton (if Python target, adapt package name and entry point)
+5. `src/<project>/devtools/` — devtools CLI skeleton (if Python target, adapt import paths but keep `lup-devtools` as the CLI entry point name)
 6. `.claude/settings.json` — create or merge
 7. `.claude/CLAUDE.md` — section-level merge from TEMPLATE_CLAUDE.md (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
 8. **Initialize upstream sync**: Run `uv run lup-devtools sync mark-synced lup` to baseline the sync state so `/lup:update` only shows commits after installation

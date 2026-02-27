@@ -84,40 +84,53 @@ Let the conversation flow naturally. The goal is to understand the domain well e
 
 ## Phase 2: Rename Package
 
-Rename `src/lup/` to `src/<project>/` where `<project>` is the name from Phase 1.
+Rename the Python package from `lup` to `<project>`. **Only the package directory and its import paths change — all framework vocabulary stays as `lup`.**
 
-### Steps:
+### What changes (consequences of renaming the package):
 
 1. **Rename the directory**:
-
    ```bash
    git mv src/lup src/<project>
    ```
 
-2. **Update all Python imports** — find and replace across all files:
+2. **Update Python import statements** — only `from lup.*` and `import lup.*` lines:
    - `from lup.` → `from <project>.`
    - `import lup` → `import <project>`
-   - In source files under `src/<project>/`
-   - In test files under `tests/`
+   - In source files under `src/<project>/` and test files under `tests/`
 
 3. **Update `pyproject.toml`**:
-   - `name = "lup-template"` → `name = "<project>"`
-   - `[project.scripts]`: `lup = "lup.environment.cli.__main__:app"` → `<project> = "<project>.environment.cli.__main__:app"`
+   - Package name: `name = "lup-template"` → `name = "<project>"`
+   - Main CLI entry point: `lup = "lup.environment.cli.__main__:app"` → `<project> = "<project>.environment.cli.__main__:app"`
+   - Devtools import path only (name stays): `lup-devtools = "lup.devtools.main:app"` → `lup-devtools = "<project>.devtools.main:app"`
 
-4. **Update CLI** (`src/<project>/environment/cli/__main__.py`):
+4. **Update CLI app name** (`src/<project>/environment/cli/__main__.py`):
    - `app = typer.Typer(name="lup", ...)` → `name="<project>"`
 
-5. **Merge CLAUDE.md from template** — Perform a section-level merge using `TEMPLATE_CLAUDE.md` (located at `.claude/plugins/lup/TEMPLATE_CLAUDE.md`):
-   1. Read `TEMPLATE_CLAUDE.md` and replace all `<project>` placeholders with the actual project name
+5. **Update logger names** (they follow Python module paths):
+   - `"lup.agent.stream"` → `"<project>.agent.stream"`
+
+### What stays as `lup` (framework identity — do NOT rename):
+
+- `.claude/plugins/lup/` — plugin directory
+- `lup-devtools` — CLI entry point name (only the import path changes)
+- `@lup_tool(...)` — framework decorator
+- `LupMcpTool` — framework type
+- `lup-tools` — MCP server name
+- `lup-sandbox-*`, `lup-mcp-*` — container/tempfile prefixes
+- `.lup/` — framework state directory
+- `lup@local` — plugin identifier
+- Naming convention ("Lup" = the inner SDK agent)
+- `/lup:*` — command namespace
+
+### After renaming:
+
+6. **Merge CLAUDE.md from template** — Perform a section-level merge using `TEMPLATE_CLAUDE.md` (located at `.claude/plugins/lup/TEMPLATE_CLAUDE.md`):
+   1. Read `TEMPLATE_CLAUDE.md` and replace `<project>` placeholders with the actual project name
    2. Read the existing `.claude/CLAUDE.md`
    3. Use the `<!-- section: ... -->` markers in the template to identify independent merge units
    4. Compare sections: for each marked section, check if the existing CLAUDE.md already has that section (by heading match)
    5. Add missing sections from the template into the existing CLAUDE.md
    6. Leave existing sections untouched — don't overwrite content the project already has
-   7. Also do package-name replacements in the existing content: `src/lup/` → `src/<project>/`, `lup.agent` → `<project>.agent`, etc.
-
-6. **Update logger names** in `src/<project>/lib/trace.py`:
-   - `"lup.agent.stream"` → `"<project>.agent.stream"`
 
 7. **Initialize upstream sync**:
    ```bash
@@ -133,8 +146,6 @@ Rename `src/lup/` to `src/<project>/` where `<project>` is the name from Phase 1
    uv run pytest
    <project> --help
    ```
-
-**Important:** The plugin stays as `.claude/plugins/lup/` — that's the framework identity, not the project identity. Only the source package and pyproject.toml change.
 
 ## Phase 3: Generate Scaffolding
 

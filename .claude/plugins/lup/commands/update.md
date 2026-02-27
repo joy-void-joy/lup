@@ -115,8 +115,8 @@ For approved improvements:
 
 1. Read the full changed files in both repos to understand context
 2. Apply the changes, adapting as needed:
-   - Rename domain-specific identifiers to match the current project
-   - Adjust import paths (the upstream might use a different package name)
+   - Adapt Python import paths between upstream and current project package names (`from lup.*` ↔ `from <project>.*`)
+   - Framework vocabulary stays as `lup` in both directions — do not rename `lup_tool`, `LupMcpTool`, `lup-devtools`, `.lup/`, `lup-tools`, `lup-sandbox-*`, etc.
    - Keep the current project's coding conventions
 3. **Wire new utilities into consumers.** When porting a library function (e.g., a helper in `lib/`), don't stop at the function itself — also wire it into the devtools commands, hooks, or agents that should use it. A utility without consumers is dead code.
 4. Run verification after applying:
