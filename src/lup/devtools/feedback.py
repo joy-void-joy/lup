@@ -221,7 +221,7 @@ def collect(
 
     if output is None:
         feedback_path().mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         output = feedback_path() / f"{timestamp}_metrics.json"
 
     output.parent.mkdir(parents=True, exist_ok=True)
