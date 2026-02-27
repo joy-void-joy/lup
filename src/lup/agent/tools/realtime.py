@@ -150,7 +150,7 @@ def create_realtime_tools(
         for item in inp.messages:
             cumulative_delay += item.delay_seconds
             if cumulative_delay == 0:
-                await scheduler._on_action(item.message)
+                await scheduler.send_action(item.message)
                 sent += 1
             else:
                 scheduler.add_delayed_action(item.message, cumulative_delay)

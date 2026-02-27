@@ -8,7 +8,6 @@ Import directly from submodules (e.g., ``from lup.lib.mcp import lup_tool``).
 
 Modules:
 - client: Agent SDK client creation and response collection
-- images: Image persistence utilities (save_images)
 - history: Session history storage and retrieval (generic, model-agnostic)
 - hooks: Claude Agent SDK hook utilities (permission, nudge, capture)
 - metrics: Tool call tracking with @tracked decorator

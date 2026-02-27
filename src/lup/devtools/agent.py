@@ -5,9 +5,21 @@ Commands:
 - serve-tools: Start SDK tools as an MCP stdio server (used by ``chat``)
 - chat: Launch an interactive ``claude`` session with the agent's tools and prompt
 - repl: Interactive REPL with the agent via the SDK (continuous session)
+
+Examples::
+
+    $ uv run lup-devtools agent inspect
+    $ uv run lup-devtools agent inspect --json
+    $ uv run lup-devtools agent inspect --full
+    $ uv run lup-devtools agent chat
+    $ uv run lup-devtools agent chat --model opus --no-tools
+    $ uv run lup-devtools agent repl
+    $ uv run lup-devtools agent repl --model sonnet --no-prompt
+    $ uv run lup-devtools agent serve-tools
 """
 
 import asyncio
+import hashlib
 import inspect as inspect_mod
 import io
 import json
@@ -17,6 +29,7 @@ import signal
 import sys
 import tempfile
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 if TYPE_CHECKING:
@@ -37,6 +50,31 @@ from lup.agent.tools.example import EXAMPLE_TOOLS
 from lup.lib.mcp import LupMcpTool
 
 logger = logging.getLogger(__name__)
+
+MIME_TO_EXT: dict[str, str] = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
+
+def save_images(
+    images: list[tuple[str, bytes]],
+    images_dir: Path,
+) -> list[Path]:
+    """Save raw image data to disk, deduplicating by content hash."""
+    images_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    for media_type, data in images:
+        ext = MIME_TO_EXT.get(media_type, ".bin")
+        name = hashlib.sha256(data).hexdigest()[:12] + ext
+        path = images_dir / name
+        if not path.exists():
+            path.write_bytes(data)
+        paths.append(path)
+    return paths
+
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -478,7 +516,6 @@ async def repl(
     from claude_agent_sdk.types import McpServerConfig
 
     from lup.lib.client import build_client, ResponseCollector
-    from lup.lib.images import save_images
     from lup.lib.mcp import create_mcp_server, extract_sdk_tools
     from lup.lib.paths import project_root
 
@@ -519,7 +556,10 @@ async def repl(
                 panel_lines.append(f"[dim]{branch}[/dim] {t.sdk_tool.name}")
     else:
         panel_lines.append("[dim]no tools[/dim]")
-    panel_lines += ["", "[dim]/quit · Ctrl-C stop · Ctrl-V paste image · Alt+Enter newline[/dim]"]
+    panel_lines += [
+        "",
+        "[dim]/quit · Ctrl-C stop · Ctrl-V paste image · Alt+Enter newline[/dim]",
+    ]
 
     console.print()
     console.print(Panel("\n".join(panel_lines), border_style="blue", width=60))
@@ -568,7 +608,9 @@ async def repl(
         if result is not None:
             pending_images.append(result)
             n = len(pending_images)
-            console.print(f"[dim]{n} image{'s' if n > 1 else ''} attached (/drop to clear)[/dim]")
+            console.print(
+                f"[dim]{n} image{'s' if n > 1 else ''} attached (/drop to clear)[/dim]"
+            )
         else:
             text = read_clipboard_text()
             if text:
@@ -577,11 +619,13 @@ async def repl(
     pt_session: PromptSession[str] = PromptSession(
         message=FormattedText([("class:prompt", "❯ ")]),
         rprompt=rprompt,
-        style=PTStyle.from_dict({
-            "prompt": "fg:ansiblue bold",
-            "prompt-continuation": "fg:ansiblue",
-            "rprompt": "fg:#666666",
-        }),
+        style=PTStyle.from_dict(
+            {
+                "prompt": "fg:ansiblue bold",
+                "prompt-continuation": "fg:ansiblue",
+                "rprompt": "fg:#666666",
+            }
+        ),
         history=FileHistory(str(history_dir / "repl_history")),
         completer=WordCompleter(
             ["/quit", "/exit", "/q", "/help", "/drop"],
@@ -616,9 +660,7 @@ async def repl(
                             console.print()
                             break
                         last_input_sigint = now
-                        console.print(
-                            "[dim]Press Ctrl-C again to exit[/dim]"
-                        )
+                        console.print("[dim]Press Ctrl-C again to exit[/dim]")
                         continue
 
                     last_input_sigint = 0.0
@@ -647,7 +689,8 @@ async def repl(
                     collector = ResponseCollector(client)
                     try:
                         result = await collect_interruptible(
-                            collector, console,
+                            collector,
+                            console,
                         )
                         parts: list[str] = []
                         if result.duration_ms:
@@ -657,9 +700,7 @@ async def repl(
                             session_cost += result.total_cost_usd
                             parts.append(f"${result.total_cost_usd:.4f}")
                         if parts:
-                            console.print(
-                                f"  [dim]{' · '.join(parts)}[/dim]"
-                            )
+                            console.print(f"  [dim]{' · '.join(parts)}[/dim]")
                         console.print()
                     except Interrupted:
                         console.print("  [dim]interrupted[/dim]\n")

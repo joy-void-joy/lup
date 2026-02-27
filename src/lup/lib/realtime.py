@@ -5,22 +5,35 @@ actions, reminders, and delayed actions. The environment layer (Discord
 bot, game server, CLI) wires callbacks; the agent interacts through
 MCP tools that delegate to this scheduler.
 
-Usage:
-    from lup.lib.realtime import Scheduler, ActionCallback
-
-    async def send_message(content: str) -> None:
-        await channel.send(content)
-
-    scheduler = Scheduler(on_action=send_message)
-
-    # Agent sleeps — blocks until wake event or timeout
-    result = await scheduler.sleep(300)
-
-    # Environment wakes agent on external event
-    scheduler.wake("user_message")
-
 See also: ``src/lup/agent/tools/realtime.py`` for the MCP tool
 implementations that wrap this scheduler.
+
+Examples:
+    Create a scheduler and wire it to an environment callback::
+
+        >>> async def send_message(content: str) -> None:
+        ...     await channel.send(content)
+        >>> scheduler = Scheduler(on_action=send_message)
+
+    Agent sleeps until a wake event or timeout::
+
+        >>> result = await scheduler.sleep(300)
+        >>> result["reason"]
+        'user_message'
+
+    Environment wakes the agent on external event::
+
+        >>> scheduler.wake("user_message")
+
+    Use debounce to batch rapid events::
+
+        >>> scheduler.start_debounce(initial_seconds=30, quiet_seconds=5)
+
+    Create a Stop hook to keep the agent in a persistent loop::
+
+        >>> from lup.lib.realtime import create_stop_guard
+        >>> from lup.lib.hooks import merge_hooks
+        >>> hooks = merge_hooks(permission_hooks, create_stop_guard())
 """
 
 import asyncio
@@ -194,6 +207,10 @@ class Scheduler:
     def ideas(self) -> list[str]:
         """Cancelled actions and agent-captured threads."""
         return self._ideas
+
+    async def send_action(self, content: str) -> None:
+        """Deliver an action to the environment via the registered callback."""
+        await self._on_action(content)
 
     # ------------------------------------------------------------------
     # Wake / Sleep

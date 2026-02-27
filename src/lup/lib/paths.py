@@ -14,8 +14,32 @@ Layout:
     notes/traces/<version>/sessions/<session_id>/<timestamp>.json
     notes/traces/<version>/outputs/<task_id>/<timestamp>/
     notes/traces/<version>/logs/<session_id>/<timestamp>.md
-    notes/scores.csv
     notes/feedback_loop/
+
+Examples:
+    Override paths for testing::
+
+        >>> from lup.lib.paths import configure, sessions_dir, project_root
+        >>> configure(root=Path("/tmp/test-project"))
+        >>> project_root()
+        PosixPath('/tmp/test-project')
+        >>> sessions_dir()
+        PosixPath('/tmp/test-project/notes/traces/0.1.0/sessions')
+
+    Iterate sessions across versions::
+
+        >>> for session_dir in iter_session_dirs(session_id="my-session"):
+        ...     print(session_dir)
+        PosixPath('.../notes/traces/0.1.0/sessions/my-session')
+
+    Resolve version scope with progressive fallback::
+
+        >>> versions, warning = resolve_version("0.1.0")
+        >>> versions
+        ['0.1.0']
+        >>> versions, warning = resolve_version("0.1.0", all_versions=True)
+        >>> versions is None  # None means "all versions"
+        True
 """
 
 import logging
@@ -55,7 +79,7 @@ def configure(
     """Override auto-detected paths.
 
     Call before any session operations. All derived paths
-    (``traces_path``, ``feedback_path``, ``scores_csv_path``, etc.)
+    (``traces_path``, ``feedback_path``, etc.)
     update automatically since they read from these values.
 
     Args:
@@ -104,11 +128,6 @@ def traces_path() -> Path:
 def feedback_path() -> Path:
     """Return ``notes/feedback_loop/``."""
     return NOTES_DIR / "feedback_loop"
-
-
-def scores_csv_path() -> Path:
-    """Return ``notes/scores.csv``."""
-    return NOTES_DIR / "scores.csv"
 
 
 # -- Timestamp helpers --------------------------------------------------------

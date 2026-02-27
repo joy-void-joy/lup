@@ -83,7 +83,7 @@ def commit_results() -> None:
     """Commit any uncommitted session results.
 
     TEMPLATE NOTE: This auto-commits session outputs (notes/sessions/,
-    notes/traces/, notes/scores.csv) after each run. For domains like
+    notes/traces/) after each run. For domains like
     forecasting, game playing, or batch processing, this keeps data
     commits atomic and automatic. Customize or remove if your domain
     doesn't need auto-commit (e.g., interactive coaching).

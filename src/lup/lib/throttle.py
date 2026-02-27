@@ -8,18 +8,18 @@ sessions in batch mode.
 Throttle instances are designed as module-level singletons, configured from
 settings, and shared across all concurrent sessions in the process.
 
-Example:
-    from lup.lib.throttle import Throttle
+Examples:
+    Pure concurrency limiting (up to 3 simultaneous requests)::
 
-    # Pure concurrency limiting
-    api_throttle = Throttle(max_concurrent=3)
+        >>> api_throttle = Throttle(max_concurrent=3)
+        >>> async with api_throttle:
+        ...     result = await do_request()
 
-    # Concurrency + temporal spacing
-    rate_limited = Throttle(max_concurrent=1, min_interval=2.0)
+    Concurrency + temporal spacing (1 request every 2 seconds)::
 
-    async def call_api():
-        async with rate_limited:
-            return await do_request()
+        >>> rate_limited = Throttle(max_concurrent=1, min_interval=2.0)
+        >>> async with rate_limited:
+        ...     return await do_request()
 """
 
 import asyncio
@@ -29,8 +29,6 @@ from types import TracebackType
 
 class LoopState:
     """Per-event-loop state for a Throttle instance."""
-
-    __slots__ = ("semaphore", "last_request_time", "lock")
 
     def __init__(self, semaphore: asyncio.Semaphore) -> None:
         self.semaphore = semaphore

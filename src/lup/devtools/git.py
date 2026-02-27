@@ -1,4 +1,10 @@
-"""Git operations for session data."""
+"""Git operations for session data.
+
+Examples::
+
+    $ uv run lup-devtools git commit-results
+    $ uv run lup-devtools git commit-results --dry-run
+"""
 
 import json
 from pathlib import Path
@@ -6,7 +12,7 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.lib.paths import iter_session_dirs, scores_csv_path, traces_path
+from lup.lib.paths import iter_session_dirs, traces_path
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -93,12 +99,6 @@ def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
     for path in paths:
         try:
             git.add(path)
-        except sh.ErrorReturnCode:
-            pass
-
-    if scores_csv_path().exists():
-        try:
-            git.add(str(scores_csv_path()))
         except sh.ErrorReturnCode:
             pass
 

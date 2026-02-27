@@ -25,6 +25,25 @@ Maintenance Notes:
 Tool naming convention:
     After registration, tools are named: mcp__{server_name}__{tool_name}
     Example: mcp__my-server__my_tool
+
+Examples:
+    Define a tool with typed input/output using the ``lup_tool`` decorator::
+
+        >>> from pydantic import BaseModel, Field
+        >>> class SearchInput(BaseModel):
+        ...     query: str = Field(description="Search query")
+        >>> class SearchOutput(BaseModel):
+        ...     results: list[str]
+        >>> @lup_tool("Search the knowledge base.", tags=["search"])
+        ... async def search(params: SearchInput) -> SearchOutput:
+        ...     return SearchOutput(results=["result1", "result2"])
+
+    Create an MCP server from tools and pass to the SDK::
+
+        >>> tools = [search, another_tool]
+        >>> sdk_tools = extract_sdk_tools(tools)
+        >>> server = create_mcp_server("my-server", tools=sdk_tools)
+        >>> options = ClaudeAgentOptions(mcp_servers={"my-server": server})
 """
 
 import inspect
@@ -33,7 +52,7 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypedDict, cast, get_type_hints
 
-from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
+from claude_agent_sdk import SdkMcpTool
 from claude_agent_sdk.types import McpSdkServerConfig
 from mcp.server import Server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
@@ -293,7 +312,9 @@ def lup_tool(
                         f"lup_tool '{tool_name}': handler must return a BaseModel, "
                         f"got {type(result).__name__}"
                     )
-                if resolved_output is not None and not isinstance(result, resolved_output):
+                if resolved_output is not None and not isinstance(
+                    result, resolved_output
+                ):
                     raise TypeError(
                         f"lup_tool '{tool_name}': expected {resolved_output.__name__}, "
                         f"got {type(result).__name__}"
@@ -329,14 +350,3 @@ def extract_sdk_tools(tools: list[LupMcpTool]) -> list[SdkMcpTool[Any]]:
     ``create_sdk_mcp_server``, which expect ``list[SdkMcpTool]``.
     """
     return [t.sdk_tool for t in tools]
-
-
-__all__ = [
-    "LupMcpTool",
-    "ToolError",
-    "create_mcp_server",
-    "create_sdk_mcp_server",
-    "extract_sdk_tools",
-    "lup_tool",
-    "tool",
-]

@@ -14,39 +14,37 @@ Composition:
 - HooksConfig type alias for type-safe hook configuration
 - merge_hooks() to compose multiple hook sources
 
-Usage:
-    from lup.lib.hooks import merge_hooks, create_permission_hooks, create_nudge_hook
+Examples:
+    Compose permission and nudge hooks::
 
-    permission_hooks = create_permission_hooks(rw_dirs, ro_dirs)
-    nudge_hooks = create_nudge_hook({"fetch_url": my_nudge_check})
-    combined = merge_hooks(permission_hooks, nudge_hooks)
+        >>> from lup.lib.hooks import merge_hooks, create_permission_hooks, create_nudge_hook
+        >>> permission_hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")])
+        >>> nudge_hooks = create_nudge_hook({"fetch_url": my_nudge_check})
+        >>> combined = merge_hooks(permission_hooks, nudge_hooks)
 
-    options = ClaudeAgentOptions(hooks=combined, ...)
+    Restrict an agent to specific tools::
+
+        >>> hooks = create_tool_allowlist_hook(["Read", "Grep", "WebSearch"])
+
+    Capture data from a sub-agent's tool calls::
+
+        >>> hooks, captured = create_capture_hook("WebSearch", extract_urls)
+        >>> # After running the agent, `captured` contains extracted items
+        >>> len(captured)
+        5
 """
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
 from claude_agent_sdk import HookInput, HookMatcher, PostToolUseHookInput
-from claude_agent_sdk.types import HookContext, SyncHookJSONOutput
+from claude_agent_sdk.types import HookContext, HookEvent, SyncHookJSONOutput
 
 from lup.lib.notes import extract_glob_dir, path_is_under
 
 
-# Hook event types supported by the Claude Agent SDK
-HookEventType = Literal[
-    "PreToolUse",
-    "PostToolUse",
-    "PostToolUseFailure",
-    "UserPromptSubmit",
-    "Stop",
-    "SubagentStop",
-    "PreCompact",
-]
-
-
-type HooksConfig = dict[HookEventType, list[HookMatcher]]
+type HooksConfig = dict[HookEvent, list[HookMatcher]]
 """Typed hook configuration for ClaudeAgentOptions.
 
 Each key is a hook event type, and the value is a list of HookMatcher
@@ -155,9 +153,7 @@ def create_permission_hooks(
             case "Glob" | "Grep":
                 file_path = tool_input.get("path", "")
                 if not file_path and tool_name == "Glob":
-                    file_path = extract_glob_dir(
-                        tool_input.get("pattern", "")
-                    )
+                    file_path = extract_glob_dir(tool_input.get("pattern", ""))
                 if not file_path:
                     return deny_hook_output(
                         f"Path required for {tool_name}. "
