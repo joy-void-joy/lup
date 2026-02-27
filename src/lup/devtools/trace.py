@@ -1,6 +1,18 @@
 """Analyze reasoning traces from sessions.
 
 This is a TEMPLATE script. Customize it for your domain's trace format.
+
+Examples::
+
+    $ uv run lup-devtools trace list
+    $ uv run lup-devtools trace list --all-versions --limit 50
+    $ uv run lup-devtools trace show my-session-id
+    $ uv run lup-devtools trace show my-session-id --full
+    $ uv run lup-devtools trace search "confidence.*low"
+    $ uv run lup-devtools trace search "error" -C 5
+    $ uv run lup-devtools trace errors
+    $ uv run lup-devtools trace errors --all-versions --limit 10
+    $ uv run lup-devtools trace capabilities
 """
 
 import re
@@ -161,8 +173,12 @@ def errors(
         try:
             content = trace_file.read_text(encoding="utf-8")
 
-            parts = trace_file.relative_to(Path.cwd()).parts
-            session_id = parts[1] if len(parts) > 1 else trace_file.stem
+            try:
+                rel = trace_file.relative_to(traces_path())
+                # Structure: <version>/<logs|sessions>/<session_id>/...
+                session_id = rel.parts[2] if len(rel.parts) > 2 else rel.stem
+            except ValueError:
+                session_id = trace_file.stem
 
             for line in content.split("\n"):
                 if regex.search(line):

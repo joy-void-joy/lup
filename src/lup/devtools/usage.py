@@ -2,6 +2,13 @@
 
 Calls the /api/oauth/usage endpoint for real-time utilization data
 and supplements with stats-cache.json for daily detail.
+
+Examples::
+
+    $ uv run lup-devtools usage
+    $ uv run lup-devtools usage --no-watch
+    $ uv run lup-devtools usage --no-detail
+    $ uv run lup-devtools usage --watch --interval 300
 """
 
 import json
@@ -176,9 +183,13 @@ PACE_LABEL_DEFAULT = PaceLabel(word="heavy usage", style="bold red")
 
 def fetch_usage() -> UsageResponse:
     """Call the live usage API."""
-    creds = json.loads(CREDS_PATH.read_text())
-    oauth = creds["claudeAiOauth"]
-    token = oauth["accessToken"]
+    try:
+        creds = json.loads(CREDS_PATH.read_text())
+        oauth = creds["claudeAiOauth"]
+        token: str = oauth["accessToken"]
+    except (json.JSONDecodeError, KeyError, OSError) as e:
+        msg = f"Bad credentials file at {CREDS_PATH}: {e}"
+        raise RuntimeError(msg) from e
 
     resp = httpx.get(
         USAGE_API_URL,

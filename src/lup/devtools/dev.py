@@ -1,4 +1,11 @@
-"""Development tools: worktree management."""
+"""Development tools: worktree management.
+
+Examples::
+
+    $ uv run lup-devtools dev worktree feat-search
+    $ uv run lup-devtools dev worktree fix-bug --base main
+    $ uv run lup-devtools dev worktree my-feature --no-sync --no-plugin-refresh
+"""
 
 import shutil
 from pathlib import Path
@@ -133,7 +140,8 @@ def worktree_cmd(
         else:
             git("worktree", "add", str(worktree_path), "-b", branch_name)
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Error creating worktree: {e.stderr.decode()}")
+        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
+        typer.echo(f"Error creating worktree: {stderr}")
         raise typer.Exit(1)
 
     if not no_copy_data:
@@ -155,7 +163,8 @@ def worktree_cmd(
         try:
             uv("sync", _cwd=str(worktree_path))
         except sh.ErrorReturnCode as e:
-            typer.echo(f"Warning: uv sync failed: {e.stderr.decode()}")
+            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
+            typer.echo(f"Warning: uv sync failed: {stderr}")
 
     if not no_plugin_refresh:
         if PLUGIN_CACHE_DIR.exists():
@@ -175,7 +184,8 @@ def worktree_cmd(
             )
             typer.echo("Installed lup plugin (project scope)")
         except sh.ErrorReturnCode as e:
-            typer.echo(f"Warning: plugin install failed: {e.stderr.decode()}", err=True)
+            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
+            typer.echo(f"Warning: plugin install failed: {stderr}", err=True)
 
     typer.echo()
     cd_command = f"cd /; cd {worktree_path}; claude"
