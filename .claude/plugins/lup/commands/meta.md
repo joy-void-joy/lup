@@ -36,10 +36,7 @@ plugins/lup/
 │   └── scripts/                 # Hook implementations
 │       ├── auto_allow_bash.py   # Bash command auto-allow/deny
 │       ├── auto_allow_edits.py  # Edit auto-allow (trivial changes)
-│       ├── auto_allow_fetch.py  # WebFetch URL allow/deny
-│       ├── pre_push_check.py    # Quality gates before push
-│       ├── check_plan_md.py     # PLAN.md check on feature branches
-│       └── protect_tests.py     # TDD test protection
+│       └── auto_allow_fetch.py  # WebFetch URL allow/deny
 ├── agents/                      # Subagent definitions
 └── TEMPLATE_CLAUDE.md           # CLAUDE.md template for new projects
 ```

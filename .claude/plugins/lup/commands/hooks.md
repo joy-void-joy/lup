@@ -21,8 +21,6 @@ The configurable hooks live in `.claude/plugins/lup/hooks/scripts/`:
 | `auto_allow_fetch.py` | WebFetch URLs   | `ALLOW_PATTERNS` (list of regex), `DENY_PATTERNS` (list of (regex, reason) tuples) |
 | `auto_allow_edits.py` | Edit operations | `PROTECTED_PATTERNS` (list of regex), `MAX_REAL_CHANGES` (int)                     |
 
-Other hooks (`pre_push_check.py`, `check_plan_md.py`, `protect_tests.py`) are structural and not managed here.
-
 ## How It Works
 
 - **ALLOW_PATTERNS / Allow rules**: Commands/URLs matching these are auto-approved (no user prompt)

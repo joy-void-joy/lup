@@ -56,27 +56,21 @@ Use `--squash` to create a single merge commit. The `--delete-branch` flag remov
 
 ### 5. Clean up
 
-After merge, clean up local state:
+After merge, pull the merged changes into the integration branch:
 
 ```bash
-# Switch to the integration branch worktree and pull the merged changes
-cd ../dev
-git pull
-cd -
-
-# Delete the local feature branch
-git branch -D "$CURRENT_BRANCH" 2>/dev/null || true
+# From the integration branch worktree
+cd ../dev && git pull && cd -
 ```
 
-Then warn the user that their current worktree corresponds to the now-merged branch. Suggest they run `/lup:clean-gone` from the dev worktree to remove this worktree, or navigate to the dev worktree to continue working.
+Then run the **targeted mode** cleanup from `/lup:clean-gone` for the merged branch (`$CURRENT_BRANCH`). This handles worktree removal, local branch deletion, and remote branch cleanup with proper user confirmation.
 
 ### 6. Report
 
 Summarize what was done:
 
 - PR merged (with link)
-- Branch deleted (local + remote)
-- Remaining cleanup needed (worktree removal if applicable)
+- Cleanup results (from clean-gone)
 
 ## Guidelines
 

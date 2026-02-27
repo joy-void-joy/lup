@@ -27,7 +27,7 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 
 - `.claude/plugins/lup/.claude-plugin/plugin.json` — plugin identity
 - `.claude/plugins/lup/hooks/hooks.json` — hook definitions
-- `.claude/plugins/lup/hooks/scripts/*.py` — permission hooks (auto_allow_bash, auto_allow_edits, auto_allow_fetch, pre_push_check, check_plan_md, protect_tests)
+- `.claude/plugins/lup/hooks/scripts/*.py` — permission hooks (auto_allow_bash, auto_allow_edits, auto_allow_fetch)
 - `.claude/plugins/lup/commands/*.md` — slash commands
 - `.claude/plugins/lup/agents/*.md` — agent definitions
 - `.claude/plugins/lup/TEMPLATE_CLAUDE.md` — CLAUDE.md template
@@ -198,7 +198,6 @@ For each item being installed:
 1. **Read the source file** from the current repo
 2. **Adapt it** for the target:
    - Replace `uv run` with target's equivalent (npm run, cargo, make, etc.) in hooks and commands
-   - Replace `pyright` / `ruff` / `pytest` with target's tools in pre_push_check
    - Adjust file path patterns in hooks for target's directory structure
    - Keep command markdown structure but update tool references and examples
 3. **Write to the target repo** — create directories as needed
