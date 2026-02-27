@@ -27,10 +27,9 @@ import logging
 from pathlib import Path
 from typing import TypedDict
 
-from claude_agent_sdk import TextBlock
 from pydantic import BaseModel, Field
 
-from lup.lib.client import run_query
+from lup.lib.client import query
 from lup.lib.mcp import LupMcpTool, lup_tool
 from lup.lib.reflect import ReflectionGate
 
@@ -149,8 +148,16 @@ class ReviewOutput(BaseModel):
 async def run_reviewer(
     validated: ReflectInput,
     outputs_dir: Path | None,
+    *,
+    model: str = "claude-sonnet-4-6",
 ) -> str | None:
-    """Run the reviewer sub-agent and return its critique text."""
+    """Run the reviewer sub-agent and return its critique text.
+
+    Args:
+        validated: The reflection input from the main agent.
+        outputs_dir: Path to past outputs for historical calibration.
+        model: Model to use for the reviewer (default: claude-sonnet-4-6).
+    """
     prompt_sections = [
         "## Agent Assessment\n\n" + validated.assessment,
         f"## Confidence: {validated.confidence:.0%}",
@@ -160,10 +167,10 @@ async def run_reviewer(
 
     reviewer_prompt = "\n\n".join(prompt_sections)
 
-    collector = await run_query(
+    collector = await query(
         reviewer_prompt,
         prefix="  ↳ [reviewer] ",
-        model="claude-sonnet-4-6",
+        model=model,
         system_prompt=REVIEWER_SYSTEM_PROMPT.format(
             outputs_dir=outputs_dir or "N/A",
         ),
@@ -173,8 +180,7 @@ async def run_reviewer(
         max_turns=5,
     )
 
-    texts = [b.text for b in collector.blocks if isinstance(b, TextBlock)]
-    return "\n\n".join(texts) if texts else None
+    return collector.text
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +199,7 @@ def create_reflect_tools(
     *,
     session_dir: Path,
     outputs_dir: Path | None = None,
+    reviewer_model: str = "claude-sonnet-4-6",
 ) -> ReflectToolKit:
     """Create the reflection tool(s) and their gate state.
 
@@ -228,10 +235,12 @@ def create_reflect_tools(
         critique: str | None = None
         if not validated.skip_reviewer:
             try:
-                critique = await run_reviewer(validated, outputs_dir)
+                critique = await run_reviewer(
+                    validated, outputs_dir, model=reviewer_model
+                )
             except Exception:
                 logger.exception("Reviewer sub-agent failed")
-                critique = None
+                critique = "(reviewer error — see logs)"
 
         return ReviewOutput(
             status="reviewed",

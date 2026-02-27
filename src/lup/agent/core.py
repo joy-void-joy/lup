@@ -24,7 +24,7 @@ from claude_agent_sdk import (
 
 from claude_agent_sdk.types import McpSdkServerConfig
 
-from lup.lib.client import run_query
+from lup.lib.client import query
 from lup.agent.config import settings
 from lup.agent.models import AgentOutput, SessionResult, TokenUsage, get_output_schema
 from lup.agent.prompts import get_system_prompt
@@ -45,7 +45,7 @@ from lup.lib.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
 
-NOTES_PATH = Path("./notes")
+NOTES_PATH = Path(settings.notes_path)
 TRACES_PATH = NOTES_PATH / "traces"
 
 
@@ -158,7 +158,7 @@ async def run_agent(
 
     with sandbox:
         options = build_options(notes, sandbox_server=sandbox.create_mcp_server())
-        collector = await run_query(
+        collector = await query(
             task,
             options=options,
             trace_logger=trace_logger,

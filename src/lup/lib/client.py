@@ -1,13 +1,41 @@
 """Centralized Agent SDK client creation and response collection.
 
 All Agent SDK client construction goes through this module to ensure
-consistent defaults (session persistence disabled for sub-agent calls).
+consistent defaults (session persistence disabled for nested agent calls).
 
 Exports:
-- ResponseCollector — reusable "iterate, print, log, collect" pattern
+- ResponseCollector — response accumulator with .text and .output(T) accessors
 - build_client() — AsyncContextManager[ClaudeSDKClient] with defaults
-- run_query(prompt, ...) — query + collect in one call, returns ResponseCollector
-- one_shot(prompt, ...) — prompt->result convenience for tool-free LLM calls
+- query(prompt, ...) — build + query + collect; returns ResponseCollector or T
+
+Examples:
+    Text result::
+
+        >>> collector = await query("Summarize this text", model="sonnet")
+        >>> collector.text
+        'Here is the summary...'
+
+    Structured output::
+
+        >>> from pydantic import BaseModel
+        >>> class Summary(BaseModel):
+        ...     title: str
+        ...     points: list[str]
+        >>> result = await query("Summarize X", output_type=Summary)
+        >>> result.title
+        'Summary of X'
+
+    Nested agent with tools::
+
+        >>> collector = await query(
+        ...     "Review this code",
+        ...     tools=["Read", "Grep"],
+        ...     model="sonnet",
+        ...     permission_mode="bypassPermissions",
+        ...     max_turns=5,
+        ... )
+        >>> collector.text
+        'The code looks correct...'
 """
 
 import logging
@@ -16,7 +44,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal, overload
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ContentBlock, Message
+from claude_agent_sdk import (
+    ClaudeAgentOptions,
+    ClaudeSDKClient,
+    ContentBlock,
+    Message,
+    TextBlock,
+)
 from claude_agent_sdk.types import (
     AgentDefinition,
     AssistantMessage,
@@ -63,7 +97,7 @@ class ResponseCollector:
         async for message in collector:
             print_message(message)
 
-    **collect()** — drain all messages with automatic display::
+    **collect()** — drain all messages with automatic display and tracing::
 
         collector = ResponseCollector(client, trace_logger=trace_logger)
         result = await collector.collect()
@@ -86,6 +120,25 @@ class ResponseCollector:
         self.result: ResultMessage | None = None
         self.trace_logger = trace_logger
         self.prefix = prefix
+
+    @property
+    def text(self) -> str | None:
+        """Concatenated text from all assistant text blocks.
+
+        Returns ``None`` when no text blocks were produced.  Access
+        after ``collect()`` (called automatically by ``query()``).
+        """
+        texts = [b.text for b in self.blocks if isinstance(b, TextBlock)]
+        return "\n\n".join(texts) if texts else None
+
+    def output[T: BaseModel](self, output_type: type[T]) -> T | None:
+        """Extract structured output as a validated Pydantic model.
+
+        Returns ``None`` when the agent produced no structured output.
+        """
+        if self.result is not None and self.result.structured_output:
+            return output_type.model_validate(self.result.structured_output)
+        return None
 
     async def __aiter__(self) -> AsyncIterator[Message]:
         """Yield messages, accumulating state but not displaying.
@@ -116,15 +169,13 @@ class ResponseCollector:
             yield message
 
     async def collect(self) -> ResultMessage:
-        """Drain all messages, displaying blocks, and return the result.
-
-        Shorthand for ``async for`` with ``print_message`` on every message.
+        """Drain all messages, displaying and tracing each one.
 
         Raises:
             RuntimeError: If the agent returns an error or no result.
         """
         async for message in self:
-            print_message(message, prefix=self.prefix, trace_logger=self.trace_logger)
+            print_message(message, prefix=self.prefix, trace=self.trace_logger)
 
         if self.result is None:
             raise RuntimeError("No result received from agent")
@@ -144,7 +195,8 @@ async def build_client(
     system_prompt: str | SystemPromptPreset | None = None,
     tools: list[str] | ToolsPreset | None = None,
     allowed_tools: list[str] | None = None,
-    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"] | None = None,
+    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"]
+    | None = None,
     mcp_servers: dict[str, McpServerConfig] | str | Path | None = None,
     agents: dict[str, AgentDefinition] | None = None,
     max_thinking_tokens: int | None = None,
@@ -191,9 +243,59 @@ async def build_client(
 # ---------------------------------------------------------------------------
 
 
-async def run_query(
+@overload
+async def query(
     prompt: str,
     *,
+    options: ClaudeAgentOptions | None = ...,
+    prefix: str = ...,
+    trace_logger: TraceLogger | None = ...,
+    model: str | None = ...,
+    system_prompt: str | SystemPromptPreset | None = ...,
+    tools: list[str] | ToolsPreset | None = ...,
+    allowed_tools: list[str] | None = ...,
+    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"]
+    | None = ...,
+    mcp_servers: dict[str, McpServerConfig] | str | Path | None = ...,
+    agents: dict[str, AgentDefinition] | None = ...,
+    max_thinking_tokens: int | None = ...,
+    max_turns: int | None = ...,
+    max_budget_usd: float | None = ...,
+    output_format: OutputFormat | None = ...,
+    extra_args: dict[str, str | None] | None = ...,
+    hooks: dict[HookEvent, list[HookMatcher]] | None = ...,
+) -> ResponseCollector: ...
+
+
+@overload
+async def query[T: BaseModel](
+    prompt: str,
+    *,
+    output_type: type[T],
+    options: ClaudeAgentOptions | None = ...,
+    prefix: str = ...,
+    trace_logger: TraceLogger | None = ...,
+    model: str | None = ...,
+    system_prompt: str | SystemPromptPreset | None = ...,
+    tools: list[str] | ToolsPreset | None = ...,
+    allowed_tools: list[str] | None = ...,
+    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"]
+    | None = ...,
+    mcp_servers: dict[str, McpServerConfig] | str | Path | None = ...,
+    agents: dict[str, AgentDefinition] | None = ...,
+    max_thinking_tokens: int | None = ...,
+    max_turns: int | None = ...,
+    max_budget_usd: float | None = ...,
+    output_format: OutputFormat | None = ...,
+    extra_args: dict[str, str | None] | None = ...,
+    hooks: dict[HookEvent, list[HookMatcher]] | None = ...,
+) -> T | None: ...
+
+
+async def query(
+    prompt: str,
+    *,
+    output_type: type[BaseModel] | None = None,
     options: ClaudeAgentOptions | None = None,
     prefix: str = "",
     trace_logger: TraceLogger | None = None,
@@ -201,7 +303,8 @@ async def run_query(
     system_prompt: str | SystemPromptPreset | None = None,
     tools: list[str] | ToolsPreset | None = None,
     allowed_tools: list[str] | None = None,
-    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"] | None = None,
+    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"]
+    | None = None,
     mcp_servers: dict[str, McpServerConfig] | str | Path | None = None,
     agents: dict[str, AgentDefinition] | None = None,
     max_thinking_tokens: int | None = None,
@@ -210,15 +313,24 @@ async def run_query(
     output_format: OutputFormat | None = None,
     extra_args: dict[str, str | None] | None = None,
     hooks: dict[HookEvent, list[HookMatcher]] | None = None,
-) -> ResponseCollector:
+) -> ResponseCollector | BaseModel | None:
     """Query an SDK client and collect the full response.
 
-    Combines build_client + query + ResponseCollector.collect into a
-    single call.  Pass either ``options`` or keyword arguments for
-    ClaudeAgentOptions.
+    Without ``output_type``: returns a ``ResponseCollector`` with
+    ``.text``, ``.output(T)``, ``.blocks``, ``.messages``, ``.result``.
 
-    Returns the ResponseCollector with .result, .blocks, .messages.
+    With ``output_type``: returns a validated Pydantic model (or ``None``
+    if the agent produced no structured output).
+
+    Pass ``options`` (pre-built) to use as-is, or keyword arguments to
+    construct ``ClaudeAgentOptions``.
     """
+    if output_type is not None and output_format is None:
+        output_format = {
+            "type": "json_schema",
+            "schema": output_type.model_json_schema(),
+        }
+
     async with build_client(
         options=options,
         model=model,
@@ -238,63 +350,7 @@ async def run_query(
         await client.query(prompt)
         collector = ResponseCollector(client, prefix=prefix, trace_logger=trace_logger)
         await collector.collect()
+
+    if output_type is not None:
+        return collector.output(output_type)
     return collector
-
-
-@overload
-async def one_shot(
-    prompt: str,
-    *,
-    model: str = ...,
-    system_prompt: str = ...,
-    prefix: str = ...,
-) -> str | None: ...
-
-
-@overload
-async def one_shot[T: BaseModel](
-    prompt: str,
-    *,
-    model: str = ...,
-    system_prompt: str = ...,
-    output_type: type[T],
-    prefix: str = ...,
-) -> T | None: ...
-
-
-async def one_shot(
-    prompt: str,
-    *,
-    model: str = "sonnet",
-    system_prompt: str = "",
-    output_type: type[BaseModel] | None = None,
-    prefix: str = "",
-) -> BaseModel | str | None:
-    """One-shot prompt->result convenience wrapper.
-
-    Without output_type: returns the text result (str).
-    With output_type: returns a validated Pydantic model from structured output.
-    """
-    output_format: OutputFormat | None = None
-    if output_type is not None:
-        output_format = {
-            "type": "json_schema",
-            "schema": output_type.model_json_schema(),
-        }
-
-    collector = await run_query(
-        prompt,
-        prefix=prefix,
-        model=model,
-        system_prompt=system_prompt,
-        allowed_tools=[],
-        output_format=output_format,
-    )
-
-    if collector.result is None:
-        return None
-    if output_type is not None and collector.result.structured_output:
-        return output_type.model_validate(collector.result.structured_output)
-    if output_type is not None:
-        return None
-    return collector.result.result
