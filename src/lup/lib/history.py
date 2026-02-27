@@ -12,6 +12,31 @@ with raw JSON dicts — no dependency on domain-specific models.
 The ``format_history_for_context`` function accepts a pluggable
 formatter so downstream projects can display domain-specific fields
 without modifying this module.
+
+Examples:
+    Save and load session results::
+
+        >>> from pydantic import BaseModel
+        >>> class MyResult(BaseModel):
+        ...     summary: str
+        ...     confidence: float
+        >>> path = save_session(MyResult(summary="done", confidence=0.9), session_id="s1")
+        >>> path.exists()
+        True
+
+    Load past sessions for analysis::
+
+        >>> sessions = load_sessions_json("s1")
+        >>> len(sessions)
+        1
+        >>> sessions[0]["summary"]
+        'done'
+
+    Format history as agent context::
+
+        >>> context = format_history_for_context(sessions, max_sessions=3)
+        >>> context.startswith("## Past Sessions")
+        True
 """
 
 import json

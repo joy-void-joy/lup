@@ -1,6 +1,15 @@
 """API inspection and module info tools.
 
 Combines inspect_api and module_info into one sub-app.
+
+Examples::
+
+    $ uv run lup-devtools api inspect claude_agent_sdk.ClaudeSDKClient
+    $ uv run lup-devtools api inspect lup.lib.mcp.lup_tool --help-full
+    $ uv run lup-devtools api module-path requests
+    $ uv run lup-devtools api module-source requests.api --lines 100
+    $ uv run lup-devtools api module-tree claude_agent_sdk
+    $ uv run lup-devtools api module-info pydantic
 """
 
 import importlib

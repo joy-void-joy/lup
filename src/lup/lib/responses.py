@@ -13,6 +13,22 @@ Shape reference (McpResponse TypedDict):
     is_error: bool (optional)
 
 The functions return dict[str, Any] to match the SDK tool handler interface.
+
+Examples:
+    Return a successful JSON-encoded response::
+
+        >>> mcp_success({"count": 42})
+        {'content': [{'type': 'text', 'text': '{"count": 42}'}]}
+
+    Return an error response::
+
+        >>> mcp_error("not found")
+        {'content': [{'type': 'text', 'text': 'not found'}], 'is_error': True}
+
+    Build a response with explicit error flag::
+
+        >>> mcp_response("partial data", is_error=False)
+        {'content': [{'type': 'text', 'text': 'partial data'}]}
 """
 
 import json

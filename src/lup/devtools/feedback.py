@@ -7,6 +7,15 @@ The script should:
 2. Match sessions to their outcomes/feedback
 3. Compute aggregate metrics
 4. Save results to notes/feedback_loop/
+
+Examples::
+
+    $ uv run lup-devtools feedback collect
+    $ uv run lup-devtools feedback collect --all-time
+    $ uv run lup-devtools feedback collect --since 2026-01-01
+    $ uv run lup-devtools feedback collect --all-versions -o results.json
+    $ uv run lup-devtools feedback check
+    $ uv run lup-devtools feedback check --all-versions
 """
 
 import json
@@ -172,9 +181,7 @@ def collect(
     ] = False,
     version: Annotated[
         str | None,
-        typer.Option(
-            "--version", "-v", help="Agent version (default: current)"
-        ),
+        typer.Option("--version", "-v", help="Agent version (default: current)"),
     ] = AGENT_VERSION,
     all_versions: Annotated[
         bool,
@@ -233,9 +240,7 @@ def collect(
 def check(
     version: Annotated[
         str | None,
-        typer.Option(
-            "--version", "-v", help="Agent version (default: current)"
-        ),
+        typer.Option("--version", "-v", help="Agent version (default: current)"),
     ] = AGENT_VERSION,
     all_versions: Annotated[
         bool,

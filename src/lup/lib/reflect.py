@@ -14,24 +14,30 @@ in ``agent/tools/``. This module only provides the enforcement mechanism.
 One-shot agents: gate ``StructuredOutput`` on reflection.
 Persistent agents: gate ``sleep`` on reflection (via ``Scheduler.meta_gate``).
 
-Usage::
+Examples:
+    Gate ``StructuredOutput`` until the agent has reflected::
 
-    from lup.lib.reflect import ReflectionGate, create_reflection_gate
-    from lup.lib.hooks import merge_hooks
+        >>> from lup.lib.reflect import ReflectionGate, create_reflection_gate
+        >>> from lup.lib.hooks import merge_hooks
+        >>> gate = ReflectionGate()
+        >>> gate_hooks = create_reflection_gate(
+        ...     gate=gate,
+        ...     gated_tool="StructuredOutput",
+        ...     reflection_tool_name="mcp__notes__review",
+        ... )
+        >>> hooks = merge_hooks(permission_hooks, gate_hooks)
 
-    gate = ReflectionGate()
-    gate_hooks = create_reflection_gate(
-        gate=gate,
-        gated_tool="StructuredOutput",
-        reflection_tool_name="mcp__notes__review",
-    )
-    hooks = merge_hooks(permission_hooks, gate_hooks)
+    In the reflection tool handler, mark as reflected::
 
-    # In the reflection tool handler:
-    gate.mark_reflected()
+        >>> gate.mark_reflected()
+        >>> gate.reflected
+        True
 
-    # For persistent agents, reset per cycle:
-    gate.reset()
+    For persistent agents, reset the gate each cycle::
+
+        >>> gate.reset()
+        >>> gate.reflected
+        False
 """
 
 from typing import cast

@@ -1,4 +1,21 @@
-"""Retry utilities for API calls using tenacity."""
+"""Retry utilities for API calls using tenacity.
+
+Examples:
+    Retry an HTTP call with exponential backoff::
+
+        >>> @with_retry(max_attempts=3)
+        ... async def fetch_data(url: str) -> dict[str, object]:
+        ...     async with httpx.AsyncClient() as client:
+        ...         response = await client.get(url)
+        ...         response.raise_for_status()
+        ...         return response.json()
+
+    Add extra retryable exceptions::
+
+        >>> @with_retry(max_attempts=5, extra_exceptions=(ValueError,))
+        ... async def parse_response(url: str) -> str:
+        ...     ...
+"""
 
 from collections.abc import Callable
 

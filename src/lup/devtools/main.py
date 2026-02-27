@@ -1,4 +1,19 @@
-"""Root CLI app composing all devtools sub-apps."""
+"""Root CLI app composing all devtools sub-apps.
+
+All development tooling is exposed as the ``lup-devtools`` entry point.
+Each sub-app groups related commands.
+
+Examples::
+
+    $ uv run lup-devtools --help
+    $ uv run lup-devtools agent inspect --json
+    $ uv run lup-devtools trace show my-session
+    $ uv run lup-devtools feedback collect --all-time
+    $ uv run lup-devtools metrics summary --all-versions
+    $ uv run lup-devtools git commit-results --dry-run
+    $ uv run lup-devtools sync list
+    $ uv run lup-devtools usage --no-detail
+"""
 
 import typer
 

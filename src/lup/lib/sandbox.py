@@ -9,6 +9,30 @@ expose it to a Claude Agent SDK agent via ``create_tools()`` /
 Network modes:
 - "bridge": Full network access (default)
 - "none": No network access at all
+
+Examples:
+    Run code in an isolated sandbox::
+
+        >>> with Sandbox(session_id="demo", shared_dir="/tmp/shared") as sb:
+        ...     result = sb.run_code("import math; print(math.pi)")
+        ...     result["stdout"]
+        '3.141592653589793\\n'
+        ...     result["exit_code"]
+        0
+
+    State persists across calls within the same session::
+
+        >>> with Sandbox(session_id="demo", shared_dir="/tmp/shared") as sb:
+        ...     sb.run_code("x = 42")
+        ...     result = sb.run_code("print(x * 2)")
+        ...     result["stdout"]
+        '84\\n'
+
+    Install packages and create MCP tools for an agent::
+
+        >>> with Sandbox(session_id="demo", shared_dir="/tmp/shared") as sb:
+        ...     sb.run_install(["scipy"])
+        ...     server = sb.create_mcp_server(name="sandbox")
 """
 
 import io
@@ -107,6 +131,20 @@ class ReplCrashedError(RuntimeError):
 
 
 REPL_SERVER_SCRIPT = r"""
+# Persistent Python REPL server — runs inside the Docker container.
+#
+# Protocol (JSON-line over stdin/stdout):
+#   Request:  {"code": "...", "timeout": 30}
+#   Response: {"exit_code": 0, "stdout": "...", "stderr": "...", "duration_ms": 42}
+#
+# - All exec() calls share a single namespace, so variables and imports
+#   persist across requests (like notebook cells).
+# - sys.stdin/stdout/stderr are redirected to /dev/null so user code cannot
+#   interfere with the JSON protocol.  The original streams are saved as
+#   _proto_in/_proto_out for protocol I/O.
+# - SIGALRM enforces per-request timeouts (exit_code 124 on expiry).
+# - stdout/stderr are capped at 1 MB to prevent memory blowouts.
+
 import json, signal, sys, time, traceback
 from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
@@ -120,6 +158,8 @@ class _Timeout(Exception):
 def _alarm(signum, frame):
     raise _Timeout()
 
+# Hijack standard streams: save originals for protocol, redirect to /dev/null
+# so user code (print, input) can't corrupt the JSON wire format.
 _proto_in = sys.stdin
 _proto_out = sys.stdout
 sys.stdin = open("/dev/null", "r")

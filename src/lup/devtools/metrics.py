@@ -1,6 +1,15 @@
 """Aggregate metrics across all sessions.
 
 This is a TEMPLATE script. Customize it for your domain's metrics.
+
+Examples::
+
+    $ uv run lup-devtools metrics summary
+    $ uv run lup-devtools metrics summary --all-versions
+    $ uv run lup-devtools metrics tools
+    $ uv run lup-devtools metrics errors --limit 10
+    $ uv run lup-devtools metrics trends --window 20
+    $ uv run lup-devtools metrics history
 """
 
 import json

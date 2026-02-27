@@ -10,6 +10,16 @@ Mechanical helper for /lup:update. Two config files:
 
 The script merges both: .local entries override .json entries by name.
 Projects with a URL but no local path are auto-cloned to .cache/downstream/.
+
+Examples::
+
+    $ uv run lup-devtools sync list
+    $ uv run lup-devtools sync log my-project
+    $ uv run lup-devtools sync log my-project --no-stat
+    $ uv run lup-devtools sync diff my-project abc1234
+    $ uv run lup-devtools sync mark-synced my-project
+    $ uv run lup-devtools sync setup my-project /path/to/repo --synced
+    $ uv run lup-devtools sync setup my-project /path/to/repo --branch main
 """
 
 import json
@@ -277,7 +287,8 @@ def setup_project(
         bool, typer.Option("--synced", help="Mark as already synced at current HEAD")
     ] = False,
     branch: Annotated[
-        str, typer.Option("--branch", "-b", help="Branch to track (default: remote HEAD)")
+        str,
+        typer.Option("--branch", "-b", help="Branch to track (default: remote HEAD)"),
     ] = "",
 ) -> None:
     """Set the local path for a project (writes to downstream.json.local)."""

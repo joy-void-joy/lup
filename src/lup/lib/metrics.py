@@ -3,13 +3,24 @@
 Provides a decorator that tracks tool call counts, durations, and errors.
 Metrics are saved with each session for feedback loop analysis.
 
-Usage:
-    @tracked("my_tool")
-    async def my_tool(args: MyToolInput) -> dict:
-        ...
+Examples:
+    Decorate a tool handler to track calls automatically::
 
-    # At end of session
-    metrics = get_metrics_summary()
+        >>> @tracked("search")
+        ... async def search(args: SearchInput) -> dict[str, object]:
+        ...     return {"results": []}
+
+    Retrieve aggregated metrics at session end::
+
+        >>> summary = get_metrics_summary()
+        >>> summary["total_tool_calls"]
+        15
+        >>> summary["by_tool"]["search"]["avg_duration_ms"]
+        42.5
+
+    Reset metrics between sessions::
+
+        >>> reset_metrics()
 """
 
 import logging

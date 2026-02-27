@@ -8,13 +8,28 @@ Key patterns:
 3. Logs directory is NOT accessible to agent (for feedback loop only)
 4. Permission hooks enforce the access control
 
-Usage:
-    from lup.lib.notes import setup_notes, NotesConfig
+Examples:
+    Set up session directories and wire into permission hooks::
 
-    notes = setup_notes(session_id="12345", task_id="my-task")
-    # notes.rw = directories agent can write to
-    # notes.ro = directories agent can only read
-    # notes.trace_log = where to save trace (agent can't read this)
+        >>> notes = setup_notes(session_id="12345", task_id="my-task")
+        >>> notes.rw  # Agent can write here
+        [PosixPath('.../sessions/12345'), PosixPath('.../outputs/my-task/...')]
+        >>> notes.ro  # Agent can only read here
+        [PosixPath('.../traces')]
+
+    Check if a path is within allowed directories::
+
+        >>> path_is_under("/data/sessions/12345/out.json", notes.rw)
+        True
+        >>> path_is_under("/etc/passwd", notes.rw)
+        False
+
+    Extract the directory prefix from a glob pattern::
+
+        >>> extract_glob_dir("/tmp/foo/**/*.py")
+        '/tmp/foo'
+        >>> extract_glob_dir("**/*.py")
+        ''
 """
 
 from datetime import datetime
