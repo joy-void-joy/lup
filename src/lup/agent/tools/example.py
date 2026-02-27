@@ -3,11 +3,12 @@
 This is a TEMPLATE. Create your own tools following this pattern.
 
 Key patterns:
-1. Use @lup_tool(name, description, InputModel, OutputModel) decorator
+1. Use @lup_tool(description, InputModel, OutputModel) decorator
 2. Define input/output schemas as BaseModel with Field(description=...)
-3. Use Model.model_validate(args) inside the handler for type-safe access
-4. Return {"content": [{"type": "text", "text": "..."}]}
-5. Tool names become: mcp__{server_name}__{tool_name}
+3. Handler receives a validated model instance (not a raw dict)
+4. Handler must return a BaseModel instance (auto-serialized to MCP response)
+5. Tool name defaults to the function name; override with name="..."
+6. Metrics (duration, errors) are tracked automatically
 
 Tool descriptions are the agent's only documentation for each tool.
 A terse description forces the agent to guess when/why to use a tool,
@@ -19,12 +20,9 @@ This keeps tool knowledge in the tool itself rather than in the prompt,
 so descriptions stay accurate as tools are added or changed.
 """
 
-import json
-from typing import Any
-
 from pydantic import BaseModel, Field
 
-from lup.lib import lup_tool, tracked
+from lup.lib.mcp import ToolError, lup_tool
 
 
 # --- Schemas ---
@@ -71,77 +69,53 @@ class FetchOutput(BaseModel):
 
 
 @lup_tool(
-    "search_example",
-    (
-        "Search for information using keyword queries. "
-        "Use this when the agent needs to find data that isn't available in local notes "
-        "or when exploring a topic before making decisions. "
-        "Exists because the agent has no built-in knowledge beyond its training data. "
-        "Returns a JSON object with {query, results: [{title, url}], count}. "
-        "Replace this with your actual search implementation."
-    ),
-    SearchInput,
-    SearchOutput,
+    "Search for information using keyword queries. "
+    "Use this when the agent needs to find data that isn't available in local notes "
+    "or when exploring a topic before making decisions. "
+    "Exists because the agent has no built-in knowledge beyond its training data. "
+    "Returns a JSON object with {query, results: [{title, url}], count}. "
+    "Replace this with your actual search implementation."
 )
-@tracked("search_example")
-async def search_example(params: SearchInput) -> dict[str, Any]:
+async def search_example(params: SearchInput) -> SearchOutput:
     """Search for information."""
 
     if not params.query:
-        return {
-            "content": [{"type": "text", "text": "Error: Query is required"}],
-            "is_error": True,
-        }
+        raise ToolError("Query is required")
 
     # TODO: Implement actual search logic
     # Example with a real search API:
     #
     # try:
     #     results = await search_api.search(params.query, limit=params.limit)
-    #     return {
-    #         "content": [{"type": "text", "text": json.dumps(results)}]
-    #     }
+    #     return SearchOutput(query=params.query, results=results, count=len(results))
     # except Exception as e:
-    #     return {
-    #         "content": [{"type": "text", "text": f"Search failed: {e}"}],
-    #         "is_error": True,
-    #     }
+    #     raise ToolError(f"Search failed: {e}") from e
 
     # Placeholder response
-    result = {
-        "query": params.query,
-        "results": [
-            {"title": "Example Result 1", "url": "https://example.com/1"},
-            {"title": "Example Result 2", "url": "https://example.com/2"},
+    return SearchOutput(
+        query=params.query,
+        results=[
+            SearchResult(title="Example Result 1", url="https://example.com/1"),
+            SearchResult(title="Example Result 2", url="https://example.com/2"),
         ],
-        "count": 2,
-    }
-    return {"content": [{"type": "text", "text": json.dumps(result)}]}
+        count=2,
+    )
 
 
 @lup_tool(
-    "fetch_example",
-    (
-        "Fetch the full content of a web page by URL. "
-        "Use this when the agent has a specific URL to retrieve — e.g., from search "
-        "results, a known reference, or a link found in notes. "
-        "Exists because the agent cannot browse the web directly; this tool provides "
-        "read access to individual pages. "
-        "Returns a JSON object with {url, content, status}. "
-        "Replace this with your actual fetch implementation."
-    ),
-    FetchInput,
-    FetchOutput,
+    "Fetch the full content of a web page by URL. "
+    "Use this when the agent has a specific URL to retrieve — e.g., from search "
+    "results, a known reference, or a link found in notes. "
+    "Exists because the agent cannot browse the web directly; this tool provides "
+    "read access to individual pages. "
+    "Returns a JSON object with {url, content, status}. "
+    "Replace this with your actual fetch implementation."
 )
-@tracked("fetch_example")
-async def fetch_example(params: FetchInput) -> dict[str, Any]:
+async def fetch_example(params: FetchInput) -> FetchOutput:
     """Fetch content from a URL."""
 
     if not params.url:
-        return {
-            "content": [{"type": "text", "text": "Error: URL is required"}],
-            "is_error": True,
-        }
+        raise ToolError("URL is required")
 
     # TODO: Implement actual fetch logic
     # Example with httpx:
@@ -150,21 +124,16 @@ async def fetch_example(params: FetchInput) -> dict[str, Any]:
     #     async with httpx.AsyncClient() as client:
     #         response = await client.get(params.url)
     #         response.raise_for_status()
-    #         result = {"url": params.url, "content": response.text[:5000], "status": 200}
-    #         return {"content": [{"type": "text", "text": json.dumps(result)}]}
+    #         return FetchOutput(url=params.url, content=response.text[:5000], status=200)
     # except Exception as e:
-    #     return {
-    #         "content": [{"type": "text", "text": f"Fetch failed: {e}"}],
-    #         "is_error": True,
-    #     }
+    #     raise ToolError(f"Fetch failed: {e}") from e
 
     # Placeholder response
-    result = {
-        "url": params.url,
-        "content": "Example content from the URL",
-        "status": 200,
-    }
-    return {"content": [{"type": "text", "text": json.dumps(result)}]}
+    return FetchOutput(
+        url=params.url,
+        content="Example content from the URL",
+        status=200,
+    )
 
 
 # --- Tool Collection ---

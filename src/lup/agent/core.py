@@ -33,22 +33,15 @@ from lup.agent.tool_policy import ToolPolicy
 from lup.agent.tools.example import EXAMPLE_TOOLS
 from lup.agent.tools.reflect import create_reflect_tools
 from lup.version import AGENT_VERSION
-from lup.lib import (
-    NotesConfig,
-    ResponseCollector,
-    Sandbox,
-    TraceLogger,
-    create_permission_hooks,
-    create_reflection_gate,
-    create_sdk_mcp_server,
-    extract_sdk_tools,
-    merge_hooks,
-    get_metrics_summary,
-    log_metrics_summary,
-    reset_metrics,
-    save_session,
-    setup_notes,
-)
+from lup.lib.client import ResponseCollector
+from lup.lib.history import save_session
+from lup.lib.hooks import create_permission_hooks, merge_hooks
+from lup.lib.mcp import create_mcp_server, extract_sdk_tools
+from lup.lib.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
+from lup.lib.notes import NotesConfig, setup_notes
+from lup.lib.reflect import create_reflection_gate
+from lup.lib.sandbox import Sandbox
+from lup.lib.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +61,7 @@ def build_options(
     """
     # Create MCP servers for your tools
     # TODO: Replace with your actual tool servers
-    example_server = create_sdk_mcp_server(
+    example_server = create_mcp_server(
         name="example",
         version="1.0.0",
         tools=extract_sdk_tools(EXAMPLE_TOOLS),
@@ -79,7 +72,7 @@ def build_options(
         session_dir=notes_config.session,
         outputs_dir=notes_config.output.parent,
     )
-    reflect_server = create_sdk_mcp_server(
+    reflect_server = create_mcp_server(
         name="notes",
         version="1.0.0",
         tools=extract_sdk_tools(reflect_kit["tools"]),

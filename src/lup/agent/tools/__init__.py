@@ -2,39 +2,8 @@
 
 This package contains:
 - example.py: Template MCP tools to customize for your domain
-- (add your domain-specific tools here)
+- reflect.py: Forced self-review tool (reviewer sub-agent)
+- realtime.py: Real-time tools template (sleep, context, reply)
 
-Utilities are re-exported from lup.lib for convenience:
-- metrics: Tool call tracking with @tracked decorator
-- retry: Retry decorator for API calls with exponential backoff
-- responses: MCP response formatting utilities
+Import directly from submodules (e.g., ``from lup.agent.tools.example import EXAMPLE_TOOLS``).
 """
-
-from lup.lib import (
-    MetricsCollector,
-    ToolMetrics,
-    get_metrics_summary,
-    log_metrics_summary,
-    mcp_error,
-    mcp_response,
-    mcp_success,
-    reset_metrics,
-    tracked,
-    with_retry,
-)
-
-__all__ = [
-    # Metrics
-    "MetricsCollector",
-    "ToolMetrics",
-    "get_metrics_summary",
-    "log_metrics_summary",
-    "reset_metrics",
-    "tracked",
-    # Responses
-    "mcp_error",
-    "mcp_response",
-    "mcp_success",
-    # Retry
-    "with_retry",
-]

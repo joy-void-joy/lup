@@ -15,7 +15,7 @@ Composition:
 - merge_hooks() to compose multiple hook sources
 
 Usage:
-    from lup.lib import merge_hooks, create_permission_hooks, create_nudge_hook
+    from lup.lib.hooks import merge_hooks, create_permission_hooks, create_nudge_hook
 
     permission_hooks = create_permission_hooks(rw_dirs, ro_dirs)
     nudge_hooks = create_nudge_hook({"fetch_url": my_nudge_check})

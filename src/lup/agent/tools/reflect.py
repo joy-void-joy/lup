@@ -25,13 +25,13 @@ Tool naming convention:
 import json
 import logging
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from claude_agent_sdk import TextBlock
 from pydantic import BaseModel, Field
 
 from lup.lib.client import run_query
-from lup.lib import LupMcpTool, lup_tool, mcp_success, tracked
+from lup.lib.mcp import LupMcpTool, lup_tool
 from lup.lib.reflect import ReflectionGate
 
 logger = logging.getLogger(__name__)
@@ -131,12 +131,22 @@ class ReflectInput(BaseModel):
     )
 
 
+class ReviewOutput(BaseModel):
+    """Output from the reflection tool."""
+
+    status: str = Field(description="Review status (e.g. 'reviewed')")
+    assessment_saved: str = Field(description="Path where assessment was saved")
+    process_reflection: str = Field(description="Agent's process reflection")
+    tool_audit: str = Field(description="Agent's tool usage audit")
+    reviewer_critique: str = Field(description="Reviewer critique or skip reason")
+
+
 # ---------------------------------------------------------------------------
 # Reviewer sub-agent
 # ---------------------------------------------------------------------------
 
 
-async def _run_reviewer(
+async def run_reviewer(
     validated: ReflectInput,
     outputs_dir: Path | None,
 ) -> str | None:
@@ -197,19 +207,14 @@ def create_reflect_tools(
     gate = ReflectionGate()
 
     @lup_tool(
-        "review",
-        (
-            "Structured self-review before finalizing output. Call this tool "
-            "after completing your research and analysis but before producing "
-            "your final structured output. Runs an independent reviewer that "
-            "critiques your reasoning, checks for gaps, and flags calibration "
-            "issues. Use the reviewer's feedback to adjust your output. "
-            "You must call this at least once per session."
-        ),
-        ReflectInput,
+        "Structured self-review before finalizing output. Call this tool "
+        "after completing your research and analysis but before producing "
+        "your final structured output. Runs an independent reviewer that "
+        "critiques your reasoning, checks for gaps, and flags calibration "
+        "issues. Use the reviewer's feedback to adjust your output. "
+        "You must call this at least once per session."
     )
-    @tracked("review")
-    async def review(validated: ReflectInput) -> dict[str, Any]:
+    async def review(validated: ReflectInput) -> ReviewOutput:
 
         # Save the review input
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -223,22 +228,17 @@ def create_reflect_tools(
         critique: str | None = None
         if not validated.skip_reviewer:
             try:
-                critique = await _run_reviewer(validated, outputs_dir)
+                critique = await run_reviewer(validated, outputs_dir)
             except Exception:
                 logger.exception("Reviewer sub-agent failed")
                 critique = None
 
-        result: dict[str, str | bool] = {
-            "status": "reviewed",
-            "assessment_saved": str(review_path),
-            "process_reflection": validated.process_reflection,
-            "tool_audit": validated.tool_audit,
-        }
-        if critique:
-            result["reviewer_critique"] = critique
-        else:
-            result["reviewer_critique"] = "(skipped or failed)"
-
-        return mcp_success(result)
+        return ReviewOutput(
+            status="reviewed",
+            assessment_saved=str(review_path),
+            process_reflection=validated.process_reflection,
+            tool_audit=validated.tool_audit,
+            reviewer_critique=critique or "(skipped or failed)",
+        )
 
     return ReflectToolKit(tools=[review], gate=gate)

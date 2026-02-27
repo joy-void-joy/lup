@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Annotated
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from claude_agent_sdk import ClaudeSDKClient
     from claude_agent_sdk.types import ResultMessage
 
     from lup.lib.client import ResponseCollector
@@ -41,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 app = typer.Typer(no_args_is_help=True)
 
-_xclip = sh.Command("xclip")
+xclip = sh.Command("xclip")
 
 CLIPBOARD_IMAGE_MIMES = ("image/png", "image/jpeg", "image/webp")
 
@@ -52,7 +51,7 @@ def read_clipboard_image() -> tuple[str, bytes] | None:
     Returns ``(media_type, raw_bytes)`` or ``None`` when no image is available.
     """
     try:
-        targets = str(_xclip("-selection", "clipboard", "-o", "-t", "TARGETS"))
+        targets = str(xclip("-selection", "clipboard", "-o", "-t", "TARGETS"))
     except (sh.ErrorReturnCode, sh.CommandNotFound):
         return None
 
@@ -61,7 +60,7 @@ def read_clipboard_image() -> tuple[str, bytes] | None:
             continue
         try:
             buf = io.BytesIO()
-            _xclip("-selection", "clipboard", "-o", "-t", mime, _out=buf)
+            xclip("-selection", "clipboard", "-o", "-t", mime, _out=buf)
             data = buf.getvalue()
             if data:
                 return (mime, data)
@@ -73,7 +72,7 @@ def read_clipboard_image() -> tuple[str, bytes] | None:
 def read_clipboard_text() -> str | None:
     """Read text from the system clipboard via xclip."""
     try:
-        text = str(_xclip("-selection", "clipboard", "-o"))
+        text = str(xclip("-selection", "clipboard", "-o"))
         return text if text else None
     except (sh.ErrorReturnCode, sh.CommandNotFound):
         return None
@@ -99,7 +98,7 @@ def print_model_source(
 
 def tool_location(tool: LupMcpTool) -> str:
     """Get file:line for the tool handler (unwraps decorators)."""
-    handler = inspect_mod.unwrap(tool["sdk_tool"].handler)
+    handler = inspect_mod.unwrap(tool.sdk_tool.handler)
     try:
         filepath = inspect_mod.getfile(handler)
         filename = os.path.basename(filepath)
@@ -111,41 +110,36 @@ def tool_location(tool: LupMcpTool) -> str:
 
 def tool_signature(tool: LupMcpTool) -> str:
     """One-liner: input fields → output model name, file:line."""
-    input_model = tool["input_model"]
     parts: list[str] = []
-    for name, f in input_model.model_fields.items():
+    for name, f in tool.input_model.model_fields.items():
         ann = f.annotation
         type_name = getattr(ann, "__name__", None) if ann is not None else None
         parts.append(f"{name}: {type_name}" if type_name else name)
     fields = ", ".join(parts)
-    output_model = tool.get("output_model")
-    output_part = f" → {output_model.__name__}" if output_model else ""
+    output_part = f" → {tool.output_model.__name__}" if tool.output_model else ""
     return f"({fields}){output_part}  [{tool_location(tool)}]"
 
 
 def print_tool_compact(out: io.StringIO, tool: LupMcpTool) -> None:
     """Print a single tool as a one-liner."""
-    sdk = tool["sdk_tool"]
-    out.write(f"    {sdk.name}{tool_signature(tool)}\n")
+    out.write(f"    {tool.sdk_tool.name}{tool_signature(tool)}\n")
 
 
 def print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
     """Print a single tool with full description and schemas."""
-    sdk = tool["sdk_tool"]
-    out.write(f"\n  {sdk.name}\n")
-    out.write(f"  {'─' * len(sdk.name)}\n")
+    out.write(f"\n  {tool.sdk_tool.name}\n")
+    out.write(f"  {'─' * len(tool.sdk_tool.name)}\n")
 
-    desc_lines = sdk.description.split(". ")
+    desc_lines = tool.sdk_tool.description.split(". ")
     for line in desc_lines:
         line = line.strip()
         if line:
             out.write(f"    {line}.\n")
 
-    print_model_source(out, tool["input_model"], "Input")
+    print_model_source(out, tool.input_model, "Input")
 
-    output_model = tool.get("output_model")
-    if output_model is not None:
-        print_model_source(out, output_model, "Output")
+    if tool.output_model is not None:
+        print_model_source(out, tool.output_model, "Output")
 
 
 def collect_tools_by_server() -> dict[str, list[LupMcpTool]]:
@@ -165,12 +159,11 @@ def collect_all_tools() -> list[LupMcpTool]:
 
 def tool_to_dict(t: LupMcpTool) -> dict[str, object]:
     """Serialize a LupMcpTool for JSON output."""
-    output_model = t.get("output_model")
     return {
-        "name": t["sdk_tool"].name,
-        "description": t["sdk_tool"].description,
-        "input_schema": t["input_model"].model_json_schema(),
-        "output_schema": output_model.model_json_schema() if output_model else None,
+        "name": t.sdk_tool.name,
+        "description": t.sdk_tool.description,
+        "input_schema": t.input_model.model_json_schema(),
+        "output_schema": t.output_model.model_json_schema() if t.output_model else None,
     }
 
 
@@ -425,11 +418,11 @@ def chat_cmd(
 # ---------------------------------------------------------------------------
 
 
-class _Interrupted(Exception):
+class Interrupted(Exception):
     """Raised when the user interrupts response collection via Ctrl-C."""
 
 
-async def _collect_interruptible(
+async def collect_interruptible(
     collector: "ResponseCollector",
     console: "Console",
 ) -> "ResultMessage":
@@ -459,12 +452,12 @@ async def _collect_interruptible(
     try:
         return await collect_task
     except asyncio.CancelledError:
-        raise _Interrupted from None
+        raise Interrupted from None
     finally:
         loop.remove_signal_handler(signal.SIGINT)
 
 
-async def _repl(
+async def repl(
     *,
     model: str | None = None,
     no_tools: bool = False,
@@ -484,7 +477,8 @@ async def _repl(
 
     from claude_agent_sdk.types import McpServerConfig
 
-    from lup.lib import build_client, ResponseCollector, save_images
+    from lup.lib.client import build_client, ResponseCollector
+    from lup.lib.images import save_images
     from lup.lib.mcp import create_mcp_server, extract_sdk_tools
     from lup.lib.paths import project_root
 
@@ -522,7 +516,7 @@ async def _repl(
                 branch = "  └" if is_last_tool else "  ├"
                 if not is_last_server:
                     branch = f"[dim]│[/dim] {'└' if is_last_tool else '├'}"
-                panel_lines.append(f"[dim]{branch}[/dim] {t['sdk_tool'].name}")
+                panel_lines.append(f"[dim]{branch}[/dim] {t.sdk_tool.name}")
     else:
         panel_lines.append("[dim]no tools[/dim]")
     panel_lines += ["", "[dim]/quit · Ctrl-C stop · Ctrl-V paste image · Alt+Enter newline[/dim]"]
@@ -652,7 +646,7 @@ async def _repl(
                         await client.query(user_input)
                     collector = ResponseCollector(client)
                     try:
-                        result = await _collect_interruptible(
+                        result = await collect_interruptible(
                             collector, console,
                         )
                         parts: list[str] = []
@@ -667,7 +661,7 @@ async def _repl(
                                 f"  [dim]{' · '.join(parts)}[/dim]"
                             )
                         console.print()
-                    except _Interrupted:
+                    except Interrupted:
                         console.print("  [dim]interrupted[/dim]\n")
                     except RuntimeError as e:
                         console.print(f"  [red]error:[/red] {e}\n")
@@ -694,6 +688,6 @@ def repl_cmd(
 ) -> None:
     """Interactive REPL — continuous session with the agent via the SDK."""
     try:
-        asyncio.run(_repl(model=model, no_tools=no_tools, no_prompt=no_prompt))
+        asyncio.run(repl(model=model, no_tools=no_tools, no_prompt=no_prompt))
     except KeyboardInterrupt:
         pass
