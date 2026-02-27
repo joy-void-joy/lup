@@ -6,7 +6,30 @@ content blocks during agent runs. Used for feedback loop analysis.
 Content blocks are displayed with color-coded tool use/result pairing
 using Rich console, making it easy to visually track which result
 belongs to which tool call.
+
+Two output channels:
+- **Console display** (``print_block`` / ``print_message``): real-time
+  color-coded output for interactive sessions.
+- **Trace accumulation** (``TraceLogger``): markdown-formatted log for
+  post-hoc feedback loop analysis.
+
+Pass a ``TraceLogger`` via the *trace* parameter to combine both in one
+call, or use ``TraceLogger`` methods directly for trace-only logging.
+
+Examples:
+    Display a message with color-coded tool pairing::
+
+        >>> print_message(assistant_message, prefix="  ")
+
+    Display and trace together::
+
+        >>> trace = TraceLogger(trace_path=Path("/tmp/trace.md"), title="Session 1")
+        >>> print_message(assistant_message, trace=trace)
+        >>> trace.save()
+        PosixPath('/tmp/trace.md')
 """
+
+from __future__ import annotations
 
 import itertools
 import json
@@ -14,7 +37,6 @@ import logging
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple
 
 from rich.console import Console
 
@@ -31,6 +53,11 @@ from claude_agent_sdk import (
 from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
+
+# JSON-like recursive type for truncation functions
+type JsonValue = (
+    str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+)
 
 # ---------------------------------------------------------------------------
 # Color-coded tool use / result pairing
@@ -66,29 +93,35 @@ def normalize_content(content: str | Sequence[object] | None) -> str:
     if content is None:
         return "(empty)"
     if isinstance(content, list):
-        texts: list[str] = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                texts.append(str(item.get("text", "")))
+        texts: list[str] = [
+            str(item.get("text", ""))
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+        ]
         return "\n".join(texts)
     return str(content)
 
 
 def truncate_str(value: str, max_len: int = 500) -> str:
+    """Truncate a string to max_len, appending '...' if trimmed."""
     if len(value) > max_len:
         return value[:max_len] + "..."
     return value
 
 
-def truncate_str_fields(obj: object, max_len: int = 500) -> object:
+def truncate_str_fields(
+    obj: JsonValue, max_len: int = 500, max_len_list: int = 10
+) -> JsonValue:
     """Recursively truncate string values in a JSON-like structure."""
-    if isinstance(obj, dict):
-        return {k: truncate_str_fields(v, max_len) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [truncate_str_fields(item, max_len) for item in obj]
-    if isinstance(obj, str):
-        return truncate_str(obj, max_len)
-    return obj
+    match obj:
+        case dict() as d:
+            return {k: truncate_str_fields(v, max_len) for k, v in d.items()}
+        case list() as items:
+            return [truncate_str_fields(item, max_len) for item in items][:max_len_list]
+        case str() as s:
+            return truncate_str(s, max_len)
+        case _:
+            return obj
 
 
 def format_tool_result(
@@ -108,51 +141,66 @@ def format_tool_result(
     return json.dumps(truncated, indent=2)
 
 
-def truncate_content(content: str | Sequence[object] | None, max_len: int = 500) -> str:
-    """Normalize and truncate content for display."""
-    text = normalize_content(content)
-    if len(text) > max_len:
-        return text[:max_len] + "..."
-    return text
-
-
 # ---------------------------------------------------------------------------
 # Block info extraction
 # ---------------------------------------------------------------------------
 
 
-class BlockInfo(NamedTuple):
-    """Extracted information from a content block."""
+class BlockInfo(BaseModel):
+    """Extracted display information from a content block."""
 
     emoji: str
     label: str
     content: str
-    is_code: bool = False
 
 
 def extract_block_info(block: ContentBlock) -> BlockInfo:
-    """Extract display information from a content block.
-
-    Args:
-        block: A ContentBlock from the Claude Agent SDK.
-
-    Returns:
-        BlockInfo with emoji, label, and content.
-    """
+    """Extract display information from a content block."""
     match block:
         case ThinkingBlock():
-            return BlockInfo("💭", "Thinking", block.thinking)
+            return BlockInfo(emoji="💭", label="Thinking", content=block.thinking)
         case TextBlock():
-            return BlockInfo("💬", "Response", block.text)
+            return BlockInfo(emoji="💬", label="Response", content=block.text)
         case ToolUseBlock():
             content = json.dumps(block.input, indent=2) if block.input else ""
-            return BlockInfo("🔧", f"Tool: {block.name}", content, is_code=True)
+            return BlockInfo(emoji="🔧", label=f"Tool: {block.name}", content=content)
         case ToolResultBlock():
             return BlockInfo(
-                "📋", "Result", normalize_content(block.content), is_code=True
+                emoji="📋", label="Result", content=normalize_content(block.content)
             )
         case _:
-            return BlockInfo("❓", "Unknown", str(block))
+            return BlockInfo(emoji="❓", label="Unknown", content=str(block))
+
+
+# ---------------------------------------------------------------------------
+# Color tag resolution
+# ---------------------------------------------------------------------------
+
+
+class ColorTag(BaseModel):
+    """Color-coded identifier for tool use / result pairing."""
+
+    id: str
+    color: str
+
+
+def resolve_color_tag(block: ContentBlock) -> ColorTag | None:
+    """Assign or retrieve a color for tool use/result pairing.
+
+    ToolUseBlock gets a fresh color from the rotating palette and stores
+    it by ID. ToolResultBlock pops the matching color. Other blocks
+    return None (no colored tag).
+    """
+    match block:
+        case ToolUseBlock():
+            color = next(color_cycle)
+            id_to_color[block.id] = color
+            return ColorTag(id=block.id, color=color)
+        case ToolResultBlock():
+            color = id_to_color.pop(block.tool_use_id, "default")
+            return ColorTag(id=block.tool_use_id, color=color)
+        case _:
+            return None
 
 
 # ---------------------------------------------------------------------------
@@ -161,9 +209,7 @@ def extract_block_info(block: ContentBlock) -> BlockInfo:
 
 
 def print_block(
-    block: ContentBlock,
-    prefix: str = "",
-    trace_logger: "TraceLogger | None" = None,
+    block: ContentBlock, prefix: str = "", trace: TraceLogger | None = None
 ) -> None:
     """Print a content block with color-coded tool use/result pairing.
 
@@ -171,21 +217,31 @@ def print_block(
     is printed, its ID is assigned a color from a rotating palette. When
     the corresponding result arrives, the same color is used, making it
     easy to visually pair them.
+
+    If *trace* is provided, the block is also logged to the trace.
     """
+    info = extract_block_info(block)
+    tag = resolve_color_tag(block)
+
+    # Tool results get special formatting (JSON pretty-print + truncation)
+    display_content = (
+        format_tool_result(block.content)
+        if isinstance(block, ToolResultBlock)
+        else info.content
+    )
+
+    # Console output — tool blocks get a colored ID tag on the header line
+    if tag:
+        print(f"{prefix}{info.emoji} {info.label} ", end="")
+        console.print(f"[{tag.id}]", style=tag.color)
+        if display_content:
+            print(display_content)
+    else:
+        print(f"{prefix}{info.emoji} {display_content}")
+
+    # Stream log — format varies by block type (TOOL_USE includes tool name)
     match block:
-        case ThinkingBlock():
-            print(f"{prefix}💭 {block.thinking}")
-            stream_log.info("%sTHINKING: %s", prefix, block.thinking)
-        case TextBlock():
-            print(f"{prefix}💬 {block.text}")
-            stream_log.info("%sTEXT: %s", prefix, block.text)
         case ToolUseBlock():
-            color = next(color_cycle)
-            id_to_color[block.id] = color
-            print(f"{prefix}🔧 {block.name} ", end="")
-            console.print(f"[{block.id}]", style=color)
-            if block.input:
-                print(json.dumps(block.input, indent=2))
             stream_log.info(
                 "%sTOOL_USE [%s] %s: %s",
                 prefix,
@@ -194,41 +250,33 @@ def print_block(
                 json.dumps(block.input) if block.input else "",
             )
         case ToolResultBlock():
-            color = id_to_color.pop(block.tool_use_id, "default")
-            formatted = format_tool_result(block.content)
-            print(f"{prefix}📋 Result ", end="")
-            console.print(f"[{block.tool_use_id}]", style=color)
-            print(formatted)
             stream_log.info(
                 "%sTOOL_RESULT [%s]: %s",
                 prefix,
                 block.tool_use_id,
-                formatted,
+                display_content,
             )
         case _:
-            print(f"{prefix}❓ {type(block).__name__}: {block}")
-            stream_log.info("%sUNKNOWN: %s: %s", prefix, type(block).__name__, block)
+            stream_log.info("%s%s: %s", prefix, info.label.upper(), display_content)
 
-    if trace_logger:
-        trace_logger.log_block(block)
+    if trace:
+        trace.log_block(block)
 
 
 def print_message(
-    message: Message,
-    prefix: str = "",
-    trace_logger: "TraceLogger | None" = None,
+    message: Message, prefix: str = "", trace: TraceLogger | None = None
 ) -> None:
-    """Print all content blocks in a message and optionally trace-log them.
+    """Print all content blocks in a message.
 
     Handles AssistantMessage and UserMessage (which carry content blocks).
     Other message types (SystemMessage, ResultMessage, StreamEvent) are
-    silently ignored.
+    silently ignored. If *trace* is provided, blocks are also logged to it.
     """
     match message:
         case AssistantMessage() | UserMessage():
             blocks = message.content if isinstance(message.content, list) else []
             for block in blocks:
-                print_block(block, prefix=prefix, trace_logger=trace_logger)
+                print_block(block, prefix=prefix, trace=trace)
 
 
 # ---------------------------------------------------------------------------
@@ -237,19 +285,16 @@ def print_message(
 
 
 def format_block_markdown(block: ContentBlock) -> str:
-    """Format a content block as markdown for trace logs.
-
-    Args:
-        block: A ContentBlock from the Claude Agent SDK.
-
-    Returns:
-        Markdown-formatted string representation.
-    """
+    """Format a content block as markdown for trace logs."""
     info = extract_block_info(block)
-    if info.is_code:
-        lang = "json" if "Tool:" in info.label else ""
-        return f"## {info.emoji} {info.label}\n\n```{lang}\n{info.content}\n```\n"
-    return f"## {info.emoji} {info.label}\n\n{info.content}\n"
+    header = f"## {info.emoji} {info.label}"
+    match block:
+        case ToolUseBlock():
+            return f"{header}\n\n```json\n{info.content}\n```\n"
+        case ToolResultBlock():
+            return f"{header}\n\n```\n{info.content}\n```\n"
+        case _:
+            return f"{header}\n\n{info.content}\n"
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +316,10 @@ class TraceLogger(BaseModel):
     Collects content blocks during agent execution and saves them
     as a markdown trace file for later analysis. Supports both
     raw line access (for saving) and indexed entry access (for slicing).
+
+    Typically passed to ``print_message(message, trace=trace)`` for
+    combined display and tracing. Methods like ``log_message`` and
+    ``log_text`` support trace-only logging without console output.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -309,6 +358,18 @@ class TraceLogger(BaseModel):
     def log_block(self, block: ContentBlock) -> None:
         """Add a formatted block to the trace."""
         self.append_entry(format_block_markdown(block))
+
+    def log_message(self, message: Message) -> None:
+        """Log all content blocks in a message.
+
+        Handles AssistantMessage and UserMessage. Other message types
+        are silently ignored.
+        """
+        match message:
+            case AssistantMessage() | UserMessage():
+                blocks = message.content if isinstance(message.content, list) else []
+                for block in blocks:
+                    self.log_block(block)
 
     def log_text(self, text: str, heading: str | None = None) -> None:
         """Add raw text to the trace."""
