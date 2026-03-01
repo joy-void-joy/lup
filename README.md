@@ -1,15 +1,16 @@
-(All code in this repository has been reviewed or rewritten by humans, this README has been written by a human)
+(All code in this repository has been reviewed by humans, this README has been written by a human)
 
 # Lup
 
-A meta repository for speed-boosting your claude code development, especially to create self-improving [ClaudeAgentSDK] applications
+A meta repository for speed-boosting your Claude Code development, especially to create self-improving [ClaudeAgentSDK] applications
 
-[[image1]]
-[[image2]]
+<img width="1535" height="863" alt="image" src="https://github.com/user-attachments/assets/d5159e28-1669-433b-8f89-e012c3abfa1c" />
+<img width="1532" height="554" alt="image" src="https://github.com/user-attachments/assets/6f272a6e-71b6-4720-89bf-6b811081343d" />
+
 
 # Why this repo?
 
-I believe that claude code may be underappreciated right now. Not just the agent, but its [SDK]. The SDK of claude code allows it to:
+I believe that claude code may be underappreciated right now. Not just the agent, but its [SDK](https://platform.claude.com/docs/en/agent-sdk/overview). The SDK of claude code allows it to:
 
 - Think through a task by using many tools to fetch information, and decompose it carefully
 - Delegate part of its task to other agents through tool calls that augment or gatekeep the results
