@@ -38,7 +38,7 @@ uv run lup-devtools sync list
 
 If no projects have new commits, report that everything is up to date and stop.
 
-### 2. Read commit history and all diffs
+### 2. Read all diffs and build inventory
 
 For each project with new commits:
 
@@ -46,21 +46,25 @@ For each project with new commits:
 uv run lup-devtools sync log <project>
 ```
 
-Skip **data-only** commits (`data(outputs):`, `data(scores):`). For every other commit, read the **complete** diff:
+Skip **data-only** commits (`data(outputs):`, `data(scores):`). For every other commit, read the **complete** diff — never truncate with `head` or skim large outputs:
 
 ```bash
 uv run lup-devtools sync diff <project> <sha>
 ```
 
-Read every diff in full — do not skim or truncate. Do not classify or judge during this step. Build the full picture first; cross-commit patterns only become visible after reading all diffs.
+After reading each diff, produce an **inventory**: list every new function, class, CLI command, model, and pattern added. The inventory is purely descriptive — what was added, not whether it's useful. This prevents whole-commit dismissal: you can't skip what you've already enumerated.
+
+Do not classify during this step. Cross-commit patterns only become visible after reading all diffs.
 
 **If a focus area was provided:** Also skip commits whose messages clearly don't relate to the focus area. But when in doubt, keep them — the diff might touch relevant code.
 
-### 3. Extract portable pieces
+### 3. Classify inventory
 
-After reading all diffs, go back through each commit and extract every portable piece. The unit of portability is the individual hunk or function, not the commit. For each commit, ask **per file, per hunk**: "Is this piece independently portable?"
+For each item in the inventory, ask: **"What would this look like with a generic data source?"** If you can describe a generic version, it's portable. If the item IS the domain data (model fields, API-specific calls, scoring formulas), it's domain-specific.
 
-Classify pieces (not commits) as:
+**Do not confuse the data a tool operates on with the tool itself.** Visualization commands, CLI watch modes, analysis pipelines, and formatting utilities are infrastructure — portable even when they currently display domain-specific data. The data source is a parameter; the infrastructure is the portable piece.
+
+Classify as:
 
 - **Portable as-is**: Improvements that apply directly without modification
   - `lib/` utilities (e.g., better `print_block`, new retry patterns, caching improvements)
@@ -78,11 +82,9 @@ Classify pieces (not commits) as:
   - **Feedback loop updates** — Version-scoped analysis, new analysis phases, better templates
   - **Agent SDK usage patterns** (hooks, session config, structured output, tool patterns)
   - **Agent core improvements** that generalize (error handling, log management, config patterns)
-  - **Scoring/metrics improvements** (new columns, aggregation methods)
+  - **Scoring/metrics improvements** (new columns, aggregation methods, visualization commands)
 
-**Do not confuse the data a tool operates on with the tool itself.** Visualization commands, CLI watch modes, analysis pipelines, and formatting utilities are infrastructure — portable even when they currently display domain-specific data. The data source is a parameter; the infrastructure is the portable piece. Test: if you swapped the data source for a generic one, would the code still be useful? If yes, it's portable.
-
-Examples of what gets missed when you extract per-commit instead of per-hunk:
+Examples of what gets missed when you classify by domain keywords instead of by function:
 - A "forge image mounting" commit also adds `save_images()` — a general utility for writing clipboard image data to disk. The forge wiring is domain-specific; the utility function is portable.
 - A "REPL upgrade" commit adds prompt_toolkit, clipboard paste, *and* container orchestration changes. The REPL UX is portable; the container setup is not.
 - A "sandbox tools" commit adds `run_code` *and* a new error-handling pattern in the tool wrapper. The tool is domain-specific; the error-handling pattern is portable.
