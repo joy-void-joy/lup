@@ -375,9 +375,9 @@ def render_bucket(
 
 def render_overage(out: Text, extra: ExtraUsage, bar_width: int) -> None:
     """Render the extra usage (overage) section."""
-    used = extra["used_credits"]
-    limit = extra["monthly_limit"]
-    util = extra["utilization"]
+    used = extra["used_credits"] or 0
+    limit = extra["monthly_limit"] or 0
+    util = extra["utilization"] or 0
 
     out.append("  overage", style="bold bright_white")
     out.append(f"  ${used / 100:.2f}", style="bold")
