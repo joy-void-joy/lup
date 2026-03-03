@@ -60,6 +60,20 @@ ActionCallback = Callable[[str], Awaitable[None]]
 # =====================================================================
 
 
+class SleepFollowUp(BaseModel):
+    """A message to send at a scheduled interval during sleep.
+
+    Follow-ups fill silence: thread-pulls, different angles, check-ins.
+    Cancelled (saved as ideas) if the user speaks before they fire.
+    """
+
+    message: str = Field(description="Message to send during sleep")
+    delay_seconds: int = Field(
+        ge=1,
+        description="Seconds from sleep start to send this message",
+    )
+
+
 class SleepInput(BaseModel):
     """Input for the sleep tool."""
 
@@ -76,6 +90,20 @@ class SleepInput(BaseModel):
         description=(
             "Quiet period for debounce. Once activity starts, wait this long "
             "after each event before waking. Defaults to debounce_initial."
+        ),
+    )
+    wake_on_empty: bool = Field(
+        default=True,
+        description=(
+            "Wake immediately if debounce_initial expires with no activity. "
+            "When false, sleep continues for the full seconds duration."
+        ),
+    )
+    follow_ups: list[SleepFollowUp] = Field(
+        default_factory=list,
+        description=(
+            "Messages to send at intervals during sleep. "
+            "Cancelled (saved as ideas) if the user speaks before they fire."
         ),
     )
     force: bool = Field(
@@ -279,11 +307,18 @@ class Scheduler:
         """Whether a wake event is already queued."""
         return self._wake.is_set()
 
-    def start_debounce(self, initial_seconds: int, quiet_seconds: int) -> None:
+    def start_debounce(
+        self,
+        initial_seconds: int,
+        quiet_seconds: int,
+        *,
+        wake_on_empty: bool = True,
+    ) -> None:
         """Start a debounce window. Replaces any existing window.
 
         Phase 1 (initial): Wait up to ``initial_seconds`` for the first
-        event. If nothing arrives, wake immediately.
+        event. If nothing arrives and ``wake_on_empty`` is True, wake
+        immediately; otherwise silently deactivate.
         Phase 2 (quiet): Once activity is detected, wait ``quiet_seconds``
         after each event. Wake when the quiet period elapses.
         """
@@ -298,7 +333,7 @@ class Scheduler:
             self._debounce_event.set()
 
         self._debounce_task = asyncio.create_task(
-            self.run_debounce(initial_seconds, quiet_seconds)
+            self.run_debounce(initial_seconds, quiet_seconds, wake_on_empty)
         )
 
     def extend_debounce(self) -> None:
@@ -306,7 +341,9 @@ class Scheduler:
         if self.debounce_active:
             self._debounce_event.set()
 
-    async def run_debounce(self, initial_seconds: int, quiet_seconds: int) -> None:
+    async def run_debounce(
+        self, initial_seconds: int, quiet_seconds: int, wake_on_empty: bool = True,
+    ) -> None:
         """Debounce timer: initial wait for activity, then quiet-period loop."""
         try:
             # Phase 1: wait for first activity
@@ -315,7 +352,8 @@ class Scheduler:
                     self._debounce_event.wait(), timeout=initial_seconds
                 )
             except asyncio.TimeoutError:
-                self.wake("timer")
+                if wake_on_empty:
+                    self.wake("timer")
                 return
 
             # Phase 2: quiet-period loop
