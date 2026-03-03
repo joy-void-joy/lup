@@ -659,6 +659,8 @@ See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-d
 
 **When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" The fix is almost never a prompt line about a specific decision. Instead: does the agent have enough context? The right tools? A strong enough model?
 
+When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
+
 ### Three Levels of Analysis
 
 1. **Object Level** — The agent itself: tools, capabilities, behavior
@@ -689,6 +691,7 @@ See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-d
 - Adding absolute thresholds ("if X happens N times, do Y")
 - Adding rules the agent can't act on (no access to required data)
 - Making small edits to patch one mistake instead of finding the general cause
+- Adding "CRITICAL: Never do X" warnings instead of restructuring the workflow so X has no entry point
 - Listing tools by name in the system prompt (two sources of truth that drift apart)
 - Writing terse tool descriptions
 - Skipping trace analysis to jump to aggregate statistics

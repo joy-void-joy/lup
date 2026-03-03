@@ -454,6 +454,7 @@ For incremental prompt changes (when Priority 0 determined a full rewrite isn't 
 - Numeric adjustments ("always add 10% margin") (will become stale)
 - Patches for observed patterns (treat symptoms, not causes)
 - Conditional exceptions that reference specific failure modes
+- "CRITICAL: Never do X" warnings — find the workflow step that invites X and restructure it
 
 **Track patch count.** If you add a patch this session, count how many patches have been
 added since the last rewrite. If the count exceeds 3, flag it in your analysis — the next
