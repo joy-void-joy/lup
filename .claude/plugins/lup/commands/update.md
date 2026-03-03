@@ -38,7 +38,7 @@ uv run lup-devtools sync list
 
 If no projects have new commits, report that everything is up to date and stop.
 
-### 2. Review commit history
+### 2. Read commit history and all diffs
 
 For each project with new commits:
 
@@ -46,21 +46,21 @@ For each project with new commits:
 uv run lup-devtools sync log <project>
 ```
 
-Read through the commit history. The commit messages preserve intent — a message like "feat(lib): add TTL cache invalidation" tells you exactly what changed and why.
-
-### 3. Classify each commit
-
-**If a focus area was provided:** Skip commits whose diffs don't touch files or concepts related to the focus area. Only review commits where the diff includes changes relevant to the focus (e.g., `/lup:update hooks` → only commits touching hook scripts, hook logic, or hook-related config).
-
-For each commit, read the full diff:
+Skip **data-only** commits (`data(outputs):`, `data(scores):`). For every other commit, read the **complete** diff:
 
 ```bash
 uv run lup-devtools sync diff <project> <sha>
 ```
 
-**IMPORTANT: Do not dismiss code changes prematurely.** A commit that touches domain-specific files may still contain portable patterns, SDK usage improvements, or generalizable techniques. Always read the actual diff before classifying.
+Read every diff in full — do not skim or truncate. Do not classify or judge during this step. Build the full picture first; cross-commit patterns only become visible after reading all diffs.
 
-Classify as:
+**If a focus area was provided:** Also skip commits whose messages clearly don't relate to the focus area. But when in doubt, keep them — the diff might touch relevant code.
+
+### 3. Extract portable pieces
+
+After reading all diffs, go back through each commit and extract every portable piece. The unit of portability is the individual hunk or function, not the commit. For each commit, ask **per file, per hunk**: "Is this piece independently portable?"
+
+Classify pieces (not commits) as:
 
 - **Portable as-is**: Improvements that apply directly without modification
   - `lib/` utilities (e.g., better `print_block`, new retry patterns, caching improvements)
@@ -80,34 +80,26 @@ Classify as:
   - **Agent core improvements** that generalize (error handling, log management, config patterns)
   - **Scoring/metrics improvements** (new columns, aggregation methods)
 
-- **Data-only**: Skip these entirely
-  - Raw data commits (`data(outputs):`, `data(scores):`)
+**Do not confuse the data a tool operates on with the tool itself.** Visualization commands, CLI watch modes, analysis pipelines, and formatting utilities are infrastructure — portable even when they currently display domain-specific data. The data source is a parameter; the infrastructure is the portable piece. Test: if you swapped the data source for a generic one, would the code still be useful? If yes, it's portable.
 
-**CRITICAL: Decompose commits, don't classify them whole.** A single commit often contains multiple independent changes — some portable, some not. Never label a commit "domain-specific" and move on. Instead, read the diff and ask **for each changed file or hunk**: "Is this piece independently portable?"
-
-Examples of what gets missed when you classify whole commits:
+Examples of what gets missed when you extract per-commit instead of per-hunk:
 - A "forge image mounting" commit also adds `save_images()` — a general utility for writing clipboard image data to disk. The forge wiring is domain-specific; the utility function is portable.
 - A "REPL upgrade" commit adds prompt_toolkit, clipboard paste, *and* container orchestration changes. The REPL UX is portable; the container setup is not.
 - A "sandbox tools" commit adds `run_code` *and* a new error-handling pattern in the tool wrapper. The tool is domain-specific; the error-handling pattern is portable.
-
-**The unit of portability is the individual change, not the commit.** When you see a commit touching domain-specific files, read the actual diff and extract every independently portable piece: utility functions, UX patterns, error handling, library additions, configuration patterns.
-
-**The key question is not "Is this commit portable?" but "What portable pieces does this commit contain?"** A downstream repo adds container image mounting — the portable piece is "clipboard image paste in REPL" and "content-hash file saving utility." Those belong in the template even though the container mounting doesn't.
-
-When reviewing diffs, also read the full changed files in both repos for context. File-level diffs help you understand how a change fits into the broader codebase structure.
+- A "score visualization" commit adds strip plots, trend charts, color selection, and watch mode. The scoring formula is domain-specific; the visualization pipeline is portable devtools infrastructure.
 
 ### 4. Present improvements
 
-For each portable improvement, use AskUserQuestion to present:
+Present every extracted portable piece to the user via AskUserQuestion:
 
-- The upstream commit message (intent)
-- The relevant diff (what changed)
-- Where it maps to in the current project
+- The upstream commit(s) it comes from
+- What the portable piece is (function, pattern, infrastructure, etc.)
+- Where it maps to in the template
 - Whether to apply it
 
-Group related commits when they form a logical unit of work.
+Group related pieces when they form a logical unit (e.g., strip plot + trend plot + watch mode = "devtools visualization scaffold").
 
-**When uncertain whether a change is portable or domain-specific, ask the user** — don't skip it. Present the commit with your classification reasoning and let the user decide.
+**Default: present.** When uncertain whether something is portable, present it with your reasoning and let the user decide. The user can always say "skip" — but you cannot un-skip something you never showed them.
 
 ### 5. Apply selected changes
 
