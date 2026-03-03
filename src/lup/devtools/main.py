@@ -25,6 +25,7 @@ from lup.devtools.git import app as git_app
 from lup.devtools.metrics import app as metrics_app
 from lup.devtools.sync import app as sync_app
 from lup.devtools.trace import app as trace_app
+from lup.devtools.charts import app as charts_app
 from lup.devtools.usage import app as usage_app
 
 app = typer.Typer(
@@ -35,6 +36,7 @@ app = typer.Typer(
 
 app.add_typer(agent_app, name="agent", help="Agent introspection and debugging")
 app.add_typer(api_app, name="api", help="API inspection and module info")
+app.add_typer(charts_app, name="charts", help="Terminal chart visualizations")
 app.add_typer(dev_app, name="dev", help="Development tools (worktrees)")
 app.add_typer(feedback_app, name="feedback", help="Feedback collection")
 app.add_typer(git_app, name="git", help="Git operations for sessions")
