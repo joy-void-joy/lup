@@ -224,6 +224,16 @@ class Scheduler:
         self._wake_reason = reason
         self._wake.set()
 
+    def consume_wake(self) -> None:
+        """Clear a pending wake event after the agent has read its cause.
+
+        Call this after the agent processes the messages that triggered
+        a wake, to prevent ``sleep()`` from returning immediately on
+        the stale event.
+        """
+        self._wake.clear()
+        self._wake_reason = None
+
     async def sleep(self, seconds: int) -> SleepResult:
         """Block until timer expires or a wake event fires.
 

@@ -247,12 +247,12 @@ def list_all_session_ids(version: str | None = None) -> list[str]:
 
 MIN_VERSION_DATAPOINTS = 10
 
-_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 
 def parse_semver(version: str) -> tuple[int, int, int] | None:
     """Parse 'X.Y.Z' into (major, minor, patch), or None if invalid."""
-    m = _SEMVER_RE.match(version)
+    m = SEMVER_RE.match(version)
     if not m:
         return None
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
