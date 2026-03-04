@@ -504,6 +504,20 @@ class Sandbox:
         self.destroy_container()
         self.docker_client = None
 
+    def restart_repl(self) -> None:
+        """Restart the REPL, clearing in-memory state.
+
+        Container, filesystem, and installed packages are preserved.
+        Only the Python namespace is reset.
+        """
+        if self.repl is not None:
+            self.repl.stop()
+        if self.docker_client is None or self.active_container is None:
+            raise SandboxNotInitializedError("Sandbox not initialized")
+        self.repl = ReplSession(self.docker_client, self.active_container, {})
+        self.repl.start()
+        logger.info("REPL restarted (state cleared)")
+
     def __enter__(self) -> Self:
         """Enter context manager, starting the sandbox."""
         started = False
