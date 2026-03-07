@@ -162,21 +162,6 @@ def current_head(path: str) -> str:
     return git_in(path, "rev-parse", "HEAD")
 
 
-def resolve_path(proj: dict[str, str]) -> tuple[str, bool]:
-    """Resolve project to a local path, return (path, exists). Creates ref symlink if found."""
-    name = proj["name"]
-    path = proj.get("path", "")
-    if path and Path(path).exists():
-        ensure_ref_symlink(name, path)
-        return path, True
-
-    cache_path = CACHE_DIR / name
-    if cache_path.exists():
-        ensure_ref_symlink(name, str(cache_path))
-        return str(cache_path), True
-
-    return proj.get("url", "NO PATH"), False
-
 
 @app.command("list")
 def list_projects_cmd() -> None:
@@ -198,11 +183,11 @@ def list_projects_cmd() -> None:
         synced = p.get("last_synced_commit", "")
         synced_short = synced[:8] if synced else "never"
 
-        resolved, exists = resolve_path(p)
-        if not exists:
-            print(
-                f"{p['name']:<20} {'?':<10} {synced_short:<12} {resolved} (run list after clone)"
-            )
+        try:
+            resolved = ensure_local(p)
+        except (typer.Exit, sh.ErrorReturnCode):
+            url = p.get("url", "NO PATH")
+            print(f"{p['name']:<20} {'?':<10} {synced_short:<12} {url} (clone failed)")
             continue
 
         behind = commit_count(resolved, synced)
