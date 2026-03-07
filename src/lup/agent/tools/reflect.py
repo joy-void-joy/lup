@@ -222,7 +222,6 @@ def create_reflect_tools(
         "You must call this at least once per session."
     )
     async def review(validated: ReflectInput) -> ReviewOutput:
-
         # Save the review input
         session_dir.mkdir(parents=True, exist_ok=True)
         review_path = session_dir / "review.json"

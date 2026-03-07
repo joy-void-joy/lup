@@ -31,9 +31,36 @@ app = typer.Typer(no_args_is_help=True)
 
 
 SATURATED_RING: list[int] = [
-    196, 202, 208, 214, 220, 226, 190, 154, 118, 82,
-    46, 47, 48, 49, 50, 51, 45, 39, 33, 27,
-    21, 57, 93, 129, 165, 201, 200, 199, 198, 197,
+    196,
+    202,
+    208,
+    214,
+    220,
+    226,
+    190,
+    154,
+    118,
+    82,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    45,
+    39,
+    33,
+    27,
+    21,
+    57,
+    93,
+    129,
+    165,
+    201,
+    200,
+    199,
+    198,
+    197,
 ]
 """30-entry ring of maximally-spaced 256-color codes for category coloring."""
 
@@ -207,9 +234,7 @@ def build_strip_chart(
     lines.append(f"{scale_pad}{DIM}{''.join(ruler)}{RESET}")
     lines.append(f"{scale_pad}{DIM}{''.join(labels_row)}{RESET}")
 
-    lines.append(
-        f"\n{DIM}● individual  2-9 overlapping  avg ±std  min‥max{RESET}"
-    )
+    lines.append(f"\n{DIM}● individual  2-9 overlapping  avg ±std  min‥max{RESET}")
 
     return "\n".join(lines)
 
@@ -293,9 +318,7 @@ def build_scatter(
     n_ticks = min(6, max(3, term_width // 20))
     x_step = (x_max - x_min) / max(1, n_ticks - 1)
     tick_pos = [x_min + i * x_step for i in range(n_ticks)]
-    tick_labels = [
-        (epoch + timedelta(days=d)).strftime("%d/%m") for d in tick_pos
-    ]
+    tick_labels = [(epoch + timedelta(days=d)).strftime("%d/%m") for d in tick_pos]
     plt.xticks(tick_pos, tick_labels)
 
     plt.hline(0, color="gray+")
@@ -416,7 +439,11 @@ def strip(
 
     def build_output() -> str:
         return build_strip_chart(
-            by_group, labels, console.width, color_map=cmap, group_totals=totals,
+            by_group,
+            labels,
+            console.width,
+            color_map=cmap,
+            group_totals=totals,
         )
 
     if no_watch:
@@ -426,8 +453,7 @@ def strip(
 
     output = build_output()
     timestamp = Text(
-        f"  updated {datetime.now().strftime('%H:%M:%S')}"
-        f"  ·  esc to quit",
+        f"  updated {datetime.now().strftime('%H:%M:%S')}  ·  esc to quit",
         style="dim",
     )
 
@@ -446,8 +472,7 @@ def strip(
             except KeyboardInterrupt:
                 break
             timestamp = Text(
-                f"  updated {datetime.now().strftime('%H:%M:%S')}"
-                f"  ·  esc to quit",
+                f"  updated {datetime.now().strftime('%H:%M:%S')}  ·  esc to quit",
                 style="dim",
             )
             live.update(Group(Text.from_ansi(output), timestamp))
@@ -488,9 +513,13 @@ def trend(
 
     def build_output() -> str:
         chart = build_scatter(
-            points, "Score trend", "score",
-            console.width, max(8, (console.height - 6) // 2),
-            cmap, epoch,
+            points,
+            "Score trend",
+            "score",
+            console.width,
+            max(8, (console.height - 6) // 2),
+            cmap,
+            epoch,
         )
         legend = build_legend(categories, cmap, {}, None, console.width)
         return f"{chart}\n\n{legend}" if legend else chart
@@ -502,8 +531,7 @@ def trend(
 
     output = build_output()
     timestamp = Text(
-        f"  updated {datetime.now().strftime('%H:%M:%S')}"
-        f"  ·  esc to quit",
+        f"  updated {datetime.now().strftime('%H:%M:%S')}  ·  esc to quit",
         style="dim",
     )
 
@@ -522,8 +550,7 @@ def trend(
             except KeyboardInterrupt:
                 break
             timestamp = Text(
-                f"  updated {datetime.now().strftime('%H:%M:%S')}"
-                f"  ·  esc to quit",
+                f"  updated {datetime.now().strftime('%H:%M:%S')}  ·  esc to quit",
                 style="dim",
             )
             live.update(Group(Text.from_ansi(output), timestamp))

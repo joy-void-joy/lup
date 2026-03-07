@@ -342,7 +342,10 @@ class Scheduler:
             self._debounce_event.set()
 
     async def run_debounce(
-        self, initial_seconds: int, quiet_seconds: int, wake_on_empty: bool = True,
+        self,
+        initial_seconds: int,
+        quiet_seconds: int,
+        wake_on_empty: bool = True,
     ) -> None:
         """Debounce timer: initial wait for activity, then quiet-period loop."""
         try:
@@ -565,6 +568,7 @@ def create_pending_event_guard(
     Returns:
         HooksConfig with PreToolUse hooks.
     """
+
     async def event_guard(
         input_data: HookInput,
         _tool_use_id: str | None,
