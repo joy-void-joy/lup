@@ -82,6 +82,7 @@ src/
     │   ├── hooks.py            # Claude Agent SDK hook utilities
     │   ├── metrics.py          # Tool call tracking (@tracked decorator)
     │   ├── mcp.py              # MCP server creation utilities
+    │   ├── background.py       # Background agents for persistent sessions
     │   ├── notes.py            # RO/RW directory structure
     │   ├── paths.py            # Centralized version-aware path constants and helpers
     │   ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
@@ -119,98 +120,14 @@ src/
 
 ### Design Patterns
 
-#### Persistent Agent Pattern
+See [PATTERNS.md](PATTERNS.md) for detailed architecture patterns: Persistent Agent, Reflection, Nested Agent, Background Agent, and Data Augmentation.
 
-For agents that exist over time — maintaining conversations, monitoring systems, playing games — the architecture inverts: the agent is a **persistent presence** that controls its own attention, not a processor steered by an event queue.
-
-| Do This                                                     | Not This                                    |
-| ----------------------------------------------------------- | ------------------------------------------- |
-| Agent sleeps when it chooses, wakes on events               | Event queue drives agent responses          |
-| All timing is tools (sleep, debounce, remind, schedule)     | Hardcode delays or polling in orchestration |
-| Stop hook prevents turn from ending — only sleep yields     | Request-response per event                  |
-| Pull-based state reading (agent calls `context` when ready) | Push state changes as SDK user turns        |
-| Agent parks thoughts (ideas, reminders) for later           | Drop context between interactions           |
-| Expose environment state as tool-readable data              | Hide activity from the agent                |
-
-**The core loop:** The agent never ends its turn. A Stop hook blocks it. Instead it cycles: wake → read context → think → act → meta-assess → sleep. The only way to yield control is `sleep()`, which blocks on an asyncio Event until something wakes it.
-
-**Why not an event queue?** The sleep/wake pattern lets the agent stay centered — it can debounce event bursts, schedule actions, set reminders, and park thoughts for later, all on its own terms.
-
-**Library support:** `src/lup/lib/realtime.py` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`). See example tools in `src/lup/agent/tools/realtime.py`.
-
-#### Reflection Pattern
-
-Agents produce better output when forced to self-assess before committing. Three components:
-
-1. **Reflection tool** (`agent/tools/reflect.py`): Domain-customizable self-assessment — confidence, uncertainties, tool audit, process reflection. Optionally runs a reviewer sub-agent.
-2. **Reflection gate** (`lib/reflect.py`): `ReflectionGate` flag tracker + `create_reflection_gate()` hook factory. Denies a target tool until reflection occurs.
-3. **Wiring**: The gate blocks `StructuredOutput` (one-shot agents) or `sleep` (persistent agents) until reflection occurs.
-
-**Customizing:** The gate in `lib/reflect.py` is domain-neutral and parametric. The reflection tool and `ReflectInput` in `agent/tools/reflect.py` are domain-specific — add fields for your domain. The reviewer prompt should target your domain's common failure modes.
-
-**Skip reviewer:** Set `skip_reviewer=True` for speed-sensitive or trivial tasks. The reviewer adds latency but catches calibration errors and reasoning gaps.
-
-#### Nested Agent Pattern
-
-Distinct from **subagents** (SDK-native `Task()` dispatch, defined upfront in `get_subagents()`, same session). A nested agent is a tool that internally creates an independent SDK client, runs it, and folds the result back into its tool response.
-
-| Aspect     | Subagent                          | Nested Agent                        |
-| ---------- | --------------------------------- | ----------------------------------- |
-| Definition | Upfront in `get_subagents()`      | On-demand inside a tool handler     |
-| Client     | Main agent's SDK session          | Independent client via `query()`    |
-| Session    | Shared — same trace, same metrics | Isolated — no session persistence   |
-| Return     | SDK `ResultMessage` (structured)  | Scalar result augmented by the tool |
-| Use case   | Specialized long-running work     | Quick generation, review, parsing   |
-
-**The augmentation pattern:** The tool handler post-processes the nested agent's output before returning it. The nested agent produces raw material; the tool shapes it into the MCP response:
-
-```python
-@lup_tool("Review code quality and return structured assessment")
-async def review(params: ReviewInput) -> ReviewOutput:
-    collector = await query(
-        build_review_prompt(params),
-        model="sonnet",
-        system_prompt=REVIEWER_PROMPT,
-        tools=["Read", "Grep"],
-        permission_mode="bypassPermissions",
-        max_turns=5,
-    )
-    # Augment: fold nested agent's text into structured tool output
-    return ReviewOutput(critique=collector.text or "", score=compute_score(collector))
-```
-
-**Library support:** `query()` in `lib/client.py` handles the full pipeline (build client → query → collect). Session persistence is automatically disabled. Use `collector.text` for text extraction, `collector.output(T)` for structured output, or pass `output_type=T` to `query()` to get `T | None` directly.
-
-**When to use each:** The axis is **context separation**. **Subagents** extend the main agent's thinking — same session, shared context, like a specialized lobe that makes reasoning more efficient. **Nested agents** are for truly separable work — the two contexts shouldn't pollute each other. The main agent doesn't need the nested agent's reasoning chain, just its conclusion. The tool handler acts as a context boundary.
-
-#### Data Augmentation Pattern
-
-Tools that fetch external data should **enrich it inside the tool** before returning to the agent. The agent receives structured, domain-aware results — not raw HTML, API responses, or search snippets it has to interpret.
-
-| Do This                                                | Not This                                              |
-| ------------------------------------------------------ | ----------------------------------------------------- |
-| Tool recognizes URL domain, calls structured API       | Tool returns raw HTML for agent to parse               |
-| Search results include API data for known domains      | Agent fetches each search result separately            |
-| Null fields filled from fallback sources inside client | Agent retries with different queries to fill gaps      |
-| Domain routing dispatches to specialized handlers      | Agent decides which tool to call per URL               |
-| Enrichment runs in parallel inside the tool            | Agent sequentially processes each result               |
-
-**The principle:** Every layer of the fetch pipeline automatically upgrades raw external data to structured, domain-appropriate content before it reaches the agent. The agent never parses HTML, never matches URL patterns, never decides which API to call for a given domain.
-
-**Three forms of augmentation:**
-
-1. **Domain dispatch** — URL patterns route to specialized API handlers (e.g., a wiki URL → structured article text via the wiki's API, instead of scraping HTML). Hints redirect the agent to a better tool when no direct handler exists.
-2. **Null-filling** — Multi-source fallback pipelines that recover missing fields from alternative endpoints or sibling records (e.g., primary API withholds fields → fallback endpoint fills the gaps).
-3. **Extraction** — Nested agent calls that distill large text blocks into focused answers (see [Nested Agent Pattern](#nested-agent-pattern)).
-
-**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API client wrappers. Extraction uses `query()` from `lib/client.py` (see [Nested Agent Pattern](#nested-agent-pattern)).
-
-#### Parametric Library Design
+### lib/ vs agent/ Boundary
 
 Files in `src/lup/lib/` must be **complete-as-is and configurable through function arguments** — never by modifying the source. Domain-specific code belongs in `agent/`.
 
-- **Use function parameters** for customization (callbacks, config objects, path overrides)
-- **Use `configure()`-style functions** for module-level state that needs overriding
+- Use function parameters for customization (callbacks, config objects, path overrides)
+- Use `configure()`-style functions for module-level state that needs overriding
 - **No imports from `agent/`** in lib code — the dependency arrow points one way
 
 ---
@@ -347,7 +264,7 @@ Worktrees typically branch from `dev`, but can also branch from other feature br
 
 ### Merge Conflict Resolution
 
-**Never silently drop code during conflict resolution.** The bias is toward inclusion -- keeping both sides is always safer than losing features. A rename on one side must not swallow an addition on the other.
+**Never silently drop code during conflict resolution.** The bias is toward inclusion — keeping both sides is always safer than losing features. A rename on one side must not swallow an addition on the other.
 
 Before completing any merge, **audit for deletions**: compare the result against both parents and verify that every removed function, parameter, or command was intentionally removed, not lost as a side effect of choosing one conflict side.
 
@@ -661,6 +578,27 @@ See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-d
 
 When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
 
+### Diagnosing Failures
+
+When the agent fails, the instinct is to patch the prompt. Resist it. Instead, trace the failure through the pipeline:
+
+1. **What data did the agent have?** Read the trace. What tools did it call? What did they return? Was the information sufficient for a correct decision?
+2. **Where in the workflow did the wrong decision enter?** Find the exact step — not the symptom, the entry point. A bad output is a symptom; a missing tool call or a misleading tool result is the cause.
+3. **What structural change prevents it?** A new tool, a better tool description, a restructured pipeline step, richer data — these are durable fixes. A prompt rule is a patch that coexists with the failure.
+
+| Do This | Not This |
+|---|---|
+| Trace the failure to a missing input or structural flaw | Add "NEVER do X" or "ALWAYS do Y" to the prompt |
+| Formulate general principles with fresh examples | Copy examples from the specific trace that failed |
+| Ask "what data was the agent missing?" and provide it | Add a numeric threshold ("if score > 15, then...") |
+| Restructure the pipeline step where the error enters | Add a warning after the error-prone step |
+
+**Examples that look the same but aren't:**
+
+- Agent misclassifies commits → **Do:** Restructure the step to process files individually before grouping. **Don't:** Add "CRITICAL: Always check if a commit touches multiple concerns."
+- Agent produces verbose output → **Do:** Constrain via output model or add a reviewer subagent. **Don't:** Add "Keep responses under 200 words."
+- Agent ignores an available tool → **Do:** Improve the tool's description (what/when/why). **Don't:** Add "Remember to use X tool" to the prompt.
+
 ### Three Levels of Analysis
 
 1. **Object Level** — The agent itself: tools, capabilities, behavior
@@ -682,26 +620,21 @@ When the principle points to a workflow failure, fix the workflow at the exact j
 - **Traces**: `notes/traces/<version>/logs/<session_id>/`
 - **Metrics**: Tool calls, timing, errors via metrics tracking
 
----
+### Anti-Patterns
 
-## Anti-Patterns
-
-- Adding numeric patches ("subtract 10% from estimates")
-- Prompting Lup with rigid mechanical procedures instead of guidelines and rationale
-- Adding absolute thresholds ("if X happens N times, do Y")
 - Adding rules the agent can't act on (no access to required data)
-- Making small edits to patch one mistake instead of finding the general cause
 - Adding "CRITICAL: Never do X" warnings instead of restructuring the workflow so X has no entry point
+- Copying examples from a specific trace into the prompt instead of deriving general principles and writing fresh examples
+- Adding numeric thresholds or absolute rules ("if more than N, do X") — these are brittle and don't survive domain shifts
+- Patching for one observed symptom instead of tracing the failure through the pipeline to find the structural cause
 - Listing tools by name in the system prompt (two sources of truth that drift apart)
-- Writing terse tool descriptions
 - Skipping trace analysis to jump to aggregate statistics
 - Over-engineering initial implementations
 - Making changes in `lup.environment` when `lup.agent` is the right place
 
-**Questions to ask when proposing changes:**
+**Validation questions for proposed changes:**
 
 1. Does this add a capability or just a rule?
 2. Would this help if the domain changed completely?
 3. Are we changing the right level (object/meta/meta-meta)?
-4. What general principle would have prevented this failure?
-5. What data would we need to validate this change worked?
+4. What data would we need to validate this change worked?

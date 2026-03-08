@@ -66,11 +66,16 @@ When considering changes, ask:
    - Prefer tools and capabilities over prompt constraints
    - Avoid pattern-matching patches
 
-2. **Generality Check**: Would this help if the domain changed?
+2. **Pipeline Diagnosis**: If fixing a failure, did you trace it?
+   - What data did the agent have? What was missing?
+   - Where in the workflow did the wrong decision enter?
+   - Is the fix structural (new tool, better data, restructured step) or just a prompt patch?
+
+3. **Generality Check**: Would this help if the domain changed?
    - General principles > specific patches
    - If it only works for one scenario, it's probably over-fitted
 
-3. **Meta Level Check**: Are we changing the right layer?
+4. **Meta Level Check**: Are we changing the right layer?
    - Object level = the agent's behavior
    - Meta level = how the agent tracks itself
    - Meta-meta level = the feedback loop infrastructure

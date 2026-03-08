@@ -379,6 +379,21 @@ If you find gaps, add tracking in Phase 4.
 
 **Log every change** in the analysis document (see Documentation Template). The next feedback session reads this (Phase 0) to avoid re-deriving the same improvements. Be specific: "Added X to Y because Z" — not just "improved prompts."
 
+### Before Any Change: Diagnose the Pipeline
+
+For each failure pattern found in Phase 2, answer these questions before proposing a fix:
+
+1. **What data did the agent have?** Trace the tool calls and their results. Was the information sufficient for a correct decision, or was something missing?
+2. **Where in the workflow did the wrong decision enter?** Find the structural entry point — the step that invited the error — not the final symptom.
+3. **What would prevent this structurally?** A new tool? Better tool descriptions? Richer data returned by an existing tool? A restructured pipeline step?
+
+Only after answering these should you classify the fix into the priorities below. If you can't answer question 1, you haven't read the trace deeply enough — go back to Phase 2.
+
+**Common diagnostic traps:**
+- Jumping to "add a prompt rule about X" without asking what data the agent had when it made the wrong call
+- Copying an example from the failing trace into the prompt (the example is trace-specific; derive the general principle instead)
+- Adding a numeric threshold ("if confidence > 0.8, do Y") instead of understanding why the agent's assessment was wrong
+
 ### Priority 0: Evaluate Prompt Health
 
 Before patching individual issues, assess whether the system prompt needs a structural

@@ -124,5 +124,6 @@ Categorize improvements as:
 - **Read the source.** Don't evaluate tool usage without reading the actual tool descriptions and schemas in `src/lup/agent/tools/`.
 - **Compare to intent.** The system prompt (`src/lup/agent/prompts.py`) defines the intended behavior — compare actual behavior against it.
 - **Focus on the general.** Per the Bitter Lesson: prefer improvements that add capabilities over improvements that add rules. A missing tool is almost always a better diagnosis than a missing prompt paragraph.
+- **Diagnose before prescribing.** For each proposed improvement, answer: what data was the agent missing, and where in the pipeline did the wrong decision enter? Don't propose "add rule X to the prompt" — propose the structural change that makes the failure impossible. Don't copy examples from this trace into the prompt — derive the general principle and write fresh examples.
 - **Be honest about quality.** If the session went well, say so. Not every review needs to find problems.
 - **Quote the trace.** When citing evidence, quote the actual trace text (tool names, thinking excerpts, result fragments) — don't paraphrase.

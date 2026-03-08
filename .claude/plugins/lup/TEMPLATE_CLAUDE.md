@@ -659,6 +659,16 @@ See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-d
 
 When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
 
+### Diagnosing Failures
+
+When the agent fails, trace the failure through the pipeline before changing anything:
+
+1. **What data did the agent have?** Read the trace. What tools did it call? What did they return?
+2. **Where in the workflow did the wrong decision enter?** Find the entry point, not the symptom.
+3. **What structural change prevents it?** A new tool, a better tool description, a restructured step, richer data.
+
+A prompt rule is a patch that coexists with the failure. A structural change makes the failure impossible.
+
 ### Three Levels of Analysis
 
 1. **Object Level** -- The agent itself: tools, capabilities, behavior
@@ -707,11 +717,11 @@ Configuration is loaded via pydantic-settings. See `src/<project>/agent/config.p
 <!-- section: Anti-Patterns to Avoid -->
 # Anti-Patterns to Avoid
 
-- Adding numeric patches ("subtract 10% from estimates")
+- Adding numeric patches ("subtract 10% from estimates") or absolute thresholds ("if X happens N times, do Y")
 - Prompting the agent with rigid mechanical procedures instead of guidelines and rationale
-- Adding absolute thresholds ("if X happens N times, do Y")
+- Copying examples from a specific trace into the prompt instead of deriving general principles and writing fresh examples
 - Adding rules the agent can't act on (no access to required data)
-- Making small edits to patch one mistake instead of finding the general cause
+- Patching for one observed symptom instead of tracing the failure through the pipeline to find the structural cause
 - Adding "CRITICAL: Never do X" warnings instead of restructuring the workflow so X has no entry point
 - Listing tools by name in the system prompt (creates two sources of truth that drift apart)
 - Writing terse tool descriptions (the agent can't use a tool well if it doesn't know when or why)
