@@ -9,16 +9,22 @@ The pattern:
 3. Wire hooks (stop guard, pending event guard, meta guard)
 4. Use streaming input mode with a single session-start turn
 
-The tools here follow the harmon pattern:
+Core tools:
 - ``sleep`` is the ONLY blocking tool — all others return immediately
 - ``context`` reads state and advances the event pointer
 - ``reply`` delivers actions to the environment
 - Timing tools (debounce, remind, schedule) are non-blocking
 
+Background agents (see ``lup.lib.background.BackgroundAgent``):
+- Run companion agents alongside the main session
+- Observer example at the bottom shows conversation summarization
+- Any use case: research, execution, monitoring — not just observation
+
 Tool descriptions are comprehensive because they're the agent's only
 documentation. See Tool Design Philosophy in CLAUDE.md.
 """
 
+import logging
 import json
 from datetime import datetime
 from typing import Any
@@ -27,6 +33,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from claude_agent_sdk import tool
 
+from lup.lib.background import BackgroundAgent
 from lup.lib.realtime import (
     DebounceInput,
     RemindInput,
@@ -35,6 +42,8 @@ from lup.lib.realtime import (
     SleepInput,
 )
 from lup.lib.responses import mcp_error, mcp_response
+
+logger = logging.getLogger(__name__)
 
 
 # =====================================================================
@@ -345,3 +354,133 @@ def create_realtime_tools(
         ideas_tool,
         meta_tool,
     ]
+
+
+# =====================================================================
+# Background agent example: Observer
+# =====================================================================
+#
+# An observer is one use of BackgroundAgent — it maintains running
+# summaries of the conversation. Other uses: research agents that
+# fetch data, executor agents that run long tasks, etc.
+#
+# Integration:
+# 1. Create shared state (e.g. notes list)
+# 2. Create observer with create_observer()
+# 3. Call observer.start() in session setup
+# 4. Call observer.wake() when transcript changes
+# 5. Include notes[-1] in the main agent's context tool
+# 6. Call observer.stop() on session teardown
+
+OBSERVER_SYSTEM_PROMPT = """\
+You are a background observer for a conversation agent. Each turn you \
+receive new transcript messages and write a note the agent reads for \
+context.
+
+Write a concise summary — what the agent needs to understand the \
+conversation if earlier messages scrolled out of context. Include \
+specifics: names, stories, claims, examples, the user's mood and \
+what they care about right now. Keep it short — a few sentences to \
+a short paragraph. No headers, no bullet lists, no numbered items.
+
+Describe context only — never prescribe behavior. No "What Agent \
+Should Do" sections, no action items, no directives. The agent \
+decides how to act; you provide the picture it acts on.
+
+If the new messages are trivial fragments, skip the update entirely — \
+only write when the picture meaningfully changed.\
+"""
+
+
+class ObserverNotesInput(BaseModel):
+    """Input for the observer notes tool."""
+
+    content: str = Field(
+        description=(
+            "Complete conversation summary replacing the previous note. "
+            "Include everything the agent needs for context."
+        )
+    )
+
+
+def create_observer_tools(
+    *,
+    notes: list[str],
+) -> list[Any]:
+    """Create tools for the observer background agent.
+
+    Args:
+        notes: Shared list where observer appends summaries.
+            The main agent reads from this via its context tool.
+    """
+
+    @tool(
+        "notes",
+        "Write a complete summary of the conversation so far. "
+        "This replaces your previous note — include everything "
+        "the agent needs. The agent sees your latest note for "
+        "temporal context.",
+        ObserverNotesInput.model_json_schema(),
+    )
+    async def observer_notes_tool(args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            inp = ObserverNotesInput.model_validate(args)
+        except ValidationError as e:
+            return mcp_error(str(e))
+        notes.append(inp.content)
+        logger.info("Observer note: %s", inp.content)
+        return mcp_response(f"Note saved ({len(notes)} total).")
+
+    return [observer_notes_tool]
+
+
+def create_observer(
+    *,
+    notes: list[str],
+    transcript: list[object],
+    model: str = "claude-sonnet-4-20250514",
+) -> BackgroundAgent:
+    """Create an observer background agent.
+
+    This is a TEMPLATE — customize the system prompt, model, and
+    build_message callback for your domain.
+
+    The observer reads new transcript entries on each wake, formats
+    them, and produces a summary note. The main agent includes
+    ``notes[-1]`` in its context tool output.
+
+    Args:
+        notes: Shared list for observer summaries.
+        transcript: Shared transcript the observer reads from.
+            Items should have ``role`` and ``content`` attributes.
+        model: Model to use for the observer.
+
+    Returns:
+        A configured BackgroundAgent (call ``.start()`` to begin).
+    """
+    read_index = [0]  # Mutable container for closure
+
+    def build_message() -> str | None:
+        start = read_index[0]
+        end = len(transcript)
+        if end <= start:
+            return None
+        read_index[0] = end
+        msgs = transcript[start:end]
+
+        msgs_text = "\n".join(
+            f"[{getattr(m, 'role', 'unknown')}] {getattr(m, 'content', str(m))}"
+            for m in msgs
+        )
+        last_note = notes[-1] if notes else "(none yet)"
+        return f"New messages:\n{msgs_text}\n\nYour last note:\n{last_note}"
+
+    return BackgroundAgent(
+        name="observer",
+        system_prompt=OBSERVER_SYSTEM_PROMPT,
+        tools=create_observer_tools(notes=notes),
+        build_message=build_message,
+        start_message="[Observer started — maintain notes about the conversation]",
+        model=model,
+        allowed_tools=["mcp__observer__notes"],
+    )
