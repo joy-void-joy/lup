@@ -7,6 +7,7 @@ by modifying the source. Domain-specific code belongs in lup.agent.
 Import directly from submodules (e.g., ``from lup.lib.mcp import lup_tool``).
 
 Modules:
+- background: Background agents for persistent sessions (parallel companions)
 - client: Agent SDK client creation and response collection
 - history: Session history storage and retrieval (generic, model-agnostic)
 - hooks: Claude Agent SDK hook utilities (permission, nudge, capture)
