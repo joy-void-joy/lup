@@ -3,9 +3,11 @@
 
 Decision order:
 1. Protected files (.claude/, pyproject.toml, .env*) -> always defer
-2. Pure deletion (new_string is empty) -> allow
-3. replace_all: single-line rename -> allow, multi-line -> defer
-4. Count nontrivial added lines per change block (using a state machine
+2. Typing anti-patterns in .py files (Any, # type: ignore, Generic[], __all__,
+   dict[str, object]) -> deny if found in newly added lines
+3. Pure deletion (new_string is empty) -> allow
+4. replace_all: single-line rename -> allow, multi-line -> defer
+5. Count nontrivial added lines per change block (using a state machine
    for context-aware classification) -> allow if every block <= MAX_REAL_CHANGES
 """
 
@@ -22,6 +24,17 @@ PROTECTED_PATTERNS = [
     r"(^|/)\.claude/",
     r"(^|/)pyproject\.toml$",
     r"(^|/)\.env($|\.)",
+]
+
+TYPING_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bAny\b"), "Never use Any — use specific types, TypedDict, or BaseModel"),
+    (re.compile(r"#\s*type:\s*ignore"), "Never use # type: ignore — fix the type error properly"),
+    (re.compile(r"\bGeneric\["), "Use Python 3.12+ class[T] syntax instead of Generic[T]"),
+    (re.compile(r"__all__\s*[=:]"), "No __all__ — import directly from the defining module"),
+    (
+        re.compile(r"\bdict\[\s*str\s*,\s*object\s*\]"),
+        "Never use dict[str, object] — use TypedDict or BaseModel",
+    ),
 ]
 
 
@@ -191,6 +204,42 @@ def _allow_decision() -> AllowDecision:
     }
 
 
+def _deny_decision(reason: str) -> AllowDecision:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }
+
+
+def find_anti_pattern_violations(old_string: str, new_string: str) -> str | None:
+    """Check newly added lines for typing anti-patterns. Returns deny reason or None."""
+    old_lines = old_string.splitlines() if old_string else []
+    new_lines = new_string.splitlines() if new_string else []
+
+    matcher = difflib.SequenceMatcher(
+        None,
+        [ln.strip() for ln in old_lines],
+        [ln.strip() for ln in new_lines],
+    )
+
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag not in ("insert", "replace"):
+            continue
+        for idx in range(j1, j2):
+            stripped = new_lines[idx].strip()
+            if not stripped or stripped.startswith("#") and "type:" not in stripped:
+                continue
+            for pattern, reason in TYPING_ANTI_PATTERNS:
+                if pattern.search(stripped):
+                    preview = stripped[:80]
+                    return f"Denied: {reason} | line: {preview}"
+
+    return None
+
+
 def decide(tool_input: EditInput) -> AllowDecision | None:
     file_path = tool_input.file_path
     old_string = tool_input.old_string
@@ -199,6 +248,11 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
 
     if is_protected_file(file_path):
         return None
+
+    if file_path.endswith(".py") and new_string:
+        violation = find_anti_pattern_violations(old_string, new_string)
+        if violation:
+            return _deny_decision(violation)
 
     if old_string and not new_string:
         return _allow_decision()
