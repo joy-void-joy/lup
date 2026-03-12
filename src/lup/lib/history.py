@@ -1,9 +1,11 @@
-"""Session history storage and retrieval.
+"""Session history storage, retrieval, and cross-version data discovery.
 
 This module handles:
 1. Saving session results to notes/traces/<version>/sessions/
 2. Loading past sessions for context or analysis (across versions)
 3. Tracking session metadata (submitted, outcome, etc.)
+4. Cross-version iteration over sessions, outputs, and trace logs
+5. Version scope resolution with progressive semver fallback
 
 The feedback loop scripts read from this storage.
 
@@ -32,27 +34,65 @@ Examples:
         >>> sessions[0]["summary"]
         'done'
 
-    Format history as agent context::
+    Iterate sessions across versions::
 
-        >>> context = format_history_for_context(sessions, max_sessions=3)
-        >>> context.startswith("## Past Sessions")
-        True
+        >>> for session_dir in iter_session_dirs(session_id="my-session"):
+        ...     print(session_dir)
+        PosixPath('.../notes/traces/0.1.0/sessions/my-session')
+
+    Resolve version scope with progressive fallback::
+
+        >>> versions, warning = resolve_version("0.1.0")
+        >>> versions
+        ['0.1.0']
 """
 
 import json
 import logging
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from lup.lib.paths import iter_session_dirs, sessions_dir
+from lup.lib.client import TokenUsage
+from lup.lib.metrics import MetricsSummary
+from lup.lib.paths import sessions_dir, traces_path
+from lup.version import AGENT_VERSION
 
 logger = logging.getLogger(__name__)
 
 # Type alias for raw session JSON — schema varies by domain
 type SessionData = dict[str, object]
+
+
+class SessionResult[OutputT: BaseModel](BaseModel):
+    """Complete result of an agent session.
+
+    Generic over the output type so domain-specific agent output
+    models can be used without modifying this module.
+
+    This captures everything needed for the feedback loop:
+    - The structured output
+    - Metadata (timing, cost, token usage)
+    - Tool metrics for analysis
+    """
+
+    session_id: str
+    task_id: str | None = Field(default=None, description="Domain-specific task ID")
+    agent_version: str = Field(
+        default="", description="Agent version that produced this result"
+    )
+    timestamp: str
+    output: OutputT
+    reasoning: str = Field(default="", description="Raw reasoning text")
+    sources_consulted: list[str] = Field(default_factory=list)
+    duration_seconds: float | None = None
+    cost_usd: float | None = None
+    token_usage: TokenUsage | None = None
+    tool_metrics: MetricsSummary | None = None
+    outcome: str | None = Field(default=None, description="Outcome after resolution")
 
 
 def save_session(result: BaseModel, *, session_id: str) -> Path:
@@ -122,8 +162,6 @@ def list_all_sessions() -> list[str]:
     Returns:
         Sorted, deduplicated list of session IDs.
     """
-    from lup.lib.paths import list_all_session_ids
-
     return list_all_session_ids()
 
 
@@ -223,3 +261,169 @@ def format_history_for_context(
         lines.append(fmt(session))
 
     return "\n".join(lines)
+
+
+# -- Cross-version data discovery ---------------------------------------------
+
+
+def version_dirs() -> list[Path]:
+    """Return all version directories under notes/traces/, sorted."""
+    tp = traces_path()
+    if not tp.exists():
+        return []
+    return sorted(d for d in tp.iterdir() if d.is_dir() and not d.name.startswith("."))
+
+
+def iter_session_dirs(
+    session_id: str | None = None,
+    version: str | None = None,
+) -> Iterator[Path]:
+    """Iterate over session directories across all (or filtered) versions.
+
+    Yields paths like: notes/traces/0.1.0/sessions/my-session/
+    """
+    ver_dirs = [traces_path() / version] if version else version_dirs()
+
+    for ver_dir in ver_dirs:
+        sessions_base = ver_dir / "sessions"
+        if not sessions_base.exists():
+            continue
+        if session_id is not None:
+            candidate = sessions_base / session_id
+            if candidate.exists() and candidate.is_dir():
+                yield candidate
+        else:
+            for d in sessions_base.iterdir():
+                if d.is_dir():
+                    yield d
+
+
+def iter_output_dirs(
+    task_id: str | None = None,
+    version: str | None = None,
+) -> Iterator[Path]:
+    """Iterate over output directories across all (or filtered) versions.
+
+    Yields paths like: notes/traces/0.1.0/outputs/my-task/
+    """
+    ver_dirs = [traces_path() / version] if version else version_dirs()
+
+    for ver_dir in ver_dirs:
+        outputs_base = ver_dir / "outputs"
+        if not outputs_base.exists():
+            continue
+        if task_id is not None:
+            candidate = outputs_base / task_id
+            if candidate.exists() and candidate.is_dir():
+                yield candidate
+        else:
+            for d in outputs_base.iterdir():
+                if d.is_dir():
+                    yield d
+
+
+def iter_trace_log_files(session_id: str | None = None) -> Iterator[Path]:
+    """Iterate reasoning log files across all versions."""
+    for ver_dir in version_dirs():
+        logs_base = ver_dir / "logs"
+        if not logs_base.exists():
+            continue
+        if session_id is not None:
+            session_logs = logs_base / session_id
+            if session_logs.exists():
+                yield from session_logs.glob("*.md")
+        else:
+            yield from logs_base.rglob("*.md")
+
+
+def list_all_session_ids(version: str | None = None) -> list[str]:
+    """Return all session IDs across versions, deduplicated."""
+    ids: set[str] = set()
+    for d in iter_session_dirs(version=version):
+        ids.add(d.name)
+    return sorted(ids)
+
+
+# -- Version scope resolution ------------------------------------------------
+
+MIN_VERSION_DATAPOINTS = 10
+
+SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+
+def parse_semver(version: str) -> tuple[int, int, int] | None:
+    """Parse 'X.Y.Z' into (major, minor, patch), or None if invalid."""
+    m = SEMVER_RE.match(version)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+
+def count_sessions_for_versions(versions: list[str]) -> int:
+    """Count total session directories across a set of version directories."""
+    return sum(sum(1 for _ in iter_session_dirs(version=v)) for v in versions)
+
+
+def resolve_version(
+    version: str | None,
+    all_versions: bool = False,
+    min_datapoints: int = MIN_VERSION_DATAPOINTS,
+) -> tuple[list[str] | None, str | None]:
+    """Resolve effective version scope with progressive semver fallback.
+
+    Fallback chain: exact version → X.Y.* → X.* → all versions.
+    Widens when the narrower scope has fewer than ``min_datapoints`` sessions.
+
+    Returns ``(version_list, warning_message)``.
+    ``version_list`` is ``None`` when all versions should be included.
+    """
+    if all_versions:
+        return None, None
+
+    effective = version if version is not None else AGENT_VERSION
+    semver = parse_semver(effective)
+    available = [d.name for d in version_dirs()]
+
+    # Level 1: exact version
+    exact = [effective] if effective in available else []
+    exact_count = count_sessions_for_versions(exact)
+    if exact_count >= min_datapoints:
+        return exact, None
+
+    if semver is None:
+        return None, (
+            f"v{effective} has only {exact_count} sessions "
+            f"(need {min_datapoints}) — including all versions"
+        )
+
+    major, minor, _ = semver
+
+    # Level 2: same minor (X.Y.*)
+    minor_matches = [
+        v
+        for v in available
+        if (sv := parse_semver(v)) is not None and sv[0] == major and sv[1] == minor
+    ]
+    minor_count = count_sessions_for_versions(minor_matches)
+    if minor_count >= min_datapoints:
+        return minor_matches, (
+            f"v{effective} has only {exact_count} sessions "
+            f"— widening to v{major}.{minor}.* ({minor_count} sessions)"
+        )
+
+    # Level 3: same major (X.*)
+    major_matches = [
+        v for v in available if (sv := parse_semver(v)) is not None and sv[0] == major
+    ]
+    major_count = count_sessions_for_versions(major_matches)
+    if major_count >= min_datapoints:
+        return major_matches, (
+            f"v{major}.{minor}.* has only {minor_count} sessions "
+            f"— widening to v{major}.* ({major_count} sessions)"
+        )
+
+    # Level 4: all versions
+    return None, (
+        f"v{major}.* has only {major_count} sessions "
+        f"(need {min_datapoints}) — including all versions"
+    )

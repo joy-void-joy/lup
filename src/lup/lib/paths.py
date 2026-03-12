@@ -1,8 +1,7 @@
 """Centralized path constants and helpers for agent session data.
 
-All session-related paths are routed through this module. Writers use
-version-specific directories; readers default to the current AGENT_VERSION
-with progressive semver fallback when data is insufficient.
+Pure path layout — where things go on disk. No data discovery or disk
+iteration; see :mod:`lup.lib.history` for cross-version queries.
 
 Paths auto-detect the project root (walking up to ``pyproject.toml``)
 but can be overridden via :func:`configure`::
@@ -26,31 +25,26 @@ Examples:
         >>> sessions_dir()
         PosixPath('/tmp/test-project/notes/traces/0.1.0/sessions')
 
-    Iterate sessions across versions::
+    Check if a path is within allowed directories::
 
-        >>> for session_dir in iter_session_dirs(session_id="my-session"):
-        ...     print(session_dir)
-        PosixPath('.../notes/traces/0.1.0/sessions/my-session')
-
-    Resolve version scope with progressive fallback::
-
-        >>> versions, warning = resolve_version("0.1.0")
-        >>> versions
-        ['0.1.0']
-        >>> versions, warning = resolve_version("0.1.0", all_versions=True)
-        >>> versions is None  # None means "all versions"
+        >>> path_is_under("/data/sessions/12345/out.json", [Path("/data/sessions")])
         True
+        >>> path_is_under("/etc/passwd", [Path("/data/sessions")])
+        False
+
+    Extract the directory prefix from a glob pattern::
+
+        >>> extract_glob_dir("/tmp/foo/**/*.py")
+        '/tmp/foo'
+        >>> extract_glob_dir("**/*.py")
+        ''
 """
 
-import logging
 import re
-from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 
 from lup.version import AGENT_VERSION
-
-logger = logging.getLogger(__name__)
 
 
 def find_project_root() -> Path:
@@ -162,167 +156,54 @@ def trace_logs_dir(version: str = AGENT_VERSION) -> Path:
     return traces_path() / version / "logs"
 
 
-# -- Read paths (cross-version iteration) -------------------------------------
+# -- Path utilities -----------------------------------------------------------
 
 
-def version_dirs() -> list[Path]:
-    """Return all version directories under notes/traces/, sorted."""
-    tp = traces_path()
-    if not tp.exists():
-        return []
-    return sorted(d for d in tp.iterdir() if d.is_dir() and not d.name.startswith("."))
+def extract_glob_dir(pattern: str) -> str:
+    """Extract the directory prefix from a glob pattern.
 
+    Strips everything from the first glob wildcard character onward,
+    returning the longest non-glob directory prefix.
 
-def iter_session_dirs(
-    session_id: str | None = None,
-    version: str | None = None,
-) -> Iterator[Path]:
-    """Iterate over session directories across all (or filtered) versions.
+    Used by permission hooks to validate Glob tool calls where the
+    agent puts the full path in the ``pattern`` parameter instead of
+    using the separate ``path`` parameter.
 
-    Yields paths like: notes/traces/0.1.0/sessions/my-session/
+    Examples:
+        >>> extract_glob_dir("/tmp/foo/**/*.py")
+        '/tmp/foo'
+        >>> extract_glob_dir("**/*.py")
+        ''
+        >>> extract_glob_dir("/tmp/foo/bar")
+        '/tmp/foo/bar'
     """
-    ver_dirs = [traces_path() / version] if version else version_dirs()
-
-    for ver_dir in ver_dirs:
-        sessions_base = ver_dir / "sessions"
-        if not sessions_base.exists():
-            continue
-        if session_id is not None:
-            candidate = sessions_base / session_id
-            if candidate.exists() and candidate.is_dir():
-                yield candidate
-        else:
-            for d in sessions_base.iterdir():
-                if d.is_dir():
-                    yield d
+    for i, c in enumerate(pattern):
+        if c in "*?[":
+            return pattern[:i].rstrip("/")
+    return pattern
 
 
-def iter_output_dirs(
-    task_id: str | None = None,
-    version: str | None = None,
-) -> Iterator[Path]:
-    """Iterate over output directories across all (or filtered) versions.
+def path_is_under(file_path: str | Path, allowed_dirs: list[Path]) -> bool:
+    """Check if a file path is under one of the allowed directories.
 
-    Yields paths like: notes/traces/0.1.0/outputs/my-task/
+    Used by permission hooks to enforce RW/RO access.
+
+    Args:
+        file_path: Path to check.
+        allowed_dirs: List of allowed parent directories.
+
+    Returns:
+        True if the path is under one of the allowed directories.
     """
-    ver_dirs = [traces_path() / version] if version else version_dirs()
+    try:
+        path = Path(file_path).resolve()
+    except (OSError, ValueError):
+        return False
 
-    for ver_dir in ver_dirs:
-        outputs_base = ver_dir / "outputs"
-        if not outputs_base.exists():
+    for allowed in allowed_dirs:
+        try:
+            path.relative_to(allowed.resolve())
+            return True
+        except ValueError:
             continue
-        if task_id is not None:
-            candidate = outputs_base / task_id
-            if candidate.exists() and candidate.is_dir():
-                yield candidate
-        else:
-            for d in outputs_base.iterdir():
-                if d.is_dir():
-                    yield d
-
-
-def iter_trace_log_files(session_id: str | None = None) -> Iterator[Path]:
-    """Iterate reasoning log files across all versions."""
-    for ver_dir in version_dirs():
-        logs_base = ver_dir / "logs"
-        if not logs_base.exists():
-            continue
-        if session_id is not None:
-            session_logs = logs_base / session_id
-            if session_logs.exists():
-                yield from session_logs.glob("*.md")
-        else:
-            yield from logs_base.rglob("*.md")
-
-
-def list_all_session_ids(version: str | None = None) -> list[str]:
-    """Return all session IDs across versions, deduplicated."""
-    ids: set[str] = set()
-    for d in iter_session_dirs(version=version):
-        ids.add(d.name)
-    return sorted(ids)
-
-
-# -- Version scope resolution ------------------------------------------------
-
-MIN_VERSION_DATAPOINTS = 10
-
-SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
-
-
-def parse_semver(version: str) -> tuple[int, int, int] | None:
-    """Parse 'X.Y.Z' into (major, minor, patch), or None if invalid."""
-    m = SEMVER_RE.match(version)
-    if not m:
-        return None
-    return int(m.group(1)), int(m.group(2)), int(m.group(3))
-
-
-def count_sessions_for_versions(versions: list[str]) -> int:
-    """Count total session directories across a set of version directories."""
-    return sum(sum(1 for _ in iter_session_dirs(version=v)) for v in versions)
-
-
-def resolve_version(
-    version: str | None,
-    all_versions: bool = False,
-    min_datapoints: int = MIN_VERSION_DATAPOINTS,
-) -> tuple[list[str] | None, str | None]:
-    """Resolve effective version scope with progressive semver fallback.
-
-    Fallback chain: exact version → X.Y.* → X.* → all versions.
-    Widens when the narrower scope has fewer than ``min_datapoints`` sessions.
-
-    Returns ``(version_list, warning_message)``.
-    ``version_list`` is ``None`` when all versions should be included.
-    """
-    if all_versions:
-        return None, None
-
-    effective = version if version is not None else AGENT_VERSION
-    semver = parse_semver(effective)
-    available = [d.name for d in version_dirs()]
-
-    # Level 1: exact version
-    exact = [effective] if effective in available else []
-    exact_count = count_sessions_for_versions(exact)
-    if exact_count >= min_datapoints:
-        return exact, None
-
-    if semver is None:
-        return None, (
-            f"v{effective} has only {exact_count} sessions "
-            f"(need {min_datapoints}) — including all versions"
-        )
-
-    major, minor, _ = semver
-
-    # Level 2: same minor (X.Y.*)
-    minor_matches = [
-        v
-        for v in available
-        if (sv := parse_semver(v)) is not None and sv[0] == major and sv[1] == minor
-    ]
-    minor_count = count_sessions_for_versions(minor_matches)
-    if minor_count >= min_datapoints:
-        return minor_matches, (
-            f"v{effective} has only {exact_count} sessions "
-            f"— widening to v{major}.{minor}.* ({minor_count} sessions)"
-        )
-
-    # Level 3: same major (X.*)
-    major_matches = [
-        v for v in available if (sv := parse_semver(v)) is not None and sv[0] == major
-    ]
-    major_count = count_sessions_for_versions(major_matches)
-    if major_count >= min_datapoints:
-        return major_matches, (
-            f"v{major}.{minor}.* has only {minor_count} sessions "
-            f"— widening to v{major}.* ({major_count} sessions)"
-        )
-
-    # Level 4: all versions
-    return None, (
-        f"v{major}.* has only {major_count} sessions "
-        f"(need {min_datapoints}) — including all versions"
-    )
+    return False

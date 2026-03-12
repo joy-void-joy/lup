@@ -20,12 +20,8 @@ from pathlib import Path
 
 import typer
 
-from lup.lib.paths import (
-    iter_session_dirs,
-    iter_trace_log_files,
-    resolve_version,
-    traces_path,
-)
+from lup.lib.history import iter_session_dirs, iter_trace_log_files, resolve_version
+from lup.lib.paths import traces_path
 from lup.version import AGENT_VERSION
 
 app = typer.Typer(no_args_is_help=True)

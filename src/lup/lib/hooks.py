@@ -46,7 +46,7 @@ from typing import cast
 from claude_agent_sdk import HookInput, HookMatcher, PostToolUseHookInput
 from claude_agent_sdk.types import HookContext, HookEvent, SyncHookJSONOutput
 
-from lup.lib.notes import extract_glob_dir, path_is_under
+from lup.lib.paths import extract_glob_dir, path_is_under
 
 
 type HooksConfig = dict[HookEvent, list[HookMatcher]]

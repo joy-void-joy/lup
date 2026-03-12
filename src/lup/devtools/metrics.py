@@ -18,7 +18,8 @@ from typing import Any
 
 import typer
 
-from lup.lib.paths import feedback_path, iter_session_dirs, resolve_version
+from lup.lib.history import iter_session_dirs, resolve_version
+from lup.lib.paths import feedback_path
 from lup.version import AGENT_VERSION
 
 app = typer.Typer(no_args_is_help=True)

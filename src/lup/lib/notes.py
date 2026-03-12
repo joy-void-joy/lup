@@ -1,7 +1,5 @@
 """RO/RW notes directory structure for agent sessions.
 
-This is a TEMPLATE. Customize the directory structure for your domain.
-
 Key patterns:
 1. Explicit separation of RW (session can write) and RO (historical, read-only)
 2. Session-specific directories prevent cross-session pollution
@@ -16,20 +14,6 @@ Examples:
         [PosixPath('.../sessions/12345'), PosixPath('.../outputs/my-task/...')]
         >>> notes.ro  # Agent can only read here
         [PosixPath('.../traces')]
-
-    Check if a path is within allowed directories::
-
-        >>> path_is_under("/data/sessions/12345/out.json", notes.rw)
-        True
-        >>> path_is_under("/etc/passwd", notes.rw)
-        False
-
-    Extract the directory prefix from a glob pattern::
-
-        >>> extract_glob_dir("/tmp/foo/**/*.py")
-        '/tmp/foo'
-        >>> extract_glob_dir("**/*.py")
-        ''
 """
 
 from datetime import datetime
@@ -41,10 +25,7 @@ from lup.lib.paths import outputs_dir, runtime_logs_path, sessions_dir, trace_lo
 
 
 class NotesConfig(BaseModel):
-    """Notes folder configuration with explicit RW/RO separation.
-
-    Customize the fields for your domain's directory structure.
-    """
+    """Notes folder configuration with explicit RW/RO separation."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -63,33 +44,38 @@ class NotesConfig(BaseModel):
 def setup_notes(
     session_id: str,
     task_id: str | None = None,
+    type: str | None = None,
 ) -> NotesConfig:
     """Create session-specific notes folder structure.
 
-    Uses version-aware paths from lup.lib.paths. The structure separates:
+    Uses version-aware paths from lup.lib.paths. Separates:
     - RW directories: This session can write here
     - RO directories: Historical data, read-only for this session
     - Logs: Agent cannot access (for feedback loop analysis)
 
-    Customize this function for your domain's directory needs.
-
     Args:
         session_id: Unique session identifier.
         task_id: Optional task identifier (for organizing by task).
+        type: Optional prefix inserted under sessions/, outputs/, and logs/
+            to separate data by category (e.g. "background", "interactive").
 
     Returns:
         NotesConfig with RW and RO directories separated.
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    session_path = sessions_dir() / session_id
-    output_path = outputs_dir() / (task_id or session_id) / timestamp
+    sessions_base = sessions_dir() / type if type else sessions_dir()
+    outputs_base = outputs_dir() / type if type else outputs_dir()
+    logs_base = trace_logs_dir() / type if type else trace_logs_dir()
+
+    session_path = sessions_base / session_id
+    output_path = outputs_base / (task_id or session_id) / timestamp
 
     session_path.mkdir(parents=True, exist_ok=True)
     output_path.mkdir(parents=True, exist_ok=True)
     runtime_logs_path().mkdir(parents=True, exist_ok=True)
 
-    trace_log = trace_logs_dir() / session_id / f"{timestamp}.md"
+    trace_log = logs_base / session_id / f"{timestamp}.md"
     trace_log.parent.mkdir(parents=True, exist_ok=True)
 
     return NotesConfig(
@@ -101,51 +87,3 @@ def setup_notes(
     )
 
 
-def extract_glob_dir(pattern: str) -> str:
-    """Extract the directory prefix from a glob pattern.
-
-    Strips everything from the first glob wildcard character onward,
-    returning the longest non-glob directory prefix.
-
-    Used by permission hooks to validate Glob tool calls where the
-    agent puts the full path in the ``pattern`` parameter instead of
-    using the separate ``path`` parameter.
-
-    Examples:
-        >>> extract_glob_dir("/tmp/foo/**/*.py")
-        '/tmp/foo'
-        >>> extract_glob_dir("**/*.py")
-        ''
-        >>> extract_glob_dir("/tmp/foo/bar")
-        '/tmp/foo/bar'
-    """
-    for i, c in enumerate(pattern):
-        if c in "*?[":
-            return pattern[:i].rstrip("/")
-    return pattern
-
-
-def path_is_under(file_path: str | Path, allowed_dirs: list[Path]) -> bool:
-    """Check if a file path is under one of the allowed directories.
-
-    Used by permission hooks to enforce RW/RO access.
-
-    Args:
-        file_path: Path to check.
-        allowed_dirs: List of allowed parent directories.
-
-    Returns:
-        True if the path is under one of the allowed directories.
-    """
-    try:
-        path = Path(file_path).resolve()
-    except (OSError, ValueError):
-        return False
-
-    for allowed in allowed_dirs:
-        try:
-            path.relative_to(allowed.resolve())
-            return True
-        except ValueError:
-            continue
-    return False

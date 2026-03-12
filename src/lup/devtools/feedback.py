@@ -27,12 +27,8 @@ from typing import Annotated, Any
 import typer
 from pydantic import BaseModel
 
-from lup.lib.paths import (
-    feedback_path,
-    iter_session_dirs,
-    resolve_version,
-    traces_path,
-)
+from lup.lib.history import iter_session_dirs, resolve_version
+from lup.lib.paths import feedback_path, traces_path
 from lup.version import AGENT_VERSION
 
 app = typer.Typer(no_args_is_help=True)

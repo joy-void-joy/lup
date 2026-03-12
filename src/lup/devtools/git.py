@@ -13,7 +13,8 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.lib.paths import iter_session_dirs, traces_path
+from lup.lib.history import iter_session_dirs
+from lup.lib.paths import traces_path
 
 logger = logging.getLogger(__name__)
 app = typer.Typer(no_args_is_help=True)

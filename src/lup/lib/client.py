@@ -9,13 +9,13 @@ Exports:
 - query(prompt, ...) — build + query + collect; returns ResponseCollector or T
 
 Examples:
-    Text result::
+    One-shot query (text result)::
 
         >>> collector = await query("Summarize this text", model="sonnet")
         >>> collector.text
         'Here is the summary...'
 
-    Structured output::
+    Structured output via ``output_type`` (returns the model directly)::
 
         >>> from pydantic import BaseModel
         >>> class Summary(BaseModel):
@@ -36,14 +36,36 @@ Examples:
         ... )
         >>> collector.text
         'The code looks correct...'
+
+    Streaming with ``async for`` for per-message handling::
+
+        >>> async with build_client(tools=["Read"], model="sonnet") as client:
+        ...     await client.query("Analyze main.py")
+        ...     collector = ResponseCollector(client)
+        ...     async for message in collector:
+        ...         print_message(message)  # display as they arrive
+        ...     # after iteration, all state is available
+        ...     print(len(collector.blocks), "content blocks")
+        ...     print(len(collector.tool_results), "tool results")
+
+    Accessing collector state after ``query``::
+
+        >>> collector = await query(
+        ...     "List files", tools=["Bash"], max_turns=3,
+        ... )
+        >>> collector.text                  # concatenated assistant text
+        >>> collector.blocks                # all ContentBlock objects
+        >>> collector.tool_results          # tool result blocks from UserMessages
+        >>> collector.messages              # full AssistantMessage/UserMessage list
+        >>> collector.result                # final ResultMessage (or None)
+        >>> collector.result.usage          # token usage from the session
 """
 
-import hashlib
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal, overload
+from typing import Literal, TypedDict, overload
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -67,6 +89,15 @@ from claude_agent_sdk.types import (
 from pydantic import BaseModel
 
 from lup.lib.trace import TraceLogger, print_message
+
+
+class TokenUsage(TypedDict, total=False):
+    """Token usage from Claude API responses."""
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
 
 logger = logging.getLogger(__name__)
 
@@ -355,36 +386,3 @@ async def query(
     if output_type is not None:
         return collector.output(output_type)
     return collector
-
-
-# ---------------------------------------------------------------------------
-# Image persistence
-# ---------------------------------------------------------------------------
-
-MIME_TO_EXT: dict[str, str] = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-}
-
-
-def save_images(
-    images: Sequence[tuple[str, bytes]],
-    images_dir: Path,
-) -> list[Path]:
-    """Save raw image data to disk, returning the written paths.
-
-    Files are named by a short content hash to avoid duplicates.
-    The directory is created if it doesn't exist.
-    """
-    images_dir.mkdir(parents=True, exist_ok=True)
-    paths: list[Path] = []
-    for media_type, data in images:
-        ext = MIME_TO_EXT.get(media_type, ".bin")
-        name = hashlib.sha256(data).hexdigest()[:12] + ext
-        path = images_dir / name
-        if not path.exists():
-            path.write_bytes(data)
-        paths.append(path)
-    return paths
