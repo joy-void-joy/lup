@@ -22,11 +22,12 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
-from claude_agent_sdk.types import McpSdkServerConfig
+from claude_agent_sdk.types import McpServerConfig, McpSdkServerConfig
 
 from lup.lib.client import query
 from lup.agent.config import settings
-from lup.agent.models import AgentOutput, SessionResult, TokenUsage, get_output_schema
+from lup.agent.models import AgentOutput, AgentSessionResult
+from lup.lib.client import TokenUsage
 from lup.agent.prompts import get_system_prompt
 from lup.agent.subagents import get_subagents
 from lup.agent.tool_policy import ToolPolicy
@@ -39,7 +40,7 @@ from lup.lib.hooks import create_permission_hooks, merge_hooks
 from lup.lib.mcp import create_mcp_server, extract_sdk_tools
 from lup.lib.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
 from lup.lib.notes import NotesConfig, setup_notes
-from lup.lib.reflect import create_reflection_gate
+from lup.lib.reflect import ReflectionGate, create_reflection_gate
 from lup.lib.sandbox import Sandbox
 from lup.lib.trace import TraceLogger
 
@@ -49,28 +50,36 @@ NOTES_PATH = Path(settings.notes_path)
 TRACES_PATH = NOTES_PATH / "traces"
 
 
-def build_options(
-    notes_config: NotesConfig,
+def build_agent_servers(
     *,
-    sandbox_server: McpSdkServerConfig | None = None,
-) -> ClaudeAgentOptions:
-    """Build ClaudeAgentOptions from settings and notes config.
+    session_dir: Path,
+    outputs_dir: Path | None = None,
+    sandbox: Sandbox | None = None,
+    gate: ReflectionGate | None = None,
+) -> dict[str, McpServerConfig]:
+    """Create the agent's core MCP servers, passed through ToolPolicy.
 
-    Separated from run_agent() so the option-building logic can be
-    tested and customized independently.
+    Creates example, notes (reflect), and optionally sandbox servers,
+    then applies ToolPolicy filtering.
+
+    Args:
+        session_dir: Directory for reflection tool output.
+        outputs_dir: Past outputs for reviewer calibration.
+        sandbox: Initialized sandbox instance (must be entered as
+            context manager by the caller before calling this).
+        gate: External ReflectionGate for the reflect tools to use.
+            If None, a new gate is created internally.
     """
-    # Create MCP servers for your tools
-    # TODO: Replace with your actual tool servers
     example_server = create_mcp_server(
         name="example",
         version="1.0.0",
         tools=extract_sdk_tools(EXAMPLE_TOOLS),
     )
 
-    # Reflection tools — forced self-review before structured output
     reflect_kit = create_reflect_tools(
-        session_dir=notes_config.session,
-        outputs_dir=notes_config.output.parent,
+        session_dir=session_dir,
+        outputs_dir=outputs_dir,
+        gate=gate,
     )
     reflect_server = create_mcp_server(
         name="notes",
@@ -78,21 +87,43 @@ def build_options(
         tools=extract_sdk_tools(reflect_kit["tools"]),
     )
 
-    # Collect all MCP servers to register
-    additional_servers: list[McpSdkServerConfig] = [example_server, reflect_server]
-    if sandbox_server is not None:
-        additional_servers.append(sandbox_server)
+    all_servers: list[McpSdkServerConfig] = [example_server, reflect_server]
+    if sandbox is not None:
+        all_servers.append(sandbox.create_mcp_server())
 
     policy = ToolPolicy.from_settings(settings)
+    return policy.get_mcp_servers(*all_servers)
+
+
+def build_options(
+    notes_config: NotesConfig,
+    *,
+    sandbox: Sandbox | None = None,
+) -> ClaudeAgentOptions:
+    """Build ClaudeAgentOptions from settings and notes config.
+
+    Separated from run_agent() so the option-building logic can be
+    tested and customized independently.
+    """
+    gate = ReflectionGate()
+    servers = build_agent_servers(
+        session_dir=notes_config.session,
+        outputs_dir=notes_config.output.parent,
+        sandbox=sandbox,
+        gate=gate,
+    )
+
     permission_hooks = create_permission_hooks(notes_config.rw, notes_config.ro)
 
     # Reflection gate: deny StructuredOutput until agent calls review
     gate_hooks = create_reflection_gate(
-        gate=reflect_kit["gate"],
+        gate=gate,
         gated_tool="StructuredOutput",
         reflection_tool_name="mcp__notes__review",
     )
     hooks = merge_hooks(permission_hooks, gate_hooks)
+
+    policy = ToolPolicy.from_settings(settings)
 
     return ClaudeAgentOptions(
         model=settings.model,
@@ -110,14 +141,57 @@ def build_options(
             "autoAllowBashIfSandboxed": True,
             "allowUnsandboxedCommands": False,
         },
-        mcp_servers=policy.get_mcp_servers(*additional_servers),
+        mcp_servers=servers,
         agents=get_subagents(),
         add_dirs=[str(d) for d in notes_config.all_dirs],
         allowed_tools=policy.get_allowed_tools(),
         output_format={
             "type": "json_schema",
-            "schema": get_output_schema(),
+            "schema": AgentOutput.model_json_schema(),
         },
+    )
+
+def extract_sources(blocks: list[ContentBlock]) -> list[str]:
+    """Extract source URLs/queries from tool use blocks."""
+    sources: list[str] = []
+    for block in blocks:
+        if isinstance(block, ToolUseBlock) and block.name in (
+            "WebSearch",
+            "WebFetch",
+        ):
+            if isinstance(block.input, dict):
+                source = block.input.get("url") or block.input.get("query")
+                if source:
+                    sources.append(str(source))
+    return sources
+
+def build_result(
+    *,
+    session_id: str,
+    task_id: str | None,
+    collector: ResponseCollector,
+) -> AgentSessionResult:
+    """Build a AgentSessionResult from the completed agent run."""
+    result = collector.result
+    if result is None:
+        raise RuntimeError("No result in collector")
+
+    output = AgentOutput(summary="No output produced", factors=[], confidence=0.5)
+    if result.structured_output:
+        output = AgentOutput.model_validate(result.structured_output)
+
+    return AgentSessionResult(
+        session_id=session_id,
+        task_id=task_id,
+        agent_version=AGENT_VERSION,
+        timestamp=datetime.now().isoformat(),
+        output=output,
+        reasoning="".join(b.text for b in collector.blocks if isinstance(b, TextBlock)),
+        sources_consulted=extract_sources(collector.blocks),
+        duration_seconds=(result.duration_ms / 1000) if result.duration_ms else None,
+        cost_usd=result.total_cost_usd,
+        token_usage=cast(TokenUsage, result.usage) if result.usage else None,
+        tool_metrics=get_metrics_summary(),
     )
 
 
@@ -126,7 +200,7 @@ async def run_agent(
     *,
     session_id: str | None = None,
     task_id: str | None = None,
-) -> SessionResult:
+) -> AgentSessionResult:
     """Run the agent on a task.
 
     Args:
@@ -135,7 +209,7 @@ async def run_agent(
         task_id: Optional task identifier (e.g., question ID for forecasting).
 
     Returns:
-        SessionResult with the agent's output and metadata.
+        AgentSessionResult with the agent's output and metadata.
     """
     if session_id is None:
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -157,7 +231,7 @@ async def run_agent(
     )
 
     with sandbox:
-        options = build_options(notes, sandbox_server=sandbox.create_mcp_server())
+        options = build_options(notes, sandbox=sandbox)
         collector = await query(
             task,
             options=options,
@@ -176,48 +250,3 @@ async def run_agent(
     save_session(session_result, session_id=session_result.session_id)
 
     return session_result
-
-
-def build_result(
-    *,
-    session_id: str,
-    task_id: str | None,
-    collector: ResponseCollector,
-) -> SessionResult:
-    """Build a SessionResult from the completed agent run."""
-    result = collector.result
-    if result is None:
-        raise RuntimeError("No result in collector")
-
-    output = AgentOutput(summary="No output produced", factors=[], confidence=0.5)
-    if result.structured_output:
-        output = AgentOutput.model_validate(result.structured_output)
-
-    return SessionResult(
-        session_id=session_id,
-        task_id=task_id,
-        agent_version=AGENT_VERSION,
-        timestamp=datetime.now().isoformat(),
-        output=output,
-        reasoning="".join(b.text for b in collector.blocks if isinstance(b, TextBlock)),
-        sources_consulted=extract_sources(collector.blocks),
-        duration_seconds=(result.duration_ms / 1000) if result.duration_ms else None,
-        cost_usd=result.total_cost_usd,
-        token_usage=cast(TokenUsage, result.usage) if result.usage else None,
-        tool_metrics=get_metrics_summary(),
-    )
-
-
-def extract_sources(blocks: list[ContentBlock]) -> list[str]:
-    """Extract source URLs/queries from tool use blocks."""
-    sources: list[str] = []
-    for block in blocks:
-        if isinstance(block, ToolUseBlock) and block.name in (
-            "WebSearch",
-            "WebFetch",
-        ):
-            if isinstance(block.input, dict):
-                source = block.input.get("url") or block.input.get("query")
-                if source:
-                    sources.append(str(source))
-    return sources

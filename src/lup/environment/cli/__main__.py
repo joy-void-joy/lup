@@ -26,7 +26,7 @@ import typer
 
 from lup.agent.config import settings
 from lup.agent.core import run_agent
-from lup.agent.models import SessionResult
+from lup.agent.models import AgentSessionResult
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ async def run_session(
     task: str,
     *,
     session_id: str | None = None,
-) -> SessionResult:
+) -> AgentSessionResult:
     """Run an agent session with the given task.
 
     This is the main entry point for the environment harness.
@@ -60,7 +60,7 @@ async def run_session(
         session_id: Optional session identifier.
 
     Returns:
-        SessionResult with the agent's output and metadata.
+        AgentSessionResult with the agent's output and metadata.
     """
     logger.info("Starting session with model: %s", settings.model)
 
@@ -103,7 +103,7 @@ def commit_results() -> None:
         logger.warning("Auto-commit failed: %s", e)
 
 
-def print_result(result: SessionResult) -> None:
+def print_result(result: AgentSessionResult) -> None:
     """Print a session result summary."""
     typer.echo(f"\nSession: {result.session_id}")
     typer.echo(f"Output: {result.output.summary}")
@@ -165,7 +165,7 @@ def loop(
     else:
         logging.basicConfig(level=logging.INFO)
 
-    results: list[SessionResult] = []
+    results: list[AgentSessionResult] = []
     total_cost = 0.0
 
     for i, task in enumerate(tasks, 1):

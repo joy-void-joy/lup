@@ -515,9 +515,10 @@ async def repl(
 
     from claude_agent_sdk.types import McpServerConfig
 
+    from lup.agent.core import build_agent_servers
     from lup.lib.client import build_client, ResponseCollector
-    from lup.lib.mcp import create_mcp_server, extract_sdk_tools
     from lup.lib.paths import project_root
+    from lup.lib.sandbox import Sandbox
 
     console = Console(highlight=False)
     effective_model = model or settings.model
@@ -526,12 +527,17 @@ async def repl(
     stack = AsyncExitStack()
 
     if not no_tools:
-        example_server = create_mcp_server(
-            name="example",
-            version="1.0.0",
-            tools=extract_sdk_tools(EXAMPLE_TOOLS),
+        repl_dir = project_root() / ".lup" / "repl"
+        sandbox = Sandbox(
+            session_id="repl",
+            shared_dir=repl_dir / "sandbox_shared",
+            timeout_seconds=settings.sandbox_timeout_seconds,
         )
-        mcp_servers = {"example": example_server}
+        stack.enter_context(sandbox)
+        mcp_servers = build_agent_servers(
+            session_dir=repl_dir,
+            sandbox=sandbox,
+        )
 
         # Shutdown message — registered last so it runs first (LIFO)
         stack.callback(lambda: console.print("[dim]Shutting down...[/dim]"))

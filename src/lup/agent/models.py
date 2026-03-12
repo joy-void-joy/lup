@@ -8,20 +8,9 @@ The key pattern is:
 3. Store results in notes/sessions/ for feedback loop analysis
 """
 
-from typing import TypedDict
-
 from pydantic import BaseModel, Field
 
-from lup.lib.metrics import MetricsSummary
-
-
-class TokenUsage(TypedDict, total=False):
-    """Token usage from Claude API responses."""
-
-    input_tokens: int
-    output_tokens: int
-    cache_read_input_tokens: int
-    cache_creation_input_tokens: int
+from lup.lib.history import SessionResult
 
 
 # =============================================================================
@@ -84,46 +73,7 @@ class AgentOutput(BaseModel):
     # response: str       # For coaching
 
 
-class SessionResult(BaseModel):
-    """Complete result of an agent session.
-
-    This captures everything needed for the feedback loop:
-    - The structured output
-    - Metadata (timing, cost, token usage)
-    - Tool metrics for analysis
-    """
-
-    session_id: str
-    task_id: str | None = Field(default=None, description="Domain-specific task ID")
-    agent_version: str = Field(
-        default="", description="Agent version that produced this result"
-    )
-    timestamp: str
-    output: AgentOutput
-    reasoning: str = Field(default="", description="Raw reasoning text")
-    sources_consulted: list[str] = Field(default_factory=list)
-    duration_seconds: float | None = None
-    cost_usd: float | None = None
-    token_usage: TokenUsage | None = None
-    tool_metrics: MetricsSummary | None = None
-    outcome: str | None = Field(default=None, description="Outcome after resolution")
+# Domain-specific type alias: SessionResult parameterized with AgentOutput
+AgentSessionResult = SessionResult[AgentOutput]
 
 
-# =============================================================================
-# OUTPUT SCHEMA HELPER
-# =============================================================================
-
-
-def get_output_schema() -> dict:
-    """Get the JSON schema for AgentOutput.
-
-    Use this with ClaudeAgentOptions.output_format:
-
-        options = ClaudeAgentOptions(
-            output_format={
-                "type": "json_schema",
-                "schema": get_output_schema(),
-            }
-        )
-    """
-    return AgentOutput.model_json_schema()

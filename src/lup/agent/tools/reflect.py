@@ -199,6 +199,7 @@ def create_reflect_tools(
     *,
     session_dir: Path,
     outputs_dir: Path | None = None,
+    gate: ReflectionGate | None = None,
     reviewer_model: str = "claude-sonnet-4-6",
 ) -> ReflectToolKit:
     """Create the reflection tool(s) and their gate state.
@@ -210,8 +211,9 @@ def create_reflect_tools(
         session_dir: Where to save the review output (JSON).
         outputs_dir: Path to past outputs for the reviewer to Read.
             If None, the reviewer won't have historical data access.
+        gate: External gate instance to use. Creates a new one if None.
     """
-    gate = ReflectionGate()
+    gate = gate or ReflectionGate()
 
     @lup_tool(
         "Structured self-review before finalizing output. Call this tool "

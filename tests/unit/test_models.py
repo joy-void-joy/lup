@@ -1,6 +1,6 @@
 """Tests for output models."""
 
-from lup.agent.models import get_output_schema
+from lup.agent.models import AgentOutput
 
 
 class TestOutputSchema:
@@ -8,7 +8,7 @@ class TestOutputSchema:
 
     def test_schema_has_required_fields(self) -> None:
         """Schema should include required fields."""
-        schema = get_output_schema()
+        schema = AgentOutput.model_json_schema()
 
         assert "properties" in schema
         assert "summary" in schema["properties"]
