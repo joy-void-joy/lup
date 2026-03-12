@@ -87,7 +87,6 @@ src/
     │   ├── paths.py            # Centralized version-aware path constants and helpers
     │   ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
     │   ├── reflect.py          # Reflection gate (enforce reflect-before-output)
-    │   ├── responses.py        # MCP response formatting
     │   ├── retry.py            # Retry decorator with backoff
     │   ├── throttle.py         # Rate limiting (concurrency + interval)
     │   └── trace.py            # Trace logging, color-coded console display
@@ -106,7 +105,7 @@ src/
     │   ├── main.py             # Root Typer app composing sub-apps
     │   ├── agent.py            # Agent introspection and debugging
     │   ├── api.py              # API inspection and module info
-    │   ├── dev.py              # Worktree management
+    │   ├── worktree.py          # Worktree management
     │   ├── git.py              # Session commit operations
     │   ├── sync.py             # Upstream sync tracking
     │   ├── usage.py            # Claude Code usage display
@@ -436,8 +435,8 @@ lup-devtools
 │   ├── module-source <mod> # Show source code for a module
 │   ├── module-tree <mod>   # Show file tree for a package
 │   └── module-info <mod>   # Show detailed info about a module
-├── dev                     # Development tools
-│   └── worktree <name>     # Create git worktree with plugin refresh
+├── worktree                # Worktree management
+│   └── create <name>       # Create git worktree with plugin refresh
 ├── git                     # Git operations for sessions
 │   └── commit-results      # Commit uncommitted session results
 ├── sync                    # Upstream sync tracking (/lup:update)
