@@ -4,26 +4,9 @@ This is a TEMPLATE. Define subagents for specialized tasks in your domain.
 
 Subagents are spawned by the main agent to perform focused work.
 Each subagent has:
-- A specialized prompt
-- A subset of tools
-- Its own model (can be cheaper for simpler tasks)
-
-Examples from different domains:
-
-Forecasting:
-- deep-researcher: Extensive research on a topic
-- estimator: Fermi estimation with code execution
-- fact-checker: Cross-validate claims
-
-Coaching:
-- empathy-agent: Understand user's emotional state
-- action-planner: Create actionable next steps
-- accountability-tracker: Follow up on commitments
-
-Game Playing:
-- position-evaluator: Assess current position
-- move-generator: Generate candidate moves
-- opponent-modeler: Predict opponent behavior
+- A specialized prompt (focused on one job)
+- A subset of tools (only what it needs)
+- Its own model (cheaper models for simpler tasks)
 """
 
 from claude_agent_sdk import AgentDefinition
