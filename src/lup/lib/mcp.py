@@ -47,6 +47,7 @@ Examples:
 """
 
 import inspect
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
@@ -66,6 +67,14 @@ class ToolResponse(TypedDict, total=False):
 
     content: list[dict[str, str]]
     is_error: bool
+
+
+def mcp_response(text: str, *, is_error: bool = False) -> dict[str, Any]:
+    """Create an MCP response with text content."""
+    response: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
+    if is_error:
+        response["is_error"] = True
+    return response
 
 
 def generate_json_schema(
@@ -244,7 +253,7 @@ def lup_tool(
 
     The handler receives a validated model instance, not a raw dict.
     The handler must return a BaseModel, which is auto-serialized via
-    ``mcp_success(result.model_dump())``.
+    ``mcp_response(json.dumps(result.model_dump(), default=str))``.
 
     Raise ``ToolError`` in the handler to return an MCP error response.
 
@@ -262,7 +271,6 @@ def lup_tool(
         A decorator that wraps the async handler into a ``LupMcpTool``.
     """
     from lup.lib.metrics import collector
-    from lup.lib.responses import mcp_error, mcp_success
 
     def decorator(
         handler: Callable[..., Awaitable[BaseModel]],
@@ -301,12 +309,12 @@ def lup_tool(
                     params = final_input.model_validate(args)
                 except ValidationError as e:
                     is_error = True
-                    return mcp_error(f"Invalid input: {e}")
+                    return mcp_response(f"Invalid input: {e}", is_error=True)
                 try:
                     result = await handler(params)
                 except ToolError as e:
                     is_error = True
-                    return mcp_error(str(e))
+                    return mcp_response(str(e), is_error=True)
                 if not isinstance(result, BaseModel):
                     raise TypeError(
                         f"lup_tool '{tool_name}': handler must return a BaseModel, "
@@ -319,7 +327,7 @@ def lup_tool(
                         f"lup_tool '{tool_name}': expected {resolved_output.__name__}, "
                         f"got {type(result).__name__}"
                     )
-                return mcp_success(result.model_dump())
+                return mcp_response(json.dumps(result.model_dump(), default=str))
             except Exception:
                 is_error = True
                 raise

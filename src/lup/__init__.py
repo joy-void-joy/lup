@@ -28,7 +28,6 @@ Structure:
   - paths.py: Centralized version-aware path constants and helpers
   - realtime.py: Scheduler for persistent agents (sleep/wake, debounce)
   - reflect.py: Reflection gate (enforce reflect-before-output)
-  - responses.py: MCP response formatting
   - retry.py: Retry decorator with backoff
   - sandbox.py: Docker-based Python sandbox for isolated code execution
   - trace.py: Trace logging, color-coded console display

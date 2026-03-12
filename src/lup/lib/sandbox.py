@@ -45,16 +45,13 @@ from pathlib import Path
 from typing import Any, Literal, Self, TypedDict
 
 import docker
-from claude_agent_sdk import SdkMcpTool, tool
 from claude_agent_sdk.types import McpSdkServerConfig
 from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container, ExecResult
 from docker.utils.socket import SocketError, next_frame_header, read_exactly
 from pydantic import BaseModel, Field
 
-from lup.lib.mcp import create_mcp_server
-from lup.lib.metrics import tracked
-from lup.lib.responses import mcp_error, mcp_success
+from lup.lib.mcp import LupMcpTool, ToolError, create_mcp_server, extract_sdk_tools, lup_tool
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +96,26 @@ class ExecuteCodeResult(TypedDict):
 
 class InstallPackageResult(TypedDict):
     """Result from installing packages in the sandbox."""
+
+    exit_code: int
+    output: str
+    packages: list[str]
+
+
+# --- Output models for lup_tool ---
+
+
+class ExecuteCodeOutput(BaseModel):
+    """Tool output for execute_code (mirrors ExecuteCodeResult)."""
+
+    exit_code: int
+    stdout: str
+    stderr: str
+    duration_ms: int
+
+
+class InstallPackageOutput(BaseModel):
+    """Tool output for install_package (mirrors InstallPackageResult)."""
 
     exit_code: int
     output: str
@@ -606,9 +623,7 @@ class Sandbox:
 
     # --- MCP tool creation ---
 
-    def create_tools(
-        self,
-    ) -> list[SdkMcpTool[ExecuteCodeInput] | SdkMcpTool[InstallPackageInput]]:
+    def create_tools(self) -> list[LupMcpTool]:
         """Create MCP tools bound to this sandbox instance.
 
         Returns:
@@ -616,65 +631,49 @@ class Sandbox:
         """
         timeout_seconds = self.timeout_seconds
 
-        @tool(
-            "execute_code",
-            (
-                "Execute Python code in an isolated Docker container with persistent state. "
-                "Variables, imports, and data persist between calls — no need to re-define them. "
-                f"The container has network access, a persistent /workspace directory, and a "
-                f"/shared directory for file exchange with the host. Timeout: {timeout_seconds}s.\n\n"
-                "Examples:\n"
-                "  execute_code(code='import numpy as np; data = [1,2,3]; print(np.mean(data))')\n"
-                "  execute_code(code='# Monte Carlo simulation\\nimport numpy as np\\n"
-                "returns = np.random.normal(0.0005, 0.015, (10000, 14))\\n"
-                "paths = 100 * np.cumprod(1 + returns, axis=1)\\n"
-                "print(np.percentile(paths[:,-1], [10,25,50,75,90]))')\n"
-                "State persists: define variables in one call, use them in the next."
-            ),
-            ExecuteCodeInput.model_json_schema(),
+        @lup_tool(
+            "Execute Python code in an isolated Docker container with persistent state. "
+            "Variables, imports, and data persist between calls — no need to re-define them. "
+            f"The container has network access, a persistent /workspace directory, and a "
+            f"/shared directory for file exchange with the host. Timeout: {timeout_seconds}s.\n\n"
+            "Examples:\n"
+            "  execute_code(code='import numpy as np; data = [1,2,3]; print(np.mean(data))')\n"
+            "  execute_code(code='# Monte Carlo simulation\\nimport numpy as np\\n"
+            "returns = np.random.normal(0.0005, 0.015, (10000, 14))\\n"
+            "paths = 100 * np.cumprod(1 + returns, axis=1)\\n"
+            "print(np.percentile(paths[:,-1], [10,25,50,75,90]))')\n"
+            "State persists: define variables in one call, use them in the next.",
+            name="execute_code",
         )
-        @tracked("execute_code")
-        async def execute_code(args: dict[str, Any]) -> dict[str, Any]:
+        async def execute_code(inp: ExecuteCodeInput) -> ExecuteCodeOutput:
             try:
-                validated = ExecuteCodeInput.model_validate(args)
-            except Exception as e:
-                return mcp_error(f"Invalid input: {e}")
-
-            try:
-                result = self.run_code(validated.code)
-                return mcp_success(result)
+                result = self.run_code(inp.code)
+                return ExecuteCodeOutput(**result)
             except SandboxNotInitializedError as e:
                 logger.error("Sandbox not initialized: %s", e)
-                return mcp_error(f"Sandbox error: {e}")
+                raise ToolError(f"Sandbox error: {e}") from e
             except CodeExecutionTimeoutError as e:
                 logger.warning("Code execution timed out")
-                return mcp_error(str(e))
+                raise ToolError(str(e)) from e
             except (APIError, DockerException) as e:
                 logger.exception("Docker execution failed")
-                return mcp_error(f"Docker error: {e}")
+                raise ToolError(f"Docker error: {e}") from e
 
-        @tool(
-            "install_package",
+        @lup_tool(
             "Install one or more Python packages from PyPI using uv. Packages persist "
             "in the container across executions.",
-            InstallPackageInput.model_json_schema(),
+            name="install_package",
         )
-        @tracked("install_package")
-        async def install_package(args: dict[str, Any]) -> dict[str, Any]:
+        async def install_package(inp: InstallPackageInput) -> InstallPackageOutput:
             try:
-                validated = InstallPackageInput.model_validate(args)
-            except Exception as e:
-                return mcp_error(f"Invalid input: {e}")
-
-            try:
-                result = self.run_install(validated.packages)
-                return mcp_success(result)
+                result = self.run_install(inp.packages)
+                return InstallPackageOutput(**result)
             except SandboxNotInitializedError as e:
                 logger.error("Sandbox not initialized: %s", e)
-                return mcp_error(f"Sandbox error: {e}")
+                raise ToolError(f"Sandbox error: {e}") from e
             except (APIError, DockerException) as e:
                 logger.exception("Docker execution failed")
-                return mcp_error(f"Docker error: {e}")
+                raise ToolError(f"Docker error: {e}") from e
 
         return [execute_code, install_package]
 
@@ -687,5 +686,5 @@ class Sandbox:
         return create_mcp_server(
             name=name,
             version=version,
-            tools=self.create_tools(),
+            tools=extract_sdk_tools(self.create_tools()),
         )

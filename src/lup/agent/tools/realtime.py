@@ -25,15 +25,13 @@ documentation. See Tool Design Philosophy in CLAUDE.md.
 """
 
 import logging
-import json
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
-
-from claude_agent_sdk import tool
+from pydantic import BaseModel, ConfigDict, Field
 
 from lup.lib.background import BackgroundAgent
+from lup.lib.mcp import LupMcpTool, ToolError, extract_sdk_tools, lup_tool
 from lup.lib.realtime import (
     DebounceInput,
     RemindInput,
@@ -41,7 +39,7 @@ from lup.lib.realtime import (
     Scheduler,
     SleepInput,
 )
-from lup.lib.responses import mcp_error, mcp_response
+from lup.lib.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +107,77 @@ class IdeasInput(BaseModel):
 
 
 # =====================================================================
+# Output models
+# =====================================================================
+
+
+class ReplyOutput(BaseModel):
+    """Output for the reply tool."""
+
+    sent: int
+    scheduled: int
+
+
+class ScheduleActionOutput(BaseModel):
+    """Output for the schedule_action tool."""
+
+    delay_seconds: int
+
+
+class DebounceOutput(BaseModel):
+    """Output for the debounce tool."""
+
+    initial_seconds: int
+    quiet_seconds: int
+
+
+class SleepOutput(BaseModel):
+    """Output for the sleep tool."""
+
+    reason: str = Field(default="timer")
+    time: str = Field(default="")
+    fired_reminders: list[str] = Field(default_factory=list)
+
+
+class RemindOutput(BaseModel):
+    """Output for the remind tool."""
+
+    label: str
+    delay_seconds: int
+
+
+class ContextOutput(BaseModel):
+    """Output for the context tool. Accepts domain-specific fields."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class NotesOutput(BaseModel):
+    """Output for the notes tool."""
+
+    message: str
+
+
+class IdeasOutput(BaseModel):
+    """Output for the ideas tool."""
+
+    message: str
+    ideas: list[str] = Field(default_factory=list)
+
+
+class MetaOutput(BaseModel):
+    """Output for the meta tool."""
+
+    status: str = Field(default="recorded")
+
+
+class ObserverNotesOutput(BaseModel):
+    """Output for the observer notes tool."""
+
+    count: int
+
+
+# =====================================================================
 # Tool factory
 # =====================================================================
 
@@ -116,9 +185,9 @@ class IdeasInput(BaseModel):
 def create_realtime_tools(
     *,
     scheduler: Scheduler,
-    build_context: Any,
-    trace_logger: Any | None = None,
-) -> list[Any]:
+    build_context: Callable[[int], ContextOutput],
+    trace_logger: TraceLogger | None = None,
+) -> list[LupMcpTool]:
     """Create the standard set of real-time MCP tools.
 
     This is a TEMPLATE — customize for your domain. The tools are
@@ -127,32 +196,27 @@ def create_realtime_tools(
 
     Args:
         scheduler: The Scheduler instance for this session.
-        build_context: Callable(last_events: int) -> dict that builds
-            the context state and advances the read pointer.
+        build_context: Callable(last_events: int) -> ContextOutput that
+            builds the context state and advances the read pointer.
+            Use ``ContextOutput(**your_dict)`` — extra fields are accepted.
         trace_logger: Optional TraceLogger for meta assessments.
 
     Returns:
-        List of MCP tool functions.
+        List of LupMcpTool instances.
     """
 
     # -- Communication tools -------------------------------------------
 
-    @tool(
-        "reply",
+    @lup_tool(
         "Deliver a message to the environment. Text output and thinking "
         "don't reach the user — this is the only way to communicate. "
         "One message is the default. For a sequence of short reactions "
         "you can batch with staggered delay_seconds. Delayed messages "
         "cancel if an external event arrives (cancelled text becomes an "
         "idea). Sending also cancels any pending scheduled_action.",
-        ReplyInput.model_json_schema(),
+        name="reply",
     )
-    async def reply_tool(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            inp = ReplyInput.model_validate(args)
-        except ValidationError as e:
-            return mcp_error(str(e))
-
+    async def reply_tool(inp: ReplyInput) -> ReplyOutput:
         sent = 0
         scheduled = 0
         cumulative_delay = 0
@@ -168,54 +232,38 @@ def create_realtime_tools(
         if sent or scheduled:
             scheduler.on_agent_action()
 
-        parts = []
-        if sent:
-            parts.append(f"{sent} sent")
-        if scheduled:
-            parts.append(f"{scheduled} scheduled")
-        return mcp_response(", ".join(parts) + ".")
+        return ReplyOutput(sent=sent, scheduled=scheduled)
 
-    @tool(
-        "schedule_action",
+    @lup_tool(
         "Schedule an action that fires if the environment stays quiet for "
         "delay_seconds. Cancels (saved as idea) if an event arrives or "
         "you send a reply. Only one at a time — calling again replaces "
         "the previous one. Does not generate a new turn when it fires.",
-        ScheduleActionInput.model_json_schema(),
+        name="schedule_action",
     )
-    async def schedule_action_tool(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            inp = ScheduleActionInput.model_validate(args)
-        except ValidationError as e:
-            return mcp_error(str(e))
+    async def schedule_action_tool(inp: ScheduleActionInput) -> ScheduleActionOutput:
         scheduler.start_scheduled_action(inp.content, inp.delay_seconds)
-        return mcp_response(f"Action scheduled in {inp.delay_seconds}s.")
+        return ScheduleActionOutput(delay_seconds=inp.delay_seconds)
 
     # -- Timing tools --------------------------------------------------
 
-    @tool(
-        "debounce",
+    @lup_tool(
         "Suppress wake events until activity stops. Two phases: waits "
         "up to initial_seconds for the first event; once activity starts, "
         "holds wake until quiet_seconds elapse with no new activity. "
         "Events still go to state — context works during debounce. "
         "Returns immediately. Only one debounce at a time — calling "
         "again replaces the previous one.",
-        DebounceInput.model_json_schema(),
+        name="debounce",
     )
-    async def debounce_tool(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            inp = DebounceInput.model_validate(args)
-        except ValidationError as e:
-            return mcp_error(str(e))
+    async def debounce_tool(inp: DebounceInput) -> DebounceOutput:
         scheduler.start_debounce(inp.initial_seconds, inp.quiet_seconds)
-        return mcp_response(
-            f"Debounce active: {inp.initial_seconds}s initial, "
-            f"{inp.quiet_seconds}s quiet."
+        return DebounceOutput(
+            initial_seconds=inp.initial_seconds,
+            quiet_seconds=inp.quiet_seconds,
         )
 
-    @tool(
-        "sleep",
+    @lup_tool(
         "Pause until timer expires or an event occurs (external event, "
         "reminder). This is the ONLY blocking tool — all others return "
         "immediately. You MUST call meta before sleeping. Returns wake "
@@ -223,14 +271,9 @@ def create_realtime_tools(
         "No debounce by default — wakes immediately on events. "
         "Set debounce_initial/debounce_quiet to batch event bursts. "
         "Blocked when unread events exist — use force=true to bypass.",
-        SleepInput.model_json_schema(),
+        name="sleep",
     )
-    async def sleep_tool(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            inp = SleepInput.model_validate(args)
-        except ValidationError as e:
-            return mcp_error(str(e))
-
+    async def sleep_tool(inp: SleepInput) -> SleepOutput:
         if inp.debounce_initial is not None:
             scheduler.start_debounce(
                 inp.debounce_initial,
@@ -238,110 +281,92 @@ def create_realtime_tools(
             )
 
         result = await scheduler.sleep(inp.seconds)
-        result["time"] = datetime.now().strftime("%H:%M:%S")
+        return SleepOutput(
+            reason=result.get("reason", "timer"),
+            time=datetime.now().strftime("%H:%M:%S"),
+            fired_reminders=result.get("fired_reminders", []),
+        )
 
-        return mcp_response(json.dumps(result, indent=2))
-
-    @tool(
-        "remind",
+    @lup_tool(
         "Schedule a self-prompt that fires after delay_seconds. "
         "When it fires, it wakes you from sleep with fired_reminders "
         "in the result. Multiple reminders can be active simultaneously. "
         "Use for things you want to come back to — checking in, "
         "revisiting a topic, following up on something.",
-        RemindInput.model_json_schema(),
+        name="remind",
     )
-    async def remind_tool(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            inp = RemindInput.model_validate(args)
-        except ValidationError as e:
-            return mcp_error(str(e))
+    async def remind_tool(inp: RemindInput) -> RemindOutput:
         scheduler.add_reminder(inp.label, inp.delay_seconds)
-        return mcp_response(f"Reminder '{inp.label}' set for {inp.delay_seconds}s.")
+        return RemindOutput(label=inp.label, delay_seconds=inp.delay_seconds)
 
     # -- State tools ---------------------------------------------------
 
-    @tool(
-        "context",
+    @lup_tool(
         "Get current state and read new events. Returns timing info, "
         "environment state, and two separate lists: recent history and "
         "unread events (no overlap). Also returns scheduler state "
         "(pending actions, reminders, debounce). last_events controls "
         "history depth (default 5, 0 = unread only).",
-        ContextInput.model_json_schema(),
+        name="context",
     )
-    async def context_tool(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            inp = ContextInput.model_validate(args)
-        except ValidationError as e:
-            return mcp_error(str(e))
-        result = build_context(inp.last_events)
-        return mcp_response(json.dumps(result, indent=2))
+    async def context_tool(inp: ContextInput) -> ContextOutput:
+        return build_context(inp.last_events)
 
-    @tool(
-        "notes",
+    @lup_tool(
         "Read or write private session notes. Not visible to the user.",
-        NotesInput.model_json_schema(),
+        name="notes",
     )
-    async def notes_tool(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            NotesInput.model_validate(args)
-        except ValidationError as e:
-            return mcp_error(str(e))
-
+    async def notes_tool(_inp: NotesInput) -> NotesOutput:
         # NOTE: This is a template. Wire to your session's notes dict.
-        return mcp_response("Notes tool not wired. Customize in your session.")
+        return NotesOutput(message="Notes tool not wired. Customize in your session.")
 
-    @tool(
-        "ideas",
+    @lup_tool(
         "Capture threads worth exploring later. Cancelled actions "
         "automatically become ideas too. Use 'set' to replace the "
         "entire list after reorganizing.",
-        IdeasInput.model_json_schema(),
+        name="ideas",
     )
-    async def ideas_tool(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            inp = IdeasInput.model_validate(args)
-        except ValidationError as e:
-            return mcp_error(str(e))
-
+    async def ideas_tool(inp: IdeasInput) -> IdeasOutput:
         match inp.action:
             case "add":
                 scheduler.ideas.append(inp.content)
-                return mcp_response(f"Idea added ({len(scheduler.ideas)} total).")
+                return IdeasOutput(
+                    message=f"Idea added ({len(scheduler.ideas)} total).",
+                )
             case "list":
-                if not scheduler.ideas:
-                    return mcp_response("No ideas.")
-                lines = [f"{i}: {idea}" for i, idea in enumerate(scheduler.ideas)]
-                return mcp_response("\n".join(lines))
+                return IdeasOutput(
+                    message=f"{len(scheduler.ideas)} ideas."
+                    if scheduler.ideas
+                    else "No ideas.",
+                    ideas=list(scheduler.ideas),
+                )
             case "remove":
                 if inp.index < 0 or inp.index >= len(scheduler.ideas):
-                    return mcp_error(f"Invalid index {inp.index}. Use 'list' first.")
+                    raise ToolError(
+                        f"Invalid index {inp.index}. Use 'list' first."
+                    )
                 removed = scheduler.ideas.pop(inp.index)
-                return mcp_response(f"Removed: {removed}")
+                return IdeasOutput(message=f"Removed: {removed}")
             case "set":
                 scheduler.ideas.clear()
                 scheduler.ideas.extend(inp.ideas)
-                return mcp_response(f"Ideas replaced ({len(scheduler.ideas)} total).")
-        return mcp_error(f"Unknown action: {inp.action}")
+                return IdeasOutput(
+                    message=f"Ideas replaced ({len(scheduler.ideas)} total).",
+                )
+        raise ToolError(f"Unknown action: {inp.action}")
 
-    @tool(
-        "meta",
+    @lup_tool(
         "Record a process assessment for the improvement loop. "
         "What worked this turn? What was friction? Are you missing "
         "tools or information? Rate pacing, timing, quality. "
         "Be specific. Required before sleep.",
-        MetaInput.model_json_schema(),
+        name="meta",
     )
-    async def meta_tool(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            inp = MetaInput.model_validate(args)
-        except ValidationError as e:
-            return mcp_error(str(e))
+    async def meta_tool(inp: MetaInput) -> MetaOutput:
         if trace_logger:
             trace_logger.log_text(inp.thought, heading="Meta")
         scheduler.meta_gate.mark_reflected()
-        return mcp_response("Recorded.")
+        return MetaOutput()
 
     return [
         reply_tool,
@@ -406,7 +431,7 @@ class ObserverNotesInput(BaseModel):
 def create_observer_tools(
     *,
     notes: list[str],
-) -> list[Any]:
+) -> list[LupMcpTool]:
     """Create tools for the observer background agent.
 
     Args:
@@ -414,22 +439,17 @@ def create_observer_tools(
             The main agent reads from this via its context tool.
     """
 
-    @tool(
-        "notes",
+    @lup_tool(
         "Write a complete summary of the conversation so far. "
         "This replaces your previous note — include everything "
         "the agent needs. The agent sees your latest note for "
         "temporal context.",
-        ObserverNotesInput.model_json_schema(),
+        name="notes",
     )
-    async def observer_notes_tool(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            inp = ObserverNotesInput.model_validate(args)
-        except ValidationError as e:
-            return mcp_error(str(e))
+    async def observer_notes_tool(inp: ObserverNotesInput) -> ObserverNotesOutput:
         notes.append(inp.content)
         logger.info("Observer note: %s", inp.content)
-        return mcp_response(f"Note saved ({len(notes)} total).")
+        return ObserverNotesOutput(count=len(notes))
 
     return [observer_notes_tool]
 
@@ -478,7 +498,7 @@ def create_observer(
     return BackgroundAgent(
         name="observer",
         system_prompt=OBSERVER_SYSTEM_PROMPT,
-        tools=create_observer_tools(notes=notes),
+        tools=extract_sdk_tools(create_observer_tools(notes=notes)),
         build_message=build_message,
         start_message="[Observer started — maintain notes about the conversation]",
         model=model,
