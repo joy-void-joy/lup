@@ -1,10 +1,10 @@
-"""Development tools: worktree management.
+"""Worktree management.
 
 Examples::
 
-    $ uv run lup-devtools dev worktree feat-search
-    $ uv run lup-devtools dev worktree fix-bug --base main
-    $ uv run lup-devtools dev worktree my-feature --no-sync --no-plugin-refresh
+    $ uv run lup-devtools worktree create feat-search
+    $ uv run lup-devtools worktree create fix-bug --base main
+    $ uv run lup-devtools worktree create my-feature --no-sync --no-plugin-refresh
 """
 
 import shutil
@@ -75,8 +75,8 @@ def get_tree_dir() -> Path:
     raise typer.Exit(1)
 
 
-@app.command("worktree")
-def worktree_cmd(
+@app.command("create")
+def create_cmd(
     name: Annotated[
         str, typer.Argument(help="Name for the worktree (e.g., feat-name)")
     ],
