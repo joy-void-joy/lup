@@ -252,7 +252,8 @@ Worktrees typically branch from `dev`, but can also branch from other feature br
 
 **Feature workflow:**
 
-1. `git worktree add ./worktrees/feat-name -b feat/feature-name && cd ./worktrees/feat-name`
+1. `uv run lup-devtools worktree create feat-name`
+   This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/dev`), syncs dependencies, and refreshes plugins. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
 2. Commit regularly and atomically
 3. Push when complete (or periodically for backup)
 4. `/lup:rebase` — Push, open PR, clean up history with `git reset --soft main` and force-push
@@ -446,9 +447,13 @@ lup-devtools
 │   ├── mark-synced <proj>  # Mark project as synced at HEAD
 │   └── setup <name> <path> # Set local path for a project
 ├── usage                   # Claude Code live usage display
-├── feedback                # Feedback collection
+├── feedback                # Feedback collection and analysis state
 │   ├── collect             # Collect feedback metrics from sessions
-│   └── check               # Check available feedback data
+│   ├── check               # Check available feedback data
+│   ├── mark <ids>          # Mark sessions as analyzed
+│   ├── unmark <ids>        # Remove analysis marks
+│   ├── status              # Show analysis state (analyzed vs unanalyzed)
+│   └── prompt-health       # Analyze prompt file size and sections
 ├── trace                   # Trace analysis
 │   ├── list                # List available traces
 │   ├── show <id>           # Show trace for a session

@@ -276,3 +276,125 @@ def check(
 
     print("\nTo collect feedback, run:")
     print("  uv run lup-devtools feedback collect")
+
+
+# =============================================================================
+# ANALYSIS STATE TRACKING
+# =============================================================================
+
+ANALYZED_FILE = feedback_path() / "analyzed.json"
+
+
+def load_analyzed() -> set[str]:
+    """Load the set of already-analyzed session IDs."""
+    if not ANALYZED_FILE.exists():
+        return set()
+    data: dict[str, list[str]] = json.loads(ANALYZED_FILE.read_text())
+    return set(data.get("analyzed", []))
+
+
+def save_analyzed(session_ids: set[str]) -> None:
+    """Save the set of analyzed session IDs."""
+    feedback_path().mkdir(parents=True, exist_ok=True)
+    ANALYZED_FILE.write_text(
+        json.dumps({"analyzed": sorted(session_ids)}, indent=2) + "\n"
+    )
+
+
+@app.command("mark")
+def mark(
+    session_ids: Annotated[
+        list[str], typer.Argument(help="Session IDs to mark as analyzed")
+    ],
+) -> None:
+    """Mark sessions as analyzed in the feedback loop."""
+    analyzed = load_analyzed()
+    new_ids = set(session_ids) - analyzed
+    if not new_ids:
+        typer.echo("All specified sessions already marked")
+        return
+    analyzed.update(new_ids)
+    save_analyzed(analyzed)
+    typer.echo(f"Marked {len(new_ids)} sessions as analyzed")
+
+
+@app.command("unmark")
+def unmark(
+    session_ids: Annotated[
+        list[str], typer.Argument(help="Session IDs to unmark")
+    ],
+) -> None:
+    """Remove analysis marks from sessions."""
+    analyzed = load_analyzed()
+    removed = analyzed & set(session_ids)
+    if not removed:
+        typer.echo("None of the specified sessions were marked")
+        return
+    analyzed -= removed
+    save_analyzed(analyzed)
+    typer.echo(f"Unmarked {len(removed)} sessions")
+
+
+@app.command("status")
+def status(
+    version: Annotated[
+        str | None,
+        typer.Option("--version", "-v", help="Agent version (default: current)"),
+    ] = AGENT_VERSION,
+    all_versions: Annotated[
+        bool,
+        typer.Option("--all-versions", help="Include all versions"),
+    ] = False,
+) -> None:
+    """Show analysis state: which sessions have been analyzed."""
+    effective, ver_warning = resolve_version(version, all_versions)
+    if ver_warning:
+        typer.echo(ver_warning)
+
+    analyzed = load_analyzed()
+
+    all_session_ids: set[str] = set()
+    if effective:
+        for v in effective:
+            for d in iter_session_dirs(version=v):
+                all_session_ids.add(d.name)
+    else:
+        for d in iter_session_dirs():
+            all_session_ids.add(d.name)
+
+    unanalyzed = sorted(all_session_ids - analyzed)
+
+    print("\n=== Analysis Status ===\n")
+    print(f"Total sessions: {len(all_session_ids)}")
+    print(f"Analyzed: {len(analyzed & all_session_ids)}")
+    print(f"Unanalyzed: {len(unanalyzed)}")
+
+    if unanalyzed:
+        preview = ", ".join(unanalyzed[:10])
+        print(f"\nUnanalyzed: {preview}")
+        if len(unanalyzed) > 10:
+            print(f"  ... and {len(unanalyzed) - 10} more")
+
+
+# =============================================================================
+# PROMPT HEALTH
+# =============================================================================
+
+
+@app.command("prompt-health")
+def prompt_health() -> None:
+    """Analyze the agent prompt for size and patch accumulation."""
+    prompts_file = Path("src/lup/agent/prompts.py")
+    if not prompts_file.exists():
+        typer.echo("prompts.py not found")
+        raise typer.Exit(1)
+
+    content = prompts_file.read_text()
+    lines = content.split("\n")
+
+    section_count = sum(1 for line in lines if "## " in line or "### " in line)
+
+    print("\n=== Prompt Health ===\n")
+    print(f"File: {prompts_file}")
+    print(f"Total lines: {len(lines)}")
+    print(f"Sections: ~{section_count}")
