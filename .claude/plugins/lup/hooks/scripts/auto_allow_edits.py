@@ -29,6 +29,7 @@ PROTECTED_PATTERNS = [
 TYPING_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bAny\b"), "Never use Any — use specific types, TypedDict, or BaseModel"),
     (re.compile(r"#\s*type:\s*ignore"), "Never use # type: ignore — fix the type error properly"),
+    (re.compile(r"#\s*noqa\b"), "Never use # noqa — fix the lint issue properly"),
     (re.compile(r"\bGeneric\["), "Use Python 3.12+ class[T] syntax instead of Generic[T]"),
     (re.compile(r"__all__\s*[=:]"), "No __all__ — import directly from the defining module"),
     (
