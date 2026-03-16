@@ -162,12 +162,6 @@ class DailyBreakdown(BaseModel):
 
 # ── pacing thresholds ──────────────────────────────────────
 
-PACE_COLOR_THRESHOLDS: list[tuple[float, str]] = [
-    (0.7, "bright_green"),
-    (1.0, "bright_cyan"),
-    (1.3, "bright_yellow"),
-]
-
 PACE_LABEL_THRESHOLDS: list[tuple[float, PaceLabel]] = [
     (0.5, PaceLabel(word="cruising", style="bold bright_green")),
     (0.85, PaceLabel(word="on track", style="bold bright_cyan")),
@@ -278,10 +272,7 @@ def model_color(model_id: str) -> str:
 
 
 def pace_color(ratio: float) -> str:
-    for threshold, color in PACE_COLOR_THRESHOLDS:
-        if ratio <= threshold:
-            return color
-    return "bright_red"
+    return pace_label(ratio).style.split()[-1]
 
 
 def pace_label(ratio: float) -> PaceLabel:
@@ -304,6 +295,9 @@ def place_label(text: str, position: int, line_width: int) -> str:
 # ── rendering ──────────────────────────────────────────────
 
 
+BAR_INDENT = 8  # matches daily bar prefix "  Sa    "
+
+
 def render_bar(
     out: Text,
     utilization: float,
@@ -318,13 +312,10 @@ def render_bar(
     actual_pos = min(int(actual_frac * bar_width), bar_width)
     linear_pos = min(int(linear_frac * bar_width), bar_width - 1)
 
-    out.append("  ")
+    out.append(" " * BAR_INDENT)
     for i in range(bar_width):
         if i == linear_pos:
-            if i < actual_pos:
-                out.append("▎", style="bold white on " + fill_color)
-            else:
-                out.append("▎", style="bold bright_white")
+            out.append("▎", style="bright_black")
         elif i < actual_pos:
             out.append("█", style=fill_color)
         else:
@@ -360,16 +351,16 @@ def render_bucket(
 
     render_bar(out, utilization, linear_pct, bar_width)
 
-    line_width = bar_width + 2
+    line_width = BAR_INDENT + bar_width
 
     you_text = f"↑ you ({utilization:.0f}%)"
-    you_pos = min(int((utilization / 100) * bar_width), bar_width - len(you_text))
-    out.append(place_label(you_text, you_pos, line_width), style="dim")
+    you_bar = min(int((utilization / 100) * bar_width), bar_width - len(you_text))
+    out.append(place_label(you_text, BAR_INDENT + you_bar, line_width), style="dim")
     out.append("\n")
 
     pace_text = f"↑ even ({linear_pct:.0f}%)"
-    pace_pos = min(int((linear_pct / 100) * bar_width), line_width - len(pace_text))
-    out.append(place_label(pace_text, pace_pos, line_width), style="dim")
+    pace_bar = min(int((linear_pct / 100) * bar_width), bar_width - len(pace_text))
+    out.append(place_label(pace_text, BAR_INDENT + pace_bar, line_width), style="dim")
     out.append("\n")
 
 
@@ -385,9 +376,10 @@ def render_overage(out: Text, extra: ExtraUsage, bar_width: int) -> None:
     out.append(f"  ({util:.0f}%)", style="bold")
     out.append("\n")
 
-    fill_color = pace_color(util / 100)
-    filled = min(int((util / 100) * bar_width), bar_width)
-    out.append("  ")
+    frac = util / 100
+    fill_color = pace_color(frac)
+    filled = min(int(frac * bar_width), bar_width)
+    out.append(" " * BAR_INDENT)
     for i in range(bar_width):
         if i < filled:
             out.append("█", style=fill_color)
@@ -405,18 +397,27 @@ def render_daily_breakdown(
     """Render the per-day cost-weighted breakdown within the 7-day window."""
     resets_at = datetime.fromisoformat(seven_day["resets_at"])
     window_start = resets_at - timedelta(days=7)
-    today = datetime.now(resets_at.tzinfo).date()
+    now = datetime.now(resets_at.tzinfo)
+    today = now.date()
+    today_str = today.isoformat()
 
     daily = get_daily_breakdown(stats, window_start, resets_at)
+    # The 168-hour window can span 8 calendar dates; keep the 7 most recent
+    if len(daily) > 7:
+        daily = daily[1:]
+
     if not any(d.total_tokens > 0 for d in daily):
         return
 
+    stale = bool(
+        stats.last_computed_date and stats.last_computed_date < today_str
+    )
     out.append("  per day", style="bold bright_white")
-    if stats.last_computed_date and stats.last_computed_date < today.isoformat():
+    if stale:
         out.append(f"  (cache: {stats.last_computed_date})", style="dim italic")
     out.append("\n")
 
-    day_bar_w = bar_width - 14
+    day_bar_w = bar_width
 
     cost_rates: dict[str, float] = {}
     for mid, entry in stats.model_usage.items():
@@ -430,10 +431,8 @@ def render_daily_breakdown(
             cost_rates[mid] = entry.cost_usd / total_tok
 
     model_totals: dict[str, int] = {}
-    week_total = 0
     daily_weights: list[float] = []
     for day in daily:
-        week_total += day.total_tokens
         weight = sum(
             tokens * cost_rates.get(model, 0)
             for model, tokens in day.tokens_by_model.items()
@@ -442,25 +441,70 @@ def render_daily_breakdown(
             model_totals[model] = model_totals.get(model, 0) + tokens
         daily_weights.append(weight)
 
-    weekly_util = seven_day["utilization"]
+    # Fall back to raw token counts when cost data is unavailable
     week_weight = sum(daily_weights)
-    if cost_rates and week_weight > 0 and weekly_util > 0:
+    if not (cost_rates and week_weight > 0):
+        daily_weights = [float(d.total_tokens) for d in daily]
+        week_weight = sum(daily_weights)
+
+    weekly_util = seven_day["utilization"]
+
+    # Find today's index and estimate its weight when cache is stale
+    today_idx: int | None = None
+    estimated_today = False
+    for i, day in enumerate(daily):
+        if day.date == today_str:
+            today_idx = i
+            break
+
+    if stale and today_idx is not None and daily_weights[today_idx] == 0:
+        # Cache doesn't cover today — estimate from API utilization.
+        # Assume usage rate is proportional to elapsed time to break
+        # the circular dependency between budget and today's weight.
+        elapsed_h = (now - window_start).total_seconds() / 3600
+        cached_days_count = sum(
+            1
+            for day in daily
+            if day.date <= stats.last_computed_date and day.total_tokens > 0
+        )
+        cached_h = cached_days_count * 24.0
+        if cached_h > 0 and elapsed_h > cached_h and week_weight > 0:
+            cached_frac = cached_h / elapsed_h
+            today_weight = week_weight * (1 - cached_frac) / cached_frac
+            daily_weights[today_idx] = today_weight
+            # Estimate token count
+            cached_tokens = sum(
+                d.total_tokens
+                for d in daily
+                if d.date <= stats.last_computed_date
+            )
+            if cached_tokens > 0:
+                est_tokens = int(cached_tokens * (1 - cached_frac) / cached_frac)
+                daily[today_idx] = DailyBreakdown(
+                    date=today_str,
+                    total_tokens=est_tokens,
+                    tokens_by_model={},
+                    activity=daily[today_idx].activity,
+                )
+            estimated_today = True
+
+    week_weight = sum(daily_weights)
+    if week_weight > 0 and weekly_util > 0:
         weekly_budget = week_weight / (weekly_util / 100)
     else:
-        weekly_budget = (
-            week_total / (weekly_util / 100) if weekly_util > 0 else max(week_total, 1)
-        )
-        daily_weights = [float(d.total_tokens) for d in daily]
+        weekly_budget = max(week_weight, 1)
 
-    cumulative_used = 0.0
+    # Rolling surplus budget: each day gets budget/7 plus leftover from prior days.
+    # Heavy days eat into future budgets, light days bank surplus.
+    even_daily = weekly_budget / 7
+    surplus = 0.0
     daily_budgets: list[float] = []
-    n_days = len(daily)
     for i, day in enumerate(daily):
         d = datetime.fromisoformat(day.date).date()
-        remaining = max(n_days - i, 1)
-        daily_budgets.append((weekly_budget - cumulative_used) / remaining)
+        budget = even_daily + surplus
+        daily_budgets.append(budget)
         if d <= today:
-            cumulative_used += daily_weights[i]
+            surplus = budget - daily_weights[i]
 
     for i, day in enumerate(daily):
         d = datetime.fromisoformat(day.date).date()
@@ -487,38 +531,41 @@ def render_daily_breakdown(
         pace_pos = min(max(int(pace_frac * day_bar_w), 0), day_bar_w - 1)
         ratio = actual / budget if budget > 0 else (2.0 if actual > 0 else 0)
         color = pace_color(ratio)
-        overflow_color = "bright_red" if ratio > 1.3 else "bright_yellow"
+        is_est = i == today_idx and estimated_today
+        fill_char = "▓" if is_est else "█"
 
         for j in range(day_bar_w):
             if j == pace_pos:
-                if j < fill_pos:
-                    out.append("▎", style="bold white on " + color)
-                else:
-                    out.append("▎", style="bold bright_white")
+                out.append("▎", style="bright_black")
             elif j < fill_pos and j <= pace_pos:
-                out.append("█", style=color)
+                out.append(fill_char, style=color)
             elif j < fill_pos:
-                out.append("▒", style=overflow_color)
+                out.append("▒", style=color)
             elif j < pace_pos:
                 out.append("░", style="bright_black")
             else:
                 out.append("░", style="black")
 
-        out.append(f" {fmt_tokens(day.total_tokens):>5}", style="bold")
+        tok_str = fmt_tokens(day.total_tokens)
+        if is_est:
+            out.append(f" ~{tok_str:>4}", style="bold dim")
+        else:
+            out.append(f" {tok_str:>5}", style="bold")
         if day.activity and day.activity.message_count > 0:
             out.append(f"  {day.activity.message_count:,}m", style="dim")
         out.append("\n")
 
     out.append("\n")
 
-    if model_totals:
+    model_token_total = sum(model_totals.values())
+    if model_totals and model_token_total > 0:
         out.append("  models", style="bold bright_white")
         out.append("  ")
         for model, tokens in sorted(
             model_totals.items(), key=lambda x: x[1], reverse=True
         ):
             name = MODEL_NAMES.get(model, model)
-            pct = tokens / week_total * 100 if week_total > 0 else 0
+            pct = tokens / model_token_total * 100
             out.append(f"● {name} ", style=model_color(model))
             out.append(f"{pct:.0f}%  ", style="dim")
         out.append("\n")
@@ -533,16 +580,19 @@ def build_display(
     show_detail: bool,
     bar_width: int,
 ) -> Panel:
+    # Common bar width so all bars are visually aligned.
+    # Daily bars need room for prefix ("  Sa    " = 8) and suffix (" 400k" = 6).
+    bar_w = bar_width - 14
     out = Text()
 
     seven_day = usage.get("seven_day")
     if seven_day and seven_day.get("resets_at"):
-        render_bucket(out, "weekly", seven_day, 7 * 24, bar_width)
+        render_bucket(out, "weekly", seven_day, 7 * 24, bar_w)
         out.append("\n")
 
     five_hour = usage.get("five_hour")
     if five_hour and five_hour.get("resets_at"):
-        render_bucket(out, "5-hour", five_hour, 5, bar_width)
+        render_bucket(out, "5-hour", five_hour, 5, bar_w)
         out.append("\n")
 
     for label, bucket in [
@@ -552,15 +602,15 @@ def build_display(
         ("oauth 7d", usage.get("seven_day_oauth_apps")),
     ]:
         if bucket and bucket.get("resets_at"):
-            render_bucket(out, label, bucket, 7 * 24, bar_width)
+            render_bucket(out, label, bucket, 7 * 24, bar_w)
             out.append("\n")
 
     extra = usage.get("extra_usage")
     if extra and extra["is_enabled"]:
-        render_overage(out, extra, bar_width)
+        render_overage(out, extra, bar_w)
 
     if show_detail and stats and seven_day and seven_day.get("resets_at"):
-        render_daily_breakdown(out, seven_day, stats, bar_width)
+        render_daily_breakdown(out, seven_day, stats, bar_w)
 
     return Panel(
         out,
@@ -604,7 +654,7 @@ def main(
     watch: Annotated[
         bool,
         typer.Option(
-            "--watch",
+            "--watch/--no-watch",
             "-w",
             help="Continuously refresh the display.",
         ),
