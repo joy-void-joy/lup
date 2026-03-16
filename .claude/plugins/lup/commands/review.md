@@ -1,84 +1,129 @@
 ---
-allowed-tools: Read, Grep, Glob, Agent, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)
-description: Something feels off — review a trace, diagnose collaboratively, then fix
-argument-hint: <console log, session ID, file path, or what feels off>
+allowed-tools: Read, Grep, Glob, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)
+description: Review a session trace for workflow quality, tool usage, and improvement opportunities
+argument-hint: [session ID, file path, or pasted trace]
 ---
 
-# Review
+# Review: Trace Workflow Analysis
 
-The user is sharing a trace and describing something that went wrong. This could be tone, timing, workflow friction, a subtle bug, a broken flow — anything where the experience doesn't match expectations.
+**Don't speculate — analyze.** Read the actual trace, the actual prompt, and the actual tool descriptions. Ground every observation in evidence from the trace or source code.
 
 ## Input
 
 **Trace input**: $ARGUMENTS
 
-### Resolve the trace
+## Process
+
+### 1. Resolve the trace
+
+Determine what was provided and get the full trace content:
 
 **Session ID** (e.g., `repl_20260228_123036`, `20260228_123036`):
 - Look in `notes/traces/` for matching session directories
 - Read the `.md` trace log from `notes/traces/<version>/logs/<session_id>/`
-- Also read the `SessionResult` JSON from `notes/traces/<version>/sessions/<session_id>/` for metadata
+- Also read the `SessionResult` JSON from `notes/traces/<version>/sessions/<session_id>/` for metadata (duration, cost, token usage, tool metrics, outcome)
 
 **File path** (contains `/` or ends in `.md`/`.json`):
 - Read the file directly
 
 **Raw pasted trace** (anything else):
-- Work with what's pasted
+- Work with what's pasted. Extract session metadata if present (timestamps, tool names, thinking blocks).
 
-If you can't find the trace, use `uv run lup-devtools trace list` to show available sessions.
+If you can't find the trace, use `uv run lup-devtools trace list` to show available sessions and ask the user which one to review.
 
-## Process
+### 2. Read the agent configuration
 
-### 1. Feel it first
+Before analyzing the trace, understand what the agent had available. Read these files:
 
-Read the trace through the lens of the user's description. Don't jump to mechanics — sit with what they're describing and see if you feel it too.
+- **System prompt**: `src/lup/agent/prompts.py` — what guidance did the agent receive?
+- **Tool policy**: `src/lup/agent/tool_policy.py` — what tools were available/excluded?
+- **Tools**: `src/lup/agent/tools/` — the tools the agent can call
+- **Subagents**: `src/lup/agent/subagents.py` — what subagents exist and what they do
+- **Core wiring**: `src/lup/agent/core.py` — how is the agent assembled?
 
-### 2. Reconstruct the experience
+This is the baseline for evaluating whether the agent used its capabilities well.
 
-Separate what the user experienced (inputs + visible outputs) from the agent's inner world (thinking, tool calls, intermediate results). The gap between expectation and reality is where things go wrong.
+### 3. Analyze the conversation flow
 
-Walk through chronologically:
+Walk through the trace chronologically and map the agent's decision path:
+
+**Task understanding:**
 - Did the agent correctly interpret the task?
-- Where did the conversation move toward the goal vs. meander?
-- At each major decision point, was the choice reasonable?
+- Did it plan before acting, or dive straight into tool calls?
+- Were there thinking blocks that showed good or poor reasoning?
 
-### 3. Name what you see
+**Progress trajectory:**
+- Did the conversation move toward the goal, or meander?
+- Were there unnecessary loops (repeated tool calls with similar inputs)?
+- Were there dead-end explorations that didn't contribute to the outcome?
+- Did the agent recover well when something failed or returned unexpected results?
 
-Present your reading concisely, pointing at specific moments in the trace. **This is the start of a conversation — not a final diagnosis, not a fix proposal.** Name the pattern you see, then stop and let the user react.
+**Decision quality:**
+- At each major decision point, was the choice reasonable given available information?
+- Did the agent gather enough context before acting?
+- Were there moments where it should have asked for clarification but didn't?
 
-Include:
-- Tool calls that were wasteful, misused, or missing
-- Workflow friction points
-- Reasoning quality issues (jumped to conclusions, ignored evidence, unnecessary loops)
+### 4. Audit tool usage
 
-### 4. Brainstorm
+For each tool call in the trace:
 
-**Do not jump to fixes.** Talk it through with the user first. Share hypotheses, ask what resonates, dig into source code together as questions arise.
+**Selection**: Was this the right tool? Could a different available tool have been more effective?
 
-Read source code as the conversation calls for it — don't front-load research. Start from what the trace tells you. Key source files when needed:
-- `src/lup/agent/prompts.py` — System prompt
-- `src/lup/agent/core.py` — Agent orchestration
-- `src/lup/agent/tools/` — Tool implementations
-- `src/lup/agent/tool_policy.py` — Tool availability
-- `src/lup/agent/subagents.py` — Subagent definitions
+**Inputs**: Were the arguments well-formed? Were searches specific enough? Were descriptions/specs complete?
 
-### 5. Converge
+**Results**: Did the agent use the result effectively, or ignore useful information?
 
-Only after agreement on what's wrong, propose specific changes. Each improvement should reference:
+**Patterns to flag:**
+- **Underused tools**: Tools that were available and would have helped but weren't called
+- **Overused tools**: Repetitive calls that could have been batched or avoided
+- **Poor tool descriptions**: If the agent misused a tool, check whether the tool's description was unclear (read the actual `@tool` decorator and `Field(description=...)` in the source)
+- **Missing tools**: Situations where the agent worked around a gap that a new tool could fill
+
+### 5. Assess the reflection (if present)
+
+If the agent called `review` (the reflection tool):
+
+- Was the self-assessment honest and accurate given the trace?
+- Did the confidence score match the actual quality of work?
+- Was the tool audit useful or perfunctory?
+- Did the process reflection identify real friction?
+
+### 6. Produce the report
+
+Structure the report in four sections:
+
+**Flow Summary**
+A concise narrative of what happened in the session: task -> approach -> key decisions -> outcome. Include timestamps if available. This should read as a story, not a log dump.
+
+**Tool Usage Audit**
+A table or list of tool calls with assessment:
+- Which tools were used well
+- Which tools were misused or underused
+- Specific tool calls that were wasteful or critical
+
+**Workflow Assessment**
+- Did the overall workflow function as designed?
+- Where did friction occur?
+- What went smoothly?
+
+**Actionable Improvements**
+Concrete, specific changes — not vague suggestions. Each improvement should reference:
 - What evidence from the trace motivates it
-- Which file to modify
-- What the change would be
+- Which file to modify (`src/lup/agent/...`)
+- What the change would be (new tool, description fix, prompt adjustment, workflow change)
 
-Categorize as: **Tool changes** (preferred) > **Prompt changes** > **Workflow changes** > **Observability**
-
-Wait for the user to greenlight before editing.
+Categorize improvements as:
+- **Tool changes** — new tools, better descriptions, schema fixes
+- **Prompt changes** — guidance that's missing, misleading, or unnecessary
+- **Workflow changes** — process or architectural adjustments
+- **Observability** — logging, metrics, or trace improvements needed
 
 ## Rules
 
-- **Don't front-load massive research.** Start from the trace, dig into source as needed.
-- **Don't jump to code fixes before the user confirms the diagnosis.**
-- **Quote the trace.** When citing evidence, quote the actual trace text — don't paraphrase.
-- **Focus on the general.** Per the Bitter Lesson: prefer improvements that add capabilities over rules.
-- **Diagnose before prescribing.** What data was missing, and where did the wrong decision enter?
-- **Be honest about quality.** If the session went well, say so. Not every review needs problems.
-- If you don't see it, name it. Don't hedge.
+- **Never guess.** Every observation must cite a specific trace entry, tool call, or source code location.
+- **Read the source.** Don't evaluate tool usage without reading the actual tool descriptions and schemas in `src/lup/agent/tools/`.
+- **Compare to intent.** The system prompt (`src/lup/agent/prompts.py`) defines the intended behavior — compare actual behavior against it.
+- **Focus on the general.** Per the Bitter Lesson: prefer improvements that add capabilities over improvements that add rules. A missing tool is almost always a better diagnosis than a missing prompt paragraph.
+- **Diagnose before prescribing.** For each proposed improvement, answer: what data was the agent missing, and where in the pipeline did the wrong decision enter? Don't propose "add rule X to the prompt" — propose the structural change that makes the failure impossible. Don't copy examples from this trace into the prompt — derive the general principle and write fresh examples.
+- **Be honest about quality.** If the session went well, say so. Not every review needs to find problems.
+- **Quote the trace.** When citing evidence, quote the actual trace text (tool names, thinking excerpts, result fragments) — don't paraphrase.
