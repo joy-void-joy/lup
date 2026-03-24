@@ -8,7 +8,8 @@ Decision order:
    - file already has `# claude: ignore` on disk -> allow (skip checks)
    - violating line has inline `# claude: ignore` -> ask (user prompt)
    - no marker -> deny with hint about `# claude: ignore`
-3. Pure deletion (new_string is empty) -> allow
+3. Edit introduces `# claude: ignore` -> ask (user prompt)
+4. Pure deletion (new_string is empty) -> allow
 4. replace_all: single-line rename -> allow, multi-line -> defer
 5. Count nontrivial added lines per change block (using a state machine
    for context-aware classification) -> allow if every block <= MAX_REAL_CHANGES
@@ -311,6 +312,9 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
                     return _ask_decision(reason)
                 case "deny":
                     return _deny_decision(reason)
+
+    if CLAUDE_IGNORE_MARKER in (new_string or ""):
+        return _ask_decision("Edit introduces `# claude: ignore` — requires user approval")
 
     if old_string and not new_string:
         return _allow_decision()
