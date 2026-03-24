@@ -4,7 +4,10 @@
 Decision order:
 1. Protected files (.claude/, pyproject.toml, .env*) -> always defer
 2. Typing anti-patterns in .py files (Any, # type: ignore, Generic[], __all__,
-   dict[str, object]) -> deny if found in newly added lines
+   dict[str, object]):
+   - file already has `# claude: ignore` on disk -> allow (skip checks)
+   - violating line has inline `# claude: ignore` -> ask (user prompt)
+   - no marker -> deny with hint about `# claude: ignore`
 3. Pure deletion (new_string is empty) -> allow
 4. replace_all: single-line rename -> allow, multi-line -> defer
 5. Count nontrivial added lines per change block (using a state machine
@@ -26,6 +29,8 @@ PROTECTED_PATTERNS = [
     r"(^|/)\.env($|\.)",
 ]
 
+CLAUDE_IGNORE_MARKER = "# claude: ignore"
+
 TYPING_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bAny\b"), "Never use Any — use specific types, TypedDict, or BaseModel"),
     (re.compile(r"#\s*type:\s*ignore"), "Never use # type: ignore — fix the type error properly"),
@@ -41,6 +46,20 @@ TYPING_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 def is_protected_file(file_path: str) -> bool:
     return any(re.search(p, file_path) for p in PROTECTED_PATTERNS)
+
+
+def has_file_level_ignore(file_path: str) -> bool:
+    """Check if the file on disk has a `# claude: ignore` marker in the first 10 lines."""
+    try:
+        with open(file_path) as f:
+            for i, line in enumerate(f):
+                if i >= 10:
+                    break
+                if line.strip() == CLAUDE_IGNORE_MARKER:
+                    return True
+    except OSError:
+        pass
+    return False
 
 
 _STRING_PREFIX_RE = re.compile(r"^[fFbBrRuU]*")
@@ -215,8 +234,29 @@ def _deny_decision(reason: str) -> AllowDecision:
     }
 
 
-def find_anti_pattern_violations(old_string: str, new_string: str) -> str | None:
-    """Check newly added lines for typing anti-patterns. Returns deny reason or None."""
+def _ask_decision(reason: str) -> AllowDecision:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": reason,
+        }
+    }
+
+
+def find_anti_pattern_violations(
+    old_string: str, new_string: str, file_path: str = ""
+) -> tuple[str, str] | None:
+    """Check newly added lines for typing anti-patterns.
+
+    Returns (decision, reason) or None. Decision is "allow", "ask", or "deny".
+    - File-level `# claude: ignore` already on disk -> "allow"
+    - Inline `# claude: ignore` on the violating line -> "ask"
+    - No marker -> "deny" with hint
+    """
+    if file_path and has_file_level_ignore(file_path):
+        return ("allow", "File has `# claude: ignore` marker")
+
     old_lines = old_string.splitlines() if old_string else []
     new_lines = new_string.splitlines() if new_string else []
 
@@ -226,6 +266,8 @@ def find_anti_pattern_violations(old_string: str, new_string: str) -> str | None
         [ln.strip() for ln in new_lines],
     )
 
+    ask_reasons: list[str] = []
+
     for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
         if tag not in ("insert", "replace"):
             continue
@@ -234,10 +276,18 @@ def find_anti_pattern_violations(old_string: str, new_string: str) -> str | None
             if not stripped or stripped.startswith("#") and "type:" not in stripped:
                 continue
             for pattern, reason in TYPING_ANTI_PATTERNS:
-                if pattern.search(stripped):
-                    preview = stripped[:80]
-                    return f"Denied: {reason} | line: {preview}"
+                if not pattern.search(stripped):
+                    continue
+                preview = stripped[:80]
+                if CLAUDE_IGNORE_MARKER in new_lines[idx]:
+                    ask_reasons.append(f"{reason} | line: {preview}")
+                else:
+                    hint = f"Add `{CLAUDE_IGNORE_MARKER}` to the line (or file-level) to request approval"
+                    return ("deny", f"Denied: {reason} | line: {preview}. {hint}")
+                break
 
+    if ask_reasons:
+        return ("ask", ask_reasons[0])
     return None
 
 
@@ -251,9 +301,16 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
         return None
 
     if file_path.endswith(".py") and new_string:
-        violation = find_anti_pattern_violations(old_string, new_string)
+        violation = find_anti_pattern_violations(old_string, new_string, file_path)
         if violation:
-            return _deny_decision(violation)
+            decision, reason = violation
+            match decision:
+                case "allow":
+                    return _allow_decision()
+                case "ask":
+                    return _ask_decision(reason)
+                case "deny":
+                    return _deny_decision(reason)
 
     if old_string and not new_string:
         return _allow_decision()
