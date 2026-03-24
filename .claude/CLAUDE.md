@@ -321,6 +321,7 @@ Use `/lup:merge-conflict` for guided resolution. See the command for the full de
 - Use `TypedDict` and Pydantic models for structured data
 - Never manually parse agent output — use structured outputs via Pydantic
 - **Never use `# type: ignore`** — Ask the user how to properly fix type errors
+- **`# claude: ignore` escape hatch** — When `Any` or other anti-patterns are genuinely needed (untyped library boundaries, MCP), add `# claude: ignore` inline to request user approval. A standalone `# claude: ignore` in the first 10 lines of a file disables anti-pattern checks for the whole file (like `# pyright: ignore` for files).
 - **Use Pydantic BaseModel instead of dataclasses**
 - **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
 
@@ -476,7 +477,7 @@ Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/lup/h
 | --------------------- | --------------- | ----------------------------------------------------------------- |
 | `auto_allow_fetch.py` | WebFetch        | `ALLOW_PATTERNS` (regex), `DENY_PATTERNS` (regex + reason)        |
 | `auto_allow_bash.py`  | Bash            | `RULES` list of `Allow`/`Deny` (last-match-wins, like .gitignore) |
-| `auto_allow_edits.py` | Edit            | Trivial-line counting, protected file list                        |
+| `auto_allow_edits.py` | Edit            | Trivial-line counting, protected file list, `# claude: ignore`    |
 
 To add a new allowed URL or command, edit the pattern list in the corresponding hook. Non-matching inputs fall through to user prompt.
 
