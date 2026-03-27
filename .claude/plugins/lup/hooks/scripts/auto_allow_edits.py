@@ -63,15 +63,15 @@ def has_file_level_ignore(file_path: str) -> bool:
     return False
 
 
-_STRING_PREFIX_RE = re.compile(r"^[fFbBrRuU]*")
+STRING_PREFIX_RE = re.compile(r"^[fFbBrRuU]*")
 
 
-def _is_string_literal(stripped: str) -> bool:
+def is_string_literal(stripped: str) -> bool:
     """Check if a stripped line is a string literal (possibly with trailing comma)."""
     s = stripped.rstrip(",").rstrip()
     if len(s) < 2:
         return False
-    bare = _STRING_PREFIX_RE.sub("", s)
+    bare = STRING_PREFIX_RE.sub("", s)
     if len(bare) < 2:
         return False
     for q in ('"""', "'''"):
@@ -83,7 +83,7 @@ def _is_string_literal(stripped: str) -> bool:
     return False
 
 
-def _is_trivial_content(stripped: str) -> bool:
+def is_trivial_content(stripped: str) -> bool:
     if not stripped:
         return True
     # Non-alpha lines: ), ], }, ):, etc.
@@ -95,7 +95,7 @@ def _is_trivial_content(stripped: str) -> bool:
         return True
     if stripped == "pass":
         return True
-    if _is_string_literal(stripped):
+    if is_string_literal(stripped):
         return True
     # Type annotations / field definitions: name: Type, name: Type = value
     if re.match(r"^\w+\s*:\s*\S", stripped):
@@ -103,7 +103,7 @@ def _is_trivial_content(stripped: str) -> bool:
     return False
 
 
-def _classify_trivial(lines: list[str]) -> list[bool]:
+def classify_trivial(lines: list[str]) -> list[bool]:
     result: list[bool] = []
     in_docstring = False
     docstring_delim = ""
@@ -136,7 +136,7 @@ def _classify_trivial(lines: list[str]) -> list[bool]:
                 break
         else:
             if (
-                _is_trivial_content(stripped)
+                is_trivial_content(stripped)
                 and "(" in stripped
                 and ")" not in stripped
             ):
@@ -157,7 +157,7 @@ def _classify_trivial(lines: list[str]) -> list[bool]:
             elif in_type_def:
                 result.append(True)
             else:
-                result.append(_is_trivial_content(stripped))
+                result.append(is_trivial_content(stripped))
 
     return result
 
@@ -178,7 +178,7 @@ def count_real_additions(old_string: str, new_string: str) -> int:
         [ln.strip() for ln in new_lines],
     )
 
-    trivial = _classify_trivial(new_lines)
+    trivial = classify_trivial(new_lines)
 
     max_nontrivial = 0
     current_block: set[int] = set()
@@ -215,7 +215,7 @@ class HookEvent(BaseModel):
     tool_input: EditInput = EditInput()
 
 
-def _allow_decision() -> AllowDecision:
+def allow_decision() -> AllowDecision:
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -225,7 +225,7 @@ def _allow_decision() -> AllowDecision:
     }
 
 
-def _deny_decision(reason: str) -> AllowDecision:
+def deny_decision(reason: str) -> AllowDecision:
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -235,7 +235,7 @@ def _deny_decision(reason: str) -> AllowDecision:
     }
 
 
-def _ask_decision(reason: str) -> AllowDecision:
+def ask_decision(reason: str) -> AllowDecision:
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -307,23 +307,23 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
             decision, reason = violation
             match decision:
                 case "allow":
-                    return _allow_decision()
+                    return allow_decision()
                 case "ask":
-                    return _ask_decision(reason)
+                    return ask_decision(reason)
                 case "deny":
-                    return _deny_decision(reason)
+                    return deny_decision(reason)
 
     if CLAUDE_IGNORE_MARKER in (new_string or ""):
-        return _ask_decision("Edit introduces `# claude: ignore` — requires user approval")
+        return ask_decision("Edit introduces `# claude: ignore` — requires user approval")
 
     if old_string and not new_string:
-        return _allow_decision()
+        return allow_decision()
 
     if replace_all:
-        return _allow_decision()
+        return allow_decision()
 
     if count_real_additions(old_string, new_string) <= MAX_REAL_CHANGES:
-        return _allow_decision()
+        return allow_decision()
 
     return None
 
