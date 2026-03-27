@@ -10,8 +10,8 @@ Decision order:
    - no marker -> deny with hint about `# claude: ignore`
 3. Edit introduces `# claude: ignore` -> ask (user prompt)
 4. Pure deletion (new_string is empty) -> allow
-4. replace_all: single-line rename -> allow, multi-line -> defer
-5. Count nontrivial added lines per change block (using a state machine
+5. replace_all: allow
+6. Count nontrivial added lines per change block (using a state machine
    for context-aware classification) -> allow if every block <= MAX_REAL_CHANGES
 """
 
@@ -320,11 +320,7 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
         return _allow_decision()
 
     if replace_all:
-        old_n = len(old_string.splitlines()) if old_string else 0
-        new_n = len(new_string.splitlines()) if new_string else 0
-        if old_n <= 1 and new_n <= 1:
-            return _allow_decision()
-        return None
+        return _allow_decision()
 
     if count_real_additions(old_string, new_string) <= MAX_REAL_CHANGES:
         return _allow_decision()
