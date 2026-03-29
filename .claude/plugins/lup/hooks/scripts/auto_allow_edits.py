@@ -3,8 +3,8 @@
 
 Decision order:
 1. Protected files (.claude/, pyproject.toml, .env*) -> always defer
-2. Typing anti-patterns in .py files (Any, # type: ignore, Generic[], __all__,
-   dict[str, object]):
+2. Anti-patterns in .py files (typing: Any, # type: ignore, Generic[], __all__,
+   dict[str, object]; string manipulation: import re, re.*, .replace, .split):
    - file already has `# claude: ignore` on disk -> allow (skip checks)
    - violating line has inline `# claude: ignore` -> ask (user prompt)
    - no marker -> deny with hint about `# claude: ignore`
@@ -32,7 +32,7 @@ PROTECTED_PATTERNS = [
 
 CLAUDE_IGNORE_MARKER = "# claude: ignore"
 
-TYPING_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bAny\b"), "Never use Any — use specific types, TypedDict, or BaseModel"),
     (re.compile(r"#\s*type:\s*ignore"), "Never use # type: ignore — fix the type error properly"),
     (re.compile(r"#\s*noqa\b"), "Never use # noqa — fix the lint issue properly"),
@@ -41,6 +41,26 @@ TYPING_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\bdict\[\s*str\s*,\s*object\s*\]"),
         "Never use dict[str, object] — use TypedDict or BaseModel",
+    ),
+    (
+        re.compile(r"\bimport\s+re\b"),
+        "`import re` is a code smell — use structured APIs (json, pathlib, urllib.parse, etc.)",
+    ),
+    (
+        re.compile(r"\bfrom\s+re\s+import\b"),
+        "`from re import` is a code smell — use structured APIs instead",
+    ),
+    (
+        re.compile(r"\bre\.(compile|search|match|fullmatch|sub|findall|split)\s*\("),
+        "Avoid regex for structured data — use proper parsers (json, pathlib, urllib.parse, xml, etc.)",
+    ),
+    (
+        re.compile(r"\.replace\s*\("),
+        "Avoid .replace() for structured data — use proper parsers",
+    ),
+    (
+        re.compile(r"\.split\s*\("),
+        "Avoid .split() for structured data — use proper parsers",
     ),
 ]
 
@@ -276,7 +296,7 @@ def find_anti_pattern_violations(
             stripped = new_lines[idx].strip()
             if not stripped or stripped.startswith("#") and "type:" not in stripped:
                 continue
-            for pattern, reason in TYPING_ANTI_PATTERNS:
+            for pattern, reason in ANTI_PATTERNS:
                 if not pattern.search(stripped):
                     continue
                 preview = stripped[:80]
