@@ -477,7 +477,7 @@ Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/lup/h
 | --------------------- | --------------- | ----------------------------------------------------------------- |
 | `auto_allow_fetch.py` | WebFetch        | `ALLOW_PATTERNS` (regex), `DENY_PATTERNS` (regex + reason)        |
 | `auto_allow_bash.py`  | Bash            | `RULES` list of `Allow`/`Deny` (last-match-wins, like .gitignore) |
-| `auto_allow_edits.py` | Edit            | Trivial-line counting, protected file list, `# claude: ignore`    |
+| `auto_allow_edits.py` | Edit            | Anti-pattern detection, trivial-line counting, protected files     |
 
 To add a new allowed URL or command, edit the pattern list in the corresponding hook. Non-matching inputs fall through to user prompt.
 
