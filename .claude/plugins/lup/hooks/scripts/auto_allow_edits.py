@@ -4,7 +4,8 @@
 Decision order:
 1. Protected files (.claude/, pyproject.toml, .env*) -> always defer
 2. Anti-patterns in .py files (typing: Any, # type: ignore, Generic[], __all__,
-   dict[str, object]; string manipulation: import re, re.*, .replace, .split):
+   dict[str, object]; string manipulation: import re, re.*, .replace, .split;
+   except Exception, dataclasses, subprocess, argparse, rich.progress, _prefixes):
    - file already has `# claude: ignore` on disk -> allow (skip checks)
    - violating line has inline `# claude: ignore` -> ask (user prompt)
    - no marker -> deny with hint about `# claude: ignore`
@@ -61,6 +62,38 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\.split\s*\("),
         "Avoid .split() for structured data — use proper parsers",
+    ),
+    (
+        re.compile(r"\bexcept\s+Exception\b"),
+        "No bare `except Exception` — catch specific exceptions (KeyError, ValueError, OSError, etc.)",
+    ),
+    (
+        re.compile(r"@dataclass|\bfrom\s+dataclasses\s+import\b"),
+        "Use Pydantic BaseModel (or TypedDict) instead of dataclasses",
+    ),
+    (
+        re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
+        "Use the `sh` library instead of subprocess",
+    ),
+    (
+        re.compile(r"\bimport\s+argparse\b|\bfrom\s+argparse\s+import\b"),
+        "Use `typer` instead of argparse",
+    ),
+    (
+        re.compile(r"\brich\.progress\b|\bfrom\s+rich\.progress\s+import\b"),
+        "Use `tqdm` instead of rich progress bars",
+    ),
+    (
+        re.compile(r"\bdef\s+_[a-zA-Z]"),
+        "No `_` prefix on functions/methods — nothing is private (nest inside caller if needed)",
+    ),
+    (
+        re.compile(r"\bclass\s+_[A-Z]"),
+        "No `_` prefix on classes — nothing is private",
+    ),
+    (
+        re.compile(r"^_[a-zA-Z]\w*\s*[=:]"),
+        "No `_` prefix on variables/constants — nothing is private",
     ),
 ]
 
