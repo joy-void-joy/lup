@@ -12,9 +12,8 @@ Get the current state of the agent and select analysis targets.
 ### 1. Agent version and data overview
 
 ```bash
-grep AGENT_VERSION src/lup/version.py
-uv run lup-devtools feedback check
-uv run lup-devtools metrics summary
+uv run lup-devtools feedback version
+uv run lup-devtools feedback status
 ```
 
 ### 2. Previous session
@@ -32,11 +31,8 @@ If it exists, read it. Note what was already fixed — don't re-investigate.
 Find sessions to analyze:
 
 ```bash
-# Sessions with errors
+uv run lup-devtools feedback unanalyzed
 uv run lup-devtools trace errors
-
-# List all available traces
-uv run lup-devtools trace list
 ```
 
 Prioritize: sessions with errors, sessions with poor outcomes (if outcome data exists), recent sessions from the current version.

@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*), Bash(gh:*), AskUserQuestion
+allowed-tools: Bash(git:*, gh:*, uv run lup-devtools:*), AskUserQuestion
 description: Check PR review status, merge if approved, and clean up branches
 ---
 
@@ -11,24 +11,17 @@ Check the review status of the feature branch's PR, merge it if approved, and cl
 
 ### 1. Identify the PR
 
-Find the open PR for the current branch:
-
 ```bash
-CURRENT_BRANCH=$(git branch --show-current)
-gh pr list --head "$CURRENT_BRANCH" --state open --json number,title,url
+uv run lup-devtools dev pr-status --json
 ```
 
-If no PR is found, check if the user passed a PR number as an argument. If still nothing, report the error and stop.
+If the command exits non-zero (no open PR), check if the user passed a PR number as an argument. If still nothing, report the error and stop.
 
 ### 2. Check PR review status
 
-Fetch the PR's review state and comments:
+The `pr-status` output includes review decision, checks, and merge state. For detailed review comments:
 
 ```bash
-# Get PR status: checks, reviews, merge state
-gh pr view <PR_NUMBER> --json reviews,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision
-
-# Get review comments (the detailed feedback)
 gh pr view <PR_NUMBER> --comments
 ```
 
@@ -63,7 +56,13 @@ After merge, pull the merged changes into the integration branch:
 cd ../dev && git pull && cd -
 ```
 
-Then run the **targeted mode** cleanup from `/lup:clean-gone` for the merged branch (`$CURRENT_BRANCH`). This handles worktree removal, local branch deletion, and remote branch cleanup with proper user confirmation.
+Then check the merged branch's cleanup status and clean up:
+
+```bash
+uv run lup-devtools dev branch-status "$CURRENT_BRANCH" --json
+```
+
+If the branch shows as DELETE, remove worktree (if any), delete local branch (`git branch -d`), and delete remote branch (`git push origin --delete`). Confirm with user before deleting.
 
 ### 6. Report
 

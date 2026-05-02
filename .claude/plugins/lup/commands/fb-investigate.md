@@ -20,6 +20,12 @@ uv run lup-devtools trace show <session_id>
 
 Read every tool call, error, and reasoning step. Don't skim.
 
+For a focused view of tool interactions:
+
+```bash
+uv run lup-devtools trace show <session_id> --tool-calls
+```
+
 ### 2. Tool use audit
 
 - **Tool call inventory**: List every tool call — what the agent tried to learn, whether it succeeded, whether the result was useful.

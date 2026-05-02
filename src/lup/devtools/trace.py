@@ -58,10 +58,45 @@ def load_trace(trace_path: Path) -> str:
     return ""
 
 
+TOOL_CALL_PATTERNS = re.compile(
+    r"tool_use|tool_result|^##\s+Tool:|^###\s+Tool:|^Tool:|^\w+_?\w+:",
+    re.IGNORECASE,
+)
+
+
+def filter_tool_calls(content: str, context_lines: int = 3) -> str:
+    """Extract lines matching tool call patterns with surrounding context."""
+    lines = content.split("\n")
+    matched_indices: set[int] = set()
+
+    for i, line in enumerate(lines):
+        if TOOL_CALL_PATTERNS.search(line):
+            start = max(0, i - context_lines)
+            end = min(len(lines), i + context_lines + 1)
+            matched_indices.update(range(start, end))
+
+    if not matched_indices:
+        return "(no tool call lines found)"
+
+    result: list[str] = []
+    prev_idx = -2
+    for idx in sorted(matched_indices):
+        if idx > prev_idx + 1:
+            if result:
+                result.append("---")
+        result.append(lines[idx])
+        prev_idx = idx
+
+    return "\n".join(result)
+
+
 @app.command("show")
 def show(
     session_id: str = typer.Argument(..., help="Session ID to show trace for"),
     full: bool = typer.Option(False, "-f", "--full", help="Show full trace"),
+    tool_calls: bool = typer.Option(
+        False, "--tool-calls", "-t", help="Show only tool call blocks"
+    ),
 ) -> None:
     """Show trace for a session."""
     trace_path = find_trace(session_id)
@@ -76,7 +111,9 @@ def show(
 
     content = load_trace(trace_path)
 
-    if full:
+    if tool_calls:
+        typer.echo(filter_tool_calls(content))
+    elif full:
         typer.echo(content)
     else:
         lines = content.split("\n")

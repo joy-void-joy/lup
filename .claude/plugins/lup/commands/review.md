@@ -1,5 +1,5 @@
 ---
-allowed-tools: Read, Grep, Glob, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)
+allowed-tools: Read, Grep, Glob, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*), Agent
 description: Review a session trace for workflow quality, tool usage, and improvement opportunities
 argument-hint: [session ID, file path, or pasted trace]
 ---
@@ -19,9 +19,13 @@ argument-hint: [session ID, file path, or pasted trace]
 Determine what was provided and get the full trace content:
 
 **Session ID** (e.g., `repl_20260228_123036`, `20260228_123036`):
-- Look in `notes/traces/` for matching session directories
-- Read the `.md` trace log from `notes/traces/<version>/logs/<session_id>/`
-- Also read the `SessionResult` JSON from `notes/traces/<version>/sessions/<session_id>/` for metadata (duration, cost, token usage, tool metrics, outcome)
+
+```bash
+uv run lup-devtools trace show <session_id>
+uv run lup-devtools trace show <session_id> --tool-calls
+```
+
+Also read the `SessionResult` JSON from `notes/traces/<version>/sessions/<session_id>/` for metadata (duration, cost, token usage, tool metrics, outcome).
 
 **File path** (contains `/` or ends in `.md`/`.json`):
 - Read the file directly
@@ -33,13 +37,18 @@ If you can't find the trace, use `uv run lup-devtools trace list` to show availa
 
 ### 2. Read the agent configuration
 
-Before analyzing the trace, understand what the agent had available. Read these files:
+Before analyzing the trace, understand what the agent had available:
 
-- **System prompt**: `src/lup/agent/prompts.py` — what guidance did the agent receive?
-- **Tool policy**: `src/lup/agent/tool_policy.py` — what tools were available/excluded?
-- **Tools**: `src/lup/agent/tools/` — the tools the agent can call
-- **Subagents**: `src/lup/agent/subagents.py` — what subagents exist and what they do
-- **Core wiring**: `src/lup/agent/core.py` — how is the agent assembled?
+```bash
+uv run lup-devtools agent inspect --json
+```
+
+This shows tools, subagents, model, and prompt info. For deeper inspection, read:
+
+- **System prompt**: `src/lup/agent/prompts.py`
+- **Tool policy**: `src/lup/agent/tool_policy.py`
+- **Tools**: `src/lup/agent/tools/`
+- **Core wiring**: `src/lup/agent/core.py`
 
 This is the baseline for evaluating whether the agent used its capabilities well.
 

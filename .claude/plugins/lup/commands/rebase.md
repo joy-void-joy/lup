@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
+allowed-tools: Bash(git:*, gh:*, uv run lup-devtools:*, uv run pyright, uv run ruff:*, uv run pytest), Read, Glob, Grep, AskUserQuestion
 argument-hint: [target-branch]
 description: Clean up commit history on the feature branch and open/update a PR
 ---
@@ -12,9 +12,11 @@ Clean up the commit history on the current feature branch, push it, and open (or
 
 ### Base branch (`<base>`)
 
-Auto-detect the base branch — the branch this feature branch diverged from. For each local branch, find the merge-base with HEAD; the branch whose merge-base is closest to HEAD (fewest commits between merge-base and HEAD) is the parent. Exclude the current branch itself.
+```bash
+uv run lup-devtools dev base-branch --json
+```
 
-If auto-detection is ambiguous or no clear parent is found, use `AskUserQuestion` to ask which branch to use as base.
+If the command exits non-zero (ambiguous), use `AskUserQuestion` to ask which branch to use as base.
 
 ### PR target (`<target>`)
 

@@ -28,13 +28,14 @@ Resolve relative paths against the current working directory.
 
 ### 2. Create a backup
 
-Copy the target to `<path>.bak` (file) or `<path>.bak/` (directory):
+Commit the current state so it can be recovered with `git diff` or `git checkout`:
 
-```
-cp -r <path> <path>.bak
+```bash
+git add <path>
+git commit -m "refactor: snapshot before rewrite of <path>"
 ```
 
-Confirm the backup was created successfully before proceeding.
+This commit serves as the backup — `git diff HEAD~1` shows exactly what changed, and `git checkout HEAD~1 -- <path>` restores the original.
 
 ### 3. Understand the original
 
@@ -83,14 +84,13 @@ After rewriting:
 Show the user:
 
 - What was refactored
-- Where the backup lives (`<path>.bak`)
+- How to compare: `git diff HEAD~1 -- <path>`
+- How to revert: `git checkout HEAD~1 -- <path>`
 - Key improvements made
 - Any issues found during verification
-- Remind them: `rm <path>.bak` when satisfied
 
 ## Important
 
 - **Never drop functionality.** The rewrite must do everything the original did.
 - **Ask before proceeding** if the target is large (>5 files or >500 lines total).
 - **Preserve tests.** If tests reference the refactored code, ensure they still pass.
-- If the backup path already exists, ask the user before overwriting it.

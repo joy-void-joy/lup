@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*), Bash(uv:*), Read, Grep, Glob, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Edit, Grep, Glob, AskUserQuestion
 description: Review changes since last bump and bump agent version
 argument-hint: [patch|minor|major]
 ---
@@ -20,9 +20,9 @@ If no level is provided, determine the appropriate level from the changes.
 
 Run these in parallel:
 
-- Read `src/lup/version.py` to get the current version
-- Run `git tag --list 'v*' --sort=-version:sort` to find the latest version tag
-- Run `git log --oneline` (limited to last 50 commits) to see recent history
+- `uv run lup-devtools feedback version` to get the current version
+- `git tag --list 'v*' --sort=-version:sort` to find the latest version tag
+- `git log --oneline` (limited to last 50 commits) to see recent history
 
 ### 2. Find changes since last bump
 

@@ -1,5 +1,5 @@
 ---
-allowed-tools: Read, Grep, Glob, Bash(ls:*, wc:*, sort:*, tail:*, stat:*)
+allowed-tools: Read, Grep, Glob, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)
 description: Trace an error through logs to find root cause
 argument-hint: [error message or fragment]
 ---
@@ -16,20 +16,25 @@ argument-hint: [error message or fragment]
 
 ### 1. Search logs for the error
 
-Search `logs/` for the error text (or a distinctive fragment of it). Use Grep with the most specific substring from the error -- avoid generic words like "error" or "failed" when more specific text is available.
+First, check if there are sessions with errors:
 
-```
-# Example: search for a distinctive error fragment
-Grep(pattern="<distinctive part of error>", path="logs/", output_mode="content", context=10)
+```bash
+uv run lup-devtools trace errors
 ```
 
-If the error text is too long for a single grep, extract the most distinctive phrase (e.g., an exception class name, a specific message, a status code with context).
+Then search traces for the specific error text:
+
+```bash
+uv run lup-devtools trace search "<distinctive part of error>"
+```
+
+If devtools search doesn't find it, fall back to Grep on `logs/` with the most specific substring from the error.
 
 ### 2. Find the right log file
 
 If multiple log files match, identify the **most recent** one (logs are named by timestamp: `YYYYMMDD-HHMMSS.log` or `YYYYMMDD_HHMMSS.log`).
 
-If no matches found in `logs/`:
+If no matches found:
 
 - Try `notes/sessions/` for meta-reflections mentioning the error
 - Try broader search terms (exception class name, HTTP status code)

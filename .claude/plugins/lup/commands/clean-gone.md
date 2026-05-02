@@ -1,16 +1,12 @@
 ---
-allowed-tools: Bash(git:*), Bash(gh:*), AskUserQuestion
+allowed-tools: Bash(git:*, gh:*, uv run lup-devtools:*), AskUserQuestion
 argument-hint: [branch-name]
 description: Review branches/worktrees and clean up merged ones
 ---
 
 # Clean Merged Branches
 
-Review all local branches and worktrees. Identify branches that are fully merged into the integration branch or any other active branch, or have completed PRs. Present the merge graph and ask before deleting.
-
-## Determine Integration Branch
-
-Auto-detect the integration branch: use `dev` if it exists locally, otherwise fall back to `main`. Use this as `<integration>` throughout.
+Review all local branches and worktrees. Identify branches that are fully merged into the integration branch, have completed PRs, or are stale. Present the results and ask before deleting.
 
 ## Arguments
 
@@ -20,116 +16,58 @@ Raw arguments: `$ARGUMENTS`
 
 Parse the raw arguments as follows: if non-empty, the first word is the **branch name** (not a natural-language instruction). Ignore any remaining words.
 
-## Targeted Mode (branch name provided)
-
-If a branch name is given as an argument, skip the full inventory and target just that branch:
-
-1. **Fetch and prune**: `git fetch --prune`
-2. **Verify the branch exists**: `git branch --list <branch-name>`. If not found, report and stop.
-3. **Check safety**:
-   - Is it the current branch? Warn and stop.
-   - Does it have a worktree? Note for removal.
-   - Is it merged into `<integration>`? (`git merge-base --is-ancestor`)
-   - Does it have a PR? (`gh pr list --state all --head <branch-name>`)
-4. **Report status** and **confirm with user** via AskUserQuestion before deleting.
-5. **Remove worktree** if applicable, then **delete the branch** (`-d`, escalate to `-D` only with user approval), then **delete remote** if it exists.
-6. **Report results**.
-
-## Full Scan Mode (no argument)
-
 ## Process
 
-1. **Fetch and prune** remote tracking info:
+### 1. Get branch status
 
-   ```bash
-   git fetch --prune
-   ```
+```bash
+# Targeted mode (specific branch)
+uv run lup-devtools dev branch-status <branch-name> --json
 
-2. **Inventory** all local branches and worktrees:
+# Full scan (all branches)
+uv run lup-devtools dev branch-status --json
+```
 
-   ```bash
-   git branch -vv
-   git worktree list
-   ```
+The devtool handles: fetch/prune, containment analysis, PR status, cherry-pick detection, and worktree info. It classifies each branch as DELETE, STALE, KEEP, or CURRENT.
 
-3. **Check containment** — for every pair of branches, check if one is an ancestor of another:
+### 2. Present results
 
-   ```bash
-   git merge-base --is-ancestor <branch> <target>
-   ```
-   A branch is "consumed" if it's fully contained in `<integration>` OR any other active branch.
+Display the branch status table to the user. For each DELETE/STALE branch, show:
+- Branch name and classification reason
+- Whether it has a worktree
+- PR status (if any)
 
-4. **Check PR status** for branches that aren't ancestors of anything:
+### 3. Confirm with user
 
-   ```bash
-   gh pr list --state all --json number,title,headRefName,state,mergedAt
-   ```
+Use AskUserQuestion before deleting anything. Show the list of branches to be cleaned up.
 
-   A branch is also deletable if:
-   - It has a merged PR (direct or via a `-rebase` suffix branch)
-   - Its corresponding rebase branch's PR was merged (content reached `<integration>` through rebased commits)
+### 4. Clean up
 
-5. **Detect transitive merges** — for branches still unresolved after steps 3-4, check if their content reached main through an intermediate branch that was rebased:
+For each confirmed branch:
 
-   ```bash
-   # Find all merged PR branches
-   # For each unresolved branch B, check if B is an ancestor of any merged PR branch
-   git merge-base --is-ancestor <B> <merged-pr-branch>
-   ```
-   Walk the merge graph: if branch B is an ancestor of branch X, and X (or X-rebase) has a merged PR into `<integration>`, then B's content reached `<integration>` transitively — even though B itself isn't an ancestor of `<integration>` (because X was rebased before merging).
-
-   Also check for branches that were **branched from** an intermediate branch and have since been superseded:
-
-   ```bash
-   # Check unique commits remaining after cherry-pick filtering
-   git log --oneline --cherry-pick --left-only <B>...<integration> | wc -l
-   # Check actual code diff (ignoring data/notes)
-   git diff <B> <integration> --stat -- src/ .claude/ tests/
-   ```
-   If the branch has few unique commits and minimal source code diff vs `<integration>`, it's **stale** (superseded by `<integration>`'s continued development, even if not literally merged).
-
-6. **Categorize** each branch:
-   - **DELETE** — fully contained in another branch, or PR merged
-   - **STALE** — content reached main transitively (via rebased intermediate branch) or branch is superseded by main's continued development. Recommend deletion but flag the transitive path.
-   - **KEEP** — has unique commits not captured elsewhere, or has an open PR
-   - **CURRENT** — the branch we're on (never delete, warn if it qualifies)
-
-7. **Present the merge graph** showing:
-   - Which branches are contained in which
-   - PR status for each branch
-   - Which have worktrees
-   - Proposed action (DELETE/STALE/KEEP) with reason
-   - For STALE branches, show the transitive path
-   - Format as a table for DELETE/STALE candidates and a tree for the merge flow
-
-8. **Confirm with user** via AskUserQuestion before deleting anything.
-
-9. **Remove worktrees first** (if any):
-
+1. **Remove worktree** (if any):
    ```bash
    git worktree remove <path>
    ```
 
-10. **Delete branches**:
+2. **Delete local branch**:
+   ```bash
+   git branch -d <branch-name>
+   ```
+   Use `-d` (not `-D`). If `-d` fails (branch not recognized as merged due to rebase), report to user and ask if `-D` is acceptable.
 
-    ```bash
-    git branch -d <branch-name>
-    ```
+3. **Delete remote branch** (if it exists):
+   ```bash
+   git push origin --delete <branch-name>
+   ```
 
-    Use `-d` (not `-D`). If `-d` fails (branch not recognized as merged due to rebase), report to user and ask if `-D` is acceptable.
+### 5. Report results
 
-11. **Delete remote branches** if they still exist:
-
-    ```bash
-    git push origin --delete <branch-name>
-    ```
-
-12. **Report results**: List what was cleaned up.
+List what was cleaned up.
 
 ## Guidelines
 
 - Never force-delete (`-D`) without explicit user approval for that specific branch
 - Always confirm before deleting anything
 - Skip the current branch — warn the user instead
-- A branch merged into ANY other active branch counts as consumed (not just `<integration>`)
 - For rebased branches: the original feature branch content is in main via the rebase PR, even though `--is-ancestor` returns false (commits were rewritten)

@@ -1,17 +1,8 @@
 """Terminal chart builders for devtools visualization.
 
 Portable visualization infrastructure: horizontal strip charts, plotext
-scatter plots, 256-color palettes, and watch-mode CLI patterns.  Downstream
-projects wire their data loaders into these chart builders.
-
-The strip chart shows data points grouped by category (e.g., agent version)
-as a horizontal scatter with summary statistics.  The scatter chart renders
-time-series data colored by category using plotext.
-
-Examples::
-
-    $ uv run lup-devtools charts strip
-    $ uv run lup-devtools charts trend --no-watch
+scatter plots, 256-color palettes, and watch-mode utilities. Import these
+builders from devtools commands that need visualization.
 """
 
 import select
@@ -21,10 +12,6 @@ import termios
 import tty
 from collections.abc import Callable
 from datetime import datetime, timedelta
-
-import typer
-
-app = typer.Typer(no_args_is_help=True)
 
 
 # ── color palette ─────────────────────────────────────────
@@ -399,158 +386,3 @@ def sleep_or_keypress(seconds: int) -> str | None:
     return None
 
 
-# ── CLI scaffolds ─────────────────────────────────────────
-#
-# These commands demonstrate the watch-mode pattern with keypress
-# detection.  Downstream projects replace the data-loading stubs
-# with their domain-specific loaders.
-
-
-@app.command()
-def strip(
-    no_watch: bool = typer.Option(
-        False, "--no-watch", help="Print once instead of live-refreshing"
-    ),
-    interval: int = typer.Option(
-        600, "--interval", "-i", help="Watch refresh interval in seconds"
-    ),
-) -> None:
-    """Strip chart of metrics by category (scaffold — wire your data loader)."""
-    from rich.console import Console, Group
-    from rich.live import Live
-    from rich.text import Text
-
-    console = Console()
-
-    # TODO: Replace with your data loader. Returns:
-    #   by_group:  dict[str, list[float]]  — category -> values
-    #   labels:    dict[str, str]          — category -> display suffix
-    #   totals:    dict[str, int] | None   — category -> total count
-    by_group: dict[str, list[float]] = {}
-    labels: dict[str, str] = {}
-    totals: dict[str, int] | None = None
-
-    if not by_group:
-        typer.echo("No data. Wire a data loader in charts.py strip command.")
-        raise typer.Exit(1)
-
-    colors = pick_colors(len(by_group))
-    cmap = dict(zip(sorted(by_group), colors))
-
-    def build_output() -> str:
-        return build_strip_chart(
-            by_group,
-            labels,
-            console.width,
-            color_map=cmap,
-            group_totals=totals,
-        )
-
-    if no_watch:
-        print()
-        print(build_output())
-        return
-
-    output = build_output()
-    timestamp = Text(
-        f"  updated {datetime.now().strftime('%H:%M:%S')}  ·  esc to quit",
-        style="dim",
-    )
-
-    with Live(
-        Group(Text.from_ansi(output), timestamp),
-        console=console,
-        refresh_per_second=1,
-        screen=True,
-    ) as live:
-        while True:
-            try:
-                key = sleep_or_keypress(interval)
-                if key == "\x1b":
-                    break
-                output = build_output()
-            except KeyboardInterrupt:
-                break
-            timestamp = Text(
-                f"  updated {datetime.now().strftime('%H:%M:%S')}  ·  esc to quit",
-                style="dim",
-            )
-            live.update(Group(Text.from_ansi(output), timestamp))
-
-
-@app.command()
-def trend(
-    no_watch: bool = typer.Option(
-        False, "--no-watch", help="Print once instead of live-refreshing"
-    ),
-    interval: int = typer.Option(
-        600, "--interval", "-i", help="Watch refresh interval in seconds"
-    ),
-) -> None:
-    """Scatter trend over time by category (scaffold — wire your data loader)."""
-    from rich.console import Console, Group
-    from rich.live import Live
-    from rich.text import Text
-
-    console = Console()
-
-    # TODO: Replace with your data loader. Returns:
-    #   points:    list[ScatterPoint]  — (day_offset, value, category, id)
-    #   epoch:     datetime            — reference date for x-axis
-    #   color_map: dict[str, int]      — category -> color
-    #   counts:    dict[str, int]      — resolved count per category
-    #   totals:    dict[str, int]      — total count per category
-    points: list[ScatterPoint] = []
-    epoch = datetime(2025, 1, 1)
-
-    if not points:
-        typer.echo("No data. Wire a data loader in charts.py trend command.")
-        raise typer.Exit(1)
-
-    categories = sorted(set(p[2] for p in points))
-    colors = pick_colors(len(categories))
-    cmap = dict(zip(categories, colors))
-
-    def build_output() -> str:
-        chart = build_scatter(
-            points,
-            "Score trend",
-            "score",
-            console.width,
-            max(8, (console.height - 6) // 2),
-            cmap,
-            epoch,
-        )
-        legend = build_legend(categories, cmap, {}, None, console.width)
-        return f"{chart}\n\n{legend}" if legend else chart
-
-    if no_watch:
-        print()
-        print(build_output())
-        return
-
-    output = build_output()
-    timestamp = Text(
-        f"  updated {datetime.now().strftime('%H:%M:%S')}  ·  esc to quit",
-        style="dim",
-    )
-
-    with Live(
-        Group(Text.from_ansi(output), timestamp),
-        console=console,
-        refresh_per_second=1,
-        screen=True,
-    ) as live:
-        while True:
-            try:
-                key = sleep_or_keypress(interval)
-                if key == "\x1b":
-                    break
-                output = build_output()
-            except KeyboardInterrupt:
-                break
-            timestamp = Text(
-                f"  updated {datetime.now().strftime('%H:%M:%S')}  ·  esc to quit",
-                style="dim",
-            )
-            live.update(Group(Text.from_ansi(output), timestamp))

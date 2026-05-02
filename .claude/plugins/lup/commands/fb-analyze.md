@@ -12,8 +12,8 @@ Aggregate findings across sessions to identify systemic patterns.
 ### 1. Tool health
 
 ```bash
-uv run lup-devtools metrics tools
-uv run lup-devtools metrics errors
+uv run lup-devtools feedback tools
+uv run lup-devtools feedback errors
 ```
 
 Identify: which tools fail most? Are failures transient or systematic? What's the error rate by tool?
