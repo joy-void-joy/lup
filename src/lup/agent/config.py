@@ -15,7 +15,7 @@ Usage:
 
 import logging
 import os
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -74,13 +74,23 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
+    # SDK SELECTION
+    # ==========================================================================
+
+    agent_sdk: Literal["claude", "codex"] = Field(
+        default="claude",
+        validation_alias="AGENT_SDK",
+        description="Which agent SDK backend to use",
+    )
+
+    # ==========================================================================
     # MODEL SETTINGS
     # ==========================================================================
 
     model: str = Field(
         default="claude-opus-4-6",
         validation_alias="AGENT_MODEL",
-        description="Claude model to use",
+        description="Model to use (provider-specific identifier)",
     )
 
     max_thinking_tokens: int | None = Field(

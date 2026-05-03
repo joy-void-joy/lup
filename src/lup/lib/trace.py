@@ -40,15 +40,15 @@ from pathlib import Path
 
 from rich.console import Console
 
-from claude_agent_sdk import (
-    AssistantMessage,
-    ContentBlock,
-    Message,
-    TextBlock,
-    ThinkingBlock,
-    ToolResultBlock,
-    ToolUseBlock,
-    UserMessage,
+from lup.lib.types import (
+    LupAssistantMessage,
+    LupContentBlock,
+    LupMessage,
+    LupTextBlock,
+    LupThinkingBlock,
+    LupToolResultBlock,
+    LupToolUseBlock,
+    LupUserMessage,
 )
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -159,22 +159,20 @@ class BlockInfo(BaseModel):
     content: str
 
 
-def extract_block_info(block: ContentBlock) -> BlockInfo:
+def extract_block_info(block: LupContentBlock) -> BlockInfo:
     """Extract display information from a content block."""
     match block:
-        case ThinkingBlock():
+        case LupThinkingBlock():
             return BlockInfo(emoji="💭", label="Thinking", content=block.thinking)
-        case TextBlock():
+        case LupTextBlock():
             return BlockInfo(emoji="💬", label="Response", content=block.text)
-        case ToolUseBlock():
+        case LupToolUseBlock():
             content = json.dumps(block.input, indent=2) if block.input else ""
             return BlockInfo(emoji="🔧", label=f"Tool: {block.name}", content=content)
-        case ToolResultBlock():
+        case LupToolResultBlock():
             return BlockInfo(
                 emoji="📋", label="Result", content=normalize_content(block.content)
             )
-        case _:
-            return BlockInfo(emoji="❓", label="Unknown", content=str(block))
 
 
 # ---------------------------------------------------------------------------
@@ -189,19 +187,19 @@ class ColorTag(BaseModel):
     color: str
 
 
-def resolve_color_tag(block: ContentBlock) -> ColorTag | None:
+def resolve_color_tag(block: LupContentBlock) -> ColorTag | None:
     """Assign or retrieve a color for tool use/result pairing.
 
-    ToolUseBlock gets a fresh color from the rotating palette and stores
-    it by ID. ToolResultBlock pops the matching color. Other blocks
-    return None (no colored tag).
+    LupToolUseBlock gets a fresh color from the rotating palette and
+    stores it by ID. LupToolResultBlock pops the matching color. Other
+    blocks return None (no colored tag).
     """
     match block:
-        case ToolUseBlock():
+        case LupToolUseBlock():
             color = next(color_cycle)
             id_to_color[block.id] = color
             return ColorTag(id=block.id, color=color)
-        case ToolResultBlock():
+        case LupToolResultBlock():
             color = id_to_color.pop(block.tool_use_id, "default")
             return ColorTag(id=block.tool_use_id, color=color)
         case _:
@@ -214,28 +212,26 @@ def resolve_color_tag(block: ContentBlock) -> ColorTag | None:
 
 
 def print_block(
-    block: ContentBlock, prefix: str = "", trace: TraceLogger | None = None
+    block: LupContentBlock, prefix: str = "", trace: TraceLogger | None = None
 ) -> None:
     """Print a content block with color-coded tool use/result pairing.
 
-    ToolUseBlock and ToolResultBlock are linked by color: when a tool use
-    is printed, its ID is assigned a color from a rotating palette. When
-    the corresponding result arrives, the same color is used, making it
-    easy to visually pair them.
+    LupToolUseBlock and LupToolResultBlock are linked by color: when a
+    tool use is printed, its ID is assigned a color from a rotating
+    palette. When the corresponding result arrives, the same color is
+    used, making it easy to visually pair them.
 
     If *trace* is provided, the block is also logged to the trace.
     """
     info = extract_block_info(block)
     tag = resolve_color_tag(block)
 
-    # Tool results get special formatting (JSON pretty-print + truncation)
     display_content = (
         format_tool_result(block.content)
-        if isinstance(block, ToolResultBlock)
+        if isinstance(block, LupToolResultBlock)
         else info.content
     )
 
-    # Console output — tool blocks get a colored ID tag on the header line
     if tag:
         print(f"{prefix}{info.emoji} {info.label} ", end="")
         console.print(f"[{tag.id}]", style=tag.color)
@@ -244,9 +240,8 @@ def print_block(
     else:
         print(f"{prefix}{info.emoji} {display_content}")
 
-    # Stream log — format varies by block type (TOOL_USE includes tool name)
     match block:
-        case ToolUseBlock():
+        case LupToolUseBlock():
             stream_log.info(
                 "%sTOOL_USE [%s] %s: %s",
                 prefix,
@@ -254,7 +249,7 @@ def print_block(
                 block.name,
                 json.dumps(block.input) if block.input else "",
             )
-        case ToolResultBlock():
+        case LupToolResultBlock():
             stream_log.info(
                 "%sTOOL_RESULT [%s]: %s",
                 prefix,
@@ -269,16 +264,16 @@ def print_block(
 
 
 def print_message(
-    message: Message, prefix: str = "", trace: TraceLogger | None = None
+    message: LupMessage, prefix: str = "", trace: TraceLogger | None = None
 ) -> None:
     """Print all content blocks in a message.
 
-    Handles AssistantMessage and UserMessage (which carry content blocks).
-    Other message types (SystemMessage, ResultMessage, StreamEvent) are
-    silently ignored. If *trace* is provided, blocks are also logged to it.
+    Handles LupAssistantMessage and LupUserMessage (which carry content
+    blocks). Other message types are silently ignored. If *trace* is
+    provided, blocks are also logged to it.
     """
     match message:
-        case AssistantMessage() | UserMessage():
+        case LupAssistantMessage() | LupUserMessage():
             blocks = message.content if isinstance(message.content, list) else []
             for block in blocks:
                 print_block(block, prefix=prefix, trace=trace)
@@ -289,14 +284,14 @@ def print_message(
 # ---------------------------------------------------------------------------
 
 
-def format_block_markdown(block: ContentBlock) -> str:
+def format_block_markdown(block: LupContentBlock) -> str:
     """Format a content block as markdown for trace logs."""
     info = extract_block_info(block)
     header = f"## {info.emoji} {info.label}"
     match block:
-        case ToolUseBlock():
+        case LupToolUseBlock():
             return f"{header}\n\n```json\n{info.content}\n```\n"
-        case ToolResultBlock():
+        case LupToolResultBlock():
             return f"{header}\n\n```\n{info.content}\n```\n"
         case _:
             return f"{header}\n\n{info.content}\n"
@@ -360,18 +355,18 @@ class TraceLogger(BaseModel):
             )
         )
 
-    def log_block(self, block: ContentBlock) -> None:
+    def log_block(self, block: LupContentBlock) -> None:
         """Add a formatted block to the trace."""
         self.append_entry(format_block_markdown(block))
 
-    def log_message(self, message: Message) -> None:
+    def log_message(self, message: LupMessage) -> None:
         """Log all content blocks in a message.
 
-        Handles AssistantMessage and UserMessage. Other message types
-        are silently ignored.
+        Handles LupAssistantMessage and LupUserMessage. Other message
+        types are silently ignored.
         """
         match message:
-            case AssistantMessage() | UserMessage():
+            case LupAssistantMessage() | LupUserMessage():
                 blocks = message.content if isinstance(message.content, list) else []
                 for block in blocks:
                     self.log_block(block)
