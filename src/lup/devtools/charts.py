@@ -384,5 +384,3 @@ def sleep_or_keypress(seconds: int) -> str | None:
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old)
     return None
-
-

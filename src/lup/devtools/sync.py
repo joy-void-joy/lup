@@ -162,7 +162,6 @@ def current_head(path: str) -> str:
     return git_in(path, "rev-parse", "HEAD")
 
 
-
 @app.command("list")
 def list_projects_cmd() -> None:
     """Show tracked projects and their sync status."""

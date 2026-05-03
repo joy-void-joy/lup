@@ -409,9 +409,7 @@ def render_daily_breakdown(
     if not any(d.total_tokens > 0 for d in daily):
         return
 
-    stale = bool(
-        stats.last_computed_date and stats.last_computed_date < today_str
-    )
+    stale = bool(stats.last_computed_date and stats.last_computed_date < today_str)
     out.append("  per day", style="bold bright_white")
     if stale:
         out.append(f"  (cache: {stats.last_computed_date})", style="dim italic")
@@ -474,9 +472,7 @@ def render_daily_breakdown(
             daily_weights[today_idx] = today_weight
             # Estimate token count
             cached_tokens = sum(
-                d.total_tokens
-                for d in daily
-                if d.date <= stats.last_computed_date
+                d.total_tokens for d in daily if d.date <= stats.last_computed_date
             )
             if cached_tokens > 0:
                 est_tokens = int(cached_tokens * (1 - cached_frac) / cached_frac)

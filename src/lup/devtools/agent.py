@@ -30,7 +30,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, TypedDict
 
 if TYPE_CHECKING:
     from rich.console import Console
@@ -715,6 +715,54 @@ async def repl(
         # Additional Ctrl+C during cleanup — containers will be cleaned
         # on next start via stale container removal
         pass
+
+
+class VersionInfo(TypedDict):
+    version: str
+    latest_tag: str | None
+    commits_since_tag: int
+
+
+@app.command("version")
+def version_cmd(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Show agent version, latest tag, and commits since last tag."""
+    from lup.version import AGENT_VERSION
+
+    git = sh.Command("git")
+
+    try:
+        latest_tag = str(git("describe", "--tags", "--abbrev=0", _ok_code=[0])).strip()
+    except sh.ErrorReturnCode:
+        latest_tag = None
+
+    commits_since = 0
+    if latest_tag:
+        try:
+            commits_since = int(
+                str(git("rev-list", "--count", f"{latest_tag}..HEAD")).strip()
+            )
+        except sh.ErrorReturnCode:
+            pass
+
+    if as_json:
+        data: VersionInfo = {
+            "version": AGENT_VERSION,
+            "latest_tag": latest_tag,
+            "commits_since_tag": commits_since,
+        }
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    typer.echo(f"\nAgent version: {AGENT_VERSION}")
+    if latest_tag:
+        typer.echo(f"Latest tag: {latest_tag} (+{commits_since} commits)")
+    else:
+        typer.echo("Latest tag: (none)")
 
 
 @app.command("repl")

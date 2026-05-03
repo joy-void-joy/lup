@@ -1,40 +1,29 @@
-"""Analyze reasoning traces from sessions.
-
-This is a TEMPLATE script. Customize it for your domain's trace format.
+"""Session trace display, search, and analysis.
 
 Examples::
 
-    $ uv run lup-devtools trace list
-    $ uv run lup-devtools trace list --all-versions --limit 50
-    $ uv run lup-devtools trace show my-session-id
-    $ uv run lup-devtools trace show my-session-id --full
-    $ uv run lup-devtools trace search "confidence.*low"
-    $ uv run lup-devtools trace search "error" -C 5
-    $ uv run lup-devtools trace errors
-    $ uv run lup-devtools trace errors --all-versions --limit 10
-    $ uv run lup-devtools trace capabilities
+    $ uv run lup-devtools session list
+    $ uv run lup-devtools session show my-session-id --full
+    $ uv run lup-devtools session search "confidence.*low"
+    $ uv run lup-devtools session capabilities
 """
 
 import re
 from pathlib import Path
 
-import typer
-
-from lup.lib.history import iter_session_dirs, iter_trace_log_files, resolve_version
+from lup.lib.history import iter_session_dirs, iter_trace_log_files
 from lup.lib.paths import traces_path
 from lup.version import AGENT_VERSION
 
-app = typer.Typer(no_args_is_help=True)
+VERSION_OPT_DEFAULT = AGENT_VERSION
 
 
 def find_trace(session_id: str) -> Path | None:
     """Find the trace file for a session across all versions."""
-    # Check versioned trace logs
     log_files = list(iter_trace_log_files(session_id=session_id))
     if log_files:
         return sorted(log_files)[-1]
 
-    # Check versioned session dirs for .md files
     for session_dir in iter_session_dirs(session_id=session_id):
         md_files = list(session_dir.glob("*.md"))
         if md_files:
@@ -90,15 +79,10 @@ def filter_tool_calls(content: str, context_lines: int = 3) -> str:
     return "\n".join(result)
 
 
-@app.command("show")
-def show(
-    session_id: str = typer.Argument(..., help="Session ID to show trace for"),
-    full: bool = typer.Option(False, "-f", "--full", help="Show full trace"),
-    tool_calls: bool = typer.Option(
-        False, "--tool-calls", "-t", help="Show only tool call blocks"
-    ),
-) -> None:
+def show(session_id: str, full: bool, tool_calls: bool) -> None:
     """Show trace for a session."""
+    import typer
+
     trace_path = find_trace(session_id)
 
     if not trace_path:
@@ -123,12 +107,10 @@ def show(
             typer.echo("Use --full to see complete trace")
 
 
-@app.command("search")
-def search(
-    pattern: str = typer.Argument(..., help="Pattern to search for (regex)"),
-    context: int = typer.Option(2, "-C", help="Lines of context around match"),
-) -> None:
+def search(pattern: str, context: int) -> None:
     """Search traces for a pattern."""
+    import typer
+
     if not traces_path().exists():
         typer.echo("No trace directories found")
         raise typer.Exit(1)
@@ -162,20 +144,12 @@ def search(
     typer.echo(f"\n{matches_found} matches found")
 
 
-@app.command("errors")
-def errors(
-    limit: int = typer.Option(20, "-n", "--limit", help="Max errors to show"),
-    version: str | None = typer.Option(
-        AGENT_VERSION, "--version", "-v", help="Agent version (default: current)"
-    ),
-    all_versions: bool = typer.Option(
-        False, "--all-versions", help="Include all versions"
-    ),
+def errors_in_traces(
+    limit: int,
+    effective: list[str] | None,
 ) -> None:
-    """Show sessions with errors or failures."""
-    effective, warning = resolve_version(version, all_versions)
-    if warning:
-        typer.echo(warning)
+    """Show sessions with errors found by regex in trace markdown files."""
+    import typer
 
     error_patterns = [
         r"error",
@@ -208,7 +182,6 @@ def errors(
 
             try:
                 rel = trace_file.relative_to(traces_path())
-                # Structure: <version>/<logs|sessions>/<session_id>/...
                 session_id = rel.parts[2] if len(rel.parts) > 2 else rel.stem
             except ValueError:
                 session_id = trace_file.stem
@@ -227,7 +200,7 @@ def errors(
         typer.echo("No errors found in traces")
         return
 
-    typer.echo(f"\n=== Sessions with Errors ({len(errors_by_session)} total) ===\n")
+    typer.echo(f"\n=== Trace Errors ({len(errors_by_session)} sessions) ===\n")
 
     sorted_sessions = sorted(
         errors_by_session.items(), key=lambda x: len(x[1]), reverse=True
@@ -242,20 +215,9 @@ def errors(
         typer.echo()
 
 
-@app.command("list")
-def list_traces(
-    limit: int = typer.Option(20, "-n", "--limit", help="Max to show"),
-    version: str | None = typer.Option(
-        AGENT_VERSION, "--version", "-v", help="Agent version (default: current)"
-    ),
-    all_versions: bool = typer.Option(
-        False, "--all-versions", help="Include all versions"
-    ),
-) -> None:
+def list_traces(limit: int, effective: list[str] | None) -> None:
     """List available traces."""
-    effective, warning = resolve_version(version, all_versions)
-    if warning:
-        typer.echo(warning)
+    import typer
 
     traces: list[tuple[str, str, Path]] = []
 
@@ -273,7 +235,6 @@ def list_traces(
         typer.echo(f"Checked: {traces_path()}")
         return
 
-    # Deduplicate by session_id, preferring logs
     seen: dict[str, tuple[str, str, Path]] = {}
     for source, session_id, path in traces:
         if session_id not in seen or source == "logs":
@@ -290,9 +251,10 @@ def list_traces(
         typer.echo(f"{session_id} ({source}): {len(files)} files, {size_kb:.1f}KB")
 
 
-@app.command("capabilities")
 def capabilities() -> None:
     """Extract capability requests from traces."""
+    import typer
+
     capability_patterns = [
         r"would be useful",
         r"would have helped",

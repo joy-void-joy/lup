@@ -1,21 +1,12 @@
-"""Collect feedback data from agent sessions and view aggregate metrics.
+"""Session feedback state: collection, analysis marks, status, and commit operations.
 
-This is a TEMPLATE script. Run `/lup:init` to customize it for your domain.
-
-The script should:
-1. Load session data from notes/sessions/
-2. Match sessions to their outcomes/feedback
-3. Compute aggregate metrics
-4. Save results to notes/feedback_loop/
+This is a TEMPLATE script. Run ``/lup:init`` to customize it for your domain.
 
 Examples::
 
-    $ uv run lup-devtools feedback status
-    $ uv run lup-devtools feedback collect --all-time
-    $ uv run lup-devtools feedback tools
-    $ uv run lup-devtools feedback errors
-    $ uv run lup-devtools feedback version
-    $ uv run lup-devtools feedback unanalyzed
+    $ uv run lup-devtools session status
+    $ uv run lup-devtools session collect --all-time
+    $ uv run lup-devtools session commit --dry-run
 """
 
 import json
@@ -24,7 +15,7 @@ from collections import defaultdict
 from datetime import datetime
 from glob import glob
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 import typer
 from pydantic import BaseModel
@@ -33,16 +24,14 @@ from lup.lib.history import iter_session_dirs, resolve_version
 from lup.lib.paths import feedback_path, traces_path
 from lup.version import AGENT_VERSION
 
-app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
-
 
 # =============================================================================
 # CUSTOMIZE THESE MODELS FOR YOUR DOMAIN
 # =============================================================================
 
 
-class SessionResult(BaseModel):
+class SessionResult(BaseModel):  # claude: ignore
     """A session matched with its outcome/feedback.
 
     Customize this for your domain. Examples:
@@ -72,7 +61,7 @@ class SessionResult(BaseModel):
     metrics: dict[str, Any] | None = None
 
 
-class FeedbackMetrics(BaseModel):
+class FeedbackMetrics(BaseModel):  # claude: ignore
     """Aggregated metrics from sessions.
 
     Customize this for your domain.
@@ -90,7 +79,7 @@ class FeedbackMetrics(BaseModel):
 # =============================================================================
 
 
-def load_sessions(
+def load_sessions(  # claude: ignore
     since: datetime | None = None, version: str | None = None
 ) -> list[dict[str, Any]]:
     """Load session data, optionally filtered by version."""
@@ -118,7 +107,7 @@ def load_sessions(
     return sessions
 
 
-def load_outcomes() -> dict[str, Any]:
+def load_outcomes() -> dict[str, Any]:  # claude: ignore
     """Load outcome data for sessions.
 
     Customize this to load outcomes for your domain.
@@ -126,7 +115,9 @@ def load_outcomes() -> dict[str, Any]:
     return {}
 
 
-def match_outcomes(sessions: list[dict[str, Any]]) -> list[SessionResult]:
+def match_outcomes(  # claude: ignore
+    sessions: list[dict[str, Any]],
+) -> list[SessionResult]:
     """Match sessions to their outcomes/feedback."""
     outcomes = load_outcomes()
     results = []
@@ -165,7 +156,9 @@ def compute_metrics(results: list[SessionResult]) -> FeedbackMetrics:
 # =============================================================================
 
 
-def load_sessions_for_versions(versions: list[str] | None) -> list[dict[str, Any]]:
+def load_sessions_for_versions(  # claude: ignore
+    versions: list[str] | None,
+) -> list[dict[str, Any]]:
     """Load sessions for a resolved version list (None = all)."""
     if versions is None:
         return load_sessions()
@@ -192,23 +185,123 @@ def collect_session_ids(effective: list[str] | None) -> set[str]:
 # ANALYSIS STATE TRACKING
 # =============================================================================
 
-ANALYZED_FILE = feedback_path() / "analyzed.json"
+
+def analyzed_file() -> Path:
+    """Return path to the analyzed sessions tracking file."""
+    return feedback_path() / "analyzed.json"
 
 
 def load_analyzed() -> set[str]:
     """Load the set of already-analyzed session IDs."""
-    if not ANALYZED_FILE.exists():
+    path = analyzed_file()
+    if not path.exists():
         return set()
-    data: dict[str, list[str]] = json.loads(ANALYZED_FILE.read_text())
+    data: dict[str, list[str]] = json.loads(path.read_text())
     return set(data.get("analyzed", []))
 
 
 def save_analyzed(session_ids: set[str]) -> None:
     """Save the set of analyzed session IDs."""
     feedback_path().mkdir(parents=True, exist_ok=True)
-    ANALYZED_FILE.write_text(
+    analyzed_file().write_text(
         json.dumps({"analyzed": sorted(session_ids)}, indent=2) + "\n"
     )
+
+
+# =============================================================================
+# SESSION COMMIT OPERATIONS
+# =============================================================================
+
+
+def get_uncommitted_session_ids() -> set[str]:
+    """Find session IDs with uncommitted result files."""
+    import sh
+
+    git = sh.Command("git")
+    session_ids: set[str] = set()
+
+    status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0])).strip()
+    if not status:
+        return session_ids
+
+    for line in status.splitlines():
+        file_path = line[3:].split(" -> ")[0].strip()
+        parts = Path(file_path).parts
+
+        if (
+            len(parts) >= 5
+            and parts[0] == "notes"
+            and parts[1] == "traces"
+            and parts[3] in ("sessions", "logs")
+        ):
+            session_ids.add(parts[4])
+
+    return session_ids
+
+
+def get_session_summary(session_id: str) -> str:
+    """Read summary from the latest session JSON across all versions."""
+    all_json: list[Path] = []
+    for session_dir in iter_session_dirs(session_id=session_id):
+        all_json.extend(session_dir.glob("*.json"))
+
+    if not all_json:
+        return f"session {session_id}"
+
+    latest = sorted(all_json)[-1]
+    try:
+        data = json.loads(latest.read_text(encoding="utf-8"))  # claude: ignore
+        output = data.get("output", {})
+        if isinstance(output, dict):
+            return output.get("summary", f"session {session_id}")[:50]
+        return f"session {session_id}"
+    except (json.JSONDecodeError, OSError):
+        return f"session {session_id}"
+
+
+def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
+    """Stage and commit files for a single session ID."""
+    import sh
+
+    git = sh.Command("git")
+    paths: list[str] = []
+
+    for session_dir in iter_session_dirs(session_id=session_id):
+        paths.append(str(session_dir))
+
+    if traces_path().exists():
+        for ver_dir in traces_path().iterdir():
+            if not ver_dir.is_dir():
+                continue
+            log_dir = ver_dir / "logs" / session_id
+            if log_dir.exists():
+                paths.append(str(log_dir))
+
+    if not paths:
+        return False
+
+    if dry_run:
+        summary = get_session_summary(session_id)
+        print(f"  Would commit {session_id}: {summary}")
+        for p in paths:
+            print(f"    {p}")
+        return True
+
+    for path in paths:
+        try:
+            git.add(path)
+        except sh.ErrorReturnCode as e:
+            logger.warning("Failed to stage %s: %s", path, e)
+
+    diff = str(git.diff("--cached", "--stat", _ok_code=[0, 1])).strip()
+    if not diff:
+        return False
+
+    summary = get_session_summary(session_id)
+    slug = summary[:50].strip().rstrip(".")
+    git.commit("-m", f"data(sessions): {slug}")
+    print(f"  Committed {session_id}: {slug}")
+    return True
 
 
 # =============================================================================
@@ -216,29 +309,20 @@ def save_analyzed(session_ids: set[str]) -> None:
 # =============================================================================
 
 
-@app.command("status")
-def status(
-    version: Annotated[
-        str | None,
-        typer.Option("--version", "-v", help="Agent version (default: current)"),
-    ] = AGENT_VERSION,
-    all_versions: Annotated[
-        bool,
-        typer.Option("--all-versions", help="Include all versions"),
-    ] = False,
+def status(  # noqa: C901
+    version: str | None,
+    all_versions: bool,
 ) -> None:
     """Show feedback status: version, data, analysis state, and aggregate stats."""
     effective, ver_warning = resolve_version(version, all_versions)
     if ver_warning:
         typer.echo(ver_warning)
 
-    # --- Agent Version ---
     typer.echo("\n=== Agent Version ===\n")
     typer.echo(f"Current: {AGENT_VERSION}")
     if effective:
         typer.echo(f"Showing: {', '.join(effective)}")
 
-    # --- Data Availability ---
     typer.echo("\n=== Data Availability ===\n")
 
     all_session_ids = collect_session_ids(effective)
@@ -264,7 +348,6 @@ def status(
     else:
         typer.echo("Previous feedback collections: None")
 
-    # --- Analysis State ---
     analyzed = load_analyzed()
     unanalyzed = sorted(all_session_ids - analyzed)
 
@@ -273,7 +356,6 @@ def status(
     typer.echo(f"Analyzed: {len(analyzed & all_session_ids)}")
     typer.echo(f"Unanalyzed: {len(unanalyzed)}")
 
-    # --- Aggregate Stats ---
     sessions = load_sessions_for_versions(effective)
 
     if sessions:
@@ -283,15 +365,9 @@ def status(
         with_outcome = sum(1 for s in sessions if s.get("outcome") is not None)
 
         typer.echo(f"\n=== Aggregate Stats ({total} sessions) ===\n")
-        typer.echo(
-            f"With metrics: {with_metrics} ({100 * with_metrics / total:.0f}%)"
-        )
-        typer.echo(
-            f"With tokens:  {with_tokens} ({100 * with_tokens / total:.0f}%)"
-        )
-        typer.echo(
-            f"With outcome: {with_outcome} ({100 * with_outcome / total:.0f}%)"
-        )
+        typer.echo(f"With metrics: {with_metrics} ({100 * with_metrics / total:.0f}%)")
+        typer.echo(f"With tokens:  {with_tokens} ({100 * with_tokens / total:.0f}%)")
+        typer.echo(f"With outcome: {with_outcome} ({100 * with_outcome / total:.0f}%)")
 
         total_cost = 0.0
         for s in sessions:
@@ -319,7 +395,6 @@ def status(
             typer.echo(f"  Output: {total_output:,}")
             typer.echo(f"  Total:  {total_input + total_output:,}")
 
-    # --- Unanalyzed Session IDs ---
     if unanalyzed:
         typer.echo("\n=== Unanalyzed Sessions ===\n")
         for sid in unanalyzed[:20]:
@@ -327,34 +402,16 @@ def status(
         if len(unanalyzed) > 20:
             typer.echo(f"  ... and {len(unanalyzed) - 20} more")
         typer.echo(
-            "\nTo list all unanalyzed IDs: uv run lup-devtools feedback unanalyzed"
+            "\nTo list all unanalyzed IDs: uv run lup-devtools session unanalyzed"
         )
 
 
-@app.command("collect")
 def collect(
-    since: Annotated[
-        str | None,
-        typer.Option(
-            "--since", "-s", help="Only sessions after this date (YYYY-MM-DD)"
-        ),
-    ] = None,
-    all_time: Annotated[
-        bool,
-        typer.Option("--all-time", help="Include all sessions regardless of date"),
-    ] = False,
-    version: Annotated[
-        str | None,
-        typer.Option("--version", "-v", help="Agent version (default: current)"),
-    ] = AGENT_VERSION,
-    all_versions: Annotated[
-        bool,
-        typer.Option("--all-versions", help="Include all versions"),
-    ] = False,
-    output: Annotated[
-        Path | None,
-        typer.Option("--output", "-o", help="Output file path"),
-    ] = None,
+    since: str | None,
+    all_time: bool,
+    version: str | None,
+    all_versions: bool,
+    output: Path | None,
 ) -> None:
     """Collect feedback metrics from sessions."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -402,17 +459,7 @@ def collect(
     print(f"\nMetrics saved to: {output}")
 
 
-@app.command("tools")
-def tools(
-    version: Annotated[
-        str | None,
-        typer.Option("--version", "-v", help="Agent version (default: current)"),
-    ] = AGENT_VERSION,
-    all_versions: Annotated[
-        bool,
-        typer.Option("--all-versions", help="Include all versions"),
-    ] = False,
-) -> None:
+def tools(version: str | None, all_versions: bool) -> None:  # claude: ignore
     """Show tool usage aggregates."""
     effective, warning = resolve_version(version, all_versions)
     if warning:
@@ -441,9 +488,7 @@ def tools(
         return
 
     typer.echo("\n=== Tool Usage Summary ===\n")
-    typer.echo(
-        f"{'Tool':<35} {'Calls':>8} {'Errors':>8} {'Err%':>8} {'Avg ms':>10}"
-    )
+    typer.echo(f"{'Tool':<35} {'Calls':>8} {'Errors':>8} {'Err%':>8} {'Avg ms':>10}")
     typer.echo("-" * 75)
 
     for tool_name in sorted(tool_stats.keys(), key=lambda t: -tool_stats[t]["calls"]):
@@ -458,22 +503,12 @@ def tools(
         )
 
 
-@app.command("errors")
-def errors(
-    limit: Annotated[
-        int,
-        typer.Option("-n", "--limit", help="Max sessions to show"),
-    ] = 20,
-    version: Annotated[
-        str | None,
-        typer.Option("--version", "-v", help="Agent version (default: current)"),
-    ] = AGENT_VERSION,
-    all_versions: Annotated[
-        bool,
-        typer.Option("--all-versions", help="Include all versions"),
-    ] = False,
+def errors(  # claude: ignore
+    limit: int,
+    version: str | None,
+    all_versions: bool,
 ) -> None:
-    """Show sessions with high error rates."""
+    """Show sessions with high error rates from structured metrics."""
     effective, warning = resolve_version(version, all_versions)
     if warning:
         typer.echo(warning)
@@ -511,21 +546,7 @@ def errors(
                 typer.echo(f"  - {tool_name}: {errs}")
 
 
-@app.command("trends")
-def trends(
-    window: Annotated[
-        int,
-        typer.Option("-w", "--window", help="Rolling window size"),
-    ] = 10,
-    version: Annotated[
-        str | None,
-        typer.Option("--version", "-v", help="Agent version (default: current)"),
-    ] = AGENT_VERSION,
-    all_versions: Annotated[
-        bool,
-        typer.Option("--all-versions", help="Include all versions"),
-    ] = False,
-) -> None:
+def trends(window: int, version: str | None, all_versions: bool) -> None:
     """Show metric trends over time."""
     effective, warning = resolve_version(version, all_versions)
     if warning:
@@ -569,13 +590,7 @@ def trends(
         )
 
 
-@app.command("history")
-def history(
-    limit: Annotated[
-        int,
-        typer.Option("-n", "--limit", help="Max to show"),
-    ] = 10,
-) -> None:
+def history(limit: int) -> None:
     """Show previous feedback collection runs."""
     if not feedback_path().exists():
         typer.echo("No feedback history found")
@@ -590,7 +605,7 @@ def history(
 
     for f in metrics_files[:limit]:
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text())  # claude: ignore
             total = data.get("total_sessions", 0)
             with_outcomes = data.get("sessions_with_outcomes", 0)
             typer.echo(f"{f.name}: {total} sessions, {with_outcomes} with outcomes")
@@ -598,12 +613,7 @@ def history(
             typer.echo(f"{f.name}: (error reading)")
 
 
-@app.command("mark")
-def mark(
-    session_ids: Annotated[
-        list[str], typer.Argument(help="Session IDs to mark as analyzed")
-    ],
-) -> None:
+def mark(session_ids: list[str]) -> None:
     """Mark sessions as analyzed in the feedback loop."""
     analyzed = load_analyzed()
     new_ids = set(session_ids) - analyzed
@@ -615,12 +625,7 @@ def mark(
     typer.echo(f"Marked {len(new_ids)} sessions as analyzed")
 
 
-@app.command("unmark")
-def unmark(
-    session_ids: Annotated[
-        list[str], typer.Argument(help="Session IDs to unmark")
-    ],
-) -> None:
+def unmark(session_ids: list[str]) -> None:
     """Remove analysis marks from sessions."""
     analyzed = load_analyzed()
     removed = analyzed & set(session_ids)
@@ -632,7 +637,6 @@ def unmark(
     typer.echo(f"Unmarked {len(removed)} sessions")
 
 
-@app.command("prompt-health")
 def prompt_health() -> None:
     """Analyze the agent prompt for size and patch accumulation."""
     matches = glob("src/*/agent/prompts.py")
@@ -652,23 +656,7 @@ def prompt_health() -> None:
     print(f"Sections: ~{section_count}")
 
 
-@app.command("version")
-def version_cmd() -> None:
-    """Print the current agent version."""
-    typer.echo(AGENT_VERSION)
-
-
-@app.command("unanalyzed")
-def unanalyzed(
-    version: Annotated[
-        str | None,
-        typer.Option("--version", "-v", help="Agent version (default: current)"),
-    ] = AGENT_VERSION,
-    all_versions: Annotated[
-        bool,
-        typer.Option("--all-versions", help="Include all versions"),
-    ] = False,
-) -> None:
+def unanalyzed(version: str | None, all_versions: bool) -> None:
     """List unanalyzed session IDs, one per line."""
     effective, ver_warning = resolve_version(version, all_versions)
     if ver_warning:
@@ -679,3 +667,29 @@ def unanalyzed(
 
     for sid in sorted(all_session_ids - analyzed):
         typer.echo(sid)
+
+
+def commit(dry_run: bool) -> None:
+    """Commit all uncommitted session result files, one commit per session."""
+    import sh
+
+    session_ids = get_uncommitted_session_ids()
+
+    if not session_ids:
+        print("Nothing to commit.")
+        return
+
+    print(f"Found {len(session_ids)} session(s) with uncommitted files")
+
+    committed = 0
+    for session_id in sorted(session_ids):
+        try:
+            if commit_session(session_id, dry_run=dry_run):
+                committed += 1
+        except sh.ErrorReturnCode as e:
+            print(f"  Failed {session_id}: {e}")
+
+    if dry_run:
+        print(f"\nWould commit {committed} session(s)")
+    else:
+        print(f"\nCommitted {committed} session(s)")
