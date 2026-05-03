@@ -54,6 +54,26 @@ type LupContentBlock = (
 
 
 # ---------------------------------------------------------------------------
+# Subagent specification
+# ---------------------------------------------------------------------------
+
+
+class SubagentSpec(BaseModel):
+    """SDK-agnostic subagent definition.
+
+    Each adapter interprets this into its native subagent primitive:
+    - Claude: AgentDefinition
+    - Codex: thread fork or query() dispatch based on tools
+    """
+
+    name: str
+    description: str
+    prompt: str
+    tools: list[str] = Field(default_factory=list)
+    model: str = "haiku"
+
+
+# ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
 
@@ -113,6 +133,7 @@ class LupResponse(BaseModel):
     tool_results: list[LupContentBlock] = Field(default_factory=list)
     messages: list[LupAssistantMessage | LupUserMessage] = Field(default_factory=list)
     result: LupResultMessage | None = None
+    session_id: str | None = None
 
     @property
     def text(self) -> str | None:
