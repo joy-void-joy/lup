@@ -101,6 +101,12 @@ class Settings(BaseSettings):
         description="Codex approval policy for tool use",
     )
 
+    reasoning_effort: str | None = Field(
+        default=None,
+        validation_alias="AGENT_REASONING_EFFORT",
+        description="Reasoning effort level: low, medium, high, xhigh, max",
+    )
+
     # ==========================================================================
     # MODEL SETTINGS
     # ==========================================================================

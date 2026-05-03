@@ -10,7 +10,9 @@ functions — never ``claude_agent_sdk`` directly.
 
 import json
 import logging
+from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Literal, cast
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -33,7 +35,15 @@ from claude_agent_sdk.types import (
     UserMessage,
 )
 
-from lup.lib.adapters.common import AgentAdapter
+from lup.lib.adapters.common import (
+    AgentAdapter,
+    LupDoneEvent,
+    LupEvent,
+    LupTextEvent,
+    LupThinkingEvent,
+    LupToolResultEvent,
+    LupToolUseEvent,
+)
 from lup.lib.trace import TraceLogger, print_message
 from lup.lib.types import (
     LupAssistantMessage,
@@ -213,6 +223,10 @@ def build_options(
             "type": "json_schema",
             "schema": AgentOutput.model_json_schema(),
         },
+        effort=cast(
+            Literal["low", "medium", "high", "max"] | None,
+            settings.reasoning_effort,
+        ),
     )
 
 
@@ -287,6 +301,47 @@ class ClaudeAdapter(AgentAdapter):
             raise RuntimeError("No result received from agent")
 
         return response
+
+    async def run_streamed(
+        self,
+        prompt: str,
+        *,
+        trace_logger: TraceLogger | None = None,
+        prefix: str = "",
+    ) -> AsyncGenerator[LupEvent, None]:
+        """Stream events from the Claude SDK."""
+        async with ClaudeSDKClient(options=self.options) as client:
+            await client.query(prompt)
+            async for message in client.receive_response():
+                lup_msg = claude_message_to_lup(message)
+                if lup_msg is not None and trace_logger:
+                    print_message(lup_msg, prefix=prefix, trace=trace_logger)
+
+                match message:
+                    case AssistantMessage():
+                        for block in message.content:
+                            match block:
+                                case ThinkingBlock():
+                                    yield LupThinkingEvent(thinking=block.thinking)
+                                case TextBlock():
+                                    yield LupTextEvent(text=block.text)
+                                case ToolUseBlock():
+                                    yield LupToolUseEvent(
+                                        id=block.id, name=block.name
+                                    )
+                    case UserMessage():
+                        if isinstance(message.content, list):
+                            for block in message.content:
+                                if isinstance(block, ToolResultBlock):
+                                    yield LupToolResultEvent(
+                                        tool_use_id=block.tool_use_id,
+                                        content=str(block.content),
+                                    )
+                    case ResultMessage():
+                        collected: list[LupContentBlock] = []
+                        yield LupDoneEvent(blocks=collected)
+                        if message.is_error:
+                            raise RuntimeError(f"Agent error: {message.result}")
 
 
 # ---------------------------------------------------------------------------
