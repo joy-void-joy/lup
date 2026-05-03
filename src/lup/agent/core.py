@@ -113,6 +113,9 @@ async def run_codex(
         model=settings.model,
         system_prompt=get_system_prompt(),
         output_schema=AgentOutput.model_json_schema(),
+        sandbox=settings.codex_sandbox,
+        effort=settings.codex_effort,
+        approval_policy=settings.codex_approval_policy,
     )
     return await adapter.run(task, trace_logger=trace_logger)
 

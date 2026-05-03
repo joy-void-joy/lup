@@ -83,6 +83,24 @@ class Settings(BaseSettings):
         description="Which agent SDK backend to use",
     )
 
+    codex_sandbox: str | None = Field(
+        default=None,
+        validation_alias="CODEX_SANDBOX",
+        description="Codex sandbox mode: read_only, workspace_write, danger_full_access",
+    )
+
+    codex_effort: str | None = Field(
+        default=None,
+        validation_alias="CODEX_EFFORT",
+        description="Codex reasoning effort: none, minimal, low, medium, high, xhigh",
+    )
+
+    codex_approval_policy: str | None = Field(
+        default=None,
+        validation_alias="CODEX_APPROVAL_POLICY",
+        description="Codex approval policy for tool use",
+    )
+
     # ==========================================================================
     # MODEL SETTINGS
     # ==========================================================================
