@@ -15,7 +15,7 @@ For each target session:
 ### 1. Read the trace
 
 ```bash
-uv run lup-devtools trace show <session_id>
+uv run lup-devtools session show <session_id>
 ```
 
 Read every tool call, error, and reasoning step. Don't skim.
@@ -23,7 +23,7 @@ Read every tool call, error, and reasoning step. Don't skim.
 For a focused view of tool interactions:
 
 ```bash
-uv run lup-devtools trace show <session_id> --tool-calls
+uv run lup-devtools session show <session_id> --tool-calls
 ```
 
 ### 2. Tool use audit

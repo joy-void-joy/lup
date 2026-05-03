@@ -21,8 +21,8 @@ Determine what was provided and get the full trace content:
 **Session ID** (e.g., `repl_20260228_123036`, `20260228_123036`):
 
 ```bash
-uv run lup-devtools trace show <session_id>
-uv run lup-devtools trace show <session_id> --tool-calls
+uv run lup-devtools session show <session_id>
+uv run lup-devtools session show <session_id> --tool-calls
 ```
 
 Also read the `SessionResult` JSON from `notes/traces/<version>/sessions/<session_id>/` for metadata (duration, cost, token usage, tool metrics, outcome).
@@ -33,7 +33,7 @@ Also read the `SessionResult` JSON from `notes/traces/<version>/sessions/<sessio
 **Raw pasted trace** (anything else):
 - Work with what's pasted. Extract session metadata if present (timestamps, tool names, thinking blocks).
 
-If you can't find the trace, use `uv run lup-devtools trace list` to show available sessions and ask the user which one to review.
+If you can't find the trace, use `uv run lup-devtools session list` to show available sessions and ask the user which one to review.
 
 ### 2. Read the agent configuration
 

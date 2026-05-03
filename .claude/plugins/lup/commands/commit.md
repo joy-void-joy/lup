@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Glob, Grep
+allowed-tools: Bash(git:*), Read, Glob, Grep
 description: Review all diffs and create atomic commits
 ---
 
@@ -80,7 +80,7 @@ After creating commits:
 - **Don't skip hooks** unless explicitly requested
 - **Don't commit secrets** (.env.local, credentials, API keys)
 - **Don't commit large binaries** unless necessary
-- For **session data** commits (notes/traces/), use `uv run lup-devtools dev commit-results` instead — it auto-commits one session per commit with proper `data(sessions):` messages
+- For **session data** commits (notes/traces/), use `uv run lup-devtools session commit` instead — it auto-commits one session per commit with proper `data(sessions):` messages
 
 ## If Pre-commit Hooks Fail
 

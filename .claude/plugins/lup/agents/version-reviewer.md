@@ -60,7 +60,7 @@ Read it carefully. Note:
 
 ```bash
 # Check scores filtered by version
-uv run lup-devtools metrics summary
+uv run lup-devtools session summary
 ```
 
 Load session JSON files from `notes/traces/<version>/sessions/` to get scores and outcomes for this version's data. Each JSON contains fields like `output.confidence`, `outcome`, `cost_usd`, `duration_seconds`, and `tool_metrics`.
@@ -71,7 +71,7 @@ From the scores data, select the top 3-5 best and bottom 3-5 worst sessions. Rea
 
 ```bash
 # Filtered agent reasoning
-uv run lup-devtools trace show <session_id>
+uv run lup-devtools session show <session_id>
 
 # Session outputs
 ls notes/sessions/<session_id>/

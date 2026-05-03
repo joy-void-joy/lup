@@ -22,10 +22,10 @@ Parse the raw arguments as follows: if non-empty, the first word is the **branch
 
 ```bash
 # Targeted mode (specific branch)
-uv run lup-devtools dev branch-status <branch-name> --json
+uv run lup-devtools git branches <branch-name> --json
 
 # Full scan (all branches)
-uv run lup-devtools dev branch-status --json
+uv run lup-devtools git branches --json
 ```
 
 The devtool handles: fetch/prune, containment analysis, PR status, cherry-pick detection, and worktree info. It classifies each branch as DELETE, STALE, KEEP, or CURRENT.

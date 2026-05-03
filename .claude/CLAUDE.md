@@ -103,14 +103,8 @@ src/
     │       └── reflect.py      # Forced self-review tool (reviewer sub-agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
-    │   ├── agent.py            # Agent introspection and debugging
-    │   ├── api.py              # API inspection and module info
-    │   ├── dev.py              # Worktrees, git ops, and branch analysis
-    │   ├── sync.py             # Upstream sync tracking
-    │   ├── usage.py            # Claude Code usage display
-    │   ├── feedback.py         # Feedback collection and aggregate metrics
-    │   ├── trace.py            # Trace analysis
-    │   └── charts.py           # Chart building library (strip, scatter, legend)
+    │   ├── session/            # Traces, metrics, feedback state, session commits
+    │   └── git/                # Worktrees, branch analysis, pre-flight checks
     └── environment/            # Domain scaffolding (user interaction, game logic)
         └── cli/
             └── __main__.py     # Typer CLI (run + loop with auto-commit)
@@ -158,8 +152,8 @@ uv run python -m lup.environment.cli loop "task1" "task2" "task3"
 uv run python -m lup.environment.cli loop --no-commit "task1" "task2"
 
 # Commit uncommitted session results
-uv run lup-devtools dev commit-results
-uv run lup-devtools dev commit-results --dry-run
+uv run lup-devtools session commit
+uv run lup-devtools session commit --dry-run
 
 uv run python -m lup.environment.cli --help
 ```
@@ -205,10 +199,10 @@ Use `/lup:debug <error message>` to trace an error through logs automatically.
 ### Feedback Loop Scripts
 
 ```bash
-uv run lup-devtools feedback collect --all-time
-uv run lup-devtools feedback status
-uv run lup-devtools trace list
-uv run lup-devtools trace show <session_id>
+uv run lup-devtools session collect --all-time
+uv run lup-devtools session status
+uv run lup-devtools session list
+uv run lup-devtools session show <session_id>
 ```
 
 ### Customizing for Your Domain
@@ -221,7 +215,7 @@ uv run lup-devtools trace show <session_id>
 6. **Reflection** (`agent/tools/reflect.py`) — Domain-specific `ReflectInput` fields, reviewer prompt
 7. **Version** (`version.py`) — Set initial `AGENT_VERSION`, bump on behavior changes
 8. **Persistent mode** (optional) — Wire `Scheduler` from `lib/realtime.py`, add Stop hook, implement sleep/context/reply tools, replace request-response with sleep/wake loop
-9. **Feedback** (`devtools/feedback.py`) — Implement `load_outcomes()`, customize `compute_metrics()`
+9. **Feedback** (`devtools/session/state.py`) — Implement `load_outcomes()`, customize `compute_metrics()`
 
 ---
 
@@ -251,7 +245,7 @@ Worktrees typically branch from `dev`, but can also branch from other feature br
 
 **Feature workflow:**
 
-1. `uv run lup-devtools dev worktree-create feat-name`
+1. `uv run lup-devtools git worktree create feat-name`
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/dev`), syncs dependencies, and refreshes plugins. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
 2. Commit regularly and atomically
 3. Push when complete (or periodically for backup)
@@ -424,50 +418,7 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
-```
-lup-devtools
-├── agent                   # Agent introspection and debugging
-│   ├── inspect             # Show tools, schemas, prompt, subagents
-│   ├── serve-tools         # Start SDK tools as MCP stdio server
-│   └── chat                # Launch interactive claude with agent config
-├── api                     # API inspection and module info
-│   ├── inspect <path>      # Explore Python module/class/method APIs
-│   ├── module-path <mod>   # Show file path for a module
-│   ├── module-source <mod> # Show source code for a module
-│   ├── module-tree <mod>   # Show file tree for a package
-│   └── module-info <mod>   # Show detailed info about a module
-├── dev                     # Worktrees, git ops, and branch analysis
-│   ├── worktree-create     # Create git worktree with plugin refresh
-│   ├── commit-results      # Commit uncommitted session results
-│   ├── base-branch         # Detect base branch for current branch
-│   ├── branch-status       # Analyze branch containment and PR status
-│   └── pr-status           # Show PR review status and merge readiness
-├── sync                    # Upstream sync tracking (/lup:update)
-│   ├── list                # Show tracked projects and sync status
-│   ├── log <project>       # Show commits since last sync
-│   ├── diff <project> <sha># Show full diff for a commit
-│   ├── mark-synced <proj>  # Mark project as synced at HEAD
-│   └── setup <name> <path> # Set local path for a project
-├── usage                   # Claude Code live usage display
-├── feedback                # Feedback collection and aggregate metrics
-│   ├── status              # Version, data, analysis state, aggregate stats
-│   ├── collect             # Collect feedback metrics from sessions
-│   ├── tools               # Show tool usage aggregates
-│   ├── errors              # Show sessions with high error rates
-│   ├── trends              # Show metric trends over time
-│   ├── history             # Show previous feedback collection runs
-│   ├── mark <ids>          # Mark sessions as analyzed
-│   ├── unmark <ids>        # Remove analysis marks
-│   ├── prompt-health       # Analyze prompt file size and sections
-│   ├── version             # Print current agent version
-│   └── unanalyzed          # List unanalyzed session IDs
-└── trace                   # Trace analysis
-    ├── list                # List available traces
-    ├── show <id>           # Show trace for a session (--tool-calls flag)
-    ├── search <pattern>    # Search traces for a regex pattern
-    ├── errors              # Show sessions with errors
-    └── capabilities        # Extract capability requests
-```
+Sub-apps: `agent`, `api`, `session`, `git`, `sync`, `usage`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
 
 ### Permission Hooks
 
@@ -612,7 +563,7 @@ When the agent fails, the instinct is to patch the prompt. Resist it. Instead, t
 
 ### Running the Feedback Loop
 
-1. **Collect feedback**: `uv run lup-devtools feedback collect`
+1. **Collect feedback**: `uv run lup-devtools session collect`
 2. **Read traces deeply**: Read 5-10 sessions in detail — don't skip to aggregates
 3. **Extract patterns**: Tool failures, capability requests, reasoning quality
 4. **Implement changes**: Fix tools → Build requested capabilities → Simplify prompts

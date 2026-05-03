@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Task
+allowed-tools: Bash(uv run lup-devtools:*), Read, Write, Edit, Glob, Grep, AskUserQuestion, Task
 description: Propagate a general principle across the entire repo
 argument-hint: <principle description>
 ---
@@ -125,7 +125,7 @@ Present findings and proposed changes one layer at a time. For each layer:
 
 **Group 5: Devtools & automation** (`src/lup/devtools/`)
 
-- Do the devtools commands (feedback, trace, metrics, git, sync) reflect the principle?
+- Do the devtools commands (agent, session, git, sync, usage) reflect the principle?
 - Are there devtools commands that should exist to support the principle but don't?
 
 ## Phase 4: Execute Approved Changes

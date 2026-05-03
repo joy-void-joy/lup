@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*, gh:*, uv run lup-devtools:*, uv run pyright, uv run ruff:*, uv run pytest), Read, Glob, Grep, AskUserQuestion
+allowed-tools: Bash(git:*, gh:*, uv run lup-devtools:*), Read, Glob, Grep, AskUserQuestion
 argument-hint: [target-branch]
 description: Clean up commit history on the feature branch and open/update a PR
 ---
@@ -13,7 +13,7 @@ Clean up the commit history on the current feature branch, push it, and open (or
 ### Base branch (`<base>`)
 
 ```bash
-uv run lup-devtools dev base-branch --json
+uv run lup-devtools git base-branch --json
 ```
 
 If the command exits non-zero (ambiguous), use `AskUserQuestion` to ask which branch to use as base.
@@ -47,10 +47,7 @@ Before starting the rebase, ensure the branch is clean and passing all checks.
 3. **Run all checks**:
 
    ```bash
-   uv run pyright
-   uv run ruff check .
-   uv run ruff format --check .
-   uv run pytest
+   uv run lup-devtools git check
    ```
 
    Fix any issues found. The rebased branch should only contain passing code.

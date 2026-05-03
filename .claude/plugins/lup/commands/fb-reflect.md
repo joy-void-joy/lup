@@ -14,8 +14,8 @@ Two levels of reflection: is the agent tracking enough data (meta), and is the f
 Is the agent emitting enough data for analysis? Check coverage of: traces, reflection outputs, tool metrics, session results.
 
 ```bash
-uv run lup-devtools feedback check
-uv run lup-devtools trace list
+uv run lup-devtools session status
+uv run lup-devtools session list
 ```
 
 ### 2. Actionable insight check

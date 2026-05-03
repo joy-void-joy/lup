@@ -34,11 +34,23 @@ PROTECTED_PATTERNS = [
 CLAUDE_IGNORE_MARKER = "# claude: ignore"
 
 ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\bAny\b"), "Never use Any — use specific types, TypedDict, or BaseModel"),
-    (re.compile(r"#\s*type:\s*ignore"), "Never use # type: ignore — fix the type error properly"),
+    (
+        re.compile(r"\bAny\b"),
+        "Never use Any — use specific types, TypedDict, or BaseModel",
+    ),
+    (
+        re.compile(r"#\s*type:\s*ignore"),
+        "Never use # type: ignore — fix the type error properly",
+    ),
     (re.compile(r"#\s*noqa\b"), "Never use # noqa — fix the lint issue properly"),
-    (re.compile(r"\bGeneric\["), "Use Python 3.12+ class[T] syntax instead of Generic[T]"),
-    (re.compile(r"__all__\s*[=:]"), "No __all__ — import directly from the defining module"),
+    (
+        re.compile(r"\bGeneric\["),
+        "Use Python 3.12+ class[T] syntax instead of Generic[T]",
+    ),
+    (
+        re.compile(r"__all__\s*[=:]"),
+        "No __all__ — import directly from the defining module",
+    ),
     (
         re.compile(r"\bdict\[\s*str\s*,\s*object\s*\]"),
         "Never use dict[str, object] — use TypedDict or BaseModel",
@@ -188,11 +200,7 @@ def classify_trivial(lines: list[str]) -> list[bool]:
                 result.append(True)
                 break
         else:
-            if (
-                is_trivial_content(stripped)
-                and "(" in stripped
-                and ")" not in stripped
-            ):
+            if is_trivial_content(stripped) and "(" in stripped and ")" not in stripped:
                 in_import = True
                 result.append(True)
                 continue
@@ -367,7 +375,9 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
                     return deny_decision(reason)
 
     if CLAUDE_IGNORE_MARKER in (new_string or ""):
-        return ask_decision("Edit introduces `# claude: ignore` — requires user approval")
+        return ask_decision(
+            "Edit introduces `# claude: ignore` — requires user approval"
+        )
 
     if old_string and not new_string:
         return allow_decision()

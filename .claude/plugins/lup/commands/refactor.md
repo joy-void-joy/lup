@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Write, Edit, Glob, Grep, AskUserQuestion
 description: Rewrite a file or folder from scratch while respecting coding conventions
 argument-hint: <path>
 ---
@@ -74,9 +74,7 @@ For each file, **write it fresh** using the Write tool — do not edit the origi
 
 After rewriting:
 
-- Run `uv run pyright` to check for type errors in the rewritten files
-- Run `uv run ruff check` to verify lint compliance
-- If tests exist for the refactored code, run them with `uv run pytest <test_file>`
+- Run `uv run lup-devtools git check` to verify types, lint, and tests
 - Report any issues found and fix them
 
 ### 7. Summary

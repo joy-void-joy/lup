@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Edit, Write, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion
 description: Import a specific pattern from a tracked downstream repo
 argument-hint: <project> <pattern description>
 ---
@@ -99,9 +99,7 @@ For approved imports:
 3. Write or edit files in the current project
 4. Verify:
    ```bash
-   uv run pyright
-   uv run ruff check .
-   uv run pytest
+   uv run lup-devtools git check
    ```
 
 ### 6. Optionally commit

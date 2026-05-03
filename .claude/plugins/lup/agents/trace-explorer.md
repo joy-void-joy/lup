@@ -28,13 +28,13 @@ Traces and session data are stored in `notes/`:
 
 ```bash
 # List available traces
-uv run lup-devtools trace list
+uv run lup-devtools session list
 
 # Show a specific trace
-uv run lup-devtools trace show <session_id> --full
+uv run lup-devtools session show <session_id> --full
 
 # Search traces for a pattern
-uv run lup-devtools trace search "pattern"
+uv run lup-devtools session search "pattern"
 
 # Traces are markdown files
 ls notes/traces/
@@ -58,7 +58,7 @@ Trace files are typically in `notes/traces/<session_id>/`.
 
 4. **Read full traces for ALL requested IDs**: Use the trace analysis script or read files directly. Don't skip traces -- you have the context budget, the main conversation doesn't.
 
-5. **Cross-reference with metrics**: Use `uv run lup-devtools trace show <id>` to get tool counts, errors, and timing data.
+5. **Cross-reference with metrics**: Use `uv run lup-devtools session show <id>` to get tool counts, errors, and timing data.
 
 6. **Synthesize across all traces**: Find what's common. Find what's interesting. Quote liberally -- the main agent hasn't read these traces and needs the exact words to make good decisions.
 

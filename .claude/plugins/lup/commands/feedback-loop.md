@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Edit, Write, Task, WebSearch, WebFetch, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run python -m lup:*), Read, Grep, Glob, Edit, Write, Task, WebSearch, WebFetch, AskUserQuestion
 description: Full feedback loop — orchestrates status, investigation, analysis, reflection, and implementation
 argument-hint: [optional: paste a trace, reflection, or output for single-trace analysis]
 ---
@@ -102,4 +102,4 @@ uv run python -m lup.environment.cli loop "task1" "task2" "task3"
 2. **Do we have outcome data?** If no, focus on process not accuracy.
 3. **What tools fail repeatedly?** Fix or replace them.
 4. **What does the agent say it needs?** Trust and provide.
-5. **Is the prompt accumulating patches?** Use `uv run lup-devtools feedback prompt-health` to check.
+5. **Is the prompt accumulating patches?** Use `uv run lup-devtools session prompt-health` to check.

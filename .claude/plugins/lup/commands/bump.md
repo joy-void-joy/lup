@@ -20,7 +20,7 @@ If no level is provided, determine the appropriate level from the changes.
 
 Run these in parallel:
 
-- `uv run lup-devtools feedback version` to get the current version
+- `uv run lup-devtools agent version` to get the current version
 - `git tag --list 'v*' --sort=-version:sort` to find the latest version tag
 - `git log --oneline` (limited to last 50 commits) to see recent history
 

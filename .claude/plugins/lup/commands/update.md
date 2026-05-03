@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Edit, Write, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion
 description: Review upstream template commits and apply improvements
 argument-hint: [focus area]
 ---
@@ -115,9 +115,7 @@ For approved improvements:
 3. **Wire new utilities into consumers.** When porting a library function (e.g., a helper in `lib/`), don't stop at the function itself — also wire it into the devtools commands, hooks, or agents that should use it. A utility without consumers is dead code.
 4. Run verification after applying:
    ```bash
-   uv run pyright
-   uv run ruff check .
-   uv run pytest
+   uv run lup-devtools git check
    ```
 
 ### 6. Mark as synced

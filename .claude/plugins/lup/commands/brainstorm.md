@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Task, WebFetch, WebSearch, AskUserQuestion
+allowed-tools: Bash(find:*, ls:*), Read, Grep, Glob, Write, Edit, Task, WebFetch, WebSearch, AskUserQuestion
 description: Pre-init design exploration — brainstorm architecture, MCP tools, and agent design
 ---
 

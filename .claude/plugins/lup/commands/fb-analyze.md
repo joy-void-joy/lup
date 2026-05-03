@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, Agent, AskUserQuestion
 description: Aggregate tool health, capability gaps, and reasoning patterns across sessions
 ---
 
@@ -12,8 +12,8 @@ Aggregate findings across sessions to identify systemic patterns.
 ### 1. Tool health
 
 ```bash
-uv run lup-devtools feedback tools
-uv run lup-devtools feedback errors
+uv run lup-devtools session tools
+uv run lup-devtools session errors
 ```
 
 Identify: which tools fail most? Are failures transient or systematic? What's the error rate by tool?
@@ -25,7 +25,7 @@ From investigation findings and trace analysis:
 - Quote the agent's exact words so you can act on them.
 
 ```bash
-uv run lup-devtools trace capabilities
+uv run lup-devtools session capabilities
 ```
 
 ### 3. Reasoning patterns

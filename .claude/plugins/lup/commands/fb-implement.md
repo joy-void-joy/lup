@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Edit, Write, AskUserQuestion, WebSearch, WebFetch
+allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run python -m lup:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, WebSearch, WebFetch
 description: Implement prioritized changes from feedback loop analysis
 ---
 

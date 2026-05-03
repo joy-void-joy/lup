@@ -12,7 +12,7 @@ Check the review status of the feature branch's PR, merge it if approved, and cl
 ### 1. Identify the PR
 
 ```bash
-uv run lup-devtools dev pr-status --json
+uv run lup-devtools git pr-status --json
 ```
 
 If the command exits non-zero (no open PR), check if the user passed a PR number as an argument. If still nothing, report the error and stop.
@@ -59,7 +59,7 @@ cd ../dev && git pull && cd -
 Then check the merged branch's cleanup status and clean up:
 
 ```bash
-uv run lup-devtools dev branch-status "$CURRENT_BRANCH" --json
+uv run lup-devtools git branches "$CURRENT_BRANCH" --json
 ```
 
 If the branch shows as DELETE, remove worktree (if any), delete local branch (`git branch -d`), and delete remote branch (`git push origin --delete`). Confirm with user before deleting.
