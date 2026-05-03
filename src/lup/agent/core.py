@@ -102,20 +102,48 @@ async def run_claude(
 async def run_codex(
     task: str,
     *,
+    session_id: str,
     trace_logger: TraceLogger,
 ) -> LupResponse:
     """Run the agent via the Codex SDK."""
+    import tempfile
+
     from lup.agent.models import AgentOutput
     from lup.agent.prompts import get_system_prompt
     from lup.lib.adapters.codex import CodexAdapter
+    from lup.lib.adapters.codex_hooks import (
+        build_permission_hooks,
+        build_reflection_gate_hook,
+    )
+    from lup.lib.notes import setup_notes
+    from lup.lib.reflect import ReflectionGate
+
+    notes = setup_notes(session_id, "0")
+    script_dir = Path(tempfile.mkdtemp(prefix="lup_codex_hooks_"))
+
+    gate_flag_path = script_dir / "reflection_gate_flag"
+    ReflectionGate(flag_path=gate_flag_path)
+
+    hook_configs = build_permission_hooks(notes.rw, notes.ro, script_dir)
+    hook_configs.extend(
+        build_reflection_gate_hook(
+            gate_flag_path=gate_flag_path,
+            gated_tool="StructuredOutput",
+            reflection_tool_name="mcp__notes__review",
+            script_dir=script_dir,
+        )
+    )
 
     adapter = CodexAdapter(
         model=settings.model,
         system_prompt=get_system_prompt(),
         output_schema=AgentOutput.model_json_schema(),
         sandbox=settings.codex_sandbox,
-        effort=settings.codex_effort,
+        effort=settings.codex_effort or settings.reasoning_effort,
         approval_policy=settings.codex_approval_policy,
+        mcp_tools=True,
+        hook_overrides=hook_configs,
+        session_id=session_id,
     )
     return await adapter.run(task, trace_logger=trace_logger)
 
@@ -149,7 +177,9 @@ async def run_agent(
                 trace_logger=trace_logger,
             )
         case "codex":
-            response = await run_codex(task, trace_logger=trace_logger)
+            response = await run_codex(
+                task, session_id=session_id, trace_logger=trace_logger
+            )
 
     trace_logger.save()
     log_metrics_summary()
