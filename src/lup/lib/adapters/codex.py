@@ -1,10 +1,9 @@
 """OpenAI Codex SDK adapter.
 
 Wraps the Codex Python SDK (``codex_app_server``) behind the
-``AgentAdapter`` interface. On the Codex path, lup features that
-require in-process hooks or MCP servers (reflection gate, custom
-tools, subagents) are not available — the agent runs with built-in
-Codex tools only.
+``AgentAdapter`` interface. Exposes lup MCP tools via external
+stdio server (serve-tools), permission hooks via config.toml
+command hooks, and the reflection gate via a file-backed flag.
 
 Install the Codex SDK to use this adapter::
 
@@ -13,6 +12,7 @@ Install the Codex SDK to use this adapter::
 
 import json
 import logging
+from typing import TypedDict
 
 from lup.lib.adapters.common import AgentAdapter
 from lup.lib.trace import TraceLogger, print_message
@@ -133,6 +133,63 @@ def codex_items_to_lup(items: list[object]) -> list[LupContentBlock]:
     return blocks
 
 
+def build_mcp_config_overrides(
+    serve_tools_command: str = "uv",
+    serve_tools_args: list[str] | None = None,
+) -> tuple[str, ...]:
+    """Build config_overrides for lup MCP tools via serve-tools.
+
+    The Codex app-server is a Rust subprocess with no in-process tool
+    registration. Tools must be configured as external MCP servers via
+    TOML config. This generates the config_overrides that point Codex
+    at the lup-devtools serve-tools command.
+    """
+    args = serve_tools_args or ["run", "lup-devtools", "agent", "serve-tools"]
+    args_toml = json.dumps(args)
+    return (
+        f'mcp_servers.lup-tools.command="{serve_tools_command}"',
+        f"mcp_servers.lup-tools.args={args_toml}",
+    )
+
+
+class CodexHookConfigRequired(TypedDict):
+    """Required fields for a Codex command hook."""
+
+    event: str
+    command: str
+
+
+class CodexHookConfig(CodexHookConfigRequired, total=False):
+    """Configuration for a single Codex command hook."""
+
+    matcher: str
+
+
+def build_hook_config_overrides(
+    hooks: list[CodexHookConfig],
+) -> tuple[str, ...]:
+    """Build config_overrides for Codex command hooks.
+
+    Each hook dict has: event, matcher (optional), command.
+    Generates TOML-style config_overrides for the Codex hook system.
+    """
+    overrides: list[str] = []
+    overrides.append("features.codex_hooks=true")
+
+    event_counts: dict[str, int] = {}
+    for hook in hooks:
+        event = hook["event"]
+        idx = event_counts.get(event, 0)
+        event_counts[event] = idx + 1
+
+        if "matcher" in hook:
+            overrides.append(f'hooks.{event}[{idx}].matcher="{hook["matcher"]}"')
+        overrides.append(f'hooks.{event}[{idx}].hooks[0].type="command"')
+        overrides.append(f'hooks.{event}[{idx}].hooks[0].command="{hook["command"]}"')
+
+    return tuple(overrides)
+
+
 class CodexAdapter(AgentAdapter):
     """Run prompts via the OpenAI Codex SDK."""
 
@@ -145,6 +202,9 @@ class CodexAdapter(AgentAdapter):
         sandbox: str | None = None,
         effort: str | None = None,
         approval_policy: str | None = None,
+        mcp_tools: bool = True,
+        hook_overrides: list[CodexHookConfig] | None = None,
+        session_id: str | None = None,
     ) -> None:
         self.model = model
         self.system_prompt = system_prompt
@@ -152,6 +212,18 @@ class CodexAdapter(AgentAdapter):
         self.sandbox = sandbox
         self.effort = effort
         self.approval_policy = approval_policy
+        self.mcp_tools = mcp_tools
+        self.hook_overrides = hook_overrides
+        self.session_id = session_id
+
+    def build_config_overrides(self) -> tuple[str, ...]:
+        """Assemble all config_overrides for this adapter run."""
+        overrides: list[str] = []
+        if self.mcp_tools:
+            overrides.extend(build_mcp_config_overrides())
+        if self.hook_overrides:
+            overrides.extend(build_hook_config_overrides(self.hook_overrides))
+        return tuple(overrides)
 
     async def run(
         self,
@@ -162,9 +234,19 @@ class CodexAdapter(AgentAdapter):
     ) -> LupResponse:
         require_codex_sdk()
 
-        from codex_app_server import AsyncCodex, ReasoningEffort, SandboxMode
+        from codex_app_server import (
+            AppServerConfig,
+            AsyncCodex,
+            ReasoningEffort,
+            SandboxMode,
+        )
 
-        async with AsyncCodex() as codex:
+        config_overrides = self.build_config_overrides()
+        config = AppServerConfig(
+            config_overrides=config_overrides if config_overrides else None,
+        )
+
+        async with AsyncCodex(config=config) as codex:
             thread = await codex.thread_start(
                 model=self.model,
                 developer_instructions=self.system_prompt,
@@ -230,5 +312,66 @@ class CodexAdapter(AgentAdapter):
                 result=result.final_response,
                 usage=result_usage,
             )
+            response.session_id = getattr(result, "thread_id", None) or self.session_id
+
+            return response
+
+    async def resume(self, session_id: str, prompt: str) -> LupResponse:
+        """Resume a Codex thread by ID."""
+        require_codex_sdk()
+
+        from codex_app_server import AppServerConfig, AsyncCodex
+
+        config_overrides = self.build_config_overrides()
+        config = AppServerConfig(
+            config_overrides=config_overrides if config_overrides else None,
+        )
+
+        async with AsyncCodex(config=config) as codex:
+            result = await codex.thread_resume(
+                thread_id=session_id,
+                message=prompt,
+            )
+            blocks = codex_items_to_lup(result.items)
+            response = LupResponse(blocks=blocks)
+            response.session_id = session_id
+
+            if result.final_response and self.output_schema:
+                try:
+                    structured_output = json.loads(result.final_response)
+                    response.result = LupResultMessage(
+                        structured_output=structured_output,
+                        result=result.final_response,
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    response.result = LupResultMessage(result=result.final_response)
+            else:
+                response.result = LupResultMessage(result=result.final_response)
+
+            return response
+
+    async def fork(self, session_id: str, prompt: str) -> LupResponse:
+        """Fork a Codex thread and run on the fork."""
+        require_codex_sdk()
+
+        from codex_app_server import AppServerConfig, AsyncCodex
+
+        config_overrides = self.build_config_overrides()
+        config = AppServerConfig(
+            config_overrides=config_overrides if config_overrides else None,
+        )
+
+        async with AsyncCodex(config=config) as codex:
+            fork_result = await codex.thread_fork(thread_id=session_id)
+            forked_thread_id = fork_result.thread_id
+
+            result = await codex.thread_resume(
+                thread_id=forked_thread_id,
+                message=prompt,
+            )
+            blocks = codex_items_to_lup(result.items)
+            response = LupResponse(blocks=blocks)
+            response.session_id = forked_thread_id
+            response.result = LupResultMessage(result=result.final_response)
 
             return response
