@@ -115,7 +115,7 @@ For approved improvements:
 3. **Wire new utilities into consumers.** When porting a library function (e.g., a helper in `lib/`), don't stop at the function itself — also wire it into the devtools commands, hooks, or agents that should use it. A utility without consumers is dead code.
 4. Run verification after applying:
    ```bash
-   uv run lup-devtools git check
+   uv run lup-devtools dev check
    ```
 
 ### 6. Mark as synced

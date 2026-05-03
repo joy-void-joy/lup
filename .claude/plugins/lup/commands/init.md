@@ -251,4 +251,4 @@ Once the scaffolding is generated, guide the user to:
 - `src/<project>/agent/prompts.py` — System prompt templates
 - `src/<project>/environment/cli/__main__.py` — CLI with loop + auto-commit
 - `src/<project>/version.py` — Agent version tracking
-- `src/lup/devtools/feedback.py` — Feedback collection
+- `src/lup/devtools/feedback/` — Feedback collection

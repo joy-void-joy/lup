@@ -13,7 +13,7 @@ Clean up the commit history on the current feature branch, push it, and open (or
 ### Base branch (`<base>`)
 
 ```bash
-uv run lup-devtools git base-branch --json
+uv run lup-devtools dev base-branch --json
 ```
 
 If the command exits non-zero (ambiguous), use `AskUserQuestion` to ask which branch to use as base.
@@ -47,7 +47,7 @@ Before starting the rebase, ensure the branch is clean and passing all checks.
 3. **Run all checks**:
 
    ```bash
-   uv run lup-devtools git check
+   uv run lup-devtools dev check
    ```
 
    Fix any issues found. The rebased branch should only contain passing code.
@@ -90,11 +90,8 @@ Before starting the rebase, ensure the branch is clean and passing all checks.
    **If no PR exists** (first run):
 
    ```bash
-   gh pr create --base "<target>" --title "<conventional commit style title>" --body "$(cat <<'EOF'
-   ## Summary
-   <1-3 bullet points describing the changes>
-   EOF
-   )"
+   BODY=$(uv run lup-devtools dev pr-body)
+   gh pr create --base "<target>" --title "<conventional commit style title>" --body "$BODY"
    ```
 
    **If a PR already exists**, skip this step — we'll force-push the cleaned history later.
@@ -129,20 +126,11 @@ Before starting the rebase, ensure the branch is clean and passing all checks.
    git push --force
    ```
 
-   Return the PR URL to the user when done. Include a commit list in the PR body:
+   Return the PR URL to the user when done. Update the PR body with the rebuilt commit list:
 
    ```bash
-   gh pr edit <PR_NUMBER> --body "$(cat <<'EOF'
-   ## Summary
-   <1-3 bullet points describing the changes>
-
-   ## Commits
-   <list of commits in the rebased branch>
-
-   ## Test plan
-   - [ ] How to verify this works
-   EOF
-   )"
+   BODY=$(uv run lup-devtools dev pr-body)
+   gh pr edit <PR_NUMBER> --body "$BODY"
    ```
 
 ## Guidelines

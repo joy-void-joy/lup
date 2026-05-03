@@ -81,7 +81,13 @@ First classify each conflict hunk by **branch scope**, then resolve:
 
 ### Step A: Scope classification
 
-Using the branch scope summary from step 2, classify each conflict hunk:
+Run scope classification to identify which conflicted files this branch touched:
+
+```bash
+uv run lup-devtools dev conflicts --json
+```
+
+Use this output together with the branch scope summary from step 2 to classify each conflict hunk:
 
 - **In-scope** -- The conflict is in code this branch intentionally changed (matches any part of the branch's purpose). **Take ours** (HEAD) -- this branch is the authority for these changes.
 - **Out-of-scope** -- The conflict is in code this branch didn't intentionally modify (unrelated to any of the branch's purposes). **Take theirs** (MERGE_HEAD) -- the other branch has the more intentional changes here.

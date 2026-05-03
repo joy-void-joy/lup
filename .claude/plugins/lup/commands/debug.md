@@ -19,13 +19,14 @@ argument-hint: [error message or fragment]
 First, check if there are sessions with errors:
 
 ```bash
-uv run lup-devtools session errors
+uv run lup-devtools feedback errors
+uv run lup-devtools trace errors
 ```
 
 Then search traces for the specific error text:
 
 ```bash
-uv run lup-devtools session search "<distinctive part of error>"
+uv run lup-devtools trace search "<distinctive part of error>"
 ```
 
 If devtools search doesn't find it, fall back to Grep on `logs/` with the most specific substring from the error.

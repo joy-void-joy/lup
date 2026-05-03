@@ -99,7 +99,7 @@ For approved imports:
 3. Write or edit files in the current project
 4. Verify:
    ```bash
-   uv run lup-devtools git check
+   uv run lup-devtools dev check
    ```
 
 ### 6. Optionally commit

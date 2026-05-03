@@ -74,7 +74,7 @@ For each file, **write it fresh** using the Write tool — do not edit the origi
 
 After rewriting:
 
-- Run `uv run lup-devtools git check` to verify types, lint, and tests
+- Run `uv run lup-devtools dev check` to verify types, lint, and tests
 - Report any issues found and fix them
 
 ### 7. Summary
