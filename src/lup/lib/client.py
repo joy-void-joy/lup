@@ -88,6 +88,7 @@ from claude_agent_sdk.types import (
 )
 from pydantic import BaseModel
 
+from lup.lib.adapters.claude import claude_message_to_lup
 from lup.lib.trace import TraceLogger, print_message
 
 
@@ -207,7 +208,9 @@ class ResponseCollector:
             RuntimeError: If the agent returns an error or no result.
         """
         async for message in self:
-            print_message(message, prefix=self.prefix, trace=self.trace_logger)
+            lup_msg = claude_message_to_lup(message)
+            if lup_msg is not None:
+                print_message(lup_msg, prefix=self.prefix, trace=self.trace_logger)
 
         if self.result is None:
             raise RuntimeError("No result received from agent")

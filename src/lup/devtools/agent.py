@@ -515,7 +515,7 @@ async def repl(
 
     from claude_agent_sdk.types import McpServerConfig
 
-    from lup.agent.core import build_agent_servers
+    from lup.lib.adapters.claude import build_agent_servers
     from lup.lib.client import build_client, ResponseCollector
     from lup.lib.paths import project_root
     from lup.lib.sandbox import Sandbox
