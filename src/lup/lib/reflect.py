@@ -40,6 +40,7 @@ Examples:
         False
 """
 
+from pathlib import Path
 from typing import cast
 
 from claude_agent_sdk import HookInput, HookMatcher
@@ -56,10 +57,32 @@ class ReflectionGate:
     after saving reflection data. The orchestration layer calls
     :meth:`reset` when a new cycle begins (e.g., after each agent action
     in persistent mode).
+
+    Supports two modes:
+    - In-memory (default): For Claude SDK where hooks run in-process.
+    - File-backed: For Codex SDK where hooks are external scripts
+      that check for a flag file's existence.
     """
 
-    def __init__(self) -> None:
-        self.reflected: bool = False
+    def __init__(self, flag_path: Path | None = None) -> None:
+        self._reflected: bool = False
+        self.flag_path = flag_path
+
+    @property
+    def reflected(self) -> bool:
+        if self.flag_path is not None:
+            return self.flag_path.exists()
+        return self._reflected
+
+    @reflected.setter
+    def reflected(self, value: bool) -> None:
+        self._reflected = value
+        if self.flag_path is not None:
+            if value:
+                self.flag_path.parent.mkdir(parents=True, exist_ok=True)
+                self.flag_path.touch()
+            elif self.flag_path.exists():
+                self.flag_path.unlink()
 
     def mark_reflected(self) -> None:
         """Record that reflection has occurred."""
