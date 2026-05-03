@@ -224,3 +224,156 @@ class BackgroundAgent:
                     logger.error(
                         "Background agent '%s' error: %s", self.name, msg.result
                     )
+
+
+class CodexBackgroundAgent:
+    """Background agent running via an independent Codex thread.
+
+    Codex threads are inherently persistent and concurrent — each
+    background agent gets its own thread that runs alongside the main
+    agent thread. Communication is through shared Python-level state,
+    same as the Claude BackgroundAgent.
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        system_prompt: str,
+        build_message: Callable[[], str | None],
+        start_message: str = "",
+        model: str = "gpt-4.1-mini",
+        debounce_seconds: float = 3.0,
+        on_response: Callable[[str], None] | None = None,
+    ) -> None:
+        self.name = name
+        self.system_prompt = system_prompt
+        self.build_message = build_message
+        self.start_message = start_message or f"[{name} started]"
+        self.model = model
+        self.debounce_seconds = debounce_seconds
+        self.on_response = on_response
+
+        self._task: asyncio.Task[None] | None = None
+        self._wake: asyncio.Event = asyncio.Event()
+        self._running = False
+
+    def start(self) -> None:
+        """Start the background agent as an asyncio task."""
+        if self._task and not self._task.done():
+            return
+        self._running = True
+        self._task = asyncio.create_task(self._run())
+
+    def wake(self) -> None:
+        """Signal that new data is available for processing."""
+        self._wake.set()
+
+    async def stop(self) -> None:
+        """Cancel the background agent and wait for cleanup."""
+        self._running = False
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        self._task = None
+
+    async def _run(self) -> None:
+        """Run independent Codex thread for background work."""
+        try:
+            from codex_app_server import AsyncCodex
+
+            async with AsyncCodex() as codex:
+                thread = await codex.thread_start(
+                    model=self.model,
+                    developer_instructions=self.system_prompt,
+                )
+
+                result = await thread.run(self.start_message)
+                if self.on_response and result.final_response:
+                    self.on_response(result.final_response)
+
+                while self._running:
+                    await self._wake.wait()
+                    self._wake.clear()
+
+                    while True:
+                        try:
+                            await asyncio.wait_for(
+                                self._wake.wait(), timeout=self.debounce_seconds
+                            )
+                            self._wake.clear()
+                        except TimeoutError:
+                            break
+
+                    content = self.build_message()
+                    if content is None:
+                        continue
+
+                    result = await thread.run(content)
+                    if self.on_response and result.final_response:
+                        self.on_response(result.final_response)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Codex background agent '%s' crashed", self.name)
+
+
+def create_background_agent(
+    sdk: str,
+    *,
+    name: str,
+    system_prompt: str,
+    build_message: Callable[[], str | None],
+    start_message: str = "",
+    model: str | None = None,
+    debounce_seconds: float = 3.0,
+    tools: list[object] | None = None,
+    builtin_tools: list[str] | None = None,
+    allowed_tools: list[str] | None = None,
+    on_response: Callable[[object], None] | None = None,
+) -> BackgroundAgent | CodexBackgroundAgent:
+    """Factory for creating SDK-appropriate background agents.
+
+    Args:
+        sdk: "claude" or "codex".
+        name: Agent identifier.
+        system_prompt: System prompt for the background agent.
+        build_message: Callable that returns the next message or None.
+        start_message: Initial message when agent starts.
+        model: Model override (defaults vary by SDK).
+        debounce_seconds: Batch rapid wakes.
+        tools: MCP tools (Claude path only).
+        builtin_tools: Built-in SDK tools (Claude path only).
+        allowed_tools: Tool allowlist (Claude path only).
+        on_response: Callback for responses.
+    """
+    match sdk:
+        case "claude":
+            return BackgroundAgent(
+                name=name,
+                system_prompt=system_prompt,
+                tools=tools or [],
+                build_message=build_message,
+                start_message=start_message,
+                model=model or "claude-sonnet-4-20250514",
+                debounce_seconds=debounce_seconds,
+                builtin_tools=builtin_tools,
+                allowed_tools=allowed_tools,
+                on_response=on_response,
+            )
+        case "codex":
+            return CodexBackgroundAgent(
+                name=name,
+                system_prompt=system_prompt,
+                build_message=build_message,
+                start_message=start_message,
+                model=model or "gpt-4.1-mini",
+                debounce_seconds=debounce_seconds,
+                on_response=on_response,
+            )
+        case _:
+            raise ValueError(f"Unknown SDK: {sdk}")
