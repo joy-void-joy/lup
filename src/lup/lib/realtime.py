@@ -632,3 +632,18 @@ def create_meta_before_sleep_guard(
         reflection_tool_name="meta",
         denial_message="You must call meta before sleeping. Assess your process this turn.",
     )
+
+
+def create_codex_stop_guard_hook() -> list[dict[str, str]]:
+    """Create Codex-compatible Stop hook config for persistent mode.
+
+    On Codex, the thread turn model doesn't have a Stop event in the
+    same way — threads naturally complete turns. This returns an empty
+    list since persistent mode on Codex uses thread/resume instead of
+    blocking Stop.
+
+    For environments that do support Codex Stop hooks, this generates
+    the config. Currently a no-op since Codex persistent mode uses
+    the thread resume pattern.
+    """
+    return []
