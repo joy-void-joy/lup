@@ -1,10 +1,10 @@
-"""Git operations: worktrees, branch analysis, and pre-flight checks."""
+"""Dev operations: worktrees, branches, and pre-flight checks."""
 
 from typing import Annotated
 
 import typer
 
-from lup.devtools.git import branches, check, worktree
+from lup.devtools.dev import branches, check, conflicts, worktree
 
 app = typer.Typer(no_args_is_help=True)
 worktree_app = typer.Typer(no_args_is_help=True)
@@ -106,6 +106,34 @@ def pr_status_cmd(
 ) -> None:
     """Show PR review status, checks, and merge readiness."""
     branches.pr_status(branch, as_json)
+
+
+# -- pr-body command --
+
+
+@app.command("pr-body")
+def pr_body_cmd(
+    base: Annotated[
+        str | None,
+        typer.Option("--base", "-b", help="Override base branch"),
+    ] = None,
+) -> None:
+    """Generate a PR body (summary, commits, test plan) from branch commits."""
+    branches.pr_body(base)
+
+
+# -- conflict command --
+
+
+@app.command("conflicts")
+def conflicts_cmd(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Show conflicted files with scope classification (in-scope vs out-of-scope)."""
+    conflicts.conflicts(as_json)
 
 
 # -- check command --

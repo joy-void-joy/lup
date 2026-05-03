@@ -1,12 +1,12 @@
-"""Session feedback state: collection, analysis marks, status, and commit operations.
+"""Feedback state: collection, analysis marks, status, and commit operations.
 
 This is a TEMPLATE script. Run ``/lup:init`` to customize it for your domain.
 
 Examples::
 
-    $ uv run lup-devtools session status
-    $ uv run lup-devtools session collect --all-time
-    $ uv run lup-devtools session commit --dry-run
+    $ uv run lup-devtools feedback status
+    $ uv run lup-devtools feedback collect --all-time
+    $ uv run lup-devtools feedback commit --dry-run
 """
 
 import json
@@ -402,7 +402,7 @@ def status(  # noqa: C901
         if len(unanalyzed) > 20:
             typer.echo(f"  ... and {len(unanalyzed) - 20} more")
         typer.echo(
-            "\nTo list all unanalyzed IDs: uv run lup-devtools session unanalyzed"
+            "\nTo list all unanalyzed IDs: uv run lup-devtools feedback unanalyzed"
         )
 
 

@@ -1,11 +1,11 @@
-"""Session trace display, search, and analysis.
+"""Trace display, search, and analysis implementation.
 
 Examples::
 
-    $ uv run lup-devtools session list
-    $ uv run lup-devtools session show my-session-id --full
-    $ uv run lup-devtools session search "confidence.*low"
-    $ uv run lup-devtools session capabilities
+    $ uv run lup-devtools trace list
+    $ uv run lup-devtools trace show my-session-id --full
+    $ uv run lup-devtools trace search "confidence.*low"
+    $ uv run lup-devtools trace capabilities
 """
 
 import re

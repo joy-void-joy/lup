@@ -1,13 +1,14 @@
-"""Branch analysis: containment, PR status, base detection."""
+"""Branch analysis: containment, PR status, base detection, PR body generation."""
 
 import json
+from collections import defaultdict
 
 import typer
 
 
 def get_integration_branch() -> str:
     """Return 'dev' if it exists locally, else 'main'."""
-    from lup.devtools.git.worktree import branch_exists
+    from lup.devtools.dev.worktree import branch_exists
 
     if branch_exists("dev"):
         return "dev"
@@ -324,3 +325,64 @@ def pr_status(branch: str | None, as_json: bool) -> None:
         failed = sum(1 for c in checks if c.get("conclusion") == "FAILURE")
         pending = len(checks) - passed - failed
         typer.echo(f"Checks: {passed} passed, {failed} failed, {pending} pending")
+
+
+COMMIT_PREFIX_LABELS = {
+    "feat": "Added",
+    "fix": "Fixed",
+    "refactor": "Refactored",
+    "docs": "Updated docs for",
+    "test": "Added tests for",
+    "chore": "Updated",
+    "meta": "Updated",
+    "data": "Added data for",
+}
+
+
+def pr_body(base_override: str | None) -> None:
+    """Generate a PR body from the current branch's commits against its base."""
+    import sh
+
+    git = sh.Command("git")
+
+    if base_override:
+        base = base_override
+    else:
+        base, _, _ = detect_base_branch()
+
+    log_output = str(
+        git(
+            "log",
+            "--oneline",
+            "--no-decorate",
+            f"{base}..HEAD",
+            _ok_code=[0],
+            _tty_out=False,
+        )
+    ).strip()
+    if not log_output:
+        typer.echo("No commits found since base branch", err=True)
+        raise typer.Exit(1)
+
+    groups: dict[str, list[str]] = defaultdict(list)
+    for line in log_output.splitlines():
+        parts = line.split(" ", 1)
+        if len(parts) < 2:
+            continue
+        message = parts[1]
+        prefix = message.split("(")[0].split(":")[0].lower().strip()
+        groups[prefix].append(message)
+
+    summary_lines: list[str] = []
+    for prefix, messages in groups.items():
+        label = COMMIT_PREFIX_LABELS.get(prefix, prefix.capitalize())
+        desc = messages[0].split(":", 1)[-1].strip()
+        if len(messages) == 1:
+            summary_lines.append(f"- {label} {desc}")
+        else:
+            summary_lines.append(f"- {label} {desc} (+{len(messages) - 1} more)")
+
+    body_parts = ["## Summary", *summary_lines, "", "## Commits", log_output]
+    body_parts.extend(["", "## Test plan", "- [ ] Verify changes work as expected"])
+
+    typer.echo("\n".join(body_parts))
