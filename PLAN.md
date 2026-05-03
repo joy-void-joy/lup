@@ -1,184 +1,252 @@
-# Plan: Devtools + Slash Command Ontology Refactor
+# Plan: Devtools & Slash Command Ontology Refactor
 
 ## Context
 
-The `lup-devtools` CLI was organized by data format — trace files, metric JSON, feedback state, git. The mental model should be organized by **what you're operating on**: the agent, a session, the repo. Meanwhile, many slash commands shell out to raw git/grep instead of using devtools, and 12 use overly broad `Bash` permissions.
+The `lup-devtools` CLI grew organically and had structural issues: session/trace/feedback were conflated, version-related commands were scattered across `agent`, git operations mixed with pre-flight checks, and slash commands referenced stale devtools paths or underused devtools.
 
-## Current State (after checkpoint commit)
+## Completed Work
 
-The prior refactor session already:
-- [x] Merged metrics.py commands (tools, errors, trends, history) into feedback.py
-- [x] Created dev.py: worktree management, branch analysis (branch-status, base-branch, pr-status), session commits
-- [x] Deleted standalone git.py, metrics.py, worktree.py
-- [x] Stripped charts.py CLI commands (kept library functions)
-- [x] Rewired main.py to 7 sub-apps: agent, api, dev, feedback, sync, trace, usage
-- [x] Partially updated slash commands (allowed-tools, some path rewiring)
-- [x] Partially updated CLAUDE.md
+### Phase 1: Split `session/` into `trace/` + `feedback/`
 
-## Remaining Work: Rename to Final Ontology
+- [x] Created `src/lup/devtools/trace/` sub-package (`__init__.py` + `traces.py`)
+- [x] Created `src/lup/devtools/feedback/` sub-package (`__init__.py` + `state.py`)
+- [x] Deleted `src/lup/devtools/session/` entirely
+- [x] Updated `main.py` to register `trace_app` and `feedback_app`
 
-The checkpoint uses `dev` + `feedback` + `trace`. The target uses `session` + `git`:
+### Phase 2: Rename `git/` → `dev/`
 
-| Checkpoint | Target | What changes |
-|------------|--------|-------------|
-| `feedback` (681 lines) | `session/state.py` | Rename sub-app, split into sub-package |
-| `trace` (modified) | `session/traces.py` | Merge into session sub-package |
-| `dev` (671 lines) | `git/` sub-package | Rename sub-app, split into worktree.py + branches.py |
-| (missing) | `session/analysis.py` | New: `compare` command, merged `errors` |
-| (missing) | `git/check.py` | New: unified pyright + ruff + pytest |
-| `feedback version` | `agent version` | Move version command to agent sub-app |
+- [x] Renamed sub-package from `git/` to `dev/`
+- [x] Fixed internal import in `dev/branches.py` (`from lup.devtools.dev.worktree`)
+- [x] `check.py` stays inside `dev/`
 
-### Target CLI Surface
+### Phase 3: Create `version` sub-app
+
+- [x] Created `src/lup/devtools/version.py` with `show` (default), `changelog`, and `bump`
+- [x] Removed `version_cmd` and `VersionInfo` from `agent.py`
+- [x] Registered `version_app` in `main.py`
+
+### Phase 4: Update all slash commands
+
+- [x] Rewired 17+ commands: `session` → `trace`/`feedback`, `git` → `dev`, `agent version` → `version`
+- [x] Deleted periodic section from `fb-reflect.md` (lines 46-51)
+- [x] Renamed `meta-principle.md` → `principle.md`
+- [x] Updated `install.md` stale file listing
+
+### Phase 5: Update CLAUDE.md and supporting files
+
+- [x] Directory tree, sub-apps list, example commands, feedback loop section
+- [x] Updated `__init__.py` docstring
+- [x] Fixed stale references in `version-reviewer.md`, `trace-explorer.md`, `TEMPLATE_CLAUDE.md`
+
+### Verification
+
+- [x] `uv run pyright` — 0 errors
+- [x] `uv run ruff check . && uv run ruff format --check .` — clean
+- [x] `uv run pytest` — 10 passed
+- [x] Smoke tests: all sub-apps (`trace`, `feedback`, `dev`, `version`) working
+- [x] `grep -r "lup-devtools session\|commit-results"` — no stale references
+
+---
+
+## Phase 6: New devtools commands (COMPLETED)
+
+Three new commands that replace manual work currently done inline by slash commands.
+
+### 6a. `feedback analyze` — structured analysis report
+
+**Location:** `src/lup/devtools/feedback/analyze.py` (new module), registered in `feedback/__init__.py`.
+
+**What it replaces:** `/fb-analyze` currently runs 3 separate devtools commands (`feedback tools`, `feedback errors`, `trace capabilities`) and holds all their output in context. The `analyze` command consolidates these into a single structured report.
+
+**Behavior:**
+
+Produces a JSON report combining:
+- **Tool health**: per-tool call counts, error counts, error rate — from existing `tools()` logic in `state.py`
+- **Error patterns**: sessions with high error rates, grouped by error type — from existing `errors()` logic in `state.py`
+- **Capability gaps**: agent capability requests extracted from traces — from existing `capabilities()` logic in `traces.py`
+
+**Interface:**
 
 ```
-lup-devtools
-├── agent                         # existing + version command
-│   ├── inspect
-│   ├── chat
-│   ├── repl
-│   ├── serve-tools
-│   └── version                   # moved from feedback, expanded
-├── session                       # NEW sub-package (trace + feedback + dev.commit)
-│   ├── list                      # from trace.list
-│   ├── show                      # from trace.show
-│   ├── search                    # from trace.search
-│   ├── errors                    # from feedback.errors (already merged)
-│   ├── capabilities              # from trace.capabilities
-│   ├── commit                    # from dev.commit-results
-│   ├── collect                   # from feedback.collect
-│   ├── mark / unmark             # from feedback.mark/unmark
-│   ├── status                    # from feedback.status (already merged)
-│   ├── unanalyzed                # from feedback.unanalyzed
-│   ├── summary                   # (NEW — was dropped in checkpoint, restore from metrics.py)
-│   ├── tools                     # from feedback.tools
-│   ├── trends                    # from feedback.trends
-│   ├── history                   # from feedback.history
-│   ├── prompt-health             # from feedback.prompt-health
-│   └── compare                   # NEW — cross-version metrics comparison
-├── git                           # renamed from dev, split into sub-package
-│   ├── worktree create           # from dev.worktree-create
-│   ├── worktree list             # NEW
-│   ├── worktree remove           # NEW
-│   ��── branches                  # from dev.branch-status
-│   ├── base-branch               # from dev.base-branch
-│   ├── pr-status                 # from dev.pr-status
-│   └── check                     # NEW — unified pyright + ruff + pytest
-├── sync                          # unchanged
-├── usage                         # unchanged
-└── api                           # unchanged
+lup-devtools feedback analyze [--version VERSION] [--all-versions] [--output FILE]
 ```
 
-## Phase 1: Create `session/` sub-package
+- Default output: JSON to stdout
+- `--output FILE`: write JSON to a file instead
+- Version filtering: same `--version` / `--all-versions` options as other feedback commands
 
-Split existing `feedback.py` (681 lines) + `trace.py` into sub-package:
+**Output schema** (TypedDict):
 
-### `src/lup/devtools/session/__init__.py`
-- Create Typer app
-- Import and register all commands from sub-modules
+```python
+class ToolHealth(TypedDict):
+    name: str
+    calls: int
+    errors: int
+    error_rate: float
 
-### `src/lup/devtools/session/traces.py`
-- Move from current `trace.py`: `find_trace`, `load_trace`, `show`, `search`, `list_traces`, `capabilities`
+class ErrorPattern(TypedDict):
+    session_id: str
+    error_count: int
+    total_calls: int
+    error_rate: float
+    top_errors: list[str]
 
-### `src/lup/devtools/session/state.py`
-- Move from current `feedback.py`: models, load/save/match/compute functions, `collect`, `status`, `mark`, `unmark`, `unanalyzed`, `prompt_health`, `tools`, `errors`, `trends`, `history`
-- Move from current `dev.py`: `get_uncommitted_session_ids`, `get_session_summary`, `commit_session`, `commit_results`
-- Fix: move `ANALYZED_FILE` from module-level to function-level
+class CapabilityGap(TypedDict):
+    request: str
+    count: int
+    session_ids: list[str]
 
-### `src/lup/devtools/session/analysis.py`
-- Restore `summary` command (load all sessions, show aggregate stats — was in deleted metrics.py)
-- New `compare` command: cross-version metrics/tool-usage comparison with `--json` flag
+class AnalysisReport(TypedDict):
+    version: str | None
+    tool_health: list[ToolHealth]
+    error_patterns: list[ErrorPattern]
+    capability_gaps: list[CapabilityGap]
+```
 
-## Phase 2: Create `git/` sub-package
+**Implementation notes:**
+- Reuse the data-loading and computation logic already in `state.py` and `traces.py` — call the functions that `tools()`, `errors()`, and `capabilities()` use internally, but collect results into the TypedDict instead of printing
+- If the existing functions are tightly coupled to printing (typer.echo), extract the data-gathering portions into separate functions that return typed data, and have both the existing CLI commands and `analyze` call those
 
-Split existing `dev.py` (671 lines) into sub-package:
+**Slash command update:** `/fb-analyze` replaces its 3 separate devtools calls with:
+```bash
+uv run lup-devtools feedback analyze --json
+```
 
-### `src/lup/devtools/git/__init__.py`
-- Create Typer app with nested `worktree` sub-app
+**Files modified:**
+- `src/lup/devtools/feedback/analyze.py` (new)
+- `src/lup/devtools/feedback/__init__.py` (register `analyze` command)
+- `src/lup/devtools/feedback/state.py` (extract data-returning helpers if needed)
+- `src/lup/devtools/trace/traces.py` (extract data-returning helper for capabilities if needed)
+- `.claude/plugins/lup/commands/fb-analyze.md` (wire new command)
 
-### `src/lup/devtools/git/worktree.py`
-- Move from `dev.py`: `branch_exists`, `worktree_is_registered`, `get_tree_dir`, `copy_to_clipboard`, `worktree_create_cmd`
-- New `list_cmd`: parse `git worktree list --porcelain`
-- New `remove_cmd`: `git worktree remove <path>` with `--force`
-- Fix: move module-level `sh.Command()` calls inside functions
+---
 
-### `src/lup/devtools/git/branches.py`
-- Move from `dev.py`: `detect_base_branch`, `base_branch_cmd`, `get_integration_branch`, `is_ancestor`, `get_branch_worktree`, `get_pr_info`, `classify_branch`, `branch_status_cmd`, `pr_status_cmd`
+### 6b. `dev conflicts` — conflict scope classification
 
-### `src/lup/devtools/git/check.py`
-- New: run ruff format + ruff check + pyright + pytest
-- Flags: `--fix` (auto-fix ruff), `--no-test` (skip pytest)
-- Report pass/fail summary per tool, exit code reflects worst result
+**Location:** `src/lup/devtools/dev/conflicts.py` (new module), registered in `dev/__init__.py`.
 
-## Phase 3: Move `version` to agent, rewire main.py, delete old files
+**What it replaces:** `/merge-conflict` Step A (scope classification) is currently done by reading git log manually and reasoning about which files are in-scope vs out-of-scope. The `conflicts` command automates the mechanical part.
 
-### `src/lup/devtools/agent.py`
-- Move `version` command from feedback.py, expand: AGENT_VERSION, latest v* tag, commits since, prompt health. `--json` flag.
+**Behavior:**
 
-### `src/lup/devtools/main.py`
-- 6 sub-apps: agent, api, session, git, sync, usage
+After a failed merge/rebase, lists conflicted files with:
+- **File path**
+- **Conflict count** per file (number of `<<<<<<<` markers)
+- **Scope classification**: in-scope / out-of-scope / mixed, based on whether this branch's commits touched that file
 
-### Delete
-- `src/lup/devtools/trace.py`
-- `src/lup/devtools/feedback.py`
-- `src/lup/devtools/dev.py`
+Scope classification logic:
+1. Find the merge base: `git merge-base HEAD MERGE_HEAD` (merge) or from rebase state
+2. Get files touched by this branch: `git diff --name-only <merge-base>..HEAD`
+3. For each conflicted file:
+   - If the file was modified by this branch's commits → **in-scope**
+   - If not → **out-of-scope**
+   - (Mixed is possible if a file was touched by both sides for different reasons, but the binary classification is the useful first cut)
 
-## Phase 4: Update slash commands
+**Interface:**
 
-### allowed-tools tightening
+```
+lup-devtools dev conflicts [--json]
+```
 
-| Command | New allowed-tools |
-|---------|-------------------|
-| commit | `Bash(git:*)` |
-| rebase | `Bash(git:*, gh:*, uv run lup-devtools:*)` |
-| fb-implement | `Bash(git:*, uv run lup-devtools:*, uv run python -m lup:*)` |
-| feedback-loop | `Bash(git:*, uv run lup-devtools:*, uv run python -m lup:*)` |
-| import | `Bash(git:*, uv run lup-devtools:*)` |
-| meta | `Bash(ls:*, uv run lup-devtools:*)` |
-| meta-principle | `Bash(uv run lup-devtools:*)` |
-| refactor | `Bash(git:*, uv run lup-devtools:*)` |
-| update | `Bash(git:*, uv run lup-devtools:*)` |
-| bump | `Bash(git:*, uv run lup-devtools:*)` |
-| init | keep bare Bash (one-time wizard) |
-| install | keep bare Bash (external repo installer) |
+- Default output: table with file path, conflict count, scope
+- `--json`: structured JSON output
+- Exits with error if not in a merge/rebase state
 
-### Devtools path rewiring
+**Output schema** (TypedDict):
 
-All old paths updated to new session/git paths:
+```python
+class ConflictFile(TypedDict):
+    path: str
+    conflict_count: int
+    scope: str  # "in-scope" | "out-of-scope"
+    branch_touched: bool
 
-| Old | New |
-|-----|-----|
-| `lup-devtools trace *` | `lup-devtools session *` |
-| `lup-devtools feedback *` | `lup-devtools session *` |
-| `lup-devtools dev worktree-create` | `lup-devtools git worktree create` |
-| `lup-devtools dev branch-status` | `lup-devtools git branches` |
-| `lup-devtools dev base-branch` | `lup-devtools git base-branch` |
-| `lup-devtools dev pr-status` | `lup-devtools git pr-status` |
-| `lup-devtools dev commit-results` | `lup-devtools session commit` |
+class ConflictReport(TypedDict):
+    state: str  # "merge" | "rebase" | "cherry-pick"
+    base: str  # merge base SHA
+    files: list[ConflictFile]
+    in_scope_count: int
+    out_of_scope_count: int
+```
 
-### Specific command fixes
+**Implementation notes:**
+- Use `git diff --name-only --diff-filter=U` to list conflicted files
+- Count conflict markers with `grep -c '<<<<<<<' <file>` per file
+- Detect merge state from `.git/MERGE_HEAD`, `.git/rebase-merge/`, or `.git/rebase-apply/`
+- Use `sh` library for git commands (not subprocess)
 
-1. **fb-analyze.md**: Add `Agent` to allowed-tools (blocks version-explorer spawn)
-2. **debug.md**: Add `Bash(uv run lup-devtools:*)`, use `lup-devtools session search` instead of raw Grep
-3. **clean-gone.md**: Use `lup-devtools git branches --json` for analysis
-4. **bump.md**: Wire `lup-devtools agent version` for step 1 context
-5. **meta.md**: Replace hardcoded command list with `ls .claude/plugins/lup/commands/`
-6. **fb-reflect.md**: Wire `lup-devtools agent version` for prompt health
-7. **close.md**: Wire `lup-devtools git pr-status` and `lup-devtools git worktree remove`
-8. **rebase.md**: Replace inline pyright/ruff/pytest with `lup-devtools git check`
-9. **refactor.md**: Same as rebase
-10. **fb-implement.md**: Same as rebase
-11. **fb-investigate.md**: Slim down to reference `/lup:review` per session + gate
+**Slash command update:** `/merge-conflict` Step A adds:
+```bash
+uv run lup-devtools dev conflicts --json
+```
+The scope classification from the tool informs the decision tree — in-scope files take ours, out-of-scope take theirs, per the existing resolution rules.
 
-## Phase 5: Update CLAUDE.md
+**Files modified:**
+- `src/lup/devtools/dev/conflicts.py` (new)
+- `src/lup/devtools/dev/__init__.py` (register `conflicts` command)
+- `.claude/plugins/lup/commands/merge-conflict.md` (wire new command into Step A)
 
-- Directory tree (Architecture section)
-- Command tree (Tooling section)
-- Example commands (Getting Started, Feedback Loop Scripts)
+---
 
-## Phase 6: Verify
+### 6c. `dev pr-body` — PR summary generation
 
-1. `uv run pyright`
-2. `uv run ruff check . && uv run ruff format --check .`
-3. `uv run pytest`
-4. Smoke test: `lup-devtools --help`, `session --help`, `git --help`, `session list`, `agent version`, `git branches`, `git check --no-test`, `git worktree list`
-5. `grep -r "from lup.devtools.trace\|from lup.devtools.feedback\|from lup.devtools.dev\b" src/` — no dangling imports
+**Location:** add to `src/lup/devtools/dev/branches.py` (already has PR-related code: `get_pr_info`, `pr_status`).
+
+**What it replaces:** `/rebase` manually constructs the PR body by reading `git diff <base>...HEAD` and `git log --oneline <base>..HEAD`, then formatting it into the Summary/Commits/Test plan template. The `pr-body` command generates this automatically.
+
+**Behavior:**
+
+Reads the diff and commit log from the current branch against its base, produces a PR body in the standard format:
+
+```markdown
+## Summary
+<1-3 bullet points describing the changes>
+
+## Commits
+<list of commits>
+
+## Test plan
+- [ ] ...
+```
+
+The summary bullets are derived from commit messages grouped by conventional commit type. The commits section is a verbatim `git log --oneline`. The test plan is a skeleton.
+
+**Interface:**
+
+```
+lup-devtools dev pr-body [--base BRANCH]
+```
+
+- Default: auto-detect base branch using existing `detect_base_branch()`
+- `--base`: override the base branch
+- Output: markdown text to stdout (no `--json` — the output IS the artifact)
+
+**Implementation notes:**
+- Reuse `detect_base_branch()` already in `branches.py`
+- Group commits by conventional commit prefix (feat/fix/refactor/etc.) for summary bullets
+- Use the same classification logic as `version.py`'s `classify_commit()` — but don't import it; the grouping here is simpler (just prefix extraction for bullet formatting)
+- The summary bullets are mechanical: "Added X" for feat, "Fixed Y" for fix, etc. — derived from commit messages, not from reading code
+- Keep it simple — this generates a starting point that `/rebase` can edit via `gh pr edit`
+
+**Slash command update:** `/rebase` step 2 (create PR) and step 6 (update PR body) replace the manual body construction with:
+```bash
+BODY=$(uv run lup-devtools dev pr-body)
+gh pr create --base "<target>" --title "<title>" --body "$BODY"
+# or for updates:
+gh pr edit <PR_NUMBER> --body "$BODY"
+```
+
+**Files modified:**
+- `src/lup/devtools/dev/branches.py` (add `pr_body` function)
+- `src/lup/devtools/dev/__init__.py` (register `pr-body` command)
+- `.claude/plugins/lup/commands/rebase.md` (wire new command)
+
+---
+
+### Verification
+
+- [x] `uv run pyright` — 0 errors
+- [x] `uv run ruff check . && uv run ruff format --check .` — clean
+- [x] `uv run pytest` — 10 passed
+- [x] Smoke tests: all three commands (`feedback analyze`, `dev conflicts`, `dev pr-body`) `--help` working
+- [x] Integration check: `feedback --help` and `dev --help` show new commands

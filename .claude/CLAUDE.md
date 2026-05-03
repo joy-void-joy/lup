@@ -103,8 +103,10 @@ src/
     │       └── reflect.py      # Forced self-review tool (reviewer sub-agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
-    │   ├── session/            # Traces, metrics, feedback state, session commits
-    │   └── git/                # Worktrees, branch analysis, pre-flight checks
+    │   ├── trace/              # Trace display, search, and analysis
+    │   ├── feedback/           # Feedback state, metrics, and session commits
+    │   ├── dev/                # Worktrees, branches, and pre-flight checks
+    │   └── version.py          # Version display, changelog, and bump
     └── environment/            # Domain scaffolding (user interaction, game logic)
         └── cli/
             └── __main__.py     # Typer CLI (run + loop with auto-commit)
@@ -152,8 +154,8 @@ uv run python -m lup.environment.cli loop "task1" "task2" "task3"
 uv run python -m lup.environment.cli loop --no-commit "task1" "task2"
 
 # Commit uncommitted session results
-uv run lup-devtools session commit
-uv run lup-devtools session commit --dry-run
+uv run lup-devtools feedback commit
+uv run lup-devtools feedback commit --dry-run
 
 uv run python -m lup.environment.cli --help
 ```
@@ -199,10 +201,10 @@ Use `/lup:debug <error message>` to trace an error through logs automatically.
 ### Feedback Loop Scripts
 
 ```bash
-uv run lup-devtools session collect --all-time
-uv run lup-devtools session status
-uv run lup-devtools session list
-uv run lup-devtools session show <session_id>
+uv run lup-devtools feedback collect --all-time
+uv run lup-devtools feedback status
+uv run lup-devtools trace list
+uv run lup-devtools trace show <session_id>
 ```
 
 ### Customizing for Your Domain
@@ -215,7 +217,7 @@ uv run lup-devtools session show <session_id>
 6. **Reflection** (`agent/tools/reflect.py`) — Domain-specific `ReflectInput` fields, reviewer prompt
 7. **Version** (`version.py`) — Set initial `AGENT_VERSION`, bump on behavior changes
 8. **Persistent mode** (optional) — Wire `Scheduler` from `lib/realtime.py`, add Stop hook, implement sleep/context/reply tools, replace request-response with sleep/wake loop
-9. **Feedback** (`devtools/session/state.py`) — Implement `load_outcomes()`, customize `compute_metrics()`
+9. **Feedback** (`devtools/feedback/state.py`) — Implement `load_outcomes()`, customize `compute_metrics()`
 
 ---
 
@@ -245,7 +247,7 @@ Worktrees typically branch from `dev`, but can also branch from other feature br
 
 **Feature workflow:**
 
-1. `uv run lup-devtools git worktree create feat-name`
+1. `uv run lup-devtools dev worktree create feat-name`
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/dev`), syncs dependencies, and refreshes plugins. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
 2. Commit regularly and atomically
 3. Push when complete (or periodically for backup)
@@ -418,7 +420,7 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
-Sub-apps: `agent`, `api`, `session`, `git`, `sync`, `usage`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
+Sub-apps: `agent`, `api`, `dev`, `feedback`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
 
 ### Permission Hooks
 
@@ -563,7 +565,7 @@ When the agent fails, the instinct is to patch the prompt. Resist it. Instead, t
 
 ### Running the Feedback Loop
 
-1. **Collect feedback**: `uv run lup-devtools session collect`
+1. **Collect feedback**: `uv run lup-devtools feedback collect`
 2. **Read traces deeply**: Read 5-10 sessions in detail — don't skip to aggregates
 3. **Extract patterns**: Tool failures, capability requests, reasoning quality
 4. **Implement changes**: Fix tools → Build requested capabilities → Simplify prompts

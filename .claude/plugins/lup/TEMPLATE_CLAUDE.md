@@ -167,8 +167,8 @@ uv run python -m <project>.environment.cli loop "task1" "task2" "task3"
 uv run python -m <project>.environment.cli loop --no-commit "task1" "task2"
 
 # Commit uncommitted session results
-uv run lup-devtools git commit-results
-uv run lup-devtools git commit-results --dry-run
+uv run lup-devtools feedback commit
+uv run lup-devtools feedback commit --dry-run
 
 uv run python -m <project>.environment.cli --help
 ```
