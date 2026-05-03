@@ -21,6 +21,10 @@ ALLOW_PATTERNS: list[str] = [
     # Project documentation
     r"https?://docs\.claude\.com/",
     r"https?://ai\.pydantic\.dev/",
+    # OpenAI Codex
+    r"https?://github\.com/openai/codex",
+    r"https?://raw\.githubusercontent\.com/openai/codex/",
+    r"https?://developers\.openai\.com/codex/",
 ]
 
 DENY_PATTERNS: list[tuple[str, str]] = [
