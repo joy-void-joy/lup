@@ -85,5 +85,3 @@ def setup_notes(
         rw=[session_path, output_path],
         ro=[outputs_dir().parent],
     )
-
-

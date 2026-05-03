@@ -51,7 +51,13 @@ from docker.models.containers import Container, ExecResult
 from docker.utils.socket import SocketError, next_frame_header, read_exactly
 from pydantic import BaseModel, Field
 
-from lup.lib.mcp import LupMcpTool, ToolError, create_mcp_server, extract_sdk_tools, lup_tool
+from lup.lib.mcp import (
+    LupMcpTool,
+    ToolError,
+    create_mcp_server,
+    extract_sdk_tools,
+    lup_tool,
+)
 
 logger = logging.getLogger(__name__)
 

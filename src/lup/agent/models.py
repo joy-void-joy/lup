@@ -75,5 +75,3 @@ class AgentOutput(BaseModel):
 
 # Domain-specific type alias: SessionResult parameterized with AgentOutput
 AgentSessionResult = SessionResult[AgentOutput]
-
-

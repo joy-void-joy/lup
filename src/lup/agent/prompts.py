@@ -116,5 +116,3 @@ def generate_tool_docs(mcp_servers: dict[str, Any]) -> str:
         lines.append("")
 
     return "\n".join(lines)
-
-

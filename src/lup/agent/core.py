@@ -151,6 +151,7 @@ def build_options(
         },
     )
 
+
 def extract_sources(blocks: list[ContentBlock]) -> list[str]:
     """Extract source URLs/queries from tool use blocks."""
     sources: list[str] = []
@@ -164,6 +165,7 @@ def extract_sources(blocks: list[ContentBlock]) -> list[str]:
                 if source:
                     sources.append(str(source))
     return sources
+
 
 def build_result(
     *,

@@ -342,9 +342,7 @@ def create_realtime_tools(
                 )
             case "remove":
                 if inp.index < 0 or inp.index >= len(scheduler.ideas):
-                    raise ToolError(
-                        f"Invalid index {inp.index}. Use 'list' first."
-                    )
+                    raise ToolError(f"Invalid index {inp.index}. Use 'list' first.")
                 removed = scheduler.ideas.pop(inp.index)
                 return IdeasOutput(message=f"Removed: {removed}")
             case "set":
