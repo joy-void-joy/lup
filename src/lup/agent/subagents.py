@@ -7,24 +7,20 @@ Each subagent has:
 - A specialized prompt (focused on one job)
 - A subset of tools (only what it needs)
 - Its own model (cheaper models for simpler tasks)
+
+Definitions use SubagentSpec (SDK-agnostic). Each adapter converts
+these into its native subagent primitive at build time.
 """
 
+from typing import Literal, cast
+
 from claude_agent_sdk import AgentDefinition
+
+from lup.lib.types import SubagentSpec
 
 # =============================================================================
 # TOOL LISTS (customize for your domain)
 # =============================================================================
-#
-# Use functions (not constants) so tool lists can be computed at runtime
-# based on available API keys, session context, etc.
-#
-# Example with conditional inclusion:
-#   def research_tools() -> list[str]:
-#       from lup.agent.config import settings
-#       tools = ["WebSearch", "WebFetch", "Read", "Glob"]
-#       if settings.exa_api_key:
-#           tools.append("mcp__search__search_exa")
-#       return tools
 
 
 def research_tools() -> list[str]:
@@ -34,7 +30,6 @@ def research_tools() -> list[str]:
         "WebFetch",
         "Read",
         "Glob",
-        # Add domain-specific tools
     ]
 
 
@@ -43,7 +38,6 @@ def analysis_tools() -> list[str]:
     return [
         "Read",
         "Glob",
-        # Add analysis tools
     ]
 
 
@@ -75,14 +69,15 @@ Research the topic/question given to you. Your output should be thorough and fac
 ```
 """
 
-researcher = AgentDefinition(
+researcher = SubagentSpec(
+    name="researcher",
     description=(
         "Research agent for gathering information. Searches multiple sources, "
         "verifies facts, and returns organized findings."
     ),
     prompt=RESEARCHER_PROMPT,
     tools=research_tools(),
-    model="haiku",  # Use cheaper model for research tasks
+    model="haiku",
 )
 
 
@@ -110,7 +105,8 @@ Analyze the given data/content and extract insights.
 ```
 """
 
-analyzer = AgentDefinition(
+analyzer = SubagentSpec(
+    name="analyzer",
     description=(
         "Analysis agent for examining data and extracting insights. "
         "Identifies patterns, anomalies, and draws conclusions."
@@ -122,20 +118,47 @@ analyzer = AgentDefinition(
 
 
 # =============================================================================
-# EXPORTED SUBAGENTS
+# ADAPTER CONVERSIONS
 # =============================================================================
 
 
+CLAUDE_MODEL_LITERALS = {"sonnet", "opus", "haiku", "inherit"}
+
+type ClaudeModelLiteral = Literal["sonnet", "opus", "haiku", "inherit"]
+
+
+def spec_to_claude(spec: SubagentSpec) -> AgentDefinition:
+    """Convert a SubagentSpec to a Claude AgentDefinition."""
+    model: ClaudeModelLiteral | None = None
+    if spec.model in CLAUDE_MODEL_LITERALS:
+        model = cast(ClaudeModelLiteral, spec.model)
+
+    return AgentDefinition(
+        description=spec.description,
+        prompt=spec.prompt,
+        tools=spec.tools,
+        model=model,
+    )
+
+
+# =============================================================================
+# EXPORTED SUBAGENTS
+# =============================================================================
+
+ALL_SPECS: list[SubagentSpec] = [researcher, analyzer]
+
+
 def get_subagents() -> dict[str, AgentDefinition]:
-    """Build subagent definitions at runtime.
+    """Build Claude AgentDefinitions at runtime.
 
     Using a factory function (not a module constant) allows:
     - Tool lists computed from current settings/API keys
     - Context-dependent subagent configuration
     - Runtime reconfiguration between sessions
     """
-    return {
-        "researcher": researcher,
-        "analyzer": analyzer,
-        # Add more subagents for your domain
-    }
+    return {spec.name: spec_to_claude(spec) for spec in ALL_SPECS}
+
+
+def get_subagent_specs() -> list[SubagentSpec]:
+    """Return all subagent specs (SDK-agnostic)."""
+    return list(ALL_SPECS)
