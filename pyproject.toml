@@ -28,7 +28,7 @@ dependencies = [
     "claude-agent-sdk>=0.1.26",
     "docker>=7.1.0",
     "httpx>=0.28.1",
-    "codex",
+    "openai-codex-app-server-sdk",
     "plotext>=5.3.2",
     "prompt-toolkit>=3.0.52",
     "pydantic>=2.12.5",
@@ -76,4 +76,4 @@ venvPath = "."
 venv = ".venv"
 
 [tool.uv.sources]
-codex = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python" }
+openai-codex-app-server-sdk = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python" }
