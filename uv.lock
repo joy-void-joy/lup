@@ -311,6 +311,7 @@ dependencies = [
     { name = "claude-agent-sdk" },
     { name = "docker" },
     { name = "httpx" },
+    { name = "openai-codex-app-server-sdk" },
     { name = "plotext" },
     { name = "prompt-toolkit" },
     { name = "pydantic" },
@@ -334,6 +335,7 @@ requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.1.26" },
     { name = "docker", specifier = ">=7.1.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "openai-codex-app-server-sdk", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython" },
     { name = "plotext", specifier = ">=5.3.2" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "pydantic", specifier = ">=2.12.5" },
@@ -405,6 +407,14 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/24/bf/d1bda4f6168e0b2e9e5958945e01910052158313224ada5ce1fb2e1113b8/nodeenv-1.10.0.tar.gz", hash = "sha256:996c191ad80897d076bdfba80a41994c2b47c68e224c542b48feba42ba00f8bb", size = 55611, upload-time = "2025-12-20T14:08:54.006Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/b2/d0896bdcdc8d28a7fc5717c305f1a861c26e18c05047949fb371034d98bd/nodeenv-1.10.0-py2.py3-none-any.whl", hash = "sha256:5bb13e3eed2923615535339b3c620e76779af4cb4c6a90deccc9e36b274d3827", size = 23438, upload-time = "2025-12-20T14:08:52.782Z" },
+]
+
+[[package]]
+name = "openai-codex-app-server-sdk"
+version = "0.116.0a1"
+source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython#67849d950d843c954102adb0db0e11f993aefdb7" }
+dependencies = [
+    { name = "pydantic" },
 ]
 
 [[package]]
