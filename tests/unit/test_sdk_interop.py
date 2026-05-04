@@ -79,13 +79,13 @@ class TestHookConfigOverrides:
 class TestCodexHookOutput:
     def test_allow_decision(self) -> None:
         output = format_codex_hook_output("allow")
-        assert output["decision"] == "allow"
+        assert output.get("decision") == "allow"
         assert "reason" not in output
 
     def test_deny_decision_with_reason(self) -> None:
         output = format_codex_hook_output("deny", "not permitted")
-        assert output["decision"] == "deny"
-        assert output["reason"] == "not permitted"
+        assert output.get("decision") == "deny"
+        assert output.get("reason") == "not permitted"
 
 
 class TestPermissionHookScripts:
@@ -138,7 +138,7 @@ class TestReflectionGateHookScripts:
             )
             assert len(hooks) == 1
             assert hooks[0]["event"] == "PreToolUse"
-            assert hooks[0]["matcher"] == "StructuredOutput"
+            assert hooks[0].get("matcher") == "StructuredOutput"
 
 
 class TestReflectionGateFileBacked:
