@@ -10,9 +10,16 @@ Install the Codex SDK to use this adapter::
     uv sync --extra codex
 """
 
+from __future__ import annotations
+
 import json
 import logging
-from typing import TypedDict
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, TypedDict, cast
+
+if TYPE_CHECKING:
+    from codex_app_server import ThreadItem
+    from codex_app_server.models import JsonObject
 
 from lup.lib.adapters.common import AgentAdapter
 from lup.lib.trace import TraceLogger, print_message
@@ -41,7 +48,7 @@ def require_codex_sdk() -> None:
         ) from exc
 
 
-def codex_items_to_lup(items: list[object]) -> list[LupContentBlock]:
+def codex_items_to_lup(items: Sequence[ThreadItem]) -> list[LupContentBlock]:
     """Convert Codex ThreadItem list into lup content blocks.
 
     Each ThreadItem is a RootModel wrapping a discriminated union.
@@ -78,7 +85,7 @@ def codex_items_to_lup(items: list[object]) -> list[LupContentBlock]:
                     LupToolUseBlock(
                         id=inner.id,
                         name="command_execution",
-                        input={"command": inner.command, "cwd": str(inner.cwd)},
+                        input={"command": inner.command, "cwd": inner.cwd.root},
                     )
                 )
                 if inner.aggregated_output is not None or inner.exit_code is not None:
@@ -236,34 +243,34 @@ class CodexAdapter(AgentAdapter):
 
         from codex_app_server import (
             AppServerConfig,
+            AskForApproval,
             AsyncCodex,
             ReasoningEffort,
             SandboxMode,
         )
+        from codex_app_server.generated.v2_all import AskForApprovalValue
 
         config_overrides = self.build_config_overrides()
-        config = AppServerConfig(
-            config_overrides=config_overrides if config_overrides else None,
-        )
+        config = AppServerConfig(config_overrides=config_overrides)
 
         async with AsyncCodex(config=config) as codex:
             thread = await codex.thread_start(
                 model=self.model,
                 developer_instructions=self.system_prompt,
                 sandbox=SandboxMode(self.sandbox) if self.sandbox else None,
+                approval_policy=(
+                    AskForApproval(root=AskForApprovalValue(self.approval_policy))
+                    if self.approval_policy
+                    else None
+                ),
             )
 
-            run_kwargs: dict[str, object] = {}
-            if self.output_schema is not None:
-                run_kwargs["output_schema"] = self.output_schema
-            if self.effort is not None:
-                run_kwargs["effort"] = ReasoningEffort(self.effort)
-            if self.approval_policy is not None:
-                run_kwargs["approval_policy"] = self.approval_policy
-            if self.sandbox is not None:
-                run_kwargs["sandbox_policy"] = self.sandbox
-
-            result = await thread.run(prompt, **run_kwargs)
+            effort = ReasoningEffort(self.effort) if self.effort else None
+            result = await thread.run(
+                prompt,
+                effort=effort,
+                output_schema=cast("JsonObject | None", self.output_schema),
+            )
 
             blocks = codex_items_to_lup(result.items)
 
@@ -312,7 +319,7 @@ class CodexAdapter(AgentAdapter):
                 result=result.final_response,
                 usage=result_usage,
             )
-            response.session_id = getattr(result, "thread_id", None) or self.session_id
+            response.session_id = thread.id or self.session_id
 
             return response
 
@@ -323,15 +330,12 @@ class CodexAdapter(AgentAdapter):
         from codex_app_server import AppServerConfig, AsyncCodex
 
         config_overrides = self.build_config_overrides()
-        config = AppServerConfig(
-            config_overrides=config_overrides if config_overrides else None,
-        )
+        config = AppServerConfig(config_overrides=config_overrides)
 
         async with AsyncCodex(config=config) as codex:
-            result = await codex.thread_resume(
-                thread_id=session_id,
-                message=prompt,
-            )
+            thread = await codex.thread_resume(thread_id=session_id)
+            result = await thread.run(prompt)
+
             blocks = codex_items_to_lup(result.items)
             response = LupResponse(blocks=blocks)
             response.session_id = session_id
@@ -357,21 +361,15 @@ class CodexAdapter(AgentAdapter):
         from codex_app_server import AppServerConfig, AsyncCodex
 
         config_overrides = self.build_config_overrides()
-        config = AppServerConfig(
-            config_overrides=config_overrides if config_overrides else None,
-        )
+        config = AppServerConfig(config_overrides=config_overrides)
 
         async with AsyncCodex(config=config) as codex:
-            fork_result = await codex.thread_fork(thread_id=session_id)
-            forked_thread_id = fork_result.thread_id
+            forked_thread = await codex.thread_fork(thread_id=session_id)
+            result = await forked_thread.run(prompt)
 
-            result = await codex.thread_resume(
-                thread_id=forked_thread_id,
-                message=prompt,
-            )
             blocks = codex_items_to_lup(result.items)
             response = LupResponse(blocks=blocks)
-            response.session_id = forked_thread_id
+            response.session_id = forked_thread.id
             response.result = LupResultMessage(result=result.final_response)
 
             return response
