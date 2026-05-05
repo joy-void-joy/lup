@@ -32,22 +32,25 @@ Examples:
     Create a Stop hook to keep the agent in a persistent loop::
 
         >>> from lup.lib.realtime import create_stop_guard
-        >>> from lup.lib.hooks import merge_hooks
+        >>> from lup.lib.types import merge_hooks
         >>> hooks = merge_hooks(permission_hooks, create_stop_guard())
 """
 
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TypedDict, cast
+from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from claude_agent_sdk import HookInput, HookMatcher
-from claude_agent_sdk.types import HookContext, SyncHookJSONOutput
-
-from lup.lib.hooks import HooksConfig, block_hook_output
 from lup.lib.reflect import ReflectionGate
+from lup.lib.types import (
+    LupHookInput,
+    LupHookMatcher,
+    LupHookOutput,
+    LupHooksConfig,
+    block_hook,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -513,41 +516,34 @@ class Scheduler:
 # =====================================================================
 
 
-def create_stop_guard() -> HooksConfig:
+def create_stop_guard() -> LupHooksConfig:
     """Create a Stop hook that prevents the agent from ending its turn.
 
     The agent must use the ``sleep`` tool to yield control. This keeps
     the agent in a persistent loop: wake -> act -> sleep -> wake.
 
     Returns:
-        HooksConfig with a Stop hook.
+        LupHooksConfig with a Stop hook.
 
     Usage:
         from lup.lib.realtime import create_stop_guard
-        from lup.lib.hooks import merge_hooks
+        from lup.lib.types import merge_hooks
 
         hooks = merge_hooks(permission_hooks, create_stop_guard())
     """
 
-    async def stop_guard(
-        input_data: HookInput,
-        _tool_use_id: str | None,
-        _context: HookContext,
-    ) -> SyncHookJSONOutput:
-        if input_data["hook_event_name"] != "Stop":
-            return SyncHookJSONOutput()
-        if input_data["stop_hook_active"]:
-            return SyncHookJSONOutput()
-        return block_hook_output(
+    async def stop_guard(input_data: LupHookInput) -> LupHookOutput:
+        if input_data.get("hook_event_name") != "Stop":
+            return LupHookOutput()
+        if input_data.get("stop_hook_active", False):
+            return LupHookOutput()
+        return block_hook(
             "You cannot end your turn. Use sleep to pause between turns."
         )
 
-    return cast(
-        HooksConfig,
-        {
-            "Stop": [HookMatcher(hooks=[stop_guard])],
-        },
-    )
+    return {
+        "Stop": [LupHookMatcher(hook=stop_guard)],
+    }
 
 
 def create_pending_event_guard(
@@ -555,7 +551,7 @@ def create_pending_event_guard(
     check_unread: Callable[[], int],
     scheduler: Scheduler,
     guarded_tools: list[str],
-) -> HooksConfig:
+) -> LupHooksConfig:
     """Create a PreToolUse hook that blocks timing tools when unread events exist.
 
     Forces the agent to call ``context`` before sleeping or scheduling.
@@ -566,53 +562,46 @@ def create_pending_event_guard(
         guarded_tools: MCP tool names to guard (e.g., ``["mcp__session__sleep"]``).
 
     Returns:
-        HooksConfig with PreToolUse hooks.
+        LupHooksConfig with PreToolUse hooks.
     """
 
-    async def event_guard(
-        input_data: HookInput,
-        _tool_use_id: str | None,
-        _context: HookContext,
-    ) -> SyncHookJSONOutput:
-        if input_data["hook_event_name"] != "PreToolUse":
-            return SyncHookJSONOutput()
-        tool_input = input_data["tool_input"]
+    async def event_guard(input_data: LupHookInput) -> LupHookOutput:
+        if input_data.get("hook_event_name") != "PreToolUse":
+            return LupHookOutput()
+        tool_input = input_data.get("tool_input", {})
         if tool_input.get("force", False):
-            return SyncHookJSONOutput()
+            return LupHookOutput()
         if tool_input.get("debounce_initial") is not None:
-            return SyncHookJSONOutput()
+            return LupHookOutput()
         if scheduler.debounce_active:
-            return SyncHookJSONOutput()
+            return LupHookOutput()
         if scheduler.wake_pending:
-            return SyncHookJSONOutput()
+            return LupHookOutput()
 
         unread = check_unread()
         if not unread:
-            return SyncHookJSONOutput()
+            return LupHookOutput()
 
-        return block_hook_output(
+        return block_hook(
             f"Blocked — {unread} unread event(s). Call context first."
         )
 
-    return cast(
-        HooksConfig,
-        {
-            "PreToolUse": [
-                HookMatcher(matcher=tool_name, hooks=[event_guard])
-                for tool_name in guarded_tools
-            ],
-        },
-    )
+    return {
+        "PreToolUse": [
+            LupHookMatcher(matcher=tool_name, hook=event_guard)
+            for tool_name in guarded_tools
+        ],
+    }
 
 
 def create_meta_before_sleep_guard(
     *,
     scheduler: Scheduler,
     sleep_tool_name: str,
-) -> HooksConfig:
+) -> LupHooksConfig:
     """Create a PreToolUse hook that requires meta before sleep.
 
-    Convenience wrapper around :func:`~lup.lib.reflect.create_reflection_gate`
+    Convenience wrapper around :func:`~lup.lib.hooks.create_reflection_gate`
     for the persistent agent pattern. Forces the agent to call the ``meta``
     tool (process self-assessment) before every sleep. The gate resets
     automatically via ``scheduler.on_agent_action()``.
@@ -622,9 +611,9 @@ def create_meta_before_sleep_guard(
         sleep_tool_name: MCP tool name for sleep (e.g., ``"mcp__session__sleep"``).
 
     Returns:
-        HooksConfig with PreToolUse hooks.
+        LupHooksConfig with PreToolUse hooks.
     """
-    from lup.lib.reflect import create_reflection_gate
+    from lup.lib.hooks import create_reflection_gate
 
     return create_reflection_gate(
         gate=scheduler.meta_gate,
@@ -634,16 +623,3 @@ def create_meta_before_sleep_guard(
     )
 
 
-def create_codex_stop_guard_hook() -> list[dict[str, str]]:
-    """Create Codex-compatible Stop hook config for persistent mode.
-
-    On Codex, the thread turn model doesn't have a Stop event in the
-    same way — threads naturally complete turns. This returns an empty
-    list since persistent mode on Codex uses thread/resume instead of
-    blocking Stop.
-
-    For environments that do support Codex Stop hooks, this generates
-    the config. Currently a no-op since Codex persistent mode uses
-    the thread resume pattern.
-    """
-    return []
