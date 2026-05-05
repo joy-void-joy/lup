@@ -10,7 +10,7 @@ Modules:
 - background: Background agents for persistent sessions (parallel companions)
 - client: Agent SDK client creation and response collection
 - history: Session history storage and retrieval (generic, model-agnostic)
-- hooks: Claude Agent SDK hook utilities (permission, nudge, capture)
+- hooks: Hook utilities (permission, nudge, capture)
 - metrics: Tool call tracking with @tracked decorator
 - mcp: MCP server creation utilities
 - notes: RO/RW notes directory structure

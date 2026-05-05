@@ -7,14 +7,20 @@ No ``claude_agent_sdk`` imports here — all SDK-specific logic lives in
 ``lup.lib.adapters.*``.
 """
 
+from __future__ import annotations
+
 import logging
+from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from lup.lib.adapters.common import AgentAdapter
 
 from lup.agent.config import settings
 from lup.agent.models import AgentOutput, AgentSessionResult
-from lup.lib.client import TokenUsage
+from lup.lib.types import TokenUsage
 from lup.lib.history import save_session
 from lup.lib.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
 from lup.lib.notes import setup_notes
@@ -75,77 +81,35 @@ def build_result(
     )
 
 
-async def run_claude(
-    task: str,
-    *,
+def build_adapter(
     session_id: str,
-    task_id: str | None,
-    trace_logger: TraceLogger,
-) -> LupResponse:
-    """Run the agent via the Claude Agent SDK."""
-    from lup.lib.adapters.claude import ClaudeAdapter, build_options
-    from lup.lib.sandbox import Sandbox
+    task_id: str | None = None,
+) -> tuple[AgentAdapter, AbstractContextManager[object]]:
+    """Build the appropriate adapter for ``settings.agent_sdk``.
 
+    Returns (adapter, context_manager) — the caller enters the context
+    (e.g. sandbox lifecycle) around the adapter run.
+    """
     notes = setup_notes(session_id, task_id or "0")
-    sandbox = Sandbox(
-        session_id=session_id,
-        shared_dir=notes.session / "sandbox_shared",
-        timeout_seconds=settings.sandbox_timeout_seconds,
-    )
 
-    with sandbox:
-        options = build_options(notes, sandbox=sandbox)
-        adapter = ClaudeAdapter(options)
-        return await adapter.run(task, trace_logger=trace_logger)
+    match settings.agent_sdk:
+        case "claude":
+            from lup.lib.adapters.claude import ClaudeAdapter, build_options
+            from lup.lib.sandbox import Sandbox
 
+            sb = Sandbox(
+                session_id=session_id,
+                shared_dir=notes.session / "sandbox_shared",
+                timeout_seconds=settings.sandbox_timeout_seconds,
+            )
+            options = build_options(notes, sandbox=sb)
+            adapter: AgentAdapter = ClaudeAdapter(options)
+            return adapter, sb
 
-async def run_codex(
-    task: str,
-    *,
-    session_id: str,
-    trace_logger: TraceLogger,
-) -> LupResponse:
-    """Run the agent via the Codex SDK."""
-    import tempfile
+        case "codex":
+            from lup.lib.adapters.codex import build_codex_adapter
 
-    from lup.agent.models import AgentOutput
-    from lup.agent.prompts import get_system_prompt
-    from lup.lib.adapters.codex import CodexAdapter
-    from lup.lib.adapters.codex_hooks import (
-        build_permission_hooks,
-        build_reflection_gate_hook,
-    )
-    from lup.lib.notes import setup_notes
-    from lup.lib.reflect import ReflectionGate
-
-    notes = setup_notes(session_id, "0")
-    script_dir = Path(tempfile.mkdtemp(prefix="lup_codex_hooks_"))
-
-    gate_flag_path = script_dir / "reflection_gate_flag"
-    ReflectionGate(flag_path=gate_flag_path)
-
-    hook_configs = build_permission_hooks(notes.rw, notes.ro, script_dir)
-    hook_configs.extend(
-        build_reflection_gate_hook(
-            gate_flag_path=gate_flag_path,
-            gated_tool="StructuredOutput",
-            reflection_tool_name="mcp__notes__review",
-            script_dir=script_dir,
-        )
-    )
-
-    adapter = CodexAdapter(
-        model=settings.model,
-        system_prompt=get_system_prompt(),
-        output_schema=AgentOutput.model_json_schema(),
-        sandbox=settings.codex_sandbox,
-        effort=settings.codex_effort or settings.reasoning_effort,
-        approval_policy=settings.codex_approval_policy,
-        mcp_tools=True,
-        hook_overrides=hook_configs,
-        session_id=session_id,
-    )
-    return await adapter.run(task, trace_logger=trace_logger)
+            return build_codex_adapter(notes), nullcontext()
 
 
 async def run_agent(
@@ -168,18 +132,10 @@ async def run_agent(
     trace_path = TRACES_PATH / session_id / f"{datetime.now().strftime('%H%M%S')}.md"
     trace_logger = TraceLogger(trace_path=trace_path, title=f"Session {session_id}")
 
-    match settings.agent_sdk:
-        case "claude":
-            response = await run_claude(
-                task,
-                session_id=session_id,
-                task_id=task_id,
-                trace_logger=trace_logger,
-            )
-        case "codex":
-            response = await run_codex(
-                task, session_id=session_id, trace_logger=trace_logger
-            )
+    adapter, ctx = build_adapter(session_id, task_id)
+
+    with ctx:
+        response = await adapter.run(task, trace_logger=trace_logger)
 
     trace_logger.save()
     log_metrics_summary()

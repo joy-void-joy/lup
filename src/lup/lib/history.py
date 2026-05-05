@@ -56,7 +56,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup.lib.client import TokenUsage
+from lup.lib.types import TokenUsage
 from lup.lib.metrics import MetricsSummary
 from lup.lib.paths import sessions_dir, traces_path
 from lup.version import AGENT_VERSION

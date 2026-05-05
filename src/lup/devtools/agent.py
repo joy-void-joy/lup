@@ -35,9 +35,8 @@ from typing import TYPE_CHECKING, Annotated
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from claude_agent_sdk.types import ResultMessage
-
-    from lup.lib.client import ResponseCollector
+    from lup.lib.adapters.common import Conversation
+    from lup.lib.types import LupResponse
 
 import sh
 import typer
@@ -45,7 +44,7 @@ import typer
 from lup.agent.config import settings
 from lup.agent.models import AgentOutput
 from lup.agent.prompts import get_system_prompt
-from lup.agent.subagents import get_subagents
+from lup.agent.subagents import get_subagent_specs
 from lup.agent.tools.example import EXAMPLE_TOOLS
 from lup.lib.mcp import LupMcpTool
 
@@ -136,7 +135,7 @@ def print_model_source(
 
 def tool_location(tool: LupMcpTool) -> str:
     """Get file:line for the tool handler (unwraps decorators)."""
-    handler = inspect_mod.unwrap(tool.sdk_tool.handler)
+    handler = inspect_mod.unwrap(tool.handler)
     try:
         filepath = inspect_mod.getfile(handler)
         filename = os.path.basename(filepath)
@@ -160,15 +159,15 @@ def tool_signature(tool: LupMcpTool) -> str:
 
 def print_tool_compact(out: io.StringIO, tool: LupMcpTool) -> None:
     """Print a single tool as a one-liner."""
-    out.write(f"    {tool.sdk_tool.name}{tool_signature(tool)}\n")
+    out.write(f"    {tool.name}{tool_signature(tool)}\n")
 
 
 def print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
     """Print a single tool with full description and schemas."""
-    out.write(f"\n  {tool.sdk_tool.name}\n")
-    out.write(f"  {'─' * len(tool.sdk_tool.name)}\n")
+    out.write(f"\n  {tool.name}\n")
+    out.write(f"  {'─' * len(tool.name)}\n")
 
-    desc_lines = tool.sdk_tool.description.split(". ")
+    desc_lines = tool.description.split(". ")
     for line in desc_lines:
         line = line.strip()
         if line:
@@ -198,8 +197,8 @@ def collect_all_tools() -> list[LupMcpTool]:
 def tool_to_dict(t: LupMcpTool) -> dict[str, object]:
     """Serialize a LupMcpTool for JSON output."""
     return {
-        "name": t.sdk_tool.name,
-        "description": t.sdk_tool.description,
+        "name": t.name,
+        "description": t.description,
         "input_schema": t.input_model.model_json_schema(),
         "output_schema": t.output_model.model_json_schema() if t.output_model else None,
     }
@@ -236,7 +235,7 @@ def inspect_cmd(
     """Inspect the full agent configuration: tools, schemas, prompt, subagents."""
     tools_by_server = collect_tools_by_server()
     all_tools = collect_all_tools()
-    subagents = get_subagents()
+    subagents = {s.name: s for s in get_subagent_specs()}
     prompt = get_system_prompt()
 
     if as_json:
@@ -335,33 +334,34 @@ def serve_tools_cmd() -> None:
     """
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import Tool
+    from mcp.types import CallToolResult, TextContent, Tool
 
-    from lup.lib.mcp import generate_json_schema, extract_sdk_tools
-
-    sdk_tools = extract_sdk_tools(collect_all_tools())
-    tool_map = {t.name: t for t in sdk_tools}
+    lup_tools = collect_all_tools()
+    tool_map = {t.name: t for t in lup_tools}
 
     server = Server("lup-tools", version="1.0.0")
 
-    @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
+    @server.list_tools()
     async def list_tools() -> list[Tool]:
         tool_list = []
-        for t in sdk_tools:
-            schema = generate_json_schema(t.input_schema)
+        for t in lup_tools:
             tool_list.append(
-                Tool(name=t.name, description=t.description, inputSchema=schema)
+                Tool(name=t.name, description=t.description, inputSchema=t.input_schema)
             )
         return tool_list
 
-    @server.call_tool()  # type: ignore[untyped-decorator]
+    @server.call_tool()
     async def call_tool(
         name: str, arguments: dict[str, object]
-    ) -> list[dict[str, str]]:
+    ) -> CallToolResult:
         if name not in tool_map:
             raise ValueError(f"Tool '{name}' not found")
         result = await tool_map[name].handler(arguments)
-        return result.get("content", [])  # type: ignore[return-value]
+        content_dicts: list[dict[str, str]] = result.get("content", [])
+        return CallToolResult(
+            content=[TextContent(type="text", text=d.get("text", "")) for d in content_dicts],
+            isError=result.get("is_error", False),
+        )
 
     async def run() -> None:
         init_options = server.create_initialization_options()
@@ -460,35 +460,33 @@ class Interrupted(Exception):
     """Raised when the user interrupts response collection via Ctrl-C."""
 
 
-async def collect_interruptible(
-    collector: "ResponseCollector",
+async def send_interruptible(
+    conv: "Conversation",
+    prompt: str,
     console: "Console",
-) -> "ResultMessage":
-    """Collect response with Ctrl-C -> client.interrupt() support.
+) -> LupResponse:
+    """Send a prompt with Ctrl-C interrupt support.
 
-    First Ctrl-C sends an interrupt signal to the CLI (graceful stop).
-    Second Ctrl-C cancels the collection task (force stop).
+    First Ctrl-C sends an interrupt signal (graceful stop).
+    Second Ctrl-C cancels the task (force stop).
     """
     loop = asyncio.get_running_loop()
     interrupt_count = 0
 
-    async def do_collect() -> "ResultMessage":
-        return await collector.collect()
-
-    collect_task = asyncio.create_task(do_collect())
+    send_task = asyncio.create_task(conv.send(prompt))
 
     def on_sigint() -> None:
         nonlocal interrupt_count
         interrupt_count += 1
         if interrupt_count == 1:
             console.print("\n  [dim]interrupting...[/dim]")
-            asyncio.ensure_future(collector.client.interrupt())
+            asyncio.ensure_future(conv.interrupt())
         else:
-            collect_task.cancel()
+            send_task.cancel()
 
     loop.add_signal_handler(signal.SIGINT, on_sigint)
     try:
-        return await collect_task
+        return await send_task
     except asyncio.CancelledError:
         raise Interrupted from None
     finally:
@@ -513,36 +511,12 @@ async def repl(
     from rich.console import Console
     from rich.panel import Panel
 
-    from claude_agent_sdk.types import McpServerConfig
-
-    from lup.lib.adapters.claude import build_agent_servers
-    from lup.lib.client import build_client, ResponseCollector
+    from lup.agent.core import build_adapter
     from lup.lib.paths import project_root
-    from lup.lib.sandbox import Sandbox
 
     console = Console(highlight=False)
     effective_model = model or settings.model
-
-    mcp_servers: dict[str, McpServerConfig] = {}
     stack = AsyncExitStack()
-
-    if not no_tools:
-        repl_dir = project_root() / ".lup" / "repl"
-        sandbox = Sandbox(
-            session_id="repl",
-            shared_dir=repl_dir / "sandbox_shared",
-            timeout_seconds=settings.sandbox_timeout_seconds,
-        )
-        stack.enter_context(sandbox)
-        mcp_servers = build_agent_servers(
-            session_dir=repl_dir,
-            sandbox=sandbox,
-        )
-
-        # Shutdown message — registered last so it runs first (LIFO)
-        stack.callback(lambda: console.print("[dim]Shutting down...[/dim]"))
-
-    prompt = get_system_prompt() if not no_prompt else ""
 
     # Welcome panel with server → tool listing
     panel_lines = [
@@ -559,7 +533,7 @@ async def repl(
                 branch = "  └" if is_last_tool else "  ├"
                 if not is_last_server:
                     branch = f"[dim]│[/dim] {'└' if is_last_tool else '├'}"
-                panel_lines.append(f"[dim]{branch}[/dim] {t.sdk_tool.name}")
+                panel_lines.append(f"[dim]{branch}[/dim] {t.name}")
     else:
         panel_lines.append("[dim]no tools[/dim]")
     panel_lines += [
@@ -642,15 +616,11 @@ async def repl(
     )
 
     try:
+        adapter, adapter_ctx = build_adapter("repl")
+        stack.enter_context(adapter_ctx)
+
         async with stack:
-            async with build_client(
-                model=effective_model,
-                system_prompt=prompt,
-                max_thinking_tokens=settings.max_thinking_tokens or (128_000 - 1),
-                permission_mode="bypassPermissions",
-                mcp_servers=mcp_servers if mcp_servers else None,
-                agents=get_subagents(),
-            ) as client:
+            async with adapter.conversation() as conv:
                 last_input_sigint = 0.0
 
                 while True:
@@ -687,23 +657,23 @@ async def repl(
                         query_text = (stripped + "\n\n" if stripped else "") + (
                             f"[image attached: {path_list}]"
                         )
-                        await client.query(query_text)
+                        prompt_text = query_text
                         pending_images.clear()
                     else:
-                        await client.query(user_input)
-                    collector = ResponseCollector(client)
+                        prompt_text = user_input
                     try:
-                        result = await collect_interruptible(
-                            collector,
+                        response = await send_interruptible(
+                            conv,
+                            prompt_text,
                             console,
                         )
                         parts: list[str] = []
-                        if result.duration_ms:
-                            secs = result.duration_ms / 1000
+                        if response.result and response.result.duration_ms:
+                            secs = response.result.duration_ms / 1000
                             parts.append(f"{secs:.1f}s")
-                        if result.total_cost_usd:
-                            session_cost += result.total_cost_usd
-                            parts.append(f"${result.total_cost_usd:.4f}")
+                        if response.result and response.result.total_cost_usd:
+                            session_cost += response.result.total_cost_usd
+                            parts.append(f"${response.result.total_cost_usd:.4f}")
                         if parts:
                             console.print(f"  [dim]{' · '.join(parts)}[/dim]")
                         console.print()

@@ -9,12 +9,11 @@ Each subagent has:
 - Its own model (cheaper models for simpler tasks)
 
 Definitions use SubagentSpec (SDK-agnostic). Each adapter converts
-these into its native subagent primitive at build time.
+these into its native subagent primitive at build time:
+
+- Claude: :func:`~lup.lib.adapters.claude.spec_to_claude`
+- Codex: uses SubagentSpec directly via :func:`~lup.lib.adapters.codex.codex_query`
 """
-
-from typing import Literal, cast
-
-from claude_agent_sdk import AgentDefinition
 
 from lup.lib.types import SubagentSpec
 
@@ -118,47 +117,15 @@ analyzer = SubagentSpec(
 
 
 # =============================================================================
-# ADAPTER CONVERSIONS
-# =============================================================================
-
-
-CLAUDE_MODEL_LITERALS = {"sonnet", "opus", "haiku", "inherit"}
-
-type ClaudeModelLiteral = Literal["sonnet", "opus", "haiku", "inherit"]
-
-
-def spec_to_claude(spec: SubagentSpec) -> AgentDefinition:
-    """Convert a SubagentSpec to a Claude AgentDefinition."""
-    model: ClaudeModelLiteral | None = None
-    if spec.model in CLAUDE_MODEL_LITERALS:
-        model = cast(ClaudeModelLiteral, spec.model)
-
-    return AgentDefinition(
-        description=spec.description,
-        prompt=spec.prompt,
-        tools=spec.tools,
-        model=model,
-    )
-
-
-# =============================================================================
 # EXPORTED SUBAGENTS
 # =============================================================================
 
 ALL_SPECS: list[SubagentSpec] = [researcher, analyzer]
 
 
-def get_subagents() -> dict[str, AgentDefinition]:
-    """Build Claude AgentDefinitions at runtime.
-
-    Using a factory function (not a module constant) allows:
-    - Tool lists computed from current settings/API keys
-    - Context-dependent subagent configuration
-    - Runtime reconfiguration between sessions
-    """
-    return {spec.name: spec_to_claude(spec) for spec in ALL_SPECS}
-
-
 def get_subagent_specs() -> list[SubagentSpec]:
-    """Return all subagent specs (SDK-agnostic)."""
+    """Return all subagent specs (SDK-agnostic).
+
+    Each adapter converts these into its native primitive at build time.
+    """
     return list(ALL_SPECS)

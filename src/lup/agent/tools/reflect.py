@@ -29,7 +29,7 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-from lup.lib.client import query
+from lup.lib.adapters.claude_client import query
 from lup.lib.mcp import LupMcpTool, lup_tool
 from lup.lib.reflect import ReflectionGate
 

@@ -15,7 +15,7 @@ Core tools:
 - ``reply`` delivers actions to the environment
 - Timing tools (debounce, remind, schedule) are non-blocking
 
-Background agents (see ``lup.lib.background.BackgroundAgent``):
+Background agents (see ``lup.lib.background.ClaudeBackgroundAgent``):
 - Run companion agents alongside the main session
 - Observer example at the bottom shows conversation summarization
 - Any use case: research, execution, monitoring — not just observation
@@ -30,8 +30,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.lib.background import BackgroundAgent
-from lup.lib.mcp import LupMcpTool, ToolError, extract_sdk_tools, lup_tool
+from lup.lib.adapters.claude_background import ClaudeBackgroundAgent
+from lup.lib.mcp import LupMcpTool, ToolError, lup_tool
 from lup.lib.realtime import (
     DebounceInput,
     RemindInput,
@@ -385,7 +385,7 @@ def create_realtime_tools(
 # Background agent example: Observer
 # =====================================================================
 #
-# An observer is one use of BackgroundAgent — it maintains running
+# An observer is one use of ClaudeBackgroundAgent — it maintains running
 # summaries of the conversation. Other uses: research agents that
 # fetch data, executor agents that run long tasks, etc.
 #
@@ -459,7 +459,7 @@ def create_observer(
     notes: list[str],
     transcript: list[object],
     model: str = "claude-sonnet-4-20250514",
-) -> BackgroundAgent:
+) -> ClaudeBackgroundAgent:
     """Create an observer background agent.
 
     This is a TEMPLATE — customize the system prompt, model, and
@@ -476,7 +476,7 @@ def create_observer(
         model: Model to use for the observer.
 
     Returns:
-        A configured BackgroundAgent (call ``.start()`` to begin).
+        A configured ClaudeBackgroundAgent (call ``.start()`` to begin).
     """
     read_index = [0]  # Mutable container for closure
 
@@ -495,10 +495,10 @@ def create_observer(
         last_note = notes[-1] if notes else "(none yet)"
         return f"New messages:\n{msgs_text}\n\nYour last note:\n{last_note}"
 
-    return BackgroundAgent(
+    return ClaudeBackgroundAgent(
         name="observer",
         system_prompt=OBSERVER_SYSTEM_PROMPT,
-        tools=extract_sdk_tools(create_observer_tools(notes=notes)),
+        tools=create_observer_tools(notes=notes),
         build_message=build_message,
         start_message="[Observer started — maintain notes about the conversation]",
         model=model,
