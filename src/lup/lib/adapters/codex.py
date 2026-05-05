@@ -1,3 +1,4 @@
+# claude: ignore
 """OpenAI Codex SDK adapter.
 
 Wraps the Codex Python SDK (``codex_app_server``) behind the
@@ -14,14 +15,15 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, TypedDict, cast
 
 if TYPE_CHECKING:
-    from codex_app_server import ThreadItem
+    from codex_app_server import AsyncThread, ThreadItem
     from codex_app_server.models import JsonObject
 
-from lup.lib.adapters.common import AgentAdapter
+from lup.lib.adapters.common import AgentAdapter, Conversation
 from lup.lib.trace import TraceLogger, print_message
 from lup.lib.types import (
     LupAssistantMessage,
@@ -197,6 +199,105 @@ def build_hook_config_overrides(
     return tuple(overrides)
 
 
+def build_lup_response(
+    result: object,
+    *,
+    output_schema: dict[str, object] | None = None,
+    session_id: str | None = None,
+    trace_logger: TraceLogger | None = None,
+    prefix: str = "",
+) -> LupResponse:
+    """Convert a Codex RunResult into a LupResponse."""
+    from codex_app_server import RunResult
+
+    if not isinstance(result, RunResult):
+        raise TypeError(f"Expected RunResult, got {type(result).__name__}")
+
+    blocks = codex_items_to_lup(result.items)
+    response = LupResponse(blocks=blocks)
+
+    for block in blocks:
+        if isinstance(block, LupToolResultBlock):
+            response.tool_results.append(block)
+
+    assistant_blocks: list[LupContentBlock] = [
+        b for b in blocks if not isinstance(b, LupToolResultBlock)
+    ]
+    result_blocks: list[LupContentBlock] = [
+        b for b in blocks if isinstance(b, LupToolResultBlock)
+    ]
+    if assistant_blocks:
+        response.messages.append(LupAssistantMessage(content=assistant_blocks))
+    if result_blocks:
+        response.messages.append(LupUserMessage(content=result_blocks))
+
+    if trace_logger:
+        for block in blocks:
+            trace_logger.log_block(block)
+        lup_msg = LupAssistantMessage(content=blocks)
+        print_message(lup_msg, prefix=prefix)
+
+    structured_output: dict[str, object] | None = None
+    if result.final_response and output_schema:
+        try:
+            structured_output = json.loads(result.final_response)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    result_usage: dict[str, int] | None = None
+    if result.usage is not None:
+        result_usage = {
+            "input_tokens": result.usage.total.input_tokens,
+            "output_tokens": result.usage.total.output_tokens,
+        }
+
+    response.result = LupResultMessage(
+        structured_output=structured_output,
+        result=result.final_response,
+        usage=result_usage,
+    )
+    response.session_id = session_id
+    return response
+
+
+class CodexConversation(Conversation):
+    """Multi-turn conversation via a Codex thread."""
+
+    def __init__(
+        self,
+        thread: "AsyncThread",
+        *,
+        output_schema: dict[str, object] | None = None,
+        effort: str | None = None,
+    ) -> None:
+        self.thread = thread
+        self.output_schema = output_schema
+        self.effort = effort
+
+    async def send(
+        self,
+        prompt: str,
+        *,
+        trace_logger: TraceLogger | None = None,
+        prefix: str = "",
+    ) -> LupResponse:
+        from codex_app_server import ReasoningEffort
+
+        effort = ReasoningEffort(self.effort) if self.effort else None
+        result = await self.thread.run(
+            prompt,
+            effort=effort,
+            output_schema=cast("JsonObject | None", self.output_schema),
+        )
+        return build_lup_response(
+            result,
+            output_schema=self.output_schema,
+            session_id=self.thread.id,
+            trace_logger=trace_logger,
+            prefix=prefix,
+        )
+
+
 class CodexAdapter(AgentAdapter):
     """Run prompts via the OpenAI Codex SDK."""
 
@@ -232,20 +333,14 @@ class CodexAdapter(AgentAdapter):
             overrides.extend(build_hook_config_overrides(self.hook_overrides))
         return tuple(overrides)
 
-    async def run(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> LupResponse:
+    @asynccontextmanager
+    async def conversation(self) -> AsyncGenerator[Conversation, None]:
         require_codex_sdk()
 
         from codex_app_server import (
             AppServerConfig,
             AskForApproval,
             AsyncCodex,
-            ReasoningEffort,
             SandboxMode,
         )
         from codex_app_server.generated.v2_all import AskForApprovalValue
@@ -264,64 +359,11 @@ class CodexAdapter(AgentAdapter):
                     else None
                 ),
             )
-
-            effort = ReasoningEffort(self.effort) if self.effort else None
-            result = await thread.run(
-                prompt,
-                effort=effort,
-                output_schema=cast("JsonObject | None", self.output_schema),
+            yield CodexConversation(
+                thread,
+                output_schema=self.output_schema,
+                effort=self.effort,
             )
-
-            blocks = codex_items_to_lup(result.items)
-
-            response = LupResponse(blocks=blocks)
-
-            for block in blocks:
-                match block:
-                    case LupToolResultBlock():
-                        response.tool_results.append(block)
-
-            assistant_blocks: list[LupContentBlock] = [
-                b for b in blocks
-                if not isinstance(b, LupToolResultBlock)
-            ]
-            result_blocks: list[LupContentBlock] = [
-                b for b in blocks
-                if isinstance(b, LupToolResultBlock)
-            ]
-            if assistant_blocks:
-                response.messages.append(LupAssistantMessage(content=assistant_blocks))
-            if result_blocks:
-                response.messages.append(LupUserMessage(content=result_blocks))
-
-            if trace_logger:
-                for block in blocks:
-                    trace_logger.log_block(block)
-                lup_msg = LupAssistantMessage(content=blocks)
-                print_message(lup_msg, prefix=prefix)
-
-            structured_output: dict[str, object] | None = None
-            if result.final_response and self.output_schema:
-                try:
-                    structured_output = json.loads(result.final_response)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-            result_usage: dict[str, int] | None = None
-            if result.usage is not None:
-                result_usage = {
-                    "input_tokens": result.usage.total.input_tokens,
-                    "output_tokens": result.usage.total.output_tokens,
-                }
-
-            response.result = LupResultMessage(
-                structured_output=structured_output,
-                result=result.final_response,
-                usage=result_usage,
-            )
-            response.session_id = thread.id or self.session_id
-
-            return response
 
     async def resume(self, session_id: str, prompt: str) -> LupResponse:
         """Resume a Codex thread by ID."""
@@ -329,30 +371,16 @@ class CodexAdapter(AgentAdapter):
 
         from codex_app_server import AppServerConfig, AsyncCodex
 
-        config_overrides = self.build_config_overrides()
-        config = AppServerConfig(config_overrides=config_overrides)
+        config = AppServerConfig(config_overrides=self.build_config_overrides())
 
         async with AsyncCodex(config=config) as codex:
             thread = await codex.thread_resume(thread_id=session_id)
             result = await thread.run(prompt)
-
-            blocks = codex_items_to_lup(result.items)
-            response = LupResponse(blocks=blocks)
-            response.session_id = session_id
-
-            if result.final_response and self.output_schema:
-                try:
-                    structured_output = json.loads(result.final_response)
-                    response.result = LupResultMessage(
-                        structured_output=structured_output,
-                        result=result.final_response,
-                    )
-                except (json.JSONDecodeError, TypeError):
-                    response.result = LupResultMessage(result=result.final_response)
-            else:
-                response.result = LupResultMessage(result=result.final_response)
-
-            return response
+            return build_lup_response(
+                result,
+                output_schema=self.output_schema,
+                session_id=session_id,
+            )
 
     async def fork(self, session_id: str, prompt: str) -> LupResponse:
         """Fork a Codex thread and run on the fork."""
@@ -360,16 +388,128 @@ class CodexAdapter(AgentAdapter):
 
         from codex_app_server import AppServerConfig, AsyncCodex
 
-        config_overrides = self.build_config_overrides()
-        config = AppServerConfig(config_overrides=config_overrides)
+        config = AppServerConfig(config_overrides=self.build_config_overrides())
 
         async with AsyncCodex(config=config) as codex:
             forked_thread = await codex.thread_fork(thread_id=session_id)
             result = await forked_thread.run(prompt)
+            return build_lup_response(
+                result,
+                output_schema=self.output_schema,
+                session_id=forked_thread.id,
+            )
 
-            blocks = codex_items_to_lup(result.items)
-            response = LupResponse(blocks=blocks)
-            response.session_id = forked_thread.id
-            response.result = LupResultMessage(result=result.final_response)
 
-            return response
+# ---------------------------------------------------------------------------
+# Setup function (parallel to claude.build_options)
+# ---------------------------------------------------------------------------
+
+
+def build_codex_adapter(
+    notes_config: object,
+    *,
+    sandbox: str | None = None,
+) -> CodexAdapter:
+    """Build a fully configured CodexAdapter from settings and notes config.
+
+    Parallel to :func:`~lup.lib.adapters.claude.build_options` — assembles
+    MCP tools, permission hooks, reflection gate, output schema, and all
+    settings into a ready-to-run adapter.
+
+    Args:
+        notes_config: A ``NotesConfig`` instance with session/output paths.
+        sandbox: Override sandbox mode (default from settings).
+
+    Returns:
+        Configured CodexAdapter.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from lup.agent.config import settings
+    from lup.agent.models import AgentOutput
+    from lup.agent.prompts import get_system_prompt
+    from lup.lib.adapters.codex_hooks import lup_hooks_to_codex
+    from lup.lib.hooks import create_permission_hooks, create_reflection_gate
+    from lup.lib.notes import NotesConfig
+    from lup.lib.reflect import ReflectionGate
+    from lup.lib.types import merge_hooks
+
+    if not isinstance(notes_config, NotesConfig):
+        raise TypeError(f"Expected NotesConfig, got {type(notes_config).__name__}")
+
+    script_dir = Path(tempfile.mkdtemp(prefix="lup_codex_hooks_"))
+    gate_flag_path = script_dir / "reflection_gate_flag"
+    ReflectionGate(flag_path=gate_flag_path)
+
+    permission_hooks = create_permission_hooks(notes_config.rw, notes_config.ro)
+    gate_hooks = create_reflection_gate(
+        gate=ReflectionGate(flag_path=gate_flag_path),
+        gated_tool="StructuredOutput",
+        reflection_tool_name="mcp__notes__review",
+    )
+    lup_hooks = merge_hooks(permission_hooks, gate_hooks)
+
+    hook_configs = lup_hooks_to_codex(
+        lup_hooks,
+        script_dir=script_dir,
+        rw_dirs=notes_config.rw,
+        ro_dirs=notes_config.ro,
+        gate_flag_path=gate_flag_path,
+    )
+
+    return CodexAdapter(
+        model=settings.model,
+        system_prompt=get_system_prompt(),
+        output_schema=AgentOutput.model_json_schema(),
+        sandbox=sandbox or settings.codex_sandbox,
+        effort=settings.codex_effort or settings.reasoning_effort,
+        approval_policy=settings.codex_approval_policy,
+        mcp_tools=True,
+        hook_overrides=hook_configs,
+    )
+
+
+# ---------------------------------------------------------------------------
+# One-shot query (parallel to client.query)
+# ---------------------------------------------------------------------------
+
+
+async def codex_query(
+    prompt: str,
+    *,
+    model: str | None = None,
+    system_prompt: str | None = None,
+    output_schema: dict[str, object] | None = None,  # claude: ignore
+    effort: str | None = None,
+    trace_logger: TraceLogger | None = None,
+    prefix: str = "",
+) -> LupResponse:
+    """One-shot Codex query — parallel to :func:`~lup.lib.client.query`.
+
+    Creates a minimal CodexAdapter (no MCP tools or hooks) and runs a
+    single prompt. Use this for internal calls: reflect tools, subagent
+    dispatch, or any place that needs a quick LLM call via Codex.
+
+    Args:
+        prompt: The prompt to send.
+        model: Model override (default from settings).
+        system_prompt: System prompt override.
+        output_schema: JSON schema for structured output.
+        effort: Reasoning effort override.
+        trace_logger: Optional trace logger.
+        prefix: Display prefix for trace output.
+
+    Returns:
+        LupResponse with the result.
+    """
+    from lup.agent.config import settings
+
+    adapter = CodexAdapter(
+        model=model or settings.model,
+        system_prompt=system_prompt or "",
+        output_schema=output_schema,
+        effort=effort or settings.codex_effort,
+        mcp_tools=False,
+    )
+    return await adapter.run(prompt, trace_logger=trace_logger, prefix=prefix)
