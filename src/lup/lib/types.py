@@ -1,13 +1,12 @@
-"""Internal content block, message, and response types.
+"""Internal content block, message, response, and hook types.
 
 These types are the shared vocabulary for all consumer code (core.py,
 trace.py, etc.). SDK-specific adapters convert to/from these types at
-the boundary — consumer code never imports from ``claude_agent_sdk``
-or ``codex_app_server`` directly.
+the boundary — consumer code never imports from SDK packages directly.
 """
 
-from collections.abc import Sequence
-from typing import Literal
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +24,7 @@ class LupTextBlock(BaseModel):
 
 
 class LupThinkingBlock(BaseModel):
-    """Extended thinking content (Claude-only)."""
+    """Extended thinking / reasoning content."""
 
     type: Literal["thinking"] = "thinking"
     thinking: str
@@ -61,9 +60,7 @@ type LupContentBlock = (
 class SubagentSpec(BaseModel):
     """SDK-agnostic subagent definition.
 
-    Each adapter interprets this into its native subagent primitive:
-    - Claude: AgentDefinition
-    - Codex: thread fork or query() dispatch based on tools
+    Each adapter interprets this into its native subagent primitive.
     """
 
     name: str
@@ -146,3 +143,119 @@ class LupResponse(BaseModel):
         if self.result is not None and self.result.structured_output:
             return output_type.model_validate(self.result.structured_output)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Hook abstraction (SDK-agnostic)
+# ---------------------------------------------------------------------------
+
+
+class LupHookInput(TypedDict, total=False):
+    """SDK-agnostic hook input. Adapters populate from their native format."""
+
+    hook_event_name: str
+    tool_name: str
+    tool_input: dict[str, str]
+    stop_hook_active: bool
+
+
+class LupHookOutput(TypedDict, total=False):
+    """SDK-agnostic hook output. Adapters convert to their native format."""
+
+    decision: str
+    reason: str
+    system_message: str
+
+
+type LupHookFn = Callable[[LupHookInput], Awaitable[LupHookOutput]]
+"""Async function that receives hook input and returns a hook decision."""
+
+
+class LupHookMatcher(BaseModel):
+    """A hook handler with an optional tool name matcher."""
+
+    matcher: str | None = None
+    hook: LupHookFn
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+type LupHookEvent = Literal["PreToolUse", "PostToolUse", "Stop"]
+type LupHooksConfig = dict[LupHookEvent, list[LupHookMatcher]]
+"""SDK-agnostic hook configuration. Each adapter converts to native format."""
+
+
+def allow_hook() -> LupHookOutput:
+    """Create a generic allow decision."""
+    return LupHookOutput(decision="allow")
+
+
+def deny_hook(reason: str) -> LupHookOutput:
+    """Create a generic deny decision."""
+    return LupHookOutput(decision="deny", reason=reason)
+
+
+def block_hook(reason: str) -> LupHookOutput:
+    """Create a generic block decision."""
+    return LupHookOutput(decision="block", reason=reason)
+
+
+class TokenUsage(TypedDict, total=False):
+    """Token usage from API responses."""
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+
+
+def merge_hooks(base: LupHooksConfig, additional: LupHooksConfig) -> LupHooksConfig:
+    """Merge two hook configurations. Base hooks run first."""
+    merged: LupHooksConfig = dict(base)
+    for event in additional:
+        if event in merged:
+            merged[event] = merged[event] + additional[event]
+        else:
+            merged[event] = additional[event]
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# Effort normalization
+# ---------------------------------------------------------------------------
+
+EFFORT_MAP_CLAUDE: dict[str, str] = {
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "max",
+    "max": "max",
+}
+
+EFFORT_MAP_CODEX: dict[str, str] = {
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "xhigh",
+}
+
+
+def normalize_effort(effort: str | None, backend: str) -> str | None:
+    """Map a generic effort level to SDK-specific value."""
+    if effort is None:
+        return None
+    effort_map = EFFORT_MAP_CLAUDE if backend == "anthropic" else EFFORT_MAP_CODEX
+    return effort_map.get(effort, effort)
+
+
+def model_backend(model: str) -> str:
+    """Determine the backend for a model name.
+
+    Returns "anthropic" for Claude models, "openai" for GPT/O models.
+    """
+    if model.startswith("claude-") or model in ("haiku", "sonnet", "opus"):
+        return "anthropic"
+    if model.startswith(("gpt-", "o1", "o3", "o4")):
+        return "openai"
+    return "anthropic"
