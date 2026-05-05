@@ -1,4 +1,4 @@
-"""Tests for Claude SDK → lup type conversion."""
+"""Tests for SDK → lup type conversion (Claude and Codex)."""
 
 from claude_agent_sdk import TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
 from claude_agent_sdk.types import AssistantMessage, ResultMessage, SystemMessage, UserMessage
@@ -267,3 +267,102 @@ class TestCodexItemsToLup:
         assert isinstance(blocks[0], LupThinkingBlock)
         assert "Step 1: analyze" in blocks[0].thinking
         assert "Step 2: decide" in blocks[0].thinking
+
+    def test_file_change_item(self) -> None:
+        from codex_app_server import ThreadItem
+        from codex_app_server.generated.v2_all import (
+            FileChangeThreadItem,
+            FileUpdateChange,
+            PatchApplyStatus,
+            PatchChangeKind,
+            UpdatePatchChangeKind,
+        )
+        from lup.lib.adapters.codex import codex_items_to_lup
+
+        item = ThreadItem(
+            root=FileChangeThreadItem(
+                id="fc_1",
+                status=PatchApplyStatus.completed,
+                changes=[
+                    FileUpdateChange(
+                        path="src/main.py",
+                        kind=PatchChangeKind(root=UpdatePatchChangeKind(type="update")),
+                        diff="--- a/src/main.py\n+++ b/src/main.py\n@@ -1 +1 @@\n-old\n+new",
+                    ),
+                ],
+                type="fileChange",
+            )
+        )
+        blocks = codex_items_to_lup([item])
+        assert len(blocks) == 2
+        assert isinstance(blocks[0], LupToolUseBlock)
+        assert blocks[0].name == "file_change"
+        assert "src/main.py" in str(blocks[0].input)
+        assert isinstance(blocks[1], LupToolResultBlock)
+        assert "old" in (blocks[1].content or "")
+        assert "new" in (blocks[1].content or "")
+
+    def test_multiple_items_mixed(self) -> None:
+        from codex_app_server import ThreadItem
+        from codex_app_server.generated.v2_all import (
+            AgentMessageThreadItem,
+            MessagePhase,
+            ReasoningThreadItem,
+        )
+        from lup.lib.adapters.codex import codex_items_to_lup
+
+        items = [
+            ThreadItem(
+                root=ReasoningThreadItem(
+                    id="r1",
+                    content=["thinking..."],
+                    summary=[],
+                    type="reasoning",
+                )
+            ),
+            ThreadItem(
+                root=AgentMessageThreadItem(
+                    id="m1",
+                    text="Done.",
+                    phase=MessagePhase.final_answer,
+                    type="agentMessage",
+                )
+            ),
+        ]
+        blocks = codex_items_to_lup(items)
+        assert len(blocks) == 2
+        assert isinstance(blocks[0], LupThinkingBlock)
+        assert isinstance(blocks[1], LupTextBlock)
+
+    def test_empty_items_list(self) -> None:
+        from lup.lib.adapters.codex import codex_items_to_lup
+
+        blocks = codex_items_to_lup([])
+        assert blocks == []
+
+    def test_mcp_tool_call_with_error(self) -> None:
+        from codex_app_server import ThreadItem
+        from codex_app_server.generated.v2_all import (
+            McpToolCallError,
+            McpToolCallStatus,
+            McpToolCallThreadItem,
+        )
+        from lup.lib.adapters.codex import codex_items_to_lup
+
+        item = ThreadItem(
+            root=McpToolCallThreadItem(
+                id="mcp_err",
+                server="lup-tools",
+                tool="broken",
+                arguments={},
+                status=McpToolCallStatus.completed,
+                error=McpToolCallError(message="tool failed"),
+                type="mcpToolCall",
+            )
+        )
+        blocks = codex_items_to_lup([item])
+        assert len(blocks) == 2
+        assert isinstance(blocks[0], LupToolUseBlock)
+        assert blocks[0].name == "mcp__lup-tools__broken"
+        assert isinstance(blocks[1], LupToolResultBlock)
+        assert "tool failed" in (blocks[1].content or "")
