@@ -3,7 +3,7 @@
 Provides a persistent REPL inside a Docker container with state that
 survives across calls (variables, imports, data).  Use ``Sandbox`` as a
 context manager and call ``run_code`` / ``run_install`` directly, or
-expose it to a Claude Agent SDK agent via ``create_tools()`` /
+expose it to an agent via ``create_tools()`` /
 ``create_mcp_server()``.
 
 Network modes:
@@ -40,18 +40,17 @@ import json
 import logging
 import tarfile
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, Literal, Self, TypedDict
 
 import docker
-from claude_agent_sdk.types import McpSdkServerConfig
 from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container, ExecResult
 from docker.utils.socket import SocketError, next_frame_header, read_exactly
 from pydantic import BaseModel, Field
 
-from lup.lib.mcp import LupMcpTool, ToolError, create_mcp_server, extract_sdk_tools, lup_tool
+from lup.lib.mcp import LupMcpServerConfig, LupMcpTool, ToolError, create_mcp_server, lup_tool
 
 logger = logging.getLogger(__name__)
 
@@ -125,11 +124,13 @@ class InstallPackageOutput(BaseModel):
 # --- Helper functions ---
 
 
-def decode_output(output: bytes | None) -> str:
+def decode_output(output: bytes | Iterator[bytes] | None) -> str:
     """Decode bytes output to string, handling None and errors."""
     if output is None:
         return ""
-    return output.decode("utf-8", errors="replace")
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return b"".join(output).decode("utf-8", errors="replace")
 
 
 # --- Sandbox class ---
@@ -616,7 +617,7 @@ class Sandbox:
         output_text = decode_output(result.output)
 
         return InstallPackageResult(
-            exit_code=result.exit_code,
+            exit_code=result.exit_code if result.exit_code is not None else -1,
             output=output_text,
             packages=packages,
         )
@@ -681,10 +682,10 @@ class Sandbox:
         self,
         name: str = "sandbox",
         version: str = "1.0.0",
-    ) -> McpSdkServerConfig:
+    ) -> LupMcpServerConfig:
         """Create an MCP server with sandbox tools."""
         return create_mcp_server(
             name=name,
             version=version,
-            tools=extract_sdk_tools(self.create_tools()),
+            tools=self.create_tools(),
         )

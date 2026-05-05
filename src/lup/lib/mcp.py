@@ -1,26 +1,8 @@
-"""Patched MCP server factory that preserves is_error from tool responses.
+"""MCP server factory with proper is_error propagation.
 
-The Claude Agent SDK's `create_sdk_mcp_server` has bugs that prevent proper error
-propagation:
-
-1. It discards `is_error` from dict responses, only extracting `content`
-2. Its query.py checks `is_error` (snake_case) but MCP's CallToolResult uses
-   `isError` (camelCase)
-
-This module provides a fixed version that works around both issues.
-
-Use `create_mcp_server` instead of `create_sdk_mcp_server` from claude_agent_sdk.
-
-SDK Compatibility
------------------
-Tested against: claude-agent-sdk>=0.1.26
-Last verified: 2026-02-04
-
-Maintenance Notes:
-- Check if these bugs are fixed in future SDK versions
-- If fixed, remove the patched code and alias `create_mcp_server = create_sdk_mcp_server`
-- Update pyproject.toml to require the fixed version minimum
-- Monitor SDK changelog for MCP-related changes
+Creates in-process MCP servers from ``LupMcpTool`` definitions. The
+``create_mcp_server`` function returns an ``LupMcpServerConfig`` that
+each SDK adapter converts to its native server configuration.
 
 Tool naming convention:
     After registration, tools are named: mcp__{server_name}__{tool_name}
@@ -38,12 +20,10 @@ Examples:
         ... async def search(params: SearchInput) -> SearchOutput:
         ...     return SearchOutput(results=["result1", "result2"])
 
-    Create an MCP server from tools and pass to the SDK::
+    Create an MCP server from tools::
 
         >>> tools = [search, another_tool]
-        >>> sdk_tools = extract_sdk_tools(tools)
-        >>> server = create_mcp_server("my-server", tools=sdk_tools)
-        >>> options = ClaudeAgentOptions(mcp_servers={"my-server": server})
+        >>> server = create_mcp_server("my-server", tools=tools)
 """
 
 import inspect
@@ -53,8 +33,6 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypedDict, cast, get_type_hints
 
-from claude_agent_sdk import SdkMcpTool
-from claude_agent_sdk.types import McpSdkServerConfig
 from mcp.server import Server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -126,57 +104,68 @@ def generate_json_schema(
 class CallToolResultWithAlias(CallToolResult):
     """CallToolResult with snake_case alias for SDK compatibility.
 
-    The Claude Agent SDK's query.py checks `is_error` (snake_case) but MCP's
-    CallToolResult uses `isError` (camelCase). This subclass adds a property
-    alias so both work.
+    Some SDK query runners check ``is_error`` (snake_case) but MCP's
+    CallToolResult uses ``isError`` (camelCase). This subclass adds a
+    property alias so both work.
     """
 
     @property
     def is_error(self) -> bool:
-        """Snake_case alias for isError (SDK compatibility)."""
+        """Snake_case alias for isError."""
         return self.isError
+
+
+type LupToolHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+class LupMcpServerConfig(BaseModel):
+    """SDK-agnostic MCP server configuration.
+
+    Wraps an ``mcp.server.Server`` instance. Each adapter converts
+    this to its native server config at build time.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    name: str
+    server: Server
 
 
 def create_mcp_server(
     name: str,
     version: str = "1.0.0",
-    tools: Sequence[SdkMcpTool[Any]] | None = None,
-) -> McpSdkServerConfig:
+    tools: Sequence["LupMcpTool"] | None = None,
+) -> LupMcpServerConfig:
     """Create an in-process MCP server with proper is_error handling.
-
-    This is a patched version of claude_agent_sdk.create_sdk_mcp_server that
-    properly preserves the `is_error` flag from tool responses.
 
     Args:
         name: Unique identifier for the server.
         version: Server version string.
-        tools: List of SdkMcpTool instances created with the @tool decorator.
+        tools: List of LupMcpTool instances created with the @lup_tool decorator.
 
     Returns:
-        McpSdkServerConfig for use with ClaudeAgentOptions.mcp_servers.
+        LupMcpServerConfig for adapter conversion.
     """
     server = Server(name, version=version)
-    server._tools = tools or []  # type: ignore[attr-defined]
 
     if tools:
         tool_map = {tool_def.name: tool_def for tool_def in tools}
 
-        @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
+        @server.list_tools()
         async def list_tools() -> list[Tool]:
             """Return the list of available tools."""
             tool_list: list[Tool] = []
             for tool_def in tools:
-                schema = generate_json_schema(tool_def.input_schema)
                 tool_list.append(
                     Tool(
                         name=tool_def.name,
                         description=tool_def.description,
-                        inputSchema=schema,
+                        inputSchema=tool_def.input_schema,
                     )
                 )
             return tool_list
 
-        @server.call_tool()  # type: ignore[untyped-decorator]
+        @server.call_tool()
         async def call_tool(name: str, arguments: dict[str, object]) -> CallToolResult:
             """Execute a tool by name with given arguments."""
             if name not in tool_map:
@@ -206,7 +195,7 @@ def create_mcp_server(
                 content=cast(list[ContentBlock], content), isError=is_error
             )
 
-    return McpSdkServerConfig(type="sdk", name=name, instance=server)
+    return LupMcpServerConfig(name=name, server=server)
 
 
 class ToolError(Exception):
@@ -216,19 +205,24 @@ class ToolError(Exception):
 class LupMcpTool:
     """MCP tool with typed input/output models for introspection.
 
-    Wraps ``SdkMcpTool`` and preserves the original BaseModel classes so that
-    devtools (``lup-devtools agent inspect``) can display full JSON Schemas
-    for both input and output.
+    Stores the tool definition (name, description, schema, handler) directly.
+    Devtools can inspect ``input_model`` / ``output_model`` for full JSON Schemas.
     """
 
     def __init__(
         self,
-        sdk_tool: SdkMcpTool[Any],
+        name: str,
+        description: str,
+        input_schema: dict[str, object],
+        handler: LupToolHandler,
         input_model: type[BaseModel],
         output_model: type[BaseModel] | None = None,
         tags: list[str] | None = None,
     ) -> None:
-        self.sdk_tool = sdk_tool
+        self.name = name
+        self.description = description
+        self.input_schema = input_schema
+        self.handler = handler
         self.input_model = input_model
         self.output_model = output_model
         self.tags = tags or []
@@ -247,9 +241,8 @@ def lup_tool(
 ]:
     """Decorator for defining MCP tools with typed input/output models.
 
-    Like the SDK's ``@tool`` but infers input/output schemas from type
-    annotations, auto-validates input, auto-serializes BaseModel output,
-    and tracks call metrics (duration, errors).
+    Infers input/output schemas from type annotations, auto-validates input,
+    auto-serializes BaseModel output, and tracks call metrics.
 
     The handler receives a validated model instance, not a raw dict.
     The handler must return a BaseModel, which is auto-serialized via
@@ -335,26 +328,14 @@ def lup_tool(
                 duration_ms = (time.perf_counter() - start) * 1000
                 collector.record(tool_name, duration_ms, is_error)
 
-        sdk = SdkMcpTool(
+        return LupMcpTool(
             name=tool_name,
             description=description,
-            input_schema=final_input.model_json_schema(),
-            handler=cast(Callable[[Any], Awaitable[dict[str, Any]]], wrapper),
-        )
-        return LupMcpTool(
-            sdk_tool=sdk,
+            input_schema=cast(dict[str, object], final_input.model_json_schema()),
+            handler=cast(LupToolHandler, wrapper),
             input_model=final_input,
             output_model=resolved_output,
             tags=tags,
         )
 
     return decorator
-
-
-def extract_sdk_tools(tools: list[LupMcpTool]) -> list[SdkMcpTool[Any]]:
-    """Extract SdkMcpTool instances from a list of LupMcpTools.
-
-    Use this when passing tools to ``create_mcp_server`` or
-    ``create_sdk_mcp_server``, which expect ``list[SdkMcpTool]``.
-    """
-    return [t.sdk_tool for t in tools]
