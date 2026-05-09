@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Edit, Grep, Glob, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, Edit, Grep, Glob, AskUserQuestion
 description: Review changes since last bump and bump agent version
 argument-hint: [patch|minor|major]
 ---
@@ -18,36 +18,27 @@ If no level is provided, determine the appropriate level from the changes.
 
 ### 1. Gather context
 
-Run these in parallel:
+```bash
+uv run lup-devtools version --json
+```
 
-- `uv run lup-devtools version` to get the current version
-- `git tag --list 'v*' --sort=-version:sort` to find the latest version tag
-- `git log --oneline` (limited to last 50 commits) to see recent history
+This shows the current version, latest tag, and recent history.
 
-### 2. Find changes since last bump
+### 2. Classify changes
 
-Using the latest version tag (e.g., `v1.1.0`):
+```bash
+uv run lup-devtools version changelog --json
+```
 
-- Run `git log --oneline <tag>..HEAD` to see all commits since the last bump
-- Run `git diff --stat <tag>..HEAD` to see which files changed
-
-If no version tag exists, use the commit that last modified `src/lup/version.py`:
-
-- `git log -1 --format=%H -- src/lup/version.py`
-
-### 3. Classify changes
-
-Read through the commits and categorize them:
+Read through the commits and categorize:
 
 - **Behavior changes** (require a bump): prompt changes, new/modified tools, scoring logic, subagent changes
 - **Data changes** (no bump needed): session outputs, notes, resolution updates
 - **Infrastructure changes** (no bump needed): dependencies, CI, scripts, CLAUDE.md
 
-If there are NO behavior changes since the last bump, inform the user and stop — no bump is needed.
+If there are NO behavior changes since the last bump, inform the user and stop.
 
-### 4. Determine bump level
-
-Apply the bump rules from `src/lup/version.py`:
+### 3. Determine bump level
 
 | Level     | When                                          | Examples                                     |
 | --------- | --------------------------------------------- | -------------------------------------------- |
@@ -55,25 +46,20 @@ Apply the bump rules from `src/lup/version.py`:
 | **minor** | Prompt changes, new tools, tool modifications | Added web search tool, rewrote system prompt |
 | **major** | Architecture changes                          | New LLM, new framework, fundamental redesign |
 
-If the user provided a level in `$ARGUMENTS`, use it. Otherwise, recommend a level based on the changes and confirm with `AskUserQuestion`.
+If the user provided a level in `$ARGUMENTS`, use it. Otherwise, recommend and confirm via AskUserQuestion.
 
-### 5. Bump the version
-
-Update `src/lup/version.py` with the new version string. For example, if the current version is `0.1.0` and the bump level is `minor`, the new version is `0.2.0`.
-
-### 6. Create git tag
+### 4. Apply the bump
 
 ```bash
-git tag v<new_version>
+uv run lup-devtools version bump <level>
 ```
 
-### 7. Verify and report
+### 5. Report
 
-- Read the updated `src/lup/version.py` to confirm the new version
-- Show the user what was bumped and the behavioral changes that warranted the bump
+Show the user what was bumped and the behavioral changes that warranted it.
 
 ## Guidelines
 
-- **Only bump for behavior changes** — Data, docs, and infra commits don't warrant a bump
-- **Summarize what changed for the agent**, not for the codebase — focus on how agent behavior differs
-- **When in doubt, ask** — Use AskUserQuestion if the level is ambiguous
+- **Only bump for behavior changes** -- Data, docs, and infra commits don't warrant a bump
+- **Summarize what changed for the agent**, not the codebase
+- **When in doubt, ask** -- Use AskUserQuestion if the level is ambiguous

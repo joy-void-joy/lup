@@ -1,65 +1,61 @@
 ---
-allowed-tools: Bash(git:*, gh:*, uv run lup-devtools:*), AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion
 argument-hint: [branch-name]
 description: Review branches/worktrees and clean up merged ones
 ---
 
 # Clean Merged Branches
 
-Review all local branches and worktrees. Identify branches that are fully merged into the integration branch, have completed PRs, or are stale. Present the results and ask before deleting.
+Review all local branches and worktrees. Identify branches that are fully merged or have completed PRs. Present the merge graph and ask before deleting.
 
 ## Arguments
 
-- **branch-name** (optional): Name of a specific branch to remove. If provided, runs in targeted mode. If omitted, runs a full scan of all branches.
+- **branch-name** (optional): Name of a specific branch to remove. If provided, runs in targeted mode. If omitted, runs a full scan.
 
 Raw arguments: `$ARGUMENTS`
 
-Parse the raw arguments as follows: if non-empty, the first word is the **branch name** (not a natural-language instruction). Ignore any remaining words.
+Parse the raw arguments: if non-empty, the first word is the **branch name**. Ignore remaining words.
 
-## Process
+## Targeted Mode (branch name provided)
 
-### 1. Get branch status
+1. Run `uv run lup-devtools dev survey --json` to get full branch data.
+2. Find the target branch in the survey results. If not found, report and stop.
+3. Show the branch's status (containment, PR, unique commits) and confirm deletion via AskUserQuestion.
+4. Run `uv run lup-devtools dev delete <branch-name>` (add `--force` only with explicit user approval).
+
+## Full Scan Mode (no argument)
+
+### 1. Collect data
 
 ```bash
-# Targeted mode (specific branch)
-uv run lup-devtools dev branches <branch-name> --json
-
-# Full scan (all branches)
-uv run lup-devtools dev branches --json
+uv run lup-devtools dev survey --json
 ```
 
-The devtool handles: fetch/prune, containment analysis, PR status, cherry-pick detection, and worktree info. It classifies each branch as DELETE, STALE, KEEP, or CURRENT.
+### 2. Classify each branch
 
-### 2. Present results
+Using the survey JSON, classify each branch:
 
-Display the branch status table to the user. For each DELETE/STALE branch, show:
-- Branch name and classification reason
-- Whether it has a worktree
-- PR status (if any)
+- **DELETE** -- `contained_in` is non-empty (fully contained in another branch), or PR state is `MERGED`
+- **STALE** -- Few `unique_commits` AND low `source_diff_lines` (content superseded by integration branch's continued development). Also check for transitive merges: if branch B is contained in a branch whose PR was merged, B's content reached integration transitively.
+- **KEEP** -- Has unique commits not captured elsewhere, or has an open PR
+- **CURRENT** -- `is_current` is true (never delete, warn if it qualifies)
 
-### 3. Confirm with user
+### 3. Present the merge graph
 
-Use AskUserQuestion before deleting anything. Show the list of branches to be cleaned up.
+Show a table with:
+- Branch name, containment info, PR status, unique commits, diff lines
+- Proposed action (DELETE/STALE/KEEP) with reason
+- For STALE branches, show the transitive path
 
-### 4. Clean up
+### 4. Confirm and delete
 
-For each confirmed branch:
+Use AskUserQuestion to confirm before deleting anything. For each confirmed deletion:
 
-1. **Remove worktree** (if any):
-   ```bash
-   git worktree remove <path>
-   ```
+```bash
+uv run lup-devtools dev delete <branch-name>
+```
 
-2. **Delete local branch**:
-   ```bash
-   git branch -d <branch-name>
-   ```
-   Use `-d` (not `-D`). If `-d` fails (branch not recognized as merged due to rebase), report to user and ask if `-D` is acceptable.
-
-3. **Delete remote branch** (if it exists):
-   ```bash
-   git push origin --delete <branch-name>
-   ```
+If safe delete (`-d`) fails, report to user and ask if `--force` is acceptable.
 
 ### 5. Report results
 
@@ -67,7 +63,8 @@ List what was cleaned up.
 
 ## Guidelines
 
-- Never force-delete (`-D`) without explicit user approval for that specific branch
+- Never force-delete without explicit user approval for that specific branch
 - Always confirm before deleting anything
-- Skip the current branch — warn the user instead
-- For rebased branches: the original feature branch content is in main via the rebase PR, even though `--is-ancestor` returns false (commits were rewritten)
+- Skip the current branch -- warn the user instead
+- A branch merged into ANY other active branch counts as consumed
+- For rebased branches: the original feature branch content may be in integration via a rebase PR, even though `--is-ancestor` returns false
