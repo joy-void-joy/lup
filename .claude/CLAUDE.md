@@ -437,10 +437,28 @@ lup-devtools
 │   ├── module-source <mod> # Show source code for a module
 │   ├── module-tree <mod>   # Show file tree for a package
 │   └── module-info <mod>   # Show detailed info about a module
-├── worktree                # Worktree management
-│   └── create <name>       # Create git worktree with plugin refresh
+├── branch                  # Branch inventory and cleanup (/lup:clean-gone)
+│   ├── survey              # Collect branch/worktree/PR containment data
+│   └── delete <name>       # Remove branch, worktree, and remote
+├── bump                    # Version bump operations (/lup:bump)
+│   ├── status              # Current version, tag, changelog since last bump
+│   └── apply <level>       # Apply patch/minor/major bump and tag
+├── conflict                # Merge conflict operations (/lup:merge-conflict)
+│   ├── status              # Detect conflict state, list files, show both sides
+│   ├── audit <files>       # Post-resolution deletion audit
+│   └── complete            # Finalize merge/rebase/cherry-pick
 ├── git                     # Git operations for sessions
 │   └── commit-results      # Commit uncommitted session results
+├── init                    # Project initialization (/lup:init)
+│   └── rename-package      # Rename lup package to project name
+├── pr                      # PR lifecycle (/lup:close, /lup:rebase)
+│   ├── status              # PR review state, checks, comments
+│   ├── merge <number>      # Squash-merge PR and pull into integration
+│   ├── sync-base           # Sync base branch and merge into feature
+│   ├── push                # Push branch, report existing PR
+│   ├── create              # Create PR with title and body
+│   ├── update <number>     # Update PR body
+│   └── checks              # Run pyright/ruff/pytest suite
 ├── sync                    # Upstream sync tracking (/lup:update)
 │   ├── list                # Show tracked projects and sync status
 │   ├── log <project>       # Show commits since last sync
@@ -448,6 +466,8 @@ lup-devtools
 │   ├── mark-synced <proj>  # Mark project as synced at HEAD
 │   └── setup <name> <path> # Set local path for a project
 ├── usage                   # Claude Code live usage display
+├── worktree                # Worktree management
+│   └── create <name>       # Create git worktree with plugin refresh
 ├── feedback                # Feedback collection and analysis state
 │   ├── collect             # Collect feedback metrics from sessions
 │   ├── check               # Check available feedback data
