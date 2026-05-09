@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Bash(git:*), Read, Glob, Grep, AskUserQuestion
 argument-hint: [target-branch]
 description: Clean up commit history on the feature branch and open/update a PR
 ---
@@ -12,144 +12,96 @@ Clean up the commit history on the current feature branch, push it, and open (or
 
 ### Base branch (`<base>`)
 
-Auto-detect the base branch — the branch this feature branch diverged from. For each local branch, find the merge-base with HEAD; the branch whose merge-base is closest to HEAD (fewest commits between merge-base and HEAD) is the parent. Exclude the current branch itself.
-
-If auto-detection is ambiguous or no clear parent is found, use `AskUserQuestion` to ask which branch to use as base.
+Run `uv run lup-devtools pr sync-base --json` (step 1 below) — it auto-detects the base branch. If ambiguous, use AskUserQuestion to ask which branch to use.
 
 ### PR target (`<target>`)
 
-If a target branch was provided as an argument, use it as the PR target. Otherwise, `<target>` defaults to `<base>`.
-
-**Scope:** Only rebase changes since the branch diverged from `<base>`. Do not touch commits that already exist on `<base>`.
+If a target branch was provided as an argument (`$ARGUMENTS`), use it. Otherwise, `<target>` defaults to `<base>`.
 
 ## Pre-rebase Validation
 
-Before starting the rebase, ensure the branch is clean and passing all checks.
+### 1. Sync and merge base
 
-1. **Merge local settings into shared config**:
-   Check if `.claude/settings.local.json` exists. If it does, review it and merge all sensible settings into `.claude/settings.json` — including permissions (allow/deny/ask rules), auto-accept patterns, and any other configuration that would benefit all contributors. Skip anything user-specific (e.g., personal paths, tokens). Commit the settings update as a separate commit.
+```bash
+uv run lup-devtools pr sync-base --json
+```
 
-2. **Merge `<base>` into feature branch**:
+If conflicts are reported, resolve with `/lup:merge-conflict` first.
 
-   ```bash
-   # Update local <base> and merge into feature branch
-   cd ../<base>
-   git pull
-   git push
-   cd -
-   git merge <base>
-   ```
+### 2. Merge local settings into shared config
 
-   Resolve any merge conflicts before proceeding. This ensures the branch is up-to-date.
+Check if `.claude/settings.local.json` exists. If so, merge all sensible settings into `.claude/settings.json` — permissions, auto-accept patterns, etc. Skip user-specific items. Commit as a separate commit.
 
-3. **Run all checks**:
+### 3. Run checks
 
-   ```bash
-   uv run pyright
-   uv run ruff check .
-   uv run ruff format --check .
-   uv run pytest
-   ```
+```bash
+uv run lup-devtools pr checks --json
+```
 
-   Fix any issues found. The rebased branch should only contain passing code.
+Fix any failures before proceeding.
 
-4. **Read PLAN.md** (if it exists):
-   Check if the branch has a PLAN.md. If it does, read it and verify:
-   - All planned items are either completed (`[x]`) or explicitly deferred
-   - No items are marked in-progress (`[~]`)
-   - The plan reflects what was actually built
+### 4. Review PLAN.md
 
-   If there are incomplete items, use AskUserQuestion to confirm whether to proceed or address them first.
+If `PLAN.md` exists, verify:
+- All items completed (`[x]`) or explicitly deferred
+- No items in-progress (`[~]`)
+- Plan reflects what was built
+
+If incomplete items exist, confirm via AskUserQuestion.
 
 ## Process
 
-1. **Sync `<base>` with remote**:
+### 5. Push and open PR
 
-   ```bash
-   cd ../<base>
-   git pull
-   git push
-   cd -
-   ```
+```bash
+uv run lup-devtools pr push --json
+```
 
-   Ensure local `<base>` is up-to-date before rebasing.
+**If no existing PR** (first run), draft a title and summary, then:
 
-2. **Push and open PR** (if not already open):
+```bash
+uv run lup-devtools pr create --base "<target>" --title "<title>" --body "<body>"
+```
 
-   Push the feature branch:
+**If PR already exists**, skip — we'll force-push the cleaned history later.
 
-   ```bash
-   git push -u origin <branch>
-   ```
+### 6. Understand all changes
 
-   Check if a PR already exists:
+- Review the full diff: `git diff <base>...HEAD`
+- Read changed files to understand the complete set of modifications
+- Think about logical units of work (features, refactors, fixes, tests, docs)
+- **Ignore existing commit history** — focus on what makes sense as a clean sequence
 
-   ```bash
-   gh pr list --head "<branch>" --base "<target>" --state open --json number,url
-   ```
+### 7. Reset and rebuild commits
 
-   **If no PR exists** (first run):
+```bash
+git reset --soft <base>
+```
 
-   ```bash
-   gh pr create --base "<target>" --title "<conventional commit style title>" --body "$(cat <<'EOF'
-   ## Summary
-   <1-3 bullet points describing the changes>
-   EOF
-   )"
-   ```
+All changes are now staged. For each logical unit of work:
+- Selectively unstage with `git reset HEAD <files>`, then stage and commit relevant pieces
+- Or use `git commit` with specific files to build atomic commits
+- Order logically: dependencies first, then features, then polish
+- Use conventional format: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`
 
-   **If a PR already exists**, skip this step — we'll force-push the cleaned history later.
+### 8. Force push and update PR
 
-3. **Gather context**:
-   - Identify the current branch and confirm `<base>`
-   - Review the full diff from base to HEAD: `git diff <base>...HEAD`
-   - List existing commits: `git log --oneline <base>..HEAD`
+```bash
+uv run lup-devtools pr push --force --json
+```
 
-4. **Understand all changes**:
-   - Read the changed files to understand the complete set of modifications
-   - Think about what logical units of work exist (features, refactors, fixes, tests, docs)
-   - **Ignore the existing commit history** — focus on what makes sense as a clean sequence
+Update the PR body with a commit list:
 
-5. **Reset and rebuild commits**:
+```bash
+uv run lup-devtools pr update <PR_NUMBER> --body "<updated body>"
+```
 
-   Reset all commits back to staged changes:
-
-   ```bash
-   git reset --soft <base>
-   ```
-
-   Now all changes are staged. For each logical unit of work:
-   - Selectively unstage with `git reset HEAD <files>`, then stage and commit the relevant pieces
-   - Or use `git commit` with specific files to build atomic commits
-   - Order commits logically (dependencies first, then features, then polish)
-   - Use conventional commit format: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`
-
-6. **Force push to update the PR**:
-
-   ```bash
-   git push --force
-   ```
-
-   Return the PR URL to the user when done. Include a commit list in the PR body:
-
-   ```bash
-   gh pr edit <PR_NUMBER> --body "$(cat <<'EOF'
-   ## Summary
-   <1-3 bullet points describing the changes>
-
-   ## Commits
-   <list of commits in the rebased branch>
-
-   ## Test plan
-   - [ ] How to verify this works
-   EOF
-   )"
-   ```
+Return the PR URL to the user.
 
 ## Guidelines
 
 - **Never rebase dev/main/master**
 - **Confirm before force push**
-- **Use --force** (not --force-with-lease) — after `git reset --soft`, the local ref diverges from remote in a way that --force-with-lease rejects. Plain --force is correct since this command intentionally rewrites history.
+- **Use --force** (not --force-with-lease) — after `git reset --soft`, --force-with-lease rejects the diverged ref
 - **Keep meaningful history**: Don't squash everything into one commit
 - **Write good messages**: Future you will thank present you

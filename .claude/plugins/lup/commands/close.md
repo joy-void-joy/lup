@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*), Bash(gh:*), AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion
 description: Check PR review status, merge if approved, and clean up branches
 ---
 
@@ -9,71 +9,46 @@ Check the review status of the feature branch's PR, merge it if approved, and cl
 
 ## Process
 
-### 1. Identify the PR
-
-Find the open PR for the current branch:
+### 1. Get PR status
 
 ```bash
-CURRENT_BRANCH=$(git branch --show-current)
-gh pr list --head "$CURRENT_BRANCH" --state open --json number,title,url
+uv run lup-devtools pr status --json
 ```
 
 If no PR is found, check if the user passed a PR number as an argument. If still nothing, report the error and stop.
 
-### 2. Check PR review status
-
-Fetch the PR's review state and comments:
-
-```bash
-# Get PR status: checks, reviews, merge state
-gh pr view <PR_NUMBER> --json reviews,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision
-
-# Get review comments (the detailed feedback)
-gh pr view <PR_NUMBER> --comments
-```
-
-### 3. Evaluate and act
+### 2. Evaluate reviews
 
 **If there are unresolved review comments or requested changes:**
 
-1. Display all review comments to the user, clearly formatted
+1. Display all review comments clearly formatted
 2. Show which reviews requested changes vs approved
-3. **Stop here.** Tell the user to fix the issues and re-run `/lup:rebase` to push updates.
+3. **Stop here.** Tell the user to fix the issues and re-run `/lup:rebase`.
 
-**If all reviews are approved (or no reviews yet but checks pass):**
+**If all reviews are approved (or no reviews but checks pass):**
 
-1. Show the PR summary to the user
-2. Use AskUserQuestion to confirm the merge
-3. If confirmed, proceed to merge and cleanup
+1. Show the PR summary
+2. Confirm the merge via AskUserQuestion
 
-### 4. Merge the PR
-
-```bash
-gh pr merge <PR_NUMBER> --squash --delete-branch
-```
-
-Use `--squash` to create a single merge commit. The `--delete-branch` flag removes the branch on remote automatically.
-
-### 5. Clean up
-
-After merge, pull the merged changes into the integration branch:
+### 3. Merge the PR
 
 ```bash
-# From the integration branch worktree
-cd ../dev && git pull && cd -
+uv run lup-devtools pr merge <PR_NUMBER>
 ```
 
-Then run the **targeted mode** cleanup from `/lup:clean-gone` for the merged branch (`$CURRENT_BRANCH`). This handles worktree removal, local branch deletion, and remote branch cleanup with proper user confirmation.
+### 4. Clean up
 
-### 6. Report
+Delete the merged branch:
 
-Summarize what was done:
+```bash
+uv run lup-devtools branch delete <BRANCH_NAME>
+```
 
-- PR merged (with link)
-- Cleanup results (from clean-gone)
+### 5. Report
+
+Summarize what was done: PR merged (with link), cleanup results.
 
 ## Guidelines
 
-- Always show review comments before merging -- never skip review feedback
-- Use `--squash` merge to keep dev history clean
+- Always show review comments before merging — never skip review feedback
 - The user must confirm before merging via AskUserQuestion
