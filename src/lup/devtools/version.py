@@ -24,6 +24,7 @@ class VersionInfo(TypedDict):
     version: str
     latest_tag: str | None
     commits_since_tag: int
+    files_changed: list[str]
 
 
 class ChangelogEntry(TypedDict):
@@ -79,6 +80,8 @@ def show(
     latest_tag = get_latest_tag()
 
     commits_since = 0
+    files_changed: list[str] = []
+    ref_since = latest_tag or "HEAD~50"
     if latest_tag:
         try:
             commits_since = int(
@@ -87,11 +90,20 @@ def show(
         except sh.ErrorReturnCode:
             pass
 
+    try:
+        diff_output = str(
+            git("diff", "--name-only", f"{ref_since}..HEAD", _ok_code=[0, 128])
+        ).strip()
+        files_changed = [f for f in diff_output.splitlines() if f]
+    except sh.ErrorReturnCode:
+        pass
+
     if as_json:
         info: VersionInfo = {
             "version": AGENT_VERSION,
             "latest_tag": latest_tag,
             "commits_since_tag": commits_since,
+            "files_changed": files_changed,
         }
         typer.echo(json.dumps(info, indent=2))
         return
@@ -101,6 +113,8 @@ def show(
         typer.echo(f"Latest tag: {latest_tag} (+{commits_since} commits)")
     else:
         typer.echo("Latest tag: (none)")
+    if files_changed:
+        typer.echo(f"Files changed: {len(files_changed)}")
 
 
 @app.command("changelog")
