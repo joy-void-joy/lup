@@ -4,11 +4,15 @@ from typing import Annotated
 
 import typer
 
-from lup.devtools.dev import branches, check, conflicts, worktree
+from lup.devtools.dev import branches, check, conflicts, init, pr, worktree
 
 app = typer.Typer(no_args_is_help=True)
 worktree_app = typer.Typer(no_args_is_help=True)
+pr_app = typer.Typer(no_args_is_help=True)
+init_app = typer.Typer(no_args_is_help=True)
 app.add_typer(worktree_app, name="worktree", help="Worktree management")
+app.add_typer(pr_app, name="pr", help="PR lifecycle (status, merge, push, checks)")
+app.add_typer(init_app, name="init", help="Project initialization")
 
 
 # -- worktree commands --
@@ -122,7 +126,37 @@ def pr_body_cmd(
     branches.pr_body(base)
 
 
-# -- conflict command --
+# -- branch survey and delete --
+
+
+@app.command("survey")
+def survey_cmd(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Full branch inventory: containment, PRs, unique commits, diff sizes."""
+    branches.survey(as_json)
+
+
+@app.command("delete")
+def delete_cmd(
+    name: Annotated[str, typer.Argument(help="Branch name to delete")],
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", "-n", help="Show what would happen"),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Force delete (git branch -D)"),
+    ] = False,
+) -> None:
+    """Delete a branch, its worktree, and remote tracking branch."""
+    branches.delete_branch(name, dry_run, force)
+
+
+# -- conflict commands --
 
 
 @app.command("conflicts")
@@ -134,6 +168,43 @@ def conflicts_cmd(
 ) -> None:
     """Show conflicted files with scope classification (in-scope vs out-of-scope)."""
     conflicts.conflicts(as_json)
+
+
+@app.command("conflict-status")
+def conflict_status_cmd(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Detect conflict state, list files, and show both sides' history."""
+    conflicts.conflict_status(as_json)
+
+
+@app.command("conflict-audit")
+def conflict_audit_cmd(
+    files: Annotated[
+        list[str],
+        typer.Argument(help="Files to audit for accidental deletions"),
+    ],
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Post-resolution deletion audit: check for accidentally dropped code."""
+    conflicts.conflict_audit(files, as_json)
+
+
+@app.command("conflict-complete")
+def conflict_complete_cmd(
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", "-n", help="Show what would happen"),
+    ] = False,
+) -> None:
+    """Finalize the merge/rebase/cherry-pick after all conflicts are resolved."""
+    conflicts.conflict_complete(dry_run)
 
 
 # -- check command --
@@ -152,3 +223,119 @@ def check_cmd(
 ) -> None:
     """Run pyright, ruff, and pytest."""
     check.run_checks(fix, no_test)
+
+
+# -- init commands --
+
+
+@init_app.command("rename-package")
+def init_rename_package_cmd(
+    new_name: Annotated[
+        str,
+        typer.Argument(
+            help="New package name (valid Python identifier, e.g. 'aib', 'forecast_bot')"
+        ),
+    ],
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run", "-n", help="Show what would change without modifying files"
+        ),
+    ] = False,
+) -> None:
+    """Rename the lup Python package to a project-specific name."""
+    init.rename_package(new_name, dry_run)
+
+
+# -- pr commands --
+
+
+@pr_app.command("status")
+def pr_status_detail_cmd(
+    branch: Annotated[
+        str | None,
+        typer.Option("--branch", "-b", help="Branch name (default: current branch)"),
+    ] = None,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Fetch PR review status, checks, and comments for a branch."""
+    pr.status(branch, as_json)
+
+
+@pr_app.command("merge")
+def pr_merge_cmd(
+    pr_number: Annotated[int, typer.Argument(help="PR number to merge")],
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", "-n", help="Show what would happen"),
+    ] = False,
+) -> None:
+    """Squash-merge a PR and pull changes into the integration branch."""
+    pr.merge(pr_number, dry_run)
+
+
+@pr_app.command("sync-base")
+def pr_sync_base_cmd(
+    base: Annotated[
+        str | None,
+        typer.Option("--base", "-b", help="Base branch (default: auto-detect)"),
+    ] = None,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Sync the base branch and merge it into the current feature branch."""
+    pr.sync_base(base, as_json)
+
+
+@pr_app.command("push")
+def pr_push_cmd(
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Force push"),
+    ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Push the current branch and report any existing PR."""
+    pr.push(force, as_json)
+
+
+@pr_app.command("create")
+def pr_create_cmd(
+    base: Annotated[str, typer.Option("--base", help="Target branch for PR")],
+    title: Annotated[str, typer.Option("--title", help="PR title")],
+    body: Annotated[str, typer.Option("--body", help="PR body (markdown)")],
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Create a new PR."""
+    pr.create(base, title, body, as_json)
+
+
+@pr_app.command("update")
+def pr_update_cmd(
+    pr_number: Annotated[int, typer.Argument(help="PR number to update")],
+    body: Annotated[str, typer.Option("--body", help="New PR body (markdown)")],
+) -> None:
+    """Update a PR body."""
+    pr.update(pr_number, body)
+
+
+@pr_app.command("checks")
+def pr_checks_cmd(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Run pyright, ruff, and pytest validation checks."""
+    pr.checks(as_json)
