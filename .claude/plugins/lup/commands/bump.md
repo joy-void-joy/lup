@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(uv run lup-devtools:*), Read, Edit, Grep, Glob, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, AskUserQuestion
 description: Review changes since last bump and bump agent version
 argument-hint: [patch|minor|major]
 ---
