@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.lib.sandbox import Sandbox
+from lup.sandbox import Sandbox
 
 pytestmark = pytest.mark.integration
 

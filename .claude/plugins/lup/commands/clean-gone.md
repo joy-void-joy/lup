@@ -1,135 +1,76 @@
 ---
-allowed-tools: Bash(git:*), Bash(gh:*), AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion, Skill(lup:commit)
 argument-hint: [branch-name]
 description: Review branches/worktrees and clean up merged ones
 ---
 
 # Clean Merged Branches
 
-Review all local branches and worktrees. Identify branches that are fully merged into the integration branch or any other active branch, or have completed PRs. Present the merge graph and ask before deleting.
-
-## Determine Integration Branch
-
-Auto-detect the integration branch: use `dev` if it exists locally, otherwise fall back to `main`. Use this as `<integration>` throughout.
+Review all local branches and worktrees. Identify branches that are fully merged or have completed PRs. Present the merge graph and ask before deleting.
 
 ## Arguments
 
-- **branch-name** (optional): Name of a specific branch to remove. If provided, runs in targeted mode. If omitted, runs a full scan of all branches.
+- **branch-name** (optional): Name of a specific branch to remove. If provided, runs in targeted mode. If omitted, runs a full scan.
 
 Raw arguments: `$ARGUMENTS`
 
-Parse the raw arguments as follows: if non-empty, the first word is the **branch name** (not a natural-language instruction). Ignore any remaining words.
-
-## Targeted Mode (branch name provided)
-
-If a branch name is given as an argument, skip the full inventory and target just that branch:
-
-1. **Fetch and prune**: `git fetch --prune`
-2. **Verify the branch exists**: `git branch --list <branch-name>`. If not found, report and stop.
-3. **Check safety**:
-   - Is it the current branch? Warn and stop.
-   - Does it have a worktree? Note for removal.
-   - Is it merged into `<integration>`? (`git merge-base --is-ancestor`)
-   - Does it have a PR? (`gh pr list --state all --head <branch-name>`)
-4. **Report status** and **confirm with user** via AskUserQuestion before deleting.
-5. **Remove worktree** if applicable, then **delete the branch** (`-d`, escalate to `-D` only with user approval), then **delete remote** if it exists.
-6. **Report results**.
-
-## Full Scan Mode (no argument)
+Parse the raw arguments: if non-empty, the first word is the **branch name**. Ignore remaining words.
 
 ## Process
 
-1. **Fetch and prune** remote tracking info:
+### 1. Commit pending changes
 
-   ```bash
-   git fetch --prune
-   ```
+Invoke `/lup:commit` to commit any uncommitted work before cleaning up branches.
 
-2. **Inventory** all local branches and worktrees:
+## Targeted Mode (branch name provided)
 
-   ```bash
-   git branch -vv
-   git worktree list
-   ```
+1. Run `uv run lup-devtools dev survey --json` to get full branch data.
+2. Find the target branch in the survey results. If not found, report and stop.
+3. Show the branch's status (containment, PR, unique commits) and confirm deletion via AskUserQuestion.
+4. Run `uv run lup-devtools dev delete <branch-name>` (add `--force` only with explicit user approval).
 
-3. **Check containment** — for every pair of branches, check if one is an ancestor of another:
+## Full Scan Mode (no argument)
 
-   ```bash
-   git merge-base --is-ancestor <branch> <target>
-   ```
-   A branch is "consumed" if it's fully contained in `<integration>` OR any other active branch.
+### 2. Collect data
 
-4. **Check PR status** for branches that aren't ancestors of anything:
+```bash
+uv run lup-devtools dev survey --json
+```
 
-   ```bash
-   gh pr list --state all --json number,title,headRefName,state,mergedAt
-   ```
+### 3. Classify each branch
 
-   A branch is also deletable if:
-   - It has a merged PR (direct or via a `-rebase` suffix branch)
-   - Its corresponding rebase branch's PR was merged (content reached `<integration>` through rebased commits)
+Using the survey JSON, classify each branch:
 
-5. **Detect transitive merges** — for branches still unresolved after steps 3-4, check if their content reached main through an intermediate branch that was rebased:
+- **DELETE** -- `contained_in` is non-empty (fully contained in another branch), or PR state is `MERGED`
+- **STALE** -- Few `unique_commits` AND low `source_diff_lines` (content superseded by integration branch's continued development). Also check for transitive merges: if branch B is contained in a branch whose PR was merged, B's content reached integration transitively.
+- **KEEP** -- Has unique commits not captured elsewhere, or has an open PR
+- **CURRENT** -- `is_current` is true (never delete, warn if it qualifies)
 
-   ```bash
-   # Find all merged PR branches
-   # For each unresolved branch B, check if B is an ancestor of any merged PR branch
-   git merge-base --is-ancestor <B> <merged-pr-branch>
-   ```
-   Walk the merge graph: if branch B is an ancestor of branch X, and X (or X-rebase) has a merged PR into `<integration>`, then B's content reached `<integration>` transitively — even though B itself isn't an ancestor of `<integration>` (because X was rebased before merging).
+### 4. Present the merge graph
 
-   Also check for branches that were **branched from** an intermediate branch and have since been superseded:
+Show a table with:
+- Branch name, containment info, PR status, unique commits, diff lines
+- Proposed action (DELETE/STALE/KEEP) with reason
+- For STALE branches, show the transitive path
 
-   ```bash
-   # Check unique commits remaining after cherry-pick filtering
-   git log --oneline --cherry-pick --left-only <B>...<integration> | wc -l
-   # Check actual code diff (ignoring data/notes)
-   git diff <B> <integration> --stat -- src/ .claude/ tests/
-   ```
-   If the branch has few unique commits and minimal source code diff vs `<integration>`, it's **stale** (superseded by `<integration>`'s continued development, even if not literally merged).
+### 5. Confirm and delete
 
-6. **Categorize** each branch:
-   - **DELETE** — fully contained in another branch, or PR merged
-   - **STALE** — content reached main transitively (via rebased intermediate branch) or branch is superseded by main's continued development. Recommend deletion but flag the transitive path.
-   - **KEEP** — has unique commits not captured elsewhere, or has an open PR
-   - **CURRENT** — the branch we're on (never delete, warn if it qualifies)
+Use AskUserQuestion to confirm before deleting anything. For each confirmed deletion:
 
-7. **Present the merge graph** showing:
-   - Which branches are contained in which
-   - PR status for each branch
-   - Which have worktrees
-   - Proposed action (DELETE/STALE/KEEP) with reason
-   - For STALE branches, show the transitive path
-   - Format as a table for DELETE/STALE candidates and a tree for the merge flow
+```bash
+uv run lup-devtools dev delete <branch-name>
+```
 
-8. **Confirm with user** via AskUserQuestion before deleting anything.
+If safe delete (`-d`) fails, report to user and ask if `--force` is acceptable.
 
-9. **Remove worktrees first** (if any):
+### 6. Report results
 
-   ```bash
-   git worktree remove <path>
-   ```
-
-10. **Delete branches**:
-
-    ```bash
-    git branch -d <branch-name>
-    ```
-
-    Use `-d` (not `-D`). If `-d` fails (branch not recognized as merged due to rebase), report to user and ask if `-D` is acceptable.
-
-11. **Delete remote branches** if they still exist:
-
-    ```bash
-    git push origin --delete <branch-name>
-    ```
-
-12. **Report results**: List what was cleaned up.
+List what was cleaned up.
 
 ## Guidelines
 
-- Never force-delete (`-D`) without explicit user approval for that specific branch
+- Never force-delete without explicit user approval for that specific branch
 - Always confirm before deleting anything
-- Skip the current branch — warn the user instead
-- A branch merged into ANY other active branch counts as consumed (not just `<integration>`)
-- For rebased branches: the original feature branch content is in main via the rebase PR, even though `--is-ancestor` returns false (commits were rewritten)
+- Skip the current branch -- warn the user instead
+- A branch merged into ANY other active branch counts as consumed
+- For rebased branches: the original feature branch content may be in integration via a rebase PR, even though `--is-ancestor` returns false

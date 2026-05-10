@@ -11,14 +11,14 @@ Review all MCP servers, tools, and subagents. Draw an outline of the pipeline an
 
 Before cataloging individual tools, map the **end-to-end flow**:
 
-1. Read `src/lup/agent/core.py` to understand:
+1. Read `src/lup_template/agent/core.py` to understand:
    - How a request enters the agent
    - Which MCP servers are configured and how they're launched
    - How tools are exposed to the agent (in-process vs remote)
    - How subagents are spawned and what tools they receive
    - How the final output is produced and returned
 
-2. Read `src/lup/agent/tool_policy.py` to understand:
+2. Read `src/lup_template/agent/tool_policy.py` to understand:
    - Which tools are gated by conditions (API keys, modes, etc.)
    - Are there tools registered but conditionally unavailable?
 
@@ -30,7 +30,7 @@ Before cataloging individual tools, map the **end-to-end flow**:
 
 ## Phase 2: Tool Inventory
 
-Read every file in `src/lup/agent/tools/` and build a **tool outline** — not just a table, but a readable summary of each tool's purpose.
+Read every file in `src/lup_template/agent/tools/` and build a **tool outline** — not just a table, but a readable summary of each tool's purpose.
 
 For each tool file:
 1. Read the file
@@ -39,8 +39,8 @@ For each tool file:
 4. Note external dependencies (APIs, config keys, packages)
 
 For remote/external MCP servers:
-- Read `src/lup/agent/core.py` for `McpServerConfig` or server lists
-- Read `src/lup/agent/config.py` for MCP-related settings
+- Read `src/lup_template/agent/core.py` for `McpServerConfig` or server lists
+- Read `src/lup_template/agent/config.py` for MCP-related settings
 - Check `pyproject.toml` for MCP server dependencies
 - Grep for `npx`, `uvx`, or other MCP server launch patterns
 

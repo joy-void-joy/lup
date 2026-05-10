@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Edit, Write, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, Skill(lup:commit)
 description: Review upstream template commits and apply improvements
 argument-hint: [focus area]
 ---
@@ -30,7 +30,11 @@ Ask the user for the path to their lup template repo if not already tracked.
 
 ## Process
 
-### 1. Check for new commits
+### 1. Commit pending changes
+
+Invoke `/lup:commit` to commit any uncommitted work before applying upstream changes.
+
+### 2. Check for new commits
 
 ```bash
 uv run lup-devtools sync list
@@ -38,7 +42,7 @@ uv run lup-devtools sync list
 
 If no projects have new commits, report that everything is up to date and stop.
 
-### 2. Read all diffs and build inventory
+### 3. Read all diffs and build inventory
 
 For each project with new commits:
 
@@ -58,7 +62,7 @@ Do not classify during this step. Cross-commit patterns only become visible afte
 
 **If a focus area was provided:** Also skip commits whose messages clearly don't relate to the focus area. But when in doubt, keep them — the diff might touch relevant code.
 
-### 3. Classify inventory
+### 4. Classify inventory
 
 For each item in the inventory, ask: **"What would this look like with a generic data source?"** If you can describe a generic version, it's portable. If the item IS the domain data (model fields, API-specific calls, scoring formulas), it's domain-specific.
 
@@ -67,7 +71,7 @@ For each item in the inventory, ask: **"What would this look like with a generic
 Classify as:
 
 - **Portable as-is**: Improvements that apply directly without modification
-  - `lib/` utilities (e.g., better `print_block`, new retry patterns, caching improvements)
+  - `lup` library utilities (e.g., better `print_block`, new retry patterns, caching improvements)
   - `devtools/` CLI improvements (new subcommands, better output formatting, new analysis tools)
   - Hook logic improvements (new permission patterns, better auto-allow rules)
   - Build/config improvements that generalize
@@ -90,7 +94,7 @@ Examples of what gets missed when you classify by domain keywords instead of by 
 - A "sandbox tools" commit adds `run_code` *and* a new error-handling pattern in the tool wrapper. The tool is domain-specific; the error-handling pattern is portable.
 - A "score visualization" commit adds strip plots, trend charts, color selection, and watch mode. The scoring formula is domain-specific; the visualization pipeline is portable devtools infrastructure.
 
-### 4. Present improvements
+### 5. Present improvements
 
 Present every extracted portable piece to the user via AskUserQuestion:
 
@@ -103,7 +107,7 @@ Group related pieces when they form a logical unit (e.g., strip plot + trend plo
 
 **Default: present.** When uncertain whether something is portable, present it with your reasoning and let the user decide. The user can always say "skip" — but you cannot un-skip something you never showed them.
 
-### 5. Apply selected changes
+### 6. Apply selected changes
 
 For approved improvements:
 
@@ -112,15 +116,13 @@ For approved improvements:
    - Adapt Python import paths between upstream and current project package names (`from lup.*` ↔ `from <project>.*`)
    - Framework vocabulary stays as `lup` in both directions — do not rename `lup_tool`, `LupMcpTool`, `lup-devtools`, `.lup/`, `lup-tools`, `lup-sandbox-*`, etc.
    - Keep the current project's coding conventions
-3. **Wire new utilities into consumers.** When porting a library function (e.g., a helper in `lib/`), don't stop at the function itself — also wire it into the devtools commands, hooks, or agents that should use it. A utility without consumers is dead code.
+3. **Wire new utilities into consumers.** When porting a library function (e.g., a helper in `packages/lup/`), don't stop at the function itself — also wire it into the devtools commands, hooks, or agents that should use it. A utility without consumers is dead code.
 4. Run verification after applying:
    ```bash
-   uv run pyright
-   uv run ruff check .
-   uv run pytest
+   uv run lup-devtools dev check
    ```
 
-### 6. Mark as synced
+### 7. Mark as synced
 
 **Skip this step if a focus area was provided** — the sync pointer must stay unchanged so unreviewed commits are still visible in the next full `/lup:update`.
 
@@ -130,7 +132,7 @@ After a full review is complete (whether or not changes were applied):
 uv run lup-devtools sync mark-synced <project>
 ```
 
-### 7. Optionally commit
+### 8. Optionally commit
 
 If changes were applied, offer to commit them:
 
@@ -146,6 +148,6 @@ git commit -m "feat(lib): apply improvements from <project>"
 - **Generalize, don't dismiss** — when a downstream repo adds something domain-specific, ask "what pattern does this represent?" and port the pattern as scaffold. A forecasting-specific agent becomes a domain-neutral agent scaffold.
 - **Ask, don't skip** — when uncertain about a change, present it to the user with your reasoning and let them decide
 - **Adapt, don't copy** — downstream code uses domain-specific naming, paths, and models. Replace these with template-appropriate equivalents (`lup` package paths, generic metrics, placeholder descriptions).
-- **Re-evaluate file placement** — after generalizing, re-check: can this module be used as-is without templating or source modification? If yes, it belongs in `lib/`, not `agent/`. A quick proxy: does it import from `agent/`? Downstream repos may have had domain-specific reasons for a different placement.
+- **Re-evaluate file placement** — after generalizing, re-check: can this module be used as-is without templating or source modification? If yes, it belongs in `packages/lup/`, not `agent/`. A quick proxy: does it import from `agent/`? Downstream repos may have had domain-specific reasons for a different placement.
 - **Test after applying** — always run pyright/ruff/pytest after applying changes
 - **Mark synced even if nothing applied** — this advances the sync pointer so you don't re-review the same commits next time

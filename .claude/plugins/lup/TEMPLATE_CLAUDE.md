@@ -98,10 +98,10 @@ For agents that exist over time — maintaining conversations, monitoring system
 Agents produce better output when forced to self-assess before committing. The reflection pattern has three components:
 
 1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool the agent calls to record its self-assessment — confidence, key uncertainties, tool audit, process reflection. Optionally runs an independent reviewer sub-agent.
-2. **Reflection gate** (`lib/reflect.py`): A `ReflectionGate` flag tracker + `create_reflection_gate()` hook factory. Denies a target tool until the agent has reflected.
+2. **Reflection gate** (`lup.reflect`): A `ReflectionGate` flag tracker + `create_reflection_gate()` hook factory. Denies a target tool until the agent has reflected.
 3. **Wiring**: The gate blocks `StructuredOutput` (one-shot agents) or `sleep` (persistent agents) until reflection occurs.
 
-**Customizing reflection:** The gate mechanism in `lib/reflect.py` is domain-neutral and parametric. The reflection _tool_ and its input model (`ReflectInput` in `agent/tools/reflect.py`) are domain-specific — add fields for your domain (e.g., factor analysis for forecasting, move evaluation for games). The reviewer prompt should target your domain's common failure modes.
+**Customizing reflection:** The gate mechanism in `lup.reflect` is domain-neutral and parametric. The reflection _tool_ and its input model (`ReflectInput` in `agent/tools/reflect.py`) are domain-specific — add fields for your domain (e.g., factor analysis for forecasting, move evaluation for games). The reviewer prompt should target your domain's common failure modes.
 
 **When to skip the reviewer:** Set `skip_reviewer=True` for speed-sensitive or trivial tasks. The reviewer adds latency (separate Sonnet call with tool access) but catches calibration errors and reasoning gaps.
 
@@ -167,8 +167,8 @@ uv run python -m <project>.environment.cli loop "task1" "task2" "task3"
 uv run python -m <project>.environment.cli loop --no-commit "task1" "task2"
 
 # Commit uncommitted session results
-uv run lup-devtools git commit-results
-uv run lup-devtools git commit-results --dry-run
+uv run lup-devtools feedback commit
+uv run lup-devtools feedback commit --dry-run
 
 uv run python -m <project>.environment.cli --help
 ```
@@ -270,7 +270,7 @@ Edit `src/<project>/version.py`:
 
 For agents that exist over time (conversations, monitoring, games), use the persistent agent pattern:
 
-- Wire `Scheduler` from `lib/realtime.py` into your session
+- Wire `Scheduler` from `lup.realtime` into your session
 - Add Stop hook to prevent turn ending (`create_stop_guard`)
 - Implement sleep/context/reply tools from `agent/tools/realtime.py`
 - Replace the request-response `run_agent()` in `core.py` with a sleep/wake loop
@@ -493,15 +493,15 @@ The codebase should read as a **monolithic source of truth** -- understandable w
 
 ## DRY: Don't Repeat Yourself
 
-- **Never duplicate code** -- If logic exists in `lib/`, import it. Don't copy-paste.
-- **Utilities belong in `lib/`** -- Functions like `print_block`, `TraceLogger`, formatters go in lib, not agent.
-- **`agent/` imports from `lib/`** -- The agent layer uses lib abstractions, never redefines them.
-- **Check before writing** -- Before creating a utility, search lib/ for existing implementations.
-- **Placement test** -- Can this module be used as-is without templating or source modification? If yes, it belongs in `lib/`, not `agent/`. Quick proxy: does it import from `agent/`?
+- **Never duplicate code** -- If logic exists in `lup`, import it. Don't copy-paste.
+- **Utilities belong in `lup`** -- Functions like `print_block`, `TraceLogger`, formatters go in the lup package, not agent.
+- **`agent/` imports from `lup`** -- The agent layer uses lup abstractions, never redefines them.
+- **Check before writing** -- Before creating a utility, search the `lup` package for existing implementations.
+- **Placement test** -- Can this module be used as-is without templating or source modification? If yes, it belongs in `lup`, not `agent/`. Quick proxy: does it import from `agent/`?
 
 ## Parametric Library Design
 
-Files in `src/<project>/lib/` must be **complete-as-is and configurable through function arguments** — never by modifying the source. Domain-specific code belongs in `agent/`. If a lib module requires subclassing or source modification to customize, it violates this principle.
+The `lup` package must be **complete-as-is and configurable through function arguments** — never by modifying the source. Domain-specific code belongs in `agent/`. If a lup module requires subclassing or source modification to customize, it violates this principle.
 
 - **Use function parameters** for customization (callbacks, config objects, path overrides)
 - **Use `configure()`-style functions** for module-level state that needs overriding
