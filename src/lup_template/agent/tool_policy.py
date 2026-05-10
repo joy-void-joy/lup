@@ -9,8 +9,8 @@ Key patterns:
 4. Separate get_mcp_servers() and get_allowed_tools() methods
 
 Usage:
-    from lup.agent.config import settings
-    from lup.agent.tool_policy import ToolPolicy
+    from lup_template.agent.config import settings
+    from lup_template.agent.tool_policy import ToolPolicy
 
     policy = ToolPolicy.from_settings(settings)
     mcp_servers = policy.get_mcp_servers()
@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from lup.agent.config import Settings
+    from lup_template.agent.config import Settings
 
 
 # =============================================================================

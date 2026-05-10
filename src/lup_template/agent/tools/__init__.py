@@ -5,5 +5,5 @@ This package contains:
 - reflect.py: Forced self-review tool (reviewer sub-agent)
 - realtime.py: Real-time tools template (sleep, context, reply)
 
-Import directly from submodules (e.g., ``from lup.agent.tools.example import EXAMPLE_TOOLS``).
+Import directly from submodules (e.g., ``from lup_template.agent.tools.example import EXAMPLE_TOOLS``).
 """

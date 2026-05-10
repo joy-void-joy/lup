@@ -4,9 +4,9 @@ from typing import Annotated
 
 import typer
 
-from lup.devtools.trace import traces
-from lup.lib.history import resolve_version
-from lup.version import AGENT_VERSION
+import lup_template.devtools.trace.traces as traces
+from lup.history import resolve_version
+from lup.paths import AGENT_VERSION
 
 app = typer.Typer(no_args_is_help=True)
 

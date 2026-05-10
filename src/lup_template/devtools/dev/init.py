@@ -1,6 +1,6 @@
 """Package renaming for downstream project initialization.
 
-Renames the ``lup`` Python package to a project-specific name,
+Renames the ``lup_template`` Python package to a project-specific name,
 updating imports, entry points, and CLI references. Framework
 vocabulary (``lup_tool``, ``lup-devtools``, ``.lup/``, etc.) stays
 unchanged.
@@ -23,7 +23,7 @@ PACKAGE_IMPORT_RE = re.compile(
     (?<![.\w])          # not preceded by dot or word char
     (?:from|import)     # keyword
     \s+
-    lup                 # the package name
+    lup_template        # the package name
     (?=\.|\.|\s|$)      # followed by dot, whitespace, or end
     """,
     re.VERBOSE,
@@ -54,12 +54,12 @@ def find_project_root() -> Path:
 
 
 def is_framework_reference(line: str) -> bool:
-    """Check if a line's ``lup`` usage is framework vocabulary, not a package import."""
+    """Check if a line's ``lup_template`` usage is framework vocabulary, not a package import."""
     return any(marker in line for marker in FRAMEWORK_MARKERS)
 
 
 def rename_imports_in_file(path: Path, new_name: str) -> list[str]:
-    """Rename ``from lup.`` / ``import lup`` imports in a single file.
+    """Rename ``from lup_template.`` / ``import lup_template`` imports in a single file.
 
     Returns a list of change descriptions (empty if no changes).
     """
@@ -75,7 +75,7 @@ def rename_imports_in_file(path: Path, new_name: str) -> list[str]:
         if is_framework_reference(line):
             return full_match
 
-        replaced = full_match.replace("lup", new_name, 1)
+        replaced = full_match.replace("lup_template", new_name, 1)  # claude: ignore
         changes.append(f"  {path}: {full_match!r} -> {replaced!r}")
         return replaced
 
@@ -91,23 +91,25 @@ def rename_in_pyproject(path: Path, new_name: str) -> list[str]:
     changes: list[str] = []
     new_text = text
 
-    old_name_line = 'name = "lup"'
+    old_name_line = 'name = "lup-template"'
     new_name_line = f'name = "{new_name}"'
     if old_name_line in new_text:
         new_text = new_text.replace(old_name_line, new_name_line, 1)
-        changes.append(f"  package name: lup -> {new_name}")
+        changes.append(f"  package name: lup-template -> {new_name}")
 
-    old_cli = 'lup = "lup.environment.cli.__main__:app"'
+    old_cli = 'lup = "lup_template.environment.cli.__main__:app"'
     new_cli = f'{new_name} = "{new_name}.environment.cli.__main__:app"'
     if old_cli in new_text:
         new_text = new_text.replace(old_cli, new_cli, 1)
         changes.append(f"  CLI entry point: lup -> {new_name}")
 
-    old_devtools = 'lup-devtools = "lup.devtools.main:app"'
+    old_devtools = 'lup-devtools = "lup_template.devtools.main:app"'
     new_devtools = f'lup-devtools = "{new_name}.devtools.main:app"'
     if old_devtools in new_text:
         new_text = new_text.replace(old_devtools, new_devtools, 1)
-        changes.append(f"  devtools import path: lup.devtools -> {new_name}.devtools")
+        changes.append(
+            f"  devtools import path: lup_template.devtools -> {new_name}.devtools"
+        )
 
     if new_text != text:
         path.write_text(new_text)
@@ -133,18 +135,18 @@ def rename_package(
     new_name: str,
     dry_run: bool,
 ) -> None:
-    """Rename the lup Python package to a project-specific name."""
+    """Rename the lup_template Python package to a project-specific name."""
     if not new_name.isidentifier():
         typer.echo(f"Error: {new_name!r} is not a valid Python identifier", err=True)
         raise typer.Exit(1)
 
-    if new_name == "lup":
+    if new_name == "lup_template":
         typer.echo("Error: new name is the same as the current name", err=True)
         raise typer.Exit(1)
 
     root = find_project_root()
     src_dir = root / "src"
-    old_pkg = src_dir / "lup"
+    old_pkg = src_dir / "lup_template"
     new_pkg = src_dir / new_name
 
     if not old_pkg.is_dir():
@@ -173,7 +175,7 @@ def rename_package(
                 line = text[line_start : line_end if line_end != -1 else len(text)]
                 if not is_framework_reference(line):
                     changes.append(
-                        f"  {py_file}: {m.group(0)!r} -> {m.group(0).replace('lup', new_name, 1)!r}"
+                        f"  {py_file}: {m.group(0)!r} -> {m.group(0).replace('lup_template', new_name, 1)!r}"  # claude: ignore
                     )
         all_changes.extend(changes)
 
@@ -181,13 +183,13 @@ def rename_package(
     typer.echo("\npyproject.toml:" if dry_run else "Updating pyproject.toml...")
     if dry_run:
         text = pyproject.read_text()
-        if 'name = "lup"' in text:
-            all_changes.append(f"  package name: lup -> {new_name}")
-        if 'lup = "lup.environment.cli.__main__:app"' in text:
+        if 'name = "lup-template"' in text:
+            all_changes.append(f"  package name: lup-template -> {new_name}")
+        if 'lup = "lup_template.environment.cli.__main__:app"' in text:
             all_changes.append(f"  CLI entry point: lup -> {new_name}")
-        if 'lup-devtools = "lup.devtools.main:app"' in text:
+        if 'lup-devtools = "lup_template.devtools.main:app"' in text:
             all_changes.append(
-                f"  devtools import path: lup.devtools -> {new_name}.devtools"
+                f"  devtools import path: lup_template.devtools -> {new_name}.devtools"
             )
     else:
         all_changes.extend(rename_in_pyproject(pyproject, new_name))
@@ -202,11 +204,11 @@ def rename_package(
 
     if dry_run:
         typer.echo("\nDirectory rename:")
-        all_changes.append(f"  src/lup/ -> src/{new_name}/")
+        all_changes.append(f"  src/lup_template/ -> src/{new_name}/")
     else:
         typer.echo("Renaming package directory...")
         git("mv", str(old_pkg), str(new_pkg), _cwd=str(root))
-        all_changes.append(f"  src/lup/ -> src/{new_name}/")
+        all_changes.append(f"  src/lup_template/ -> src/{new_name}/")
 
     typer.echo()
     if dry_run:

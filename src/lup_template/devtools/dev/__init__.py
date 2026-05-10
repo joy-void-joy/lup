@@ -4,7 +4,12 @@ from typing import Annotated
 
 import typer
 
-from lup.devtools.dev import branches, check, conflicts, init, pr, worktree
+import lup_template.devtools.dev.branches as branches
+import lup_template.devtools.dev.check as check
+import lup_template.devtools.dev.conflicts as conflicts
+import lup_template.devtools.dev.init as init
+import lup_template.devtools.dev.pr as pr
+import lup_template.devtools.dev.worktree as worktree
 
 app = typer.Typer(no_args_is_help=True)
 worktree_app = typer.Typer(no_args_is_help=True)

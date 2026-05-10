@@ -22,7 +22,7 @@ so descriptions stay accurate as tools are added or changed.
 
 from pydantic import BaseModel, Field
 
-from lup.lib.mcp import ToolError, lup_tool
+from lup.mcp import ToolError, lup_tool
 
 
 # --- Schemas ---

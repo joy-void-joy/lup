@@ -20,9 +20,8 @@ from typing import Any
 import typer
 from pydantic import BaseModel
 
-from lup.lib.history import iter_session_dirs, resolve_version
-from lup.lib.paths import feedback_path, traces_path
-from lup.version import AGENT_VERSION
+from lup.history import iter_session_dirs, resolve_version
+from lup.paths import feedback_path, traces_path, AGENT_VERSION
 
 logger = logging.getLogger(__name__)
 

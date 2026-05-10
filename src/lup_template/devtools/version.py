@@ -15,7 +15,7 @@ from typing import Annotated, TypedDict
 import sh
 import typer
 
-from lup.version import AGENT_VERSION
+from lup.paths import AGENT_VERSION
 
 app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
 

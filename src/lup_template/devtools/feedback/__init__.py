@@ -5,8 +5,9 @@ from typing import Annotated
 
 import typer
 
-from lup.devtools.feedback import analyze, state
-from lup.version import AGENT_VERSION
+import lup_template.devtools.feedback.analyze as analyze
+import lup_template.devtools.feedback.state as state
+from lup.paths import AGENT_VERSION
 
 app = typer.Typer(no_args_is_help=True)
 

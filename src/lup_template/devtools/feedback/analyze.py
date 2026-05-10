@@ -14,9 +14,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, TypedDict
 
-from lup.devtools.feedback.state import load_sessions_for_versions
-from lup.lib.history import resolve_version
-from lup.lib.paths import traces_path
+from lup_template.devtools.feedback.state import load_sessions_for_versions
+from lup.history import resolve_version
+from lup.paths import traces_path
 
 
 class ToolHealth(TypedDict):

@@ -11,9 +11,8 @@ Examples::
 import re
 from pathlib import Path
 
-from lup.lib.history import iter_session_dirs, iter_trace_log_files
-from lup.lib.paths import traces_path
-from lup.version import AGENT_VERSION
+from lup.history import iter_session_dirs, iter_trace_log_files
+from lup.paths import traces_path, AGENT_VERSION
 
 VERSION_OPT_DEFAULT = AGENT_VERSION
 

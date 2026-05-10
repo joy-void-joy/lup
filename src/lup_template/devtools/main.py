@@ -19,14 +19,14 @@ Examples::
 
 import typer
 
-from lup.devtools.agent import app as agent_app
-from lup.devtools.api import app as api_app
-from lup.devtools.dev import app as dev_app
-from lup.devtools.feedback import app as feedback_app
-from lup.devtools.sync import app as sync_app
-from lup.devtools.trace import app as trace_app
-from lup.devtools.usage import app as usage_app
-from lup.devtools.version import app as version_app
+from lup_template.devtools.agent import app as agent_app
+from lup_template.devtools.api import app as api_app
+from lup_template.devtools.dev import app as dev_app
+from lup_template.devtools.feedback import app as feedback_app
+from lup_template.devtools.sync import app as sync_app
+from lup_template.devtools.trace import app as trace_app
+from lup_template.devtools.usage import app as usage_app
+from lup_template.devtools.version import app as version_app
 
 app = typer.Typer(
     help="lup-devtools: development and analysis tools",

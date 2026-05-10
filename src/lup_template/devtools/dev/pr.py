@@ -21,7 +21,10 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.dev.branches import detect_base_branch, get_integration_branch
+from lup_template.devtools.dev.branches import (
+    detect_base_branch,
+    get_integration_branch,
+)
 
 logger = logging.getLogger(__name__)
 
