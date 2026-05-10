@@ -2,6 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.14"
 
+[manifest]
+members = [
+    "lup",
+    "lup-template",
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -306,18 +312,41 @@ wheels = [
 [[package]]
 name = "lup"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "packages/lup" }
 dependencies = [
     { name = "claude-agent-sdk" },
-    { name = "docker" },
     { name = "httpx" },
+    { name = "pydantic" },
+    { name = "rich" },
+    { name = "tenacity" },
+]
+
+[package.optional-dependencies]
+docker = [
+    { name = "docker" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "claude-agent-sdk", specifier = ">=0.1.26" },
+    { name = "docker", marker = "extra == 'docker'", specifier = ">=7.1.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "rich", specifier = ">=14.3.1" },
+    { name = "tenacity", specifier = ">=9.0.0" },
+]
+provides-extras = ["docker"]
+
+[[package]]
+name = "lup-template"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "lup", extra = ["docker"] },
     { name = "plotext" },
     { name = "prompt-toolkit" },
-    { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "rich" },
     { name = "sh" },
-    { name = "tenacity" },
     { name = "typer" },
 ]
 
@@ -331,16 +360,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "claude-agent-sdk", specifier = ">=0.1.26" },
-    { name = "docker", specifier = ">=7.1.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "lup", extras = ["docker"], editable = "packages/lup" },
     { name = "plotext", specifier = ">=5.3.2" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
-    { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pydantic-settings", specifier = ">=2.12.0" },
-    { name = "rich", specifier = ">=14.3.1" },
     { name = "sh", specifier = ">=2.2.2" },
-    { name = "tenacity", specifier = ">=9.0.0" },
     { name = "typer", specifier = ">=0.21.1" },
 ]
 

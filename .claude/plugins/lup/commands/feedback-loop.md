@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Edit, Write, Task, WebSearch, WebFetch, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run python -m lup:*), Read, Grep, Glob, Edit, Write, Task, WebSearch, WebFetch, AskUserQuestion
 description: Full feedback loop — orchestrates status, investigation, analysis, reflection, and implementation
 argument-hint: [optional: paste a trace, reflection, or output for single-trace analysis]
 ---
@@ -93,7 +93,7 @@ Write analysis output to `notes/feedback_loop/<timestamp>_analysis.md`:
 | ----- | ------ | --------- |
 
 ## Evaluation Queue
-uv run python -m lup.environment.cli loop "task1" "task2" "task3"
+uv run python -m lup_template.environment.cli loop "task1" "task2" "task3"
 ```
 
 ## Key Questions

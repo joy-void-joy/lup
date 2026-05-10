@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Edit, Write, Task, AskUserQuestion
+allowed-tools: Bash(ls:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, Task, AskUserQuestion
 description: Review and modify .claude structure, brainstorm improvements interactively
 ---
 
@@ -41,14 +41,14 @@ plugins/lup/
 └── TEMPLATE_CLAUDE.md           # CLAUDE.md template for new projects
 ```
 
-**Note:** Python CLI tooling (API inspection, trace analysis, feedback collection, worktree management, etc.) lives in `src/lup/devtools/` and is exposed as the `lup-devtools` CLI entry point. See the lup-devtools section in CLAUDE.md.
+**Note:** Python CLI tooling (API inspection, trace analysis, feedback collection, worktree management, etc.) lives in `src/lup_template/devtools/` and is exposed as the `lup-devtools` CLI entry point. See the lup-devtools section in CLAUDE.md.
 
 ### When to Add to the Plugin
 
 - **Commands**: Reusable workflows invoked via `/lup:command-name`
 - **Hooks**: Permission hooks in `hooks/scripts/` — auto-allow, deny, or quality gates
 - **Agents**: Subagent definitions for specialized tasks
-- **Devtools**: Python CLI tools go in `src/lup/devtools/` (exposed as `lup-devtools`), not in the plugin
+- **Devtools**: Python CLI tools go in `src/lup_template/devtools/` (exposed as `lup-devtools`), not in the plugin
 
 ## Brainstorming Principles
 

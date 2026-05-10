@@ -20,12 +20,18 @@ uv run lup-devtools trace show <session_id>
 
 Read every tool call, error, and reasoning step. Don't skim.
 
+For a focused view of tool interactions:
+
+```bash
+uv run lup-devtools trace show <session_id> --tool-calls
+```
+
 ### 2. Tool use audit
 
 - **Tool call inventory**: List every tool call — what the agent tried to learn, whether it succeeded, whether the result was useful.
-- **Tool errors**: For each failure — what happened (quote the error), why it failed (read the tool source in `src/lup/agent/tools/`), was recovery reasonable.
+- **Tool errors**: For each failure — what happened (quote the error), why it failed (read the tool source in `src/lup_template/agent/tools/`), was recovery reasonable.
 - **Subtle bugs**: Cases where a tool *succeeded* but returned misleading or incomplete data.
-- **Missing tool calls**: Tools the agent *should* have called but didn't. Check available tools in `src/lup/agent/tools/`.
+- **Missing tool calls**: Tools the agent *should* have called but didn't. Check available tools in `src/lup_template/agent/tools/`.
 
 ### 3. Workflow assessment
 
