@@ -5,7 +5,7 @@ actions, reminders, and delayed actions. The environment layer (Discord
 bot, game server, CLI) wires callbacks; the agent interacts through
 MCP tools that delegate to this scheduler.
 
-See also: ``src/lup/agent/tools/realtime.py`` for the MCP tool
+See also: ``src/lup_template/agent/tools/realtime.py`` for the MCP tool
 implementations that wrap this scheduler.
 
 Examples:
@@ -31,8 +31,8 @@ Examples:
 
     Create a Stop hook to keep the agent in a persistent loop::
 
-        >>> from lup.lib.realtime import create_stop_guard
-        >>> from lup.lib.hooks import merge_hooks
+        >>> from lup.realtime import create_stop_guard
+        >>> from lup.hooks import merge_hooks
         >>> hooks = merge_hooks(permission_hooks, create_stop_guard())
 """
 
@@ -46,8 +46,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from claude_agent_sdk import HookInput, HookMatcher
 from claude_agent_sdk.types import HookContext, SyncHookJSONOutput
 
-from lup.lib.hooks import HooksConfig, block_hook_output
-from lup.lib.reflect import ReflectionGate
+from lup.hooks import HooksConfig, block_hook_output
+from lup.reflect import ReflectionGate
 
 logger = logging.getLogger(__name__)
 
@@ -523,8 +523,8 @@ def create_stop_guard() -> HooksConfig:
         HooksConfig with a Stop hook.
 
     Usage:
-        from lup.lib.realtime import create_stop_guard
-        from lup.lib.hooks import merge_hooks
+        from lup.realtime import create_stop_guard
+        from lup.hooks import merge_hooks
 
         hooks = merge_hooks(permission_hooks, create_stop_guard())
     """
@@ -624,7 +624,7 @@ def create_meta_before_sleep_guard(
     Returns:
         HooksConfig with PreToolUse hooks.
     """
-    from lup.lib.reflect import create_reflection_gate
+    from lup.reflect import create_reflection_gate
 
     return create_reflection_gate(
         gate=scheduler.meta_gate,

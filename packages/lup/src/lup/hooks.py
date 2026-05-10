@@ -22,7 +22,7 @@ Composition:
 Examples:
     Compose permission and nudge hooks::
 
-        >>> from lup.lib.hooks import merge_hooks, create_permission_hooks, create_nudge_hook
+        >>> from lup.hooks import merge_hooks, create_permission_hooks, create_nudge_hook
         >>> permission_hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")])
         >>> nudge_hooks = create_nudge_hook({"fetch_url": my_nudge_check})
         >>> combined = merge_hooks(permission_hooks, nudge_hooks)
@@ -46,7 +46,7 @@ from typing import cast
 from claude_agent_sdk import HookInput, HookMatcher, PostToolUseHookInput
 from claude_agent_sdk.types import HookContext, HookEvent, SyncHookJSONOutput
 
-from lup.lib.paths import extract_glob_dir, path_is_under
+from lup.paths import extract_glob_dir, path_is_under
 
 
 type HooksConfig = dict[HookEvent, list[HookMatcher]]

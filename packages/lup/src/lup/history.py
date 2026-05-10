@@ -56,10 +56,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup.lib.client import TokenUsage
-from lup.lib.metrics import MetricsSummary
-from lup.lib.paths import sessions_dir, traces_path
-from lup.version import AGENT_VERSION
+from lup.client import TokenUsage
+from lup.metrics import MetricsSummary
+from lup.paths import agent_version, sessions_dir, traces_path
 
 logger = logging.getLogger(__name__)
 
@@ -380,7 +379,7 @@ def resolve_version(
     if all_versions:
         return None, None
 
-    effective = version if version is not None else AGENT_VERSION
+    effective = version if version is not None else agent_version()
     semver = parse_semver(effective)
     available = [d.name for d in version_dirs()]
 

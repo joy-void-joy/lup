@@ -44,14 +44,25 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, Self, TypedDict
 
-import docker
+try:
+    import docker
+    from docker.errors import APIError, DockerException, NotFound
+    from docker.models.containers import Container, ExecResult
+    from docker.utils.socket import SocketError, next_frame_header, read_exactly
+except ImportError as e:
+    raise ImportError(
+        "lup.sandbox requires the 'docker' extra. Install with: pip install lup[docker]"
+    ) from e
 from claude_agent_sdk.types import McpSdkServerConfig
-from docker.errors import APIError, DockerException, NotFound
-from docker.models.containers import Container, ExecResult
-from docker.utils.socket import SocketError, next_frame_header, read_exactly
 from pydantic import BaseModel, Field
 
-from lup.lib.mcp import LupMcpTool, ToolError, create_mcp_server, extract_sdk_tools, lup_tool
+from lup.mcp import (
+    LupMcpTool,
+    ToolError,
+    create_mcp_server,
+    extract_sdk_tools,
+    lup_tool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +257,9 @@ class ReplSession:
         self.client = client
         self.container = container
         self.environment = environment
-        self.sock: Any = None  # Docker exec socket — no typed API exported by SDK
+        self.sock: Any = (
+            None  # claude: ignore — Docker exec socket, no typed API exported
+        )
         self.exec_id: str | None = None
 
     def start(self) -> None:

@@ -88,7 +88,7 @@ from claude_agent_sdk.types import (
 )
 from pydantic import BaseModel
 
-from lup.lib.trace import TraceLogger, print_message
+from lup.trace import TraceLogger, print_message
 
 
 class TokenUsage(TypedDict, total=False):
@@ -98,6 +98,7 @@ class TokenUsage(TypedDict, total=False):
     output_tokens: int
     cache_read_input_tokens: int
     cache_creation_input_tokens: int
+
 
 logger = logging.getLogger(__name__)
 
