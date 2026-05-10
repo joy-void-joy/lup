@@ -17,13 +17,13 @@ The pattern:
 4. It processes data via tool calls that write to shared state
 5. The main agent reads results through its own tools
 
-See ``src/lup/agent/tools/realtime.py`` for example integration with
+See ``src/lup_template/agent/tools/realtime.py`` for example integration with
 the persistent agent pattern (observer example).
 
 Examples:
     Create an observer that maintains conversation notes::
 
-        >>> from lup.lib.background import BackgroundAgent
+        >>> from lup.background import BackgroundAgent
         >>> notes: list[str] = []
         >>> agent = BackgroundAgent(
         ...     name="observer",
@@ -103,7 +103,7 @@ class BackgroundAgent:
         *,
         name: str,
         system_prompt: str,
-        tools: list[Any],
+        tools: list[Any],  # claude: ignore
         build_message: Callable[[], str | None],
         start_message: str = "",
         model: str = "claude-sonnet-4-20250514",

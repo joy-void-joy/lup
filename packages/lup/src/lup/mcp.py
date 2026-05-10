@@ -1,4 +1,5 @@
 """Patched MCP server factory that preserves is_error from tool responses.
+# claude: ignore
 
 The Claude Agent SDK's `create_sdk_mcp_server` has bugs that prevent proper error
 propagation:
@@ -69,9 +70,9 @@ class ToolResponse(TypedDict, total=False):
     is_error: bool
 
 
-def mcp_response(text: str, *, is_error: bool = False) -> dict[str, Any]:
+def mcp_response(text: str, *, is_error: bool = False) -> ToolResponse:
     """Create an MCP response with text content."""
-    response: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
+    response = ToolResponse(content=[{"type": "text", "text": text}])
     if is_error:
         response["is_error"] = True
     return response
@@ -270,7 +271,7 @@ def lup_tool(
     Returns:
         A decorator that wraps the async handler into a ``LupMcpTool``.
     """
-    from lup.lib.metrics import collector
+    from lup.metrics import collector
 
     def decorator(
         handler: Callable[..., Awaitable[BaseModel]],
@@ -301,7 +302,7 @@ def lup_tool(
 
         final_input: type[BaseModel] = resolved_input
 
-        async def wrapper(args: dict[str, Any]) -> dict[str, Any]:
+        async def wrapper(args: dict[str, Any]) -> ToolResponse:
             start = time.perf_counter()
             is_error = False
             try:
