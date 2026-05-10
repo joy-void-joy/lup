@@ -24,9 +24,9 @@ from typing import Annotated
 import sh
 import typer
 
-from lup.agent.config import settings
-from lup.agent.core import run_agent
-from lup.agent.models import AgentSessionResult
+from lup_template.agent.config import settings
+from lup_template.agent.core import run_agent
+from lup_template.agent.models import AgentSessionResult
 
 logger = logging.getLogger(__name__)
 

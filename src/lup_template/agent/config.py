@@ -9,7 +9,7 @@ Key patterns:
 4. Singleton instance for easy import
 
 Usage:
-    from lup.agent.config import settings
+    from lup_template.agent.config import settings
     print(settings.model)
 """
 

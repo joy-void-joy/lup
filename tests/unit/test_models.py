@@ -1,6 +1,6 @@
 """Tests for output models."""
 
-from lup.agent.models import AgentOutput
+from lup_template.agent.models import AgentOutput
 
 
 class TestOutputSchema:

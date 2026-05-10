@@ -29,9 +29,9 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-from lup.lib.client import query
-from lup.lib.mcp import LupMcpTool, lup_tool
-from lup.lib.reflect import ReflectionGate
+from lup.client import query
+from lup.mcp import LupMcpTool, lup_tool
+from lup.reflect import ReflectionGate
 
 logger = logging.getLogger(__name__)
 

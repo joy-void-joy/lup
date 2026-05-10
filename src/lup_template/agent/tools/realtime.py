@@ -30,16 +30,16 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.lib.background import BackgroundAgent
-from lup.lib.mcp import LupMcpTool, ToolError, extract_sdk_tools, lup_tool
-from lup.lib.realtime import (
+from lup.background import BackgroundAgent
+from lup.mcp import LupMcpTool, ToolError, extract_sdk_tools, lup_tool
+from lup.realtime import (
     DebounceInput,
     RemindInput,
     ScheduleActionInput,
     Scheduler,
     SleepInput,
 )
-from lup.lib.trace import TraceLogger
+from lup.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
 
@@ -342,9 +342,7 @@ def create_realtime_tools(
                 )
             case "remove":
                 if inp.index < 0 or inp.index >= len(scheduler.ideas):
-                    raise ToolError(
-                        f"Invalid index {inp.index}. Use 'list' first."
-                    )
+                    raise ToolError(f"Invalid index {inp.index}. Use 'list' first.")
                 removed = scheduler.ideas.pop(inp.index)
                 return IdeasOutput(message=f"Removed: {removed}")
             case "set":

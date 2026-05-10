@@ -10,7 +10,7 @@ The key pattern is:
 
 from pydantic import BaseModel, Field
 
-from lup.lib.history import SessionResult
+from lup.history import SessionResult
 
 
 # =============================================================================
@@ -75,5 +75,3 @@ class AgentOutput(BaseModel):
 
 # Domain-specific type alias: SessionResult parameterized with AgentOutput
 AgentSessionResult = SessionResult[AgentOutput]
-
-

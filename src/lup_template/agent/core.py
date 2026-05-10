@@ -24,25 +24,24 @@ from claude_agent_sdk import (
 
 from claude_agent_sdk.types import McpServerConfig, McpSdkServerConfig
 
-from lup.lib.client import query
-from lup.agent.config import settings
-from lup.agent.models import AgentOutput, AgentSessionResult
-from lup.lib.client import TokenUsage
-from lup.agent.prompts import get_system_prompt
-from lup.agent.subagents import get_subagents
-from lup.agent.tool_policy import ToolPolicy
-from lup.agent.tools.example import EXAMPLE_TOOLS
-from lup.agent.tools.reflect import create_reflect_tools
-from lup.version import AGENT_VERSION
-from lup.lib.client import ResponseCollector
-from lup.lib.history import save_session
-from lup.lib.hooks import create_permission_hooks, merge_hooks
-from lup.lib.mcp import create_mcp_server, extract_sdk_tools
-from lup.lib.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
-from lup.lib.notes import NotesConfig, setup_notes
-from lup.lib.reflect import ReflectionGate, create_reflection_gate
-from lup.lib.sandbox import Sandbox
-from lup.lib.trace import TraceLogger
+from lup.client import ResponseCollector, TokenUsage, query
+from lup.history import save_session
+from lup.hooks import create_permission_hooks, merge_hooks
+from lup.mcp import create_mcp_server, extract_sdk_tools
+from lup.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
+from lup.notes import NotesConfig, setup_notes
+from lup.paths import agent_version
+from lup.reflect import ReflectionGate, create_reflection_gate
+from lup.sandbox import Sandbox
+from lup.trace import TraceLogger
+
+from lup_template.agent.config import settings
+from lup_template.agent.models import AgentOutput, AgentSessionResult
+from lup_template.agent.prompts import get_system_prompt
+from lup_template.agent.subagents import get_subagents
+from lup_template.agent.tool_policy import ToolPolicy
+from lup_template.agent.tools.example import EXAMPLE_TOOLS
+from lup_template.agent.tools.reflect import create_reflect_tools
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +150,7 @@ def build_options(
         },
     )
 
+
 def extract_sources(blocks: list[ContentBlock]) -> list[str]:
     """Extract source URLs/queries from tool use blocks."""
     sources: list[str] = []
@@ -164,6 +164,7 @@ def extract_sources(blocks: list[ContentBlock]) -> list[str]:
                 if source:
                     sources.append(str(source))
     return sources
+
 
 def build_result(
     *,
@@ -183,7 +184,7 @@ def build_result(
     return AgentSessionResult(
         session_id=session_id,
         task_id=task_id,
-        agent_version=AGENT_VERSION,
+        agent_version=agent_version(),
         timestamp=datetime.now().isoformat(),
         output=output,
         reasoning="".join(b.text for b in collector.blocks if isinstance(b, TextBlock)),
