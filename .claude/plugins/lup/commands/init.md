@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Edit, Write, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*), Read, Grep, Glob, Edit, Write, AskUserQuestion
 description: Initialize the self-improvement loop for a specific domain
 ---
 
@@ -7,7 +7,7 @@ description: Initialize the self-improvement loop for a specific domain
 
 This command sets up the project identity, renames the source package, and customizes the feedback collection, metrics, and trace analysis for your specific agent domain.
 
-**This project uses the Claude Agent SDK.** The Agent SDK is the default and expected framework. If the user wants to use the bare Anthropic API instead, ask them to explain why — the Agent SDK provides structured outputs, tool use, subagents, and hooks out of the box.
+**This project uses the Claude Agent SDK.** The Agent SDK is the default and expected framework. If the user wants to use the bare Anthropic API instead, ask them to explain why -- the Agent SDK provides structured outputs, tool use, subagents, and hooks out of the box.
 
 ## Your Task
 
@@ -18,8 +18,8 @@ Interview the user about their domain, rename the source package, and generate t
 Before starting the interview, check if `DESIGN.md` exists in the project root. If it does:
 
 1. Read it thoroughly
-2. Use it as context for the entire init process — it contains design decisions from a `/lup:brainstorm` session
-3. Still run the full interview, but reference design decisions when asking questions (e.g., "DESIGN.md mentions you want a persistent agent with sleep/wake — does that still hold?")
+2. Use it as context for the entire init process -- it contains design decisions from a `/lup:brainstorm` session
+3. Still run the full interview, but reference design decisions when asking questions (e.g., "DESIGN.md mentions you want a persistent agent with sleep/wake -- does that still hold?")
 4. Skip questions whose answers are unambiguously covered in the design doc
 5. If no DESIGN.md exists, proceed normally
 
@@ -70,13 +70,13 @@ Use AskUserQuestion to determine the project name:
 
 ## Interviewing Style
 
-Use AskUserQuestion extensively — don't make assumptions about the domain. Ask open-ended questions first, then drill into specifics. Example questions (adapt based on context):
+Use AskUserQuestion extensively -- don't make assumptions about the domain. Ask open-ended questions first, then drill into specifics. Example questions (adapt based on context):
 
 - "What should this project be called? (valid Python package name, e.g., 'aib', 'forecast_bot')"
 - "What does your agent do and what does a single session look like?"
 - "How do you know if the agent did well? Is there ground truth that resolves later?"
 - "What metrics matter most to you?"
-- "How are tasks provided — free text, IDs, files, API calls?"
+- "How are tasks provided -- free text, IDs, files, API calls?"
 - "Should results auto-commit after each session?"
 - "What tools or APIs will the agent need?"
 
@@ -84,61 +84,32 @@ Let the conversation flow naturally. The goal is to understand the domain well e
 
 ## Phase 2: Rename Package
 
-Rename the Python package from `lup` to `<project>`. **Only the package directory and its import paths change — all framework vocabulary stays as `lup`.**
+Run the devtool to rename the package. Preview first with `--dry-run`, then execute:
 
-### What changes (consequences of renaming the package):
+```bash
+uv run lup-devtools dev init rename-package <project> --dry-run
+uv run lup-devtools dev init rename-package <project>
+```
 
-1. **Rename the directory**:
-   ```bash
-   git mv src/lup src/<project>
-   ```
-
-2. **Update Python import statements** — only `from lup.*` and `import lup.*` lines:
-   - `from lup.` → `from <project>.`
-   - `import lup` → `import <project>`
-   - In source files under `src/<project>/` and test files under `tests/`
-
-3. **Update `pyproject.toml`**:
-   - Package name: `name = "lup-template"` → `name = "<project>"`
-   - Main CLI entry point: `lup = "lup.environment.cli.__main__:app"` → `<project> = "<project>.environment.cli.__main__:app"`
-   - Devtools import path only (name stays): `lup-devtools = "lup.devtools.main:app"` → `lup-devtools = "<project>.devtools.main:app"`
-
-4. **Update CLI app name** (`src/<project>/environment/cli/__main__.py`):
-   - `app = typer.Typer(name="lup", ...)` → `name="<project>"`
-
-5. **Update logger names** (they follow Python module paths):
-   - `"lup.agent.stream"` → `"<project>.agent.stream"`
-
-### What stays as `lup` (framework identity — do NOT rename):
-
-- `.claude/plugins/lup/` — plugin directory
-- `lup-devtools` — CLI entry point name (only the import path changes)
-- `@lup_tool(...)` — framework decorator
-- `LupMcpTool` — framework type
-- `lup-tools` — MCP server name
-- `lup-sandbox-*`, `lup-mcp-*` — container/tempfile prefixes
-- `.lup/` — framework state directory
-- `lup@local` — plugin identifier
-- Naming convention ("Lup" = the inner SDK agent)
-- `/lup:*` — command namespace
+This handles directory rename (`src/lup_template/` -> `src/<project>/`), import updates, pyproject.toml entry points, and CLI app name -- all in one shot. Framework vocabulary (`lup_tool`, `lup-devtools`, `.lup/`, etc.) is preserved automatically.
 
 ### After renaming:
 
-6. **Merge CLAUDE.md from template** — Perform a section-level merge using `TEMPLATE_CLAUDE.md` (located at `.claude/plugins/lup/TEMPLATE_CLAUDE.md`):
+1. **Merge CLAUDE.md from template** -- Perform a section-level merge using `TEMPLATE_CLAUDE.md` (located at `.claude/plugins/lup/TEMPLATE_CLAUDE.md`):
    1. Read `TEMPLATE_CLAUDE.md` and replace `<project>` placeholders with the actual project name
    2. Read the existing `.claude/CLAUDE.md`
    3. Use the `<!-- section: ... -->` markers in the template to identify independent merge units
    4. Compare sections: for each marked section, check if the existing CLAUDE.md already has that section (by heading match)
    5. Add missing sections from the template into the existing CLAUDE.md
-   6. Leave existing sections untouched — don't overwrite content the project already has
+   6. Leave existing sections untouched -- don't overwrite content the project already has
 
-7. **Initialize upstream sync**:
+2. **Initialize upstream sync**:
    ```bash
    uv run lup-devtools sync mark-synced lup
    ```
    This baselines the sync state so `/lup:update` only shows commits after this point.
 
-8. **Verify**:
+3. **Verify**:
    ```bash
    uv sync
    uv run pyright
@@ -159,7 +130,7 @@ Customize AgentOutput for the domain:
 
 ### 2. `src/<project>/agent/prompts.py`
 
-Update the system prompt template for the domain. Focus on what the agent does and how to reason — tools self-document via their descriptions, so listing them in the prompt creates a second source of truth that drifts as tools change.
+Update the system prompt template for the domain. Focus on what the agent does and how to reason -- tools self-document via their descriptions, so listing them in the prompt creates a second source of truth that drifts as tools change.
 
 ### 3. `src/<project>/agent/subagents.py`
 
@@ -174,9 +145,9 @@ Customize the CLI for the domain's task format:
 - Configure auto-commit behavior: enable/disable by default, target branch (main for data-only commits, or a dedicated branch)
 - Add domain-specific CLI commands if needed
 
-### 5. `src/<project>/version.py`
+### 5. Agent Version
 
-Set initial AGENT_VERSION and explain bump rules for this domain.
+Set `agent_version` under `[tool.lup]` in `pyproject.toml` and explain bump rules for this domain.
 
 ### 6. Configure Reflection
 
@@ -184,12 +155,12 @@ Customize `src/<project>/agent/tools/reflect.py`:
 
 Ask the user:
 
-- Should the agent self-review before producing output? (default: yes — already wired in core.py)
-- Should there be a reviewer sub-agent? (default: yes, runs on Sonnet — adds latency but catches errors)
+- Should the agent self-review before producing output? (default: yes -- already wired in core.py)
+- Should there be a reviewer sub-agent? (default: yes, runs on Sonnet -- adds latency but catches errors)
 - What domain-specific fields should reflection capture? (extend `ReflectInput` with fields like factor analysis, move evaluation, etc.)
 - Customize the reviewer prompt for the domain's common failure modes
 
-The reflection gate (`lib/reflect.py`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
+The reflection gate (`lup.reflect`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
 
 ### 7. `feedback_collect.py`
 
@@ -206,11 +177,11 @@ The CLAUDE.md should already have the template sections from the Phase 2 merge. 
 
 ### 9. Tool Description Standards
 
-The agent discovers tools through their descriptions — a terse description means the agent can't tell when or why to use it. Each description should answer:
+The agent discovers tools through their descriptions -- a terse description means the agent can't tell when or why to use it. Each description should answer:
 
-1. **What** — What does this tool do? (concrete behavior, not vague summary)
-2. **When** — When should the agent reach for this tool? (triggers, conditions)
-3. **Why** — Why does this tool exist? (what problem it solves, what gap it fills)
+1. **What** -- What does this tool do? (concrete behavior, not vague summary)
+2. **When** -- When should the agent reach for this tool? (triggers, conditions)
+3. **Why** -- Why does this tool exist? (what problem it solves, what gap it fills)
 
 See `src/<project>/agent/tools/example.py` for the pattern.
 
@@ -243,12 +214,11 @@ Once the scaffolding is generated, guide the user to:
 
 ## Key Files to Customize
 
-- `src/<project>/agent/models.py` — Output schemas (AgentOutput, SessionResult)
-- `src/<project>/agent/subagents.py` — Specialized subagents
-- `src/<project>/agent/tool_policy.py` — Tool availability and MCP servers
-- `src/<project>/agent/core.py` — Options building and orchestration
-- `src/<project>/agent/tools/reflect.py` — Reflection tool and reviewer sub-agent
-- `src/<project>/agent/prompts.py` — System prompt templates
-- `src/<project>/environment/cli/__main__.py` — CLI with loop + auto-commit
-- `src/<project>/version.py` — Agent version tracking
-- `src/lup/devtools/feedback.py` — Feedback collection
+- `src/<project>/agent/models.py` -- Output schemas (AgentOutput, SessionResult)
+- `src/<project>/agent/subagents.py` -- Specialized subagents
+- `src/<project>/agent/tool_policy.py` -- Tool availability and MCP servers
+- `src/<project>/agent/core.py` -- Options building and orchestration
+- `src/<project>/agent/tools/reflect.py` -- Reflection tool and reviewer sub-agent
+- `src/<project>/agent/prompts.py` -- System prompt templates
+- `src/<project>/environment/cli/__main__.py` -- CLI with loop + auto-commit
+- `src/<project>/devtools/feedback/` -- Feedback collection

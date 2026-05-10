@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Task
+allowed-tools: Bash(uv run lup-devtools:*), Read, Write, Edit, Glob, Grep, AskUserQuestion, Task
 description: Propagate a general principle across the entire repo
 argument-hint: <principle description>
 ---
@@ -65,7 +65,7 @@ Read every relevant file and categorize findings into three buckets:
 
 The `src/` directory IS the template — when someone forks this repo, this code is their starting point. The principle should be visible in how the template code is written.
 
-5. **Agent code** (`src/lup/agent/`)
+5. **Agent code** (`src/lup_template/agent/`)
    - `core.py` — orchestration patterns, how the agent is structured
    - `prompts.py` — system prompts, instructions to the SDK agent
    - `subagents.py` — how subagents are defined and used
@@ -73,15 +73,15 @@ The `src/` directory IS the template — when someone forks this repo, this code
    - `tools/*.py` — example tool implementations
    - `models.py`, `config.py` — data modeling patterns
 
-6. **Library code** (`src/lup/lib/`)
+6. **Library code** (`packages/lup/src/lup/`)
    - Reusable abstractions — do they embody or contradict the principle?
    - Patterns that downstream users will copy
 
-7. **Environment code** (`src/lup/environment/`)
+7. **Environment code** (`src/lup_template/environment/`)
    - CLI structure, how the agent is invoked
    - Any scaffolding patterns
 
-8. **Devtools** (`src/lup/devtools/`)
+8. **Devtools** (`src/lup_template/devtools/`)
    - CLI commands for development and analysis
    - Patterns encoded in automation
 
@@ -114,7 +114,7 @@ Present findings and proposed changes one layer at a time. For each layer:
 - Agent orchestration (`core.py`, `subagents.py`) — does the structure reflect the principle?
 - Prompts (`prompts.py`) — does the SDK agent's system prompt embody the principle?
 - Tools (`tools/*.py`, `tool_policy.py`) — do the example tools demonstrate the principle?
-- Library (`lib/`) — do shared abstractions follow the principle?
+- Library (`packages/lup/`) — do shared abstractions follow the principle?
 - Consider: refactoring patterns, adding/removing code, changing defaults, updating examples.
 
 **Group 4: Hook scripts & enforcement**
@@ -123,9 +123,9 @@ Present findings and proposed changes one layer at a time. For each layer:
 - If an existing hook contradicts the principle, propose modifications.
 - Not every principle needs a hook — only propose one if mechanical enforcement makes sense.
 
-**Group 5: Devtools & automation** (`src/lup/devtools/`)
+**Group 5: Devtools & automation** (`src/lup_template/devtools/`)
 
-- Do the devtools commands (feedback, trace, metrics, git, sync) reflect the principle?
+- Do the devtools commands (agent, session, git, sync, usage) reflect the principle?
 - Are there devtools commands that should exist to support the principle but don't?
 
 ## Phase 4: Execute Approved Changes

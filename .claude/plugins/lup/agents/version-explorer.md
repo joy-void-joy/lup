@@ -7,7 +7,7 @@ Context: Feedback loop wants to understand how the prompt evolved.
 user: "Fetch the system prompt from v0.3.0"
 assistant: "I'll launch the version-explorer to retrieve prompts.py at v0.3.0."
 <commentary>
-Simple retrieval — the agent runs `git show v0.3.0:src/lup/agent/prompts.py` and returns the content.
+Simple retrieval — the agent runs `git show v0.3.0:src/lup_template/agent/prompts.py` and returns the content.
 </commentary>
 </example>
 
@@ -46,16 +46,16 @@ These are the files that matter most for version comparison. Check these by defa
 
 | File | What It Contains |
 |------|-----------------|
-| `src/lup/agent/prompts.py` | System prompt — the single most important file |
-| `src/lup/agent/core.py` | Agent orchestration (tool selection, hooks, output processing) |
-| `src/lup/agent/tool_policy.py` | Which tools are available and their documentation |
-| `src/lup/agent/models.py` | Structured output models |
-| `src/lup/agent/subagents.py` | Subagent definitions |
-| `src/lup/agent/config.py` | Configuration settings |
-| `src/lup/version.py` | AGENT_VERSION constant |
+| `src/lup_template/agent/prompts.py` | System prompt — the single most important file |
+| `src/lup_template/agent/core.py` | Agent orchestration (tool selection, hooks, output processing) |
+| `src/lup_template/agent/tool_policy.py` | Which tools are available and their documentation |
+| `src/lup_template/agent/models.py` | Structured output models |
+| `src/lup_template/agent/subagents.py` | Subagent definitions |
+| `src/lup_template/agent/config.py` | Configuration settings |
+| `packages/lup/src/lup/paths.py` | AGENT_VERSION constant |
 | `CHANGELOG.md` | Version history with change summaries |
 
-Tool implementations live in `src/lup/agent/tools/*.py` — diff these when the caller asks about tool changes.
+Tool implementations live in `src/lup_template/agent/tools/*.py` — diff these when the caller asks about tool changes.
 
 ## Git Commands
 
@@ -70,16 +70,16 @@ git show v<VERSION>:<path>
 git diff v<A> v<B> -- <path>
 
 # Diff all agent code between two versions
-git diff v<A> v<B> -- src/lup/agent/ src/lup/agent/tools/
+git diff v<A> v<B> -- src/lup_template/agent/ src/lup_template/agent/tools/
 
 # Commits between two versions
 git log --oneline v<A>..v<B>
 
 # Find when a string was introduced (pickaxe search)
-git log -S "<string>" --oneline -- src/lup/
+git log -S "<string>" --oneline -- src/lup_template/
 
 # Find when a string was introduced with context
-git log -S "<string>" -p -- src/lup/agent/prompts.py
+git log -S "<string>" -p -- src/lup_template/agent/prompts.py
 
 # Changelog entry for a version
 git show v<VERSION>:CHANGELOG.md
@@ -110,10 +110,10 @@ Diff code between two versions. This is the most common request.
 2. Read the changelog entries for both versions: `git show v<A>:CHANGELOG.md` and `git show v<B>:CHANGELOG.md`
 3. List commits between them: `git log --oneline v<A>..v<B>`
 4. Diff the key files (prompts.py first, then others as relevant):
-   - `git diff v<A> v<B> -- src/lup/agent/prompts.py`
-   - `git diff v<A> v<B> -- src/lup/agent/core.py`
-   - `git diff v<A> v<B> -- src/lup/agent/tool_policy.py`
-   - `git diff v<A> v<B> -- src/lup/agent/tools/` (if tool changes are relevant)
+   - `git diff v<A> v<B> -- src/lup_template/agent/prompts.py`
+   - `git diff v<A> v<B> -- src/lup_template/agent/core.py`
+   - `git diff v<A> v<B> -- src/lup_template/agent/tool_policy.py`
+   - `git diff v<A> v<B> -- src/lup_template/agent/tools/` (if tool changes are relevant)
 5. Synthesize: explain what changed, why it matters, and what the practical effect on agent behavior would be
 
 **Output:**
@@ -152,7 +152,7 @@ Diff code between two versions. This is the most common request.
 Find when a concept, phrase, or pattern appeared or disappeared.
 
 **Process:**
-1. Use pickaxe search: `git log -S "<search term>" --oneline -- src/lup/`
+1. Use pickaxe search: `git log -S "<search term>" --oneline -- src/lup_template/`
 2. Map the commit(s) to version tags: for each commit, find which version tag contains it
    ```bash
    git tag --contains <commit> --sort=version:refname | head -1
