@@ -37,17 +37,17 @@ if TYPE_CHECKING:
 
     from claude_agent_sdk.types import ResultMessage
 
-    from lup.lib.client import ResponseCollector
+    from lup.client import ResponseCollector
 
 import sh
 import typer
 
-from lup.agent.config import settings
-from lup.agent.models import AgentOutput
-from lup.agent.prompts import get_system_prompt
-from lup.agent.subagents import get_subagents
-from lup.agent.tools.example import EXAMPLE_TOOLS
-from lup.lib.mcp import LupMcpTool
+from lup_template.agent.config import settings
+from lup_template.agent.models import AgentOutput
+from lup_template.agent.prompts import get_system_prompt
+from lup_template.agent.subagents import get_subagents
+from lup_template.agent.tools.example import EXAMPLE_TOOLS
+from lup.mcp import LupMcpTool
 
 logger = logging.getLogger(__name__)
 
@@ -337,7 +337,7 @@ def serve_tools_cmd() -> None:
     from mcp.server.stdio import stdio_server
     from mcp.types import Tool
 
-    from lup.lib.mcp import generate_json_schema, extract_sdk_tools
+    from lup.mcp import generate_json_schema, extract_sdk_tools
 
     sdk_tools = extract_sdk_tools(collect_all_tools())
     tool_map = {t.name: t for t in sdk_tools}
@@ -515,10 +515,10 @@ async def repl(
 
     from claude_agent_sdk.types import McpServerConfig
 
-    from lup.agent.core import build_agent_servers
-    from lup.lib.client import build_client, ResponseCollector
-    from lup.lib.paths import project_root
-    from lup.lib.sandbox import Sandbox
+    from lup_template.agent.core import build_agent_servers
+    from lup.client import build_client, ResponseCollector
+    from lup.paths import project_root
+    from lup.sandbox import Sandbox
 
     console = Console(highlight=False)
     effective_model = model or settings.model

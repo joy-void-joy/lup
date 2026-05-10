@@ -90,6 +90,16 @@ def inspect_cmd(
     typer.echo(f"Type: {obj_type}")
 
     if inspect.ismodule(obj):
+        file_path = find_module_path(path)
+        if file_path:
+            typer.echo(f"File: {file_path}")
+            if file_path.name == "__init__.py":
+                typer.echo(f"Package root: {file_path.parent}")
+
+        version = getattr(obj, "__version__", None)
+        if version:
+            typer.echo(f"Version: {version}")
+
         typer.echo(f"\nDocstring:\n{get_docstring(obj)}\n")
 
         members = []
