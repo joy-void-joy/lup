@@ -91,7 +91,7 @@ uv run lup-devtools dev init rename-package <project> --dry-run
 uv run lup-devtools dev init rename-package <project>
 ```
 
-This handles directory rename (`src/lup/` -> `src/<project>/`), import updates, pyproject.toml entry points, and CLI app name -- all in one shot. Framework vocabulary (`lup_tool`, `lup-devtools`, `.lup/`, etc.) is preserved automatically.
+This handles directory rename (`src/lup_template/` -> `src/<project>/`), import updates, pyproject.toml entry points, and CLI app name -- all in one shot. Framework vocabulary (`lup_tool`, `lup-devtools`, `.lup/`, etc.) is preserved automatically.
 
 ### After renaming:
 
@@ -145,9 +145,9 @@ Customize the CLI for the domain's task format:
 - Configure auto-commit behavior: enable/disable by default, target branch (main for data-only commits, or a dedicated branch)
 - Add domain-specific CLI commands if needed
 
-### 5. `src/<project>/version.py`
+### 5. Agent Version
 
-Set initial AGENT_VERSION and explain bump rules for this domain.
+Set `agent_version` under `[tool.lup]` in `pyproject.toml` and explain bump rules for this domain.
 
 ### 6. Configure Reflection
 
@@ -160,7 +160,7 @@ Ask the user:
 - What domain-specific fields should reflection capture? (extend `ReflectInput` with fields like factor analysis, move evaluation, etc.)
 - Customize the reviewer prompt for the domain's common failure modes
 
-The reflection gate (`lib/reflect.py`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
+The reflection gate (`lup.reflect`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
 
 ### 7. `feedback_collect.py`
 
@@ -221,5 +221,4 @@ Once the scaffolding is generated, guide the user to:
 - `src/<project>/agent/tools/reflect.py` -- Reflection tool and reviewer sub-agent
 - `src/<project>/agent/prompts.py` -- System prompt templates
 - `src/<project>/environment/cli/__main__.py` -- CLI with loop + auto-commit
-- `src/<project>/version.py` -- Agent version tracking
-- `src/lup/devtools/feedback/` -- Feedback collection
+- `src/<project>/devtools/feedback/` -- Feedback collection

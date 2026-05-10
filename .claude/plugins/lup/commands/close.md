@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion, Skill(lup:commit)
 description: Check PR review status, merge if approved, and clean up branches
 ---
 
@@ -9,7 +9,11 @@ Check the review status of the feature branch's PR, merge it if approved, and cl
 
 ## Process
 
-### 1. Get PR status
+### 1. Commit pending changes
+
+Invoke `/lup:commit` to commit any uncommitted work before proceeding.
+
+### 2. Get PR status
 
 ```bash
 uv run lup-devtools dev pr status --json
@@ -17,7 +21,7 @@ uv run lup-devtools dev pr status --json
 
 If no PR is found, check if the user passed a PR number as an argument. If still nothing, report the error and stop.
 
-### 2. Evaluate reviews
+### 3. Evaluate reviews
 
 **If there are unresolved review comments or requested changes:**
 
@@ -30,13 +34,13 @@ If no PR is found, check if the user passed a PR number as an argument. If still
 1. Show the PR summary
 2. Confirm the merge via AskUserQuestion
 
-### 3. Merge the PR
+### 4. Merge the PR
 
 ```bash
 uv run lup-devtools dev pr merge <PR_NUMBER>
 ```
 
-### 4. Clean up
+### 5. Clean up
 
 Delete the merged branch:
 
@@ -44,7 +48,7 @@ Delete the merged branch:
 uv run lup-devtools dev delete <BRANCH_NAME>
 ```
 
-### 5. Report
+### 6. Report
 
 Summarize what was done: PR merged (with link), cleanup results.
 

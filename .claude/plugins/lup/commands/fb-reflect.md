@@ -33,7 +33,7 @@ Common gaps:
 
 ### 4. Prompt health
 
-Read the full system prompt (`src/lup/agent/prompts.py`). Is it accumulating patches? Count conditional exceptions added since the last rewrite. If >3, flag for structural rewrite.
+Read the full system prompt (`src/lup_template/agent/prompts.py`). Is it accumulating patches? Count conditional exceptions added since the last rewrite. If >3, flag for structural rewrite.
 
 ### 5. Subcommand assessment
 
@@ -41,4 +41,4 @@ Were the `/fb-*` subcommands helpful? Anything confusing, missing, or redundant?
 
 ### 6. Devtools assessment
 
-Any repetitive analysis that should be automated as a devtools command? Add commands to `src/lup/devtools/`.
+Any repetitive analysis that should be automated as a devtools command? Add commands to `src/lup_template/devtools/`.

@@ -45,10 +45,10 @@ uv run lup-devtools agent inspect --json
 
 This shows tools, subagents, model, and prompt info. For deeper inspection, read:
 
-- **System prompt**: `src/lup/agent/prompts.py`
-- **Tool policy**: `src/lup/agent/tool_policy.py`
-- **Tools**: `src/lup/agent/tools/`
-- **Core wiring**: `src/lup/agent/core.py`
+- **System prompt**: `src/lup_template/agent/prompts.py`
+- **Tool policy**: `src/lup_template/agent/tool_policy.py`
+- **Tools**: `src/lup_template/agent/tools/`
+- **Core wiring**: `src/lup_template/agent/core.py`
 
 This is the baseline for evaluating whether the agent used its capabilities well.
 
@@ -118,7 +118,7 @@ A table or list of tool calls with assessment:
 **Actionable Improvements**
 Concrete, specific changes — not vague suggestions. Each improvement should reference:
 - What evidence from the trace motivates it
-- Which file to modify (`src/lup/agent/...`)
+- Which file to modify (`src/lup_template/agent/...`)
 - What the change would be (new tool, description fix, prompt adjustment, workflow change)
 
 Categorize improvements as:
@@ -130,8 +130,8 @@ Categorize improvements as:
 ## Rules
 
 - **Never guess.** Every observation must cite a specific trace entry, tool call, or source code location.
-- **Read the source.** Don't evaluate tool usage without reading the actual tool descriptions and schemas in `src/lup/agent/tools/`.
-- **Compare to intent.** The system prompt (`src/lup/agent/prompts.py`) defines the intended behavior — compare actual behavior against it.
+- **Read the source.** Don't evaluate tool usage without reading the actual tool descriptions and schemas in `src/lup_template/agent/tools/`.
+- **Compare to intent.** The system prompt (`src/lup_template/agent/prompts.py`) defines the intended behavior — compare actual behavior against it.
 - **Focus on the general.** Per the Bitter Lesson: prefer improvements that add capabilities over improvements that add rules. A missing tool is almost always a better diagnosis than a missing prompt paragraph.
 - **Diagnose before prescribing.** For each proposed improvement, answer: what data was the agent missing, and where in the pipeline did the wrong decision enter? Don't propose "add rule X to the prompt" — propose the structural change that makes the failure impossible. Don't copy examples from this trace into the prompt — derive the general principle and write fresh examples.
 - **Be honest about quality.** If the session went well, say so. Not every review needs to find problems.

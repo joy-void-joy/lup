@@ -34,20 +34,19 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 
 ### Reusable Library Code
 
-- `src/lup/lib/` — utilities (trace, hooks, metrics, scoring, cache, retry, notes, mcp, responses, history)
-- `src/lup/version.py` — version tracking pattern
+- `packages/lup/src/lup/` — utilities (trace, hooks, metrics, mcp, retry, notes, history, paths)
+- `lup.paths.AGENT_VERSION` — version tracking pattern
 
 ### DevTools CLI
 
-The `lup-devtools` CLI (`src/lup/devtools/`) gives Claude Code structured commands for development tasks that would otherwise require ad-hoc bash one-liners. Without it, Claude resorts to `python -c "..."` snippets or manual shell pipelines for trace analysis, feedback collection, and session management — which are fragile and unrepeatable. The devtools encode these workflows as proper CLI commands with argument parsing, output formatting, and error handling.
+The `lup-devtools` CLI (`src/lup_template/devtools/`) gives Claude Code structured commands for development tasks that would otherwise require ad-hoc bash one-liners. Without it, Claude resorts to `python -c "..."` snippets or manual shell pipelines for trace analysis, feedback collection, and session management — which are fragile and unrepeatable. The devtools encode these workflows as proper CLI commands with argument parsing, output formatting, and error handling.
 
-- `src/lup/devtools/main.py` — root typer app composing sub-apps (entry point: `lup-devtools`)
+- `src/lup_template/devtools/main.py` — root typer app composing sub-apps (entry point: `lup-devtools`)
   - `trace/` — trace display, search, and analysis
   - `feedback/` — feedback state, metrics, and commits
   - `dev/` — worktree management, branch analysis, pre-flight checks
   - `version.py` — version, changelog, and bump operations
   - `sync.py` — upstream sync tracking
-  - `usage.py` — Claude Code usage display
 
 ### Configuration Patterns
 
@@ -207,8 +206,8 @@ For each item being installed:
 
 | Changes (adapt to target package) | Stays as `lup` (framework identity) |
 |---|---|
-| `from lup.*` → `from <target>.*` imports | `lup-devtools` CLI entry point name |
-| `src/lup/` → `src/<target>/` paths | `@lup_tool(...)`, `LupMcpTool` |
+| `from lup_template.*` → `from <target>.*` imports | `lup-devtools` CLI entry point name |
+| `src/lup_template/` → `src/<target>/` paths | `@lup_tool(...)`, `LupMcpTool` |
 | `pyproject.toml` package name | `.claude/plugins/lup/`, `lup@local` |
 | Main CLI entry point name | `.lup/` state directory |
 | Logger module paths | `lup-tools`, `lup-sandbox-*`, `lup-mcp-*` |

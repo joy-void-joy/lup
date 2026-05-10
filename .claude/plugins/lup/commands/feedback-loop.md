@@ -93,7 +93,7 @@ Write analysis output to `notes/feedback_loop/<timestamp>_analysis.md`:
 | ----- | ------ | --------- |
 
 ## Evaluation Queue
-uv run python -m lup.environment.cli loop "task1" "task2" "task3"
+uv run python -m lup_template.environment.cli loop "task1" "task2" "task3"
 ```
 
 ## Key Questions

@@ -20,13 +20,13 @@ Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manag
 - **Claude** = the meta-agent (Claude Code) that modifies the codebase, runs commands, and manages the development workflow
 - **Lup** = the SDK agent inside the code being built and improved — the agent that runs via the CLI and produces outputs
 
-"Lup" is the framework's name for the inner agent, not a project-specific term — it stays as "Lup" in all downstream projects. Only the Python package directory (`src/lup/`) gets renamed; all framework vocabulary (`lup_tool`, `LupMcpTool`, `lup-devtools`, `.lup/`, `lup-tools`, etc.) stays as `lup`.
+"Lup" is the framework's name for the inner agent, not a project-specific term — it stays as "Lup" in all downstream projects. Only the template package directory (`src/lup_template/`) gets renamed; all framework vocabulary (`lup_tool`, `LupMcpTool`, `lup-devtools`, `.lup/`, `lup-tools`, etc.) stays as `lup`.
 
 ### Key Concepts
 
-- **Lup Package** (`src/lup/`): All code for the self-improving agent.
-  - **Agent** (`src/lup/agent/`): The agent code that the feedback loop improves. Contains core orchestration, tools, subagents, and configuration.
-  - **Environment** (`src/lup/environment/`): Domain-specific scaffolding (user interaction, game logic, etc.). Evolves with application requirements, but not via the feedback loop.
+- **Template Package** (`src/lup_template/`): Domain-specific code for the self-improving agent.
+  - **Agent** (`src/lup_template/agent/`): The agent code that the feedback loop improves. Contains core orchestration, tools, subagents, and configuration.
+  - **Environment** (`src/lup_template/environment/`): Domain-specific scaffolding (user interaction, game logic, etc.). Evolves with application requirements, but not via the feedback loop.
 - **Three-Level Meta Analysis**: Object (agent behavior), Meta (agent self-tracking), Meta-Meta (feedback loop process).
 
 ---
@@ -72,24 +72,27 @@ Compare: `"Search the web for information"` vs. `"Search the web using keyword q
 ### Directory Structure
 
 ```
+packages/
+└── lup/                        # Standalone library (uv workspace member)
+    ├── pyproject.toml
+    └── src/lup/
+        ├── __init__.py         # Public API re-exports (__all__)
+        ├── background.py       # Background agents for persistent sessions
+        ├── client.py           # Agent SDK client (build_client, query)
+        ├── history.py          # Session storage/retrieval
+        ├── hooks.py            # Claude Agent SDK hook utilities
+        ├── mcp.py              # MCP server creation utilities
+        ├── metrics.py          # Tool call tracking (@tracked decorator)
+        ├── notes.py            # RO/RW directory structure
+        ├── paths.py            # Centralized version-aware path constants and helpers
+        ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
+        ├── reflect.py          # Reflection gate (enforce reflect-before-output)
+        ├── retry.py            # Retry decorator with backoff
+        ├── sandbox.py          # Docker-based Python sandbox
+        ├── throttle.py         # Rate limiting (concurrency + interval)
+        └── trace.py            # Trace logging, color-coded console display
 src/
-└── lup/
-    ├── version.py              # Agent version tracking (bump on behavior changes)
-    ├── lib/                    # Reusable abstractions (rarely modified)
-    │   ├── client.py           # Agent SDK client (build_client, query)
-    │   ├── cache.py            # TTL caching for API responses
-    │   ├── history.py          # Session storage/retrieval
-    │   ├── hooks.py            # Claude Agent SDK hook utilities
-    │   ├── metrics.py          # Tool call tracking (@tracked decorator)
-    │   ├── mcp.py              # MCP server creation utilities
-    │   ├── background.py       # Background agents for persistent sessions
-    │   ├── notes.py            # RO/RW directory structure
-    │   ├── paths.py            # Centralized version-aware path constants and helpers
-    │   ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
-    │   ├── reflect.py          # Reflection gate (enforce reflect-before-output)
-    │   ├── retry.py            # Retry decorator with backoff
-    │   ├── throttle.py         # Rate limiting (concurrency + interval)
-    │   └── trace.py            # Trace logging, color-coded console display
+└── lup_template/               # Template application (depends on lup)
     ├── agent/                  # Domain-specific code (feedback loop improves this)
     │   ├── core.py             # Main orchestration
     │   ├── config.py           # Settings via pydantic-settings
@@ -116,13 +119,14 @@ src/
 
 See [PATTERNS.md](PATTERNS.md) for detailed architecture patterns: Persistent Agent, Reflection, Nested Agent, Background Agent, and Data Augmentation.
 
-### lib/ vs agent/ Boundary
+### lup (library) vs lup_template (application) Boundary
 
-Files in `src/lup/lib/` must be **complete-as-is and configurable through function arguments** — never by modifying the source. Domain-specific code belongs in `agent/`.
+Code in `packages/lup/` must be **complete-as-is and configurable through function arguments** — never by modifying the source. Domain-specific code belongs in `src/lup_template/`.
 
 - Use function parameters for customization (callbacks, config objects, path overrides)
 - Use `configure()`-style functions for module-level state that needs overriding
-- **No imports from `agent/`** in lib code — the dependency arrow points one way
+- **No imports from `lup_template`** in `lup` code — the dependency arrow points one way
+- **Placement test:** Can this module be used as-is in a different project without modification? If yes → `packages/lup/`. Does it import from `lup_template`? If yes → `src/lup_template/`.
 
 ---
 
@@ -146,18 +150,18 @@ uv run pyright
 uv run pytest
 
 # Run a single agent session
-uv run python -m lup.environment.cli run "your task here"
-uv run python -m lup.environment.cli run --session-id my-session "task"
+uv run python -m lup_template.environment.cli run "your task here"
+uv run python -m lup_template.environment.cli run --session-id my-session "task"
 
 # Run multiple sessions with auto-commit
-uv run python -m lup.environment.cli loop "task1" "task2" "task3"
-uv run python -m lup.environment.cli loop --no-commit "task1" "task2"
+uv run python -m lup_template.environment.cli loop "task1" "task2" "task3"
+uv run python -m lup_template.environment.cli loop --no-commit "task1" "task2"
 
 # Commit uncommitted session results
 uv run lup-devtools feedback commit
 uv run lup-devtools feedback commit --dry-run
 
-uv run python -m lup.environment.cli --help
+uv run python -m lup_template.environment.cli --help
 ```
 
 ### Testing
@@ -215,8 +219,8 @@ uv run lup-devtools trace show <session_id>
 4. **Subagents** (`agent/subagents.py`) — Specialized subagents, tool sets, model choices
 5. **Tools** (`agent/tool_policy.py`) — API key requirements, conditional availability, MCP configs
 6. **Reflection** (`agent/tools/reflect.py`) — Domain-specific `ReflectInput` fields, reviewer prompt
-7. **Version** (`version.py`) — Set initial `AGENT_VERSION`, bump on behavior changes
-8. **Persistent mode** (optional) — Wire `Scheduler` from `lib/realtime.py`, add Stop hook, implement sleep/context/reply tools, replace request-response with sleep/wake loop
+7. **Version** (`[tool.lup] agent_version` in `pyproject.toml`) — Set initial version, bump on behavior changes
+8. **Persistent mode** (optional) — Wire `Scheduler` from `lup.realtime`, add Stop hook, implement sleep/context/reply tools, replace request-response with sleep/wake loop
 9. **Feedback** (`devtools/feedback/state.py`) — Implement `load_outcomes()`, customize `compute_metrics()`
 
 ---
@@ -368,17 +372,19 @@ The codebase should read as a **monolithic source of truth** — understandable 
 
 ### DRY: Don't Repeat Yourself
 
-- If logic exists in `lib/`, import it. Don't copy-paste.
-- Utilities belong in `lib/`, not `agent/`. `agent/` imports from `lib/`.
-- **Placement test:** Can this module be used as-is without templating or source modification? If yes → `lib/`. Quick proxy: does it import from `agent/`?
+- If logic exists in `lup` (the library), import it. Don't copy-paste.
+- Reusable utilities belong in `packages/lup/`, not `src/lup_template/`.
+- See [lup vs lup_template Boundary](#lup-library-vs-lup_template-application-boundary) for the placement test.
 
 ### Imports: No Barrel Files
 
-**Never use `__init__.py` re-exports or `__all__`.** Import directly from the module that defines the symbol.
+**Never use `__init__.py` re-exports or `__all__` in internal packages.** Import directly from the module that defines the symbol.
 
-- `from lup.lib.mcp import lup_tool` — not `from lup.lib import lup_tool`
+- `from lup.mcp import lup_tool` — not `from lup import lup_tool`
 - `__init__.py` files should contain only the module docstring (no imports, no `__all__`)
 - Barrel files drift out of sync and hide real dependencies
+
+**Exception:** Standalone library packages under `packages/` may use re-exports with `__all__` in their top-level `__init__.py` to declare a public API. Only the package root — not subpackages.
 
 ### Naming: No Private Prefixes
 
@@ -414,9 +420,9 @@ def build_display(usage, stats):
 
 ### lup-devtools
 
-All development tooling lives in `src/lup/devtools/` and is exposed as the `lup-devtools` CLI entry point. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` — these are denied by the Bash permission hook.
+All development tooling lives in `src/lup_template/devtools/` and is exposed as the `lup-devtools` CLI entry point. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` — these are denied by the Bash permission hook.
 
-If you find yourself running the same command repeatedly, **add a command** to `src/lup/devtools/`. Use `tmp/*.py` for one-off scripts.
+If you find yourself running the same command repeatedly, **add a command** to `src/lup_template/devtools/`. Use `tmp/*.py` for one-off scripts.
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
@@ -479,7 +485,7 @@ The `.env` file contains template configuration. Create `.env.local` for secrets
 # AGENT_MAX_BUDGET_USD=5.00
 ```
 
-Settings in `.env.local` override `.env`. Configuration is loaded via pydantic-settings — see `src/lup/agent/config.py`.
+Settings in `.env.local` override `.env`. Configuration is loaded via pydantic-settings — see `src/lup_template/agent/config.py`.
 
 All Claude Code settings modifications should be **project-level** (in `.claude/settings.json`), not user-level.
 

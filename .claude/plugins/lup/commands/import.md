@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, Skill(lup:commit)
 description: Import a specific pattern from a tracked downstream repo
 argument-hint: <project> <pattern description>
 ---
@@ -27,7 +27,11 @@ If only a project name is provided (single word, no description), use AskUserQue
 
 ## Steps
 
-### 1. Resolve the project
+### 1. Commit pending changes
+
+Invoke `/lup:commit` to commit any uncommitted work before importing.
+
+### 2. Resolve the project
 
 ```bash
 uv run lup-devtools sync list
@@ -46,7 +50,7 @@ Ensure the local copy is available:
 uv run lup-devtools sync log <project>
 ```
 
-### 2. Search the downstream repo for the pattern
+### 3. Search the downstream repo for the pattern
 
 Use the pattern description to locate relevant code. The downstream repo is accessible via `refs/<project>` (symlink created by sync tooling).
 
@@ -63,7 +67,7 @@ Cast a wide net — search file names, function names, class names, commit messa
 cd refs/<project> && git log --all --oneline --grep="<keyword>" | head -20
 ```
 
-### 3. Present what you found
+### 4. Present what you found
 
 Use AskUserQuestion to present the relevant code you found, organized by file. For each piece:
 
@@ -75,7 +79,7 @@ If you found multiple possible matches, present them and ask which one the user 
 
 If nothing matches, say so and ask the user to clarify or point you to specific files.
 
-### 4. Analyze portability
+### 5. Analyze portability
 
 Before porting, analyze what needs to change:
 
@@ -86,7 +90,7 @@ Before porting, analyze what needs to change:
 
 Present your analysis and proposed adaptation plan via AskUserQuestion before making changes.
 
-### 5. Port the pattern
+### 6. Port the pattern
 
 For approved imports:
 
@@ -102,7 +106,7 @@ For approved imports:
    uv run lup-devtools dev check
    ```
 
-### 6. Optionally commit
+### 7. Optionally commit
 
 Offer to commit the imported pattern:
 

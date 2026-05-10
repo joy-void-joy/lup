@@ -46,7 +46,7 @@ git log --oneline v<VERSION> -1
 This is the most important step. Read the full system prompt that was active for this version:
 
 ```bash
-git show v<VERSION>:src/lup/agent/prompts.py
+git show v<VERSION>:src/lup_template/agent/prompts.py
 ```
 
 Read it carefully. Note:

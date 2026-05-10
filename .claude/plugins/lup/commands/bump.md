@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, AskUserQuestion, Skill(lup:commit)
 description: Review changes since last bump and bump agent version
 argument-hint: [patch|minor|major]
 ---
@@ -16,7 +16,11 @@ If no level is provided, determine the appropriate level from the changes.
 
 ## Process
 
-### 1. Gather context
+### 1. Commit pending changes
+
+Invoke `/lup:commit` to commit any uncommitted work before bumping.
+
+### 2. Gather context
 
 ```bash
 uv run lup-devtools version --json
@@ -24,7 +28,7 @@ uv run lup-devtools version --json
 
 This shows the current version, latest tag, and recent history.
 
-### 2. Classify changes
+### 3. Classify changes
 
 ```bash
 uv run lup-devtools version changelog --json
@@ -38,7 +42,7 @@ Read through the commits and categorize:
 
 If there are NO behavior changes since the last bump, inform the user and stop.
 
-### 3. Determine bump level
+### 4. Determine bump level
 
 | Level     | When                                          | Examples                                     |
 | --------- | --------------------------------------------- | -------------------------------------------- |
@@ -48,13 +52,13 @@ If there are NO behavior changes since the last bump, inform the user and stop.
 
 If the user provided a level in `$ARGUMENTS`, use it. Otherwise, recommend and confirm via AskUserQuestion.
 
-### 4. Apply the bump
+### 5. Apply the bump
 
 ```bash
 uv run lup-devtools version bump <level>
 ```
 
-### 5. Report
+### 6. Report
 
 Show the user what was bumped and the behavioral changes that warranted it.
 

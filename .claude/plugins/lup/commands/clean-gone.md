@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion, Skill(lup:commit)
 argument-hint: [branch-name]
 description: Review branches/worktrees and clean up merged ones
 ---
@@ -16,6 +16,12 @@ Raw arguments: `$ARGUMENTS`
 
 Parse the raw arguments: if non-empty, the first word is the **branch name**. Ignore remaining words.
 
+## Process
+
+### 1. Commit pending changes
+
+Invoke `/lup:commit` to commit any uncommitted work before cleaning up branches.
+
 ## Targeted Mode (branch name provided)
 
 1. Run `uv run lup-devtools dev survey --json` to get full branch data.
@@ -25,13 +31,13 @@ Parse the raw arguments: if non-empty, the first word is the **branch name**. Ig
 
 ## Full Scan Mode (no argument)
 
-### 1. Collect data
+### 2. Collect data
 
 ```bash
 uv run lup-devtools dev survey --json
 ```
 
-### 2. Classify each branch
+### 3. Classify each branch
 
 Using the survey JSON, classify each branch:
 
@@ -40,14 +46,14 @@ Using the survey JSON, classify each branch:
 - **KEEP** -- Has unique commits not captured elsewhere, or has an open PR
 - **CURRENT** -- `is_current` is true (never delete, warn if it qualifies)
 
-### 3. Present the merge graph
+### 4. Present the merge graph
 
 Show a table with:
 - Branch name, containment info, PR status, unique commits, diff lines
 - Proposed action (DELETE/STALE/KEEP) with reason
 - For STALE branches, show the transitive path
 
-### 4. Confirm and delete
+### 5. Confirm and delete
 
 Use AskUserQuestion to confirm before deleting anything. For each confirmed deletion:
 
@@ -57,7 +63,7 @@ uv run lup-devtools dev delete <branch-name>
 
 If safe delete (`-d`) fails, report to user and ask if `--force` is acceptable.
 
-### 5. Report results
+### 6. Report results
 
 List what was cleaned up.
 
