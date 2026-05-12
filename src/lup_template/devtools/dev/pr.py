@@ -25,9 +25,9 @@ from lup_template.devtools.dev.branches import (
     get_integration_branch,
 )
 
-logger = logging.getLogger(__name__)
-
 from lup_template.devtools.utils import git, gh
+
+logger = logging.getLogger(__name__)
 
 
 def current_branch() -> str:
@@ -86,7 +86,6 @@ class PushResult(BaseModel):
 class CreateResult(BaseModel):
     number: int
     url: str
-
 
 
 def output_result(result: BaseModel, as_json: bool) -> None:
@@ -382,5 +381,3 @@ def update(
         stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
         typer.echo(f"Failed to update PR: {stderr}", err=True)
         raise typer.Exit(1)
-
-
