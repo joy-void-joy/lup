@@ -571,9 +571,14 @@ def pr_body(base_override: str | None) -> None:
 
 def survey(as_json: bool) -> None:
     """Collect branch, worktree, PR, and containment data."""
-    if not as_json:
-        typer.echo("Fetching and pruning remote...", err=True)
-    git("fetch", "--prune")
+    if check_remote_ssh_auth():
+        if not as_json:
+            typer.echo("Fetching and pruning remote...", err=True)
+        try:
+            git("fetch", "--prune")
+        except sh.ErrorReturnCode as e:
+            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
+            logger.warning("Failed to fetch: %s", stderr)
 
     integration = get_integration_branch()
     cur = str(git("branch", "--show-current")).strip()
