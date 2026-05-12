@@ -207,32 +207,18 @@ def bump_cmd(
     ] = False,
 ) -> None:
     """Bump agent version and create a git tag."""
-    import re
-    from pathlib import Path
+    from lup.paths import find_project_root, read_agent_version
 
-    version_file = Path("src") / "lup" / "version.py"
-    if not version_file.exists():
-        for candidate in Path("src").glob("*/version.py"):
-            version_file = candidate
-            break
+    root = find_project_root()
+    pyproject = root / "pyproject.toml"
+    current = read_agent_version(root)
 
-    if not version_file.exists():
-        typer.echo("Could not find version.py")
-        raise typer.Exit(1)
-
-    content = version_file.read_text()
-    match = re.search(r'AGENT_VERSION\s*=\s*"([^"]+)"', content)
-    if not match:
-        typer.echo("Could not parse AGENT_VERSION from version.py")
-        raise typer.Exit(1)
-
-    current = match.group(1)
     parts = current.split(".")
     if len(parts) != 3:
         typer.echo(f"Version {current} is not in X.Y.Z format")
         raise typer.Exit(1)
 
-    major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+    major, minor, patch_v = int(parts[0]), int(parts[1]), int(parts[2])
 
     if level is None:
         typer.echo(f"Current version: {current}")
@@ -241,7 +227,7 @@ def bump_cmd(
 
     match level:
         case "patch":
-            new_version = f"{major}.{minor}.{patch + 1}"
+            new_version = f"{major}.{minor}.{patch_v + 1}"
         case "minor":
             new_version = f"{major}.{minor + 1}.0"
         case "major":
@@ -250,12 +236,16 @@ def bump_cmd(
             typer.echo(f"Unknown bump level: {level}. Use patch, minor, or major.")
             raise typer.Exit(1)
 
+    content = pyproject.read_text()
     new_content = content.replace(
-        f'AGENT_VERSION = "{current}"', f'AGENT_VERSION = "{new_version}"'
+        f'agent_version = "{current}"', f'agent_version = "{new_version}"'
     )
-    version_file.write_text(new_content)
+    if new_content == content:
+        typer.echo(f'Could not find \'agent_version = "{current}"\' in pyproject.toml')
+        raise typer.Exit(1)
+    pyproject.write_text(new_content)
 
-    git.add(str(version_file))
+    git.add(str(pyproject))
     git.commit("-m", f"chore(version): bump {current} → {new_version}")
     git.tag(f"v{new_version}")
 
