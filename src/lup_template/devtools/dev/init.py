@@ -13,10 +13,9 @@ Examples::
 
 import re
 from pathlib import Path
-import sh
 import typer
 
-git = sh.Command("git")
+from lup_template.devtools.utils import git
 
 PACKAGE_IMPORT_RE = re.compile(
     r"""

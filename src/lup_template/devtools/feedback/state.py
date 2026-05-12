@@ -17,11 +17,13 @@ from glob import glob
 from pathlib import Path
 from typing import Any
 
+import sh
 import typer
 from pydantic import BaseModel
 
 from lup.history import iter_session_dirs, resolve_version
 from lup.paths import feedback_path, traces_path, AGENT_VERSION
+from lup_template.devtools.utils import git
 
 logger = logging.getLogger(__name__)
 
@@ -214,9 +216,6 @@ def save_analyzed(session_ids: set[str]) -> None:
 
 def get_uncommitted_session_ids() -> set[str]:
     """Find session IDs with uncommitted result files."""
-    import sh
-
-    git = sh.Command("git")
     session_ids: set[str] = set()
 
     status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0])).strip()
@@ -260,9 +259,6 @@ def get_session_summary(session_id: str) -> str:
 
 def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
     """Stage and commit files for a single session ID."""
-    import sh
-
-    git = sh.Command("git")
     paths: list[str] = []
 
     for session_dir in iter_session_dirs(session_id=session_id):
@@ -670,8 +666,6 @@ def unanalyzed(version: str | None, all_versions: bool) -> None:
 
 def commit(dry_run: bool) -> None:
     """Commit all uncommitted session result files, one commit per session."""
-    import sh
-
     session_ids = get_uncommitted_session_ids()
 
     if not session_ids:

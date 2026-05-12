@@ -336,11 +336,6 @@ def pr_update_cmd(
 
 
 @pr_app.command("checks")
-def pr_checks_cmd(
-    as_json: Annotated[
-        bool,
-        typer.Option("--json", help="Output as JSON"),
-    ] = False,
-) -> None:
+def pr_checks_cmd() -> None:
     """Run pyright, ruff, and pytest validation checks."""
-    pr.checks(as_json)
+    check.run_checks(fix=False, no_test=False)

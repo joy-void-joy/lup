@@ -15,7 +15,6 @@ Examples::
 
 import json
 import logging
-import sys
 from pathlib import Path
 import sh
 import typer
@@ -28,9 +27,7 @@ from lup_template.devtools.dev.branches import (
 
 logger = logging.getLogger(__name__)
 
-git = sh.Command("git").bake("--no-pager")
-gh = sh.Command("gh").bake(_tty_out=False)
-uv = sh.Command("uv")
+from lup_template.devtools.utils import git, gh
 
 
 def current_branch() -> str:
@@ -90,16 +87,6 @@ class CreateResult(BaseModel):
     number: int
     url: str
 
-
-class CheckResult(BaseModel):
-    name: str
-    passed: bool
-    output: str
-
-
-class ChecksResult(BaseModel):
-    results: list[CheckResult]
-    all_passed: bool
 
 
 def output_result(result: BaseModel, as_json: bool) -> None:
@@ -397,41 +384,3 @@ def update(
         raise typer.Exit(1)
 
 
-def checks(as_json: bool) -> None:
-    """Run pyright, ruff, and pytest validation checks."""
-    check_commands = [
-        ("pyright", [sys.executable, "-m", "pyright"]),
-        ("ruff-check", [sys.executable, "-m", "ruff", "check", "."]),
-        ("ruff-format", [sys.executable, "-m", "ruff", "format", "--check", "."]),
-        ("pytest", [sys.executable, "-m", "pytest"]),
-    ]
-
-    results: list[CheckResult] = []
-    for name, cmd in check_commands:
-        if not as_json:
-            typer.echo(f"Running {name}...", err=True)
-        try:
-            output = str(uv("run", *cmd[1:], _ok_code=[0]))
-            results.append(CheckResult(name=name, passed=True, output=output))
-        except sh.ErrorReturnCode as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-            stdout = e.stdout.decode() if isinstance(e.stdout, bytes) else str(e.stdout)
-            output = (stdout + "\n" + stderr).strip()
-            results.append(CheckResult(name=name, passed=False, output=output))
-
-    all_passed = all(r.passed for r in results)
-    final = ChecksResult(results=results, all_passed=all_passed)
-
-    if as_json:
-        print(final.model_dump_json(indent=2))
-    else:
-        for r in results:
-            status_str = "PASS" if r.passed else "FAIL"
-            typer.echo(f"  {r.name}: {status_str}")
-            if not r.passed:
-                for line in r.output.splitlines()[:10]:
-                    typer.echo(f"    {line}")
-        typer.echo(f"\n{'All checks passed' if all_passed else 'Some checks failed'}")
-
-    if not all_passed:
-        raise typer.Exit(1)
