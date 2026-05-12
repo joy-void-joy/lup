@@ -215,7 +215,6 @@ SIGNIFICANT_PATTERN = re.compile(
 )
 
 
-
 def extract_removals(diff_output: str) -> list[str]:
     """Find removed functions/classes/decorators in a diff."""
     removals: list[str] = []

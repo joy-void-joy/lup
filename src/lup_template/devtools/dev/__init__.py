@@ -333,5 +333,3 @@ def pr_update_cmd(
 ) -> None:
     """Update a PR body."""
     pr.update(pr_number, body)
-
-
