@@ -39,7 +39,7 @@ Check if `.claude/settings.local.json` exists. If so, merge all sensible setting
 ### 4. Run checks
 
 ```bash
-uv run lup-devtools dev pr checks --json
+uv run lup-devtools dev check
 ```
 
 Fix any failures before proceeding.

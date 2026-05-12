@@ -30,6 +30,8 @@ from typing import Annotated
 import sh
 import typer
 
+from lup_template.devtools.utils import git
+
 app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
 
@@ -37,8 +39,6 @@ DOWNSTREAM_FILE = Path("downstream.json")
 LOCAL_FILE = Path("downstream.json.local")
 CACHE_DIR = Path(".cache/downstream")
 REFS_DIR = Path("refs")
-
-from lup_template.devtools.utils import git
 
 
 def load_json(path: Path) -> dict[str, list[dict[str, str]]]:
