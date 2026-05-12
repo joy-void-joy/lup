@@ -21,6 +21,8 @@ import sh
 import typer
 from pydantic import BaseModel
 
+from lup_template.devtools.utils import git
+
 
 class ConflictFile(TypedDict):
     path: str
@@ -39,7 +41,6 @@ class ConflictReport(TypedDict):
 
 def find_git_dir() -> Path:
     """Locate the .git directory (works in worktrees too)."""
-    git = sh.Command("git")
     return Path(str(git("rev-parse", "--git-dir")).strip())
 
 
@@ -48,7 +49,7 @@ def detect_conflict_state() -> str | None:
     git_dir = find_git_dir()
     if (git_dir / "MERGE_HEAD").exists():
         return "merge"
-    if (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists():
+    if (git_dir / "rebase-merge").is_dir() or (git_dir / "rebase-apply").is_dir():
         return "rebase"
     if (git_dir / "CHERRY_PICK_HEAD").exists():
         return "cherry-pick"
@@ -57,7 +58,6 @@ def detect_conflict_state() -> str | None:
 
 def get_branch_files(state: str) -> tuple[str, set[str]]:
     """Return (merge_base, files touched by this branch) for scope classification."""
-    git = sh.Command("git")
     git_dir = find_git_dir()
 
     match state:
@@ -102,7 +102,6 @@ def get_branch_files(state: str) -> tuple[str, set[str]]:
 
 def list_conflicted_files() -> list[str]:
     """List files with unresolved conflicts."""
-    git = sh.Command("git")
     output = str(git("diff", "--name-only", "--diff-filter=U", _ok_code=[0])).strip()
     if not output:
         return []
@@ -190,9 +189,6 @@ def conflicts(as_json: bool) -> None:
 # -- Status, audit, and completion --
 
 
-git = sh.Command("git").bake("--no-pager")
-
-
 class ConflictStatusResult(BaseModel):
     operation: str
     conflicted_files: list[str]
@@ -219,18 +215,6 @@ SIGNIFICANT_PATTERN = re.compile(
 )
 
 
-def detect_operation() -> str:
-    """Detect if we're in a merge, rebase, or cherry-pick."""
-    git_dir = find_git_dir()
-
-    if (git_dir / "MERGE_HEAD").exists():
-        return "merge"
-    if (git_dir / "rebase-merge").is_dir() or (git_dir / "rebase-apply").is_dir():
-        return "rebase"
-    if (git_dir / "CHERRY_PICK_HEAD").exists():
-        return "cherry-pick"
-    return "none"
-
 
 def extract_removals(diff_output: str) -> list[str]:
     """Find removed functions/classes/decorators in a diff."""
@@ -243,9 +227,9 @@ def extract_removals(diff_output: str) -> list[str]:
 
 def conflict_status(as_json: bool) -> None:
     """Detect conflict state, list files, and show both sides' history."""
-    operation = detect_operation()
+    operation = detect_conflict_state()
 
-    if operation == "none":
+    if operation is None:
         if as_json:
             result = ConflictStatusResult(
                 operation="none",
@@ -313,8 +297,8 @@ def conflict_status(as_json: bool) -> None:
 
 def conflict_audit(files: list[str], as_json: bool) -> None:
     """Post-resolution deletion audit: check for accidentally dropped code."""
-    operation = detect_operation()
-    if operation == "none":
+    operation = detect_conflict_state()
+    if operation is None:
         typer.echo("No merge/rebase/cherry-pick in progress", err=True)
         raise typer.Exit(1)
 
@@ -366,8 +350,8 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
 
 def conflict_complete(dry_run: bool) -> None:
     """Finalize the merge/rebase/cherry-pick after all conflicts are resolved."""
-    operation = detect_operation()
-    if operation == "none":
+    operation = detect_conflict_state()
+    if operation is None:
         typer.echo("No merge/rebase/cherry-pick in progress")
         return
 

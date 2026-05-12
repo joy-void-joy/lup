@@ -10,8 +10,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-git = sh.Command("git").bake("--no-pager")
-gh = sh.Command("gh").bake(_tty_out=False)
+from lup_template.devtools.utils import git, gh
 
 
 class PRStatus(BaseModel):
@@ -40,13 +39,17 @@ class SurveyResult(BaseModel):
 
 
 def parse_branches() -> list[dict[str, str | bool]]:
-    """Parse ``git branch -vv`` into structured data."""
+    """Parse ``git branch -vv`` into structured data.
+
+    Handles prefix markers: ``*`` (current), ``+`` (checked out in another worktree).
+    """
     output = str(git("branch", "-vv")).strip()
     results: list[dict[str, str | bool]] = []
 
     for line in output.splitlines():
         is_current = line.startswith("*")
-        line = line.lstrip("* ").strip()
+        # Strip the 2-char prefix column (* /+/space + space)
+        line = line[2:].strip()
         parts = line.split(maxsplit=2)
         if len(parts) < 2:
             continue
@@ -511,7 +514,6 @@ def pr_body(base_override: str | None) -> None:
             "--no-decorate",
             f"{base}..HEAD",
             _ok_code=[0],
-            _tty_out=False,
         )
     ).strip()
     if not log_output:

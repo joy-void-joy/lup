@@ -38,7 +38,7 @@ LOCAL_FILE = Path("downstream.json.local")
 CACHE_DIR = Path(".cache/downstream")
 REFS_DIR = Path("refs")
 
-git = sh.Command("git").bake("--no-pager")
+from lup_template.devtools.utils import git
 
 
 def load_json(path: Path) -> dict[str, list[dict[str, str]]]:

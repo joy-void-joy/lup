@@ -88,7 +88,7 @@ def commit_results() -> None:
     commits atomic and automatic. Customize or remove if your domain
     doesn't need auto-commit (e.g., interactive coaching).
     """
-    git = sh.Command("git")
+    git = sh.Command("git").bake("--no-pager", "-c", "color.ui=never")
     status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0])).strip()
     if not status:
         return

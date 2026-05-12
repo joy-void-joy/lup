@@ -17,6 +17,8 @@ import typer
 
 from lup.paths import AGENT_VERSION
 
+from lup_template.devtools.utils import git
+
 app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
 
 
@@ -45,7 +47,6 @@ DATA_PREFIXES = ("data",)
 
 
 def get_latest_tag() -> str | None:
-    git = sh.Command("git")
     try:
         return str(git("describe", "--tags", "--abbrev=0", _ok_code=[0])).strip()
     except sh.ErrorReturnCode:
@@ -76,7 +77,6 @@ def show(
     if click.get_current_context().invoked_subcommand is not None:
         return
 
-    git = sh.Command("git")
     latest_tag = get_latest_tag()
 
     commits_since = 0
@@ -131,8 +131,6 @@ def changelog_cmd(
     ] = False,
 ) -> None:
     """Show changes since a version tag, classified by type."""
-    git = sh.Command("git")
-
     tag = since or get_latest_tag()
     if not tag:
         ref = (
@@ -211,8 +209,6 @@ def bump_cmd(
     """Bump agent version and create a git tag."""
     import re
     from pathlib import Path
-
-    git = sh.Command("git")
 
     version_file = Path("src") / "lup" / "version.py"
     if not version_file.exists():

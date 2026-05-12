@@ -3,7 +3,10 @@
 import shutil
 from pathlib import Path
 
+import sh
 import typer
+
+from lup_template.devtools.utils import git
 
 
 PLUGIN_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache" / "local" / "lup"
@@ -19,9 +22,6 @@ GITIGNORED_EXTRAS = [
 
 def branch_exists(branch: str) -> bool:
     """Check if a git branch exists (local only)."""
-    import sh
-
-    git = sh.Command("git")
     try:
         git("rev-parse", "--verify", f"refs/heads/{branch}")
         return True
@@ -31,9 +31,6 @@ def branch_exists(branch: str) -> bool:
 
 def worktree_is_registered(path: Path) -> bool:
     """Check if a path is registered as a git worktree (even if dir is missing)."""
-    import sh
-
-    git = sh.Command("git")
     output = str(git("worktree", "list", "--porcelain"))
     resolved = str(path.resolve())
     for line in output.splitlines():
@@ -64,8 +61,6 @@ def get_tree_dir() -> Path:
 
 def copy_to_clipboard(text: str) -> bool:
     """Copy text to system clipboard. Returns True on success."""
-    import sh
-
     try:
         xclip = sh.Command("xclip")
         xclip("-selection", "clipboard", _in=text)
@@ -89,9 +84,6 @@ def create(
     base_branch: str | None,
 ) -> None:
     """Create or re-attach a git worktree."""
-    import sh
-
-    git = sh.Command("git")
     uv = sh.Command("uv")
     current_dir = Path.cwd()
 
@@ -182,9 +174,6 @@ def create(
 
 def list_worktrees() -> None:
     """List all git worktrees with branch and status info."""
-    import sh
-
-    git = sh.Command("git")
     output = str(git("worktree", "list", "--porcelain"))
 
     entries: list[dict[str, str]] = []
@@ -230,9 +219,6 @@ def list_worktrees() -> None:
 
 def remove(name: str, force: bool) -> None:
     """Remove a git worktree."""
-    import sh
-
-    git = sh.Command("git")
     path = Path(name)
 
     if not path.is_absolute():
