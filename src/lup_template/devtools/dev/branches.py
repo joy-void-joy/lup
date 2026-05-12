@@ -8,9 +8,11 @@ import sh
 import typer
 from pydantic import BaseModel
 
+from lup_template.devtools.utils import git, gh
+
 logger = logging.getLogger(__name__)
 
-from lup_template.devtools.utils import git, gh
+ssh = sh.Command("ssh").bake(_tty_out=False)
 
 
 class PRStatus(BaseModel):
@@ -370,15 +372,35 @@ def detect_base_branch(branch: str | None = None) -> tuple[str, str, int]:
     return best_branch, best_merge_base, best_distance
 
 
+def check_remote_ssh_auth() -> bool:
+    """Test SSH auth for the origin remote. Returns True if authenticated."""
+    remote_url = str(git("remote", "get-url", "origin")).strip()
+    # SCP-style git URLs (host:path) have no stdlib parser — urlparse misparses them
+    host = remote_url.split(":")[0] if ":" in remote_url else None  # claude: ignore
+    if not host:
+        return True
+    try:
+        ssh("-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-T", host, _ok_code=[1])
+        return True
+    except sh.ErrorReturnCode:
+        identity = ""
+        for line in str(ssh("-G", host, _ok_code=[0])).splitlines():  # claude: ignore
+            if line.startswith("identityfile "):
+                identity = line.split(" ", 1)[1]  # claude: ignore
+                break
+        msg = f"SSH authentication failed for remote '{remote_url}'."
+        if identity:
+            msg += f"\nLoad the key with:  ssh-add {identity}"
+        typer.echo(msg, err=True)
+        return False
+
+
 # -- CLI functions --
 
 
 def branch_status(branch: str | None, as_json: bool) -> None:
     """Analyze branch containment, PR status, and worktree info."""
-    try:
-        git("fetch", "--prune", _ok_code=[0])
-    except sh.ErrorReturnCode:
-        pass
+    check_remote_ssh_auth()
 
     integration = get_integration_branch()
     current = str(git("branch", "--show-current")).strip()
