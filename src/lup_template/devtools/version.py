@@ -241,7 +241,7 @@ def bump_cmd(
         f'agent_version = "{current}"', f'agent_version = "{new_version}"'
     )
     if new_content == content:
-        typer.echo(f'Could not find \'agent_version = "{current}"\' in pyproject.toml')
+        typer.echo(f"Could not find 'agent_version = \"{current}\"' in pyproject.toml")
         raise typer.Exit(1)
     pyproject.write_text(new_content)
 
