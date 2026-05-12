@@ -10,7 +10,6 @@ Examples::
     $ uv run lup-devtools dev pr push --force --json
     $ uv run lup-devtools dev pr create --base dev --title "feat: search" --body "..."
     $ uv run lup-devtools dev pr update 42 --body "..."
-    $ uv run lup-devtools dev pr checks --json
 """
 
 import json

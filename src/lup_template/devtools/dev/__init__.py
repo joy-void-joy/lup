@@ -335,7 +335,3 @@ def pr_update_cmd(
     pr.update(pr_number, body)
 
 
-@pr_app.command("checks")
-def pr_checks_cmd() -> None:
-    """Run pyright, ruff, and pytest validation checks."""
-    check.run_checks(fix=False, no_test=False)
