@@ -217,17 +217,17 @@ def conflict_complete_cmd(
 
 @app.command("check")
 def check_cmd(
-    fix: Annotated[
+    check_only: Annotated[
         bool,
-        typer.Option("--fix", help="Auto-fix ruff issues"),
+        typer.Option("--check", help="CI mode: fail without modifying files"),
     ] = False,
     no_test: Annotated[
         bool,
         typer.Option("--no-test", help="Skip pytest"),
     ] = False,
 ) -> None:
-    """Run pyright, ruff, and pytest."""
-    check.run_checks(fix, no_test)
+    """Run ruff format, ruff check, pyright, and pytest. Auto-fixes by default."""
+    check.run_checks(check_only, no_test)
 
 
 # -- init commands --

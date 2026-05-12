@@ -3,21 +3,25 @@
 import sh
 import typer
 
-from lup_template.devtools.utils import uv
+from lup_template.devtools.utils import git, uv
 
 
-def run_checks(fix: bool, no_test: bool) -> None:
-    """Run ruff format, ruff check, pyright, and pytest in sequence."""
+def run_checks(check_only: bool, no_test: bool) -> None:
+    """Run ruff format, ruff check, pyright, and pytest in sequence.
+
+    By default, auto-fixes formatting and lint issues. Pass *check_only* for
+    CI mode (fail without modifying files).
+    """
     results: list[tuple[str, bool]] = []
 
     # ruff format
     try:
-        if fix:
-            uv("run", "ruff", "format", ".")
-            typer.echo("ruff format: applied")
-        else:
+        if check_only:
             uv("run", "ruff", "format", "--check", ".")
             typer.echo("ruff format: ok")
+        else:
+            uv("run", "ruff", "format", ".")
+            typer.echo("ruff format: applied")
         results.append(("ruff format", True))
     except sh.ErrorReturnCode:
         typer.echo("ruff format: FAIL")
@@ -26,7 +30,7 @@ def run_checks(fix: bool, no_test: bool) -> None:
     # ruff check
     try:
         args = ["run", "ruff", "check", "."]
-        if fix:
+        if not check_only:
             args.append("--fix")
         uv(*args)
         typer.echo("ruff check: ok")
@@ -34,6 +38,14 @@ def run_checks(fix: bool, no_test: bool) -> None:
     except sh.ErrorReturnCode:
         typer.echo("ruff check: FAIL")
         results.append(("ruff check", False))
+
+    if not check_only:
+        modified = str(git("diff", "--name-only", _ok_code=[0])).strip()
+        if modified:
+            count = len(modified.splitlines())
+            typer.echo(f"  auto-fixed {count} file(s)")
+            for f in modified.splitlines()[:10]:
+                typer.echo(f"    {f}")
 
     # pyright
     try:
