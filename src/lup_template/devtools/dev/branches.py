@@ -534,6 +534,7 @@ def pr_body(base_override: str | None) -> None:
             "log",
             "--oneline",
             "--no-decorate",
+            "--no-merges",
             f"{base}..HEAD",
             _ok_code=[0],
         )
