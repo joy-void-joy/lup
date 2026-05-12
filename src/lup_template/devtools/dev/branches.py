@@ -350,6 +350,8 @@ def detect_base_branch(branch: str | None = None) -> tuple[str, str, int]:
             distance = int(
                 str(git("rev-list", "--count", f"{merge_base}..{branch}")).strip()
             )
+            if is_ancestor(candidate, branch):
+                continue
             candidates.append((candidate, distance, merge_base))
             if best_distance < 0 or distance < best_distance:
                 best_distance = distance
