@@ -1,15 +1,13 @@
 """Unified pre-flight checks: ruff, pyright, pytest."""
 
-import sys
-
+import sh
 import typer
+
+from lup_template.devtools.utils import uv
 
 
 def run_checks(fix: bool, no_test: bool) -> None:
     """Run ruff format, ruff check, pyright, and pytest in sequence."""
-    import sh
-
-    uv = sh.Command("uv")
     results: list[tuple[str, bool]] = []
 
     # ruff format
@@ -64,4 +62,4 @@ def run_checks(fix: bool, no_test: bool) -> None:
     if any(not ok for _, ok in results):
         failed = [name for name, ok in results if not ok]
         typer.echo(f"Failed: {', '.join(failed)}")
-        sys.exit(1)
+        raise typer.Exit(1)
