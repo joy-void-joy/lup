@@ -277,9 +277,9 @@ def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
 
     if dry_run:
         summary = get_session_summary(session_id)
-        print(f"  Would commit {session_id}: {summary}")
+        typer.echo(f"  Would commit {session_id}: {summary}")
         for p in paths:
-            print(f"    {p}")
+            typer.echo(f"    {p}")
         return True
 
     for path in paths:
@@ -295,7 +295,7 @@ def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
     summary = get_session_summary(session_id)
     slug = summary[:50].strip().rstrip(".")
     git.commit("-m", f"data(sessions): {slug}")
-    print(f"  Committed {session_id}: {slug}")
+    typer.echo(f"  Committed {session_id}: {slug}")
     return True
 
 
@@ -446,12 +446,12 @@ def collect(
     output.write_text(feedback.model_dump_json(indent=2))
     logger.info("Saved metrics to %s", output)
 
-    print("\n" + "=" * 60)
-    print("FEEDBACK COLLECTION SUMMARY")
-    print("=" * 60)
-    print(f"Total sessions: {feedback.total_sessions}")
-    print(f"Sessions with outcomes: {feedback.sessions_with_outcomes}")
-    print(f"\nMetrics saved to: {output}")
+    typer.echo("\n" + "=" * 60)
+    typer.echo("FEEDBACK COLLECTION SUMMARY")
+    typer.echo("=" * 60)
+    typer.echo(f"Total sessions: {feedback.total_sessions}")
+    typer.echo(f"Sessions with outcomes: {feedback.sessions_with_outcomes}")
+    typer.echo(f"\nMetrics saved to: {output}")
 
 
 def tools(version: str | None, all_versions: bool) -> None:  # claude: ignore
@@ -462,7 +462,7 @@ def tools(version: str | None, all_versions: bool) -> None:  # claude: ignore
     sessions = load_sessions_for_versions(effective)
     if not sessions:
         typer.echo("No sessions found")
-        raise typer.Exit(1)
+        return
 
     tool_stats: dict[str, dict[str, int | float]] = defaultdict(
         lambda: {"calls": 0, "errors": 0, "total_ms": 0}
@@ -510,7 +510,7 @@ def errors(  # claude: ignore
     sessions = load_sessions_for_versions(effective)
     if not sessions:
         typer.echo("No sessions found")
-        raise typer.Exit(1)
+        return
 
     with_errors: list[dict[str, Any]] = []
     for s in sessions:
@@ -549,7 +549,7 @@ def trends(window: int, version: str | None, all_versions: bool) -> None:
     sessions = load_sessions_for_versions(effective)
     if not sessions:
         typer.echo("No sessions found")
-        raise typer.Exit(1)
+        return
 
     sessions_with_ts = [s for s in sessions if s.get("timestamp")]
     sessions_with_ts.sort(key=lambda x: x["timestamp"])
@@ -645,10 +645,10 @@ def prompt_health() -> None:
 
     section_count = sum(1 for line in lines if "## " in line or "### " in line)
 
-    print("\n=== Prompt Health ===\n")
-    print(f"File: {prompts_file}")
-    print(f"Total lines: {len(lines)}")
-    print(f"Sections: ~{section_count}")
+    typer.echo("\n=== Prompt Health ===\n")
+    typer.echo(f"File: {prompts_file}")
+    typer.echo(f"Total lines: {len(lines)}")
+    typer.echo(f"Sections: ~{section_count}")
 
 
 def unanalyzed(version: str | None, all_versions: bool) -> None:
@@ -669,10 +669,10 @@ def commit(dry_run: bool) -> None:
     session_ids = get_uncommitted_session_ids()
 
     if not session_ids:
-        print("Nothing to commit.")
+        typer.echo("Nothing to commit.")
         return
 
-    print(f"Found {len(session_ids)} session(s) with uncommitted files")
+    typer.echo(f"Found {len(session_ids)} session(s) with uncommitted files")
 
     committed = 0
     for session_id in sorted(session_ids):
@@ -680,9 +680,9 @@ def commit(dry_run: bool) -> None:
             if commit_session(session_id, dry_run=dry_run):
                 committed += 1
         except sh.ErrorReturnCode as e:
-            print(f"  Failed {session_id}: {e}")
+            typer.echo(f"  Failed {session_id}: {e}", err=True)
 
     if dry_run:
-        print(f"\nWould commit {committed} session(s)")
+        typer.echo(f"\nWould commit {committed} session(s)")
     else:
-        print(f"\nCommitted {committed} session(s)")
+        typer.echo(f"\nCommitted {committed} session(s)")
