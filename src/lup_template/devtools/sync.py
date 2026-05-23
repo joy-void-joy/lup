@@ -171,12 +171,12 @@ def list_projects_cmd() -> None:
         typer.echo("No projects tracked. Check downstream.json or run 'setup'.")
         raise typer.Exit(1)
 
-    print(f"\n{'Project':<20} {'Behind':<10} {'Last Synced':<12} {'Source'}")
-    print("-" * 80)
+    typer.echo(f"\n{'Project':<20} {'Behind':<10} {'Last Synced':<12} {'Source'}")
+    typer.echo("-" * 80)
 
     for p in projects:
         if p.get("ignore"):
-            print(f"{p['name']:<20} {'—':<10} {'ignored':<12} (skipped)")
+            typer.echo(f"{p['name']:<20} {'—':<10} {'ignored':<12} (skipped)")
             continue
 
         synced = p.get("last_synced_commit", "")
@@ -186,21 +186,25 @@ def list_projects_cmd() -> None:
             resolved = ensure_local(p)
         except (typer.Exit, sh.ErrorReturnCode):
             url = p.get("url", "NO PATH")
-            print(f"{p['name']:<20} {'?':<10} {synced_short:<12} {url} (clone failed)")
+            typer.echo(
+                f"{p['name']:<20} {'?':<10} {synced_short:<12} {url} (clone failed)"
+            )
             continue
 
         behind = commit_count(resolved, synced)
         branch = p.get("branch", "")
         source = f"{resolved} ({branch})" if branch else resolved
-        print(f"{p['name']:<20} {behind:<10} {synced_short:<12} {source}")
+        typer.echo(f"{p['name']:<20} {behind:<10} {synced_short:<12} {source}")
 
-    print()
+    typer.echo()
 
 
 @app.command("log")
 def show_log(
     project: Annotated[str, typer.Argument(help="Project name")],
-    stat: Annotated[bool, typer.Option("--stat", help="Show file stats")] = True,
+    stat: Annotated[
+        bool, typer.Option("--stat/--no-stat", help="Show file stats")
+    ] = True,
 ) -> None:
     """Show commits since last sync for a project."""
     proj = find_project(project)
@@ -216,9 +220,9 @@ def show_log(
 
     output = git_in(path, *args)
     if output:
-        print(output)
+        typer.echo(output)
     else:
-        print(f"No new commits since {synced[:8]}.")
+        typer.echo(f"No new commits since {synced[:8]}.")
 
 
 @app.command("diff")
@@ -230,7 +234,7 @@ def show_diff(
     proj = find_project(project)
     path = ensure_local(proj)
     output = git_in(path, "show", commit)
-    print(output)
+    typer.echo(output)
 
 
 @app.command("mark-synced")
