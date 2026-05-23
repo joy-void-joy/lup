@@ -12,7 +12,6 @@ Examples::
     $ uv run lup-devtools dev conflict-complete --dry-run
 """
 
-import json
 import re
 from pathlib import Path
 from typing import TypedDict
@@ -21,7 +20,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup_template.devtools.utils import git
+from lup_template.devtools.utils import git, output_json
 
 
 class ConflictFile(TypedDict):
@@ -169,7 +168,7 @@ def conflicts(as_json: bool) -> None:
     report = build_conflict_report(state)
 
     if as_json:
-        typer.echo(json.dumps(report, indent=2))
+        output_json(report)
         return
 
     typer.echo(f"\nConflict state: {report['state']}")
@@ -238,7 +237,7 @@ def conflict_status(as_json: bool) -> None:
                 ours_commits=[],
                 theirs_commits=[],
             )
-            print(result.model_dump_json(indent=2))
+            output_json(result)
         else:
             typer.echo("No merge/rebase/cherry-pick in progress")
         return
@@ -278,7 +277,7 @@ def conflict_status(as_json: bool) -> None:
     )
 
     if as_json:
-        print(result.model_dump_json(indent=2))
+        output_json(result)
     else:
         typer.echo(f"Operation: {operation}")
         typer.echo(f"Conflicted files ({len(conflicted)}):")
@@ -333,7 +332,7 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
     )
 
     if as_json:
-        print(audit_result.model_dump_json(indent=2))
+        output_json(audit_result)
     else:
         for f in file_results:
             status = "WARNING" if f.warning else "OK"
