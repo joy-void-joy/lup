@@ -102,21 +102,6 @@ def base_branch_cmd(
     branches.base_branch(branch, as_json)
 
 
-@app.command("pr-status")
-def pr_status_cmd(
-    branch: Annotated[
-        str | None,
-        typer.Argument(help="Branch to check PR for (default: current)"),
-    ] = None,
-    as_json: Annotated[
-        bool,
-        typer.Option("--json", help="Output as JSON"),
-    ] = False,
-) -> None:
-    """Show PR review status, checks, and merge readiness."""
-    branches.pr_status(branch, as_json)
-
-
 # -- pr-body command --
 
 

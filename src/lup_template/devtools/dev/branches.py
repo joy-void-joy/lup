@@ -3,12 +3,13 @@
 import json
 import logging
 from collections import defaultdict
+from typing import Required, TypedDict
 
 import sh
 import typer
 from pydantic import BaseModel
 
-from lup_template.devtools.utils import git, gh
+from lup_template.devtools.utils import git, gh, output_json
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,22 @@ class SurveyResult(BaseModel):
     branches: list[BranchInfo]
 
 
-def parse_branches() -> list[dict[str, str | bool]]:
+class BranchClassification(TypedDict, total=False):
+    branch: Required[str]
+    status: Required[str]
+    reason: Required[str]
+    worktree: str | None
+    pr: str | int
+    pr_url: str
+
+
+def parse_branches() -> list[dict[str, str | bool | None]]:
     """Parse ``git branch -vv`` into structured data.
 
     Handles prefix markers: ``*`` (current), ``+`` (checked out in another worktree).
     """
     output = str(git("branch", "-vv")).strip()
-    results: list[dict[str, str | bool]] = []
+    results: list[dict[str, str | bool | None]] = []
 
     for line in output.splitlines():
         is_current = line.startswith("*")
@@ -72,7 +82,7 @@ def parse_branches() -> list[dict[str, str | bool]]:
             {
                 "name": name,
                 "commit": commit,
-                "tracking": tracking or "",
+                "tracking": tracking,
                 "is_current": is_current,
             }
         )
@@ -253,14 +263,16 @@ def classify_branch(
     branch: str,
     integration: str,
     current: str,
-) -> dict[str, str | bool | None]:
+    *,
+    has_remote: bool = True,
+) -> BranchClassification:
     """Classify a branch as DELETE/STALE/KEEP/CURRENT with reason."""
     if branch == current:
         return {"branch": branch, "status": "CURRENT", "reason": "current branch"}
 
     merged_into_integration = is_ancestor(branch, integration)
     worktree = get_branch_worktree(branch)
-    pr = get_pr_info(branch)
+    pr = get_pr_info(branch) if has_remote else {}
     pr_state = pr.get("state", "")
     pr_merged = pr_state == "MERGED"
     pr_number = pr.get("number", "")
@@ -402,7 +414,7 @@ def check_remote_ssh_auth() -> bool:
 
 def branch_status(branch: str | None, as_json: bool) -> None:
     """Analyze branch containment, PR status, and worktree info."""
-    check_remote_ssh_auth()
+    has_remote = check_remote_ssh_auth()
 
     integration = get_integration_branch()
     current = str(git("branch", "--show-current")).strip()
@@ -417,12 +429,14 @@ def branch_status(branch: str | None, as_json: bool) -> None:
             .splitlines()
         ]
 
-    results: list[dict[str, str | bool | None]] = []
+    results: list[BranchClassification] = []
     for b in branch_list:
-        results.append(classify_branch(b, integration, current))
+        results.append(
+            classify_branch(b, integration, current, has_remote=has_remote)
+        )
 
     if as_json:
-        typer.echo(json.dumps(results, indent=2))
+        output_json(results)
         return
 
     typer.echo(f"\nIntegration branch: {integration}")
@@ -450,66 +464,19 @@ def base_branch(branch: str | None, as_json: bool) -> None:
     effective = branch or str(git("branch", "--show-current")).strip()
 
     if as_json:
-        typer.echo(
-            json.dumps(
-                {
-                    "branch": effective,
-                    "base": base,
-                    "merge_base": merge_base,
-                    "commits_ahead": ahead,
-                }
-            )
+        output_json(
+            {
+                "branch": effective,
+                "base": base,
+                "merge_base": merge_base,
+                "commits_ahead": ahead,
+            }
         )
     else:
         typer.echo(f"Branch: {effective}")
         typer.echo(f"Base: {base}")
         typer.echo(f"Merge base: {merge_base[:10]}")
         typer.echo(f"Commits ahead: {ahead}")
-
-
-def pr_status(branch: str | None, as_json: bool) -> None:
-    """Show PR review status, checks, and merge readiness."""
-    effective = branch or str(git("branch", "--show-current")).strip()
-
-    try:
-        output = str(
-            gh(
-                "pr",
-                "list",
-                f"--head={effective}",
-                "--state=open",
-                "--json=number,title,url,reviewDecision,statusCheckRollup,mergeable,mergeStateStatus",
-                "--limit=1",
-                _ok_code=[0],
-            )
-        ).strip()
-        items: list[dict[str, object]] = json.loads(output)
-    except (sh.ErrorReturnCode, sh.CommandNotFound) as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-
-    if not items:
-        typer.echo(f"No open PR found for branch '{effective}'")
-        raise typer.Exit(1)
-
-    pr = items[0]
-
-    if as_json:
-        typer.echo(json.dumps(pr, indent=2))
-        return
-
-    typer.echo(f"\nPR #{pr['number']}: {pr['title']}")
-    typer.echo(f"URL: {pr['url']}")
-    typer.echo(f"Review decision: {pr.get('reviewDecision') or 'none'}")
-    typer.echo(f"Mergeable: {pr.get('mergeable', '?')}")
-    typer.echo(f"Merge state: {pr.get('mergeStateStatus', '?')}")
-
-    checks = pr.get("statusCheckRollup")
-    if isinstance(checks, list):
-        passed = sum(1 for c in checks if c.get("conclusion") == "SUCCESS")
-        failed = sum(1 for c in checks if c.get("conclusion") == "FAILURE")
-        pending = len(checks) - passed - failed
-        typer.echo(f"Checks: {passed} passed, {failed} failed, {pending} pending")
 
 
 COMMIT_PREFIX_LABELS = {
@@ -571,7 +538,8 @@ def pr_body(base_override: str | None) -> None:
 
 def survey(as_json: bool) -> None:
     """Collect branch, worktree, PR, and containment data."""
-    if check_remote_ssh_auth():
+    has_remote = check_remote_ssh_auth()
+    if has_remote:
         if not as_json:
             typer.echo("Fetching and pruning remote...", err=True)
         try:
@@ -588,9 +556,12 @@ def survey(as_json: bool) -> None:
     branch_names = [str(b["name"]) for b in raw_branches]
     containment = build_containment(branch_names)
 
-    if not as_json:
-        typer.echo("Querying PR status...", err=True)
-    pr_map = fetch_pr_status(branch_names)
+    if has_remote:
+        if not as_json:
+            typer.echo("Querying PR status...", err=True)
+        pr_map = fetch_pr_status(branch_names)
+    else:
+        pr_map: dict[str, PRStatus] = {}
 
     branches_list: list[BranchInfo] = []
     for b in raw_branches:
@@ -610,7 +581,7 @@ def survey(as_json: bool) -> None:
             BranchInfo(
                 name=name,
                 commit=str(b["commit"]),
-                tracking=str(b["tracking"]) or None,
+                tracking=str(b["tracking"]) if b["tracking"] else None,
                 worktree=worktrees.get(name),
                 is_current=bool(b["is_current"]),
                 contained_in=contained_in,
@@ -627,7 +598,7 @@ def survey(as_json: bool) -> None:
     )
 
     if as_json:
-        print(result.model_dump_json(indent=2))
+        output_json(result)
     else:
         typer.echo(f"\nIntegration: {integration} | Current: {cur}\n")
         typer.echo(
