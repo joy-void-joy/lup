@@ -171,12 +171,13 @@ def analyze(version: str | None, all_versions: bool, output: Path | None) -> Non
 
     import typer
 
+    from lup_template.devtools.utils import output_json
+
     report = build_report(version, all_versions)
-    report_json = json.dumps(report, indent=2)
 
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(report_json + "\n")
+        output.write_text(json.dumps(report, indent=2) + "\n")
         typer.echo(f"Report written to {output}")
     else:
-        typer.echo(report_json)
+        output_json(report)
