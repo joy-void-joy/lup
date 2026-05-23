@@ -9,15 +9,17 @@ Examples::
     $ uv run lup-devtools version bump minor
 """
 
-import json
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 import sh
 import typer
 
 from lup.paths import AGENT_VERSION
 
-from lup_template.devtools.utils import git
+from lup_template.devtools.utils import git, output_json
+
+
+ChangelogCategory = Literal["behavior", "data", "infrastructure"]
 
 app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
 
@@ -53,7 +55,7 @@ def get_latest_tag() -> str | None:
         return None
 
 
-def classify_commit(message: str) -> str:
+def classify_commit(message: str) -> ChangelogCategory:
     lower = message.lower()
     for prefix in BEHAVIOR_PREFIXES:
         if lower.startswith(prefix):
@@ -105,7 +107,7 @@ def show(
             "commits_since_tag": commits_since,
             "files_changed": files_changed,
         }
-        typer.echo(json.dumps(info, indent=2))
+        output_json(info)
         return
 
     typer.echo(f"\nAgent version: {AGENT_VERSION}")
@@ -165,10 +167,10 @@ def changelog_cmd(
         message = parts[1] if len(parts) > 1 else ""
         category = classify_commit(message)
         entry: ChangelogEntry = {"sha": sha, "message": message, "category": category}
-        report[category].append(entry)  # type: ignore[literal-required]
+        report[category].append(entry)
 
     if as_json:
-        typer.echo(json.dumps(report, indent=2))
+        output_json(report)
         return
 
     tag_display = since or get_latest_tag() or "(root)"
@@ -205,6 +207,10 @@ def bump_cmd(
         bool,
         typer.Option("--json", help="Output result as JSON"),
     ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", "-n", help="Show what would happen"),
+    ] = False,
 ) -> None:
     """Bump agent version and create a git tag."""
     from lup.paths import find_project_root, read_agent_version
@@ -236,6 +242,16 @@ def bump_cmd(
             typer.echo(f"Unknown bump level: {level}. Use patch, minor, or major.")
             raise typer.Exit(1)
 
+    if dry_run:
+        if as_json:
+            output_json(
+                {"old": current, "new": new_version, "tag": f"v{new_version}"}
+            )
+        else:
+            typer.echo(f"\nWould bump: {current} → {new_version}")
+            typer.echo(f"Would tag: v{new_version}")
+        return
+
     content = pyproject.read_text()
     new_content = content.replace(
         f'agent_version = "{current}"', f'agent_version = "{new_version}"'
@@ -250,9 +266,7 @@ def bump_cmd(
     git.tag(f"v{new_version}")
 
     if as_json:
-        typer.echo(
-            json.dumps({"old": current, "new": new_version, "tag": f"v{new_version}"})
-        )
+        output_json({"old": current, "new": new_version, "tag": f"v{new_version}"})
     else:
         typer.echo(f"\nBumped: {current} → {new_version}")
         typer.echo(f"Tag: v{new_version}")
