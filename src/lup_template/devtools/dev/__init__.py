@@ -262,9 +262,13 @@ def pr_merge_cmd(
         bool,
         typer.Option("--dry-run", "-n", help="Show what would happen"),
     ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
 ) -> None:
     """Squash-merge a PR and pull changes into the integration branch."""
-    pr.merge(pr_number, dry_run)
+    pr.merge(pr_number, dry_run, as_json)
 
 
 @pr_app.command("sync-base")

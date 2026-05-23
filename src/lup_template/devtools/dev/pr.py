@@ -24,7 +24,7 @@ from lup_template.devtools.dev.branches import (
     get_integration_branch,
 )
 
-from lup_template.devtools.utils import git, gh
+from lup_template.devtools.utils import git, gh, output_json
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class CreateResult(BaseModel):
 
 def output_result(result: BaseModel, as_json: bool) -> None:
     if as_json:
-        print(result.model_dump_json(indent=2))
+        output_json(result)
     else:
         for key, value in result.model_dump().items():
             typer.echo(f"{key}: {value}")
@@ -193,6 +193,7 @@ def status(
 def merge(
     pr_number: int,
     dry_run: bool,
+    as_json: bool = False,
 ) -> None:
     """Squash-merge a PR and pull changes into the integration branch."""
     integration = get_integration_branch()
@@ -228,7 +229,7 @@ def merge(
         integration_branch=integration,
         pulled=pulled,
     )
-    print(result.model_dump_json(indent=2))
+    output_result(result, as_json)
 
 
 def sync_base(
