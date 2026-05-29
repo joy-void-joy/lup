@@ -15,7 +15,7 @@ Resolve all merge conflicts in the working tree after a failed merge or rebase.
 ### 1. Assess the situation
 
 ```bash
-uv run lup-devtools dev conflict-status --json
+uv run lup-devtools dev conflict status --json
 ```
 
 This reports the operation type (merge/rebase/cherry-pick), conflicted files, and commits on both sides.
@@ -40,7 +40,7 @@ For each file in `conflicted_files`:
 After resolving all conflicts but **before completing the merge**:
 
 ```bash
-uv run lup-devtools dev conflict-audit <conflicted-files> --json
+uv run lup-devtools dev conflict audit <conflicted-files> --json
 ```
 
 Review the audit output. If any files have `warning: true`, check that the removals are intentional. **Fix unjustified deletions before completing.**
@@ -48,7 +48,7 @@ Review the audit output. If any files have `warning: true`, check that the remov
 ### 5. Complete the merge
 
 ```bash
-uv run lup-devtools dev conflict-complete
+uv run lup-devtools dev conflict complete
 ```
 
 ## Core Principle: Bias Toward Inclusion
@@ -62,7 +62,7 @@ uv run lup-devtools dev conflict-complete
 Run scope classification to identify which conflicted files this branch touched:
 
 ```bash
-uv run lup-devtools dev conflicts --json
+uv run lup-devtools dev conflict list --json
 ```
 
 Use this output together with the branch scope summary from step 2 to classify each conflict hunk:

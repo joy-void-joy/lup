@@ -14,9 +14,11 @@ import lup_template.devtools.dev.worktree as worktree
 app = typer.Typer(no_args_is_help=True)
 worktree_app = typer.Typer(no_args_is_help=True)
 pr_app = typer.Typer(no_args_is_help=True)
+conflict_app = typer.Typer(no_args_is_help=True)
 init_app = typer.Typer(no_args_is_help=True)
 app.add_typer(worktree_app, name="worktree", help="Worktree management")
 app.add_typer(pr_app, name="pr", help="PR lifecycle (status, merge, push, checks)")
+app.add_typer(conflict_app, name="conflict", help="Merge/rebase conflict resolution")
 app.add_typer(init_app, name="init", help="Project initialization")
 
 
@@ -149,8 +151,8 @@ def delete_cmd(
 # -- conflict commands --
 
 
-@app.command("conflicts")
-def conflicts_cmd(
+@conflict_app.command("list")
+def conflict_list_cmd(
     as_json: Annotated[
         bool,
         typer.Option("--json", help="Output as JSON"),
@@ -160,7 +162,7 @@ def conflicts_cmd(
     conflicts.conflicts(as_json)
 
 
-@app.command("conflict-status")
+@conflict_app.command("status")
 def conflict_status_cmd(
     as_json: Annotated[
         bool,
@@ -171,7 +173,7 @@ def conflict_status_cmd(
     conflicts.conflict_status(as_json)
 
 
-@app.command("conflict-audit")
+@conflict_app.command("audit")
 def conflict_audit_cmd(
     files: Annotated[
         list[str],
@@ -186,7 +188,7 @@ def conflict_audit_cmd(
     conflicts.conflict_audit(files, as_json)
 
 
-@app.command("conflict-complete")
+@conflict_app.command("complete")
 def conflict_complete_cmd(
     dry_run: Annotated[
         bool,
