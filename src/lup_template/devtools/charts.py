@@ -57,7 +57,7 @@ def pick_colors(n: int) -> list[int]:
     if n <= 0:
         return []
     if n >= len(SATURATED_RING):
-        return list(SATURATED_RING[:n])
+        return [SATURATED_RING[i % len(SATURATED_RING)] for i in range(n)]
     step = len(SATURATED_RING) / n
     return [SATURATED_RING[int(i * step) % len(SATURATED_RING)] for i in range(n)]
 
