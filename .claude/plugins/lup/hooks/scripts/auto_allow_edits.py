@@ -104,8 +104,54 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "No `_` prefix on classes — nothing is private",
     ),
     (
-        re.compile(r"^_[a-zA-Z]\w*\s*[=:]"),
+        re.compile(r"^_[a-zA-Z]\w*\s*[:=](?!.*,\s*$)"),
         "No `_` prefix on variables/constants — nothing is private",
+    ),
+]
+
+TS_FILE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
+TS_CLAUDE_IGNORE_MARKER = "// claude: ignore"
+
+TS_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (
+        re.compile(r"\bas\s+any\b"),
+        "Never use `as any` — use proper types or type guards",
+    ),
+    (
+        re.compile(r"\bas\s+unknown\b"),
+        "Never use `as unknown` — use type guards or proper types",
+    ),
+    (
+        re.compile(r":\s*any\b"),
+        "Never use `any` type annotation — use specific types, generics, or `unknown`",
+    ),
+    (
+        re.compile(r"<any>"),
+        "Never use `<any>` type assertion — use proper types",
+    ),
+    (
+        re.compile(r"@ts-ignore"),
+        "Never use @ts-ignore — fix the type error properly",
+    ),
+    (
+        re.compile(r"@ts-expect-error"),
+        "Never use @ts-expect-error — fix the type error properly",
+    ),
+    (
+        re.compile(r"@ts-nocheck"),
+        "Never use @ts-nocheck — fix the type errors in the file",
+    ),
+    (
+        re.compile(r"//\s*eslint-disable"),
+        "Never use eslint-disable — fix the lint issue properly",
+    ),
+    (
+        re.compile(r"/\*\s*eslint-disable"),
+        "Never use eslint-disable — fix the lint issue properly",
+    ),
+    (
+        re.compile(r"//\s*tslint:disable"),
+        "Never use tslint:disable — migrate to eslint and fix the issue",
     ),
 ]
 
@@ -114,14 +160,14 @@ def is_protected_file(file_path: str) -> bool:
     return any(re.search(p, file_path) for p in PROTECTED_PATTERNS)
 
 
-def has_file_level_ignore(file_path: str) -> bool:
+def has_file_level_ignore(file_path: str, marker: str = CLAUDE_IGNORE_MARKER) -> bool:
     """Check if the file on disk has a `# claude: ignore` marker in the first 10 lines."""
     try:
         with open(file_path) as f:
             for i, line in enumerate(f):
                 if i >= 10:
                     break
-                if line.strip() == CLAUDE_IGNORE_MARKER:
+                if line.strip() == marker:
                     return True
     except OSError:
         pass
@@ -307,7 +353,11 @@ def ask_decision(reason: str) -> AllowDecision:
 
 
 def find_anti_pattern_violations(
-    old_string: str, new_string: str, file_path: str = ""
+    old_string: str,
+    new_string: str,
+    file_path: str = "",
+    patterns: list[tuple[re.Pattern[str], str]] | None = None,
+    ignore_marker: str = CLAUDE_IGNORE_MARKER,
 ) -> tuple[str, str] | None:
     """Check newly added lines for typing anti-patterns.
 
@@ -316,8 +366,11 @@ def find_anti_pattern_violations(
     - Inline `# claude: ignore` on the violating line -> "ask"
     - No marker -> "deny" with hint
     """
-    if file_path and has_file_level_ignore(file_path):
-        return ("allow", "File has `# claude: ignore` marker")
+    if patterns is None:
+        patterns = ANTI_PATTERNS
+
+    if file_path and has_file_level_ignore(file_path, ignore_marker):
+        return ("allow", f"File has `{ignore_marker}` marker")
 
     old_lines = old_string.splitlines() if old_string else []
     new_lines = new_string.splitlines() if new_string else []
@@ -337,14 +390,14 @@ def find_anti_pattern_violations(
             stripped = new_lines[idx].strip()
             if not stripped or stripped.startswith("#") and "type:" not in stripped:
                 continue
-            for pattern, reason in ANTI_PATTERNS:
+            for pattern, reason in patterns:
                 if not pattern.search(stripped):
                     continue
                 preview = stripped[:80]
-                if CLAUDE_IGNORE_MARKER in new_lines[idx]:
+                if ignore_marker in new_lines[idx]:
                     ask_reasons.append(f"{reason} | line: {preview}")
                 else:
-                    hint = f"Add `{CLAUDE_IGNORE_MARKER}` to the line (or file-level) to request approval"
+                    hint = f"Add `{ignore_marker}` to the line (or file-level) to request approval"
                     return ("deny", f"Denied: {reason} | line: {preview}. {hint}")
                 break
 
@@ -374,9 +427,30 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
                 case "deny":
                     return deny_decision(reason)
 
-    if CLAUDE_IGNORE_MARKER in (new_string or ""):
+    if file_path.endswith(TS_FILE_EXTENSIONS) and new_string:
+        violation = find_anti_pattern_violations(
+            old_string,
+            new_string,
+            file_path,
+            patterns=TS_ANTI_PATTERNS,
+            ignore_marker=TS_CLAUDE_IGNORE_MARKER,
+        )
+        if violation:
+            decision, reason = violation
+            match decision:
+                case "allow":
+                    return allow_decision()
+                case "ask":
+                    return ask_decision(reason)
+                case "deny":
+                    return deny_decision(reason)
+
+    ignore_markers = [CLAUDE_IGNORE_MARKER]
+    if file_path.endswith(TS_FILE_EXTENSIONS):
+        ignore_markers = [TS_CLAUDE_IGNORE_MARKER]
+    if any(m in (new_string or "") for m in ignore_markers):
         return ask_decision(
-            "Edit introduces `# claude: ignore` — requires user approval"
+            "Edit introduces ignore marker — requires user approval"
         )
 
     if old_string and not new_string:
