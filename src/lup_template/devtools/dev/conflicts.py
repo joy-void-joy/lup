@@ -5,11 +5,11 @@ After a failed merge or rebase, classifies conflicted files as in-scope
 
 Examples::
 
-    $ uv run lup-devtools dev conflicts
-    $ uv run lup-devtools dev conflicts --json
-    $ uv run lup-devtools dev conflict-status --json
-    $ uv run lup-devtools dev conflict-audit src/lup/agent/core.py --json
-    $ uv run lup-devtools dev conflict-complete --dry-run
+    $ uv run lup-devtools dev conflict list
+    $ uv run lup-devtools dev conflict list --json
+    $ uv run lup-devtools dev conflict status --json
+    $ uv run lup-devtools dev conflict audit src/lup/agent/core.py --json
+    $ uv run lup-devtools dev conflict complete --dry-run
 """
 
 import re
