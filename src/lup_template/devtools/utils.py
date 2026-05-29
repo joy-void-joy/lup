@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Mapping, Sequence
+from typing import Annotated
 
 import sh
 import typer
@@ -19,3 +20,17 @@ def output_json(  # claude: ignore
         typer.echo(data.model_dump_json(indent=2))
     else:
         typer.echo(json.dumps(data, indent=2))
+
+
+VERSION_OPT = Annotated[
+    str | None,
+    typer.Option("--version", "-v", help="Agent version (default: current)"),
+]
+ALL_VERSIONS_OPT = Annotated[
+    bool,
+    typer.Option("--all-versions", help="Include all versions"),
+]
+JSON_OPT = Annotated[
+    bool,
+    typer.Option("--json", help="Output as JSON"),
+]
