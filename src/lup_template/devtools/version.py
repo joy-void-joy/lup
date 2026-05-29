@@ -133,7 +133,8 @@ def changelog_cmd(
     ] = False,
 ) -> None:
     """Show changes since a version tag, classified by type."""
-    tag = since or get_latest_tag()
+    latest_tag = get_latest_tag()
+    tag = since or latest_tag
     if not tag:
         ref = (
             str(git("rev-list", "--max-parents=0", "HEAD", _ok_code=[0]))
@@ -153,7 +154,7 @@ def changelog_cmd(
         return
 
     report: ChangelogReport = {
-        "since_tag": since or get_latest_tag(),
+        "since_tag": since or latest_tag,
         "behavior": [],
         "data": [],
         "infrastructure": [],
@@ -173,7 +174,7 @@ def changelog_cmd(
         output_json(report)
         return
 
-    tag_display = since or get_latest_tag() or "(root)"
+    tag_display = since or latest_tag or "(root)"
     typer.echo(f"\n=== Changes since {tag_display} ===\n")
 
     if report["behavior"]:
@@ -244,9 +245,7 @@ def bump_cmd(
 
     if dry_run:
         if as_json:
-            output_json(
-                {"old": current, "new": new_version, "tag": f"v{new_version}"}
-            )
+            output_json({"old": current, "new": new_version, "tag": f"v{new_version}"})
         else:
             typer.echo(f"\nWould bump: {current} → {new_version}")
             typer.echo(f"Would tag: v{new_version}")
