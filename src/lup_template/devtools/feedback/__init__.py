@@ -8,17 +8,9 @@ import typer
 import lup_template.devtools.feedback.analyze as analyze
 import lup_template.devtools.feedback.state as state
 from lup.paths import AGENT_VERSION
+from lup_template.devtools.utils import VERSION_OPT, ALL_VERSIONS_OPT, JSON_OPT
 
 app = typer.Typer(no_args_is_help=True)
-
-VERSION_OPT = Annotated[
-    str | None,
-    typer.Option("--version", "-v", help="Agent version (default: current)"),
-]
-ALL_VERSIONS_OPT = Annotated[
-    bool,
-    typer.Option("--all-versions", help="Include all versions"),
-]
 
 
 @app.command("status")
@@ -57,9 +49,10 @@ def collect_cmd(
 def tools_cmd(
     version: VERSION_OPT = AGENT_VERSION,
     all_versions: ALL_VERSIONS_OPT = False,
+    as_json: JSON_OPT = False,
 ) -> None:
     """Show tool usage aggregates."""
-    state.tools(version, all_versions)
+    state.tools(version, all_versions, as_json)
 
 
 @app.command("errors")
@@ -67,9 +60,10 @@ def errors_cmd(
     limit: int = typer.Option(20, "-n", "--limit", help="Max errors to show"),
     version: VERSION_OPT = AGENT_VERSION,
     all_versions: ALL_VERSIONS_OPT = False,
+    as_json: JSON_OPT = False,
 ) -> None:
     """Show sessions with high error rates from structured metrics."""
-    state.errors(limit, version, all_versions)
+    state.errors(limit, version, all_versions, as_json)
 
 
 @app.command("trends")
@@ -80,9 +74,10 @@ def trends_cmd(
     ] = 10,
     version: VERSION_OPT = AGENT_VERSION,
     all_versions: ALL_VERSIONS_OPT = False,
+    as_json: JSON_OPT = False,
 ) -> None:
     """Show metric trends over time."""
-    state.trends(window, version, all_versions)
+    state.trends(window, version, all_versions, as_json)
 
 
 @app.command("history")
@@ -115,9 +110,11 @@ def unmark_cmd(
 
 
 @app.command("prompt-health")
-def prompt_health_cmd() -> None:
+def prompt_health_cmd(
+    as_json: JSON_OPT = False,
+) -> None:
     """Analyze the agent prompt for size and patch accumulation."""
-    state.prompt_health()
+    state.prompt_health(as_json)
 
 
 @app.command("unanalyzed")

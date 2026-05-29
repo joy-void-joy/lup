@@ -15,7 +15,7 @@ from collections import defaultdict
 from datetime import datetime
 from glob import glob
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict  # claude: ignore
 
 import sh
 import typer
@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from lup.history import iter_session_dirs, resolve_version
 from lup.paths import feedback_path, traces_path, AGENT_VERSION
-from lup_template.devtools.utils import git
+from lup_template.devtools.utils import git, output_json
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +150,38 @@ def compute_metrics(results: list[SessionResult]) -> FeedbackMetrics:
         sessions_with_outcomes=sessions_with_outcomes,
         results=results,
     )
+
+
+# =============================================================================
+# JSON OUTPUT TYPES
+# =============================================================================
+
+
+class ToolUsageEntry(TypedDict):
+    name: str
+    calls: int
+    errors: int
+    error_rate: float
+    avg_ms: float
+
+
+class ErrorSessionEntry(TypedDict):
+    session_id: str
+    errors: int
+    by_tool: dict[str, object]  # claude: ignore
+
+
+class TrendEntry(TypedDict):
+    date: str
+    avg_calls: float
+    error_rate: float
+    avg_cost: float
+
+
+class PromptHealthReport(TypedDict):
+    file: str
+    lines: int
+    sections: int
 
 
 # =============================================================================
@@ -454,14 +486,19 @@ def collect(
     typer.echo(f"\nMetrics saved to: {output}")
 
 
-def tools(version: str | None, all_versions: bool) -> None:  # claude: ignore
+def tools(
+    version: str | None, all_versions: bool, as_json: bool
+) -> None:  # claude: ignore
     """Show tool usage aggregates."""
     effective, warning = resolve_version(version, all_versions)
     if warning:
         typer.echo(warning)
     sessions = load_sessions_for_versions(effective)
     if not sessions:
-        typer.echo("No sessions found")
+        if as_json:
+            output_json([])
+        else:
+            typer.echo("No sessions found")
         return
 
     tool_stats: dict[str, dict[str, int | float]] = defaultdict(
@@ -479,22 +516,41 @@ def tools(version: str | None, all_versions: bool) -> None:  # claude: ignore
             tool_stats[tool_name]["total_ms"] += avg_ms * count
 
     if not tool_stats:
-        typer.echo("No tool metrics found")
+        if as_json:
+            output_json([])
+        else:
+            typer.echo("No tool metrics found")
+        return
+
+    entries: list[ToolUsageEntry] = []
+    for tool_name in sorted(tool_stats.keys(), key=lambda t: -tool_stats[t]["calls"]):
+        stats = tool_stats[tool_name]
+        calls = int(stats["calls"])
+        errs = int(stats["errors"])
+        entries.append(
+            {
+                "name": tool_name,
+                "calls": calls,
+                "errors": errs,
+                "error_rate": (errs / calls) if calls > 0 else 0.0,
+                "avg_ms": stats["total_ms"] / calls if calls > 0 else 0.0,
+            }
+        )
+
+    if as_json:
+        output_json(entries)
         return
 
     typer.echo("\n=== Tool Usage Summary ===\n")
     typer.echo(f"{'Tool':<35} {'Calls':>8} {'Errors':>8} {'Err%':>8} {'Avg ms':>10}")
     typer.echo("-" * 75)
 
-    for tool_name in sorted(tool_stats.keys(), key=lambda t: -tool_stats[t]["calls"]):
-        stats = tool_stats[tool_name]
-        calls = int(stats["calls"])
-        errs = int(stats["errors"])
-        err_pct = (100 * errs / calls) if calls > 0 else 0
-        avg_ms = stats["total_ms"] / calls if calls > 0 else 0
+    for e in entries:
+        err_pct = e["error_rate"] * 100
         err_indicator = " !" if err_pct > 10 else ""
         typer.echo(
-            f"{tool_name:<35} {calls:>8} {errs:>8} {err_pct:>7.1f}%{err_indicator} {avg_ms:>9.0f}"
+            f"{e['name']:<35} {e['calls']:>8} {e['errors']:>8} "
+            f"{err_pct:>7.1f}%{err_indicator} {e['avg_ms']:>9.0f}"
         )
 
 
@@ -502,6 +558,7 @@ def errors(  # claude: ignore
     limit: int,
     version: str | None,
     all_versions: bool,
+    as_json: bool,
 ) -> None:
     """Show sessions with high error rates from structured metrics."""
     effective, warning = resolve_version(version, all_versions)
@@ -509,58 +566,76 @@ def errors(  # claude: ignore
         typer.echo(warning)
     sessions = load_sessions_for_versions(effective)
     if not sessions:
-        typer.echo("No sessions found")
+        if as_json:
+            output_json([])
+        else:
+            typer.echo("No sessions found")
         return
 
-    with_errors: list[dict[str, Any]] = []
+    with_errors: list[ErrorSessionEntry] = []
     for s in sessions:
         metrics = s.get("tool_metrics", {})
         total_errors = metrics.get("total_errors", 0)
         if total_errors and total_errors > 0:
             with_errors.append(
                 {
-                    "session_id": s.get("_session_id"),
+                    "session_id": s.get("_session_id", ""),
                     "errors": total_errors,
                     "by_tool": metrics.get("by_tool", {}),
                 }
             )
 
     if not with_errors:
-        typer.echo("No sessions with errors found")
+        if as_json:
+            output_json([])
+        else:
+            typer.echo("No sessions with errors found")
         return
 
     with_errors.sort(key=lambda x: -x["errors"])
+
+    if as_json:
+        output_json(with_errors[:limit])
+        return
 
     typer.echo(f"\n=== Sessions with Errors ({len(with_errors)} total) ===\n")
 
     for item in with_errors[:limit]:
         typer.echo(f"Session {item['session_id']}: {item['errors']} errors")
-        for tool_name, tool_data in item["by_tool"].items():
-            errs = tool_data.get("error_count", 0)
-            if errs > 0:
-                typer.echo(f"  - {tool_name}: {errs}")
+        by_tool = item["by_tool"]
+        if isinstance(by_tool, dict):
+            for tool_name, tool_data in by_tool.items():
+                if isinstance(tool_data, dict):
+                    errs = tool_data.get("error_count", 0)
+                    if errs and int(errs) > 0:
+                        typer.echo(f"  - {tool_name}: {errs}")
 
 
-def trends(window: int, version: str | None, all_versions: bool) -> None:
+def trends(window: int, version: str | None, all_versions: bool, as_json: bool) -> None:
     """Show metric trends over time."""
     effective, warning = resolve_version(version, all_versions)
     if warning:
         typer.echo(warning)
     sessions = load_sessions_for_versions(effective)
     if not sessions:
-        typer.echo("No sessions found")
+        if as_json:
+            output_json([])
+        else:
+            typer.echo("No sessions found")
         return
 
     sessions_with_ts = [s for s in sessions if s.get("timestamp")]
     sessions_with_ts.sort(key=lambda x: x["timestamp"])
 
     if len(sessions_with_ts) < window:
-        typer.echo(f"Need at least {window} sessions for trend analysis")
-        typer.echo(f"Have: {len(sessions_with_ts)}")
+        if as_json:
+            output_json([])
+        else:
+            typer.echo(f"Need at least {window} sessions for trend analysis")
+            typer.echo(f"Have: {len(sessions_with_ts)}")
         return
 
-    typer.echo(f"\n=== Trends (rolling {window}-session window) ===\n")
-
+    entries: list[TrendEntry] = []
     for i in range(window - 1, len(sessions_with_ts)):
         window_sessions = sessions_with_ts[i - window + 1 : i + 1]
 
@@ -579,9 +654,24 @@ def trends(window: int, version: str | None, all_versions: bool) -> None:
         avg_cost = total_cost / window
 
         latest_ts = window_sessions[-1].get("timestamp", "")[:10]
+        entries.append(
+            {
+                "date": latest_ts,
+                "avg_calls": round(avg_calls, 1),
+                "error_rate": round(error_rate, 4),
+                "avg_cost": round(avg_cost, 4),
+            }
+        )
+
+    if as_json:
+        output_json(entries)
+        return
+
+    typer.echo(f"\n=== Trends (rolling {window}-session window) ===\n")
+    for e in entries:
         typer.echo(
-            f"{latest_ts}: calls={avg_calls:.1f}/session, "
-            f"errors={error_rate:.1%}, cost=${avg_cost:.4f}/session"
+            f"{e['date']}: calls={e['avg_calls']:.1f}/session, "
+            f"errors={e['error_rate']:.1%}, cost=${e['avg_cost']:.4f}/session"
         )
 
 
@@ -632,7 +722,7 @@ def unmark(session_ids: list[str]) -> None:
     typer.echo(f"Unmarked {len(removed)} sessions")
 
 
-def prompt_health() -> None:
+def prompt_health(as_json: bool) -> None:
     """Analyze the agent prompt for size and patch accumulation."""
     matches = glob("src/*/agent/prompts.py")
     if not matches:
@@ -644,6 +734,15 @@ def prompt_health() -> None:
     lines = content.split("\n")
 
     section_count = sum(1 for line in lines if "## " in line or "### " in line)
+
+    if as_json:
+        report: PromptHealthReport = {
+            "file": str(prompts_file),
+            "lines": len(lines),
+            "sections": section_count,
+        }
+        output_json(report)
+        return
 
     typer.echo("\n=== Prompt Health ===\n")
     typer.echo(f"File: {prompts_file}")
