@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 import typer
 
+from lup.paths import find_project_root
 from lup_template.devtools.utils import git
 
 PACKAGE_IMPORT_RE = re.compile(
@@ -40,16 +41,6 @@ FRAMEWORK_MARKERS = {
     "plugins/lup",
     "plugins/cache/local/lup",
 }
-
-
-def find_project_root() -> Path:
-    """Find the project root by looking for pyproject.toml."""
-    cwd = Path.cwd().resolve()
-    for parent in [cwd, *cwd.parents]:
-        if (parent / "pyproject.toml").exists():
-            return parent
-    typer.echo("Error: Could not find pyproject.toml", err=True)
-    raise typer.Exit(1)
 
 
 def is_framework_reference(line: str) -> bool:
