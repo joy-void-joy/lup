@@ -78,8 +78,6 @@ def save_images(
 
 app = typer.Typer(no_args_is_help=True)
 
-xclip = sh.Command("xclip")
-
 CLIPBOARD_IMAGE_MIMES = ("image/png", "image/jpeg", "image/webp")
 
 
@@ -89,6 +87,7 @@ def read_clipboard_image() -> tuple[str, bytes] | None:
     Returns ``(media_type, raw_bytes)`` or ``None`` when no image is available.
     """
     try:
+        xclip = sh.Command("xclip")
         targets = str(xclip("-selection", "clipboard", "-o", "-t", "TARGETS"))
     except (sh.ErrorReturnCode, sh.CommandNotFound):
         return None
@@ -110,6 +109,7 @@ def read_clipboard_image() -> tuple[str, bytes] | None:
 def read_clipboard_text() -> str | None:
     """Read text from the system clipboard via xclip."""
     try:
+        xclip = sh.Command("xclip")
         text = str(xclip("-selection", "clipboard", "-o"))
         return text if text else None
     except (sh.ErrorReturnCode, sh.CommandNotFound):
