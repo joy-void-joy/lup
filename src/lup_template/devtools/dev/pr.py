@@ -14,7 +14,6 @@ Examples::
 
 import json
 import logging
-from pathlib import Path
 import sh
 import typer
 from pydantic import BaseModel
@@ -23,6 +22,7 @@ from lup_template.devtools.dev.branches import (
     detect_base_branch,
     get_integration_branch,
 )
+from lup_template.devtools.dev.worktree import get_tree_dir
 
 from lup_template.devtools.utils import git, gh, output_json
 
@@ -211,10 +211,13 @@ def merge(
         typer.echo(f"Merge failed: {stderr}", err=True)
         raise typer.Exit(1)
 
-    tree_dir = Path.cwd().parent
-    integration_path = tree_dir / integration
+    try:
+        tree_dir = get_tree_dir()
+    except SystemExit:
+        tree_dir = None
+    integration_path = tree_dir / integration if tree_dir else None
     pulled = False
-    if integration_path.is_dir():
+    if integration_path and integration_path.is_dir():
         try:
             git("-C", str(integration_path), "pull")
             typer.echo(f"Pulled changes into {integration}")
@@ -244,10 +247,13 @@ def sync_base(
         typer.echo(f"Feature branch: {feature}", err=True)
         typer.echo(f"Base branch: {base_branch}", err=True)
 
-    tree_dir = Path.cwd().parent
-    base_path = tree_dir / base_branch
+    try:
+        tree_dir = get_tree_dir()
+    except SystemExit:
+        tree_dir = None
+    base_path = tree_dir / base_branch if tree_dir else None
 
-    if base_path.is_dir():
+    if base_path and base_path.is_dir():
         if not as_json:
             typer.echo(f"Syncing {base_branch}...", err=True)
         try:
