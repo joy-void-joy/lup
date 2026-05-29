@@ -36,7 +36,7 @@ RULES: list[Allow | Deny] = [
     Allow(pattern=r"^ls\b"),
     Allow(pattern=r"^tree\b"),
     Allow(pattern=r"^grep\b"),
-    Allow(pattern=r"|\sxargs\b"),
+    Allow(pattern=r"\|\s*xargs\b"),
     Allow(pattern=r"^test "),
     Allow(pattern=r"^find"),
     # GitHub CLI (read-only)
@@ -46,7 +46,7 @@ RULES: list[Allow | Deny] = [
         pattern=r"^git (status|log|diff|show|branch|worktree|stash|remote|fetch|tag|add|commit)\b"
     ),
     # uv package management
-    Allow(pattern=r"^uv (sync|add|remove|lock)\b"),
+    Allow(pattern=r"^uv (remove|lock)\b"),
     Allow(pattern=r"^uv run (pyright|pytest|ruff)\b"),
     Allow(pattern=r"^uv run \S+ --help$"),
     # lup-devtools CLI

@@ -13,7 +13,9 @@
       "Read(./**/*.local*)"
     ],
     "ask": [
-      "Edit(./**/pyproject.toml)"
+      "Edit(./**/pyproject.toml)",
+      "Bash(uv sync*)",
+      "Bash(uv add*)"
     ]
   },
   "enabledPlugins": {
