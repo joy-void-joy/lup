@@ -431,9 +431,7 @@ def branch_status(branch: str | None, as_json: bool) -> None:
 
     results: list[BranchClassification] = []
     for b in branch_list:
-        results.append(
-            classify_branch(b, integration, current, has_remote=has_remote)
-        )
+        results.append(classify_branch(b, integration, current, has_remote=has_remote))
 
     if as_json:
         output_json(results)

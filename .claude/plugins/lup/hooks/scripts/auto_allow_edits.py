@@ -449,9 +449,7 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
     if file_path.endswith(TS_FILE_EXTENSIONS):
         ignore_markers = [TS_CLAUDE_IGNORE_MARKER]
     if any(m in (new_string or "") for m in ignore_markers):
-        return ask_decision(
-            "Edit introduces ignore marker — requires user approval"
-        )
+        return ask_decision("Edit introduces ignore marker — requires user approval")
 
     if old_string and not new_string:
         return allow_decision()
