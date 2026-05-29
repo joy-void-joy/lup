@@ -9,14 +9,16 @@ Examples::
 
 # claude: ignore
 
-import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, TypedDict
 
 from lup_template.devtools.feedback.state import load_sessions_for_versions
+from lup_template.devtools.trace.traces import (
+    CapabilityRequest,
+    scan_for_capability_gaps,
+)
 from lup.history import resolve_version
-from lup.paths import traces_path
 
 
 class ToolHealth(TypedDict):
@@ -34,17 +36,11 @@ class ErrorPattern(TypedDict):
     top_errors: list[str]
 
 
-class CapabilityGap(TypedDict):
-    request: str
-    count: int
-    session_ids: list[str]
-
-
 class AnalysisReport(TypedDict):
     version: str | None
     tool_health: list[ToolHealth]
     error_patterns: list[ErrorPattern]
-    capability_gaps: list[CapabilityGap]
+    capability_gaps: list[CapabilityRequest]
 
 
 def gather_tool_health(sessions: list[dict[str, Any]]) -> list[ToolHealth]:
@@ -110,48 +106,6 @@ def gather_error_patterns(sessions: list[dict[str, Any]]) -> list[ErrorPattern]:
     return result
 
 
-CAPABILITY_PATTERNS = re.compile(
-    r"would be useful|would have helped|would benefit from|wish I had|"
-    r"if I could|tool that|need.* access to|cannot .* because",
-    re.IGNORECASE,
-)
-
-
-def gather_capability_gaps() -> list[CapabilityGap]:
-    """Extract and aggregate capability requests from trace files."""
-    if not traces_path().exists():
-        return []
-
-    requests_by_text: dict[str, list[str]] = defaultdict(list)
-
-    for trace_file in traces_path().rglob("*.md"):
-        try:
-            content = trace_file.read_text(encoding="utf-8")
-            rel = trace_file.relative_to(traces_path())
-            session_id = rel.parts[2] if len(rel.parts) > 2 else rel.stem
-
-            for line in content.split("\n"):
-                if CAPABILITY_PATTERNS.search(line):
-                    text = line.strip()[:120]
-                    if text:
-                        requests_by_text[text].append(session_id)
-        except (OSError, ValueError):
-            pass
-
-    result: list[CapabilityGap] = []
-    for request, session_ids in sorted(
-        requests_by_text.items(), key=lambda x: -len(x[1])
-    ):
-        result.append(
-            {
-                "request": request,
-                "count": len(session_ids),
-                "session_ids": sorted(set(session_ids)),
-            }
-        )
-    return result
-
-
 def build_report(version: str | None, all_versions: bool) -> AnalysisReport:
     """Build a complete analysis report."""
     effective, _ = resolve_version(version, all_versions)
@@ -161,7 +115,7 @@ def build_report(version: str | None, all_versions: bool) -> AnalysisReport:
         "version": version,
         "tool_health": gather_tool_health(sessions),
         "error_patterns": gather_error_patterns(sessions),
-        "capability_gaps": gather_capability_gaps(),
+        "capability_gaps": scan_for_capability_gaps(effective),
     }
 
 
