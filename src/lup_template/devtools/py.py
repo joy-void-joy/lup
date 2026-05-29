@@ -1,15 +1,15 @@
-"""API inspection and module info tools.
+"""Python module introspection tools.
 
-Combines inspect_api and module_info into one sub-app.
+Inspect installed packages, view source, and explore APIs.
 
 Examples::
 
-    $ uv run lup-devtools api inspect claude_agent_sdk.ClaudeSDKClient
-    $ uv run lup-devtools api inspect lup.lib.mcp.lup_tool --help-full
-    $ uv run lup-devtools api module-path requests
-    $ uv run lup-devtools api module-source requests.api --lines 100
-    $ uv run lup-devtools api module-tree claude_agent_sdk
-    $ uv run lup-devtools api module-info pydantic
+    $ uv run lup-devtools py inspect claude_agent_sdk.ClaudeSDKClient
+    $ uv run lup-devtools py inspect lup.mcp.lup_tool --help-full
+    $ uv run lup-devtools py module-path requests
+    $ uv run lup-devtools py module-source requests.api --lines 100
+    $ uv run lup-devtools py module-tree claude_agent_sdk
+    $ uv run lup-devtools py module-info pydantic
 """
 
 import importlib

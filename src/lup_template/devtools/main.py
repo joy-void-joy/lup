@@ -7,6 +7,7 @@ Examples::
 
     $ uv run lup-devtools --help
     $ uv run lup-devtools agent inspect --json
+    $ uv run lup-devtools py inspect requests
     $ uv run lup-devtools trace show <session_id>
     $ uv run lup-devtools feedback status
     $ uv run lup-devtools dev branches
@@ -20,7 +21,7 @@ Examples::
 import typer
 
 from lup_template.devtools.agent import app as agent_app
-from lup_template.devtools.api import app as api_app
+from lup_template.devtools.py import app as py_app
 from lup_template.devtools.dev import app as dev_app
 from lup_template.devtools.feedback import app as feedback_app
 from lup_template.devtools.sync import app as sync_app
@@ -35,7 +36,7 @@ app = typer.Typer(
 )
 
 app.add_typer(agent_app, name="agent", help="Agent introspection and debugging")
-app.add_typer(api_app, name="api", help="API inspection")
+app.add_typer(py_app, name="py", help="Python module introspection")
 app.add_typer(dev_app, name="dev", help="Worktrees, branches, and pre-flight checks")
 app.add_typer(
     feedback_app, name="feedback", help="Feedback state, metrics, and commits"
