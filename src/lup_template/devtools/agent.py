@@ -181,10 +181,47 @@ def print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
 
 
 def collect_tools_by_server() -> dict[str, list[LupMcpTool]]:
-    """Collect all LupMcpTool instances grouped by server name."""
+    """Collect all statically-available LupMcpTool instances grouped by server name.
+
+    Tools that require runtime context (reflect, realtime) are listed
+    separately via :func:`collect_dynamic_tool_names`.
+    """
     return {
         "example": list(EXAMPLE_TOOLS),
     }
+
+
+def collect_dynamic_tool_names() -> dict[str, list[str]]:
+    """Discover tool names from modules that require runtime instantiation."""
+    import ast
+    from pathlib import Path
+
+    tools_dir = Path(__file__).parent.parent / "agent" / "tools"
+    dynamic: dict[str, list[str]] = {}
+
+    for module_path in sorted(tools_dir.glob("*.py")):
+        if module_path.name in ("__init__.py", "example.py"):
+            continue
+
+        try:
+            tree = ast.parse(module_path.read_text())
+        except SyntaxError:
+            continue
+
+        tool_names: list[str] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef):
+                continue
+            for decorator in node.decorator_list:
+                if isinstance(decorator, ast.Call) and isinstance(
+                    decorator.func, ast.Name
+                ):
+                    if decorator.func.id == "lup_tool":
+                        tool_names.append(node.name)
+        if tool_names:
+            dynamic[module_path.stem] = tool_names
+
+    return dynamic
 
 
 def collect_all_tools() -> list[LupMcpTool]:
@@ -235,6 +272,7 @@ def inspect_cmd(
 ) -> None:
     """Inspect the full agent configuration: tools, schemas, prompt, subagents."""
     tools_by_server = collect_tools_by_server()
+    dynamic_tools = collect_dynamic_tool_names()
     all_tools = collect_all_tools()
     subagents = get_subagents()
     prompt = get_system_prompt()
@@ -244,6 +282,7 @@ def inspect_cmd(
             "model": settings.model,
             "max_thinking_tokens": settings.max_thinking_tokens,
             "tools": [tool_to_dict(t) for t in all_tools],
+            "dynamic_tools": dynamic_tools,
             "output_schema": AgentOutput.model_json_schema(),
             "subagents": {
                 name: {
@@ -270,9 +309,10 @@ def inspect_cmd(
     out.write(f"Max thinking tokens: {settings.max_thinking_tokens}\n")
 
     # Tools grouped by server
-    total_tools = sum(len(ts) for ts in tools_by_server.values())
+    total_static = sum(len(ts) for ts in tools_by_server.values())
+    total_dynamic = sum(len(ts) for ts in dynamic_tools.values())
     out.write(f"\n{'─' * 60}\n")
-    out.write(f"  MCP Tools ({total_tools})\n")
+    out.write(f"  MCP Tools ({total_static + total_dynamic})\n")
     out.write(f"{'─' * 60}\n")
     for server_name, server_tools in tools_by_server.items():
         out.write(f"\n  {server_name} ({len(server_tools)} tools)\n")
@@ -281,6 +321,13 @@ def inspect_cmd(
                 print_tool_full(out, t)
             else:
                 print_tool_compact(out, t)
+    if dynamic_tools:
+        for module_name, tool_names in dynamic_tools.items():
+            out.write(
+                f"\n  {module_name} ({len(tool_names)} tools, created at runtime)\n"
+            )
+            for name in tool_names:
+                out.write(f"    {name}\n")
 
     # Agent output schema
     out.write(f"\n{'─' * 60}\n")
@@ -551,15 +598,20 @@ async def repl(
     ]
     if not no_tools:
         servers = collect_tools_by_server()
-        for i, (name, tools) in enumerate(servers.items()):
-            is_last_server = i == len(servers) - 1
+        dynamic = collect_dynamic_tool_names()
+        group_names: list[tuple[str, list[str]]] = [
+            (name, [t.sdk_tool.name for t in stools])
+            for name, stools in servers.items()
+        ] + list(dynamic.items())
+        for i, (name, tool_names_list) in enumerate(group_names):
+            is_last_server = i == len(group_names) - 1
             panel_lines.append(f"[dim]{'└' if is_last_server else '├'} {name}[/dim]")
-            for j, t in enumerate(tools):
-                is_last_tool = j == len(tools) - 1
+            for j, tname in enumerate(tool_names_list):
+                is_last_tool = j == len(tool_names_list) - 1
                 branch = "  └" if is_last_tool else "  ├"
                 if not is_last_server:
                     branch = f"[dim]│[/dim] {'└' if is_last_tool else '├'}"
-                panel_lines.append(f"[dim]{branch}[/dim] {t.sdk_tool.name}")
+                panel_lines.append(f"[dim]{branch}[/dim] {tname}")
     else:
         panel_lines.append("[dim]no tools[/dim]")
     panel_lines += [
