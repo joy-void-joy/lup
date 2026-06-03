@@ -6,40 +6,44 @@ import typer
 from lup_template.devtools.utils import git, uv
 
 
-def run_checks(check_only: bool, no_test: bool) -> None:
+def run_checks(fix: bool, no_test: bool) -> None:
     """Run ruff format, ruff check, pyright, and pytest in sequence.
 
-    By default, auto-fixes formatting and lint issues. Pass *check_only* for
-    CI mode (fail without modifying files).
+    Read-only by default (reports issues without modifying files).
+    Pass *fix* to auto-fix formatting and lint issues.
     """
     results: list[tuple[str, bool]] = []
 
     # ruff format
     try:
-        if check_only:
+        if not fix:
             uv("run", "ruff", "format", "--check", ".")
             typer.echo("ruff format: ok")
         else:
             uv("run", "ruff", "format", ".")
             typer.echo("ruff format: applied")
         results.append(("ruff format", True))
-    except sh.ErrorReturnCode:
+    except sh.ErrorReturnCode as e:
         typer.echo("ruff format: FAIL")
+        if e.stdout:
+            typer.echo(e.stdout.decode().rstrip())
         results.append(("ruff format", False))
 
     # ruff check
     try:
         args = ["run", "ruff", "check", "."]
-        if not check_only:
+        if fix:
             args.append("--fix")
         uv(*args)
         typer.echo("ruff check: ok")
         results.append(("ruff check", True))
-    except sh.ErrorReturnCode:
+    except sh.ErrorReturnCode as e:
         typer.echo("ruff check: FAIL")
+        if e.stdout:
+            typer.echo(e.stdout.decode().rstrip())
         results.append(("ruff check", False))
 
-    if not check_only:
+    if fix:
         modified = str(git("diff", "--name-only", _ok_code=[0])).strip()
         if modified:
             count = len(modified.splitlines())
@@ -52,8 +56,10 @@ def run_checks(check_only: bool, no_test: bool) -> None:
         uv("run", "pyright")
         typer.echo("pyright: ok")
         results.append(("pyright", True))
-    except sh.ErrorReturnCode:
+    except sh.ErrorReturnCode as e:
         typer.echo("pyright: FAIL")
+        if e.stdout:
+            typer.echo(e.stdout.decode().rstrip())
         results.append(("pyright", False))
 
     # pytest
@@ -62,8 +68,10 @@ def run_checks(check_only: bool, no_test: bool) -> None:
             uv("run", "pytest")
             typer.echo("pytest: ok")
             results.append(("pytest", True))
-        except sh.ErrorReturnCode:
+        except sh.ErrorReturnCode as e:
             typer.echo("pytest: FAIL")
+            if e.stdout:
+                typer.echo(e.stdout.decode().rstrip())
             results.append(("pytest", False))
 
     # summary
