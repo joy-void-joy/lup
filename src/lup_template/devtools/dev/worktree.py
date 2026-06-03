@@ -172,6 +172,15 @@ def create(
         typer.echo(f"  {cd_command}")
 
 
+def worktree_status(path: str) -> str:
+    """Check if a worktree has uncommitted changes."""
+    try:
+        status = str(git("-C", path, "status", "--porcelain", _ok_code=[0])).strip()
+        return "dirty" if status else "clean"
+    except sh.ErrorReturnCode:
+        return "?"
+
+
 def list_worktrees() -> None:
     """List all git worktrees with branch and status info."""
     output = str(git("worktree", "list", "--porcelain"))
@@ -203,18 +212,30 @@ def list_worktrees() -> None:
         typer.echo("No worktrees found")
         return
 
+    cwd = str(Path.cwd().resolve())
+
     typer.echo(f"\n=== Worktrees ({len(entries)}) ===\n")
-    typer.echo(f"{'Branch':<30} {'HEAD':<12} {'Path'}")
-    typer.echo("-" * 80)
+    typer.echo(f"  {'Branch':<28} {'HEAD':<12} {'Status':<8} {'Path'}")
+    typer.echo("-" * 90)
 
     for entry in entries:
         branch = entry.get("branch", "(bare)" if entry.get("bare") else "(detached)")
         head = entry.get("head", "")
         path = entry.get("path", "")
-        flags = ""
+        is_current = path == cwd
+        marker = "* " if is_current else "  "
+
+        flags: list[str] = []
         if entry.get("prunable"):
-            flags = " [prunable]"
-        typer.echo(f"{branch:<30} {head:<12} {path}{flags}")
+            flags.append("prunable")
+
+        if not entry.get("bare") and Path(path).is_dir():
+            status = worktree_status(path)
+        else:
+            status = ""
+
+        flag_str = f" [{', '.join(flags)}]" if flags else ""
+        typer.echo(f"{marker}{branch:<28} {head:<12} {status:<8} {path}{flag_str}")
 
 
 def remove(name: str, force: bool) -> None:
