@@ -90,9 +90,56 @@ class CreateResult(BaseModel):
 def output_result(result: BaseModel, as_json: bool) -> None:
     if as_json:
         output_json(result)
-    else:
-        for key, value in result.model_dump().items():
+        return
+
+    if isinstance(result, PRStatusResult) and result.pr:
+        format_pr_status(result)
+        return
+
+    for key, value in result.model_dump().items():
+        if isinstance(value, list):
+            typer.echo(f"{key}:")
+            for item in value:
+                typer.echo(f"  - {item}")
+        elif isinstance(value, dict):
+            typer.echo(f"{key}:")
+            for k, v in value.items():
+                typer.echo(f"  {k}: {v}")
+        else:
             typer.echo(f"{key}: {value}")
+
+
+def format_pr_status(result: PRStatusResult) -> None:
+    """Pretty-print PR status with formatted reviews and checks."""
+    pr = result.pr
+    if not pr:
+        return
+
+    typer.echo(f"\n  PR #{pr.number}: {pr.title}")
+    typer.echo(f"  {pr.url}")
+    typer.echo(f"  Review: {pr.review_decision or 'pending'}")
+    typer.echo(f"  Mergeable: {pr.mergeable}")
+
+    if pr.reviews:
+        typer.echo(f"\n  Reviews ({len(pr.reviews)}):")
+        for r in pr.reviews:
+            typer.echo(f"    {r.author:<20} {r.state}")
+
+    if pr.checks:
+        typer.echo(f"\n  Checks ({len(pr.checks)}):")
+        passed = sum(
+            1
+            for c in pr.checks
+            if c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
+        )
+        typer.echo(f"    {passed}/{len(pr.checks)} passing")
+        for c in pr.checks:
+            marker = (
+                "✓"
+                if c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
+                else "✗"
+            )
+            typer.echo(f"    {marker} {c.name}: {c.conclusion or c.status}")
 
 
 def find_base_branch() -> str:
