@@ -263,13 +263,19 @@ def show(session_id: str, full: bool, tool_calls: bool, as_json: bool) -> None:
 def search(pattern: str, context: int, as_json: bool) -> None:
     """Search traces for a pattern."""
     if not traces_path().exists():
-        typer.echo("No trace directories found", err=True)
-        raise typer.Exit(1)
+        if as_json:
+            output_json({"matches": [], "total": 0})
+        else:
+            typer.echo("0 matches found")
+        return
 
     regex = re.compile(pattern, re.IGNORECASE)
     matches: list[SearchMatch] = []
 
-    for trace_file in traces_path().rglob("*.md"):
+    trace_files = list(traces_path().rglob("*.md")) + list(
+        traces_path().rglob("*.json")
+    )
+    for trace_file in trace_files:
         try:
             content = trace_file.read_text(encoding="utf-8")
             lines = content.split("\n")
