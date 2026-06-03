@@ -40,9 +40,15 @@ def collect_cmd(
         Path | None,
         typer.Option("--output", "-o", help="Output file path"),
     ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run", "-n", help="Show what would be collected without writing"
+        ),
+    ] = False,
 ) -> None:
     """Collect feedback metrics from sessions."""
-    state.collect(since, all_time, version, all_versions, output)
+    state.collect(since, all_time, version, all_versions, output, dry_run=dry_run)
 
 
 @app.command("tools")
