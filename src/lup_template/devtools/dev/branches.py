@@ -259,6 +259,9 @@ def get_pr_info(branch: str) -> dict[str, str]:
     return {}
 
 
+PROTECTED_BRANCHES = {"main", "master", "dev", "develop"}
+
+
 def classify_branch(
     branch: str,
     integration: str,
@@ -266,9 +269,12 @@ def classify_branch(
     *,
     has_remote: bool = True,
 ) -> BranchClassification:
-    """Classify a branch as DELETE/STALE/KEEP/CURRENT with reason."""
+    """Classify a branch as DELETE/STALE/KEEP/CURRENT/PROTECTED with reason."""
     if branch == current:
         return {"branch": branch, "status": "CURRENT", "reason": "current branch"}
+
+    if branch in PROTECTED_BRANCHES:
+        return {"branch": branch, "status": "KEEP", "reason": "protected branch"}
 
     merged_into_integration = is_ancestor(branch, integration)
     worktree = get_branch_worktree(branch)
@@ -336,6 +342,10 @@ def classify_branch(
 def detect_base_branch(branch: str | None = None) -> tuple[str, str, int]:
     """Detect the base branch for the given (or current) branch.
 
+    Prefers ancestor branches (the natural parent in a two-tier model)
+    over siblings. Among ancestors, picks the one with the fewest commits
+    ahead. Falls back to non-ancestor heuristics when no ancestor exists.
+
     Returns (base_branch, merge_base_sha, commits_ahead).
     """
     if branch is None:
@@ -351,10 +361,8 @@ def detect_base_branch(branch: str | None = None) -> tuple[str, str, int]:
         typer.echo("No other local branches to compare against.", err=True)
         raise typer.Exit(1)
 
-    best_branch = ""
-    best_distance = -1
-    best_merge_base = ""
-    candidates: list[tuple[str, int, str]] = []
+    ancestors: list[tuple[str, int, str]] = []
+    non_ancestors: list[tuple[str, int, str]] = []
 
     for candidate in local_branches:
         try:
@@ -363,23 +371,26 @@ def detect_base_branch(branch: str | None = None) -> tuple[str, str, int]:
                 str(git("rev-list", "--count", f"{merge_base}..{branch}")).strip()
             )
             if is_ancestor(candidate, branch):
-                continue
-            candidates.append((candidate, distance, merge_base))
-            if best_distance < 0 or distance < best_distance:
-                best_distance = distance
-                best_branch = candidate
-                best_merge_base = merge_base
+                ancestors.append((candidate, distance, merge_base))
+            else:
+                non_ancestors.append((candidate, distance, merge_base))
         except sh.ErrorReturnCode:
             continue
 
-    if not best_branch:
+    # Prefer ancestors — they are the natural base
+    candidates = ancestors if ancestors else non_ancestors
+
+    if not candidates:
         typer.echo("Could not determine base branch.", err=True)
         raise typer.Exit(1)
 
-    tied = [c for c in candidates if c[1] == best_distance and c[0] != best_branch]
+    candidates.sort(key=lambda c: c[1])
+    best_branch, best_distance, best_merge_base = candidates[0]
+
+    tied = [c for c in candidates[1:] if c[1] == best_distance]
     if tied:
         typer.echo("Ambiguous base branch. Candidates:", err=True)
-        for name, dist, _ in [(best_branch, best_distance, best_merge_base), *tied]:
+        for name, dist, _ in [candidates[0], *tied]:
             typer.echo(f"  {name} ({dist} commits ahead)", err=True)
         raise typer.Exit(1)
 
