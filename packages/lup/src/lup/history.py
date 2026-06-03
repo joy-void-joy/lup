@@ -390,6 +390,9 @@ def resolve_version(
         return exact, None
 
     if semver is None:
+        all_count = count_sessions_for_versions(available)
+        if all_count == 0:
+            return None, None
         return None, (
             f"v{effective} has only {exact_count} sessions "
             f"(need {min_datapoints}) — including all versions"
@@ -422,6 +425,9 @@ def resolve_version(
         )
 
     # Level 4: all versions
+    all_count = count_sessions_for_versions(available)
+    if all_count == 0:
+        return None, None
     return None, (
         f"v{major}.* has only {major_count} sessions "
         f"(need {min_datapoints}) — including all versions"
