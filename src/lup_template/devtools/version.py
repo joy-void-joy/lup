@@ -83,14 +83,27 @@ def show(
 
     commits_since = 0
     files_changed: list[str] = []
-    ref_since = latest_tag or "HEAD~50"
     if latest_tag:
+        ref_since = latest_tag
         try:
             commits_since = int(
                 str(git("rev-list", "--count", f"{latest_tag}..HEAD")).strip()
             )
         except sh.ErrorReturnCode:
             pass
+    else:
+        try:
+            commits_since = int(str(git("rev-list", "--count", "HEAD")).strip())
+        except sh.ErrorReturnCode:
+            pass
+        try:
+            ref_since = (
+                str(git("rev-list", "--max-parents=0", "HEAD", _ok_code=[0]))
+                .strip()
+                .splitlines()[0]
+            )
+        except sh.ErrorReturnCode:
+            ref_since = "HEAD"
 
     try:
         diff_output = str(
