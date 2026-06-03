@@ -178,10 +178,17 @@ class TrendEntry(TypedDict):
     avg_cost: float
 
 
+class PromptSection(TypedDict):
+    name: str
+    lines: int
+    characters: int
+
+
 class PromptHealthReport(TypedDict):
     file: str
-    lines: int
-    sections: int
+    rendered_characters: int
+    estimated_tokens: int
+    sections: list[PromptSection]
 
 
 # =============================================================================
@@ -439,6 +446,8 @@ def collect(
     version: str | None,
     all_versions: bool,
     output: Path | None,
+    *,
+    dry_run: bool = False,
 ) -> None:
     """Collect feedback metrics from sessions."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -464,10 +473,29 @@ def collect(
             if not s.get("timestamp")
             or datetime.fromisoformat(s["timestamp"]) >= since_dt
         ]
+
+    if not sessions:
+        typer.echo("No sessions found. Nothing to collect.")
+        typer.echo(
+            "Run agent sessions first: "
+            'uv run python -m lup_template.environment.cli run "task"'
+        )
+        return
+
     logger.info("Found %d sessions", len(sessions))
 
     results = match_outcomes(sessions)
     feedback = compute_metrics(results)
+
+    typer.echo("\n" + "=" * 60)
+    typer.echo("FEEDBACK COLLECTION SUMMARY")
+    typer.echo("=" * 60)
+    typer.echo(f"Total sessions: {feedback.total_sessions}")
+    typer.echo(f"Sessions with outcomes: {feedback.sessions_with_outcomes}")
+
+    if dry_run:
+        typer.echo("\n(dry run — no files written)")
+        return
 
     if output is None:
         feedback_path().mkdir(parents=True, exist_ok=True)
@@ -476,13 +504,6 @@ def collect(
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(feedback.model_dump_json(indent=2))
-    logger.info("Saved metrics to %s", output)
-
-    typer.echo("\n" + "=" * 60)
-    typer.echo("FEEDBACK COLLECTION SUMMARY")
-    typer.echo("=" * 60)
-    typer.echo(f"Total sessions: {feedback.total_sessions}")
-    typer.echo(f"Sessions with outcomes: {feedback.sessions_with_outcomes}")
     typer.echo(f"\nMetrics saved to: {output}")
 
 
@@ -723,31 +744,56 @@ def unmark(session_ids: list[str]) -> None:
 
 
 def prompt_health(as_json: bool) -> None:
-    """Analyze the agent prompt for size and patch accumulation."""
-    matches = glob("src/*/agent/prompts.py")
-    if not matches:
-        typer.echo("No prompts.py found matching src/*/agent/prompts.py")
-        raise typer.Exit(1)
+    """Analyze the agent prompt structure and size.
 
-    prompts_file = Path(matches[0])
-    content = prompts_file.read_text()
-    lines = content.split("\n")
+    Renders the prompt via get_system_prompt() and analyzes the actual
+    output — not the source file. Breaks down by named section.
+    """
+    from lup_template.agent.prompts import SECTIONS, get_system_prompt
 
-    section_count = sum(1 for line in lines if "## " in line or "### " in line)
+    prompts_file = (
+        Path(glob("src/*/agent/prompts.py")[0])
+        if glob("src/*/agent/prompts.py")
+        else None
+    )
+    rendered = get_system_prompt()
+    char_count = len(rendered)
+    estimated_tokens = char_count // 4
+
+    section_reports: list[PromptSection] = []
+    for section_text in SECTIONS:
+        first_line = (
+            section_text.strip().splitlines()[0] if section_text.strip() else "(empty)"
+        )
+        section_reports.append(
+            {
+                "name": first_line[:60],
+                "lines": len(section_text.splitlines()),
+                "characters": len(section_text),
+            }
+        )
+
+    report: PromptHealthReport = {
+        "file": str(prompts_file) if prompts_file else "unknown",
+        "rendered_characters": char_count,
+        "estimated_tokens": estimated_tokens,
+        "sections": section_reports,
+    }
 
     if as_json:
-        report: PromptHealthReport = {
-            "file": str(prompts_file),
-            "lines": len(lines),
-            "sections": section_count,
-        }
         output_json(report)
         return
 
     typer.echo("\n=== Prompt Health ===\n")
-    typer.echo(f"File: {prompts_file}")
-    typer.echo(f"Total lines: {len(lines)}")
-    typer.echo(f"Sections: ~{section_count}")
+    if prompts_file:
+        typer.echo(f"File: {prompts_file}")
+    typer.echo(f"Rendered: {char_count:,} chars (~{estimated_tokens:,} tokens)")
+    typer.echo(f"Sections: {len(section_reports)}")
+
+    typer.echo(f"\n{'Section':<50} {'Lines':>6} {'Chars':>8}")
+    typer.echo("-" * 68)
+    for s in section_reports:
+        typer.echo(f"{s['name']:<50} {s['lines']:>6} {s['characters']:>8}")
 
 
 def unanalyzed(version: str | None, all_versions: bool) -> None:
