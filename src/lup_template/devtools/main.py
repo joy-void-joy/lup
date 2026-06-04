@@ -24,6 +24,7 @@ from lup_template.devtools.agent import app as agent_app
 from lup_template.devtools.py import app as py_app
 from lup_template.devtools.dev import app as dev_app
 from lup_template.devtools.feedback import app as feedback_app
+from lup_template.devtools.setup import app as setup_app
 from lup_template.devtools.sync import app as sync_app
 from lup_template.devtools.trace import app as trace_app
 from lup_template.devtools.usage import app as usage_app
@@ -41,6 +42,7 @@ app.add_typer(dev_app, name="dev", help="Worktrees, branches, and pre-flight che
 app.add_typer(
     feedback_app, name="feedback", help="Feedback state, metrics, and commits"
 )
+app.add_typer(setup_app, name="setup", help="Interactive setup wizard")
 app.add_typer(sync_app, name="sync", help="Upstream sync tracking")
 app.add_typer(trace_app, name="trace", help="Trace display, search, and analysis")
 app.add_typer(usage_app, name="usage", help="Claude Code usage display")
