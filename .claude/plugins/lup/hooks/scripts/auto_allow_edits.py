@@ -42,6 +42,10 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"#\s*type:\s*ignore"),
         "Never use # type: ignore — fix the type error properly",
     ),
+    (
+        re.compile(r"#\s*pyright:\s*ignore"),
+        "Never use # pyright: ignore — fix the type error properly",
+    ),
     (re.compile(r"#\s*noqa\b"), "Never use # noqa — fix the lint issue properly"),
     (
         re.compile(r"\bGeneric\["),
