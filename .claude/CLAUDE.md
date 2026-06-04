@@ -109,6 +109,7 @@ src/
     │   ├── trace/              # Trace display, search, and analysis
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── dev/                # Worktrees, branches, and pre-flight checks
+    │   ├── setup.py            # Interactive setup wizard (customize integrations)
     │   └── version.py          # Version display, changelog, and bump
     └── environment/            # Domain scaffolding (user interaction, game logic)
         └── cli/
@@ -160,6 +161,11 @@ uv run python -m lup_template.environment.cli loop --no-commit "task1" "task2"
 # Commit uncommitted session results
 uv run lup-devtools feedback commit
 uv run lup-devtools feedback commit --dry-run
+
+# Interactive setup wizard (configure integrations, API keys, env vars)
+uv run lup-devtools setup             # Full walkthrough
+uv run lup-devtools setup status      # Show what's configured
+uv run lup-devtools setup slack       # Just one integration
 
 uv run python -m lup_template.environment.cli --help
 ```
@@ -426,7 +432,7 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
-Sub-apps: `agent`, `api`, `dev`, `feedback`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
+Sub-apps: `agent`, `api`, `dev`, `feedback`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
 
 ### Permission Hooks
 

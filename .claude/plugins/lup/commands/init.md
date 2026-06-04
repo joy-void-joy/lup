@@ -185,7 +185,24 @@ The agent discovers tools through their descriptions -- a terse description mean
 
 See `src/<project>/agent/tools/example.py` for the pattern.
 
-### 10. Update `feedback-loop.md`
+### 10. Setup Wizard (`src/<project>/devtools/setup.py`)
+
+Customize the interactive setup wizard for the domain's integrations:
+
+- Replace the template integrations (Slack, Google, Notion, Example API) with the domain's actual services
+- Update the `INTEGRATIONS` list — each entry is an `Integration(name, env_keys, setup_func, status_func)`
+- Add corresponding `@app.command()` subcommands for individual integration setup
+- Update env var names in `config.py` to match what the setup wizard writes to `.env.local`
+
+The framework (env helpers, status table, mask, clipboard, browser open, wizard flow) is reusable — only the integration functions and registry need customization.
+
+Ask the user:
+
+- What external services does the agent use? (APIs, databases, messaging platforms)
+- Which require OAuth flows vs simple API keys?
+- Are there any credentials files to manage? (JSON tokens, certificates)
+
+### 11. Update `feedback-loop.md`
 
 Customize the feedback loop command for the domain's specific:
 
@@ -221,4 +238,5 @@ Once the scaffolding is generated, guide the user to:
 - `src/<project>/agent/tools/reflect.py` -- Reflection tool and reviewer sub-agent
 - `src/<project>/agent/prompts.py` -- System prompt templates
 - `src/<project>/environment/cli/__main__.py` -- CLI with loop + auto-commit
+- `src/<project>/devtools/setup.py` -- Setup wizard (integrations, env vars)
 - `src/<project>/devtools/feedback/` -- Feedback collection
