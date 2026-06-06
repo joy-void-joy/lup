@@ -7,7 +7,7 @@ Examples::
 
     $ uv run lup-devtools --help
     $ uv run lup-devtools agent inspect --json
-    $ uv run lup-devtools py inspect requests
+    $ uv run lup-devtools py info requests
     $ uv run lup-devtools trace show <session_id>
     $ uv run lup-devtools feedback status
     $ uv run lup-devtools dev branches
