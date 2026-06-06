@@ -263,7 +263,7 @@ def setup_google() -> dict[str, str]:
             "  [bold]Step 2:[/] Enable the APIs you need (Gmail, Calendar, etc.)\n"
             "  [bold]Step 3:[/] Configure OAuth consent screen\n"
             "  [bold]Step 4:[/] Add yourself as a test user\n"
-            '  [bold]Step 5:[/] Create OAuth client ID (Desktop app)\n'
+            "  [bold]Step 5:[/] Create OAuth client ID (Desktop app)\n"
             "  [bold]Step 6:[/] Download the credentials JSON\n"
         )
         open_browser("https://console.cloud.google.com/apis/credentials")
@@ -365,9 +365,7 @@ def setup_api_key() -> dict[str, str]:
         if not typer.confirm("Reconfigure?", default=False):
             return {}
 
-    console.print(
-        "  Sign up and get an API key from the service provider.\n"
-    )
+    console.print("  Sign up and get an API key from the service provider.\n")
 
     key = typer.prompt(
         "EXAMPLE_API_KEY",
@@ -432,8 +430,12 @@ def timezone_status(env: dict[str, str]) -> tuple[bool, str]:
 # =====================================================================
 
 INTEGRATIONS: list[Integration] = [
-    Integration("Slack", ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"], setup_slack, slack_status),
-    Integration("Google (OAuth)", ["GMAIL_CREDENTIALS_PATH"], setup_google, google_status),
+    Integration(
+        "Slack", ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"], setup_slack, slack_status
+    ),
+    Integration(
+        "Google (OAuth)", ["GMAIL_CREDENTIALS_PATH"], setup_google, google_status
+    ),
     Integration("Notion", ["NOTION_TOKEN"], setup_notion),
     Integration("Example API", ["EXAMPLE_API_KEY"], setup_api_key),
     Integration("Timezone", ["AGENT_TIMEZONE"], setup_timezone, timezone_status),
