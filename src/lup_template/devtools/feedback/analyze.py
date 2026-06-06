@@ -11,9 +11,10 @@ Examples::
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, TypedDict
+from collections.abc import Sequence
+from typing import TypedDict
 
-from lup_template.devtools.feedback.state import load_sessions_for_versions
+from lup_template.devtools.feedback.state import SessionData, load_sessions_for_versions
 from lup_template.devtools.trace.traces import (
     CapabilityRequest,
     scan_for_capability_gaps,
@@ -43,7 +44,7 @@ class AnalysisReport(TypedDict):
     capability_gaps: list[CapabilityRequest]
 
 
-def gather_tool_health(sessions: list[dict[str, Any]]) -> list[ToolHealth]:
+def gather_tool_health(sessions: Sequence[SessionData]) -> list[ToolHealth]:
     """Compute per-tool call counts, error counts, and error rates."""
     tool_stats: dict[str, dict[str, int]] = defaultdict(
         lambda: {"calls": 0, "errors": 0}
@@ -72,7 +73,7 @@ def gather_tool_health(sessions: list[dict[str, Any]]) -> list[ToolHealth]:
     return result
 
 
-def gather_error_patterns(sessions: list[dict[str, Any]]) -> list[ErrorPattern]:
+def gather_error_patterns(sessions: Sequence[SessionData]) -> list[ErrorPattern]:
     """Find sessions with high error rates, grouped by error type."""
     result: list[ErrorPattern] = []
 
