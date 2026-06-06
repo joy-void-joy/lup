@@ -15,7 +15,7 @@ from collections import defaultdict
 from datetime import datetime
 from glob import glob
 from pathlib import Path
-from typing import Any, TypedDict  # claude: ignore
+from typing import TypedDict, cast
 
 import sh
 import typer
@@ -27,12 +27,50 @@ from lup_template.devtools.utils import git, output_json
 
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# SESSION JSON TYPES
+# =============================================================================
+
+
+class ToolData(TypedDict, total=False):
+    call_count: int
+    error_count: int
+    avg_duration_ms: float
+    total_cost_usd: float
+
+
+class ToolMetrics(TypedDict, total=False):
+    total_tool_calls: int
+    total_errors: int
+    total_cost_usd: float
+    by_tool: dict[str, ToolData]
+
+
+class TokenUsage(TypedDict, total=False):
+    input_tokens: int
+    output_tokens: int
+
+
+class SessionData(TypedDict, total=False):
+    """Raw session JSON loaded from disk."""
+
+    timestamp: str
+    outcome: object
+    tool_metrics: ToolMetrics
+    token_usage: TokenUsage
+    cost_usd: float
+    output: dict[str, str]
+    _session_id: str
+    _file: str
+
+
 # =============================================================================
 # CUSTOMIZE THESE MODELS FOR YOUR DOMAIN
 # =============================================================================
 
 
-class SessionResult(BaseModel):  # claude: ignore
+class SessionResult(BaseModel):
     """A session matched with its outcome/feedback.
 
     Customize this for your domain. Examples:
@@ -58,11 +96,11 @@ class SessionResult(BaseModel):  # claude: ignore
 
     session_id: str
     timestamp: str
-    outcome: Any | None = None
-    metrics: dict[str, Any] | None = None
+    outcome: object | None = None
+    metrics: ToolMetrics | None = None
 
 
-class FeedbackMetrics(BaseModel):  # claude: ignore
+class FeedbackMetrics(BaseModel):
     """Aggregated metrics from sessions.
 
     Customize this for your domain.
@@ -80,11 +118,11 @@ class FeedbackMetrics(BaseModel):  # claude: ignore
 # =============================================================================
 
 
-def load_sessions(  # claude: ignore
+def load_sessions(
     since: datetime | None = None, version: str | None = None
-) -> list[dict[str, Any]]:
+) -> list[SessionData]:
     """Load session data, optionally filtered by version."""
-    sessions: list[dict[str, Any]] = []
+    sessions: list[SessionData] = []
 
     for session_dir in iter_session_dirs(version=version):
         session_files = sorted(session_dir.glob("*.json"), reverse=True)
@@ -92,12 +130,13 @@ def load_sessions(  # claude: ignore
             continue
 
         try:
-            data: dict[str, Any] = json.loads(session_files[0].read_text())
+            data = cast(SessionData, json.loads(session_files[0].read_text()))
             data["_session_id"] = session_dir.name
             data["_file"] = str(session_files[0])
 
-            if since and data.get("timestamp"):
-                session_time = datetime.fromisoformat(data["timestamp"])
+            ts = data.get("timestamp")
+            if since and ts:
+                session_time = datetime.fromisoformat(ts)
                 if session_time < since:
                     continue
 
@@ -108,7 +147,7 @@ def load_sessions(  # claude: ignore
     return sessions
 
 
-def load_outcomes() -> dict[str, Any]:  # claude: ignore
+def load_outcomes() -> dict[str, object]:
     """Load outcome data for sessions.
 
     Customize this to load outcomes for your domain.
@@ -116,8 +155,8 @@ def load_outcomes() -> dict[str, Any]:  # claude: ignore
     return {}
 
 
-def match_outcomes(  # claude: ignore
-    sessions: list[dict[str, Any]],
+def match_outcomes(
+    sessions: list[SessionData],
 ) -> list[SessionResult]:
     """Match sessions to their outcomes/feedback."""
     outcomes = load_outcomes()
@@ -168,7 +207,7 @@ class ToolUsageEntry(TypedDict):
 class ErrorSessionEntry(TypedDict):
     session_id: str
     errors: int
-    by_tool: dict[str, object]  # claude: ignore
+    by_tool: dict[str, ToolData]
 
 
 class TrendEntry(TypedDict):
@@ -191,18 +230,23 @@ class PromptHealthReport(TypedDict):
     sections: list[PromptSection]
 
 
+class FeedbackFileData(TypedDict, total=False):
+    total_sessions: int
+    sessions_with_outcomes: int
+
+
 # =============================================================================
 # SHARED HELPERS
 # =============================================================================
 
 
-def load_sessions_for_versions(  # claude: ignore
+def load_sessions_for_versions(
     versions: list[str] | None,
-) -> list[dict[str, Any]]:
+) -> list[SessionData]:
     """Load sessions for a resolved version list (None = all)."""
     if versions is None:
         return load_sessions()
-    results: list[dict[str, Any]] = []
+    results: list[SessionData] = []
     for v in versions:
         results.extend(load_sessions(version=v))
     return results
@@ -287,10 +331,13 @@ def get_session_summary(session_id: str) -> str:
 
     latest = sorted(all_json)[-1]
     try:
-        data = json.loads(latest.read_text(encoding="utf-8"))  # claude: ignore
-        output = data.get("output", {})
-        if isinstance(output, dict):
-            return output.get("summary", f"session {session_id}")[:50]
+        raw = json.loads(latest.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            output = raw.get("output", {})
+            if isinstance(output, dict):
+                summary = output.get("summary")
+                if isinstance(summary, str):
+                    return summary[:50]
         return f"session {session_id}"
     except (json.JSONDecodeError, OSError):
         return f"session {session_id}"
@@ -343,24 +390,15 @@ def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
 # =============================================================================
 
 
-def status(  # noqa: C901
-    version: str | None,
-    all_versions: bool,
-) -> None:
-    """Show feedback status: version, data, analysis state, and aggregate stats."""
-    effective, ver_warning = resolve_version(version, all_versions)
-    if ver_warning:
-        typer.echo(ver_warning)
-
+def print_version_info(effective: list[str] | None) -> None:
     typer.echo("\n=== Agent Version ===\n")
     typer.echo(f"Current: {AGENT_VERSION}")
     if effective:
         typer.echo(f"Showing: {', '.join(effective)}")
 
-    typer.echo("\n=== Data Availability ===\n")
 
-    all_session_ids = collect_session_ids(effective)
-    session_count = len(all_session_ids)
+def print_data_availability(effective: list[str] | None, session_count: int) -> None:
+    typer.echo("\n=== Data Availability ===\n")
 
     if effective:
         typer.echo(f"Sessions: {session_count} (versions: {effective})")
@@ -382,59 +420,82 @@ def status(  # noqa: C901
     else:
         typer.echo("Previous feedback collections: None")
 
+
+def print_aggregate_stats(sessions: list[SessionData]) -> None:
+    total = len(sessions)
+    with_metrics = sum(1 for s in sessions if s.get("tool_metrics"))
+    with_tokens = sum(1 for s in sessions if s.get("token_usage"))
+    with_outcome = sum(1 for s in sessions if s.get("outcome") is not None)
+
+    typer.echo(f"\n=== Aggregate Stats ({total} sessions) ===\n")
+    typer.echo(f"With metrics: {with_metrics} ({100 * with_metrics / total:.0f}%)")
+    typer.echo(f"With tokens:  {with_tokens} ({100 * with_tokens / total:.0f}%)")
+    typer.echo(f"With outcome: {with_outcome} ({100 * with_outcome / total:.0f}%)")
+
+    total_cost = 0.0
+    for s in sessions:
+        cost = s.get("cost_usd") or 0
+        if not cost:
+            metrics = s.get("tool_metrics")
+            if metrics:
+                cost = metrics.get("total_cost_usd", 0) or 0
+        if cost:
+            total_cost += cost
+
+    if total_cost > 0:
+        typer.echo(f"\nTotal cost: ${total_cost:.2f}")
+        typer.echo(f"Avg cost/session: ${total_cost / total:.4f}")
+
+    total_input = 0
+    total_output = 0
+    for s in sessions:
+        usage = s.get("token_usage")
+        if usage:
+            total_input += usage.get("input_tokens", 0) or 0
+            total_output += usage.get("output_tokens", 0) or 0
+
+    if total_input or total_output:
+        typer.echo("\nTokens:")
+        typer.echo(f"  Input:  {total_input:,}")
+        typer.echo(f"  Output: {total_output:,}")
+        typer.echo(f"  Total:  {total_input + total_output:,}")
+
+
+def status(
+    version: str | None,
+    all_versions: bool,
+) -> None:
+    """Show feedback status: version, data, analysis state, and aggregate stats."""
+    effective, ver_warning = resolve_version(version, all_versions)
+    if ver_warning:
+        typer.echo(ver_warning)
+
+    print_version_info(effective)
+
+    all_session_ids = collect_session_ids(effective)
+    session_count = len(all_session_ids)
+
+    print_data_availability(effective, session_count)
+
     analyzed = load_analyzed()
-    unanalyzed = sorted(all_session_ids - analyzed)
+    unanalyzed_ids = sorted(all_session_ids - analyzed)
 
     typer.echo("\n=== Analysis State ===\n")
     typer.echo(f"Total sessions: {session_count}")
     typer.echo(f"Analyzed: {len(analyzed & all_session_ids)}")
-    typer.echo(f"Unanalyzed: {len(unanalyzed)}")
+    typer.echo(f"Unanalyzed: {len(unanalyzed_ids)}")
 
     sessions = load_sessions_for_versions(effective)
 
     if sessions:
-        total = len(sessions)
-        with_metrics = sum(1 for s in sessions if s.get("tool_metrics"))
-        with_tokens = sum(1 for s in sessions if s.get("token_usage"))
-        with_outcome = sum(1 for s in sessions if s.get("outcome") is not None)
+        print_aggregate_stats(sessions)
 
-        typer.echo(f"\n=== Aggregate Stats ({total} sessions) ===\n")
-        typer.echo(f"With metrics: {with_metrics} ({100 * with_metrics / total:.0f}%)")
-        typer.echo(f"With tokens:  {with_tokens} ({100 * with_tokens / total:.0f}%)")
-        typer.echo(f"With outcome: {with_outcome} ({100 * with_outcome / total:.0f}%)")
-
-        total_cost = 0.0
-        for s in sessions:
-            cost = s.get("cost_usd") or s.get("tool_metrics", {}).get(
-                "total_cost_usd", 0
-            )
-            if cost:
-                total_cost += cost
-
-        if total_cost > 0:
-            typer.echo(f"\nTotal cost: ${total_cost:.2f}")
-            typer.echo(f"Avg cost/session: ${total_cost / total:.4f}")
-
-        total_input = 0
-        total_output = 0
-        for s in sessions:
-            usage = s.get("token_usage", {})
-            if usage:
-                total_input += usage.get("input_tokens", 0) or 0
-                total_output += usage.get("output_tokens", 0) or 0
-
-        if total_input or total_output:
-            typer.echo("\nTokens:")
-            typer.echo(f"  Input:  {total_input:,}")
-            typer.echo(f"  Output: {total_output:,}")
-            typer.echo(f"  Total:  {total_input + total_output:,}")
-
-    if unanalyzed:
+    if unanalyzed_ids:
         typer.echo("\n=== Unanalyzed Sessions ===\n")
-        for sid in unanalyzed[:20]:
+        for sid in unanalyzed_ids[:20]:
             typer.echo(f"  {sid}")
-        if len(unanalyzed) > 20:
-            typer.echo(f"  ... and {len(unanalyzed) - 20} more")
+        if len(unanalyzed_ids) > 20:
+            typer.echo(f"  ... and {len(unanalyzed_ids) - 20} more")
         typer.echo(
             "\nTo list all unanalyzed IDs: uv run lup-devtools feedback unanalyzed"
         )
@@ -470,8 +531,7 @@ def collect(
         sessions = [
             s
             for s in sessions
-            if not s.get("timestamp")
-            or datetime.fromisoformat(s["timestamp"]) >= since_dt
+            if not (ts := s.get("timestamp")) or datetime.fromisoformat(ts) >= since_dt
         ]
 
     if not sessions:
@@ -507,9 +567,7 @@ def collect(
     typer.echo(f"\nMetrics saved to: {output}")
 
 
-def tools(
-    version: str | None, all_versions: bool, as_json: bool
-) -> None:  # claude: ignore
+def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
     """Show tool usage aggregates."""
     effective, warning = resolve_version(version, all_versions)
     if warning:
@@ -527,12 +585,14 @@ def tools(
     )
 
     for s in sessions:
-        metrics = s.get("tool_metrics", {})
+        metrics = s.get("tool_metrics")
+        if not metrics:
+            continue
         by_tool = metrics.get("by_tool", {})
         for tool_name, data in by_tool.items():
             tool_stats[tool_name]["calls"] += data.get("call_count", 0)
             tool_stats[tool_name]["errors"] += data.get("error_count", 0)
-            avg_ms = data.get("avg_duration_ms", 0)
+            avg_ms = data.get("avg_duration_ms", 0) or 0
             count = data.get("call_count", 0)
             tool_stats[tool_name]["total_ms"] += avg_ms * count
 
@@ -575,7 +635,7 @@ def tools(
         )
 
 
-def errors(  # claude: ignore
+def errors(
     limit: int,
     version: str | None,
     all_versions: bool,
@@ -595,7 +655,9 @@ def errors(  # claude: ignore
 
     with_errors: list[ErrorSessionEntry] = []
     for s in sessions:
-        metrics = s.get("tool_metrics", {})
+        metrics = s.get("tool_metrics")
+        if not metrics:
+            continue
         total_errors = metrics.get("total_errors", 0)
         if total_errors and total_errors > 0:
             with_errors.append(
@@ -623,13 +685,10 @@ def errors(  # claude: ignore
 
     for item in with_errors[:limit]:
         typer.echo(f"Session {item['session_id']}: {item['errors']} errors")
-        by_tool = item["by_tool"]
-        if isinstance(by_tool, dict):
-            for tool_name, tool_data in by_tool.items():
-                if isinstance(tool_data, dict):
-                    errs = tool_data.get("error_count", 0)
-                    if errs and int(errs) > 0:
-                        typer.echo(f"  - {tool_name}: {errs}")
+        for tool_name, tool_data in item["by_tool"].items():
+            errs = tool_data.get("error_count", 0)
+            if errs and int(errs) > 0:
+                typer.echo(f"  - {tool_name}: {errs}")
 
 
 def trends(window: int, version: str | None, all_versions: bool, as_json: bool) -> None:
@@ -646,7 +705,7 @@ def trends(window: int, version: str | None, all_versions: bool, as_json: bool) 
         return
 
     sessions_with_ts = [s for s in sessions if s.get("timestamp")]
-    sessions_with_ts.sort(key=lambda x: x["timestamp"])
+    sessions_with_ts.sort(key=lambda s: s.get("timestamp", ""))
 
     if len(sessions_with_ts) < window:
         if as_json:
@@ -660,16 +719,15 @@ def trends(window: int, version: str | None, all_versions: bool, as_json: bool) 
     for i in range(window - 1, len(sessions_with_ts)):
         window_sessions = sessions_with_ts[i - window + 1 : i + 1]
 
-        total_calls = sum(
-            s.get("tool_metrics", {}).get("total_tool_calls", 0)
-            for s in window_sessions
-        )
+        total_calls = 0
+        total_errs = 0
+        for ws in window_sessions:
+            m = ws.get("tool_metrics")
+            if m:
+                total_calls += m.get("total_tool_calls", 0) or 0
+                total_errs += m.get("total_errors", 0) or 0
         avg_calls = total_calls / window
-
-        total_errors = sum(
-            s.get("tool_metrics", {}).get("total_errors", 0) for s in window_sessions
-        )
-        error_rate = total_errors / max(1, total_calls)
+        error_rate = total_errs / max(1, total_calls)
 
         total_cost = sum(s.get("cost_usd", 0) or 0 for s in window_sessions)
         avg_cost = total_cost / window
@@ -711,10 +769,13 @@ def history(limit: int) -> None:
 
     for f in metrics_files[:limit]:
         try:
-            data = json.loads(f.read_text())  # claude: ignore
-            total = data.get("total_sessions", 0)
-            with_outcomes = data.get("sessions_with_outcomes", 0)
-            typer.echo(f"{f.name}: {total} sessions, {with_outcomes} with outcomes")
+            raw = json.loads(f.read_text())
+            if isinstance(raw, dict):
+                total = raw.get("total_sessions", 0)
+                with_outcomes = raw.get("sessions_with_outcomes", 0)
+                typer.echo(f"{f.name}: {total} sessions, {with_outcomes} with outcomes")
+            else:
+                typer.echo(f"{f.name}: (unexpected format)")
         except (json.JSONDecodeError, OSError):
             typer.echo(f"{f.name}: (error reading)")
 
