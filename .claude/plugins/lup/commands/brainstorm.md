@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Task, WebFetch, WebSearch, AskUserQuestion
+allowed-tools: Bash(find:*, ls:*), Read, Grep, Glob, Write, Edit, Task, WebFetch, WebSearch, AskUserQuestion
 description: Pre-init design exploration — brainstorm architecture, MCP tools, and agent design
 ---
 
@@ -27,7 +27,7 @@ The lup template supports these architecture patterns — use this knowledge to 
 
 ### Agent Patterns
 - **One-shot agent**: Single task → structured output. Simplest. Good for: analysis, generation, classification.
-- **Persistent agent**: Long-running, sleep/wake cycle. Good for: monitoring, games, conversations, real-time systems. Uses `lib/realtime.py` Scheduler.
+- **Persistent agent**: Long-running, sleep/wake cycle. Good for: monitoring, games, conversations, real-time systems. Uses `lup.realtime` Scheduler.
 - **Multi-agent**: Main agent delegates to specialized subagents. Good for: complex workflows with distinct phases.
 
 ### Key Capabilities
@@ -41,14 +41,14 @@ The lup template supports these architecture patterns — use this knowledge to 
 ### Template Files to Reference
 When the conversation gets specific enough, read these to show the user what they're customizing:
 
-- `src/lup/agent/tools/example.py` — Example MCP tools pattern
-- `src/lup/agent/tools/realtime.py` — Persistent agent tools (sleep, context, reply)
-- `src/lup/agent/tools/reflect.py` — Reflection tool pattern
-- `src/lup/agent/models.py` — Output model structure
-- `src/lup/agent/subagents.py` — Subagent definitions
-- `src/lup/agent/core.py` — Main orchestration
-- `src/lup/agent/tool_policy.py` — Tool availability logic
-- `src/lup/agent/prompts.py` — System prompt templates
+- `src/lup_template/agent/tools/example.py` — Example MCP tools pattern
+- `src/lup_template/agent/tools/realtime.py` — Persistent agent tools (sleep, context, reply)
+- `src/lup_template/agent/tools/reflect.py` — Reflection tool pattern
+- `src/lup_template/agent/models.py` — Output model structure
+- `src/lup_template/agent/subagents.py` — Subagent definitions
+- `src/lup_template/agent/core.py` — Main orchestration
+- `src/lup_template/agent/tool_policy.py` — Tool availability logic
+- `src/lup_template/agent/prompts.py` — System prompt templates
 
 ### SDK Documentation
 When you need to verify SDK capabilities or answer technical questions:

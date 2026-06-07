@@ -50,7 +50,7 @@ Trace files are typically in `notes/traces/<session_id>/`.
 
 2. **Verify version context**: The caller should provide the agent version being analyzed. Before reading traces, retrieve the prompt that was active for that version:
    ```bash
-   git show v<VERSION>:src/lup/agent/prompts.py
+   git show v<VERSION>:src/lup_template/agent/prompts.py
    ```
    Also check each trace's `agent_version` field (in the session output JSON) to confirm it matches the version being analyzed. Flag any mismatches — a trace from v0.2.0 analyzed as if it were v1.0.0 produces invalid conclusions.
 
@@ -71,7 +71,7 @@ Return your findings in this exact structure:
 
 ### Version Context
 - **Analyzing version**: [X.Y.Z]
-- **Prompt retrieved from**: `git show vX.Y.Z:src/lup/agent/prompts.py`
+- **Prompt retrieved from**: `git show vX.Y.Z:src/lup_template/agent/prompts.py`
 - **Version mismatches**: [list any traces whose agent_version differs from the target, or "none"]
 
 ### Tool Failure Patterns

@@ -1,5 +1,5 @@
 [project]
-name = "lup"
+name = "lup-template"
 version = "0.1.0"
 description = "Self-improving agent template with feedback loop, built with the Claude Agent SDK"
 readme = "README.md"
@@ -25,23 +25,18 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "claude-agent-sdk>=0.1.26",
-    "docker>=7.1.0",
-    "httpx>=0.28.1",
-    "openai-codex-app-server-sdk",
+    "lup[docker]",
+    "openai-codex",
     "plotext>=5.3.2",
     "prompt-toolkit>=3.0.52",
-    "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
-    "rich>=14.3.1",
     "sh>=2.2.2",
-    "tenacity>=9.0.0",
     "typer>=0.21.1",
 ]
 
 [project.scripts]
-lup = "lup.environment.cli.__main__:app"
-lup-devtools = "lup.devtools.main:app"
+lup = "lup_template.environment.cli.__main__:app"
+lup-devtools = "lup_template.devtools.main:app"
 
 [project.urls]
 Homepage = "https://github.com/joy-void-joy/lup"
@@ -59,6 +54,19 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.lup]
+agent_version = "0.1.0"
+
+[tool.uv]
+exclude-newer = "3 days"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+lup = { workspace = true }
+openai-codex = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python" }
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
@@ -66,14 +74,11 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "packages/lup/src"]
 markers = ["integration: tests requiring external services (Docker, APIs)"]
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "packages/lup/src", "tests"]
 pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"
-
-[tool.uv.sources]
-openai-codex-app-server-sdk = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python" }

@@ -21,7 +21,7 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 **Why not an event queue?** The sleep/wake pattern lets the agent stay centered — it can debounce event bursts, schedule actions, set reminders, and park thoughts for later, all on its own terms.
 
-**Library support:** `src/lup/lib/realtime.py` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`). See example tools in `src/lup/agent/tools/realtime.py`.
+**Library support:** `packages/lup/src/lup/realtime.py` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`). See example tools in `src/lup_template/agent/tools/realtime.py`.
 
 ---
 
@@ -30,10 +30,10 @@ For agents that exist over time — maintaining conversations, monitoring system
 Agents produce better output when forced to self-assess before committing. Three components:
 
 1. **Reflection tool** (`agent/tools/reflect.py`): Domain-customizable self-assessment — confidence, uncertainties, tool audit, process reflection. Optionally runs a reviewer sub-agent.
-2. **Reflection gate** (`lib/reflect.py`): `ReflectionGate` flag tracker + `create_reflection_gate()` hook factory. Denies a target tool until reflection occurs.
+2. **Reflection gate** (`lup.reflect`): `ReflectionGate` flag tracker + `create_reflection_gate()` hook factory. Denies a target tool until reflection occurs.
 3. **Wiring**: The gate blocks `StructuredOutput` (one-shot agents) or `sleep` (persistent agents) until reflection occurs.
 
-**Customizing:** The gate in `lib/reflect.py` is domain-neutral and parametric. The reflection tool and `ReflectInput` in `agent/tools/reflect.py` are domain-specific — add fields for your domain. The reviewer prompt should target your domain's common failure modes.
+**Customizing:** The gate in `lup.reflect` is domain-neutral and parametric. The reflection tool and `ReflectInput` in `agent/tools/reflect.py` are domain-specific — add fields for your domain. The reviewer prompt should target your domain's common failure modes.
 
 **Skip reviewer:** Set `skip_reviewer=True` for speed-sensitive or trivial tasks. The reviewer adds latency but catches calibration errors and reasoning gaps.
 
@@ -68,7 +68,7 @@ async def review(params: ReviewInput) -> ReviewOutput:
     return ReviewOutput(critique=collector.text or "", score=compute_score(collector))
 ```
 
-**Library support:** `query()` in `lib/client.py` handles the full pipeline (build client → query → collect). Session persistence is automatically disabled. Use `collector.text` for text extraction, `collector.output(T)` for structured output, or pass `output_type=T` to `query()` to get `T | None` directly.
+**Library support:** `query()` in `lup.client` handles the full pipeline (build client → query → collect). Session persistence is automatically disabled. Use `collector.text` for text extraction, `collector.output(T)` for structured output, or pass `output_type=T` to `query()` to get `T | None` directly.
 
 **When to use each:** The axis is **context separation**. **Subagents** extend the main agent's thinking — same session, shared context, like a specialized lobe that makes reasoning more efficient. **Nested agents** are for truly separable work — the two contexts shouldn't pollute each other. The main agent doesn't need the nested agent's reasoning chain, just its conclusion. The tool handler acts as a context boundary.
 
@@ -95,7 +95,7 @@ For persistent agents that need parallel processing, a **background agent** runs
 
 **Lifecycle:** `start()` spawns an asyncio task. `wake()` signals new data. The message generator debounces rapid wakes and calls `build_message()` to produce the next turn. `stop()` cancels the task.
 
-**Library support:** `src/lup/lib/background.py` provides the `BackgroundAgent` class. See observer example in `src/lup/agent/tools/realtime.py`.
+**Library support:** `packages/lup/src/lup/background.py` provides the `BackgroundAgent` class. See observer example in `src/lup_template/agent/tools/realtime.py`.
 
 **Customizing:** The `build_message` callback is the main extension point — it reads shared state, advances its own read pointer, and returns the next user turn content (or `None` to skip). The observer example in `agent/tools/realtime.py` shows the full wiring.
 
@@ -121,4 +121,4 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 2. **Null-filling** — Multi-source fallback pipelines that recover missing fields from alternative endpoints or sibling records (e.g., primary API withholds fields → fallback endpoint fills the gaps).
 3. **Extraction** — Nested agent calls that distill large text blocks into focused answers (see [Nested Agent Pattern](#nested-agent-pattern)).
 
-**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API client wrappers. Extraction uses `query()` from `lib/client.py` (see [Nested Agent Pattern](#nested-agent-pattern)).
+**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API client wrappers. Extraction uses `query()` from `lup.client` (see [Nested Agent Pattern](#nested-agent-pattern)).
