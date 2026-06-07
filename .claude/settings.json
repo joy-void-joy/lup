@@ -13,21 +13,23 @@
       "Read(./**/*.local*)"
     ],
     "ask": [
-      "Edit(./**/pyproject.toml)"
+      "Edit(./**/pyproject.toml)",
+      "Bash(uv sync*)",
+      "Bash(uv add*)"
     ]
   },
   "enabledPlugins": {
-    "lup@local": true,
     "github@claude-plugins-official": true,
     "pyright-lsp@claude-plugins-official": true,
     "agent-sdk-dev@claude-plugins-official": true,
-    "claude-md-management@claude-plugins-official": true
+    "claude-md-management@claude-plugins-official": true,
+    "lup@lup": true
   },
   "extraKnownMarketplaces": {
-    "local": {
+    "lup": {
       "source": {
         "source": "directory",
-        "path": "."
+        "path": "./.claude/plugins"
       }
     }
   },

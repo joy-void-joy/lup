@@ -34,22 +34,19 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 
 ### Reusable Library Code
 
-- `src/lup/lib/` — utilities (trace, hooks, metrics, scoring, cache, retry, notes, mcp, responses, history)
-- `src/lup/version.py` — version tracking pattern
+- `packages/lup/src/lup/` — utilities (trace, hooks, metrics, mcp, retry, notes, history, paths)
+- `lup.paths.AGENT_VERSION` — version tracking pattern
 
 ### DevTools CLI
 
-The `lup-devtools` CLI (`src/lup/devtools/`) gives Claude Code structured commands for development tasks that would otherwise require ad-hoc bash one-liners. Without it, Claude resorts to `python -c "..."` snippets or manual shell pipelines for trace analysis, feedback collection, and session management — which are fragile and unrepeatable. The devtools encode these workflows as proper CLI commands with argument parsing, output formatting, and error handling.
+The `lup-devtools` CLI (`src/lup_template/devtools/`) gives Claude Code structured commands for development tasks that would otherwise require ad-hoc bash one-liners. Without it, Claude resorts to `python -c "..."` snippets or manual shell pipelines for trace analysis, feedback collection, and session management — which are fragile and unrepeatable. The devtools encode these workflows as proper CLI commands with argument parsing, output formatting, and error handling.
 
-- `src/lup/devtools/main.py` — root typer app composing sub-apps (entry point: `lup-devtools`)
-  - `api.py` — API inspection, module info
-  - `dev.py` — worktree management
-  - `git.py` — session commit operations
+- `src/lup_template/devtools/main.py` — root typer app composing sub-apps (entry point: `lup-devtools`)
+  - `trace/` — trace display, search, and analysis
+  - `feedback/` — feedback state, metrics, and commits
+  - `dev/` — worktree management, branch analysis, pre-flight checks
+  - `version.py` — version, changelog, and bump operations
   - `sync.py` — upstream sync tracking
-  - `usage.py` — Claude Code usage display
-  - `feedback.py` — feedback collection
-  - `trace.py` — trace analysis
-  - `metrics.py` — aggregate metrics
 
 ### Configuration Patterns
 
@@ -113,7 +110,7 @@ If the target repo uses (or will use) the Claude Agent SDK, the **self-improveme
 - **Agent scaffolding**: core.py pattern (orchestration), subagents.py, models.py (structured output), prompts.py, tool_policy.py, config.py (pydantic-settings)
 - **Feedback loop**: feedback collection, trace analysis, metrics aggregation, scoring CSV
 - **Session management**: CLI with `run` + `loop` commands, auto-commit, session storage
-- **DevTools**: The full `lup-devtools` CLI (trace, feedback, metrics, git commit-results)
+- **DevTools**: The full `lup-devtools` CLI (trace, feedback, dev, version, usage)
 - **Version tracking**: version.py pattern for tracking agent behavior changes
 - **Commands**: `init`, `feedback-loop`, `bump`, `update` — the self-improvement workflow
 - **TEMPLATE_CLAUDE.md**: Section-level merge into the target's existing CLAUDE.md (add missing sections, leave existing ones)
@@ -209,8 +206,8 @@ For each item being installed:
 
 | Changes (adapt to target package) | Stays as `lup` (framework identity) |
 |---|---|
-| `from lup.*` → `from <target>.*` imports | `lup-devtools` CLI entry point name |
-| `src/lup/` → `src/<target>/` paths | `@lup_tool(...)`, `LupMcpTool` |
+| `from lup_template.*` → `from <target>.*` imports | `lup-devtools` CLI entry point name |
+| `src/lup_template/` → `src/<target>/` paths | `@lup_tool(...)`, `LupMcpTool` |
 | `pyproject.toml` package name | `.claude/plugins/lup/`, `lup@local` |
 | Main CLI entry point name | `.lup/` state directory |
 | Logger module paths | `lup-tools`, `lup-sandbox-*`, `lup-mcp-*` |

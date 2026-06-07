@@ -14,7 +14,7 @@ Two levels of reflection: is the agent tracking enough data (meta), and is the f
 Is the agent emitting enough data for analysis? Check coverage of: traces, reflection outputs, tool metrics, session results.
 
 ```bash
-uv run lup-devtools feedback check
+uv run lup-devtools feedback status
 uv run lup-devtools trace list
 ```
 
@@ -33,7 +33,7 @@ Common gaps:
 
 ### 4. Prompt health
 
-Read the full system prompt (`src/lup/agent/prompts.py`). Is it accumulating patches? Count conditional exceptions added since the last rewrite. If >3, flag for structural rewrite.
+Read the full system prompt (`src/lup_template/agent/prompts.py`). Is it accumulating patches? Count conditional exceptions added since the last rewrite. If >3, flag for structural rewrite.
 
 ### 5. Subcommand assessment
 
@@ -41,11 +41,4 @@ Were the `/fb-*` subcommands helpful? Anything confusing, missing, or redundant?
 
 ### 6. Devtools assessment
 
-Any repetitive analysis that should be automated as a devtools command? Add commands to `src/lup/devtools/`.
-
-## Periodic (every 3rd session)
-
-7. Reread all subcommand files (`/fb-status`, `/fb-investigate`, `/fb-analyze`, `/fb-reflect`, `/fb-implement`)
-8. Prompt health audit — read the full `src/lup/agent/prompts.py`
-9. Clean up `notes/` — archive old files, ensure consistent naming
-10. Sync learnings to CLAUDE.md
+Any repetitive analysis that should be automated as a devtools command? Add commands to `src/lup_template/devtools/`.
