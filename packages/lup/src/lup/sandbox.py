@@ -44,7 +44,12 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, Literal, Self, TypedDict
 
-import docker
+try:
+    import docker
+except ImportError as exc:
+    raise ImportError(
+        "lup.sandbox requires the 'docker' extra. Install with: uv sync --extra docker"
+    ) from exc
 from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container, ExecResult
 from docker.utils.socket import SocketError, next_frame_header, read_exactly
