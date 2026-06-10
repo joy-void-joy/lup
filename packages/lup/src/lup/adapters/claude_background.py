@@ -67,16 +67,16 @@ class ClaudeBackgroundAgent(BaseBackgroundAgent):
             "message": {"role": "user", "content": self.start_message},
         }
 
-        while self._running:
-            await self._wake.wait()
-            self._wake.clear()
+        while self.running:
+            await self.wake_event.wait()
+            self.wake_event.clear()
 
             while True:
                 try:
                     await asyncio.wait_for(
-                        self._wake.wait(), timeout=self.debounce_seconds
+                        self.wake_event.wait(), timeout=self.debounce_seconds
                     )
-                    self._wake.clear()
+                    self.wake_event.clear()
                 except TimeoutError:
                     break
 

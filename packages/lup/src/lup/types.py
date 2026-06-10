@@ -148,9 +148,8 @@ type LupMessage = (
 class LupResponse(BaseModel):
     """Collected results from a completed agent run.
 
-    Replaces ``ResponseCollector`` as the public return type from adapters.
-    Provides the same accessors (``.text``, ``.output(T)``) that consumer
-    code depends on.
+    The public return type from adapters: ``.text`` for concatenated
+    assistant text, ``.output(Model)`` for validated structured output.
     """
 
     blocks: list[LupContentBlock] = Field(default_factory=list)
@@ -170,6 +169,57 @@ class LupResponse(BaseModel):
         if self.result is not None and self.result.structured_output:
             return output_type.model_validate(self.result.structured_output)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Streaming events
+# ---------------------------------------------------------------------------
+
+
+class LupTextEvent(BaseModel):
+    """Streamed text delta."""
+
+    type: Literal["text"] = "text"
+    text: str
+
+
+class LupThinkingEvent(BaseModel):
+    """Streamed thinking content."""
+
+    type: Literal["thinking"] = "thinking"
+    thinking: str
+
+
+class LupToolUseEvent(BaseModel):
+    """Streamed tool invocation start."""
+
+    type: Literal["tool_use"] = "tool_use"
+    id: str
+    name: str
+
+
+class LupToolResultEvent(BaseModel):
+    """Streamed tool result."""
+
+    type: Literal["tool_result"] = "tool_result"
+    tool_use_id: str
+    content: str
+
+
+class LupDoneEvent(BaseModel):
+    """Stream complete; carries all collected content blocks."""
+
+    type: Literal["done"] = "done"
+    blocks: list[LupContentBlock] = Field(default_factory=list)
+
+
+type LupEvent = (
+    LupTextEvent
+    | LupThinkingEvent
+    | LupToolUseEvent
+    | LupToolResultEvent
+    | LupDoneEvent
+)
 
 
 # ---------------------------------------------------------------------------

@@ -45,18 +45,14 @@ from claude_agent_sdk.types import (
 from lup.adapters.common import (
     AgentAdapter,
     Conversation,
-    LupDoneEvent,
-    LupEvent,
-    LupTextEvent,
-    LupThinkingEvent,
-    LupToolResultEvent,
-    LupToolUseEvent,
 )
 from lup.mcp import LupMcpServerConfig, LupMcpTool
 from lup.trace import TraceLogger, print_message
 from lup.types import (
     LupAssistantMessage,
     LupContentBlock,
+    LupDoneEvent,
+    LupEvent,
     LupHookInput,
     LupHookMatcher,
     LupHookOutput,
@@ -66,9 +62,13 @@ from lup.types import (
     LupResultMessage,
     LupSystemMessage,
     LupTextBlock,
+    LupTextEvent,
     LupThinkingBlock,
+    LupThinkingEvent,
     LupToolResultBlock,
+    LupToolResultEvent,
     LupToolUseBlock,
+    LupToolUseEvent,
     LupUserMessage,
     SubagentSpec,
     Usage,
@@ -381,6 +381,7 @@ class ClaudeAdapter(AgentAdapter):
         prefix: str = "",
     ) -> AsyncGenerator[LupEvent, None]:
         """Stream events from the Claude SDK."""
+        collected: list[LupContentBlock] = []
         async with ClaudeSDKClient(options=self.options) as client:
             await client.query(prompt)
             async for message in client.receive_response():
@@ -391,6 +392,7 @@ class ClaudeAdapter(AgentAdapter):
                 match message:
                     case AssistantMessage():
                         for block in message.content:
+                            collected.append(claude_block_to_lup(block))
                             match block:
                                 case ThinkingBlock():
                                     if block.thinking:
@@ -408,14 +410,6 @@ class ClaudeAdapter(AgentAdapter):
                                         content=str(block.content),
                                     )
                     case ResultMessage():
-                        collected: list[LupContentBlock] = []
                         yield LupDoneEvent(blocks=collected)
                         if message.is_error:
                             raise RuntimeError(f"Agent error: {message.result}")
-
-
-# ---------------------------------------------------------------------------
-# Convenience: query() for internal use (reflect tool, etc.)
-# ---------------------------------------------------------------------------
-
-type HooksConfig = dict[HookEvent, list[HookMatcher]]

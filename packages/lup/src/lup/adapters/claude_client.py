@@ -88,9 +88,16 @@ from claude_agent_sdk.types import (
 )
 from pydantic import BaseModel
 
-from lup.adapters.claude import claude_message_to_lup
+from lup.adapters.claude import claude_block_to_lup, claude_message_to_lup
+from lup.adapters.common import PermissionMode
 from lup.trace import TraceLogger, print_message
-
+from lup.types import (
+    LupAssistantMessage,
+    LupResponse,
+    LupResultMessage,
+    extract_token_usage,
+    safe_normalize_usage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -381,3 +388,62 @@ async def query(
     if output_type is not None:
         return collector.output(output_type)
     return collector
+
+
+async def claude_query(
+    prompt: str,
+    *,
+    model: str = "claude-sonnet-4-6",
+    system_prompt: str | None = None,
+    output_schema: dict[str, object] | None = None,
+    trace_logger: TraceLogger | None = None,
+    prefix: str = "",
+    max_turns: int | None = None,
+    max_thinking_tokens: int | None = None,
+    tools: list[str] | None = None,
+    allowed_tools: list[str] | None = None,
+    permission_mode: PermissionMode | None = None,
+    max_budget_usd: float | None = None,
+) -> LupResponse:
+    """One-shot query via the Claude Agent SDK, returning LupResponse.
+
+    The lup-typed counterpart of :func:`query` — the anthropic backend
+    of ``lup.adapters.common.query`` dispatches here.
+    """
+    collector = await query(
+        prompt,
+        model=model,
+        system_prompt=system_prompt,
+        prefix=prefix,
+        trace_logger=trace_logger,
+        max_turns=max_turns,
+        max_thinking_tokens=max_thinking_tokens,
+        tools=tools,
+        allowed_tools=allowed_tools,
+        permission_mode=permission_mode,
+        max_budget_usd=max_budget_usd,
+        output_format=(
+            {"type": "json_schema", "schema": output_schema} if output_schema else None
+        ),
+    )
+
+    blocks = [claude_block_to_lup(b) for b in collector.blocks]
+    tool_results = [claude_block_to_lup(b) for b in collector.tool_results]
+
+    response = LupResponse(blocks=blocks, tool_results=tool_results)
+    for msg in collector.messages:
+        if isinstance(msg, AssistantMessage):
+            lup_blocks = [claude_block_to_lup(b) for b in msg.content]
+            response.messages.append(LupAssistantMessage(content=lup_blocks))
+
+    if collector.result is not None:
+        response.result = LupResultMessage(
+            structured_output=collector.result.structured_output,
+            is_error=collector.result.is_error,
+            result=collector.result.result,
+            duration_ms=collector.result.duration_ms,
+            total_cost_usd=collector.result.total_cost_usd,
+            usage=safe_normalize_usage(extract_token_usage, collector.result.usage),
+        )
+
+    return response
