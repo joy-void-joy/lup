@@ -11,9 +11,9 @@ This is a **self-improving agent template and scaffold** built with the Claude A
 1. **Template** — Code that downstream projects customize for their domain: agent prompts, tools, models, environment scaffolding. `/lup:brainstorm` explores the design, `/lup:init` executes the customization.
 2. **Scaffold** — Agents, commands, hooks, and workflows that downstream projects inherit and extend. These provide the development workflow (commit, rebase, feedback loop) and analysis infrastructure (trace exploration, version comparison) that every project needs.
 
-When reviewing changes from downstream repos (`/lup:update`), the goal is to **generalize domain-specific patterns back into the template**. The bias is toward inclusion: if a pattern emerged from real use, it likely belongs in the template.
+When reviewing changes from downstream repos (`/lup:update`), the goal is to **generalize domain-specific patterns back into the template**. The bias is toward inclusion: if a pattern emerged from real use, it likely belongs in the template. Downstream projects are tracked in `downstream.json` (names and URLs; machine-local paths go in the gitignored `downstream.json.local`), consumed by `lup-devtools sync` and the `/lup:update` and `/lup:import` commands.
 
-Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manager.
+Built with Python 3.14+ and the Claude Agent SDK. Uses `uv` as the package manager.
 
 ### Naming
 
@@ -106,10 +106,15 @@ src/
     │       └── reflect.py      # Forced self-review tool (reviewer sub-agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
+    │   ├── agent.py            # Agent introspection (inspect, serve-tools, chat, repl)
+    │   ├── py.py               # Python object introspection (info, source, eval)
     │   ├── trace/              # Trace display, search, and analysis
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── dev/                # Worktrees, branches, and pre-flight checks
     │   ├── setup.py            # Interactive setup wizard (customize integrations)
+    │   ├── sync.py             # Downstream project sync tracking
+    │   ├── usage.py            # Claude Code usage display
+    │   ├── utils.py            # Shared CLI helpers (git command, JSON output)
     │   └── version.py          # Version display, changelog, and bump
     └── environment/            # Domain scaffolding (user interaction, game logic)
         └── cli/
@@ -432,7 +437,7 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
-Sub-apps: `agent`, `api`, `dev`, `feedback`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
+Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
 
 ### Permission Hooks
 
