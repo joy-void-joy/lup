@@ -260,7 +260,7 @@ def merge(
 
     try:
         tree_dir = get_tree_dir()
-    except SystemExit:
+    except (typer.Exit, SystemExit):
         tree_dir = None
     integration_path = tree_dir / integration if tree_dir else None
     pulled = False
@@ -296,7 +296,7 @@ def sync_base(
 
     try:
         tree_dir = get_tree_dir()
-    except SystemExit:
+    except (typer.Exit, SystemExit):
         tree_dir = None
     base_path = tree_dir / base_branch if tree_dir else None
 
