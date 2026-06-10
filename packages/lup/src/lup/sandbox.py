@@ -291,7 +291,7 @@ class ReplSession:
                 if response is not None:
                     response.close()
                 self.sock.close()
-            except Exception:
+            except Exception:  # claude: ignore — best-effort socket cleanup
                 pass
             self.sock = None
         self.exec_id = None

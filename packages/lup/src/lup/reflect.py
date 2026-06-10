@@ -61,18 +61,18 @@ class ReflectionGate:
     """
 
     def __init__(self, flag_path: Path | None = None) -> None:
-        self._reflected: bool = False
+        self.memory_flag: bool = False
         self.flag_path = flag_path
 
     @property
     def reflected(self) -> bool:
         if self.flag_path is not None:
             return self.flag_path.exists()
-        return self._reflected
+        return self.memory_flag
 
     @reflected.setter
     def reflected(self, value: bool) -> None:
-        self._reflected = value
+        self.memory_flag = value
         if self.flag_path is not None:
             if value:
                 self.flag_path.parent.mkdir(parents=True, exist_ok=True)

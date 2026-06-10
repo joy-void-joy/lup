@@ -336,36 +336,43 @@ name = "lup"
 version = "0.1.0"
 source = { editable = "packages/lup" }
 dependencies = [
-    { name = "claude-agent-sdk" },
     { name = "httpx" },
+    { name = "mcp" },
     { name = "pydantic" },
     { name = "rich" },
     { name = "tenacity" },
 ]
 
 [package.optional-dependencies]
+claude = [
+    { name = "claude-agent-sdk" },
+]
+codex = [
+    { name = "openai-codex" },
+]
 docker = [
     { name = "docker" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "claude-agent-sdk", specifier = ">=0.1.26" },
+    { name = "claude-agent-sdk", marker = "extra == 'claude'", specifier = ">=0.1.26" },
     { name = "docker", marker = "extra == 'docker'", specifier = ">=7.1.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mcp", specifier = ">=1.27.0" },
+    { name = "openai-codex", marker = "extra == 'codex'", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython&tag=rust-v0.139.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "rich", specifier = ">=14.3.1" },
     { name = "tenacity", specifier = ">=9.0.0" },
 ]
-provides-extras = ["docker"]
+provides-extras = ["claude", "codex", "docker"]
 
 [[package]]
 name = "lup-template"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "lup", extra = ["docker"] },
-    { name = "openai-codex" },
+    { name = "lup", extra = ["claude", "codex", "docker"] },
     { name = "plotext" },
     { name = "prompt-toolkit" },
     { name = "pydantic-settings" },
@@ -383,8 +390,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "lup", extras = ["docker"], editable = "packages/lup" },
-    { name = "openai-codex", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython&tag=rust-v0.139.0" },
+    { name = "lup", extras = ["claude", "codex", "docker"], editable = "packages/lup" },
     { name = "plotext", specifier = ">=5.3.2" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "pydantic-settings", specifier = ">=2.12.0" },

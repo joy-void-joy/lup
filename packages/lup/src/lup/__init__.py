@@ -1,10 +1,11 @@
-"""Lup — agent development library for the Claude Agent SDK.
+"""Lup — agent development library for Claude and Codex agent SDKs.
 
-Core utilities for building agents with hooks, MCP tools, tracing, and session management.
+Core utilities for building agents with hooks, MCP tools, tracing, and
+session management. SDK-specific code lives in ``lup.adapters``; this
+package imports no SDK at load time — install the ``claude`` and/or
+``codex`` extras for the backend you use.
 """
 
-from lup.adapters.claude_client import ResponseCollector, build_client
-from lup.adapters.claude_client import query as claude_query
 from lup.adapters.common import query
 from lup.hooks import (
     create_capture_hook,
@@ -42,15 +43,12 @@ __all__ = [
     "LupMcpTool",
     "MetricsSummary",
     "ReflectionGate",
-    "ResponseCollector",
     "ToolError",
     "TraceLogger",
     "Usage",
     "agent_version",
     "allow_hook",
     "block_hook",
-    "build_client",
-    "claude_query",
     "configure",
     "create_capture_hook",
     "create_mcp_server",

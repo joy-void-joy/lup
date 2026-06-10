@@ -80,40 +80,36 @@ class BaseBackgroundAgent(ABC):
         self.model = model
         self.debounce_seconds = debounce_seconds
 
-        self._task: asyncio.Task[None] | None = None
-        self._wake: asyncio.Event = asyncio.Event()
-        self._running = False
+        self.runner: asyncio.Task[None] | None = None
+        self.wake_event: asyncio.Event = asyncio.Event()
+        self.running = False
 
     def start(self) -> None:
         """Start the background agent as an asyncio task."""
-        if self._task and not self._task.done():
+        if self.runner and not self.runner.done():
             return
-        self._running = True
-        self._task = asyncio.create_task(self.run_loop())
+        self.running = True
+        self.runner = asyncio.create_task(self.run_loop())
 
     def wake(self) -> None:
         """Signal that new data is available for processing."""
-        self._wake.set()
+        self.wake_event.set()
 
     async def stop(self) -> None:
         """Cancel the background agent and wait for cleanup."""
-        self._running = False
-        if self._task and not self._task.done():
-            self._task.cancel()
+        self.running = False
+        if self.runner and not self.runner.done():
+            self.runner.cancel()
             try:
-                await self._task
+                await self.runner
             except asyncio.CancelledError:
                 pass
-        self._task = None
+        self.runner = None
 
     @abstractmethod
     async def run_loop(self) -> None:
         """SDK-specific run loop. Implemented by each adapter."""
         ...
-
-
-# Re-export for backward compatibility — consumers import from here
-BackgroundAgent = BaseBackgroundAgent
 
 
 def create_background_agent(

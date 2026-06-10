@@ -1,4 +1,3 @@
-# claude: ignore
 """Agent adapter ABC and unified ``query()`` frontend.
 
 Each SDK adapter implements this interface. Consumer code (core.py)
@@ -11,64 +10,16 @@ based on model name — consumer code never imports from SDK packages.
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager
 
 from typing import Literal
 
 from pydantic import BaseModel
 
 from lup.trace import TraceLogger
-from lup.types import LupContentBlock, LupResponse, model_backend
+from lup.types import LupDoneEvent, LupEvent, LupResponse, model_backend
 
 type PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
-
-
-# ---------------------------------------------------------------------------
-# Streaming events
-# ---------------------------------------------------------------------------
-
-
-class LupEvent:
-    """Base class for normalized streaming events."""
-
-    pass
-
-
-class LupTextEvent(LupEvent):
-    """Streamed text delta."""
-
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-
-class LupToolUseEvent(LupEvent):
-    """Streamed tool invocation start."""
-
-    def __init__(self, id: str, name: str) -> None:
-        self.id = id
-        self.name = name
-
-
-class LupToolResultEvent(LupEvent):
-    """Streamed tool result."""
-
-    def __init__(self, tool_use_id: str, content: str) -> None:
-        self.tool_use_id = tool_use_id
-        self.content = content
-
-
-class LupThinkingEvent(LupEvent):
-    """Streamed thinking content."""
-
-    def __init__(self, thinking: str) -> None:
-        self.thinking = thinking
-
-
-class LupDoneEvent(LupEvent):
-    """Stream complete."""
-
-    def __init__(self, blocks: list[LupContentBlock] | None = None) -> None:
-        self.blocks = blocks or []
 
 
 # ---------------------------------------------------------------------------
@@ -112,14 +63,13 @@ class AgentAdapter(ABC):
     """
 
     @abstractmethod
-    @asynccontextmanager
-    async def conversation(self) -> AsyncGenerator[Conversation, None]:
+    def conversation(self) -> AbstractAsyncContextManager[Conversation]:
         """Create a multi-turn conversation session.
 
-        Yields a ``Conversation`` that maintains state across turns.
+        Implementations are ``@asynccontextmanager`` async generators
+        yielding a ``Conversation`` that maintains state across turns.
         The SDK client/thread is created on entry and cleaned up on exit.
         """
-        yield  # type: ignore[misc]
 
     async def run(
         self,
@@ -205,6 +155,8 @@ async def query(
 
     match backend:
         case "anthropic":
+            from lup.adapters.claude_client import claude_query
+
             return await claude_query(
                 prompt,
                 model=effective_model,
@@ -243,71 +195,3 @@ async def query(
             return await compat_adapter.run(
                 prompt, trace_logger=trace_logger, prefix=prefix
             )
-
-
-async def claude_query(
-    prompt: str,
-    *,
-    model: str = "claude-sonnet-4-6",
-    system_prompt: str | None = None,
-    output_schema: dict[str, object] | None = None,
-    trace_logger: TraceLogger | None = None,
-    prefix: str = "",
-    max_turns: int | None = None,
-    max_thinking_tokens: int | None = None,
-    tools: list[str] | None = None,
-    allowed_tools: list[str] | None = None,
-    permission_mode: PermissionMode | None = None,
-    max_budget_usd: float | None = None,
-) -> LupResponse:
-    """One-shot query via the Claude Agent SDK, returning LupResponse."""
-    from lup.adapters.claude_client import query as claude_sdk_query
-
-    collector = await claude_sdk_query(
-        prompt,
-        model=model,
-        system_prompt=system_prompt,
-        prefix=prefix,
-        trace_logger=trace_logger,
-        max_turns=max_turns,
-        max_thinking_tokens=max_thinking_tokens,
-        tools=tools,
-        allowed_tools=allowed_tools,
-        permission_mode=permission_mode,
-        max_budget_usd=max_budget_usd,
-        output_format=(
-            {"type": "json_schema", "schema": output_schema} if output_schema else None
-        ),
-    )
-
-    from lup.adapters.claude import claude_block_to_lup
-
-    from lup.types import (
-        LupAssistantMessage,
-        LupResultMessage,
-    )
-
-    blocks = [claude_block_to_lup(b) for b in collector.blocks]
-    tool_results = [claude_block_to_lup(b) for b in collector.tool_results]
-
-    response = LupResponse(blocks=blocks, tool_results=tool_results)
-    for msg in collector.messages:
-        from claude_agent_sdk.types import AssistantMessage
-
-        if isinstance(msg, AssistantMessage):
-            lup_blocks = [claude_block_to_lup(b) for b in msg.content]
-            response.messages.append(LupAssistantMessage(content=lup_blocks))
-
-    if collector.result is not None:
-        from lup.types import extract_token_usage, safe_normalize_usage
-
-        response.result = LupResultMessage(
-            structured_output=collector.result.structured_output,
-            is_error=collector.result.is_error,
-            result=collector.result.result,
-            duration_ms=collector.result.duration_ms,
-            total_cost_usd=collector.result.total_cost_usd,
-            usage=safe_normalize_usage(extract_token_usage, collector.result.usage),
-        )
-
-    return response
