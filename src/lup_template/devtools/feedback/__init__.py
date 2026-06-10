@@ -7,7 +7,6 @@ import typer
 
 import lup_template.devtools.feedback.analyze as analyze
 import lup_template.devtools.feedback.state as state
-from lup.paths import AGENT_VERSION
 from lup_template.devtools.utils import VERSION_OPT, ALL_VERSIONS_OPT, JSON_OPT
 
 app = typer.Typer(no_args_is_help=True)
@@ -15,7 +14,7 @@ app = typer.Typer(no_args_is_help=True)
 
 @app.command("status")
 def status_cmd(
-    version: VERSION_OPT = AGENT_VERSION,
+    version: VERSION_OPT = None,
     all_versions: ALL_VERSIONS_OPT = False,
 ) -> None:
     """Show feedback status: version, data, analysis state, and aggregate stats."""
@@ -38,7 +37,7 @@ def collect_cmd(
             "(the default when --since is not given)",
         ),
     ] = False,
-    version: VERSION_OPT = AGENT_VERSION,
+    version: VERSION_OPT = None,
     all_versions: ALL_VERSIONS_OPT = False,
     output: Annotated[
         Path | None,
@@ -57,7 +56,7 @@ def collect_cmd(
 
 @app.command("tools")
 def tools_cmd(
-    version: VERSION_OPT = AGENT_VERSION,
+    version: VERSION_OPT = None,
     all_versions: ALL_VERSIONS_OPT = False,
     as_json: JSON_OPT = False,
 ) -> None:
@@ -68,7 +67,7 @@ def tools_cmd(
 @app.command("errors")
 def errors_cmd(
     limit: int = typer.Option(20, "-n", "--limit", help="Max errors to show"),
-    version: VERSION_OPT = AGENT_VERSION,
+    version: VERSION_OPT = None,
     all_versions: ALL_VERSIONS_OPT = False,
     as_json: JSON_OPT = False,
 ) -> None:
@@ -82,7 +81,7 @@ def trends_cmd(
         int,
         typer.Option("-w", "--window", help="Rolling window size"),
     ] = 10,
-    version: VERSION_OPT = AGENT_VERSION,
+    version: VERSION_OPT = None,
     all_versions: ALL_VERSIONS_OPT = False,
     as_json: JSON_OPT = False,
 ) -> None:
@@ -129,7 +128,7 @@ def prompt_health_cmd(
 
 @app.command("unanalyzed")
 def unanalyzed_cmd(
-    version: VERSION_OPT = AGENT_VERSION,
+    version: VERSION_OPT = None,
     all_versions: ALL_VERSIONS_OPT = False,
 ) -> None:
     """List unanalyzed session IDs, one per line."""
@@ -138,7 +137,7 @@ def unanalyzed_cmd(
 
 @app.command("analyze")
 def analyze_cmd(
-    version: VERSION_OPT = AGENT_VERSION,
+    version: VERSION_OPT = None,
     all_versions: ALL_VERSIONS_OPT = False,
     output: Annotated[
         Path | None,
