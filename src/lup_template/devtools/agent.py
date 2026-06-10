@@ -19,6 +19,7 @@ Examples::
 """
 
 import asyncio
+import atexit
 import hashlib
 import inspect as inspect_mod
 import io
@@ -221,6 +222,17 @@ def collect_tools_by_server(
         *output_kit["tools"],
         subagent_tool,
     ]
+
+    if context.session_id:
+        from lup.sandbox import Sandbox
+
+        sandbox = Sandbox(
+            session_id=context.session_id,
+            shared_dir=context.session_dir / "sandbox_shared",
+        )
+        atexit.register(sandbox.stop)
+        servers["sandbox"] = sandbox.create_tools()
+
     return servers
 
 
@@ -412,6 +424,13 @@ def serve_tools_cmd(
         bool,
         typer.Option("--list", help="Print served tool names and exit"),
     ] = False,
+    server_group: Annotated[
+        str | None,
+        typer.Option(
+            "--server",
+            help="Serve only this tool group (notes or sandbox); default: all",
+        ),
+    ] = None,
 ) -> None:
     """Start SDK tools as an MCP stdio server (the ``notes`` server).
 
@@ -428,7 +447,19 @@ def serve_tools_cmd(
     if context is not None:
         configure_metrics(metrics_path(context.session_dir))
 
-    lup_tools = collect_all_tools(context)
+    by_server = collect_tools_by_server(context)
+    match server_group:
+        case None:
+            lup_tools = [t for tools in by_server.values() for t in tools]
+        case "sandbox":
+            lup_tools = list(by_server.get("sandbox", []))
+        case "notes":
+            lup_tools = [
+                t for key, tools in by_server.items() if key != "sandbox" for t in tools
+            ]
+        case _:
+            typer.echo(f"Unknown server group: {server_group}", err=True)
+            raise typer.Exit(1)
     tool_map = {t.name: t for t in lup_tools}
 
     if list_only:
@@ -436,11 +467,16 @@ def serve_tools_cmd(
             typer.echo(t.name)
         return
 
+    def terminate(_signum: int, _frame: object) -> None:
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, terminate)
+
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
     from mcp.types import CallToolResult, TextContent, Tool
 
-    server = Server("notes", version="1.0.0")
+    server = Server(server_group or "notes", version="1.0.0")
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
