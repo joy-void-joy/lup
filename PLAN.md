@@ -92,24 +92,25 @@ This plan supersedes the previous SDK-interop status document. That document mar
 
 ## Phase 1 — Output unification (keystone; Claude path first)
 
-- [ ] `lup/output.py`: `create_output_tool(output_model, session_dir, gate)` → `submit_output` LupMcpTool. Handler: validate → if gate not reflected, `is_error` "call review first" → write `session_dir/output.json` → mark complete
-- [ ] Completion state file (`output.json`) is the single source `build_result` reads; remove dependence on `ResultMessage.structured_output`
-- [ ] Claude path: drop `output_format` from `ClaudeAgentOptions`; register `submit_output` on the `notes` server; add Stop hook (`create_completion_guard` in `lup/hooks.py`) that blocks stop until output exists, with a corrective message
-- [ ] Spike first: verify Stop-hook forced-continuation behaves with `max_turns` and doesn't loop unbounded (cap retries, then surface error)
-- [ ] Keep the PreToolUse gate hook on Claude as hardening (matcher `mcp__notes__submit_output`)
-- [ ] Tests: gate-in-handler denial → reflect → submit succeeds; invalid output → `is_error` retry; stop-guard path
+- [x] `lup/output.py`: `create_output_tool(output_model, session_dir, gate)` → `submit_output` LupMcpTool. Handler: validate → if gate not reflected, `is_error` "call review first" → write `session_dir/output.json` → mark complete
+- [x] Completion state file (`output.json`) is the single source `build_result` reads (`result.structured_output` remains the fallback only until the Codex path migrates in Phase 2)
+- [x] Claude path: drop `output_format` from `ClaudeAgentOptions`; register `submit_output` on the `notes` server; add Stop hook (`create_completion_guard` in `lup/hooks.py`) that blocks stop until output exists, with a corrective message
+- [x] Spike verified live: an agent that ends without submitting is blocked by the Stop hook, reads the corrective message, self-corrects (review → submit); retries bounded at 3
+- [x] Keep the PreToolUse gate hook on Claude as hardening (matcher `mcp__notes__submit_output`)
+- [x] Tests: gate-in-handler denial → reflect → submit succeeds; invalid output → `is_error` retry; stop-guard path
+- [x] (Added during live verification) `Usage` model + injectable per-adapter `usage_normalizer` callbacks: raw vendor usage payloads (nested dicts/strings) crashed result conversion; adapters now normalize to portable token counts via a constructor-supplied callback, with `SerializeAsAny` so custom subclasses survive into session JSON
 
-**Verify:** `AGENT_SDK=claude uv run lup run "test task"` produces `output.json` + `AgentSessionResult`; trace shows a denial when submitting before reflecting.
+**Verified:** `AGENT_SDK=claude uv run lup run "test task"` produces `output.json` + `AgentSessionResult` end-to-end ($0.29 smoke session); Stop-guard probe confirmed forced continuation + self-correction.
 
 ## Phase 2 — Context relay + dynamic serve-tools
 
-- [ ] Env contract constants in `lup/paths.py`; `build_mcp_config_overrides(env=...)` emits `mcp_servers.notes.env.*`
-- [ ] `serve-tools` builds tools from env context: example + reflect (file-backed gate from `LUP_GATE_FLAG`) + `submit_output` + sandbox tools; `collect_tools_by_server(context)` replaces the static dict; add `--list` flag for debugging
-- [ ] `lup/metrics.py` gains file-backed flush (`session_dir/metrics.json`), mirroring `ReflectionGate`'s dual mode; `build_result` merges subprocess metrics
-- [ ] `core.py: build_codex_adapter` passes env; gate matcher becomes `mcp__notes__submit_output`; Codex stops passing native `output_schema`
-- [ ] Rename the Codex MCP server key from `lup-tools` to `notes`
+- [x] Env contract (`SessionContext` + constants) in `lup/paths.py`; `build_mcp_config_overrides(env=...)` emits `mcp_servers.notes.env.*`
+- [x] `serve-tools` builds tools from env context: example + reflect (file-backed gate from `LUP_GATE_FLAG`) + `submit_output`; `collect_tools_by_server(context)`; `--list` flag (sandbox tools join in Phase 5)
+- [x] `lup/metrics.py` gains write-through flush (`session_dir/metrics.json`); `build_result` reads the flushed file when present, in-process collector otherwise (no merge needed — tools run entirely in one process per backend)
+- [x] `core.py`: shared `build_codex_session()` scaffolding passes env; gate matcher is `mcp__notes__submit_output`; Codex no longer passes native `output_schema`; `build_result` fallback to `structured_output` removed
+- [x] Codex MCP server key renamed `lup-tools` → `notes`
 
-**Verify:** integration test (no LLM needed): spawn `serve-tools` with env set, connect an MCP client, list tools (13 expected), call `review` with `skip_reviewer=true` → gate flag file appears → call `submit_output` → `output.json` written.
+**Verified:** the no-LLM integration test (`tests/integration/test_serve_tools.py`) round-trips the subprocess: 4 tools listed, premature submit denied in-handler, review sets the flag file, submit writes `output.json`, metrics flushed. **Live-verified on the real Codex backend** (`AGENT_SDK=codex AGENT_MODEL=gpt-5.5`): review → submit via the subprocess, `output.json` read by `build_result`, cross-process metrics (2 calls) and normalized `token_usage` in the saved session. Note: ChatGPT-account Codex only accepts its own models — `AGENT_MODEL` must be set accordingly (default account model: gpt-5.5).
 
 ## Phase 3 — Codex-side enforcement
 
