@@ -44,18 +44,9 @@ uv run lup-devtools dev check
 
 Fix any failures before proceeding.
 
-### 5. Review PLAN.md
-
-If `PLAN.md` exists, verify:
-- All items completed (`[x]`) or explicitly deferred
-- No items in-progress (`[~]`)
-- Plan reflects what was built
-
-If incomplete items exist, confirm via AskUserQuestion.
-
 ## Process
 
-### 6. Push and open PR
+### 5. Push and open PR
 
 ```bash
 uv run lup-devtools dev pr push --json
@@ -69,14 +60,14 @@ uv run lup-devtools dev pr create --base "<target>" --title "<title>" --body "<b
 
 **If PR already exists**, skip -- we'll force-push the cleaned history later.
 
-### 7. Understand all changes
+### 6. Understand all changes
 
 - Review the full diff: `git diff <base>...HEAD`
 - Read changed files to understand the complete set of modifications
 - Think about logical units of work (features, refactors, fixes, tests, docs)
 - **Ignore existing commit history** -- focus on what makes sense as a clean sequence
 
-### 8. Reset and rebuild commits
+### 7. Reset and rebuild commits
 
 ```bash
 git reset --soft <base>
@@ -88,7 +79,7 @@ All changes are now staged. For each logical unit of work:
 - Order logically: dependencies first, then features, then polish
 - Use conventional format: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`
 
-### 9. Force push and update PR
+### 8. Force push and update PR
 
 ```bash
 uv run lup-devtools dev pr push --force --json
