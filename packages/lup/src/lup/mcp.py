@@ -1,5 +1,6 @@
-"""Patched MCP server factory that preserves is_error from tool responses.
 # claude: ignore
+# (file-level: SDK MCP plumbing needs Any at the untyped handler boundary)
+"""Patched MCP server factory that preserves is_error from tool responses.
 
 The Claude Agent SDK's `create_sdk_mcp_server` has bugs that prevent proper error
 propagation:
