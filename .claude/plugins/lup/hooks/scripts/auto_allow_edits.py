@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""PreToolUse hook that auto-allows small, safe Edit operations.
+"""PreToolUse hook that gates Edit and Write operations.
 
-Decision order:
+Edit decision order:
 1. Protected files (.claude/, pyproject.toml, .env*) -> always defer
 2. Anti-patterns scanned over added lines in .py and TS-family files
    (see ANTI_PATTERNS / TS_ANTI_PATTERNS):
@@ -16,6 +16,10 @@ Decision order:
 6. Size gate: count nontrivial added lines per change block (using a state
    machine for context-aware classification) -> allow if every block stays
    within MAX_REAL_CHANGES
+
+Write decision order:
+1. Protected files -> deny (use targeted Edits instead)
+2. Otherwise -> defer to the user (full-file rewrites never auto-allow)
 """
 
 import difflib
@@ -33,7 +37,7 @@ MAX_REAL_CHANGES = 3
 # Configuration: protected paths and anti-pattern tables
 # ---------------------------------------------------------------------------
 
-# Files this hook never auto-allows: edits to them always defer to the user.
+# Files this hook never auto-allows: Edits defer to the user, Writes deny.
 PROTECTED_PATTERNS = [
     r"(^|/)\.claude/",
     r"(^|/)pyproject\.toml$",
@@ -357,9 +361,21 @@ class EditInput(BaseModel):
     replace_all: bool = False
 
 
-class HookEvent(BaseModel):
+class WriteInput(BaseModel):
+    file_path: str = ""
+    content: str = ""
+
+
+class HookEnvelope(BaseModel):
     tool_name: str = ""
+
+
+class EditEvent(BaseModel):
     tool_input: EditInput = EditInput()
+
+
+class WriteEvent(BaseModel):
+    tool_input: WriteInput = WriteInput()
 
 
 def allow_decision() -> AllowDecision:
@@ -552,16 +568,33 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
     return None
 
 
+def decide_write(tool_input: WriteInput) -> AllowDecision | None:
+    """Gate Write (full-file) operations.
+
+    Writes never auto-allow — a whole-file rewrite needs user eyes — so the
+    only automated decision is denying protected files outright.
+    """
+    if is_protected_file(tool_input.file_path):
+        return deny_decision(
+            f"Denied: Write to protected file ({tool_input.file_path}) — "
+            "use targeted Edit calls, which prompt for approval"
+        )
+    return None
+
+
 def main() -> None:
     try:
-        event = HookEvent.model_validate_json(sys.stdin.read())
+        raw = sys.stdin.read()
+        match HookEnvelope.model_validate_json(raw).tool_name:
+            case "Edit":
+                result = decide(EditEvent.model_validate_json(raw).tool_input)
+            case "Write":
+                result = decide_write(WriteEvent.model_validate_json(raw).tool_input)
+            case _:
+                sys.exit(0)
     except (ValidationError, OSError):
         sys.exit(0)
 
-    if event.tool_name != "Edit":
-        sys.exit(0)
-
-    result = decide(event.tool_input)
     if result:
         json.dump(result, sys.stdout)
 
