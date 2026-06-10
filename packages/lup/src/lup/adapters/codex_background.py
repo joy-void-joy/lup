@@ -41,7 +41,7 @@ class CodexBackgroundAgent(BaseBackgroundAgent):
     async def run_loop(self) -> None:
         """Run independent Codex thread for background work."""
         try:
-            from codex_app_server import AsyncCodex
+            from openai_codex import AsyncCodex
 
             async with AsyncCodex() as codex:
                 thread = await codex.thread_start(
