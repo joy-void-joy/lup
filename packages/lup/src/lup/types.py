@@ -155,7 +155,8 @@ class LupHookInput(TypedDict, total=False):
 
     hook_event_name: str
     tool_name: str
-    tool_input: dict[str, str]
+    tool_input: dict[str, object]  # claude: ignore
+    tool_result: str
     stop_hook_active: bool
 
 
@@ -172,10 +173,15 @@ type LupHookFn = Callable[[LupHookInput], Awaitable[LupHookOutput]]
 
 
 class LupHookMatcher(BaseModel):
-    """A hook handler with an optional tool name matcher."""
+    """A hook handler with an optional tool name matcher.
+
+    The ``tag`` field lets adapters dispatch deterministically instead
+    of guessing hook intent from ``matcher`` / caller arguments.
+    """
 
     matcher: str | None = None
     hook: LupHookFn
+    tag: str | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 

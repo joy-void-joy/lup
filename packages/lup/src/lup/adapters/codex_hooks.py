@@ -370,10 +370,9 @@ def lup_hooks_to_codex(
 ) -> list[CodexHookConfig]:
     """Convert SDK-agnostic LupHooksConfig to Codex hook configs.
 
-    Parallel to :func:`~lup.lib.adapters.claude.lup_hooks_to_claude`.
-    Since Codex hooks are external scripts, this generates the appropriate
-    script files based on the hook matchers and event types present in the
-    config.
+    Dispatches on each ``LupHookMatcher.tag`` to generate the correct
+    Codex hook script. Unrecognized tags are logged and skipped rather
+    than silently dropped.
 
     Args:
         hooks: SDK-agnostic hook configuration.
@@ -387,50 +386,75 @@ def lup_hooks_to_codex(
     Returns:
         List of CodexHookConfig entries for config_overrides.
     """
-    configs: list[CodexHookConfig] = []
-    generated_permission = False
-    generated_gate = False
-    generated_allowlist = False
-    generated_nudge = False
+    import logging
 
-    for event_name, matchers in hooks.items():
+    log = logging.getLogger(__name__)
+    configs: list[CodexHookConfig] = []
+    seen_tags: set[str] = set()
+
+    for _event_name, matchers in hooks.items():
         for matcher in matchers:
-            if event_name == "PreToolUse":
-                if matcher.matcher and gate_flag_path and not generated_gate:
-                    configs.extend(
-                        build_reflection_gate_hook(
-                            gate_flag_path=gate_flag_path,
-                            gated_tool=matcher.matcher,
-                            reflection_tool_name="mcp__notes__review",
-                            script_dir=script_dir,
+            tag = matcher.tag or ""
+            if tag in seen_tags:
+                continue
+
+            match tag:
+                case "permission":
+                    if rw_dirs is not None:
+                        configs.extend(
+                            build_permission_hooks(
+                                rw_dirs=rw_dirs,
+                                ro_dirs=ro_dirs or [],
+                                script_dir=script_dir,
+                            )
                         )
-                    )
-                    generated_gate = True
-                elif not matcher.matcher and rw_dirs is not None and not generated_permission:
-                    configs.extend(
-                        build_permission_hooks(
-                            rw_dirs=rw_dirs,
-                            ro_dirs=ro_dirs or [],
-                            script_dir=script_dir,
+                        seen_tags.add(tag)
+                    else:
+                        log.warning("permission hook requires rw_dirs")
+
+                case "reflection_gate":
+                    if gate_flag_path and matcher.matcher:
+                        configs.extend(
+                            build_reflection_gate_hook(
+                                gate_flag_path=gate_flag_path,
+                                gated_tool=matcher.matcher,
+                                reflection_tool_name="mcp__notes__review",
+                                script_dir=script_dir,
+                            )
                         )
-                    )
-                    generated_permission = True
-                elif not matcher.matcher and allowed_tools and not generated_allowlist:
-                    configs.extend(
-                        build_tool_allowlist_hook(
-                            allowed_tools=allowed_tools,
-                            script_dir=script_dir,
+                        seen_tags.add(tag)
+                    else:
+                        log.warning("reflection_gate hook requires gate_flag_path and matcher")
+
+                case "allowlist":
+                    if allowed_tools:
+                        configs.extend(
+                            build_tool_allowlist_hook(
+                                allowed_tools=allowed_tools,
+                                script_dir=script_dir,
+                            )
                         )
-                    )
-                    generated_allowlist = True
-            elif event_name == "PostToolUse":
-                if nudges and not generated_nudge:
-                    configs.extend(
-                        build_nudge_hook(
-                            nudges=nudges,
-                            script_dir=script_dir,
+                        seen_tags.add(tag)
+                    else:
+                        log.warning("allowlist hook requires allowed_tools")
+
+                case "nudge":
+                    if nudges:
+                        configs.extend(
+                            build_nudge_hook(
+                                nudges=nudges,
+                                script_dir=script_dir,
+                            )
                         )
-                    )
-                    generated_nudge = True
+                        seen_tags.add(tag)
+                    else:
+                        log.warning("nudge hook requires nudges dict")
+
+                case "capture":
+                    log.info("capture hook has no Codex equivalent (in-process only)")
+
+                case _:
+                    if tag:
+                        log.warning("Unknown hook tag %r — skipping", tag)
 
     return configs

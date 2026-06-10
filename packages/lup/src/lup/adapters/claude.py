@@ -33,6 +33,7 @@ from claude_agent_sdk.types import (
     HookEvent,
     HookMatcher,
     McpSdkServerConfig,
+    PreToolUseHookSpecificOutput,
     ResultMessage,
     SyncHookJSONOutput,
     SystemMessage,
@@ -134,18 +135,18 @@ def lup_hook_output_to_claude(output: LupHookOutput) -> SyncHookJSONOutput:
     match decision:
         case "allow":
             return SyncHookJSONOutput(
-                hookSpecificOutput={
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "allow",
-                }
+                hookSpecificOutput=PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="allow",
+                )
             )
         case "deny":
             return SyncHookJSONOutput(
-                hookSpecificOutput={
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": reason,
-                }
+                hookSpecificOutput=PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="deny",
+                    permissionDecisionReason=reason,
+                )
             )
         case "block":
             return SyncHookJSONOutput(decision="block", reason=reason)

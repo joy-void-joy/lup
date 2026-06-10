@@ -96,7 +96,7 @@ def create_permission_hooks(
 
         match tool_name:
             case "Write" | "Edit":
-                file_path = tool_input.get("file_path", "")
+                file_path = str(tool_input.get("file_path", ""))
                 if not file_path:
                     return LupHookOutput()
                 if path_is_under(file_path, rw_dirs):
@@ -106,7 +106,7 @@ def create_permission_hooks(
                 )
 
             case "Read":
-                file_path = tool_input.get("file_path", "")
+                file_path = str(tool_input.get("file_path", ""))
                 if not file_path:
                     return LupHookOutput()
                 if path_is_under(file_path, all_readable):
@@ -116,9 +116,9 @@ def create_permission_hooks(
                 )
 
             case "Glob" | "Grep":
-                file_path = tool_input.get("path", "")
+                file_path = str(tool_input.get("path", ""))
                 if not file_path and tool_name == "Glob":
-                    file_path = extract_glob_dir(tool_input.get("pattern", ""))
+                    file_path = extract_glob_dir(str(tool_input.get("pattern", "")))
                 if not file_path:
                     return deny_hook(
                         f"Path required for {tool_name}. "
@@ -134,7 +134,7 @@ def create_permission_hooks(
                 return allow_hook()
 
     return {
-        "PreToolUse": [LupHookMatcher(hook=permission_hook)],
+        "PreToolUse": [LupHookMatcher(hook=permission_hook, tag="permission")],
     }
 
 
@@ -154,7 +154,7 @@ def create_tool_allowlist_hook(
         return deny_hook(f"Tool '{tool_name}' not in allowed list.")
 
     return {
-        "PreToolUse": [LupHookMatcher(hook=allowlist_hook)],
+        "PreToolUse": [LupHookMatcher(hook=allowlist_hook, tag="allowlist")],
     }
 
 
@@ -191,7 +191,7 @@ def create_nudge_hook(
         return LupHookOutput(system_message=message)
 
     return {
-        "PostToolUse": [LupHookMatcher(hook=nudge_hook)],
+        "PostToolUse": [LupHookMatcher(hook=nudge_hook, tag="nudge")],
     }
 
 
@@ -223,7 +223,7 @@ def create_capture_hook[T](
         return LupHookOutput()
 
     return (
-        {"PostToolUse": [LupHookMatcher(hook=capture_hook)]},
+        {"PostToolUse": [LupHookMatcher(hook=capture_hook, tag="capture")]},
         captured,
     )
 
@@ -263,5 +263,5 @@ def create_reflection_gate(
         return deny_hook(message)
 
     return {
-        "PreToolUse": [LupHookMatcher(matcher=gated_tool, hook=reflection_gate_hook)],
+        "PreToolUse": [LupHookMatcher(matcher=gated_tool, hook=reflection_gate_hook, tag="reflection_gate")],
     }
