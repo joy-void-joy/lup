@@ -26,7 +26,6 @@ documentation. See Tool Design Philosophy in CLAUDE.md.
 
 import logging
 from collections.abc import Callable
-from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -283,7 +282,7 @@ def create_realtime_tools(
         result = await scheduler.sleep(inp.seconds)
         return SleepOutput(
             reason=result.get("reason", "timer"),
-            time=datetime.now().strftime("%H:%M:%S"),
+            time=result.get("time", ""),
             fired_reminders=result.get("fired_reminders", []),
         )
 
