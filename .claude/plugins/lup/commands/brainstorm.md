@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(find:*, ls:*), Read, Grep, Glob, Write, Edit, Task, WebFetch, WebSearch, AskUserQuestion
+allowed-tools: Bash(find:*, ls:*), Read, Grep, Glob, Write, Edit, Agent, WebFetch, WebSearch, AskUserQuestion
 description: Pre-init design exploration — brainstorm architecture, MCP tools, and agent design
 ---
 
@@ -54,7 +54,7 @@ When the conversation gets specific enough, read these to show the user what the
 When you need to verify SDK capabilities or answer technical questions:
 - Agent SDK docs: `https://docs.claude.com/en/agent-sdk/`
 - Use `WebFetch` or `WebSearch` to check specifics
-- Use `Task(subagent_type="claude-code-guide")` for Claude Code / SDK questions
+- Use `Agent(subagent_type="claude-code-guide")` for Claude Code / SDK questions
 
 ## Conversation Flow
 
