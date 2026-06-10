@@ -27,7 +27,8 @@ class LupThinkingBlock(BaseModel):
     """Extended thinking / reasoning content."""
 
     type: Literal["thinking"] = "thinking"
-    thinking: str
+    thinking: str = ""
+    redacted: bool = False
 
 
 class LupToolUseBlock(BaseModel):
