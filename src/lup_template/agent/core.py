@@ -5,7 +5,7 @@ This is a TEMPLATE. Customize for your domain.
 Key patterns:
 1. Use ClaudeAgentOptions with structured output
 2. Create MCP servers with create_mcp_server()
-3. Track tool metrics with the @tracked decorator
+3. Tool metrics are recorded automatically by lup_tool handlers
 4. Save sessions for feedback loop analysis
 5. Use hooks for permission control
 """

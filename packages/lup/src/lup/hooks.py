@@ -366,12 +366,20 @@ def create_nudge_hook(
 ) -> HooksConfig:
     """Create a PostToolUse hook that nudges the agent toward better alternatives.
 
-    Instead of hard-blocking a tool via PreToolUse denial, this injects a
-    system message after the tool runs, suggesting a better approach. The
-    agent remains free to ignore the nudge.
+    **What:** After a tool in *nudges* runs, calls its check function with
+    the full PostToolUse input; when the check returns a message, that
+    message is injected as a system message. The tool result itself is
+    untouched, and the agent remains free to ignore the nudge.
 
-    Use this when an alternative tool or API exists but hard-blocking would
-    be too restrictive (the original tool still works, just suboptimally).
+    **When:** Use when an alternative tool or approach exists but a
+    PreToolUse denial would be too restrictive — the original tool still
+    works, just suboptimally (e.g. WebFetch on a site with a structured
+    API, or Bash where a dedicated tool exists). For hard constraints,
+    use :func:`create_tool_gate` instead.
+
+    **Why:** Mid-turn guidance lands where prompt rules don't: the nudge
+    arrives exactly at the suboptimal call, with the call's own context,
+    instead of being a standing instruction the agent must remember.
 
     Args:
         nudges: Mapping of tool_name to a check function. The check receives
@@ -413,11 +421,20 @@ def create_capture_hook[T](
 ) -> tuple[HooksConfig, list[T]]:
     """Create a PostToolUse hook that captures data from tool responses.
 
-    Extracts data from a sub-agent's tool responses into a shared list,
-    enabling side-channel data capture without requiring structured output
-    parsing. This is useful when running a sub-agent (e.g., a search agent)
-    and you want to collect data from its tool calls without requiring it
-    to produce a specific output format.
+    **What:** Every time *tool_name* runs, passes the full PostToolUse
+    input to *extract* and appends the returned items to a shared list,
+    which is handed back alongside the hook config and fills up as the
+    agent runs.
+
+    **When:** Use when running a (sub-)agent whose tool traffic carries
+    the data you want — search results, fetched URLs, intermediate
+    artifacts — and you need those collected reliably regardless of what
+    the agent writes in its final answer.
+
+    **Why:** Asking an agent to repeat everything it found in a specific
+    output format is lossy and burns tokens; reading the data off the
+    wire at the hook level captures it exactly once, exactly as the tool
+    returned it.
 
     Args:
         tool_name: The tool name to capture from (e.g., "WebSearch").
