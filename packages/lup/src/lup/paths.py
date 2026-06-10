@@ -1,13 +1,18 @@
 """Centralized path constants and helpers for agent session data.
 
 Pure path layout — where things go on disk. No data discovery or disk
-iteration; see :mod:`lup.lib.history` for cross-version queries.
+iteration; see :mod:`lup.history` for cross-version queries.
 
 Paths auto-detect the project root (walking up to ``pyproject.toml``)
-but can be overridden via :func:`configure`::
+on first access, but can be overridden via :func:`configure`::
 
     from lup.paths import configure
     configure(root=Path("/my/project"), notes_dir=Path("/my/data/notes"))
+
+Resolution is lazy and cached: importing this module never touches the
+filesystem, so ``lup`` is importable outside a ``[tool.lup]`` project
+(e.g. when pip-installed). Auto-detection runs on the first accessor
+call; calling :func:`configure` first skips it entirely.
 
 Layout:
     notes/traces/<version>/sessions/<session_id>/<timestamp>.json
@@ -16,14 +21,15 @@ Layout:
     notes/feedback_loop/
 
 Examples:
-    Override paths for testing::
+    Override paths for testing (the root does not need a pyproject.toml;
+    the version falls back to "0.0.0" unless given explicitly)::
 
         >>> from lup.paths import configure, sessions_dir, project_root
         >>> configure(root=Path("/tmp/test-project"))
         >>> project_root()
         PosixPath('/tmp/test-project')
         >>> sessions_dir()
-        PosixPath('/tmp/test-project/notes/traces/0.1.0/sessions')
+        PosixPath('/tmp/test-project/notes/traces/0.0.0/sessions')
 
     Check if a path is within allowed directories::
 
@@ -45,6 +51,7 @@ from datetime import datetime
 from pathlib import Path
 
 import tomllib
+from pydantic import BaseModel
 
 
 def find_project_root() -> Path:
@@ -63,20 +70,49 @@ def find_project_root() -> Path:
 
 
 def read_agent_version(root: Path) -> str:
-    """Read agent_version from [tool.lup] in pyproject.toml."""
+    """Read agent_version from [tool.lup] in pyproject.toml.
+
+    Returns "0.0.0" when the file or the [tool.lup] table is absent, so
+    :func:`configure` accepts roots that are not lup projects (e.g. test
+    fixtures or scratch directories).
+    """
     pyproject = root / "pyproject.toml"
+    if not pyproject.exists():
+        return "0.0.0"
     with pyproject.open("rb") as f:
         data = tomllib.load(f)
     return data.get("tool", {}).get("lup", {}).get("agent_version", "0.0.0")
 
 
 # -- Mutable path state -------------------------------------------------------
-# Auto-detected on first import; overridable via configure().
+# Resolved lazily on first accessor call; overridable via configure().
+# Internal — read it through the accessor functions, never import it by name.
 
-PROJECT_ROOT = find_project_root()
-AGENT_VERSION = read_agent_version(PROJECT_ROOT)
-NOTES_DIR = PROJECT_ROOT / "notes"
-RUNTIME_LOGS_DIR = PROJECT_ROOT / "logs"
+
+class PathConfig(BaseModel):
+    """Resolved path state: project root, agent version, base directories."""
+
+    root: Path
+    version: str
+    notes_dir: Path
+    logs_dir: Path
+
+
+state: PathConfig | None = None
+
+
+def resolve_state() -> PathConfig:
+    """Return the cached path state, auto-detecting the project root on first use."""
+    global state  # noqa: PLW0603
+    if state is None:
+        root = find_project_root()
+        state = PathConfig(
+            root=root,
+            version=read_agent_version(root),
+            notes_dir=root / "notes",
+            logs_dir=root / "logs",
+        )
+    return state
 
 
 def configure(
@@ -90,7 +126,11 @@ def configure(
 
     Call before any session operations. All derived paths
     (``traces_path``, ``feedback_path``, etc.)
-    update automatically since they read from these values.
+    update automatically since they read from this state.
+
+    ``pyproject.toml`` is consulted only when ``root`` is given without
+    ``version``, and even then it does not have to exist — a missing
+    file or missing ``[tool.lup]`` table falls back to version "0.0.0".
 
     Args:
         root: Project root directory. Resets ``notes_dir``,
@@ -100,20 +140,26 @@ def configure(
         logs_dir: Override runtime logs directory independently.
         version: Override agent version (read from [tool.lup] by default).
     """
-    global PROJECT_ROOT, AGENT_VERSION, NOTES_DIR, RUNTIME_LOGS_DIR  # noqa: PLW0603
+    global state  # noqa: PLW0603
 
     if root is not None:
-        PROJECT_ROOT = root
-        AGENT_VERSION = read_agent_version(root)
-        NOTES_DIR = root / "notes"
-        RUNTIME_LOGS_DIR = root / "logs"
+        state = PathConfig(
+            root=root,
+            version=version if version is not None else read_agent_version(root),
+            notes_dir=notes_dir if notes_dir is not None else root / "notes",
+            logs_dir=logs_dir if logs_dir is not None else root / "logs",
+        )
+        return
 
+    updates: dict[str, Path | str] = {}
     if notes_dir is not None:
-        NOTES_DIR = notes_dir
+        updates["notes_dir"] = notes_dir
     if logs_dir is not None:
-        RUNTIME_LOGS_DIR = logs_dir
+        updates["logs_dir"] = logs_dir
     if version is not None:
-        AGENT_VERSION = version
+        updates["version"] = version
+    if updates:
+        state = resolve_state().model_copy(update=updates)
 
 
 # -- Public path accessors ----------------------------------------------------
@@ -121,32 +167,32 @@ def configure(
 
 def project_root() -> Path:
     """Return the project root directory."""
-    return PROJECT_ROOT
+    return resolve_state().root
 
 
 def agent_version() -> str:
-    """Return the agent version from [tool.lup] in pyproject.toml."""
-    return AGENT_VERSION
+    """Return the agent version ([tool.lup] in pyproject.toml unless overridden)."""
+    return resolve_state().version
 
 
 def notes_path() -> Path:
     """Return the notes directory (``<root>/notes`` by default)."""
-    return NOTES_DIR
+    return resolve_state().notes_dir
 
 
 def runtime_logs_path() -> Path:
     """Return the runtime logs directory (``<root>/logs`` by default)."""
-    return RUNTIME_LOGS_DIR
+    return resolve_state().logs_dir
 
 
 def traces_path() -> Path:
     """Return ``notes/traces/``."""
-    return NOTES_DIR / "traces"
+    return notes_path() / "traces"
 
 
 def feedback_path() -> Path:
     """Return ``notes/feedback_loop/``."""
-    return NOTES_DIR / "feedback_loop"
+    return notes_path() / "feedback_loop"
 
 
 # -- Timestamp helpers --------------------------------------------------------
@@ -168,17 +214,17 @@ def parse_timestamp(name: str) -> datetime:
 
 def sessions_dir(version: str | None = None) -> Path:
     """Directory for session JSONs: notes/traces/<version>/sessions/"""
-    return traces_path() / (version or AGENT_VERSION) / "sessions"
+    return traces_path() / (version or agent_version()) / "sessions"
 
 
 def outputs_dir(version: str | None = None) -> Path:
     """Directory for agent outputs: notes/traces/<version>/outputs/"""
-    return traces_path() / (version or AGENT_VERSION) / "outputs"
+    return traces_path() / (version or agent_version()) / "outputs"
 
 
 def trace_logs_dir(version: str | None = None) -> Path:
     """Directory for reasoning logs: notes/traces/<version>/logs/"""
-    return traces_path() / (version or AGENT_VERSION) / "logs"
+    return traces_path() / (version or agent_version()) / "logs"
 
 
 # -- Path utilities -----------------------------------------------------------
