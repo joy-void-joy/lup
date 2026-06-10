@@ -2,6 +2,7 @@
 
 from typing import cast
 
+import pytest
 from claude_agent_sdk.types import (
     HookContext,
     PreToolUseHookInput,
@@ -27,6 +28,13 @@ class PingOutput(BaseModel):
 
 @lup_tool("Echo a ping. Test fixture tool.")
 async def ping(params: PingInput) -> PingOutput:
+    return PingOutput(text=params.text)
+
+
+@lup_tool(
+    "Tagged ping requiring an API key. Test fixture tool.", tags=["requires:demo-api"]
+)
+async def gated_ping(params: PingInput) -> PingOutput:
     return PingOutput(text=params.text)
 
 
@@ -123,6 +131,50 @@ class TestGetAllowedTools:
         assert "WebFetch" not in allowed
         assert "mcp__pingsrv__ping" not in allowed
         assert "WebSearch" in allowed
+
+
+class TestTagFiltering:
+    """Tags filter at server construction: tools with unmet requirements
+    are never registered instead of failing on their first call."""
+
+    def test_tagged_tool_filtered_when_tag_excluded(self) -> None:
+        policy = ToolPolicy(settings, excluded_tags=frozenset({"requires:demo-api"}))
+
+        kept = policy.filter_tools([ping, gated_ping])
+
+        assert gated_ping not in kept
+        assert ping in kept
+
+    def test_untagged_tools_unaffected_by_tag_exclusions(self) -> None:
+        policy = ToolPolicy(
+            settings, excluded_tags=frozenset({"requires:demo-api", "requires:other"})
+        )
+
+        assert policy.filter_tools([ping]) == [ping]
+
+    def test_missing_example_key_excludes_example_api_tag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from lup_template.agent.tools.example import EXAMPLE_TOOLS
+
+        monkeypatch.setattr(settings, "example_api_key", None)
+        policy = ToolPolicy(settings)
+
+        assert "requires:example-api" in policy.excluded_tags
+        kept_names = [t.sdk_tool.name for t in policy.filter_tools(EXAMPLE_TOOLS)]
+        assert "search_example" not in kept_names
+        assert "fetch_example" in kept_names
+
+    def test_present_example_key_keeps_tagged_tools(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from lup_template.agent.tools.example import EXAMPLE_TOOLS
+
+        monkeypatch.setattr(settings, "example_api_key", "key-123")
+        policy = ToolPolicy(settings)
+
+        assert "requires:example-api" not in policy.excluded_tags
+        assert policy.filter_tools(EXAMPLE_TOOLS) == list(EXAMPLE_TOOLS)
 
 
 class TestAllowlistEnforcement:
