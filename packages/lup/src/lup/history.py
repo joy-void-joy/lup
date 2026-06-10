@@ -321,9 +321,14 @@ def iter_output_dirs(
                     yield d
 
 
-def iter_trace_log_files(session_id: str | None = None) -> Iterator[Path]:
-    """Iterate reasoning log files across all versions."""
-    for ver_dir in version_dirs():
+def iter_trace_log_files(
+    session_id: str | None = None,
+    version: str | None = None,
+) -> Iterator[Path]:
+    """Iterate reasoning log files across all (or filtered) versions."""
+    ver_dirs = [traces_path() / version] if version else version_dirs()
+
+    for ver_dir in ver_dirs:
         logs_base = ver_dir / "logs"
         if not logs_base.exists():
             continue
