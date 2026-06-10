@@ -653,9 +653,9 @@ def main(
         typer.Option(
             "--watch/--no-watch",
             "-w",
-            help="Continuously refresh the display.",
+            help="Continuously refresh the display (requires a terminal).",
         ),
-    ] = True,
+    ] = False,
     interval: Annotated[
         int,
         typer.Option(
@@ -672,7 +672,7 @@ def main(
 
     bar_width = min(console.width - 10, 58)
 
-    if not watch:
+    if not watch or not console.is_terminal:
         try:
             panel = fetch_and_build(detail, bar_width)
         except httpx.HTTPStatusError as e:
