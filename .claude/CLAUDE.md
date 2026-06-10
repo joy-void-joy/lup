@@ -509,16 +509,6 @@ Even for open-ended questions, use `AskUserQuestion` with options that include a
 
 **When in doubt, ask.**
 
-### Planning & Documentation
-
-**PLAN.md** is the source of truth for what has been built and what remains:
-
-- Reflect actual state, not aspirational designs
-- Mark completed items (`[x]`), keep status indicators current (`[ ]` pending, `[~]` in progress)
-- Update architecture decisions as they evolve
-- Add new tasks discovered during implementation
-- No speculative code — describe what to build, not how
-
 ### Slash Commands & Skills
 
 **After every command invocation**, reflect on how it was actually used vs. documented:
