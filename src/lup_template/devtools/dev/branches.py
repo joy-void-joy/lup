@@ -226,14 +226,7 @@ def is_ancestor(ancestor: str, descendant: str) -> bool:
 
 def get_branch_worktree(branch: str) -> str | None:
     """Return the worktree path for a branch, or None."""
-    output = str(git("worktree", "list", "--porcelain"))
-    current_worktree = ""
-    for line in output.splitlines():
-        if line.startswith("worktree "):
-            current_worktree = line.split(" ", 1)[1]
-        elif line.startswith("branch ") and line.endswith(f"/{branch}"):
-            return current_worktree
-    return None
+    return parse_worktrees().get(branch)
 
 
 def get_pr_info(branch: str) -> dict[str, str]:
@@ -268,7 +261,16 @@ def classify_branch(
     *,
     has_remote: bool = True,
 ) -> BranchClassification:
-    """Classify a branch as DELETE/STALE/KEEP/CURRENT/PROTECTED with reason."""
+    """Classify a branch as DELETE/STALE/KEEP/CURRENT/NOT_FOUND with reason."""
+    from lup_template.devtools.dev.worktree import branch_exists
+
+    if not branch_exists(branch):
+        return {
+            "branch": branch,
+            "status": "NOT_FOUND",
+            "reason": "no such local branch",
+        }
+
     if branch == current:
         return {"branch": branch, "status": "CURRENT", "reason": "current branch"}
 
@@ -506,9 +508,13 @@ def branch_status(branch: str | None, as_json: bool) -> None:
 
     for r in results:
         status = r["status"]
-        marker = {"DELETE": "x", "STALE": "~", "KEEP": " ", "CURRENT": "*"}.get(
-            str(status), " "
-        )
+        marker = {
+            "DELETE": "x",
+            "STALE": "~",
+            "KEEP": " ",
+            "CURRENT": "*",
+            "NOT_FOUND": "?",
+        }.get(str(status), " ")
         wt = " [worktree]" if r.get("worktree") else ""
         typer.echo(f"[{marker}] {r['branch']:<27} {status:<10} {r['reason']}{wt}")
 
