@@ -6,15 +6,17 @@ Key patterns:
 1. Define tool sets as frozensets for fast membership testing
 2. ToolPolicy class computes excluded tools at construction
 3. from_settings() factory for easy initialization
-4. Separate get_mcp_servers() and get_allowed_tools() methods
+4. get_mcp_servers() registers servers; get_allowed_tools() feeds the
+   allowlist hook that enforces availability at call time
 
 Usage:
+    from lup.hooks import create_tool_allowlist_hook
     from lup_template.agent.config import settings
     from lup_template.agent.tool_policy import ToolPolicy
 
     policy = ToolPolicy.from_settings(settings)
-    mcp_servers = policy.get_mcp_servers()
-    allowed_tools = policy.get_allowed_tools()
+    mcp_servers = policy.get_mcp_servers(*sdk_servers)
+    hooks = create_tool_allowlist_hook(policy.get_allowed_tools(mcp_servers))
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from claude_agent_sdk.types import McpSdkServerConfig, McpServerConfig
+
+from lup.mcp import server_tool_names
 
 if TYPE_CHECKING:
     from lup_template.agent.config import Settings
@@ -31,21 +35,28 @@ if TYPE_CHECKING:
 # TOOL SETS - Define tools that require specific API keys
 # =============================================================================
 
-# Built-in SDK tools (always available)
+# Built-in Claude Code tools (always available)
 BUILTIN_TOOLS: frozenset[str] = frozenset(
     {
-        "WebSearch",
-        "WebFetch",
-        "Read",
-        "Write",
+        "Bash",
+        "Edit",
         "Glob",
         "Grep",
-        "Bash",
+        "NotebookEdit",
+        "Read",
         "Task",
-        "TodoRead",
         "TodoWrite",
+        "WebFetch",
+        "WebSearch",
+        "Write",
     }
 )
+
+# Tools the SDK injects for the session itself, outside the builtin
+# toolset: StructuredOutput emits the final structured output when
+# ClaudeAgentOptions.output_format is set, so denying it would leave the
+# agent unable to finish.
+FRAMEWORK_TOOLS: frozenset[str] = frozenset({"StructuredOutput"})
 
 # Define named tool sets for each API dependency.
 # Each set groups tools that share the same API key requirement.
@@ -78,11 +89,12 @@ class ToolPolicy:
         settings: Settings,
         *,
         restricted_mode: bool = False,
+        excluded_tools: frozenset[str] = frozenset(),
     ) -> None:
         self.settings = settings
         self.restricted_mode = restricted_mode
 
-        excluded: set[str] = set()
+        excluded: set[str] = set(excluded_tools)
 
         # TODO: Add your exclusion logic
         # Example:
@@ -146,24 +158,29 @@ class ToolPolicy:
 
         return servers
 
-    def get_allowed_tools(self) -> list[str]:
-        """Get list of allowed tools based on policy.
+    def get_allowed_tools(self, servers: dict[str, McpServerConfig]) -> list[str]:
+        """Compute every tool name the agent may call.
+
+        Combines built-in Claude Code tools, SDK framework tools, and the
+        ``mcp__{server}__{tool}`` name of every tool on the registered
+        *servers*, minus policy-excluded names. Feed the result to
+        :func:`lup.hooks.create_tool_allowlist_hook` — under
+        ``permission_mode="bypassPermissions"`` the SDK's ``allowed_tools``
+        option is ignored, so that hook is the enforcement point.
+
+        Args:
+            servers: Registered MCP servers (from :meth:`get_mcp_servers`),
+                keyed by the server name the SDK uses for tool prefixes.
 
         Returns:
-            Sorted list of tool names that are allowed.
+            Sorted list of allowed tool names.
         """
-        # Start with all potential tools
-        tools: set[str] = set()
+        tools: set[str] = set(BUILTIN_TOOLS) | set(FRAMEWORK_TOOLS)
 
-        # Built-in tools
-        tools.update(BUILTIN_TOOLS)
+        for server_name, server in servers.items():
+            for tool_name in server_tool_names(server):
+                tools.add(f"mcp__{server_name}__{tool_name}")
 
-        # TODO: Add your tool sets
-        # tools.update(EXA_TOOLS)
-        # tools.update(FRED_TOOLS)
-        # tools.update(YOUR_DOMAIN_TOOLS)
-
-        # Remove excluded tools
         tools -= self.excluded_tools
 
         return sorted(tools)

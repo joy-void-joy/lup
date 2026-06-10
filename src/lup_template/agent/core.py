@@ -26,7 +26,7 @@ from claude_agent_sdk.types import McpServerConfig, McpSdkServerConfig
 
 from lup.client import ResponseCollector, TokenUsage, query
 from lup.history import save_session
-from lup.hooks import create_permission_hooks, merge_hooks
+from lup.hooks import create_permission_hooks, create_tool_allowlist_hook, merge_hooks
 from lup.mcp import create_mcp_server, extract_sdk_tools
 from lup.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
 from lup.notes import NotesConfig, setup_notes
@@ -119,7 +119,11 @@ def build_options(
     )
     hooks = merge_hooks(permission_hooks, gate_hooks)
 
+    # Tool allowlist: allowed_tools in options is ignored under
+    # bypassPermissions, so availability is enforced by a PreToolUse hook.
     policy = ToolPolicy.from_settings(settings)
+    allowlist_hooks = create_tool_allowlist_hook(policy.get_allowed_tools(servers))
+    hooks = merge_hooks(hooks, allowlist_hooks)
 
     return ClaudeAgentOptions(
         model=settings.model,
@@ -142,7 +146,6 @@ def build_options(
         mcp_servers=servers,
         agents=get_subagents(),
         add_dirs=[str(d) for d in notes_config.all_dirs],
-        allowed_tools=policy.get_allowed_tools(),
         output_format={
             "type": "json_schema",
             "schema": AgentOutput.model_json_schema(),
