@@ -19,7 +19,7 @@ The configurable hooks live in `.claude/plugins/lup/hooks/scripts/`:
 | --------------------- | --------------- | ---------------------------------------------------------------------------------- |
 | `auto_allow_bash.py`  | Bash commands   | `RULES` list of `Allow`/`Deny` (last-match-wins)                                   |
 | `auto_allow_fetch.py` | WebFetch URLs   | `ALLOW_PATTERNS` (list of regex), `DENY_PATTERNS` (list of (regex, reason) tuples) |
-| `auto_allow_edits.py` | Edit operations | `PROTECTED_PATTERNS` (list of regex), `MAX_REAL_CHANGES` (int)                     |
+| `auto_allow_edits.py` | Edit operations | `PROTECTED_PATTERNS` (list of regex), `MAX_REAL_CHANGES` (int), `ANTI_PATTERNS` / `TS_ANTI_PATTERNS` (list of (regex, reason)) |
 
 ## How It Works
 
@@ -28,6 +28,7 @@ The configurable hooks live in `.claude/plugins/lup/hooks/scripts/`:
 - **Neither**: Falls through to ask the user interactively
 - **PROTECTED_PATTERNS** (edits only): Files matching these always defer to user
 - **MAX_REAL_CHANGES** (edits only): Edits with more nontrivial lines than this defer to user
+- **ANTI_PATTERNS / TS_ANTI_PATTERNS** (edits only): Added lines matching these are denied with a reason; an inline `# claude: ignore` escalates to ask instead. `find_swallowed_excepts` adds a structural check for silent `except ...: pass` handlers on top of the line regexes
 
 ## Your Task
 
@@ -67,6 +68,9 @@ User says: "increase the edit threshold to 5 lines"
 
 User says: "remove the pypi allow pattern"
 -> Remove the matching pattern from the relevant list
+
+User says: "the X anti-pattern keeps firing on legitimate uses"
+-> Survey real usages of X in the codebase first, then retarget the ANTI_PATTERNS entry at the actual failure mode instead of the surface pattern (e.g. `except Exception` -> silent `except ...: pass` swallows)
 
 ## If no arguments provided
 
