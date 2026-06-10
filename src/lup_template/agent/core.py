@@ -59,15 +59,26 @@ def build_result(
     session_id: str,
     task_id: str | None,
     response: LupResponse,
+    session_dir: Path,
 ) -> AgentSessionResult:
-    """Build an AgentSessionResult from the completed agent run."""
+    """Build an AgentSessionResult from the completed agent run.
+
+    The output is what the agent submitted via the submit_output tool
+    (``session_dir/output.json``). Adapters still using native structured
+    output fall back to ``result.structured_output``.
+    """
+    from lup.output import read_output
+
     result = response.result
     if result is None:
         raise RuntimeError("No result in response")
 
-    output = AgentOutput(summary="No output produced", factors=[], confidence=0.5)
-    if result.structured_output:
+    output = read_output(session_dir, AgentOutput)
+    if output is None and result.structured_output:
         output = AgentOutput.model_validate(result.structured_output)
+    if output is None:
+        logger.error("Session %s finished without submitting output", session_id)
+        output = AgentOutput(summary="No output produced", factors=[], confidence=0.5)
 
     return AgentSessionResult(
         session_id=session_id,
@@ -112,6 +123,7 @@ def build_options(
     )
     from lup.hooks import create_permission_hooks
     from lup.mcp import create_mcp_server
+    from lup.output import create_output_tool
     from lup.types import merge_hooks
 
     from lup_template.agent.prompts import get_system_prompt
@@ -124,9 +136,16 @@ def build_options(
         outputs_dir=notes.output.parent,
     )
 
+    output_kit = create_output_tool(
+        AgentOutput,
+        session_dir=notes.session,
+        gate=reflect_kit["gate"],
+        reflection_tool_name="mcp__notes__review",
+    )
+
     reflect_server = create_mcp_server(
         name="notes",
-        tools=reflect_kit["tools"],
+        tools=[*reflect_kit["tools"], *output_kit["tools"]],
     )
 
     all_servers = [reflect_server]
@@ -146,13 +165,17 @@ def build_options(
         ro_dirs=notes.ro,
     )
 
-    from lup.hooks import create_reflection_gate
+    from lup.hooks import create_completion_guard, create_reflection_gate
 
     reflection_hooks = create_reflection_gate(
         gate=reflect_kit["gate"],
-        gated_tool="StructuredOutput",
+        gated_tool="mcp__notes__submit_output",
+        reflection_tool_name="mcp__notes__review",
     )
     hooks = merge_hooks(hooks, reflection_hooks)
+
+    completion_hooks = create_completion_guard(output_kit["output_path"].exists)
+    hooks = merge_hooks(hooks, completion_hooks)
 
     claude_hooks = lup_hooks_to_claude(hooks)
 
@@ -186,10 +209,6 @@ def build_options(
         agents=subagents,
         add_dirs=[str(d) for d in notes.all_dirs],
         allowed_tools=policy.get_allowed_tools(),
-        output_format={
-            "type": "json_schema",
-            "schema": AgentOutput.model_json_schema(),
-        },
         effort=cast("EffortLevel | None", settings.reasoning_effort),
     )
 
@@ -324,11 +343,12 @@ def build_openai_adapter(
 def build_adapter(
     session_id: str,
     task_id: str | None = None,
-) -> tuple[AgentAdapter, AbstractContextManager[object]]:
+) -> tuple[AgentAdapter, AbstractContextManager[object], NotesConfig]:
     """Build the appropriate adapter for ``settings.agent_sdk``.
 
-    Returns (adapter, context_manager) — the caller enters the context
-    (e.g. sandbox lifecycle) around the adapter run.
+    Returns (adapter, context_manager, notes) — the caller enters the
+    context (e.g. sandbox lifecycle) around the adapter run and reads
+    session artifacts from the notes config.
     """
     notes = setup_notes(session_id, task_id or "0")
 
@@ -344,13 +364,13 @@ def build_adapter(
             )
             options = build_options(notes, sandbox=sb)
             adapter: AgentAdapter = ClaudeAdapter(options)
-            return adapter, sb
+            return adapter, sb, notes
 
         case "codex":
-            return build_codex_adapter(notes), nullcontext()
+            return build_codex_adapter(notes), nullcontext(), notes
 
         case "openai":
-            return build_openai_adapter(notes), nullcontext()
+            return build_openai_adapter(notes), nullcontext(), notes
 
 
 async def run_agent(
@@ -373,7 +393,7 @@ async def run_agent(
     trace_path = TRACES_PATH / session_id / f"{datetime.now().strftime('%H%M%S')}.md"
     trace_logger = TraceLogger(trace_path=trace_path, title=f"Session {session_id}")
 
-    adapter, ctx = build_adapter(session_id, task_id)
+    adapter, ctx, notes = build_adapter(session_id, task_id)
 
     with ctx:
         response = await adapter.run(task, trace_logger=trace_logger)
@@ -385,6 +405,7 @@ async def run_agent(
         session_id=session_id,
         task_id=task_id,
         response=response,
+        session_dir=notes.session,
     )
 
     save_session(session_result, session_id=session_result.session_id)

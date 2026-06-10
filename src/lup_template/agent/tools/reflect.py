@@ -4,11 +4,11 @@ This is a TEMPLATE. Customize the input model and reviewer prompt
 for your domain.
 
 Pattern: A tool the agent calls to record its self-assessment before
-producing final output. A :class:`~lup.lib.reflect.ReflectionGate`
-hook enforces this — StructuredOutput (or sleep) is denied until
+producing final output. A :class:`~lup.reflect.ReflectionGate` enforces
+this — submit_output (or sleep, in persistent mode) is rejected until
 the agent has called ``review``.
 
-Optionally runs a reviewer sub-agent (independent ClaudeSDKClient)
+Optionally runs a reviewer sub-agent (an independent one-shot query)
 that critiques the main agent's reasoning with sandboxed file access
 to past outputs and web search.
 
