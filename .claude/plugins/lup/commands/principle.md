@@ -125,7 +125,7 @@ Present findings and proposed changes one layer at a time. For each layer:
 
 **Group 5: Devtools & automation** (`src/lup_template/devtools/`)
 
-- Do the devtools commands (agent, session, git, sync, usage) reflect the principle?
+- Do the devtools commands (agent, py, dev, feedback, setup, sync, trace, usage, version) reflect the principle?
 - Are there devtools commands that should exist to support the principle but don't?
 
 ## Phase 4: Execute Approved Changes
