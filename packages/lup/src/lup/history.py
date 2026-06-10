@@ -58,7 +58,7 @@ from pydantic import BaseModel, Field
 
 from lup.client import TokenUsage
 from lup.metrics import MetricsSummary
-from lup.paths import agent_version, sessions_dir, traces_path
+from lup.paths import agent_version, parse_timestamp, sessions_dir, traces_path
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +187,16 @@ def update_session_metadata(
     if not all_files:
         return False
 
-    latest_file = sorted(all_files)[-1]
+    def file_timestamp(path: Path) -> datetime:
+        """Sort key: parsed filename timestamp (non-timestamped names sort first)."""
+        try:
+            return parse_timestamp(path.name)
+        except ValueError:
+            return datetime.min
+
+    # Latest by parsed timestamp — a lexicographic full-path sort would
+    # order version directories wrong (0.10.0 < 0.9.0).
+    latest_file = max(all_files, key=file_timestamp)
 
     try:
         data: SessionData = json.loads(latest_file.read_text(encoding="utf-8"))
