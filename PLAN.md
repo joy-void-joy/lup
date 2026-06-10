@@ -1,310 +1,196 @@
-# SDK Interoperability: Claude + Codex
+# Refactor Plan: True SDK Parity + Repo Stabilization
 
 ## Goal
 
-Make the lup inner-agent runnable on either the Claude Agent SDK or the OpenAI Codex SDK, selectable via the `AGENT_SDK` env var. Both paths get the full lup feature set — hooks, MCP tools, reflection, subagents, persistent mode. The implementation differs; the behavior doesn't.
+Make the lup inner-agent genuinely runnable on either the Claude Agent SDK or the OpenAI Codex SDK — same feature set, same enforcement, same session artifacts — and bring the repo itself to a healthy baseline: working devtools, CI, truthful docs, and tests that exercise wiring rather than construction.
 
-## How Every Feature Maps
+This plan supersedes the previous SDK-interop status document. That document marked all phases DONE; an end-to-end review showed the pieces exist and pass unit tests, but the Codex path is not wired: `serve-tools` serves 2 of 13 tools, the reflection gate guards a tool that never fires on Codex, generated permission scripts match Claude tool names, and subagents are prompt text with no invocation mechanism.
 
-The previous plan mapped lup features to SDK primitives and declared anything without a 1:1 match "Claude-only." But every lup feature has a Codex implementation — just through different plumbing.
+## Locked Decisions
 
-| Feature | Claude SDK | Codex SDK |
+1. **True parity (Option A)** — both SDKs get the full one-shot feature set. Not "basic mode", not removal.
+2. **Output is a lup-owned MCP tool on every backend.** `submit_output` (schema = `AgentOutput`) replaces Claude's native `output_format` and Codex's native `output_schema` as the finalization mechanism.
+3. **Enforcement lives in tool handlers first, hooks second.** The reflection gate is checked inside `submit_output` itself (deny via `is_error` until reflected). PreToolUse hooks become optional hardening. This removes the hard dependency on Codex's experimental `features.codex_hooks` flag.
+4. **State crosses process boundaries via filesystem + env.** One convention everywhere: session context enters subprocesses through env vars; mutable state (gate flag, output, metrics) relays through files in the session directory.
+5. **One MCP server name on all backends: `notes`.** Tool names like `mcp__notes__submit_output` must be identical on every path, or gates and prompts diverge again.
+6. **Subagent spec is shared; implementation is per-adapter.** Claude keeps native `AgentDefinition` subagents. Codex gets a served `run_subagent` tool that dispatches `query()` from the same `SubagentSpec` list.
+7. **Persistent/realtime mode stays Claude-only in this refactor.** The sleep/wake tools require tool→parent IPC on Codex (different problem class). Deferred with a design sketch — see Deferred Work.
+8. **Phase 0 (devtools regressions, CI) ships independently off `dev`** — it is unrelated to interop and unblocks everything else.
+
+## Current State
+
+### Actually working
+
+- [x] `lup/types.py` type layer (blocks, messages, response, hooks, `SubagentSpec`)
+- [x] `AgentAdapter` / `Conversation` ABCs; Claude adapter + converters (tested)
+- [x] Codex adapter basics: prompt → run → collect, `resume()`, `fork()`, config-override assembly
+- [x] OpenAI-compatible adapter (Codex runtime + `model_provider`)
+- [x] `core.py` dispatch with zero `claude_agent_sdk` imports
+- [x] File-backed `ReflectionGate`; Codex hook **script generation** (generation only)
+- [x] Config fields for SDK selection, Codex sandbox/effort/approval
+
+### Wired but dead (what this plan fixes)
+
+- [ ] `serve-tools` serves only `EXAMPLE_TOOLS` — reflect/realtime/sandbox tools never reach Codex (`devtools/agent.py: collect_tools_by_server`)
+- [ ] Gate guards `"StructuredOutput"`, which doesn't exist as a tool on Codex; nothing can set the flag file (`core.py: build_codex_adapter`)
+- [ ] Generated permission scripts match Claude tool names (`Write`/`Edit`/`Read`/`Glob`/`Grep`) — unverified against real Codex hook events (`adapters/codex_hooks.py`)
+- [ ] Subagents on Codex are a system-prompt section with no invocation mechanism (`core.py: format_subagent_prompt_section`)
+- [ ] Sandbox constructed only on the Claude path (`core.py: build_adapter`)
+- [ ] `settings.max_turns` / `settings.max_budget_usd` never wired into `build_options`; `query()` silently drops options on non-Claude backends; background factory silently drops `tools` on Codex
+- [ ] `lup/__init__.py` eagerly imports `adapters.claude_client`; exports retired `ResponseCollector` alongside its replacement
+- [ ] `core.py` writes traces to `notes/traces/<session_id>/` bypassing the versioned `lup.paths` layout
+- [ ] Devtools: `version` sub-app crashes (`click.get_current_context()`), `usage` hangs in non-TTY, `ruff format` failing on 24 files, no CI
+- [ ] Docs: README unfinished, CLAUDE.md structure stale, 11 `lup.lib` docstring refs, PATTERNS.md references `lup.client`
+
+## Target Architecture
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Consumer code (core.py) — lup.types only                       │
+├────────────────────────────────────────────────────────────────┤
+│ Finalization: mcp__notes__submit_output (ALL backends)         │
+│   - validates AgentOutput in-handler (is_error retry)          │
+│   - checks ReflectionGate in-handler (deny until reflected)    │
+│   - writes session_dir/output.json (build_result reads it)     │
+├──────────────────────────┬─────────────────────────────────────┤
+│ Claude path              │ Codex / OpenAI path                 │
+│ in-process MCP "notes"   │ serve-tools subprocess = MCP "notes"│
+│ in-process hooks         │ env contract: LUP_SESSION_DIR,      │
+│ native AgentDefinition   │   LUP_OUTPUTS_DIR, LUP_GATE_FLAG,   │
+│ Stop-guard for unsubmit  │   LUP_TASK_ID, LUP_SESSION_ID       │
+│                          │ native sandbox_mode+writable_roots  │
+│                          │ run_subagent tool (query dispatch)  │
+├──────────────────────────┴─────────────────────────────────────┤
+│ State relay: files in session dir (gate flag, output, metrics) │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Context relay contract
+
+| Env var | Meaning | Read by |
 |---|---|---|
-| **MCP tools** | In-process via `create_sdk_mcp_server()` | External stdio via `serve-tools` + `config_overrides` (Codex app-server is a Rust subprocess — no in-process tool registration exists) |
-| **Permission hooks** | Python functions in `ClaudeAgentOptions.hooks` | config.toml command hooks — Codex supports PreToolUse/PostToolUse/PermissionRequest/Stop with allow/deny |
-| **Reflection gate** | PreToolUse hook blocks output tool until reflect is called | config.toml PreToolUse command hook — same gate logic, different transport |
-| **Subagents** | `AgentDefinition` — first-class | Thread fork (`thread/fork`) or direct API calls via `query()` |
-| **Background agents** | Independent `ClaudeSDKClient` instances | Independent Codex threads (inherently persistent and concurrent) |
-| **Persistent agent** | Stop hook prevents exit + Scheduler | Thread resume (`thread/resume`) + Scheduler |
-| **Structured output** | `output_format` + `StructuredOutput` tool | `run_pydantic()` / `run_json()` with native schema validation |
-| **Sandbox** | lup's Docker `Sandbox` class | Same — lup's Docker `Sandbox` via MCP tools (`execute_code`, `install_package`) |
-| **Thinking / effort** | `output_config.effort` (low–max) | `ReasoningEffort` (none–xhigh) |
-| **Session persistence** | Session JSONL on disk, `--continue`/`--resume`, `fork_session` | Thread store, `thread/resume`, `thread/fork` |
-| **Web search** | `web_search` server tool with domain filtering | Native web search (disabled/cached/live) |
-| **Streaming** | `Message` union type, `StreamEvent` wrapper | `ThreadEvent` with type discriminators |
-| **Security profiles** | 6 permission modes + allowed/disallowed tools + hooks | `SandboxMode` + `approval_policy` (4 levels) + `writable_roots` |
-| **PydanticAI** | `AnthropicModel` provider | `CodexModel` provider (third-party `codex-sdk-python`) |
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                       Consumer Code                           │
-│  core.py, trace.py — import from lup.types only               │
-├──────────────────────────────────────────────────────────────┤
-│  core.py dispatches: match settings.agent_sdk                 │
-├─────────────────────────┬────────────────────────────────────┤
-│   adapters/claude       │   adapters/codex                   │
-│                         │   adapters/openai_compat            │
-│   ClaudeAdapter         │   CodexAdapter                     │
-│    build_options()      │   OpenAICompatibleAdapter           │
-│    type converters      │    type converters                 │
-│                         │    thread management               │
-│                         │                                    │
-│   In-process hooks      │   config.toml command hooks        │
-│   In-process MCP        │   External MCP (serve-tools)       │
-│   AgentDefinition       │   Thread fork / query()            │
-│   ClaudeSDKClient       │   AsyncCodex threads               │
-├─────────────────────────┴────────────────────────────────────┤
-│   adapters/common — AgentAdapter ABC                          │
-├──────────────────────────────────────────────────────────────┤
-│   types.py — LupContentBlock, LupMessage, LupResponse         │
-├──────────────────────────────────────────────────────────────┤
-│   Shared (SDK-agnostic)                                       │
-│   trace.py    — trace logging (lup types only)                │
-│   metrics.py  — tool call tracking                            │
-│   history.py  — session storage                               │
-│   notes.py    — directory structure                           │
-│   realtime.py — scheduler (timing logic is SDK-agnostic)      │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**Key rule:** Consumer code never imports from `claude_agent_sdk` or `codex_app_server`. All SDK-specific logic lives in `adapters/*`.
-
-## Feature Implementation Details
-
-### 1. MCP Tools on Codex
-
-Codex's app-server is a Rust subprocess communicating via JSON-RPC. There is no in-process tool registration — tools are either built-in or external MCP servers configured via TOML. An experimental `dynamicTools` JSON-RPC protocol exists but the Python SDK doesn't expose it yet.
-
-`lup-devtools agent serve-tools` already launches all `@lup_tool` tools as a stdio MCP server. The Codex adapter passes this via `config_overrides` on `AppServerConfig`:
-
-```python
-config = AppServerConfig(
-    config_overrides=(
-        'mcp_servers.lup-tools.command="uv"',
-        'mcp_servers.lup-tools.args=["run", "lup-devtools", "agent", "serve-tools"]',
-    ),
-)
-async with AsyncCodex(config) as codex:
-    thread = await codex.thread_start(...)
-```
-
-All existing `@lup_tool` decorated tools (reflect, sandbox, realtime, domain) work unchanged — the tool code doesn't know which SDK drives the outer agent.
-
-**Future optimization:** When the Python SDK exposes `dynamicTools`, tool call/result can go through JSON-RPC directly (in-process handlers) instead of spawning a subprocess. This eliminates the MCP server but requires subclassing `AppServerClient` to handle `item/tool/call` requests.
-
-### 2. Permission Hooks on Codex
-
-Codex has a config.toml hook system with PreToolUse, PostToolUse, PermissionRequest, and Stop events — structurally identical to Claude Code's hook scripts, with allow/deny decisions.
-
-Lup's existing hook scripts (`.claude/plugins/lup/hooks/scripts/`) are Python command scripts. The Codex adapter writes equivalent config via `config_overrides`:
-
-```python
-config_overrides=(
-    'features.codex_hooks=true',
-    'hooks.PreToolUse[0].matcher="^Bash$"',
-    'hooks.PreToolUse[0].hooks[0].type="command"',
-    'hooks.PreToolUse[0].hooks[0].command="python3 hooks/auto_allow_bash.py"',
-)
-```
+| `LUP_SESSION_DIR` | session notes directory | serve-tools (reflect, output tools) |
+| `LUP_OUTPUTS_DIR` | past outputs root | reviewer subagent |
+| `LUP_GATE_FLAG` | reflection gate flag file | gate (tool-side and hook-side) |
+| `LUP_TASK_ID` / `LUP_SESSION_ID` | identifiers | sandbox naming, metrics |
 
-The hook scripts need a thin adapter (`adapters/codex_hooks.py`) to translate between output formats — Claude hooks emit `SyncHookJSONOutput`; Codex hooks emit JSON with `allow`/`deny`/`systemMessage` fields. The policy logic itself stays shared.
+`build_mcp_config_overrides()` gains an `env` parameter emitted as `mcp_servers.notes.env.*` overrides. Constants live in `lup/paths.py` so both producer (core) and consumer (serve-tools) import one definition.
 
-### 3. Reflection Gate on Codex
+---
 
-The reflection gate is a PreToolUse hook that blocks the output tool (e.g., `StructuredOutput`, `sleep`) until the agent has called the reflect tool. Same mechanism on both SDKs, different transport:
+## Phase 0 — Stabilize (independent; worktree off `dev`)
 
-- **Claude:** Python hook function in `ClaudeAgentOptions.hooks` checks `ReflectionGate.reflected` flag
-- **Codex:** config.toml PreToolUse command hook runs a Python script that checks a flag file
+- [ ] Fix `version` callback: take `ctx: typer.Context` instead of `click.get_current_context()` (restores `version`, `changelog`, `bump`, and the `/lup:bump`, `/lup:fb-status` workflows)
+- [ ] Fix `usage`: one-shot render by default, watch mode behind `--watch`; never block without output on non-TTY
+- [ ] `uv run ruff format .` (24 files) and commit
+- [ ] Add CI workflow (GitHub Actions): `uv sync` + `lup-devtools dev check` (format, lint, pyright, pytest) on PRs to `dev`/`main`
+- [ ] Pin `openai-codex` git dependency to a rev in `[tool.uv.sources]`
+- [ ] Standardize the read-only overview verb to `status` across sub-apps (`sync list` → `sync status`)
+- [ ] Dedupe `copy_to_clipboard` into `devtools/utils.py`; replace `setup.py` `parents[3]` with `lup.paths.project_root()`; guard rebase-state reads in `dev/conflicts.py`; guard `splitlines()[0]` in `version.py`
 
-The gate script tracks state via a temp file (set by the reflect tool's MCP handler, checked by the gate hook). The `ReflectionGate` class gains a `file_path` mode alongside its current in-memory flag for this.
+**Verify:** `uv run lup-devtools version`, `version changelog`, `usage` all exit cleanly; `dev check` reports 4/4; CI green on a test PR.
 
-### 4. Subagents on Codex
+## Phase 1 — Output unification (keystone; Claude path first)
 
-Three strategies, chosen per-subagent based on needs:
+- [ ] `lup/output.py`: `create_output_tool(output_model, session_dir, gate)` → `submit_output` LupMcpTool. Handler: validate → if gate not reflected, `is_error` "call review first" → write `session_dir/output.json` → mark complete
+- [ ] Completion state file (`output.json`) is the single source `build_result` reads; remove dependence on `ResultMessage.structured_output`
+- [ ] Claude path: drop `output_format` from `ClaudeAgentOptions`; register `submit_output` on the `notes` server; add Stop hook (`create_completion_guard` in `lup/hooks.py`) that blocks stop until output exists, with a corrective message
+- [ ] Spike first: verify Stop-hook forced-continuation behaves with `max_turns` and doesn't loop unbounded (cap retries, then surface error)
+- [ ] Keep the PreToolUse gate hook on Claude as hardening (matcher `mcp__notes__submit_output`)
+- [ ] Tests: gate-in-handler denial → reflect → submit succeeds; invalid output → `is_error` retry; stop-guard path
 
-| Strategy | When to Use | How |
-|---|---|---|
-| **Thread fork** | Subagent needs same tools/context as main agent | `thread/fork` from current turn, run focused prompt, read result |
-| **Direct API** | Subagent is a one-shot LLM call (researcher, analyzer) | `query()` — SDK-agnostic, dispatches by model name |
-| **PydanticAI** | Subagent needs tool use + structured output + validation | `AnthropicModel` or `CodexModel` as PydanticAI provider |
+**Verify:** `AGENT_SDK=claude uv run lup run "test task"` produces `output.json` + `AgentSessionResult`; trace shows a denial when submitting before reflecting.
 
-`agent/subagents.py` evolves from `AgentDefinition` (Claude-specific) to a lup-native `SubagentSpec`:
+## Phase 2 — Context relay + dynamic serve-tools
 
-```python
-class SubagentSpec(BaseModel):
-    name: str
-    description: str
-    prompt: str
-    tools: list[str]
-    model: str  # "haiku", "gpt-4.1-mini", etc.
-```
+- [ ] Env contract constants in `lup/paths.py`; `build_mcp_config_overrides(env=...)` emits `mcp_servers.notes.env.*`
+- [ ] `serve-tools` builds tools from env context: example + reflect (file-backed gate from `LUP_GATE_FLAG`) + `submit_output` + sandbox tools; `collect_tools_by_server(context)` replaces the static dict; add `--list` flag for debugging
+- [ ] `lup/metrics.py` gains file-backed flush (`session_dir/metrics.json`), mirroring `ReflectionGate`'s dual mode; `build_result` merges subprocess metrics
+- [ ] `core.py: build_codex_adapter` passes env; gate matcher becomes `mcp__notes__submit_output`; Codex stops passing native `output_schema`
+- [ ] Rename the Codex MCP server key from `lup-tools` to `notes`
 
-Each adapter interprets `SubagentSpec`:
-- Claude adapter → `AgentDefinition`
-- Codex adapter → thread fork or `query()` dispatch based on whether tools are needed
+**Verify:** integration test (no LLM needed): spawn `serve-tools` with env set, connect an MCP client, list tools (13 expected), call `review` with `skip_reviewer=true` → gate flag file appears → call `submit_output` → `output.json` written.
 
-`adapters/claude_client.py`'s `query()` needs a backend-agnostic mode — dispatch to Anthropic or OpenAI API based on model name prefix (`claude-*` → Anthropic, `gpt-*`/`o*` → OpenAI).
+## Phase 3 — Codex-side enforcement
 
-### 5. Background Agents on Codex
+- [ ] Primary: native config — `sandbox_mode` + `writable_roots` derived from `notes.rw` dirs replaces the generated Write/Edit permission script
+- [ ] Spike: probe script logging real Codex hook event payloads (tool names, fields) on a live turn; record findings in this file
+- [ ] If hooks usable: regenerate scripts against *actual* Codex tool names; generate them from the same policy source as `lup/hooks.py` (no logic drift — the current scripts diverge on `extract_glob_dir` and path resolution)
+- [ ] If hooks unusable: delete the generated-script layer for permissions (in-tool gate + native sandbox already enforce), keep `codex_hooks.py` only for what's verified
+- [ ] Wire `Settings.permission_mode` for Claude (currently hardcoded `bypassPermissions`), completing the security-profile normalization
 
-On Claude, `BackgroundAgent` spawns independent `ClaudeSDKClient` instances. On Codex, background work uses independent threads — threads are inherently persistent and concurrent:
+**Verify:** Codex agent cannot write outside `writable_roots`; gate denial observed on Codex in the trace; no hook config referencing unverified tool names remains.
 
-```python
-bg_thread = await codex.thread_start(
-    model=model,
-    developer_instructions=bg_system_prompt,
-)
-bg_result = await bg_thread.run(message)
-```
+## Phase 4 — Subagents on Codex
 
-`BackgroundAgent` gains an adapter-aware factory:
+- [ ] `run_subagent` LupMcpTool: input (subagent name, task) → look up `SubagentSpec` → dispatch `query()` by `model_backend(spec.model)` → return text or structured result
+- [ ] Served via serve-tools on Codex/OpenAI; Claude keeps native `agents=` (same specs, per-adapter interpretation — documented)
+- [ ] Specs requiring tools that the chosen backend can't provide fail loudly with a clear message
+- [ ] Delete `format_subagent_prompt_section` (capability replaces prose)
+- [ ] `query()` honesty: raise `ValueError` for accepted-but-unsupported options per backend (capability table in `adapters/common.py`)
 
-```python
-def create_background_agent(sdk: str, ...) -> BackgroundAgent:
-    match sdk:
-        case "claude": return ClaudeBackgroundAgent(...)
-        case "codex": return CodexBackgroundAgent(...)
-```
+**Verify:** Codex session trace shows `mcp__notes__run_subagent` invocation returning researcher output; `query(model="gpt-…", max_budget_usd=…)` raises.
 
-Shared mutable state for inter-agent communication stays Python-level.
+## Phase 5 — Backgrounds + sandbox lifecycle on Codex
 
-### 6. Persistent Agent on Codex
+- [ ] Sandbox on Codex: serve-tools constructs `Sandbox` lazily from env (`LUP_SESSION_ID`, shared dir), registers `atexit` cleanup; stale-container sweep on next start (existing label mechanism)
+- [ ] `CodexBackgroundAgent` gains MCP tools via per-agent `config_overrides` (its own serve-tools instance); factory stops silently dropping `tools`/`builtin_tools`/`allowed_tools` — pass through or raise
+- [ ] Align background model defaults intentionally (document why claude default is opus-class and codex default is mini-class, or make them symmetric)
+- [ ] Replace bare `except Exception` supervisors in both background run-loops with specific exceptions + a documented top-level supervisor pattern
 
-The persistent agent pattern (sleep/wake loop) maps to Codex's thread model:
+**Verify:** `AGENT_SDK=codex` session executes `execute_code` in Docker; `docker ps` clean after exit (including SIGKILL test); background agent on Codex calls one of its tools.
 
-| Lup Concept | Claude Implementation | Codex Implementation |
-|---|---|---|
-| Sleep | `Scheduler.sleep()` blocks, Stop hook prevents exit | Thread turn completes; state persisted by Codex |
-| Wake | `Scheduler.wake()` resumes blocked sleep | `thread/resume` with new message |
-| Debounce | `Scheduler.start_debounce()` batches events | Same — `Scheduler` logic is SDK-agnostic |
-| Stop guard | PreToolUse hook blocks Stop | Not needed — thread turn model has no Stop |
+## Phase 6 — Library API + boundary cleanup
 
-The `Scheduler` class (`realtime.py`) is mostly SDK-agnostic — asyncio timers and state tracking. The SDK-specific parts are hook factories (`create_stop_guard`, etc.) which need Codex equivalents via config.toml hooks.
+- [ ] `lup/__init__.py`: stop eager `claude_client` import; retire `ResponseCollector`, `build_client`, `claude_query` from `__all__` (import from `lup.adapters.claude_client` where genuinely needed); `import lup` must work without `claude_agent_sdk` installed
+- [ ] Extras: `lup[claude]`, `lup[codex]`, `lup[docker]`; template depends on `lup[claude,codex,docker]`; update `require_codex_sdk` message accordingly
+- [ ] Move `LupEvent` hierarchy into `types.py` as Pydantic models; Claude `run_streamed` `LupDoneEvent` carries blocks (match Codex contract); delete dead `HooksConfig` alias and stale section header in `adapters/claude.py`
+- [ ] Move `claude_query` conversion code out of `adapters/common.py` into `claude_client.py` — `common.py` stays SDK-import-free
+- [ ] `core.py` traces through `lup.paths.logs_dir()` (versioned layout; fixes session-IDs-as-versions in `trace list`)
+- [ ] Wire `settings.max_turns` / `max_budget_usd` into `build_options`; raise on Codex if set (until supported)
+- [ ] Convention sweep: bare `except Exception` (cli loop, setup.py, mcp.py, sandbox.py), `_`-prefixed attributes (`_reflected`, `_task`, `_wake`, `_running`), "backward compatibility" comment in `background.py`; audit the 4 file-wide `# claude: ignore` headers down to justified inline ignores
+- [ ] Align `requires-python`/pyright `pythonVersion` deliberately (library 3.13, template 3.14 — or unify; document the choice)
 
-### 7. Sandbox — Shared
+**Verify:** fresh venv with `lup` only (no extras) imports; `grep -r "claude_agent_sdk" packages/lup/src/lup --include="*.py" | grep -v adapters/` empty; `trace list` groups new sessions under the agent version.
 
-Lup's Docker `Sandbox` class and its MCP tools (`execute_code`, `install_package`) work on both SDK paths unchanged. On Codex, these tools are exposed via `serve-tools` like all other `@lup_tool` tools — the sandbox code doesn't know which SDK drives the outer agent.
+## Phase 7 — Test program (grows with each phase, plus a coverage push)
 
-Codex has built-in `SandboxMode` but we don't use it. Using lup's own sandbox ensures identical isolation behavior on both paths. The tradeoff is Docker as a dependency on the Codex path.
+- [ ] Devtools smoke suite: Typer `CliRunner` invokes every sub-app and key read-only commands (`--help`, `version`, `trace list`, `feedback status`, `setup status`) — would have caught the `version` crash
+- [ ] Wiring tests over unit tests: the Phase 2 serve-tools MCP round-trip; gate flow; output retry loop
+- [ ] `realtime.py` Scheduler: sleep/wake/debounce timing tests (flagged as test-worthy by CLAUDE.md, currently zero)
+- [ ] `retry.py`, `history.py` round-trip, `metrics.py` (incl. file mode), `paths.py` version resolution
+- [ ] Delete construction-only tests (`test_models.py` schema-property checks, happy-path roundtrips in `test_type_conversion.py` that exercise no failure mode)
+- [ ] Gated parity integration test: same task via `AGENT_SDK=claude` and `AGENT_SDK=codex`, assert equivalent `AgentSessionResult` shape and artifacts
 
-## Shared Capabilities — Adapter Normalization
+## Phase 8 — Docs truth pass (last, after interfaces settle)
 
-Both SDKs support these features with different APIs. The adapter layer normalizes both into lup's internal types.
+- [ ] README: finish the cut-off sentences, remove `[[[]]]` placeholders, fill the three empty workflow sections, correct command names (`lup-devtools dev worktree create`, `uv run lup run`), document the `lup` entry point
+- [ ] CLAUDE.md: directory tree (add `adapters/`, `types.py`, `output.py`; remove `client.py`), sub-app list (`py` not `api`), getting-started commands
+- [ ] PATTERNS.md: replace `lup.client` references; document the submit-output finalization pattern and per-adapter subagent interpretation
+- [ ] Fix all 11 `lup.lib` docstring references and the phantom `codex_query` (`subagents.py`); fix `lup.environment.cli` module paths in CLI docstrings
+- [ ] Keep this file's checkboxes current as phases land
 
-### Session Persistence & Forking
+---
 
-| | Claude | Codex |
-|---|---|---|
-| Persistence | JSONL files at `~/.claude/projects/` | Thread store (app-server managed) |
-| Resume | `--continue`, `--resume`, `ClaudeAgentOptions.resume` | `thread/resume` by thread ID |
-| Fork | `fork_session=True`, `/branch` command | `thread/fork` from any turn |
-| Search | `list_sessions()`, `get_session_info()` | `thread/list` with search term |
+## Deferred Work (explicit, with design notes)
 
-`LupResponse` gains optional `session_id: str`. Each adapter populates it from its native session/thread ID. `AgentAdapter` gains optional `resume(session_id)` and `fork(session_id)` methods.
+- **Persistent/realtime mode on Codex.** Sketch: parent process keeps `Scheduler` and the wake loop; each cycle is `thread/resume` with a built message; sleep/reply tools are served tools that write a mailbox file (`session_dir/realtime/`) the parent polls/watches between turns. Requires no Codex hooks. Build only after Phases 2–5 prove the relay pattern.
+- **Codex `dynamicTools` migration.** When the Python SDK exposes in-process tool handlers over JSON-RPC, swap serve-tools for direct registration behind the same `collect_tools_by_server(context)` seam. The env contract remains the test harness.
+- **Budget enforcement on Codex.** Needs per-turn usage accumulation in `CodexConversation`; until then, setting a budget on Codex raises.
 
-### Web Search
+## Risks
 
-Claude has `web_search` server tool with domain filtering and dynamic filtering. Codex has native web search with modes (disabled/cached/live).
+| Risk | Mitigation |
+|---|---|
+| Codex hooks are behind an experimental flag and may change/break | Enforcement primary in tool handlers + native sandbox config (Decision 3); hooks optional |
+| Stop-guard on Claude may not reliably force `submit_output` | Phase 1 spike before committing; bounded retries with surfaced error |
+| Unpinned `openai-codex` git dep + `exclude-newer` floating deps | Pin rev (Phase 0); CI catches drift on every PR |
+| Orphaned Docker containers from killed serve-tools | atexit + label-based stale sweep; SIGKILL test in Phase 5 |
+| Two-backend test cost grows per feature | Wiring tests run without LLM calls (skip_reviewer, MCP round-trips); LLM parity test stays integration-gated |
 
-Both produce search results that the adapter normalizes into `LupToolUseBlock(name="web_search")` / `LupToolResultBlock` with citations.
+## Type Mapping (reference, unchanged)
 
-### Streaming
-
-Claude has a `Message` union type (`UserMessage | AssistantMessage | StreamEvent | ...`) with `isinstance()` dispatch. Codex has `ThreadEvent` with `.type` string discriminators.
-
-`AgentAdapter` gains optional `run_streamed()` returning `AsyncGenerator[LupEvent]`. Both adapters convert their native event types into a shared `LupEvent` union.
-
-### Effort / Thinking
-
-Both SDKs support named effort levels:
-
-| Level | Claude | Codex |
-|---|---|---|
-| None/minimal | — | `none`, `minimal` |
-| Low | `low` | `low` |
-| Medium | `medium` | `medium` |
-| High | `high` (default) | `high` |
-| Extra | `xhigh`, `max` | `xhigh` |
-
-`Settings` gains `reasoning_effort: str | None`. Each adapter maps to its native enum. Claude uses `output_config.effort`; Codex uses `ReasoningEffort`.
-
-### Security Profiles
-
-Claude has 6 permission modes (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`) plus `allowed_tools`/`disallowed_tools` and hooks. Codex has `SandboxMode` × `approval_policy` (4 levels) + `writable_roots`.
-
-`Settings` gains `permission_mode` (maps to Claude's modes) and `sandbox_mode` + `approval_policy` (maps to Codex's config). Each adapter translates to its native primitives.
-
-## Implementation Status
-
-### Phase 1: Type Layer & Basic Dispatch (DONE)
-
-- [x] `lup/types.py` — Internal types
-- [x] `lup/adapters/common.py` — `AgentAdapter` ABC
-- [x] `lup/adapters/claude.py` — Claude adapter with type converters
-- [x] `lup/adapters/codex.py` — Codex adapter (basic: prompt → run → collect)
-- [x] `lup/adapters/openai_compat.py` — OpenAI-compatible adapter via Codex
-- [x] `agent/core.py` — SDK dispatch, zero `claude_agent_sdk` imports
-- [x] `lup/trace.py` — Migrated to lup types
-- [x] `lup/adapters/claude_client.py` — Claude→lup conversion at print boundary
-- [x] `agent/config.py` — `agent_sdk` + Codex + OpenAI settings fields
-- [x] `tests/unit/test_type_conversion.py` — 14 tests for Claude→lup conversion
-- [x] `pyproject.toml` — Codex as optional dependency
-
-### Phase 2: MCP Tools on Codex (DONE)
-
-- [x] `CodexAdapter` passes `serve-tools` as MCP server via `AppServerConfig.config_overrides`
-- [x] `build_mcp_config_overrides()` generates TOML config for external MCP server
-- [x] `CodexAdapter.build_config_overrides()` assembles all overrides (MCP + hooks)
-- [x] Test: config override generation verified
-
-### Phase 3: Permission Hooks on Codex (DONE)
-
-- [x] `adapters/codex_hooks.py` — Adapter translating lup hook output ↔ Codex hook JSON format
-- [x] `write_permission_hook_script()` generates standalone permission hook scripts
-- [x] `CodexAdapter` accepts `hook_overrides` and passes them via `config_overrides`
-- [x] `build_hook_config_overrides()` generates TOML for Codex command hooks
-- [x] Test: permission hook script generation and config verified
-
-### Phase 4: Reflection Gate on Codex (DONE)
-
-- [x] `ReflectionGate` gains file-backed mode (`flag_path` parameter)
-- [x] `write_reflection_gate_script()` generates PreToolUse gate hook script
-- [x] `build_reflection_gate_hook()` wires gate into Codex config
-- [x] `core.py` Codex path uses file-backed gate + generated hook scripts
-- [x] Test: file-backed gate creation/check/reset verified
-
-### Phase 5: Subagents (DONE)
-
-- [x] `SubagentSpec` model in `types.py` — SDK-agnostic subagent definition
-- [x] `agent/subagents.py` migrated from `AgentDefinition` to `SubagentSpec`
-- [x] `spec_to_claude()`: `SubagentSpec` → `AgentDefinition`
-- [x] `model_backend()`: backend-agnostic dispatch (model name prefix → Anthropic or OpenAI)
-- [x] `get_subagent_specs()` returns SDK-agnostic specs
-- [x] Test: spec creation, conversion, and backend dispatch verified
-
-### Phase 6: Background Agents & Persistent Mode (DONE)
-
-- [x] `CodexBackgroundAgent` — independent thread per background agent
-- [x] `create_background_agent()` factory for SDK-aware creation
-- [x] `CodexAdapter.resume()` — thread resume for persistent sleep/wake
-- [x] `CodexAdapter.fork()` — thread fork support
-- [x] `create_codex_stop_guard_hook()` — no-op (Codex uses thread/resume pattern)
-
-### Phase 7: Streaming & Session Management (DONE)
-
-- [x] `AgentAdapter.run_streamed()` → `AsyncGenerator[LupEvent]`
-- [x] `LupEvent` hierarchy: `LupTextEvent`, `LupThinkingEvent`, `LupToolUseEvent`, `LupToolResultEvent`, `LupDoneEvent`
-- [x] Claude adapter: `run_streamed()` yields events from `receive_response()`
-- [x] Codex adapter: `run_streamed()` yields events from completed turn items
-- [x] `LupResponse.session_id` — populated from native session/thread ID
-- [x] `AgentAdapter.resume()` and `fork()` base methods
-- [x] `Settings.reasoning_effort` mapped to native effort on each adapter
-- [x] `normalize_effort()` utility for cross-SDK effort mapping
-- [x] Test: streaming events, session_id, effort normalization verified
-
-### Unchanged (SDK-Agnostic Already)
-
-- `trace.py`, `metrics.py`, `history.py`, `notes.py`
-- `retry.py`, `throttle.py`, `paths.py`
-- `agent/models.py`, `agent/prompts.py`, `agent/config.py`
-- `agent/tools/example.py` — `@lup_tool` decorated (SDK-agnostic via MCP)
-- `devtools/*` — CLI tooling
-
-## Type Mapping
-
-### Content Blocks
+### Content blocks
 
 | Claude SDK | Lup Internal | Codex SDK |
 |---|---|---|
@@ -322,28 +208,12 @@ Claude has 6 permission modes (`default`, `acceptEdits`, `plan`, `auto`, `dontAs
 | `SystemMessage` | `LupSystemMessage` | `developer_instructions` |
 | `ResultMessage` | `LupResultMessage` | `Turn` (usage, final_response) |
 
-### Options
+## Global Verification
 
-| Claude SDK | Config Field | Codex SDK |
-|---|---|---|
-| `model` | `settings.model` | `thread_start(model=...)` |
-| `system_prompt` | `get_system_prompt()` | `thread_start(developer_instructions=...)` |
-| `output_format` | `AgentOutput.model_json_schema()` | `run_json(output_schema=...)` / `run_pydantic(output_model=...)` |
-| `hooks` | permission + reflection hooks | config.toml `[[hooks.PreToolUse]]` command hooks |
-| `mcp_servers` | MCP server dict | `config_overrides` → `mcp_servers.lup-tools` |
-| `agents` | subagent dict | thread fork / `query()` |
-| `output_config.effort` | `settings.reasoning_effort` | `thread.run(effort=ReasoningEffort.HIGH)` |
-| `permission_mode` | `settings.permission_mode` | `thread_start(approval_policy=...)` |
-| `resume` / `fork_session` | `settings.session_id` | `thread/resume` / `thread/fork` |
-
-## Verification
-
-1. `uv run pyright` — 0 errors (excluding optional `codex_app_server` imports) ✓
-2. `uv run pytest` — all 54 tests pass ✓
-3. `grep "claude_agent_sdk" src/lup/agent/core.py` — zero results ✓
-4. `AGENT_SDK=claude uv run python -m lup.environment.cli run "test"` — full feature set
-5. `AGENT_SDK=codex uv run python -m lup.environment.cli run "test"` — full feature set (requires `codex_app_server`)
-6. Both paths produce equivalent `AgentSessionResult` for the same task
-7. MCP tools callable from Codex agent via `config_overrides` + `serve-tools`
-8. Permission hooks enforce same policies on both paths
-9. Reflection gate blocks premature output on both paths
+1. `uv run lup-devtools dev check` — 4/4 (format, lint, pyright, pytest)
+2. `uv run pytest` — unit suite green; `uv run pytest -m integration` — green with Docker + keys
+3. `AGENT_SDK=claude uv run lup run "test task"` — full feature set, `output.json` + versioned trace
+4. `AGENT_SDK=codex uv run lup run "test task"` — same artifacts, 13 tools listed, gate enforced
+5. `grep -rn "claude_agent_sdk" src/lup_template/agent/core.py` — empty; `grep -rn "lup\.lib" src/ packages/` — empty
+6. Fresh venv: `import lup` succeeds without SDK extras
+7. `uv run lup-devtools version && uv run lup-devtools usage` — exit cleanly
