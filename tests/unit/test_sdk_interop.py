@@ -60,8 +60,8 @@ class TestMcpConfigOverrides:
     def test_default_serve_tools(self) -> None:
         overrides = build_mcp_config_overrides()
         assert len(overrides) == 2
-        assert 'mcp_servers.lup-tools.command="uv"' in overrides
-        assert "mcp_servers.lup-tools.args=" in overrides[1]
+        assert 'mcp_servers.notes.command="uv"' in overrides
+        assert "mcp_servers.notes.args=" in overrides[1]
         assert "lup-devtools" in overrides[1]
 
     def test_custom_command(self) -> None:
@@ -69,7 +69,7 @@ class TestMcpConfigOverrides:
             serve_tools_command="python3",
             serve_tools_args=["-m", "lup.devtools.main", "agent", "serve-tools"],
         )
-        assert 'mcp_servers.lup-tools.command="python3"' in overrides
+        assert 'mcp_servers.notes.command="python3"' in overrides
 
 
 class TestHookConfigOverrides:
@@ -926,7 +926,7 @@ class TestOpenAICompatibleAdapter:
             mcp_tools=True,
         )
         overrides = adapter.build_config_overrides()
-        assert any("lup-tools" in o for o in overrides)
+        assert any("mcp_servers.notes" in o for o in overrides)
 
     def test_inherits_hook_config(self) -> None:
         from lup.adapters.codex import CodexHookConfig
