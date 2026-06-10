@@ -82,6 +82,7 @@ def create(
     no_copy_data: bool,
     no_plugin_refresh: bool,
     base_branch: str | None,
+    force: bool = False,
 ) -> None:
     """Create or re-attach a git worktree."""
     uv = sh.Command("uv")
@@ -95,6 +96,13 @@ def create(
         if worktree_is_registered(worktree_path):
             typer.echo(f"Worktree already active: {worktree_path}")
             raise typer.Exit(0)
+        if not force:
+            typer.echo(
+                f"Directory exists but is not a registered worktree: {worktree_path}\n"
+                "Re-run with --force to delete it and create the worktree.",
+                err=True,
+            )
+            raise typer.Exit(1)
         typer.echo(f"Removing stale worktree directory: {worktree_path}")
         shutil.rmtree(worktree_path)
 
