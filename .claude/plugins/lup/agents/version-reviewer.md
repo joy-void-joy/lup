@@ -34,8 +34,9 @@ The caller provides:
 ### 1. Retrieve Version Metadata
 
 ```bash
-# Read the changelog entry for context on what this version changed
-grep -A 5 "v<VERSION>" CHANGELOG.md
+# Read the commits leading up to this version for context on what it changed
+uv run lup-devtools version changelog --since v<PREVIOUS_VERSION>
+git log --oneline v<PREVIOUS_VERSION>..v<VERSION>
 
 # Check when this version was active (git log for the tag)
 git log --oneline v<VERSION> -1
@@ -74,7 +75,7 @@ From the scores data, select the top 3-5 best and bottom 3-5 worst sessions. Rea
 uv run lup-devtools trace show <session_id>
 
 # Session outputs
-ls notes/sessions/<session_id>/
+ls notes/traces/<version>/sessions/<session_id>/
 ```
 
 For each trace, note:
@@ -95,7 +96,7 @@ Combine all findings into the structured report below.
 ## Version Context
 - **Version**: <VERSION>
 - **Date**: <date from git tag>
-- **Changelog**: <summary from CHANGELOG.md>
+- **Changelog**: <summary of the commits between the previous tag and this one>
 - **Prompt size**: <approximate line count of prompts.py at this version>
 
 ## Prompt Summary

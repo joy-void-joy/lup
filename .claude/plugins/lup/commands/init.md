@@ -216,7 +216,7 @@ After generating files:
 
 1. Run `uv run pyright` to check types
 2. Run `uv run ruff check .` to check lint
-3. Run `uv run python -m <project>.environment.cli --help` to verify CLI
+3. Run `uv run lup --help` to verify CLI
 4. Verify the feedback loop command references the right scripts
 5. Check that CLAUDE.md accurately describes the domain
 
@@ -224,7 +224,7 @@ After generating files:
 
 Once the scaffolding is generated, guide the user to:
 
-1. Run a few sessions: `uv run python -m <project>.environment.cli loop "task1" "task2"`
+1. Run a few sessions: `uv run lup loop "task1" "task2"`
 2. Review traces in `notes/traces/`
 3. Use `/lup:feedback-loop` to analyze and improve
 4. Iterate on the feedback collection as patterns emerge
