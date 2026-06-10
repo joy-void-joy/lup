@@ -282,13 +282,15 @@ async def claude_query(
             response.messages.append(LupAssistantMessage(content=lup_blocks))
 
     if collector.result is not None:
+        from lup.types import extract_token_usage, safe_normalize_usage
+
         response.result = LupResultMessage(
             structured_output=collector.result.structured_output,
             is_error=collector.result.is_error,
             result=collector.result.result,
             duration_ms=collector.result.duration_ms,
             total_cost_usd=collector.result.total_cost_usd,
-            usage=collector.result.usage,
+            usage=safe_normalize_usage(extract_token_usage, collector.result.usage),
         )
 
     return response

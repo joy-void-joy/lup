@@ -30,7 +30,7 @@ from lup.reflect import ReflectionGate
 from lup.trace import TraceLogger, print_message
 from lup.types import (
     LupHooksConfig,
-    TokenUsage,
+    Usage,
     allow_hook,
     block_hook,
     deny_hook,
@@ -43,9 +43,9 @@ __all__ = [
     "MetricsSummary",
     "ReflectionGate",
     "ResponseCollector",
-    "TokenUsage",
     "ToolError",
     "TraceLogger",
+    "Usage",
     "agent_version",
     "allow_hook",
     "block_hook",

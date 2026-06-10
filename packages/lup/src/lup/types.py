@@ -5,10 +5,13 @@ trace.py, etc.). SDK-specific adapters convert to/from these types at
 the boundary — consumer code never imports from SDK packages directly.
 """
 
-from collections.abc import Awaitable, Callable, Sequence
+import logging
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny, ValidationError
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +101,23 @@ class LupSystemMessage(BaseModel):
     data: str
 
 
+class Usage(BaseModel):
+    """Portable token usage — the counts every backend can provide.
+
+    Adapters produce this through a ``usage_normalizer`` callback supplied
+    at construction, defaulting to each adapter's standard converter. A
+    custom normalizer may return a *subclass* carrying vendor-specific
+    fields (service tier, per-iteration costs, …); fields holding it are
+    declared ``SerializeAsAny[Usage]`` so subclass data survives into
+    session JSON.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+
+
 class LupResultMessage(BaseModel):
     """Final result metadata from a completed agent run."""
 
@@ -106,7 +126,7 @@ class LupResultMessage(BaseModel):
     result: str | None = None
     duration_ms: float | None = None
     total_cost_usd: float | None = None
-    usage: dict[str, int] | None = None
+    usage: SerializeAsAny[Usage] | None = None
 
 
 type LupMessage = (
@@ -207,13 +227,45 @@ def block_hook(reason: str) -> LupHookOutput:
     return LupHookOutput(decision="block", reason=reason)
 
 
-class TokenUsage(TypedDict, total=False):
-    """Token usage from API responses."""
+def extract_token_usage(raw: Mapping[str, object] | None) -> Usage | None:
+    """Extract portable token counts from a raw vendor usage mapping.
 
-    input_tokens: int
-    output_tokens: int
-    cache_read_input_tokens: int
-    cache_creation_input_tokens: int
+    Reads only the known count fields and ignores vendor extras, so
+    payload growth in any SDK can never fail a completed run. Default
+    normalizer for adapters whose raw payload is a mapping.
+    """
+    if not raw:
+        return None
+
+    def count(key: str) -> int:
+        value = raw.get(key)
+        return value if isinstance(value, int) else 0
+
+    return Usage(
+        input_tokens=count("input_tokens"),
+        output_tokens=count("output_tokens"),
+        cache_read_input_tokens=count("cache_read_input_tokens"),
+        cache_creation_input_tokens=count("cache_creation_input_tokens"),
+    )
+
+
+def safe_normalize_usage[T](
+    normalizer: Callable[[T], Usage | None],
+    raw: T | None,
+) -> Usage | None:
+    """Run a usage normalizer, degrading to None on failure.
+
+    Usage is diagnostic — a broken normalizer must never fail a run that
+    already completed. Failures are logged loudly and dropped.
+    """
+    if raw is None:
+        return None
+    try:
+        return normalizer(raw)
+    except ValidationError, KeyError, TypeError, AttributeError:
+        name = getattr(normalizer, "__name__", repr(normalizer))
+        logger.exception("Usage normalizer %s failed; dropping usage", name)
+        return None
 
 
 def merge_hooks(base: LupHooksConfig, additional: LupHooksConfig) -> LupHooksConfig:
