@@ -71,6 +71,19 @@ class TestMcpConfigOverrides:
         )
         assert 'mcp_servers.notes.command="python3"' in overrides
 
+    def test_env_relay(self) -> None:
+        overrides = build_mcp_config_overrides(env={"LUP_SESSION_DIR": "/tmp/s"})
+        assert 'mcp_servers.notes.env.LUP_SESSION_DIR="/tmp/s"' in overrides
+
+
+class TestSandboxConfigOverrides:
+    def test_workspace_write_with_roots(self) -> None:
+        from lup.adapters.codex import build_sandbox_config_overrides
+
+        overrides = build_sandbox_config_overrides([Path("/notes/a"), Path("/notes/b")])
+        assert 'sandbox_mode="workspace-write"' in overrides
+        assert any("writable_roots" in o and "/notes/a" in o for o in overrides)
+
 
 class TestHookConfigOverrides:
     def test_single_hook(self) -> None:
