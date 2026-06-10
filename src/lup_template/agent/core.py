@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from claude_agent_sdk import ClaudeAgentOptions
     from claude_agent_sdk.types import EffortLevel
 
+    from lup.adapters.codex import CodexHookConfig
     from lup.adapters.common import AgentAdapter
     from lup.notes import NotesConfig
     from lup.types import SubagentSpec
@@ -63,9 +64,12 @@ def build_result(
     """Build an AgentSessionResult from the completed agent run.
 
     The output is what the agent submitted via the submit_output tool
-    (``session_dir/output.json``). Adapters still using native structured
-    output fall back to ``result.structured_output``.
+    (``session_dir/output.json``) — the single finalization mechanism
+    on every backend. Tool metrics come from the session's flushed
+    metrics file when tools ran in a subprocess (Codex/OpenAI paths),
+    falling back to the in-process collector (Claude path).
     """
+    from lup.metrics import read_metrics_summary
     from lup.output import read_output
 
     result = response.result
@@ -73,8 +77,6 @@ def build_result(
         raise RuntimeError("No result in response")
 
     output = read_output(session_dir, AgentOutput)
-    if output is None and result.structured_output:
-        output = AgentOutput.model_validate(result.structured_output)
     if output is None:
         logger.error("Session %s finished without submitting output", session_id)
         output = AgentOutput(summary="No output produced", factors=[], confidence=0.5)
@@ -92,7 +94,7 @@ def build_result(
         duration_seconds=(result.duration_ms / 1000) if result.duration_ms else None,
         cost_usd=result.total_cost_usd,
         token_usage=result.usage,
-        tool_metrics=get_metrics_summary(),
+        tool_metrics=read_metrics_summary(session_dir) or get_metrics_summary(),
     )
 
 
@@ -222,22 +224,22 @@ def format_subagent_prompt_section(specs: list["SubagentSpec"]) -> str:
     return "\n".join(lines)
 
 
-def build_codex_adapter(
+def build_codex_session(
     notes: "NotesConfig",
-) -> "AgentAdapter":
-    """Build a CodexAdapter for the agent session.
+) -> tuple[str, list["CodexHookConfig"], dict[str, str]]:
+    """Shared scaffolding for Codex-runtime adapters.
 
-    Args:
-        notes: Session notes config.
-
-    Returns:
-        Configured CodexAdapter.
+    Returns (system_prompt, hook_configs, mcp_env). The reflection gate
+    is enforced inside submit_output — the serve-tools subprocess reads
+    the same flag path from the relayed env — so structured output and
+    gating behave identically to the Claude path. The generated
+    PreToolUse hook script is optional hardening on top.
     """
     import tempfile
 
-    from lup.adapters.codex import CodexAdapter
     from lup.adapters.codex_hooks import lup_hooks_to_codex
     from lup.hooks import create_permission_hooks, create_reflection_gate
+    from lup.paths import SessionContext
     from lup.reflect import ReflectionGate
     from lup.types import merge_hooks
 
@@ -251,7 +253,7 @@ def build_codex_adapter(
     permission_hooks = create_permission_hooks(notes.rw, notes.ro)
     gate_hooks = create_reflection_gate(
         gate=gate,
-        gated_tool="StructuredOutput",
+        gated_tool="mcp__notes__submit_output",
         reflection_tool_name="mcp__notes__review",
     )
     lup_hooks = merge_hooks(permission_hooks, gate_hooks)
@@ -264,18 +266,36 @@ def build_codex_adapter(
         gate_flag_path=gate_flag_path,
     )
 
+    context = SessionContext(
+        session_dir=notes.session,
+        outputs_dir=notes.output.parent,
+        gate_flag=gate_flag_path,
+        session_id=notes.session.name,
+        task_id=notes.output.parent.name,
+    )
+
     system_prompt = get_system_prompt()
-    subagent_specs = get_subagent_specs()
-    system_prompt += format_subagent_prompt_section(subagent_specs)
+    system_prompt += format_subagent_prompt_section(get_subagent_specs())
+
+    return system_prompt, hook_configs, context.to_env()
+
+
+def build_codex_adapter(
+    notes: "NotesConfig",
+) -> "AgentAdapter":
+    """Build a CodexAdapter for the agent session."""
+    from lup.adapters.codex import CodexAdapter
+
+    system_prompt, hook_configs, mcp_env = build_codex_session(notes)
 
     return CodexAdapter(
         model=settings.model,
         system_prompt=system_prompt,
-        output_schema=AgentOutput.model_json_schema(),
         sandbox=settings.codex_sandbox,
         effort=settings.codex_effort or settings.reasoning_effort,
         approval_policy=settings.codex_approval_policy,
         mcp_tools=True,
+        mcp_env=mcp_env,
         hook_overrides=hook_configs,
     )
 
@@ -283,46 +303,10 @@ def build_codex_adapter(
 def build_openai_adapter(
     notes: "NotesConfig",
 ) -> "AgentAdapter":
-    """Build an OpenAICompatibleAdapter with full hooks and tools.
-
-    Reuses the same hook scaffolding as the Codex path (file-backed
-    gate, permission scripts) since OpenAICompatibleAdapter extends
-    CodexAdapter.
-    """
-    import tempfile
-
-    from lup.adapters.codex_hooks import lup_hooks_to_codex
+    """Build an OpenAICompatibleAdapter with full hooks and tools."""
     from lup.adapters.openai_compat import OpenAICompatibleAdapter
-    from lup.hooks import create_permission_hooks, create_reflection_gate
-    from lup.reflect import ReflectionGate
-    from lup.types import merge_hooks
 
-    from lup_template.agent.prompts import get_system_prompt
-    from lup_template.agent.subagents import get_subagent_specs
-
-    script_dir = Path(tempfile.mkdtemp(prefix="lup_openai_hooks_"))
-    gate_flag_path = script_dir / "reflection_gate_flag"
-    gate = ReflectionGate(flag_path=gate_flag_path)
-
-    permission_hooks = create_permission_hooks(notes.rw, notes.ro)
-    gate_hooks = create_reflection_gate(
-        gate=gate,
-        gated_tool="StructuredOutput",
-        reflection_tool_name="mcp__notes__review",
-    )
-    lup_hooks = merge_hooks(permission_hooks, gate_hooks)
-
-    hook_configs = lup_hooks_to_codex(
-        lup_hooks,
-        script_dir=script_dir,
-        rw_dirs=notes.rw,
-        ro_dirs=notes.ro,
-        gate_flag_path=gate_flag_path,
-    )
-
-    system_prompt = get_system_prompt()
-    subagent_specs = get_subagent_specs()
-    system_prompt += format_subagent_prompt_section(subagent_specs)
+    system_prompt, hook_configs, mcp_env = build_codex_session(notes)
 
     return OpenAICompatibleAdapter(
         model=settings.model,
@@ -330,11 +314,11 @@ def build_openai_adapter(
         base_url=settings.openai_base_url,
         api_key=settings.openai_api_key,
         model_provider=settings.openai_model_provider,
-        output_schema=AgentOutput.model_json_schema(),
         sandbox=settings.codex_sandbox,
         effort=settings.codex_effort or settings.reasoning_effort,
         approval_policy=settings.codex_approval_policy,
         mcp_tools=True,
+        mcp_env=mcp_env,
         hook_overrides=hook_configs,
     )
 

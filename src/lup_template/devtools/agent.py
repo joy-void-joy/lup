@@ -47,6 +47,7 @@ from lup_template.agent.prompts import get_system_prompt
 from lup_template.agent.subagents import get_subagent_specs
 from lup_template.agent.tools.example import EXAMPLE_TOOLS
 from lup.mcp import LupMcpTool
+from lup.paths import SessionContext
 
 logger = logging.getLogger(__name__)
 
@@ -179,15 +180,42 @@ def print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
         print_model_source(out, tool.output_model, "Output")
 
 
-def collect_tools_by_server() -> dict[str, list[LupMcpTool]]:
-    """Collect all statically-available LupMcpTool instances grouped by server name.
+def collect_tools_by_server(
+    context: SessionContext | None = None,
+) -> dict[str, list[LupMcpTool]]:
+    """Collect LupMcpTool instances grouped by server name.
 
-    Tools that require runtime context (reflect, realtime) are listed
-    separately via :func:`collect_dynamic_tool_names`.
+    Without context, only statically-available tools are returned —
+    tools that require runtime state (reflect, realtime) are listed via
+    :func:`collect_dynamic_tool_names`. With a session context (relayed
+    by the Codex/OpenAI adapters via env vars), the session-bound
+    reflect and submit_output tools are constructed and served too.
     """
-    return {
+    servers: dict[str, list[LupMcpTool]] = {
         "example": list(EXAMPLE_TOOLS),
     }
+    if context is None:
+        return servers
+
+    from lup.output import create_output_tool
+    from lup.reflect import ReflectionGate
+
+    from lup_template.agent.tools.reflect import create_reflect_tools
+
+    gate = ReflectionGate(flag_path=context.gate_flag)
+    reflect_kit = create_reflect_tools(
+        session_dir=context.session_dir,
+        outputs_dir=context.outputs_dir,
+        gate=gate,
+    )
+    output_kit = create_output_tool(
+        AgentOutput,
+        session_dir=context.session_dir,
+        gate=gate,
+        reflection_tool_name="mcp__notes__review",
+    )
+    servers["notes"] = [*reflect_kit["tools"], *output_kit["tools"]]
+    return servers
 
 
 def collect_dynamic_tool_names() -> dict[str, list[str]]:
@@ -223,10 +251,10 @@ def collect_dynamic_tool_names() -> dict[str, list[str]]:
     return dynamic
 
 
-def collect_all_tools() -> list[LupMcpTool]:
+def collect_all_tools(context: SessionContext | None = None) -> list[LupMcpTool]:
     """Collect all LupMcpTool instances from known tool modules."""
     tools: list[LupMcpTool] = []
-    for server_tools in collect_tools_by_server().values():
+    for server_tools in collect_tools_by_server(context).values():
         tools.extend(server_tools)
     return tools
 
@@ -373,20 +401,40 @@ def inspect_cmd(
 
 
 @app.command("serve-tools")
-def serve_tools_cmd() -> None:
-    """Start SDK tools as an MCP stdio server.
+def serve_tools_cmd(
+    list_only: Annotated[
+        bool,
+        typer.Option("--list", help="Print served tool names and exit"),
+    ] = False,
+) -> None:
+    """Start SDK tools as an MCP stdio server (the ``notes`` server).
 
-    This is used by the ``chat`` command — claude CLI launches it as a subprocess.
-    Can also be used standalone for testing MCP tool integration.
+    Launched as a subprocess by the Codex/OpenAI adapters and by the
+    ``chat`` command. When session-context env vars are present (see
+    ``lup.paths.SessionContext``), session-bound tools — reflect and
+    submit_output — are served alongside the static tools, and tool
+    metrics are flushed to the session directory for the parent to read.
     """
+    from lup.metrics import configure_metrics, metrics_path
+    from lup.paths import read_session_context
+
+    context = read_session_context()
+    if context is not None:
+        configure_metrics(metrics_path(context.session_dir))
+
+    lup_tools = collect_all_tools(context)
+    tool_map = {t.name: t for t in lup_tools}
+
+    if list_only:
+        for t in lup_tools:
+            typer.echo(t.name)
+        return
+
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
     from mcp.types import CallToolResult, TextContent, Tool
 
-    lup_tools = collect_all_tools()
-    tool_map = {t.name: t for t in lup_tools}
-
-    server = Server("lup-tools", version="1.0.0")
+    server = Server("notes", version="1.0.0")
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -459,7 +507,7 @@ def chat_cmd(
     if not no_tools:
         mcp_config = {
             "mcpServers": {
-                "lup-tools": {
+                "notes": {
                     "command": "uv",
                     "args": ["run", "lup-devtools", "agent", "serve-tools"],
                 }
