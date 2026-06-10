@@ -40,8 +40,6 @@ Examples:
         ''
 """
 
-import re
-from datetime import datetime
 from pathlib import Path
 
 import tomllib
@@ -147,20 +145,6 @@ def traces_path() -> Path:
 def feedback_path() -> Path:
     """Return ``notes/feedback_loop/``."""
     return NOTES_DIR / "feedback_loop"
-
-
-# -- Timestamp helpers --------------------------------------------------------
-
-TIMESTAMP_FMT = "%Y%m%d_%H%M%S"
-TIMESTAMP_RE = re.compile(r"\d{8}_\d{6}")
-
-
-def parse_timestamp(name: str) -> datetime:
-    """Parse the last YYYYMMDD_HHMMSS occurrence from a filename or string."""
-    matches = TIMESTAMP_RE.findall(Path(name).stem)
-    if not matches:
-        raise ValueError(f"No YYYYMMDD_HHMMSS timestamp found in: {name}")
-    return datetime.strptime(matches[-1], TIMESTAMP_FMT)
 
 
 # -- Write paths (version-specific) ------------------------------------------
