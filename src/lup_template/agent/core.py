@@ -11,6 +11,7 @@ Key patterns:
 """
 
 import logging
+from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -227,15 +228,20 @@ async def run_agent(
     )
 
     # --- Sandbox (optional, requires Docker) ---
-    # Customize: adjust pre_install, timeout, network_mode, or remove entirely
-    # if your agent doesn't need code execution.
-    sandbox = Sandbox(
-        session_id=session_id,
-        shared_dir=notes.session / "sandbox_shared",
-        timeout_seconds=settings.sandbox_timeout_seconds,
-    )
+    # Disabled via AGENT_SANDBOX_ENABLED=false; the agent then runs
+    # without code execution tools. Customize: adjust pre_install,
+    # timeout, or network_mode for your domain.
+    sandbox: Sandbox | None = None
+    with ExitStack() as stack:
+        if settings.sandbox_enabled:
+            sandbox = stack.enter_context(
+                Sandbox(
+                    session_id=session_id,
+                    shared_dir=notes.session / "sandbox_shared",
+                    timeout_seconds=settings.sandbox_timeout_seconds,
+                )
+            )
 
-    with sandbox:
         options = build_options(notes, sandbox=sandbox)
         collector = await query(
             task,
