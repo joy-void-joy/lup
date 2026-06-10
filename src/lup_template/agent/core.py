@@ -288,6 +288,25 @@ def build_openai_adapter(
     )
 
 
+def subprocess_sandbox_cleanup(
+    notes: "NotesConfig",
+) -> AbstractContextManager[object]:
+    """Session context guaranteeing subprocess sandbox containers die.
+
+    The Codex/OpenAI tool subprocess may be killed without running its
+    own cleanup; the parent removes the session's container on exit.
+    No-op when the docker extra is not installed.
+    """
+    try:
+        from lup.sandbox import sandbox_cleanup
+    except ImportError:
+        return nullcontext()
+    return sandbox_cleanup(
+        session_id=notes.session.name,
+        shared_dir=notes.session / "sandbox_shared",
+    )
+
+
 def build_adapter(
     session_id: str,
     task_id: str | None = None,
@@ -315,10 +334,14 @@ def build_adapter(
             return adapter, sb, notes
 
         case "codex":
-            return build_codex_adapter(notes), nullcontext(), notes
+            return build_codex_adapter(notes), subprocess_sandbox_cleanup(notes), notes
 
         case "openai":
-            return build_openai_adapter(notes), nullcontext(), notes
+            return (
+                build_openai_adapter(notes),
+                subprocess_sandbox_cleanup(notes),
+                notes,
+            )
 
 
 async def run_agent(
