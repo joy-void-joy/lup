@@ -4,7 +4,6 @@ import typer
 
 import lup_template.devtools.trace.traces as traces
 from lup.history import resolve_version
-from lup.paths import AGENT_VERSION
 from lup_template.devtools.utils import VERSION_OPT, ALL_VERSIONS_OPT, JSON_OPT
 
 app = typer.Typer(no_args_is_help=True)
@@ -36,7 +35,7 @@ def search_cmd(
 @app.command("list")
 def list_cmd(
     limit: int = typer.Option(20, "-n", "--limit", help="Max to show"),
-    version: VERSION_OPT = AGENT_VERSION,
+    version: VERSION_OPT = None,
     all_versions: ALL_VERSIONS_OPT = False,
     as_json: JSON_OPT = False,
 ) -> None:
@@ -50,7 +49,7 @@ def list_cmd(
 @app.command("errors")
 def errors_cmd(
     limit: int = typer.Option(20, "-n", "--limit", help="Max errors to show"),
-    version: VERSION_OPT = AGENT_VERSION,
+    version: VERSION_OPT = None,
     all_versions: ALL_VERSIONS_OPT = False,
     as_json: JSON_OPT = False,
 ) -> None:
