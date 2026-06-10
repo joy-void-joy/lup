@@ -162,6 +162,7 @@ def codex_items_to_lup(items: Sequence[ThreadItem]) -> list[LupContentBlock]:
 def build_mcp_config_overrides(
     serve_tools_command: str = "uv",
     serve_tools_args: list[str] | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, ...]:
     """Build config_overrides for lup MCP tools via serve-tools.
 
@@ -169,13 +170,25 @@ def build_mcp_config_overrides(
     registration. Tools must be configured as external MCP servers via
     TOML config. This generates the config_overrides that point Codex
     at the lup-devtools serve-tools command.
+
+    The server key is ``notes`` so tool names (``mcp__notes__review``,
+    ``mcp__notes__submit_output``) match the Claude path exactly.
+
+    Args:
+        serve_tools_command: Executable that launches the tool server.
+        serve_tools_args: Arguments for the launcher.
+        env: Session-context env vars for the subprocess (see
+            :class:`lup.paths.SessionContext`).
     """
     args = serve_tools_args or ["run", "lup-devtools", "agent", "serve-tools"]
     args_toml = json.dumps(args)
-    return (
-        f'mcp_servers.lup-tools.command="{serve_tools_command}"',
-        f"mcp_servers.lup-tools.args={args_toml}",
-    )
+    overrides = [
+        f'mcp_servers.notes.command="{serve_tools_command}"',
+        f"mcp_servers.notes.args={args_toml}",
+    ]
+    for key, value in (env or {}).items():
+        overrides.append(f'mcp_servers.notes.env.{key}="{value}"')
+    return tuple(overrides)
 
 
 class CodexHookConfigRequired(TypedDict):
@@ -339,6 +352,7 @@ class CodexAdapter(AgentAdapter):
         effort: str | None = None,
         approval_policy: str | None = None,
         mcp_tools: bool = True,
+        mcp_env: dict[str, str] | None = None,
         hook_overrides: list[CodexHookConfig] | None = None,
         session_id: str | None = None,
         usage_normalizer: CodexUsageNormalizer | None = None,
@@ -350,6 +364,7 @@ class CodexAdapter(AgentAdapter):
         self.effort = effort
         self.approval_policy = approval_policy
         self.mcp_tools = mcp_tools
+        self.mcp_env = mcp_env
         self.hook_overrides = hook_overrides
         self.session_id = session_id
         self.usage_normalizer = usage_normalizer
@@ -358,7 +373,7 @@ class CodexAdapter(AgentAdapter):
         """Assemble all config_overrides for this adapter run."""
         overrides: list[str] = []
         if self.mcp_tools:
-            overrides.extend(build_mcp_config_overrides())
+            overrides.extend(build_mcp_config_overrides(env=self.mcp_env))
         if self.hook_overrides:
             overrides.extend(build_hook_config_overrides(self.hook_overrides))
         return tuple(overrides)

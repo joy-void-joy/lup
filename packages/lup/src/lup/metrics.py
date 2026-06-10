@@ -23,16 +23,25 @@ Examples:
         >>> reset_metrics()
 """
 
+import json
 import logging
 import time
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from functools import wraps
+from pathlib import Path
 from typing import TypedDict, cast
 
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+METRICS_FILENAME = "metrics.json"
+
+
+def metrics_path(session_dir: Path) -> Path:
+    """Canonical location of flushed metrics for a session."""
+    return session_dir / METRICS_FILENAME
 
 
 class ToolMetricsDict(TypedDict):
@@ -109,17 +118,37 @@ class ToolMetrics(BaseModel):
 
 
 class MetricsCollector:
-    """Collects metrics for all tools."""
+    """Collects metrics for all tools.
+
+    When ``flush_path`` is set (tool-serving subprocesses), the summary
+    is written through to disk after every recorded call so the parent
+    process can read it even if the subprocess is killed.
+    """
 
     def __init__(self) -> None:
         self.metrics: dict[str, ToolMetrics] = defaultdict(ToolMetrics)
         self.session_start: float = time.time()
+        self.flush_path: Path | None = None
 
     def record(
         self, tool_name: str, duration_ms: float, is_error: bool = False
     ) -> None:
         """Record a tool call."""
         self.metrics[tool_name].record_call(duration_ms, is_error)
+        if self.flush_path is not None:
+            self.flush()
+
+    def flush(self) -> None:
+        """Write the current summary to ``flush_path``."""
+        if self.flush_path is None:
+            return
+        try:
+            self.flush_path.parent.mkdir(parents=True, exist_ok=True)
+            self.flush_path.write_text(
+                json.dumps(self.get_summary(), indent=2), encoding="utf-8"
+            )
+        except OSError:
+            logger.exception("Failed to flush metrics to %s", self.flush_path)
 
     def get_summary(self) -> MetricsSummary:
         """Get a summary of all metrics."""
@@ -203,6 +232,27 @@ def tracked[**P, T](
         return wrapper
 
     return decorator
+
+
+def configure_metrics(flush_path: Path | None) -> None:
+    """Route metrics to a write-through flush file.
+
+    Call in tool-serving subprocesses (with ``metrics_path(session_dir)``)
+    so the parent process can read tool metrics after the run.
+    """
+    collector.flush_path = flush_path
+
+
+def read_metrics_summary(session_dir: Path) -> MetricsSummary | None:
+    """Read a flushed metrics summary, or None if absent or unreadable."""
+    path = metrics_path(session_dir)
+    if not path.exists():
+        return None
+    try:
+        return cast(MetricsSummary, json.loads(path.read_text(encoding="utf-8")))
+    except json.JSONDecodeError, OSError:
+        logger.exception("Flushed metrics at %s are unreadable", path)
+        return None
 
 
 def log_metrics_summary() -> None:
