@@ -399,20 +399,11 @@ def create(
 ) -> None:
     """Create a new PR."""
     try:
-        raw = str(
-            gh(
-                "pr",
-                "create",
-                "--base",
-                base,
-                "--title",
-                title,
-                "--body",
-                body,
-                "--json",
-                "number,url",
-            )
+        created = str(
+            gh("pr", "create", "--base", base, "--title", title, "--body", body)
         ).strip()
+        url = created.splitlines()[-1].strip()
+        raw = str(gh("pr", "view", url, "--json", "number,url")).strip()
         data = json.loads(raw)
         result = CreateResult(number=data["number"], url=data["url"])
         output_result(result, as_json)
