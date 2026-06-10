@@ -68,15 +68,14 @@ def classify_commit(message: str) -> ChangelogCategory:
 
 @app.callback()
 def show(
+    ctx: typer.Context,
     as_json: Annotated[
         bool,
         typer.Option("--json", help="Output as JSON"),
     ] = False,
 ) -> None:
     """Show agent version, latest tag, and commits since last tag."""
-    import click
-
-    if click.get_current_context().invoked_subcommand is not None:
+    if ctx.invoked_subcommand is not None:
         return
 
     latest_tag = get_latest_tag()
@@ -97,11 +96,10 @@ def show(
         except sh.ErrorReturnCode:
             pass
         try:
-            ref_since = (
-                str(git("rev-list", "--max-parents=0", "HEAD", _ok_code=[0]))
-                .strip()
-                .splitlines()[0]
-            )
+            root_commits = str(
+                git("rev-list", "--max-parents=0", "HEAD", _ok_code=[0])
+            ).strip()
+            ref_since = root_commits.splitlines()[0] if root_commits else "HEAD"
         except sh.ErrorReturnCode:
             ref_since = "HEAD"
 
