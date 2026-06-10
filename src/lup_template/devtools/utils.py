@@ -32,7 +32,7 @@ class LazyCommand:
             self.resolved = command
         return self.resolved
 
-    def __call__(self, *args: str, **kwargs: object) -> sh.RunningCommand:
+    def __call__(self, *args: str, **kwargs: object) -> sh.RunningCommand | str | None:
         return self.resolve()(*args, **kwargs)
 
     def __getattr__(self, attr: str) -> sh.Command:
