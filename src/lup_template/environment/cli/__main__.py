@@ -24,6 +24,8 @@ from typing import Annotated
 import sh
 import typer
 
+import lup.paths
+
 from lup_template.agent.config import settings
 from lup_template.agent.core import run_agent
 from lup_template.agent.models import AgentSessionResult
@@ -40,7 +42,21 @@ app = typer.Typer(
 
 @app.callback(invoke_without_command=True)
 def callback(ctx: typer.Context) -> None:
-    """Self-improving agent CLI."""
+    """Self-improving agent CLI.
+
+    Wires AGENT_NOTES_PATH / AGENT_LOGS_PATH (``settings.notes_path`` /
+    ``settings.logs_path``) into ``lup.paths`` so all session data —
+    sessions, outputs, and trace logs — lands under the configured
+    directories. The overrides are always applied: relative values
+    (including the "./notes" and "./logs" defaults) are anchored at the
+    project root, so default behavior is unchanged regardless of cwd,
+    while absolute env values move the data wholesale.
+    """
+    root = lup.paths.project_root()
+    lup.paths.configure(
+        notes_dir=(root / settings.notes_path).resolve(),
+        logs_dir=(root / settings.logs_path).resolve(),
+    )
     if ctx.invoked_subcommand is None:
         raise typer.Exit()
 
