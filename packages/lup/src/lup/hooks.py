@@ -59,6 +59,7 @@ from lup.types import (
     LupHookOutput,
     LupHooksConfig,
     allow_hook,
+    block_hook,
     deny_hook,
 )
 
@@ -268,4 +269,51 @@ def create_reflection_gate(
                 matcher=gated_tool, hook=reflection_gate_hook, tag="reflection_gate"
             )
         ],
+    }
+
+
+def create_completion_guard(
+    output_exists: Callable[[], bool],
+    *,
+    output_tool_name: str = "mcp__notes__submit_output",
+    max_blocks: int = 3,
+) -> LupHooksConfig:
+    """Create a Stop hook that blocks finishing until output is submitted.
+
+    Output submission happens through a tool (see :mod:`lup.output`), so a
+    backend's native finalization no longer guarantees a result exists. On
+    backends with a stop event, this hook pushes the agent back with a
+    corrective message when it tries to finish without submitting.
+
+    After ``max_blocks`` consecutive blocks the stop is allowed through —
+    a confused agent must not loop forever. The orchestration layer then
+    sees the missing output file and surfaces the failure.
+
+    Args:
+        output_exists: Returns True once the final output has been submitted.
+        output_tool_name: Tool named in the corrective message.
+        max_blocks: Consecutive blocks before giving up.
+
+    Returns:
+        SDK-agnostic hooks configuration with a Stop hook.
+    """
+    blocks = 0
+
+    async def completion_guard_hook(input_data: LupHookInput) -> LupHookOutput:
+        nonlocal blocks
+        if input_data.get("hook_event_name") != "Stop":
+            return LupHookOutput()
+        if output_exists():
+            return LupHookOutput()
+        if blocks >= max_blocks:
+            return LupHookOutput()
+        blocks += 1
+        return block_hook(
+            f"No final output has been submitted. Call {output_tool_name} "
+            f"with your structured output before finishing. "
+            f"(attempt {blocks}/{max_blocks})"
+        )
+
+    return {
+        "Stop": [LupHookMatcher(hook=completion_guard_hook, tag="completion_guard")],
     }
