@@ -161,15 +161,6 @@ def get_latest_session_json(session_id: str) -> SessionData | None:
     return sessions[-1] if sessions else None
 
 
-def list_all_sessions() -> list[str]:
-    """List all session IDs across all versions.
-
-    Returns:
-        Sorted, deduplicated list of session IDs.
-    """
-    return list_all_session_ids()
-
-
 def update_session_metadata(
     session_id: str,
     *,
