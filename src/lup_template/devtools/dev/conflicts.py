@@ -197,11 +197,27 @@ class ConflictStatusResult(BaseModel):
     theirs_commits: list[str]
 
 
+def theirs_ref_for(operation: str) -> str:
+    """Ref naming the other side of the in-progress operation.
+
+    During a rebase the conflicting commit is REBASE_HEAD —
+    MERGE_HEAD and CHERRY_PICK_HEAD do not exist.
+    """
+    match operation:
+        case "merge":
+            return "MERGE_HEAD"
+        case "rebase":
+            return "REBASE_HEAD"
+        case _:
+            return "CHERRY_PICK_HEAD"
+
+
 class FileAuditResult(BaseModel):
     path: str
     ours_removals: list[str]
     theirs_removals: list[str]
     warning: bool
+    partial: bool = False
 
 
 class AuditResult(BaseModel):
@@ -245,27 +261,24 @@ def conflict_status(as_json: bool) -> None:
     conflicted = list_conflicted_files()
 
     ours_ref = "HEAD"
-    theirs_ref = "MERGE_HEAD" if operation == "merge" else "CHERRY_PICK_HEAD"
+    theirs_ref = theirs_ref_for(operation)
 
     ours_commits: list[str] = []
     theirs_commits: list[str] = []
 
-    if operation == "merge":
-        try:
-            merge_base = str(
-                git("merge-base", "HEAD", "MERGE_HEAD", _ok_code=[0])
-            ).strip()
-            ours_raw = str(
-                git("log", "--oneline", f"{merge_base}..HEAD", _ok_code=[0])
-            ).strip()
-            ours_commits = [line for line in ours_raw.splitlines() if line][:10]
+    try:
+        merge_base = str(git("merge-base", "HEAD", theirs_ref, _ok_code=[0])).strip()
+        ours_raw = str(
+            git("log", "--oneline", f"{merge_base}..HEAD", _ok_code=[0])
+        ).strip()
+        ours_commits = [line for line in ours_raw.splitlines() if line][:10]
 
-            theirs_raw = str(
-                git("log", "--oneline", f"{merge_base}..MERGE_HEAD", _ok_code=[0])
-            ).strip()
-            theirs_commits = [line for line in theirs_raw.splitlines() if line][:10]
-        except sh.ErrorReturnCode:
-            pass
+        theirs_raw = str(
+            git("log", "--oneline", f"{merge_base}..{theirs_ref}", _ok_code=[0])
+        ).strip()
+        theirs_commits = [line for line in theirs_raw.splitlines() if line][:10]
+    except sh.ErrorReturnCode:
+        pass
 
     result = ConflictStatusResult(
         operation=operation,
@@ -300,7 +313,7 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
         typer.echo("No merge/rebase/cherry-pick in progress", err=True)
         raise typer.Exit(1)
 
-    theirs_ref = "MERGE_HEAD" if operation == "merge" else "CHERRY_PICK_HEAD"
+    theirs_ref = theirs_ref_for(operation)
 
     file_results: list[FileAuditResult] = []
     for path in files:
@@ -308,12 +321,18 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
         ours_removals = extract_removals(ours_diff)
 
         theirs_diff = ""
+        partial = False
         try:
             theirs_diff = str(
                 git("diff", theirs_ref, "--", path, _ok_code=[0, 1])
             ).strip()
         except sh.ErrorReturnCode:
-            pass
+            partial = True
+            typer.echo(
+                f"Warning: could not diff {path} against {theirs_ref} — "
+                "theirs-side audit is partial",
+                err=True,
+            )
         theirs_removals = extract_removals(theirs_diff)
 
         has_warning = bool(ours_removals or theirs_removals)
@@ -323,6 +342,7 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
                 ours_removals=ours_removals,
                 theirs_removals=theirs_removals,
                 warning=has_warning,
+                partial=partial,
             )
         )
 
@@ -336,6 +356,8 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
     else:
         for f in file_results:
             status = "WARNING" if f.warning else "OK"
+            if f.partial:
+                status += " (partial)"
             typer.echo(f"  {f.path}: {status}")
             for r in f.ours_removals:
                 typer.echo(f"    - [ours] {r}")
