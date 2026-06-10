@@ -10,7 +10,7 @@ functions — never ``claude_agent_sdk`` directly.
 
 import json
 import logging
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Literal, cast  # claude: ignore
 
@@ -71,6 +71,9 @@ from lup.types import (
     LupToolUseBlock,
     LupUserMessage,
     SubagentSpec,
+    Usage,
+    extract_token_usage,
+    safe_normalize_usage,
 )
 
 logger = logging.getLogger(__name__)
@@ -272,11 +275,21 @@ def lup_tools_to_sdk(
 # ---------------------------------------------------------------------------
 
 
+type ClaudeUsageNormalizer = Callable[[Mapping[str, object]], Usage | None]
+"""Transforms the raw Claude SDK usage payload into a (subclass of) Usage."""
+
+
 class ClaudeConversation(Conversation):
     """Multi-turn conversation via the Claude Agent SDK."""
 
-    def __init__(self, client: ClaudeSDKClient) -> None:
+    def __init__(
+        self,
+        client: ClaudeSDKClient,
+        *,
+        usage_normalizer: ClaudeUsageNormalizer = extract_token_usage,
+    ) -> None:
         self.client = client
+        self.usage_normalizer = usage_normalizer
 
     async def send(
         self,
@@ -309,7 +322,9 @@ class ClaudeConversation(Conversation):
                         result=message.result,
                         duration_ms=message.duration_ms,
                         total_cost_usd=message.total_cost_usd,
-                        usage=message.usage,
+                        usage=safe_normalize_usage(
+                            self.usage_normalizer, message.usage
+                        ),
                     )
                     if message.is_error:
                         raise RuntimeError(f"Agent error: {message.result}")
@@ -336,15 +351,27 @@ class ClaudeConversation(Conversation):
 
 
 class ClaudeAdapter(AgentAdapter):
-    """Run prompts via the Claude Agent SDK."""
+    """Run prompts via the Claude Agent SDK.
 
-    def __init__(self, options: ClaudeAgentOptions) -> None:
+    Args:
+        options: Native SDK options built by the consumer.
+        usage_normalizer: Transforms the raw SDK usage payload into a
+            ``Usage`` (or subclass, for vendor-specific fields).
+    """
+
+    def __init__(
+        self,
+        options: ClaudeAgentOptions,
+        *,
+        usage_normalizer: ClaudeUsageNormalizer = extract_token_usage,
+    ) -> None:
         self.options = options
+        self.usage_normalizer = usage_normalizer
 
     @asynccontextmanager
     async def conversation(self) -> AsyncGenerator[Conversation, None]:
         async with ClaudeSDKClient(options=self.options) as client:
-            yield ClaudeConversation(client)
+            yield ClaudeConversation(client, usage_normalizer=self.usage_normalizer)
 
     async def run_streamed(
         self,

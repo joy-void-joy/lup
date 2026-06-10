@@ -20,6 +20,7 @@ from lup.adapters.codex import (
     CodexAdapter,
     CodexConversation,
     CodexHookConfig,
+    CodexUsageNormalizer,
     require_codex_sdk,
 )
 from lup.adapters.common import Conversation
@@ -50,6 +51,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
         approval_policy: str | None = None,
         mcp_tools: bool = True,
         hook_overrides: list[CodexHookConfig] | None = None,
+        usage_normalizer: CodexUsageNormalizer | None = None,
     ) -> None:
         super().__init__(
             model=model,
@@ -60,6 +62,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
             approval_policy=approval_policy,
             mcp_tools=mcp_tools,
             hook_overrides=hook_overrides,
+            usage_normalizer=usage_normalizer,
         )
         self.base_url = base_url
         self.api_key = api_key
@@ -98,6 +101,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
                 thread,
                 output_schema=self.output_schema,
                 effort=self.effort,
+                usage_normalizer=self.usage_normalizer,
             )
 
 

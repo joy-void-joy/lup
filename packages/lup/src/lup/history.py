@@ -54,9 +54,9 @@ from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 
-from lup.types import TokenUsage
+from lup.types import Usage
 from lup.metrics import MetricsSummary
 from lup.paths import agent_version, sessions_dir, traces_path
 
@@ -89,7 +89,7 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     sources_consulted: list[str] = Field(default_factory=list)
     duration_seconds: float | None = None
     cost_usd: float | None = None
-    token_usage: TokenUsage | None = None
+    token_usage: SerializeAsAny[Usage] | None = None
     tool_metrics: MetricsSummary | None = None
     outcome: str | None = Field(default=None, description="Outcome after resolution")
 

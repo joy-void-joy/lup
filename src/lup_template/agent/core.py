@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
-from lup.types import TokenUsage
 from lup.history import save_session
 from lup.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
 from lup.notes import setup_notes
@@ -92,7 +91,7 @@ def build_result(
         sources_consulted=extract_sources(response.blocks),
         duration_seconds=(result.duration_ms / 1000) if result.duration_ms else None,
         cost_usd=result.total_cost_usd,
-        token_usage=cast(TokenUsage, result.usage) if result.usage else None,
+        token_usage=result.usage,
         tool_metrics=get_metrics_summary(),
     )
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, TypedDict, cast
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from openai_codex import AsyncThread, TurnResult
     from openai_codex.models import JsonObject
 
-    from openai_codex.generated.v2_all import ThreadItem
+    from openai_codex.generated.v2_all import ThreadItem, ThreadTokenUsage
 
 from lup.adapters.common import (
     AgentAdapter,
@@ -42,6 +42,8 @@ from lup.types import (
     LupToolResultBlock,
     LupToolUseBlock,
     LupUserMessage,
+    Usage,
+    safe_normalize_usage,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,6 +216,20 @@ def build_hook_config_overrides(
     return tuple(overrides)
 
 
+type CodexUsageNormalizer = Callable[[ThreadTokenUsage], Usage | None]
+"""Transforms the Codex SDK usage object into a (subclass of) Usage."""
+
+
+def codex_usage_to_lup(usage: ThreadTokenUsage) -> Usage | None:
+    """Default Codex usage normalizer — portable token counts only."""
+    total = usage.total
+    return Usage(
+        input_tokens=total.input_tokens,
+        output_tokens=total.output_tokens,
+        cache_read_input_tokens=total.cached_input_tokens,
+    )
+
+
 def build_lup_response(
     result: "TurnResult",
     *,
@@ -221,6 +237,7 @@ def build_lup_response(
     session_id: str | None = None,
     trace_logger: TraceLogger | None = None,
     prefix: str = "",
+    usage_normalizer: CodexUsageNormalizer | None = None,
 ) -> LupResponse:
     """Convert a Codex TurnResult into a LupResponse."""
 
@@ -255,12 +272,9 @@ def build_lup_response(
         except json.JSONDecodeError, TypeError:
             pass
 
-    result_usage: dict[str, int] | None = None
-    if result.usage is not None:
-        result_usage = {
-            "input_tokens": result.usage.total.input_tokens,
-            "output_tokens": result.usage.total.output_tokens,
-        }
+    result_usage = safe_normalize_usage(
+        usage_normalizer or codex_usage_to_lup, result.usage
+    )
 
     response.result = LupResultMessage(
         structured_output=structured_output,
@@ -280,10 +294,12 @@ class CodexConversation(Conversation):
         *,
         output_schema: dict[str, object] | None = None,
         effort: str | None = None,
+        usage_normalizer: CodexUsageNormalizer | None = None,
     ) -> None:
         self.thread = thread
         self.output_schema = output_schema
         self.effort = effort
+        self.usage_normalizer = usage_normalizer
 
     async def send(
         self,
@@ -306,6 +322,7 @@ class CodexConversation(Conversation):
             session_id=self.thread.id,
             trace_logger=trace_logger,
             prefix=prefix,
+            usage_normalizer=self.usage_normalizer,
         )
 
 
@@ -324,6 +341,7 @@ class CodexAdapter(AgentAdapter):
         mcp_tools: bool = True,
         hook_overrides: list[CodexHookConfig] | None = None,
         session_id: str | None = None,
+        usage_normalizer: CodexUsageNormalizer | None = None,
     ) -> None:
         self.model = model
         self.system_prompt = system_prompt
@@ -334,6 +352,7 @@ class CodexAdapter(AgentAdapter):
         self.mcp_tools = mcp_tools
         self.hook_overrides = hook_overrides
         self.session_id = session_id
+        self.usage_normalizer = usage_normalizer
 
     def build_config_overrides(self) -> tuple[str, ...]:
         """Assemble all config_overrides for this adapter run."""
@@ -368,6 +387,7 @@ class CodexAdapter(AgentAdapter):
                 thread,
                 output_schema=self.output_schema,
                 effort=self.effort,
+                usage_normalizer=self.usage_normalizer,
             )
 
     async def resume(self, session_id: str, prompt: str) -> LupResponse:
@@ -385,6 +405,7 @@ class CodexAdapter(AgentAdapter):
                 result,
                 output_schema=self.output_schema,
                 session_id=session_id,
+                usage_normalizer=self.usage_normalizer,
             )
 
     async def fork(self, session_id: str, prompt: str) -> LupResponse:
@@ -402,6 +423,7 @@ class CodexAdapter(AgentAdapter):
                 result,
                 output_schema=self.output_schema,
                 session_id=forked_thread.id,
+                usage_normalizer=self.usage_normalizer,
             )
 
     async def run_streamed(
