@@ -24,6 +24,7 @@ Examples::
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -110,8 +111,15 @@ def find_project(name: str) -> dict[str, str]:
     return proj
 
 
-def ensure_local(proj: dict[str, str]) -> str:
-    """Ensure a project has a usable local path."""
+def ensure_local(
+    proj: dict[str, str],
+    report: Callable[[str], None] = typer.echo,
+) -> str:
+    """Ensure a project has a usable local path.
+
+    Progress and error text goes through ``report`` so callers rendering
+    tables can defer the messages instead of interleaving them mid-table.
+    """
     path = proj.get("path", "")
     name = proj["name"]
     branch = proj.get("branch", "")
@@ -124,17 +132,17 @@ def ensure_local(proj: dict[str, str]) -> str:
     reset_target = f"origin/{branch}" if branch else "origin/HEAD"
 
     if cache_path.exists():
-        typer.echo(f"Fetching latest for '{name}' from cache...")
+        report(f"Fetching latest for '{name}' from cache...")
         try:
             git("-C", str(cache_path), "fetch", "--quiet")
             git("-C", str(cache_path), "reset", "--hard", reset_target, "--quiet")
         except sh.ErrorReturnCode as e:
-            typer.echo(f"Warning: fetch failed: {e.stderr.decode().strip()}")
+            report(f"Warning: fetch failed: {e.stderr.decode().strip()}")
         ensure_ref_symlink(name, str(cache_path))
         return str(cache_path)
 
     if url:
-        typer.echo(f"Cloning '{name}' from {url}...")
+        report(f"Cloning '{name}' from {url}...")
         cache_dir().mkdir(parents=True, exist_ok=True)
         clone_args = ["clone", "--depth=200"]
         if branch:
@@ -143,15 +151,17 @@ def ensure_local(proj: dict[str, str]) -> str:
         try:
             git(*clone_args)
         except sh.ErrorReturnCode as e:
-            typer.echo(f"Clone failed: {e.stderr.decode().strip()}")
+            report(f"Clone failed: {e.stderr.decode().strip()}")
             raise typer.Exit(1)
         ensure_ref_symlink(name, str(cache_path))
         return str(cache_path)
 
-    typer.echo(f"Project '{name}' has no local path or URL configured.")
-    typer.echo("\nEither:")
-    typer.echo("  1. Add a URL to downstream.json")
-    typer.echo(f"  2. Run: uv run lup-devtools sync setup {name} /path/to/repo")
+    report(
+        f"Project '{name}' has no local path or URL configured.\n"
+        "Either:\n"
+        "  1. Add a URL to downstream.json\n"
+        f"  2. Run: uv run lup-devtools sync setup {name} /path/to/repo"
+    )
     raise typer.Exit(1)
 
 
@@ -186,6 +196,8 @@ def list_projects_cmd() -> None:
     typer.echo(f"\n{'Project':<20} {'Behind':<10} {'Last Synced':<12} {'Source'}")
     typer.echo("-" * 80)
 
+    deferred: list[str] = []
+
     for p in projects:
         if p.get("ignore"):
             typer.echo(f"{p['name']:<20} {'—':<10} {'ignored':<12} (skipped)")
@@ -195,11 +207,11 @@ def list_projects_cmd() -> None:
         synced_short = synced[:8] if synced else "never"
 
         try:
-            resolved = ensure_local(p)
+            resolved = ensure_local(p, report=deferred.append)
         except (typer.Exit, sh.ErrorReturnCode):
             url = p.get("url", "NO PATH")
             typer.echo(
-                f"{p['name']:<20} {'?':<10} {synced_short:<12} {url} (clone failed)"
+                f"{p['name']:<20} {'?':<10} {synced_short:<12} {url} (unavailable)"
             )
             continue
 
@@ -209,6 +221,8 @@ def list_projects_cmd() -> None:
         typer.echo(f"{p['name']:<20} {behind:<10} {synced_short:<12} {source}")
 
     typer.echo()
+    for message in deferred:
+        typer.echo(message)
 
 
 @app.command("log")
