@@ -66,10 +66,12 @@ def build_agent_servers(
         gate: External ReflectionGate for the reflect tools to use.
             If None, a new gate is created internally.
     """
+    policy = ToolPolicy.from_settings(settings)
+
     example_server = create_mcp_server(
         name="example",
         version="1.0.0",
-        tools=extract_sdk_tools(EXAMPLE_TOOLS),
+        tools=extract_sdk_tools(policy.filter_tools(EXAMPLE_TOOLS)),
     )
 
     reflect_kit = create_reflect_tools(
@@ -80,14 +82,13 @@ def build_agent_servers(
     reflect_server = create_mcp_server(
         name="notes",
         version="1.0.0",
-        tools=extract_sdk_tools(reflect_kit["tools"]),
+        tools=extract_sdk_tools(policy.filter_tools(reflect_kit["tools"])),
     )
 
     all_servers: list[McpSdkServerConfig] = [example_server, reflect_server]
     if sandbox is not None:
         all_servers.append(sandbox.create_mcp_server())
 
-    policy = ToolPolicy.from_settings(settings)
     return policy.get_mcp_servers(*all_servers)
 
 

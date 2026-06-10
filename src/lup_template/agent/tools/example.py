@@ -9,6 +9,9 @@ Key patterns:
 4. Handler must return a BaseModel instance (auto-serialized to MCP response)
 5. Tool name defaults to the function name; override with name="..."
 6. Metrics (duration, errors) are tracked automatically
+7. tags=["requires:<service>"] marks tools that need an API key —
+   ToolPolicy.filter_tools drops them when the key is missing, so the
+   agent never sees tools it cannot use (see search_example below)
 
 Tool descriptions are the agent's only documentation for each tool.
 A terse description forces the agent to guess when/why to use a tool,
@@ -74,7 +77,8 @@ class FetchOutput(BaseModel):
     "or when exploring a topic before making decisions. "
     "Exists because the agent has no built-in knowledge beyond its training data. "
     "Returns a JSON object with {query, results: [{title, url}], count}. "
-    "Replace this with your actual search implementation."
+    "Replace this with your actual search implementation.",
+    tags=["requires:example-api"],
 )
 async def search_example(params: SearchInput) -> SearchOutput:
     """Search for information."""

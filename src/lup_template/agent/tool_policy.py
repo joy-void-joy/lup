@@ -21,11 +21,12 @@ Usage:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from claude_agent_sdk.types import McpSdkServerConfig, McpServerConfig
 
-from lup.mcp import server_tool_names
+from lup.mcp import LupMcpTool, server_tool_names
 
 if TYPE_CHECKING:
     from lup_template.agent.config import Settings
@@ -58,19 +59,27 @@ BUILTIN_TOOLS: frozenset[str] = frozenset(
 # agent unable to finish.
 FRAMEWORK_TOOLS: frozenset[str] = frozenset({"StructuredOutput"})
 
-# Define named tool sets for each API dependency.
-# Each set groups tools that share the same API key requirement.
-# This makes it clear which tools degrade when a key is missing.
+# Two complementary mechanisms control which tools the agent gets:
 #
-# Example:
-# EXA_TOOLS: frozenset[str] = frozenset({
-#     "mcp__search__search_exa",
-# })
+# 1. Tags (primary) — declare the requirement on the tool itself:
 #
-# FRED_TOOLS: frozenset[str] = frozenset({
-#     "mcp__financial__fred_series",
-#     "mcp__financial__fred_search",
-# })
+#        @lup_tool("...", tags=["requires:example-api"])
+#
+#    ``__init__`` maps missing settings to excluded tags, and
+#    ``filter_tools()`` drops tagged tools before server registration.
+#    The requirement lives next to the tool definition, so adding or
+#    renaming a tool never means editing this file.
+#
+# 2. Name sets — for tools you don't define (built-ins, external
+#    servers), group full tool names per dependency and subtract them
+#    via ``excluded_tools``:
+#
+#        LIVE_DATA_TOOLS: frozenset[str] = frozenset({
+#            "WebSearch",
+#            "mcp__external__live_quote",
+#        })
+#
+#    Name exclusions are enforced by the allowlist hook at call time.
 
 
 class ToolPolicy:
@@ -90,22 +99,26 @@ class ToolPolicy:
         *,
         restricted_mode: bool = False,
         excluded_tools: frozenset[str] = frozenset(),
+        excluded_tags: frozenset[str] = frozenset(),
     ) -> None:
         self.settings = settings
         self.restricted_mode = restricted_mode
 
         excluded: set[str] = set(excluded_tools)
+        tags: set[str] = set(excluded_tags)
 
-        # TODO: Add your exclusion logic
+        # Tags: map each unmet requirement to its tag (TEMPLATE example —
+        # replace with your domain's keys).
+        if not settings.example_api_key:
+            tags.add("requires:example-api")
+
+        # TODO: Add your name-set exclusion logic
         # Example:
-        # if not settings.exa_api_key:
-        #     excluded.update(EXA_TOOLS)
-        # if not settings.fred_api_key:
-        #     excluded.update(FRED_TOOLS)
         # if self.restricted_mode:
         #     excluded.update(LIVE_DATA_TOOLS)
 
         self.excluded_tools: frozenset[str] = frozenset(excluded)
+        self.excluded_tags: frozenset[str] = frozenset(tags)
 
     @classmethod
     def from_settings(
@@ -127,6 +140,15 @@ class ToolPolicy:
             settings,
             restricted_mode=restricted_mode,
         )
+
+    def filter_tools(self, tools: Sequence[LupMcpTool]) -> list[LupMcpTool]:
+        """Drop tools whose tags intersect the policy's excluded tags.
+
+        Apply before ``create_mcp_server`` so tools with unmet
+        requirements are never registered — the agent only sees tools it
+        can actually use. Untagged tools always pass through.
+        """
+        return [tool for tool in tools if not (set(tool.tags) & self.excluded_tags)]
 
     def get_mcp_servers(
         self, *additional_servers: McpSdkServerConfig
