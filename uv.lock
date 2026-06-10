@@ -384,7 +384,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "lup", extras = ["docker"], editable = "packages/lup" },
-    { name = "openai-codex", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython" },
+    { name = "openai-codex", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython&tag=rust-v0.139.0" },
     { name = "plotext", specifier = ">=5.3.2" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "pydantic-settings", specifier = ">=2.12.0" },
@@ -458,7 +458,7 @@ wheels = [
 [[package]]
 name = "openai-codex"
 version = "0.0.0.dev0"
-source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython#b89ce9a2bcedcfddf3a48f387b7912d602d6d87c" }
+source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython&tag=rust-v0.139.0#a7dff904308535e965aee87680c1fc5ef1d19eec" }
 dependencies = [
     { name = "openai-codex-cli-bin" },
     { name = "pydantic" },

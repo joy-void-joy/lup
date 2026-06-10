@@ -65,7 +65,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 lup = { workspace = true }
-openai-codex = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python" }
+openai-codex = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python", tag = "rust-v0.139.0" }
 
 [build-system]
 requires = ["setuptools>=61.0"]
