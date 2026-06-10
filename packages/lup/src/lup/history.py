@@ -58,7 +58,13 @@ from pydantic import BaseModel, Field
 
 from lup.client import TokenUsage
 from lup.metrics import MetricsSummary
-from lup.paths import agent_version, parse_timestamp, sessions_dir, traces_path
+from lup.paths import (
+    TIMESTAMP_FMT,
+    agent_version,
+    parse_timestamp,
+    sessions_dir,
+    traces_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +113,7 @@ def save_session(result: BaseModel, *, session_id: str) -> Path:
     session_dir = sessions_dir() / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime(TIMESTAMP_FMT)
     filepath = session_dir / f"{timestamp}.json"
 
     filepath.write_text(result.model_dump_json(indent=2), encoding="utf-8")
