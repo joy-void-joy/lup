@@ -252,10 +252,12 @@ def normalize_effort(effort: str | None, backend: str) -> str | None:
 def model_backend(model: str) -> str:
     """Determine the backend for a model name.
 
-    Returns "anthropic" for Claude models, "openai" for GPT/O models.
+    Returns "anthropic" for Claude models, "openai" for GPT/O-series
+    models, "openai-compatible" for everything else (open-source models
+    served via vLLM, Ollama, TGI, etc.).
     """
     if model.startswith("claude-") or model in ("haiku", "sonnet", "opus"):
         return "anthropic"
-    if model.startswith(("gpt-", "o1", "o3", "o4")):
+    if model.startswith(("gpt-", "o1-", "o3-", "o4-")):
         return "openai"
-    return "anthropic"
+    return "openai-compatible"

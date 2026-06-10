@@ -77,10 +77,28 @@ class Settings(BaseSettings):
     # SDK SELECTION
     # ==========================================================================
 
-    agent_sdk: Literal["claude", "codex"] = Field(
+    agent_sdk: Literal["claude", "codex", "openai"] = Field(
         default="claude",
         validation_alias="AGENT_SDK",
-        description="Which agent SDK backend to use",
+        description="Which agent SDK backend to use (claude, codex, openai)",
+    )
+
+    openai_base_url: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_BASE_URL",
+        description="Base URL for OpenAI-compatible API (vLLM, Ollama, TGI, etc.)",
+    )
+
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_API_KEY",
+        description="API key for OpenAI-compatible API",
+    )
+
+    openai_model_provider: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_MODEL_PROVIDER",
+        description="Codex model_provider for OpenAI-compatible endpoints",
     )
 
     codex_sandbox: str | None = Field(
