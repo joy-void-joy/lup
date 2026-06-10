@@ -1,7 +1,7 @@
 """Real-time MCP tools for persistent agents.
 
 This is a TEMPLATE. These tools show how to wire the Scheduler from
-``lup.lib.realtime`` into an agent session. Customize for your domain.
+``lup.realtime`` into an agent session. Customize for your domain.
 
 The pattern:
 1. Create a Scheduler with your environment's action callback
@@ -15,7 +15,7 @@ Core tools:
 - ``reply`` delivers actions to the environment
 - Timing tools (debounce, remind, schedule) are non-blocking
 
-Background agents (see ``lup.lib.background.BackgroundAgent``):
+Background agents (see ``lup.background.BackgroundAgent``):
 - Run companion agents alongside the main session
 - Observer example at the bottom shows conversation summarization
 - Any use case: research, execution, monitoring — not just observation
