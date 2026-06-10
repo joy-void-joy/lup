@@ -455,7 +455,7 @@ def create_observer(
     *,
     notes: list[str],
     transcript: list[object],
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-sonnet-4-6",
 ) -> BackgroundAgent:
     """Create an observer background agent.
 
