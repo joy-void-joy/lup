@@ -32,7 +32,11 @@ def collect_cmd(
     ] = None,
     all_time: Annotated[
         bool,
-        typer.Option("--all-time", help="Include all sessions regardless of date"),
+        typer.Option(
+            "--all-time",
+            help="Include all sessions regardless of date "
+            "(the default when --since is not given)",
+        ),
     ] = False,
     version: VERSION_OPT = AGENT_VERSION,
     all_versions: ALL_VERSIONS_OPT = False,
