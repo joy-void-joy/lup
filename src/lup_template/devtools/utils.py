@@ -8,9 +8,40 @@ import sh
 import typer
 from pydantic import BaseModel
 
-git = sh.Command("git").bake("--no-pager", "-c", "color.ui=never", _tty_out=False)
-gh = sh.Command("gh").bake(_tty_out=False)
-uv = sh.Command("uv")
+
+class LazyCommand:
+    """Shell command that resolves its binary on first use.
+
+    ``sh.Command`` raises ``CommandNotFound`` at construction time, so a
+    module-level command for a missing binary (e.g. ``gh``) would crash
+    every CLI invocation at import — including ``--help``. Resolution is
+    deferred to the first call or sub-command attribute access instead.
+    """
+
+    def __init__(self, name: str, *bake_args: str, tty_out: bool = True) -> None:
+        self.name = name
+        self.bake_args = bake_args
+        self.tty_out = tty_out
+        self.resolved: sh.Command | None = None
+
+    def resolve(self) -> sh.Command:
+        if self.resolved is None:
+            command = sh.Command(self.name)
+            if self.bake_args or not self.tty_out:
+                command = command.bake(*self.bake_args, _tty_out=self.tty_out)
+            self.resolved = command
+        return self.resolved
+
+    def __call__(self, *args: str, **kwargs: object) -> sh.RunningCommand:
+        return self.resolve()(*args, **kwargs)
+
+    def __getattr__(self, attr: str) -> sh.Command:
+        return getattr(self.resolve(), attr)
+
+
+git = LazyCommand("git", "--no-pager", "-c", "color.ui=never", tty_out=False)
+gh = LazyCommand("gh", tty_out=False)
+uv = LazyCommand("uv")
 
 
 def output_json(  # claude: ignore
