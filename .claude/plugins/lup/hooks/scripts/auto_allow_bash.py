@@ -58,7 +58,7 @@ RULES: list[Allow | Deny] = [
         pattern=r"^git (status|log|diff|show|branch|worktree|stash|remote|fetch|tag|add|commit)\b"
     ),
     # uv package management
-    Allow(pattern=r"^uv (remove|lock)\b"),
+    Allow(pattern=r"^uv (add|remove|sync|lock)\b"),
     Allow(pattern=r"^uv run (pyright|pytest|ruff)\b"),
     Allow(pattern=r"^uv run \S+ --help$"),
     # lup-devtools CLI
