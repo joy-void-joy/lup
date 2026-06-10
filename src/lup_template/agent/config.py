@@ -123,6 +123,13 @@ class Settings(BaseSettings):
         description="Maximum agent turns per session (None = unlimited)",
     )
 
+    sandbox_enabled: bool = Field(
+        default=True,
+        validation_alias="AGENT_SANDBOX_ENABLED",
+        description="Run code execution tools in a Docker sandbox "
+        "(requires Docker; disable to run the agent without code execution)",
+    )
+
     sandbox_timeout_seconds: int = Field(
         default=30,
         validation_alias="AGENT_SANDBOX_TIMEOUT_SECONDS",
