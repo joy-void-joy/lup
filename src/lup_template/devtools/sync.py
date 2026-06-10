@@ -13,7 +13,7 @@ Projects with a URL but no local path are auto-cloned to .cache/downstream/.
 
 Examples::
 
-    $ uv run lup-devtools sync list
+    $ uv run lup-devtools sync status
     $ uv run lup-devtools sync log my-project
     $ uv run lup-devtools sync log my-project --no-stat
     $ uv run lup-devtools sync diff my-project abc1234
@@ -162,8 +162,8 @@ def current_head(path: str) -> str:
     return git_in(path, "rev-parse", "HEAD")
 
 
-@app.command("list")
-def list_projects_cmd() -> None:
+@app.command("status")
+def status_cmd() -> None:
     """Show tracked projects and their sync status."""
     projects = load_projects()
 

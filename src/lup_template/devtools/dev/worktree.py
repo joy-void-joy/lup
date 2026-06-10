@@ -6,7 +6,7 @@ from pathlib import Path
 import sh
 import typer
 
-from lup_template.devtools.utils import git
+from lup_template.devtools.utils import copy_to_clipboard, git
 
 
 PLUGIN_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache" / "local" / "lup"
@@ -57,23 +57,6 @@ def get_tree_dir() -> Path:
 
     typer.echo("Error: Could not find tree/ directory", err=True)
     raise typer.Exit(1)
-
-
-def copy_to_clipboard(text: str) -> bool:
-    """Copy text to system clipboard. Returns True on success."""
-    try:
-        xclip = sh.Command("xclip")
-        xclip("-selection", "clipboard", _in=text)
-        return True
-    except (sh.ErrorReturnCode, sh.CommandNotFound):
-        pass
-    try:
-        xsel = sh.Command("xsel")
-        xsel("--clipboard", "--input", _in=text)
-        return True
-    except (sh.ErrorReturnCode, sh.CommandNotFound):
-        pass
-    return False
 
 
 def create(

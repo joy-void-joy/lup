@@ -23,7 +23,6 @@ Customization:
 from __future__ import annotations
 
 import shutil
-import subprocess
 import webbrowser
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -34,6 +33,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from lup.paths import project_root
+
 app = typer.Typer(
     help="Interactive setup wizard",
     pretty_exceptions_show_locals=False,
@@ -42,7 +43,7 @@ app = typer.Typer(
 
 console = Console()
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = project_root()
 ENV_LOCAL = PROJECT_ROOT / ".env.local"
 CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 
@@ -100,24 +101,8 @@ def open_browser(url: str) -> None:
     console.print(f"  Opening [link={url}]{url}[/link]")
     try:
         webbrowser.open(url)
-    except Exception:
+    except (webbrowser.Error, OSError):
         console.print(f"  [dim]Could not open browser. Go to: {url}[/dim]")
-
-
-def copy_to_clipboard(text: str) -> bool:
-    """Copy text to system clipboard. Returns True on success."""
-    for cmd in (
-        ["xclip", "-selection", "clipboard"],
-        ["xsel", "--clipboard", "--input"],
-        ["pbcopy"],
-    ):
-        if shutil.which(cmd[0]):
-            try:
-                subprocess.run(cmd, input=text.encode(), check=True)
-                return True
-            except subprocess.CalledProcessError:
-                continue
-    return False
 
 
 def detect_system_timezone() -> str:
@@ -131,7 +116,7 @@ def detect_system_timezone() -> str:
             if "zoneinfo/" in target:
                 return target.split("zoneinfo/", 1)[1]
         return tz_name or ""
-    except Exception:
+    except OSError:
         return ""
 
 

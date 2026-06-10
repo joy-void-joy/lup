@@ -70,15 +70,19 @@ def get_branch_files(state: str) -> tuple[str, set[str]]:
         case "rebase":
             rebase_merge = git_dir / "rebase-merge"
             rebase_apply = git_dir / "rebase-apply"
-            if rebase_merge.exists():
-                onto = (rebase_merge / "onto").read_text().strip()
-                orig_head = (rebase_merge / "head").read_text().strip()
-            elif rebase_apply.exists():
-                onto = (rebase_apply / "onto").read_text().strip()
-                orig_head = (rebase_apply / "orig-head").read_text().strip()
-            else:
-                typer.echo("Cannot determine rebase state", err=True)
-                raise typer.Exit(1)
+            try:
+                if rebase_merge.exists():
+                    onto = (rebase_merge / "onto").read_text().strip()
+                    orig_head = (rebase_merge / "head").read_text().strip()
+                elif rebase_apply.exists():
+                    onto = (rebase_apply / "onto").read_text().strip()
+                    orig_head = (rebase_apply / "orig-head").read_text().strip()
+                else:
+                    typer.echo("Cannot determine rebase state", err=True)
+                    raise typer.Exit(1)
+            except OSError as e:
+                typer.echo(f"Cannot read rebase state: {e}", err=True)
+                raise typer.Exit(1) from e
             base = str(git("merge-base", orig_head, onto)).strip()
             files_output = str(
                 git("diff", "--name-only", f"{base}..{orig_head}", _ok_code=[0])
