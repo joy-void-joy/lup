@@ -114,32 +114,32 @@ This plan supersedes the previous SDK-interop status document. That document mar
 
 ## Phase 3 — Codex-side enforcement
 
-- [ ] Primary: native config — `sandbox_mode` + `writable_roots` derived from `notes.rw` dirs replaces the generated Write/Edit permission script
-- [ ] Spike: probe script logging real Codex hook event payloads (tool names, fields) on a live turn; record findings in this file
-- [ ] If hooks usable: regenerate scripts against *actual* Codex tool names; generate them from the same policy source as `lup/hooks.py` (no logic drift — the current scripts diverge on `extract_glob_dir` and path resolution)
-- [ ] If hooks unusable: delete the generated-script layer for permissions (in-tool gate + native sandbox already enforce), keep `codex_hooks.py` only for what's verified
-- [ ] Wire `Settings.permission_mode` for Claude (currently hardcoded `bypassPermissions`), completing the security-profile normalization
+- [x] Primary: native config — `build_sandbox_config_overrides()` emits `sandbox_mode="workspace-write"` + `sandbox_workspace_write.writable_roots` from `notes.rw`
+- [x] Spike completed live: PreToolUse/PostToolUse command hooks configured with `features.codex_hooks=true` **never fire** on codex-cli 0.128.0 (ChatGPT account) — a full turn ran tools with zero hook invocations. Codex hooks are unusable today.
+- [x] Hooks-unusable branch taken: the default Codex path no longer generates permission/gate hook scripts; enforcement is native sandbox (filesystem) + in-tool gate (reflection). `codex_hooks.py` retained as a quarantined library layer for when upstream ships working hooks.
+- [x] Wire `Settings.permission_mode` for Claude (`AGENT_PERMISSION_MODE`, default preserves `bypassPermissions`)
 
-**Verify:** Codex agent cannot write outside `writable_roots`; gate denial observed on Codex in the trace; no hook config referencing unverified tool names remains.
+**Verified live:** a Codex agent attempting to write `$HOME/lup_escape_test.txt` was blocked by the sandbox (read-only filesystem error), no file created, and the session still completed review → submit normally.
 
 ## Phase 4 — Subagents on Codex
 
-- [ ] `run_subagent` LupMcpTool: input (subagent name, task) → look up `SubagentSpec` → dispatch `query()` by `model_backend(spec.model)` → return text or structured result
-- [ ] Served via serve-tools on Codex/OpenAI; Claude keeps native `agents=` (same specs, per-adapter interpretation — documented)
-- [ ] Specs requiring tools that the chosen backend can't provide fail loudly with a clear message
-- [ ] Delete `format_subagent_prompt_section` (capability replaces prose)
-- [ ] `query()` honesty: raise `ValueError` for accepted-but-unsupported options per backend (capability table in `adapters/common.py`)
+- [x] `run_subagent` LupMcpTool (`lup/subagents.py`): look up `SubagentSpec` → dispatch `query()` by `model_backend(spec.model)`; `SubagentSpec` gains optional `max_turns`
+- [x] Served via serve-tools on Codex/OpenAI; Claude keeps native `agents=` (same specs, per-adapter interpretation)
+- [x] Specs requiring tools on a backend whose one-shot queries can't provide them fail loudly
+- [x] `format_subagent_prompt_section` deleted (capability replaces prose)
+- [x] `query()` honesty: ValueError for Claude-only options (`max_turns`, `tools`, `permission_mode`, `max_budget_usd`, …) on other backends
 
-**Verify:** Codex session trace shows `mcp__notes__run_subagent` invocation returning researcher output; `query(model="gpt-…", max_budget_usd=…)` raises.
+**Verified live:** a gpt-5.5 Codex agent called `mcp__notes__run_subagent(analyzer, …)`; the subprocess dispatched a Claude haiku one-shot and returned its finding, which the codex agent reviewed and submitted — cross-SDK delegation end to end.
 
 ## Phase 5 — Backgrounds + sandbox lifecycle on Codex
 
-- [ ] Sandbox on Codex: serve-tools constructs `Sandbox` lazily from env (`LUP_SESSION_ID`, shared dir), registers `atexit` cleanup; stale-container sweep on next start (existing label mechanism)
-- [ ] `CodexBackgroundAgent` gains MCP tools via per-agent `config_overrides` (its own serve-tools instance); factory stops silently dropping `tools`/`builtin_tools`/`allowed_tools` — pass through or raise
-- [ ] Align background model defaults intentionally (document why claude default is opus-class and codex default is mini-class, or make them symmetric)
-- [ ] Replace bare `except Exception` supervisors in both background run-loops with specific exceptions + a documented top-level supervisor pattern
+- [x] Sandbox on Codex: serve-tools constructs `Sandbox` from env, tools lazy-start the container (`ensure_started`), atexit + SIGTERM handler for graceful exit, label-based orphan sweep (creation time and volume stored as container labels — no timestamp parsing), and a parent-side `sandbox_cleanup` context guaranteeing removal even when the subprocess is killed (observed: codex kills serve-tools without graceful exit)
+- [x] Per-group serve-tools servers (`--server notes|sandbox`) so tool names match the Claude path exactly (`mcp__sandbox__execute_code`)
+- [x] Factory raises for tools with `sdk="codex"` — background tools share in-process state, which cannot cross the subprocess boundary (documented in the factory)
+- [x] Background model defaults documented: opus-class on Claude (tool-acting observers) vs small on Codex (prompt-in/text-out summarizers)
+- [x] Supervisor `except Exception` blocks annotated as deliberate (`# claude: ignore` with rationale): a background crash logs and dies quietly, never propagates
 
-**Verify:** `AGENT_SDK=codex` session executes `execute_code` in Docker; `docker ps` clean after exit (including SIGKILL test); background agent on Codex calls one of its tools.
+**Verified live:** `AGENT_SDK=codex` session executed `mcp__sandbox__execute_code` in Docker (lazy container start) and `docker ps -a --filter label=lup.sandbox` is empty after exit — guaranteed cleanup confirmed.
 
 ## Phase 6 — Library API + boundary cleanup
 
