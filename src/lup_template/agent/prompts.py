@@ -10,8 +10,11 @@ Key patterns:
    (see Tool Design Philosophy in CLAUDE.md)
 """
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any  # claude: ignore — SdkMcpTool's input type param
+
+from claude_agent_sdk import SdkMcpTool
 
 
 # ---------------------------------------------------------------------------
@@ -60,14 +63,15 @@ SECTIONS: list[str] = [
 def get_system_prompt(
     *,
     date: datetime | None = None,
-    mcp_servers: dict[str, Any] | None = None,
+    server_tools: dict[str, Sequence[SdkMcpTool[Any]]] | None = None,  # claude: ignore
     extra_sections: list[str] | None = None,
 ) -> str:
     """Generate the system prompt by composing sections.
 
     Args:
         date: Date to use as "today". If None, uses current date.
-        mcp_servers: Optional dict of MCP servers to auto-generate tool docs.
+        server_tools: Tool definitions per server name to auto-generate
+            tool docs, e.g. ``{"example": extract_sdk_tools(EXAMPLE_TOOLS)}``.
         extra_sections: Additional prompt sections appended after SECTIONS.
 
     Returns:
@@ -81,15 +85,17 @@ def get_system_prompt(
     prompt = "\n\n".join(all_sections)
     prompt = prompt.format(date=effective_date.strftime("%Y-%m-%d"))
 
-    if mcp_servers:
-        tool_docs = generate_tool_docs(mcp_servers)
+    if server_tools:
+        tool_docs = generate_tool_docs(server_tools)
         prompt += f"\n\n{tool_docs}"
 
     return prompt + "\n"
 
 
-def generate_tool_docs(mcp_servers: dict[str, Any]) -> str:
-    """Generate tool documentation from MCP server tool descriptions.
+def generate_tool_docs(
+    server_tools: dict[str, Sequence[SdkMcpTool[Any]]],  # claude: ignore
+) -> str:
+    """Generate tool documentation from MCP tool descriptions.
 
     Tool descriptions are the single source of truth for what each tool does,
     when to use it, and why it exists. This function passes them through
@@ -97,21 +103,17 @@ def generate_tool_docs(mcp_servers: dict[str, Any]) -> str:
     """
     lines = ["## Auto-Generated Tool Reference\n"]
 
-    for server_name, server_config in mcp_servers.items():
-        tools = getattr(server_config, "tools", [])
+    for server_name, tools in server_tools.items():
         if not tools:
             continue
 
         lines.append(f"### {server_name.title()}\n")
 
         for tool in tools:
-            tool_name = getattr(tool, "name", str(tool))
-            tool_desc = getattr(tool, "description", "")
-
-            if tool_desc:
-                lines.append(f"- **{tool_name}**: {tool_desc}")
+            if tool.description:
+                lines.append(f"- **{tool.name}**: {tool.description}")
             else:
-                lines.append(f"- **{tool_name}**")
+                lines.append(f"- **{tool.name}**")
 
         lines.append("")
 
