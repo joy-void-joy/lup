@@ -48,6 +48,7 @@ The configurable hooks live in `.claude/plugins/lup/hooks/scripts/`:
 - When adding allow patterns, prefer precise patterns over broad ones (e.g., `r"^npm run build$"` not `r"^npm"`)
 - When the user's request is ambiguous about which hook, ask
 - Show the exact pattern you'll add so the user can verify the regex
+- When a rule misfires or is questioned, diagnose before editing: survey the codebase's real matches and retarget the rule at the failure mode it exists to catch, not at the surface pattern
 
 ## Examples
 
@@ -68,9 +69,6 @@ User says: "increase the edit threshold to 5 lines"
 
 User says: "remove the pypi allow pattern"
 -> Remove the matching pattern from the relevant list
-
-User says: "the X anti-pattern keeps firing on legitimate uses"
--> Survey real usages of X in the codebase first, then retarget the ANTI_PATTERNS entry at the actual failure mode instead of the surface pattern (e.g. `except Exception` -> silent `except ...: pass` swallows)
 
 ## If no arguments provided
 
