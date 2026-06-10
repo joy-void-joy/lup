@@ -3,21 +3,20 @@
 Core utilities for building agents with hooks, MCP tools, tracing, and session management.
 """
 
-from lup.client import ResponseCollector, TokenUsage, build_client, query
+from lup.adapters.claude_client import ResponseCollector, build_client
+from lup.adapters.claude_client import query as claude_query
+from lup.adapters.common import query
 from lup.hooks import (
-    HooksConfig,
-    allow_hook_output,
-    block_hook_output,
+    create_capture_hook,
     create_nudge_hook,
     create_permission_hooks,
-    deny_hook_output,
-    merge_hooks,
+    create_reflection_gate,
+    create_tool_allowlist_hook,
 )
 from lup.mcp import (
     LupMcpTool,
     ToolError,
     create_mcp_server,
-    extract_sdk_tools,
     lup_tool,
 )
 from lup.metrics import (
@@ -27,11 +26,19 @@ from lup.metrics import (
     reset_metrics,
 )
 from lup.paths import agent_version, configure, project_root
-from lup.reflect import ReflectionGate, create_reflection_gate
+from lup.reflect import ReflectionGate
 from lup.trace import TraceLogger, print_message
+from lup.types import (
+    LupHooksConfig,
+    TokenUsage,
+    allow_hook,
+    block_hook,
+    deny_hook,
+    merge_hooks,
+)
 
 __all__ = [
-    "HooksConfig",
+    "LupHooksConfig",
     "LupMcpTool",
     "MetricsSummary",
     "ReflectionGate",
@@ -40,16 +47,18 @@ __all__ = [
     "ToolError",
     "TraceLogger",
     "agent_version",
-    "allow_hook_output",
-    "block_hook_output",
+    "allow_hook",
+    "block_hook",
     "build_client",
+    "claude_query",
     "configure",
+    "create_capture_hook",
     "create_mcp_server",
     "create_nudge_hook",
     "create_permission_hooks",
     "create_reflection_gate",
-    "deny_hook_output",
-    "extract_sdk_tools",
+    "create_tool_allowlist_hook",
+    "deny_hook",
     "get_metrics_summary",
     "log_metrics_summary",
     "lup_tool",

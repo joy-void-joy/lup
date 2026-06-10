@@ -29,7 +29,7 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.claude_client import query
+from lup.adapters.common import query
 from lup.mcp import LupMcpTool, lup_tool
 from lup.reflect import ReflectionGate
 
@@ -167,7 +167,7 @@ async def run_reviewer(
 
     reviewer_prompt = "\n\n".join(prompt_sections)
 
-    collector = await query(
+    response = await query(
         reviewer_prompt,
         prefix="  ↳ [reviewer] ",
         model=model,
@@ -180,7 +180,7 @@ async def run_reviewer(
         max_turns=5,
     )
 
-    return collector.text
+    return response.text
 
 
 # ---------------------------------------------------------------------------
