@@ -56,7 +56,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypedDict, cast, get_type_hints
 
 from claude_agent_sdk import SdkMcpTool
-from claude_agent_sdk.types import McpSdkServerConfig
+from claude_agent_sdk.types import McpSdkServerConfig, McpServerConfig
 from mcp.server import Server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -209,6 +209,24 @@ def create_mcp_server(
             )
 
     return McpSdkServerConfig(type="sdk", name=name, instance=server)
+
+
+def server_tool_names(server: McpServerConfig) -> list[str]:
+    """List the tool names registered on an in-process SDK MCP server.
+
+    Servers built with :func:`create_mcp_server` carry their tool list on
+    the server instance. Use this to compute the full
+    ``mcp__{server}__{tool}`` names the agent will see — e.g. when
+    building a tool allowlist or an inspection display — without
+    maintaining a second tool list that can drift. External server
+    configs (stdio, SSE, HTTP) cannot be introspected without connecting,
+    so they yield an empty list.
+    """
+    if server.get("type") != "sdk":
+        return []
+    instance = cast(McpSdkServerConfig, server)["instance"]
+    tools = cast(Sequence[SdkMcpTool[Any]], getattr(instance, "_tools", []))
+    return [tool_def.name for tool_def in tools]
 
 
 class ToolError(Exception):
