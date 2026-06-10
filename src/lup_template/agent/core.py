@@ -45,9 +45,6 @@ from lup_template.agent.tools.reflect import create_reflect_tools
 
 logger = logging.getLogger(__name__)
 
-NOTES_PATH = Path(settings.notes_path)
-TRACES_PATH = NOTES_PATH / "traces"
-
 
 def build_agent_servers(
     *,
@@ -219,8 +216,9 @@ async def run_agent(
     reset_metrics()
 
     notes = setup_notes(session_id, task_id or "0")
-    trace_path = TRACES_PATH / session_id / f"{datetime.now().strftime('%H%M%S')}.md"
-    trace_logger = TraceLogger(trace_path=trace_path, title=f"Session {session_id}")
+    trace_logger = TraceLogger(
+        trace_path=notes.trace_log, title=f"Session {session_id}"
+    )
 
     # --- Sandbox (optional, requires Docker) ---
     # Customize: adjust pre_install, timeout, network_mode, or remove entirely
