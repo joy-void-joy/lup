@@ -143,6 +143,23 @@ def decode_output(output: bytes | None) -> str:
     return output.decode("utf-8", errors="replace")
 
 
+def compute_deadline(timeout_seconds: int, grace_seconds: float = 5.0) -> float | None:
+    """Host-side deadline (monotonic clock) for a REPL request.
+
+    Returns ``None`` for non-positive timeouts: "no timeout" means no
+    host deadline at all, mirroring the in-sandbox behavior where the
+    REPL server skips ``signal.alarm`` for non-positive values. Killing
+    the connection after a fixed grace would lose the REPL state for
+    deliberately long-running code.
+
+    The grace period covers protocol overhead on top of the in-sandbox
+    timeout, so the in-sandbox SIGALRM fires first under normal operation.
+    """
+    if timeout_seconds <= 0:
+        return None
+    return time.monotonic() + timeout_seconds + grace_seconds
+
+
 # --- Sandbox class ---
 
 
@@ -295,14 +312,19 @@ class ReplSession:
         self.exec_id = None
 
     def execute(self, code: str, timeout_seconds: int) -> ExecuteCodeResult:
-        """Send code to the REPL and return the result."""
+        """Send code to the REPL and return the result.
+
+        Non-positive ``timeout_seconds`` disables both the in-sandbox
+        SIGALRM and the host-side deadline — the call blocks until the
+        code finishes.
+        """
         if self.sock is None:
             raise SandboxNotInitializedError("REPL not connected")
 
         request = json.dumps({"code": code, "timeout": timeout_seconds}) + "\n"
         self.send(request.encode("utf-8"))
 
-        deadline = time.monotonic() + timeout_seconds + 5
+        deadline = compute_deadline(timeout_seconds)
         try:
             response = self.recv_response(deadline)
         except (SocketError, OSError) as e:
@@ -331,14 +353,20 @@ class ReplSession:
         except (BrokenPipeError, OSError) as e:
             raise ReplCrashedError(f"REPL write failed: {e}") from e
 
-    def recv_response(self, deadline: float) -> dict[str, int | str]:
-        """Read Docker multiplex frames until a complete JSON line arrives."""
+    def recv_response(self, deadline: float | None) -> dict[str, int | str]:
+        """Read Docker multiplex frames until a complete JSON line arrives.
+
+        ``deadline=None`` blocks indefinitely (no-timeout requests).
+        """
         stdout_buf = b""
         while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise ReplCrashedError("Timed out waiting for REPL response")
-            self.set_socket_timeout(remaining)
+            if deadline is None:
+                self.set_socket_timeout(None)
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ReplCrashedError("Timed out waiting for REPL response")
+                self.set_socket_timeout(remaining)
 
             stream_type, size = next_frame_header(self.sock)
             if size < 0:
@@ -362,8 +390,8 @@ class ReplSession:
                         "REPL stderr: %s", data.decode("utf-8", errors="replace")
                     )
 
-    def set_socket_timeout(self, timeout: float) -> None:
-        """Set timeout on the underlying socket."""
+    def set_socket_timeout(self, timeout: float | None) -> None:
+        """Set timeout on the underlying socket (None = blocking mode)."""
         sock = self.sock
         for candidate in [sock, getattr(sock, "_sock", None)]:
             if hasattr(candidate, "settimeout"):
@@ -582,7 +610,9 @@ class Sandbox:
         Args:
             code: Python code to execute.
             timeout_seconds: Max execution time in seconds. If None, uses
-                the sandbox's default timeout. Set to 0 for no timeout.
+                the sandbox's default timeout. Zero or negative means no
+                timeout at all — no in-sandbox alarm and no host deadline,
+                so long-running code completes without losing REPL state.
 
         Returns:
             Result containing exit code, stdout, stderr, and duration.
