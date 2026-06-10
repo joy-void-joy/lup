@@ -186,6 +186,23 @@ async def query(
 
     output_schema = output_type.model_json_schema() if output_type else None
 
+    if backend != "anthropic":
+        claude_only = {
+            "max_turns": max_turns,
+            "max_thinking_tokens": max_thinking_tokens,
+            "tools": tools,
+            "allowed_tools": allowed_tools,
+            "permission_mode": permission_mode,
+            "max_budget_usd": max_budget_usd,
+        }
+        requested = sorted(k for k, v in claude_only.items() if v is not None)
+        if requested:
+            raise ValueError(
+                f"query() options {requested} are not supported on the "
+                f"{backend} backend (model={effective_model!r}); use a "
+                "Claude model or drop these options."
+            )
+
     match backend:
         case "anthropic":
             return await claude_query(
