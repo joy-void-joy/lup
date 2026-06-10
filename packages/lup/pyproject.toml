@@ -48,6 +48,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+lup = ["py.typed"]
+
 [tool.pyright]
 include = ["src"]
 pythonVersion = "3.13"
