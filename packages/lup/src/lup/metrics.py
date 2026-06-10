@@ -1,14 +1,20 @@
 """Tool call metrics tracking.
 
-Provides a decorator that tracks tool call counts, durations, and errors.
-Metrics are saved with each session for feedback loop analysis.
+MCP tools defined with :func:`lup.mcp.lup_tool` are tracked automatically —
+every call's duration and error status is recorded into the module-level
+collector, no decorator needed. Metrics are saved with each session for
+feedback loop analysis.
+
+Use the :func:`tracked` decorator for non-tool async functions (background
+jobs, API helpers, sub-agent invocations) that should feed the same
+metrics stream.
 
 Examples:
-    Decorate a tool handler to track calls automatically::
+    Record a non-tool helper alongside tool metrics::
 
-        >>> @tracked("search")
-        ... async def search(args: SearchInput) -> dict[str, object]:
-        ...     return {"results": []}
+        >>> @tracked("fetch_market_data")
+        ... async def fetch_market_data(symbol: str) -> dict[str, float]:
+        ...     return {"price": 101.5}
 
     Retrieve aggregated metrics at session end::
 
@@ -165,14 +171,28 @@ def tracked[**P, T](
     [Callable[P, Coroutine[object, object, T]]],
     Callable[P, Coroutine[object, object, T]],
 ]:
-    """Decorator to track tool call metrics.
+    """Decorator recording call metrics for non-tool async functions.
+
+    **What:** Records each call's duration and error status (raised
+    exceptions, or a returned dict carrying ``is_error``) into the same
+    collector that :func:`lup.mcp.lup_tool` feeds automatically for MCP
+    tools.
+
+    **When:** Apply to async helpers that are not MCP tools — background
+    jobs, API wrappers, sub-agent invocations — so their health shows up
+    in :func:`get_metrics_summary` next to the tool metrics. Tools defined
+    via ``lup_tool`` are already tracked; do not double-decorate them.
+
+    **Why:** Session analysis reads a single metrics stream; work that
+    happens outside tool handlers would otherwise be invisible to the
+    feedback loop.
 
     Args:
         tool_name: Name to record metrics under. If None, uses function name.
 
     Example:
-        @tracked("search")
-        async def search(args: SearchInput) -> dict:
+        @tracked("refresh_cache")
+        async def refresh_cache(bucket: str) -> dict[str, int]:
             ...
     """
 
