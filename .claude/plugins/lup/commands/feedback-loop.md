@@ -93,12 +93,12 @@ Write analysis output to `notes/feedback_loop/<timestamp>_analysis.md`:
 | ----- | ------ | --------- |
 
 ## Evaluation Queue
-uv run python -m lup_template.environment.cli loop "task1" "task2" "task3"
+uv run lup loop "task1" "task2" "task3"
 ```
 
 ## Key Questions
 
-1. **What AGENT_VERSION am I analyzing?** Filter ALL data by version.
+1. **What agent version am I analyzing?** Filter ALL data by version.
 2. **Do we have outcome data?** If no, focus on process not accuracy.
 3. **What tools fail repeatedly?** Fix or replace them.
 4. **What does the agent say it needs?** Trust and provide.

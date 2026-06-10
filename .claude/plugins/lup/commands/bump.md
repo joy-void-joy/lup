@@ -6,7 +6,7 @@ argument-hint: [patch|minor|major]
 
 # Version Bump
 
-Review changes since the last version bump and bump `AGENT_VERSION` accordingly.
+Review changes since the last version bump and bump the agent version (`[tool.lup] agent_version` in `pyproject.toml`) accordingly.
 
 ## Input
 
