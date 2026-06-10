@@ -44,6 +44,27 @@ gh = LazyCommand("gh", tty_out=False)
 uv = LazyCommand("uv")
 
 
+def copy_to_clipboard(text: str) -> bool:
+    """Copy text to the system clipboard. Returns True on success.
+
+    Tries xclip, then xsel; returns False when neither is available so
+    callers can fall back to printing the text for manual copying.
+    """
+    try:
+        xclip = sh.Command("xclip")
+        xclip("-selection", "clipboard", _in=text)
+        return True
+    except (sh.ErrorReturnCode, sh.CommandNotFound):
+        pass
+    try:
+        xsel = sh.Command("xsel")
+        xsel("--clipboard", "--input", _in=text)
+        return True
+    except (sh.ErrorReturnCode, sh.CommandNotFound):
+        pass
+    return False
+
+
 def output_json(  # claude: ignore
     data: BaseModel | Mapping[str, object] | Sequence[object],
 ) -> None:

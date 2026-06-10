@@ -18,18 +18,20 @@ Customization:
     1. Define ``setup_<name>()`` functions that return ``dict[str, str]``
     2. Register them in ``INTEGRATIONS`` with a name and status checker
     3. Optionally add individual subcommands via ``@app.command``
+    4. Shell helpers live in ``lup_template.devtools.utils`` (e.g.
+       ``copy_to_clipboard`` for wizard steps that hand the user a value)
 """
 
 from __future__ import annotations
 
 import shutil
-import subprocess
 import webbrowser
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
+from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -106,22 +108,6 @@ def open_browser(url: str) -> None:
         console.print(f"  [dim]Could not open browser. Go to: {url}[/dim]")
 
 
-def copy_to_clipboard(text: str) -> bool:
-    """Copy text to system clipboard. Returns True on success."""
-    for cmd in (
-        ["xclip", "-selection", "clipboard"],
-        ["xsel", "--clipboard", "--input"],
-        ["pbcopy"],
-    ):
-        if shutil.which(cmd[0]):
-            try:
-                subprocess.run(cmd, input=text.encode(), check=True)
-                return True
-            except subprocess.CalledProcessError:
-                continue
-    return False
-
-
 def detect_system_timezone() -> str:
     """Detect the system's IANA timezone name."""
     try:
@@ -142,27 +128,18 @@ def detect_system_timezone() -> str:
 # =====================================================================
 
 
-class Integration:
-    """A single integration that the setup wizard can configure.
+class Integration(BaseModel):
+    """A single integration that the setup wizard can configure."""
 
-    Each integration has:
-    - ``name``: Display name (e.g., "Slack", "Google")
-    - ``env_keys``: Env vars to check for status display
-    - ``setup_func``: Interactive function that returns env vars to write
-    - ``status_func``: Optional custom status checker (default: checks env_keys)
-    """
-
-    def __init__(
-        self,
-        name: str,
-        env_keys: list[str],
-        setup_func: Callable[[], dict[str, str]],
-        status_func: Callable[[dict[str, str]], tuple[bool, str]] | None = None,
-    ) -> None:
-        self.name = name
-        self.env_keys = env_keys
-        self.setup_func = setup_func
-        self.status_func = status_func
+    name: str = Field(description="Display name (e.g., 'Slack', 'Google')")
+    env_keys: list[str] = Field(description="Env vars to check for status display")
+    setup_func: Callable[[], dict[str, str]] = Field(
+        description="Interactive function that returns env vars to write"
+    )
+    status_func: Callable[[dict[str, str]], tuple[bool, str]] | None = Field(
+        default=None,
+        description="Custom status checker (default: checks env_keys)",
+    )
 
     def check_status(self, env: dict[str, str]) -> tuple[bool, str]:
         """Return (is_configured, detail_string)."""
@@ -406,7 +383,7 @@ def setup_timezone() -> dict[str, str]:
 
             ZoneInfo(tz)
             console.print(f"  [green]Valid[/] — {tz}")
-        except (KeyError, ModuleNotFoundError):
+        except KeyError:
             console.print(
                 f"  [yellow]Warning:[/] '{tz}' may not be a valid IANA timezone"
             )
@@ -433,14 +410,27 @@ def timezone_status(env: dict[str, str]) -> tuple[bool, str]:
 
 INTEGRATIONS: list[Integration] = [
     Integration(
-        "Slack", ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"], setup_slack, slack_status
+        name="Slack",
+        env_keys=["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
+        setup_func=setup_slack,
+        status_func=slack_status,
     ),
     Integration(
-        "Google (OAuth)", ["GMAIL_CREDENTIALS_PATH"], setup_google, google_status
+        name="Google (OAuth)",
+        env_keys=["GMAIL_CREDENTIALS_PATH"],
+        setup_func=setup_google,
+        status_func=google_status,
     ),
-    Integration("Notion", ["NOTION_TOKEN"], setup_notion),
-    Integration("Example API", ["EXAMPLE_API_KEY"], setup_api_key),
-    Integration("Timezone", ["AGENT_TIMEZONE"], setup_timezone, timezone_status),
+    Integration(name="Notion", env_keys=["NOTION_TOKEN"], setup_func=setup_notion),
+    Integration(
+        name="Example API", env_keys=["EXAMPLE_API_KEY"], setup_func=setup_api_key
+    ),
+    Integration(
+        name="Timezone",
+        env_keys=["AGENT_TIMEZONE"],
+        setup_func=setup_timezone,
+        status_func=timezone_status,
+    ),
 ]
 
 
