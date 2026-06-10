@@ -155,15 +155,6 @@ def get_latest_session_json(session_id: str) -> SessionData | None:
     return sessions[-1] if sessions else None
 
 
-def list_all_sessions() -> list[str]:
-    """List all session IDs across all versions.
-
-    Returns:
-        Sorted, deduplicated list of session IDs.
-    """
-    return list_all_session_ids()
-
-
 def update_session_metadata(
     session_id: str,
     *,
@@ -333,14 +324,6 @@ def iter_trace_log_files(session_id: str | None = None) -> Iterator[Path]:
                 yield from session_logs.glob("*.md")
         else:
             yield from logs_base.rglob("*.md")
-
-
-def list_all_session_ids(version: str | None = None) -> list[str]:
-    """Return all session IDs across versions, deduplicated."""
-    ids: set[str] = set()
-    for d in iter_session_dirs(version=version):
-        ids.add(d.name)
-    return sorted(ids)
 
 
 # -- Version scope resolution ------------------------------------------------
