@@ -6,7 +6,6 @@ and supplements with stats-cache.json for daily detail.
 Examples::
 
     $ uv run lup-devtools usage
-    $ uv run lup-devtools usage --no-watch
     $ uv run lup-devtools usage --no-detail
     $ uv run lup-devtools usage --watch --interval 300
 """
@@ -652,9 +651,9 @@ def main(
         typer.Option(
             "--watch/--no-watch",
             "-w",
-            help="Continuously refresh the display.",
+            help="Continuously refresh the display (blocks; needs a TTY).",
         ),
-    ] = True,
+    ] = False,
     interval: Annotated[
         int,
         typer.Option(
@@ -680,7 +679,7 @@ def main(
                 f" {e.response.text[:200]}[/red]"
             )
             raise typer.Exit(1) from e
-        except httpx.ConnectError as e:
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
             console.print(f"[red]Connection failed: {e}[/red]")
             raise typer.Exit(1) from e
         console.print()
@@ -694,7 +693,7 @@ def main(
     )
     try:
         panel = fetch_and_build(detail, bar_width)
-    except (httpx.HTTPStatusError, httpx.ConnectError):
+    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException):
         panel = build_error_panel("Initial fetch failed")
 
     with Live(
@@ -707,7 +706,11 @@ def main(
             try:
                 time.sleep(interval)
                 panel = fetch_and_build(detail, bar_width)
-            except (httpx.HTTPStatusError, httpx.ConnectError) as e:
+            except (
+                httpx.HTTPStatusError,
+                httpx.ConnectError,
+                httpx.TimeoutException,
+            ) as e:
                 panel = build_error_panel(str(e)[:120])
             except KeyboardInterrupt:
                 break
