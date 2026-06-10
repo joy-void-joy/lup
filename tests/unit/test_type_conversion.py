@@ -1,10 +1,17 @@
 """Tests for SDK → lup type conversion (Claude and Codex)."""
 
 from claude_agent_sdk import TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
-from claude_agent_sdk.types import AssistantMessage, ResultMessage, SystemMessage, UserMessage
+from claude_agent_sdk.types import (
+    AssistantMessage,
+    ResultMessage,
+    ServerToolResultBlock,
+    ServerToolUseBlock,
+    SystemMessage,
+    UserMessage,
+)
 
-from lup.lib.adapters.claude import claude_block_to_lup, claude_message_to_lup
-from lup.lib.types import (
+from lup.adapters.claude import claude_block_to_lup, claude_message_to_lup
+from lup.types import (
     LupAssistantMessage,
     LupSystemMessage,
     LupTextBlock,
@@ -71,6 +78,48 @@ class TestClaudeBlockToLup:
         result = claude_block_to_lup(block)
         assert isinstance(result, LupTextBlock)
         assert result.text == ""
+
+    def test_redacted_thinking_block(self) -> None:
+        block = ThinkingBlock(thinking="", signature="sig_redacted_abc")
+        result = claude_block_to_lup(block)
+        assert isinstance(result, LupThinkingBlock)
+        assert result.redacted is True
+        assert result.thinking == ""
+
+    def test_thinking_block_not_redacted_when_has_content(self) -> None:
+        block = ThinkingBlock(thinking="reasoning here", signature="sig_abc")
+        result = claude_block_to_lup(block)
+        assert isinstance(result, LupThinkingBlock)
+        assert result.redacted is False
+        assert result.thinking == "reasoning here"
+
+    def test_thinking_block_empty_no_signature(self) -> None:
+        block = ThinkingBlock(thinking="", signature="")
+        result = claude_block_to_lup(block)
+        assert isinstance(result, LupThinkingBlock)
+        assert result.redacted is False
+
+    def test_server_tool_use_block(self) -> None:
+        block = ServerToolUseBlock(
+            id="svr_123",
+            name="web_search",
+            input={"query": "python docs"},
+        )
+        result = claude_block_to_lup(block)
+        assert isinstance(result, LupToolUseBlock)
+        assert result.id == "svr_123"
+        assert result.name == "web_search"
+        assert result.input == {"query": "python docs"}
+
+    def test_server_tool_result_block(self) -> None:
+        block = ServerToolResultBlock(
+            tool_use_id="svr_123",
+            content={"results": [{"title": "Python", "url": "https://python.org"}]},
+        )
+        result = claude_block_to_lup(block)
+        assert isinstance(result, LupToolResultBlock)
+        assert result.tool_use_id == "svr_123"
+        assert "Python" in str(result.content)
 
 
 class TestClaudeMessageToLup:
@@ -150,12 +199,12 @@ class TestCodexItemsToLup:
     """Test Codex SDK ThreadItem → lup type conversion using real SDK types."""
 
     def test_agent_message_final_answer(self) -> None:
-        from codex_app_server import ThreadItem
-        from codex_app_server.generated.v2_all import (
+        from openai_codex.generated.v2_all import ThreadItem
+        from openai_codex.generated.v2_all import (
             AgentMessageThreadItem,
             MessagePhase,
         )
-        from lup.lib.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=AgentMessageThreadItem(
@@ -171,12 +220,12 @@ class TestCodexItemsToLup:
         assert blocks[0].text == "The answer is 42."
 
     def test_agent_message_commentary(self) -> None:
-        from codex_app_server import ThreadItem
-        from codex_app_server.generated.v2_all import (
+        from openai_codex.generated.v2_all import ThreadItem
+        from openai_codex.generated.v2_all import (
             AgentMessageThreadItem,
             MessagePhase,
         )
-        from lup.lib.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=AgentMessageThreadItem(
@@ -192,13 +241,13 @@ class TestCodexItemsToLup:
         assert blocks[0].thinking == "Let me think about this..."
 
     def test_command_execution(self) -> None:
-        from codex_app_server import ThreadItem
-        from codex_app_server.generated.v2_all import (
+        from openai_codex.generated.v2_all import ThreadItem
+        from openai_codex.generated.v2_all import (
             AbsolutePathBuf,
             CommandExecutionStatus,
             CommandExecutionThreadItem,
         )
-        from lup.lib.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=CommandExecutionThreadItem(
@@ -221,13 +270,13 @@ class TestCodexItemsToLup:
         assert "total 8" in (blocks[1].content or "")
 
     def test_mcp_tool_call(self) -> None:
-        from codex_app_server import ThreadItem
-        from codex_app_server.generated.v2_all import (
+        from openai_codex.generated.v2_all import ThreadItem
+        from openai_codex.generated.v2_all import (
             McpToolCallResult,
             McpToolCallStatus,
             McpToolCallThreadItem,
         )
-        from lup.lib.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=McpToolCallThreadItem(
@@ -250,9 +299,9 @@ class TestCodexItemsToLup:
         assert isinstance(blocks[1], LupToolResultBlock)
 
     def test_reasoning_item(self) -> None:
-        from codex_app_server import ThreadItem
-        from codex_app_server.generated.v2_all import ReasoningThreadItem
-        from lup.lib.adapters.codex import codex_items_to_lup
+        from openai_codex.generated.v2_all import ThreadItem
+        from openai_codex.generated.v2_all import ReasoningThreadItem
+        from lup.adapters.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=ReasoningThreadItem(
@@ -269,15 +318,15 @@ class TestCodexItemsToLup:
         assert "Step 2: decide" in blocks[0].thinking
 
     def test_file_change_item(self) -> None:
-        from codex_app_server import ThreadItem
-        from codex_app_server.generated.v2_all import (
+        from openai_codex.generated.v2_all import ThreadItem
+        from openai_codex.generated.v2_all import (
             FileChangeThreadItem,
             FileUpdateChange,
             PatchApplyStatus,
             PatchChangeKind,
             UpdatePatchChangeKind,
         )
-        from lup.lib.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=FileChangeThreadItem(
@@ -303,13 +352,13 @@ class TestCodexItemsToLup:
         assert "new" in (blocks[1].content or "")
 
     def test_multiple_items_mixed(self) -> None:
-        from codex_app_server import ThreadItem
-        from codex_app_server.generated.v2_all import (
+        from openai_codex.generated.v2_all import ThreadItem
+        from openai_codex.generated.v2_all import (
             AgentMessageThreadItem,
             MessagePhase,
             ReasoningThreadItem,
         )
-        from lup.lib.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
 
         items = [
             ThreadItem(
@@ -335,19 +384,19 @@ class TestCodexItemsToLup:
         assert isinstance(blocks[1], LupTextBlock)
 
     def test_empty_items_list(self) -> None:
-        from lup.lib.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
 
         blocks = codex_items_to_lup([])
         assert blocks == []
 
     def test_mcp_tool_call_with_error(self) -> None:
-        from codex_app_server import ThreadItem
-        from codex_app_server.generated.v2_all import (
+        from openai_codex.generated.v2_all import ThreadItem
+        from openai_codex.generated.v2_all import (
             McpToolCallError,
             McpToolCallStatus,
             McpToolCallThreadItem,
         )
-        from lup.lib.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=McpToolCallThreadItem(

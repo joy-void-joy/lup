@@ -5,12 +5,12 @@ import tempfile
 from collections.abc import Awaitable
 from pathlib import Path
 
-from lup.lib.adapters.codex import (
+from lup.adapters.codex import (
     CodexHookConfig,
     build_hook_config_overrides,
     build_mcp_config_overrides,
 )
-from lup.lib.adapters.codex_hooks import (
+from lup.adapters.codex_hooks import (
     build_nudge_hook,
     build_permission_hooks,
     build_reflection_gate_hook,
@@ -21,7 +21,7 @@ from lup.lib.adapters.codex_hooks import (
     write_reflection_gate_script,
     write_tool_allowlist_script,
 )
-from lup.lib.adapters.common import (
+from lup.adapters.common import (
     LupDoneEvent,
     LupEvent,
     LupTextEvent,
@@ -29,16 +29,16 @@ from lup.lib.adapters.common import (
     LupToolResultEvent,
     LupToolUseEvent,
 )
-from lup.lib.types import model_backend, normalize_effort
-from lup.lib.hooks import (
+from lup.types import model_backend, normalize_effort
+from lup.hooks import (
     create_capture_hook,
     create_nudge_hook,
     create_permission_hooks,
     create_reflection_gate,
     create_tool_allowlist_hook,
 )
-from lup.lib.reflect import ReflectionGate
-from lup.lib.types import (
+from lup.reflect import ReflectionGate
+from lup.types import (
     LupHookInput,
     LupHooksConfig,
     SubagentSpec,
@@ -203,7 +203,7 @@ class TestReflectionGateFileBacked:
 
 class TestLupMcpServerConfig:
     def test_create_mcp_server_returns_lup_config(self) -> None:
-        from lup.lib.mcp import LupMcpServerConfig, create_mcp_server
+        from lup.mcp import LupMcpServerConfig, create_mcp_server
 
         config = create_mcp_server("test-server", version="1.0.0")
         assert isinstance(config, LupMcpServerConfig)
@@ -211,8 +211,8 @@ class TestLupMcpServerConfig:
         assert config.server is not None
 
     def test_lup_server_to_claude_conversion(self) -> None:
-        from lup.lib.adapters.claude import lup_server_to_claude
-        from lup.lib.mcp import create_mcp_server
+        from lup.adapters.claude import lup_server_to_claude
+        from lup.mcp import create_mcp_server
 
         lup_config = create_mcp_server("test-server")
         claude_config = lup_server_to_claude(lup_config)
@@ -234,7 +234,7 @@ class TestSubagentSpec:
         assert spec.tools == ["Read", "Grep"]
 
     def test_spec_to_claude(self) -> None:
-        from lup.lib.adapters.claude import spec_to_claude
+        from lup.adapters.claude import spec_to_claude
 
         spec = SubagentSpec(
             name="researcher",
@@ -250,7 +250,7 @@ class TestSubagentSpec:
         assert agent_def.model == "haiku"
 
     def test_spec_to_claude_unknown_model(self) -> None:
-        from lup.lib.adapters.claude import spec_to_claude
+        from lup.adapters.claude import spec_to_claude
 
         spec = SubagentSpec(
             name="test",
@@ -262,7 +262,7 @@ class TestSubagentSpec:
         assert agent_def.model is None
 
     def test_get_subagent_specs(self) -> None:
-        from lup.agent.subagents import get_subagent_specs
+        from lup_template.agent.subagents import get_subagent_specs
 
         specs = get_subagent_specs()
         assert len(specs) >= 2
@@ -274,7 +274,7 @@ class TestSubagentSpec:
 class TestModelBackend:
     def test_claude_models(self) -> None:
         assert model_backend("claude-opus-4-6") == "anthropic"
-        assert model_backend("claude-sonnet-4-20250514") == "anthropic"
+        assert model_backend("claude-sonnet-4-6") == "anthropic"
         assert model_backend("haiku") == "anthropic"
         assert model_backend("sonnet") == "anthropic"
 
@@ -285,8 +285,8 @@ class TestModelBackend:
         assert model_backend("o3-mini") == "openai"
         assert model_backend("o4-mini") == "openai"
 
-    def test_default_anthropic(self) -> None:
-        assert model_backend("unknown-model") == "anthropic"
+    def test_default_openai_compatible(self) -> None:
+        assert model_backend("unknown-model") == "openai-compatible"
 
 
 class TestEffortNormalization:
@@ -398,7 +398,7 @@ class TestNudgeHookScripts:
 
 class TestCodexAdapter:
     def test_adapter_builds_config_overrides_with_mcp(self) -> None:
-        from lup.lib.adapters.codex import CodexAdapter
+        from lup.adapters.codex import CodexAdapter
 
         adapter = CodexAdapter(
             model="o4-mini",
@@ -409,7 +409,7 @@ class TestCodexAdapter:
         assert any("mcp_servers" in o for o in overrides)
 
     def test_adapter_builds_config_overrides_without_mcp(self) -> None:
-        from lup.lib.adapters.codex import CodexAdapter
+        from lup.adapters.codex import CodexAdapter
 
         adapter = CodexAdapter(
             model="o4-mini",
@@ -420,7 +420,7 @@ class TestCodexAdapter:
         assert not any("mcp_servers" in o for o in overrides)
 
     def test_adapter_builds_config_overrides_with_hooks(self) -> None:
-        from lup.lib.adapters.codex import CodexAdapter
+        from lup.adapters.codex import CodexAdapter
 
         adapter = CodexAdapter(
             model="o4-mini",
@@ -436,7 +436,7 @@ class TestCodexAdapter:
 
 class TestLupResponseSessionId:
     def test_session_id_field(self) -> None:
-        from lup.lib.types import LupResponse
+        from lup.types import LupResponse
 
         response = LupResponse()
         assert response.session_id is None
@@ -463,7 +463,7 @@ class TestGenericHookOutputHelpers:
 
 class TestMergeHooks:
     def test_merge_disjoint_events(self) -> None:
-        from lup.lib.types import LupHookMatcher, LupHookOutput
+        from lup.types import LupHookMatcher, LupHookOutput
 
         async def hook_a(inp: LupHookInput) -> LupHookOutput:
             return allow_hook()
@@ -478,7 +478,7 @@ class TestMergeHooks:
         assert "PostToolUse" in merged
 
     def test_merge_same_event(self) -> None:
-        from lup.lib.types import LupHookMatcher, LupHookOutput
+        from lup.types import LupHookMatcher, LupHookOutput
 
         async def hook_a(inp: LupHookInput) -> LupHookOutput:
             return allow_hook()
@@ -700,8 +700,8 @@ class TestGenericCaptureHook:
 
 class TestLupHooksToClaudeConversion:
     def test_converts_allow_decision(self) -> None:
-        from lup.lib.adapters.claude import lup_hook_output_to_claude
-        from lup.lib.types import LupHookOutput
+        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.types import LupHookOutput
 
         output = LupHookOutput(decision="allow")
         result = lup_hook_output_to_claude(output)
@@ -710,8 +710,8 @@ class TestLupHooksToClaudeConversion:
         assert specific.get("permissionDecision") == "allow"
 
     def test_converts_deny_decision(self) -> None:
-        from lup.lib.adapters.claude import lup_hook_output_to_claude
-        from lup.lib.types import LupHookOutput
+        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.types import LupHookOutput
 
         output = LupHookOutput(decision="deny", reason="test reason")
         result = lup_hook_output_to_claude(output)
@@ -721,8 +721,8 @@ class TestLupHooksToClaudeConversion:
         assert specific.get("permissionDecisionReason") == "test reason"
 
     def test_converts_block_decision(self) -> None:
-        from lup.lib.adapters.claude import lup_hook_output_to_claude
-        from lup.lib.types import LupHookOutput
+        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.types import LupHookOutput
 
         output = LupHookOutput(decision="block", reason="blocked")
         result = lup_hook_output_to_claude(output)
@@ -730,16 +730,16 @@ class TestLupHooksToClaudeConversion:
         assert result.get("reason") == "blocked"
 
     def test_converts_system_message(self) -> None:
-        from lup.lib.adapters.claude import lup_hook_output_to_claude
-        from lup.lib.types import LupHookOutput
+        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.types import LupHookOutput
 
         output = LupHookOutput(system_message="try another way")
         result = lup_hook_output_to_claude(output)
         assert result.get("systemMessage") == "try another way"
 
     def test_converts_empty_output(self) -> None:
-        from lup.lib.adapters.claude import lup_hook_output_to_claude
-        from lup.lib.types import LupHookOutput
+        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.types import LupHookOutput
 
         output = LupHookOutput()
         result = lup_hook_output_to_claude(output)
@@ -747,7 +747,7 @@ class TestLupHooksToClaudeConversion:
         assert result.get("hookSpecificOutput") is None
 
     def test_full_hook_conversion_roundtrip(self) -> None:
-        from lup.lib.adapters.claude import lup_hooks_to_claude
+        from lup.adapters.claude import lup_hooks_to_claude
 
         hooks = create_permission_hooks(
             rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")]
@@ -757,7 +757,7 @@ class TestLupHooksToClaudeConversion:
         assert len(claude_hooks["PreToolUse"]) == 1
 
     def test_matcher_preserved_in_conversion(self) -> None:
-        from lup.lib.adapters.claude import lup_hooks_to_claude
+        from lup.adapters.claude import lup_hooks_to_claude
 
         gate = ReflectionGate()
         hooks = create_reflection_gate(
@@ -771,7 +771,7 @@ class TestLupHooksToClaudeConversion:
 
 class TestLupHooksToCodexConversion:
     def test_converts_permission_hooks(self) -> None:
-        from lup.lib.adapters.codex_hooks import lup_hooks_to_codex
+        from lup.adapters.codex_hooks import lup_hooks_to_codex
 
         hooks = create_permission_hooks(
             rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")]
@@ -789,7 +789,7 @@ class TestLupHooksToCodexConversion:
             assert script_path.exists()
 
     def test_converts_gate_hooks(self) -> None:
-        from lup.lib.adapters.codex_hooks import lup_hooks_to_codex
+        from lup.adapters.codex_hooks import lup_hooks_to_codex
 
         gate = ReflectionGate()
         hooks = create_reflection_gate(
@@ -809,7 +809,7 @@ class TestLupHooksToCodexConversion:
             assert configs[0].get("matcher") == "StructuredOutput"
 
     def test_converts_merged_hooks(self) -> None:
-        from lup.lib.adapters.codex_hooks import lup_hooks_to_codex
+        from lup.adapters.codex_hooks import lup_hooks_to_codex
 
         gate = ReflectionGate()
         perm_hooks = create_permission_hooks(
@@ -832,7 +832,7 @@ class TestLupHooksToCodexConversion:
             assert len(configs) == 2
 
     def test_converts_nudge_hooks(self) -> None:
-        from lup.lib.adapters.codex_hooks import lup_hooks_to_codex
+        from lup.adapters.codex_hooks import lup_hooks_to_codex
 
         hooks = create_nudge_hook(
             {"Bash": lambda inp: "Use Grep instead"}
@@ -852,7 +852,7 @@ class TestLupHooksToCodexConversion:
             assert "Use Grep instead" in content
 
     def test_converts_allowlist_hooks(self) -> None:
-        from lup.lib.adapters.codex_hooks import lup_hooks_to_codex
+        from lup.adapters.codex_hooks import lup_hooks_to_codex
 
         hooks = create_tool_allowlist_hook(["Read", "Grep"])
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -870,7 +870,7 @@ class TestLupHooksToCodexConversion:
             assert "Grep" in content
 
     def test_converts_full_hook_set(self) -> None:
-        from lup.lib.adapters.codex_hooks import lup_hooks_to_codex
+        from lup.adapters.codex_hooks import lup_hooks_to_codex
 
         gate = ReflectionGate()
         perm_hooks = create_permission_hooks(
@@ -899,3 +899,90 @@ class TestLupHooksToCodexConversion:
             events = [c["event"] for c in configs]
             assert "PreToolUse" in events
             assert "PostToolUse" in events
+
+
+class TestOpenAICompatibleAdapter:
+    """Tests for the OpenAI-compatible adapter configuration."""
+
+    def test_config_overrides_include_base_url(self) -> None:
+        from lup.adapters.openai_compat import OpenAICompatibleAdapter
+
+        adapter = OpenAICompatibleAdapter(
+            model="glm-4-7b",
+            system_prompt="test",
+            base_url="http://localhost:8000/v1",
+            api_key="test-key",
+            model_provider="openai_compat",
+            mcp_tools=False,
+        )
+        overrides = adapter.build_config_overrides()
+        assert any("base_url" in o for o in overrides)
+        assert any("api_key" in o for o in overrides)
+
+    def test_config_overrides_without_credentials(self) -> None:
+        from lup.adapters.openai_compat import OpenAICompatibleAdapter
+
+        adapter = OpenAICompatibleAdapter(
+            model="llama-3.1-8b",
+            system_prompt="test",
+            mcp_tools=False,
+        )
+        overrides = adapter.build_config_overrides()
+        assert not any("base_url" in o for o in overrides)
+        assert not any("api_key" in o for o in overrides)
+
+    def test_inherits_mcp_config(self) -> None:
+        from lup.adapters.openai_compat import OpenAICompatibleAdapter
+
+        adapter = OpenAICompatibleAdapter(
+            model="glm-4-7b",
+            system_prompt="test",
+            base_url="http://localhost:8000/v1",
+            mcp_tools=True,
+        )
+        overrides = adapter.build_config_overrides()
+        assert any("lup-tools" in o for o in overrides)
+
+    def test_inherits_hook_config(self) -> None:
+        from lup.adapters.codex import CodexHookConfig
+        from lup.adapters.openai_compat import OpenAICompatibleAdapter
+
+        hooks: list[CodexHookConfig] = [
+            CodexHookConfig(event="PreToolUse", command="check.py"),
+        ]
+        adapter = OpenAICompatibleAdapter(
+            model="glm-4-7b",
+            system_prompt="test",
+            mcp_tools=False,
+            hook_overrides=hooks,
+        )
+        overrides = adapter.build_config_overrides()
+        assert any("PreToolUse" in o for o in overrides)
+
+
+class TestModelBackendExtended:
+    """Extended tests for model_backend covering open-source models."""
+
+    def test_glm_model(self) -> None:
+        assert model_backend("glm-4-7b") == "openai-compatible"
+
+    def test_llama_model(self) -> None:
+        assert model_backend("llama-3.1-8b") == "openai-compatible"
+
+    def test_deepseek_model(self) -> None:
+        assert model_backend("deepseek-v3") == "openai-compatible"
+
+    def test_qwen_model(self) -> None:
+        assert model_backend("qwen-72b") == "openai-compatible"
+
+    def test_gpt_model(self) -> None:
+        assert model_backend("gpt-4.1") == "openai"
+
+    def test_o_series_model(self) -> None:
+        assert model_backend("o3-mini") == "openai"
+
+    def test_claude_full_name(self) -> None:
+        assert model_backend("claude-opus-4-8") == "anthropic"
+
+    def test_claude_short_name(self) -> None:
+        assert model_backend("opus") == "anthropic"
