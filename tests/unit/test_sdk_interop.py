@@ -59,10 +59,13 @@ def run_awaitable[T](aw: Awaitable[T]) -> T:
 class TestMcpConfigOverrides:
     def test_default_serve_tools(self) -> None:
         overrides = build_mcp_config_overrides()
-        assert len(overrides) == 2
         assert 'mcp_servers.notes.command="uv"' in overrides
-        assert "mcp_servers.notes.args=" in overrides[1]
-        assert "lup-devtools" in overrides[1]
+        assert 'mcp_servers.sandbox.command="uv"' in overrides
+        notes_args = next(
+            o for o in overrides if o.startswith("mcp_servers.notes.args")
+        )
+        assert "lup-devtools" in notes_args
+        assert '"--server", "notes"' in notes_args
 
     def test_custom_command(self) -> None:
         overrides = build_mcp_config_overrides(
