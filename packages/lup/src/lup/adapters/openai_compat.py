@@ -50,6 +50,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
         effort: str | None = None,
         approval_policy: str | None = None,
         mcp_tools: bool = True,
+        mcp_env: dict[str, str] | None = None,
         hook_overrides: list[CodexHookConfig] | None = None,
         usage_normalizer: CodexUsageNormalizer | None = None,
     ) -> None:
@@ -61,6 +62,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
             effort=effort,
             approval_policy=approval_policy,
             mcp_tools=mcp_tools,
+            mcp_env=mcp_env,
             hook_overrides=hook_overrides,
             usage_normalizer=usage_normalizer,
         )
