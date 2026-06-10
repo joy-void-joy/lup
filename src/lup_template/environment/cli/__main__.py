@@ -181,7 +181,7 @@ def loop(
         except RuntimeError as e:
             typer.echo(f"Error: {e}", err=True)
             continue
-        except Exception as e:
+        except Exception as e:  # claude: ignore — keep the batch alive
             typer.echo(f"Unexpected error: {e}", err=True)
             logger.exception("Unexpected error on task %d/%d", i, len(tasks))
             continue

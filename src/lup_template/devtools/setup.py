@@ -100,7 +100,7 @@ def open_browser(url: str) -> None:
     console.print(f"  Opening [link={url}]{url}[/link]")
     try:
         webbrowser.open(url)
-    except Exception:
+    except (webbrowser.Error, OSError):
         console.print(f"  [dim]Could not open browser. Go to: {url}[/dim]")
 
 
