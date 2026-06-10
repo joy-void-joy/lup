@@ -320,6 +320,7 @@ source = { editable = "packages/lup" }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "httpx" },
+    { name = "mcp" },
     { name = "pydantic" },
     { name = "rich" },
     { name = "tenacity" },
@@ -335,6 +336,7 @@ requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.1.26" },
     { name = "docker", marker = "extra == 'docker'", specifier = ">=7.1.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mcp", specifier = ">=1.26.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "rich", specifier = ">=14.3.1" },
     { name = "tenacity", specifier = ">=9.0.0" },
