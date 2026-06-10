@@ -30,15 +30,27 @@ from typing import Annotated
 import sh
 import typer
 
+from lup.paths import project_root
 from lup_template.devtools.utils import git
 
 app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
 
-DOWNSTREAM_FILE = Path("downstream.json")
-LOCAL_FILE = Path("downstream.json.local")
-CACHE_DIR = Path(".cache/downstream")
-REFS_DIR = Path("refs")
+
+def downstream_file() -> Path:
+    return project_root() / "downstream.json"
+
+
+def local_file() -> Path:
+    return project_root() / "downstream.json.local"
+
+
+def cache_dir() -> Path:
+    return project_root() / ".cache" / "downstream"
+
+
+def refs_dir() -> Path:
+    return project_root() / "refs"
 
 
 def load_json(path: Path) -> dict[str, list[dict[str, str]]]:
@@ -49,13 +61,13 @@ def load_json(path: Path) -> dict[str, list[dict[str, str]]]:
 
 
 def save_local(data: dict[str, list[dict[str, str]]]) -> None:
-    LOCAL_FILE.write_text(json.dumps(data, indent=2) + "\n")
+    local_file().write_text(json.dumps(data, indent=2) + "\n")
 
 
 def ensure_ref_symlink(name: str, target: str) -> None:
     """Create or update refs/<name> symlink pointing to a resolved project path."""
-    REFS_DIR.mkdir(exist_ok=True)
-    link = REFS_DIR / name
+    refs_dir().mkdir(exist_ok=True)
+    link = refs_dir() / name
     target_path = Path(target).resolve()
     if link.is_symlink():
         if link.resolve() == target_path:
@@ -70,8 +82,8 @@ def ensure_ref_symlink(name: str, target: str) -> None:
 
 def load_projects() -> list[dict[str, str]]:
     """Load and merge projects from downstream.json + downstream.json.local."""
-    base = load_json(DOWNSTREAM_FILE)
-    local = load_json(LOCAL_FILE)
+    base = load_json(downstream_file())
+    local = load_json(local_file())
 
     merged: dict[str, dict[str, str]] = {}
     for p in base.get("projects", []):
@@ -107,7 +119,7 @@ def ensure_local(proj: dict[str, str]) -> str:
         ensure_ref_symlink(name, path)
         return path
 
-    cache_path = CACHE_DIR / name
+    cache_path = cache_dir() / name
     url = proj.get("url", "")
     reset_target = f"origin/{branch}" if branch else "origin/HEAD"
 
@@ -123,7 +135,7 @@ def ensure_local(proj: dict[str, str]) -> str:
 
     if url:
         typer.echo(f"Cloning '{name}' from {url}...")
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_dir().mkdir(parents=True, exist_ok=True)
         clone_args = ["clone", "--depth=200"]
         if branch:
             clone_args.extend(["--branch", branch])
@@ -247,7 +259,7 @@ def mark_synced(
 
     head = current_head(path)
 
-    local_data = load_json(LOCAL_FILE)
+    local_data = load_json(local_file())
     local_projects = local_data.get("projects", [])
 
     entry = next((p for p in local_projects if p["name"] == project), None)
@@ -289,7 +301,7 @@ def setup_project(
         typer.echo(f"Not a git repository: {resolved}")
         raise typer.Exit(1)
 
-    local_data = load_json(LOCAL_FILE)
+    local_data = load_json(local_file())
     local_projects = local_data.get("projects", [])
 
     entry = next((p for p in local_projects if p["name"] == name), None)

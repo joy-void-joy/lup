@@ -34,6 +34,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from lup.paths import project_root
+
 app = typer.Typer(
     help="Interactive setup wizard",
     pretty_exceptions_show_locals=False,
@@ -42,7 +44,7 @@ app = typer.Typer(
 
 console = Console()
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = project_root()
 ENV_LOCAL = PROJECT_ROOT / ".env.local"
 CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 
