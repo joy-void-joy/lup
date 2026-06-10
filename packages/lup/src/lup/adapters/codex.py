@@ -164,6 +164,7 @@ def build_mcp_config_overrides(
     serve_tools_command: str = "uv",
     serve_tools_args: list[str] | None = None,
     env: dict[str, str] | None = None,
+    servers: Sequence[str] = ("notes", "sandbox"),
 ) -> tuple[str, ...]:
     """Build config_overrides for lup MCP tools via serve-tools.
 
@@ -172,23 +173,27 @@ def build_mcp_config_overrides(
     TOML config. This generates the config_overrides that point Codex
     at the lup-devtools serve-tools command.
 
-    The server key is ``notes`` so tool names (``mcp__notes__review``,
-    ``mcp__notes__submit_output``) match the Claude path exactly.
+    One entry is emitted per server group so tool names match the
+    Claude path exactly (``mcp__notes__submit_output``,
+    ``mcp__sandbox__execute_code``); each subprocess serves one group
+    via ``serve-tools --server <name>``.
 
     Args:
         serve_tools_command: Executable that launches the tool server.
-        serve_tools_args: Arguments for the launcher.
-        env: Session-context env vars for the subprocess (see
+        serve_tools_args: Base arguments for the launcher (the
+            ``--server <name>`` selector is appended per group).
+        env: Session-context env vars for the subprocesses (see
             :class:`lup.paths.SessionContext`).
+        servers: Server groups to register.
     """
-    args = serve_tools_args or ["run", "lup-devtools", "agent", "serve-tools"]
-    args_toml = json.dumps(args)
-    overrides = [
-        f'mcp_servers.notes.command="{serve_tools_command}"',
-        f"mcp_servers.notes.args={args_toml}",
-    ]
-    for key, value in (env or {}).items():
-        overrides.append(f'mcp_servers.notes.env.{key}="{value}"')
+    base_args = serve_tools_args or ["run", "lup-devtools", "agent", "serve-tools"]
+    overrides: list[str] = []
+    for name in servers:
+        args = [*base_args, "--server", name]
+        overrides.append(f'mcp_servers.{name}.command="{serve_tools_command}"')
+        overrides.append(f"mcp_servers.{name}.args={json.dumps(args)}")
+        for key, value in (env or {}).items():
+            overrides.append(f'mcp_servers.{name}.env.{key}="{value}"')
     return tuple(overrides)
 
 

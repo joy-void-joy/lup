@@ -40,7 +40,8 @@ import json
 import logging
 import tarfile
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, Self, TypedDict
 
@@ -425,6 +426,11 @@ class Sandbox:
         """Check if the sandbox container is currently running."""
         return self.active_container is not None
 
+    SANDBOX_LABEL = "lup.sandbox"
+    CREATED_AT_LABEL = "lup.sandbox.created_at"
+    VOLUME_LABEL = "lup.sandbox.volume"
+    STALE_AGE_HOURS = 24.0
+
     def remove_stale_container(self) -> None:
         """Remove a pre-existing container with the same name, if any."""
         if self.docker_client is None:
@@ -435,6 +441,45 @@ class Sandbox:
             old.remove(force=True)
         except NotFound:
             pass
+
+    def sweep_orphaned_containers(self) -> None:
+        """Remove lup sandbox containers orphaned by killed processes.
+
+        A SIGKILLed owner leaves its uniquely-named container running
+        forever (``remove_stale_container`` only matches this session's
+        name). Every lup sandbox carries its creation time and volume
+        name as labels; any labelled container older than
+        ``STALE_AGE_HOURS`` cannot belong to a live session and is
+        removed together with its volume.
+        """
+        if self.docker_client is None:
+            return
+        cutoff = time.time() - self.STALE_AGE_HOURS * 3600
+        try:
+            candidates = self.docker_client.containers.list(
+                all=True, filters={"label": self.SANDBOX_LABEL}
+            )
+        except (APIError, DockerException) as e:
+            logger.warning("Orphan sweep failed to list containers: %s", e)
+            return
+        for container in candidates:
+            if container.name == self.container_name:
+                continue
+            labels = container.labels or {}
+            try:
+                created_at = float(labels.get(self.CREATED_AT_LABEL, "0"))
+            except ValueError:
+                created_at = 0.0
+            if created_at > cutoff:
+                continue
+            logger.warning("Removing orphaned sandbox container: %s", container.name)
+            try:
+                container.remove(force=True)
+                volume_name = labels.get(self.VOLUME_LABEL)
+                if volume_name:
+                    self.docker_client.volumes.get(volume_name).remove()
+            except (NotFound, APIError, DockerException) as e:
+                logger.warning("Orphan cleanup of %s failed: %s", container.name, e)
 
     def destroy_container(self) -> None:
         """Stop and remove the current container and its session volume."""
@@ -492,6 +537,7 @@ class Sandbox:
         self.docker_client = docker.from_env()
 
         self.remove_stale_container()
+        self.sweep_orphaned_containers()
 
         self.shared_dir.mkdir(parents=True, exist_ok=True)
 
@@ -513,6 +559,11 @@ class Sandbox:
             working_dir="/workspace",
             mem_limit="1g",
             network_mode=self.network_mode,
+            labels={
+                self.SANDBOX_LABEL: "1",
+                self.CREATED_AT_LABEL: str(time.time()),
+                self.VOLUME_LABEL: self.volume_name,
+            },
         )
 
         if self.network_mode != "none":
@@ -534,6 +585,15 @@ class Sandbox:
         logger.info("Destroying sandbox container")
         self.destroy_container()
         self.docker_client = None
+
+    def ensure_started(self) -> None:
+        """Start the sandbox if it isn't running (lazy initialization).
+
+        Tool handlers call this so a sandbox served by a tool subprocess
+        only pays Docker startup when the agent actually executes code.
+        """
+        if self.repl is None:
+            self.start()
 
     def restart_repl(self) -> None:
         """Restart the REPL, clearing in-memory state.
@@ -661,6 +721,7 @@ class Sandbox:
         )
         async def execute_code(inp: ExecuteCodeInput) -> ExecuteCodeOutput:
             try:
+                self.ensure_started()
                 result = self.run_code(inp.code)
                 return ExecuteCodeOutput(**result)
             except SandboxNotInitializedError as e:
@@ -680,6 +741,7 @@ class Sandbox:
         )
         async def install_package(inp: InstallPackageInput) -> InstallPackageOutput:
             try:
+                self.ensure_started()
                 result = self.run_install(inp.packages)
                 return InstallPackageOutput(**result)
             except SandboxNotInitializedError as e:
@@ -702,3 +764,27 @@ class Sandbox:
             version=version,
             tools=self.create_tools(),
         )
+
+
+@contextmanager
+def sandbox_cleanup(session_id: str, shared_dir: Path) -> Generator[None]:
+    """Guarantee a session's sandbox container is removed on exit.
+
+    For sessions whose sandbox lives in a tool subprocess (Codex/OpenAI
+    paths): the subprocess owner may kill it without a graceful exit,
+    skipping its atexit cleanup. The parent wraps the session in this
+    context so the container and volume are removed regardless of how
+    the subprocess died.
+    """
+    try:
+        yield
+    finally:
+        sandbox = Sandbox(session_id=session_id, shared_dir=shared_dir)
+        try:
+            sandbox.docker_client = docker.from_env()
+            sandbox.remove_stale_container()
+            sandbox.docker_client.volumes.get(sandbox.volume_name).remove()
+        except NotFound:
+            pass
+        except (APIError, DockerException) as e:
+            logger.warning("Post-session sandbox cleanup failed: %s", e)
