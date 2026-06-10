@@ -50,27 +50,27 @@ class Throttle:
     """
 
     def __init__(self, max_concurrent: int, min_interval: float = 0.0) -> None:
-        self._max_concurrent = max_concurrent
-        self._min_interval = min_interval
-        self._state: dict[int, LoopState] = {}
+        self.max_concurrent = max_concurrent
+        self.min_interval = min_interval
+        self.loop_states: dict[int, LoopState] = {}
 
     def get_state(self) -> LoopState:
         loop = asyncio.get_running_loop()
         loop_id = id(loop)
-        if loop_id not in self._state:
-            self._state[loop_id] = LoopState(
-                asyncio.Semaphore(self._max_concurrent),
+        if loop_id not in self.loop_states:
+            self.loop_states[loop_id] = LoopState(
+                asyncio.Semaphore(self.max_concurrent),
             )
-        return self._state[loop_id]
+        return self.loop_states[loop_id]
 
     async def __aenter__(self) -> None:
         state = self.get_state()
         await state.semaphore.acquire()
-        if self._min_interval > 0:
+        if self.min_interval > 0:
             async with state.lock:
                 if state.last_request_time > 0:
                     elapsed = time.monotonic() - state.last_request_time
-                    remaining = self._min_interval - elapsed
+                    remaining = self.min_interval - elapsed
                     if remaining > 0:
                         await asyncio.sleep(remaining)
                 state.last_request_time = time.monotonic()
