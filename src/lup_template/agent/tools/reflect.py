@@ -149,14 +149,14 @@ async def run_reviewer(
     validated: ReflectInput,
     outputs_dir: Path | None,
     *,
-    model: str = "claude-sonnet-4-6",
+    model: str = "claude-opus-4-6",
 ) -> str | None:
     """Run the reviewer sub-agent and return its critique text.
 
     Args:
         validated: The reflection input from the main agent.
         outputs_dir: Path to past outputs for historical calibration.
-        model: Model to use for the reviewer (default: claude-sonnet-4-6).
+        model: Model to use for the reviewer (default: claude-opus-4-6).
     """
     prompt_sections = [
         "## Agent Assessment\n\n" + validated.assessment,
@@ -200,7 +200,7 @@ def create_reflect_tools(
     session_dir: Path,
     outputs_dir: Path | None = None,
     gate: ReflectionGate | None = None,
-    reviewer_model: str = "claude-sonnet-4-6",
+    reviewer_model: str = "claude-opus-4-6",
 ) -> ReflectToolKit:
     """Create the reflection tool(s) and their gate state.
 

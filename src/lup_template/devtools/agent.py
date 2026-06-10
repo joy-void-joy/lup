@@ -14,7 +14,7 @@ Examples::
     $ uv run lup-devtools agent chat
     $ uv run lup-devtools agent chat --model opus --no-tools
     $ uv run lup-devtools agent repl
-    $ uv run lup-devtools agent repl --model sonnet --no-prompt
+    $ uv run lup-devtools agent repl --model opus --no-prompt
     $ uv run lup-devtools agent serve-tools
 """
 
@@ -427,7 +427,7 @@ def serve_tools_cmd() -> None:
 def chat_cmd(
     model: Annotated[
         str | None,
-        typer.Option("--model", "-m", help="Override the model (e.g. sonnet, opus)"),
+        typer.Option("--model", "-m", help="Override the model (e.g. opus, haiku)"),
     ] = None,
     no_tools: Annotated[
         bool,

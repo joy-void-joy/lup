@@ -487,7 +487,7 @@ The `.env` file contains template configuration. Create `.env.local` for secrets
 # .env.local - your secrets (ANTHROPIC_API_KEY is read directly by the SDK from env)
 
 # Optional overrides
-# AGENT_MODEL=claude-sonnet-4-20250514
+# AGENT_MODEL=claude-opus-4-6
 # AGENT_MAX_BUDGET_USD=5.00
 ```
 
