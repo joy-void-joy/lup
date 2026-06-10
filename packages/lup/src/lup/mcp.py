@@ -214,28 +214,34 @@ class ToolError(Exception):
     """Raise in a tool handler to return an MCP error response."""
 
 
-class LupMcpTool:
+class LupMcpTool[I: BaseModel, O: BaseModel]:
     """MCP tool with typed input/output models for introspection.
 
     Wraps ``SdkMcpTool`` and preserves the original BaseModel classes so that
     devtools (``lup-devtools agent inspect``) can display full JSON Schemas
-    for both input and output.
+    for both input and output. Also callable directly with a typed model
+    instance, bypassing MCP serialization.
     """
 
     def __init__(
         self,
         sdk_tool: SdkMcpTool[Any],
-        input_model: type[BaseModel],
-        output_model: type[BaseModel] | None = None,
+        input_model: type[I],
+        handler: Callable[[I], Awaitable[O]],
+        output_model: type[O] | None = None,
         tags: list[str] | None = None,
     ) -> None:
         self.sdk_tool = sdk_tool
         self.input_model = input_model
+        self.handler = handler
         self.output_model = output_model
         self.tags = tags or []
 
+    async def __call__(self, params: I) -> O:
+        return await self.handler(params)
 
-def lup_tool(
+
+def lup_tool[I: BaseModel, O: BaseModel](
     description: str,
     input_model: type[BaseModel] | None = None,
     output_model: type[BaseModel] | None = None,
@@ -243,8 +249,8 @@ def lup_tool(
     name: str | None = None,
     tags: list[str] | None = None,
 ) -> Callable[
-    [Callable[..., Awaitable[BaseModel]]],
-    LupMcpTool,
+    [Callable[[I], Awaitable[O]]],
+    LupMcpTool[I, O],
 ]:
     """Decorator for defining MCP tools with typed input/output models.
 
@@ -274,8 +280,8 @@ def lup_tool(
     from lup.metrics import collector
 
     def decorator(
-        handler: Callable[..., Awaitable[BaseModel]],
-    ) -> LupMcpTool:
+        handler: Callable[[I], Awaitable[O]],
+    ) -> LupMcpTool[I, O]:
         tool_name = name or handler.__name__
 
         resolved_input = input_model
@@ -300,7 +306,7 @@ def lup_tool(
             msg = f"lup_tool '{tool_name}': cannot infer input_model from annotations"
             raise TypeError(msg)
 
-        final_input: type[BaseModel] = resolved_input
+        final_input = cast(type[I], resolved_input)
 
         async def wrapper(args: dict[str, Any]) -> ToolResponse:
             start = time.perf_counter()
@@ -345,14 +351,15 @@ def lup_tool(
         return LupMcpTool(
             sdk_tool=sdk,
             input_model=final_input,
-            output_model=resolved_output,
+            handler=handler,
+            output_model=cast(type[O] | None, resolved_output),
             tags=tags,
         )
 
     return decorator
 
 
-def extract_sdk_tools(tools: list[LupMcpTool]) -> list[SdkMcpTool[Any]]:
+def extract_sdk_tools(tools: list[LupMcpTool[Any, Any]]) -> list[SdkMcpTool[Any]]:
     """Extract SdkMcpTool instances from a list of LupMcpTools.
 
     Use this when passing tools to ``create_mcp_server`` or
