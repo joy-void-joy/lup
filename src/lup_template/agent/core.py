@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from claude_agent_sdk import ClaudeAgentOptions
     from claude_agent_sdk.types import EffortLevel
 
-    from lup.adapters.codex import CodexHookConfig
     from lup.adapters.common import AgentAdapter
     from lup.notes import NotesConfig
     from lup.types import SubagentSpec
@@ -198,7 +197,7 @@ def build_options(
         # ThinkingConfigEnabled(budget_tokens=N) is the newer alternative, but
         # max_thinking_tokens is simpler and avoids adaptive mode's variable allocation.
         max_thinking_tokens=settings.max_thinking_tokens or (128_000 - 1),
-        permission_mode="bypassPermissions",
+        permission_mode=settings.permission_mode,
         extra_args={"no-session-persistence": None},
         hooks=claude_hooks,
         sandbox={
@@ -226,45 +225,26 @@ def format_subagent_prompt_section(specs: list["SubagentSpec"]) -> str:
 
 def build_codex_session(
     notes: "NotesConfig",
-) -> tuple[str, list["CodexHookConfig"], dict[str, str]]:
+) -> tuple[str, dict[str, str], list[Path]]:
     """Shared scaffolding for Codex-runtime adapters.
 
-    Returns (system_prompt, hook_configs, mcp_env). The reflection gate
-    is enforced inside submit_output — the serve-tools subprocess reads
-    the same flag path from the relayed env — so structured output and
-    gating behave identically to the Claude path. The generated
-    PreToolUse hook script is optional hardening on top.
+    Returns (system_prompt, mcp_env, writable_roots). Enforcement on
+    Codex is native and in-tool: the runtime's workspace-write sandbox
+    confines writes to ``writable_roots``, and the reflection gate is
+    checked inside submit_output (the serve-tools subprocess reads the
+    flag path from the relayed env). Codex config.toml command hooks
+    are not wired — a live probe showed they never fire on current
+    codex builds.
     """
     import tempfile
 
-    from lup.adapters.codex_hooks import lup_hooks_to_codex
-    from lup.hooks import create_permission_hooks, create_reflection_gate
     from lup.paths import SessionContext
-    from lup.reflect import ReflectionGate
-    from lup.types import merge_hooks
 
     from lup_template.agent.prompts import get_system_prompt
     from lup_template.agent.subagents import get_subagent_specs
 
-    script_dir = Path(tempfile.mkdtemp(prefix="lup_codex_hooks_"))
-    gate_flag_path = script_dir / "reflection_gate_flag"
-    gate = ReflectionGate(flag_path=gate_flag_path)
-
-    permission_hooks = create_permission_hooks(notes.rw, notes.ro)
-    gate_hooks = create_reflection_gate(
-        gate=gate,
-        gated_tool="mcp__notes__submit_output",
-        reflection_tool_name="mcp__notes__review",
-    )
-    lup_hooks = merge_hooks(permission_hooks, gate_hooks)
-
-    hook_configs = lup_hooks_to_codex(
-        lup_hooks,
-        script_dir=script_dir,
-        rw_dirs=notes.rw,
-        ro_dirs=notes.ro,
-        gate_flag_path=gate_flag_path,
-    )
+    state_dir = Path(tempfile.mkdtemp(prefix="lup_codex_session_"))
+    gate_flag_path = state_dir / "reflection_gate_flag"
 
     context = SessionContext(
         session_dir=notes.session,
@@ -277,7 +257,7 @@ def build_codex_session(
     system_prompt = get_system_prompt()
     system_prompt += format_subagent_prompt_section(get_subagent_specs())
 
-    return system_prompt, hook_configs, context.to_env()
+    return system_prompt, context.to_env(), list(notes.rw)
 
 
 def build_codex_adapter(
@@ -286,7 +266,7 @@ def build_codex_adapter(
     """Build a CodexAdapter for the agent session."""
     from lup.adapters.codex import CodexAdapter
 
-    system_prompt, hook_configs, mcp_env = build_codex_session(notes)
+    system_prompt, mcp_env, writable_roots = build_codex_session(notes)
 
     return CodexAdapter(
         model=settings.model,
@@ -296,17 +276,17 @@ def build_codex_adapter(
         approval_policy=settings.codex_approval_policy,
         mcp_tools=True,
         mcp_env=mcp_env,
-        hook_overrides=hook_configs,
+        writable_roots=writable_roots,
     )
 
 
 def build_openai_adapter(
     notes: "NotesConfig",
 ) -> "AgentAdapter":
-    """Build an OpenAICompatibleAdapter with full hooks and tools."""
+    """Build an OpenAICompatibleAdapter with full tools and enforcement."""
     from lup.adapters.openai_compat import OpenAICompatibleAdapter
 
-    system_prompt, hook_configs, mcp_env = build_codex_session(notes)
+    system_prompt, mcp_env, writable_roots = build_codex_session(notes)
 
     return OpenAICompatibleAdapter(
         model=settings.model,
@@ -319,7 +299,7 @@ def build_openai_adapter(
         approval_policy=settings.codex_approval_policy,
         mcp_tools=True,
         mcp_env=mcp_env,
-        hook_overrides=hook_configs,
+        writable_roots=writable_roots,
     )
 
 

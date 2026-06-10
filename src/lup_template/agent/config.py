@@ -125,6 +125,14 @@ class Settings(BaseSettings):
         description="Reasoning effort level: low, medium, high, xhigh, max",
     )
 
+    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"] = (
+        Field(
+            default="bypassPermissions",
+            validation_alias="AGENT_PERMISSION_MODE",
+            description="Claude SDK permission mode for the main agent session",
+        )
+    )
+
     # ==========================================================================
     # MODEL SETTINGS
     # ==========================================================================
