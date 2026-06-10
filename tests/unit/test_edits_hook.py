@@ -1,7 +1,8 @@
 """Behavior tests for the auto_allow_edits permission hook.
 
 Loads the hook script by path (it lives outside the package tree) and
-exercises decide() — the pure decision core — table-driven.
+exercises decide() / decide_write() — the pure decision cores —
+table-driven.
 """
 
 import importlib.util
@@ -148,3 +149,23 @@ def test_unused_underscore_parameters_are_not_denied() -> None:
 def test_underscore_module_assignments_are_still_denied() -> None:
     assert edit_decision("src/module.py", "", "_cache = {}\n") == "deny"
     assert edit_decision("src/module.py", "", "_LIMIT: int = 5\n") == "deny"
+
+
+def write_decision(file_path: str, content: str) -> str | None:
+    """Return 'deny' or None (fall through to user prompt)."""
+    result = hook.decide_write(hook.WriteInput(file_path=file_path, content=content))
+    if result is None:
+        return None
+    return result["hookSpecificOutput"]["permissionDecision"]
+
+
+def test_write_to_protected_file_is_denied() -> None:
+    assert write_decision(".claude/settings.json", "{}") == "deny"
+    assert write_decision("pyproject.toml", "") == "deny"
+    assert write_decision(".env", "SECRET=1") == "deny"
+    assert write_decision("sub/dir/.env.local", "SECRET=1") == "deny"
+
+
+def test_ordinary_write_falls_through() -> None:
+    assert write_decision("src/new_module.py", "x = 1\n") is None
+    assert write_decision("notes/scratch.md", "hello") is None
