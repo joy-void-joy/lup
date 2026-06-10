@@ -297,17 +297,29 @@ def save_analyzed(session_ids: set[str]) -> None:
 
 
 def get_uncommitted_session_ids() -> set[str]:
-    """Find session IDs with uncommitted result files."""
+    """Find session IDs with uncommitted result files.
+
+    Parses ``git status --porcelain -z``: NUL-separated entries are never
+    quoted, so paths containing spaces survive intact. Rename and copy
+    entries carry the origin path as an extra NUL-separated field.
+    """
     session_ids: set[str] = set()
 
-    status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0])).strip()
-    if not status:
-        return session_ids
+    status = str(git.status("--porcelain", "-z", "--", "notes/", _ok_code=[0]))
+    entries = status.split("\0")  # claude: ignore
 
-    for line in status.splitlines():
-        file_path = line[3:].split(" -> ")[0].strip()
+    index = 0
+    while index < len(entries):
+        entry = entries[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        code = entry[:2]
+        file_path = entry[3:]
+        if "R" in code or "C" in code:
+            index += 1  # skip the rename/copy origin path that follows
+
         parts = Path(file_path).parts
-
         if (
             len(parts) >= 5
             and parts[0] == "notes"
@@ -510,6 +522,10 @@ def collect(
     dry_run: bool = False,
 ) -> None:
     """Collect feedback metrics from sessions."""
+    if since and all_time:
+        typer.echo("Error: --since and --all-time are mutually exclusive", err=True)
+        raise typer.Exit(1)
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     effective, ver_warning = resolve_version(version, all_versions)
