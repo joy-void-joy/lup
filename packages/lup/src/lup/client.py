@@ -176,7 +176,9 @@ class ResponseCollector:
     async def __aiter__(self) -> AsyncIterator[Message]:
         """Yield messages, accumulating state but not displaying.
 
-        Raises RuntimeError on agent error results.
+        Raises RuntimeError on agent error results — after logging,
+        tracing, and yielding the failing ResultMessage, so consumers
+        see it and the trace records what went wrong.
         """
         async for message in self.client.receive_response():
             match message:
@@ -188,7 +190,11 @@ class ResponseCollector:
                 case ResultMessage():
                     self.result = message
                     if message.is_error:
-                        raise RuntimeError(f"Agent error: {message.result}")
+                        logger.error("Agent error result: %s", message.result)
+                        if self.trace_logger:
+                            self.trace_logger.log_text(
+                                str(message.result), heading="Agent error result"
+                            )
 
                 case SystemMessage():
                     logger.info("System [%s]: %s", message.subtype, message.data)
@@ -200,6 +206,9 @@ class ResponseCollector:
                             self.tool_results.append(block)
 
             yield message
+
+            if isinstance(message, ResultMessage) and message.is_error:
+                raise RuntimeError(f"Agent error: {message.result}")
 
     async def collect(self) -> ResultMessage:
         """Drain all messages, displaying and tracing each one.
