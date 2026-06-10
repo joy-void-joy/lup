@@ -23,9 +23,10 @@ the persistent agent pattern (observer example).
 Examples:
     Create an observer that maintains conversation notes::
 
-        >>> from lup.background import BackgroundAgent
+        >>> from lup.background import create_background_agent
         >>> notes: list[str] = []
-        >>> agent = BackgroundAgent(
+        >>> agent = create_background_agent(
+        ...     "claude",
         ...     name="observer",
         ...     system_prompt="Summarize conversations...",
         ...     tools=create_observer_tools(notes=notes),
@@ -38,8 +39,9 @@ Examples:
 
     Run multiple background agents in parallel::
 
-        >>> observer = BackgroundAgent(name="observer", ...)
-        >>> researcher = BackgroundAgent(
+        >>> observer = create_background_agent("claude", name="observer", ...)
+        >>> researcher = create_background_agent(
+        ...     "claude",
         ...     name="researcher",
         ...     builtin_tools=["Read", "Grep", "WebFetch"],
         ...     ...
@@ -153,7 +155,7 @@ def create_background_agent(
                 tools=tools or [],
                 build_message=build_message,
                 start_message=start_message,
-                model=model or "claude-sonnet-4-20250514",
+                model=model or "claude-opus-4-6",
                 debounce_seconds=debounce_seconds,
                 builtin_tools=builtin_tools,
                 allowed_tools=allowed_tools,

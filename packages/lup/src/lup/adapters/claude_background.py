@@ -38,7 +38,7 @@ class ClaudeBackgroundAgent(BaseBackgroundAgent):
         tools: list[LupMcpTool],
         build_message: Callable[[], str | None],
         start_message: str = "",
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-opus-4-6",
         max_thinking_tokens: int | None = None,
         debounce_seconds: float = 3.0,
         builtin_tools: list[str] | None = None,
@@ -54,6 +54,7 @@ class ClaudeBackgroundAgent(BaseBackgroundAgent):
             debounce_seconds=debounce_seconds,
         )
         self.tools = tools
+        # ThinkingConfigEnabled(budget_tokens=N) is the newer alternative
         self.max_thinking_tokens = max_thinking_tokens or (128_000 - 1)
         self.builtin_tools = builtin_tools
         self.allowed_tools = allowed_tools
