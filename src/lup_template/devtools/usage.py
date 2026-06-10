@@ -648,13 +648,13 @@ def main(
         ),
     ] = True,
     watch: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             "--watch/--no-watch",
             "-w",
-            help="Continuously refresh the display.",
+            help="Continuously refresh the display (default: only in a terminal).",
         ),
-    ] = True,
+    ] = None,
     interval: Annotated[
         int,
         typer.Option(
@@ -668,6 +668,9 @@ def main(
     if not CREDS_PATH.exists():
         console.print("[red]No credentials at ~/.claude/.credentials.json[/red]")
         raise typer.Exit(1)
+
+    if watch is None:
+        watch = console.is_terminal
 
     bar_width = min(console.width - 10, 58)
 
