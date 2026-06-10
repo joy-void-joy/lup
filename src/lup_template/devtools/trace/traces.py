@@ -20,7 +20,7 @@ from typing import TypedDict
 import typer
 
 from lup.history import iter_session_dirs, iter_trace_log_files
-from lup.paths import traces_path
+from lup.paths import project_root, traces_path
 
 from lup_template.devtools.utils import output_json
 
@@ -79,6 +79,14 @@ def resolve_trace_paths(effective: list[str] | None) -> list[Path]:
                 paths.extend(ver_dir.rglob("*.md"))
         return paths
     return list(traces_path().rglob("*.md"))
+
+
+def display_path(path: Path) -> str:
+    """Project-relative path for display, absolute when outside the project."""
+    try:
+        return str(path.relative_to(project_root()))
+    except ValueError:
+        return str(path)
 
 
 def session_id_from_path(trace_file: Path) -> str:
@@ -286,7 +294,7 @@ def search(pattern: str, context: int, as_json: bool) -> None:
                     end = min(len(lines), i + context + 1)
                     matches.append(
                         {
-                            "file": str(trace_file.relative_to(Path.cwd())),
+                            "file": display_path(trace_file),
                             "line": i + 1,
                             "context": lines[start:end],
                         }

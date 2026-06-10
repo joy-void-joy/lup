@@ -13,7 +13,6 @@ import json
 import logging
 from collections import defaultdict
 from datetime import datetime
-from glob import glob
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -22,7 +21,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.history import iter_session_dirs, resolve_version
-from lup.paths import feedback_path, traces_path, AGENT_VERSION
+from lup.paths import feedback_path, project_root, traces_path, AGENT_VERSION
 from lup_template.devtools.utils import git, output_json
 
 logger = logging.getLogger(__name__)
@@ -812,11 +811,8 @@ def prompt_health(as_json: bool) -> None:
     """
     from lup_template.agent.prompts import SECTIONS, get_system_prompt
 
-    prompts_file = (
-        Path(glob("src/*/agent/prompts.py")[0])
-        if glob("src/*/agent/prompts.py")
-        else None
-    )
+    prompts_candidates = sorted(project_root().glob("src/*/agent/prompts.py"))
+    prompts_file = prompts_candidates[0] if prompts_candidates else None
     rendered = get_system_prompt()
     char_count = len(rendered)
     estimated_tokens = char_count // 4
