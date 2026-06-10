@@ -43,15 +43,15 @@ But you could use it for so much more. Real-time monitoring, mathematical proofs
 To start using this repo either:
 
 - For a fresh repository: Use the "Use this template" button on github, or clone this repository. In the newly cloned repository, use /lup:init [description of your project] or /lup:brainstorm to first flesh out the broad shape of it
-- For an already existing repository, clone lup inside it, and either use /lup:install to install the bare plugin, or /lup:install --interactive to install the
+- For an already existing repository, clone lup inside it, and either use /lup:install to install the bare plugin, or /lup:install --interactive to choose what to port piece by piece
 
 You will need to install [uv] for python management and [fzf] for fuzzy-file matching. Docker is an additional dependency if you plan to use the sandboxing capabilities.
 
 The intended workflow while using this repository is to:
 
 - Have it cloned in a bare repo
-- Creating a worktree to tree/main: ``git clone
-- When working on a new feature, branching off from it with `lup-devtools worktree create <branch-name>`
+- Creating a worktree to tree/main: `git clone --bare <repo-url> lup.git && cd lup.git && git worktree add tree/main main`
+- When working on a new feature, branching off from it with `uv run lup-devtools dev worktree create <branch-name>`
 - Going into this new branch, and working on it there
 - Then /lup:commit it
 - When it works and you've tested it works well /lup:rebase it
@@ -81,7 +81,7 @@ This repository contains many elements and code template that are designed to ma
 
 ### lib
 
-src/lup/lib is the [[[]]]
+packages/lup/src/lup is the [[[]]]
 
 ### agent
 
@@ -137,18 +137,14 @@ To speed up development, many claude commands and meta-commands are built in thi
 
 ## Devtools
 
-### Agent
+Run `uv run lup-devtools --help` for the full command tree. Sub-apps:
 
-- api.py
-- trace.py
-- feedback.py
-- metrics.py
-- sync.py
-- git.py
-
-### Human
-
-- agent.py
-- charts.py
-- dev.py
-- usage.py
+- agent — inspect the SDK agent's tools/prompt/subagents, serve tools over MCP, interactive REPL
+- py — Python object introspection (info, source, eval, imports, search)
+- dev — worktrees, branches, PRs, and pre-flight checks
+- feedback — feedback loop state, metrics, and session commits
+- setup — interactive integration setup wizard
+- sync — downstream project sync tracking
+- trace — trace display, search, and analysis
+- usage — Claude Code usage display
+- version — agent version, changelog, and bump
