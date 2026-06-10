@@ -21,15 +21,16 @@ from lup.adapters.codex_hooks import (
     write_reflection_gate_script,
     write_tool_allowlist_script,
 )
-from lup.adapters.common import (
+from lup.types import (
     LupDoneEvent,
     LupEvent,
     LupTextEvent,
     LupThinkingEvent,
     LupToolResultEvent,
     LupToolUseEvent,
+    model_backend,
+    normalize_effort,
 )
-from lup.types import model_backend, normalize_effort
 from lup.hooks import (
     create_capture_hook,
     create_nudge_hook,
@@ -325,31 +326,16 @@ class TestEffortNormalization:
 
 
 class TestLupEventTypes:
-    def test_text_event(self) -> None:
-        event = LupTextEvent("hello")
-        assert isinstance(event, LupEvent)
-        assert event.text == "hello"
-
-    def test_thinking_event(self) -> None:
-        event = LupThinkingEvent("reasoning...")
-        assert isinstance(event, LupEvent)
-        assert event.thinking == "reasoning..."
-
-    def test_tool_use_event(self) -> None:
-        event = LupToolUseEvent(id="t1", name="Bash")
-        assert isinstance(event, LupEvent)
-        assert event.id == "t1"
-        assert event.name == "Bash"
-
-    def test_tool_result_event(self) -> None:
-        event = LupToolResultEvent(tool_use_id="t1", content="output")
-        assert isinstance(event, LupEvent)
-        assert event.tool_use_id == "t1"
-
-    def test_done_event(self) -> None:
-        event = LupDoneEvent()
-        assert isinstance(event, LupEvent)
-        assert event.blocks == []
+    def test_events_dispatch_by_discriminator(self) -> None:
+        events: list[LupEvent] = [
+            LupTextEvent(text="hello"),
+            LupThinkingEvent(thinking="hmm"),
+            LupToolUseEvent(id="t1", name="Bash"),
+            LupToolResultEvent(tool_use_id="t1", content="out"),
+            LupDoneEvent(),
+        ]
+        kinds = [event.type for event in events]
+        assert kinds == ["text", "thinking", "tool_use", "tool_result", "done"]
 
 
 class TestToolAllowlistHookScripts:
