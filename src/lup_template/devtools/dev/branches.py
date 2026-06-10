@@ -4,6 +4,7 @@ import json
 import logging
 from collections import defaultdict
 from typing import Required, TypedDict
+from urllib.parse import urlparse
 
 import sh
 import typer
@@ -12,8 +13,6 @@ from pydantic import BaseModel
 from lup_template.devtools.utils import git, gh, output_json
 
 logger = logging.getLogger(__name__)
-
-ssh = sh.Command("ssh").bake(_tty_out=False)
 
 
 class PRStatus(BaseModel):
@@ -397,19 +396,38 @@ def detect_base_branch(branch: str | None = None) -> tuple[str, str, int]:
     return best_branch, best_merge_base, best_distance
 
 
-def check_remote_ssh_auth() -> bool:
-    """Test SSH auth for the origin remote. Returns True if authenticated."""
-    remote_url = str(git("remote", "get-url", "origin")).strip()
-    # SCP-style git URLs (host:path) have no stdlib parser — urlparse misparses them
-    host = remote_url.split(":")[0] if ":" in remote_url else None  # claude: ignore
-    if not host:
-        return True
+def parse_remote(remote_url: str) -> tuple[str, str] | None:
+    """Parse a git remote into (scheme, destination) for auth probing.
+
+    URL forms (https://host/org/repo, ssh://git@host/org/repo) are parsed
+    with urllib; SCP-style syntax (git@host:org/repo) has no stdlib parser,
+    so the user@host part before the colon is taken verbatim. Returns None
+    for local paths and unrecognized remotes.
+    """
+    parsed = urlparse(remote_url)
+    if parsed.scheme and parsed.hostname:
+        user_prefix = f"{parsed.username}@" if parsed.username else ""
+        return parsed.scheme, f"{user_prefix}{parsed.hostname}"
+    if "://" not in remote_url and ":" in remote_url:
+        return "ssh", remote_url.split(":")[0]  # claude: ignore
+    return None
+
+
+def probe_ssh_auth(destination: str, remote_url: str) -> bool:
+    """Probe SSH auth with ``ssh -T``. GitHub answers with exit 1, GitLab with 0."""
     try:
-        ssh("-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-T", host, _ok_code=[1])
+        ssh = sh.Command("ssh").bake(_tty_out=False)
+    except sh.CommandNotFound:
+        typer.echo("ssh binary not found; skipping remote checks", err=True)
+        return False
+    probe = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-T", destination]
+    try:
+        ssh(*probe, _ok_code=[0, 1])
         return True
     except sh.ErrorReturnCode:
         identity = ""
-        for line in str(ssh("-G", host, _ok_code=[0])).splitlines():  # claude: ignore
+        lines = str(ssh("-G", destination, _ok_code=[0])).splitlines()
+        for line in lines:  # claude: ignore
             if line.startswith("identityfile "):
                 identity = line.split(" ", 1)[1]  # claude: ignore
                 break
@@ -420,12 +438,45 @@ def check_remote_ssh_auth() -> bool:
         return False
 
 
+def probe_gh_auth(remote_url: str) -> bool:
+    """Verify GitHub CLI auth, used for https remotes where ssh -T means nothing."""
+    try:
+        gh("auth", "status", _ok_code=[0])
+        return True
+    except (sh.ErrorReturnCode, sh.CommandNotFound):
+        typer.echo(
+            f"gh auth failed for remote '{remote_url}'. Run: gh auth login",
+            err=True,
+        )
+        return False
+
+
+def check_remote_auth() -> bool:
+    """Verify auth for the origin remote. Returns True if remote ops can proceed.
+
+    ssh-style remotes are probed with ``ssh -T``; https remotes are verified
+    via ``gh auth status``. Local and unrecognized remotes pass.
+    """
+    remote_url = str(git("remote", "get-url", "origin")).strip()
+    remote = parse_remote(remote_url)
+    if remote is None:
+        return True
+    scheme, destination = remote
+    match scheme:
+        case "ssh" | "git":
+            return probe_ssh_auth(destination, remote_url)
+        case "http" | "https":
+            return probe_gh_auth(remote_url)
+        case _:
+            return True
+
+
 # -- CLI functions --
 
 
 def branch_status(branch: str | None, as_json: bool) -> None:
     """Analyze branch containment, PR status, and worktree info."""
-    has_remote = check_remote_ssh_auth()
+    has_remote = check_remote_auth()
 
     integration = get_integration_branch()
     current = str(git("branch", "--show-current")).strip()
@@ -547,7 +598,7 @@ def pr_body(base_override: str | None) -> None:
 
 def survey(as_json: bool) -> None:
     """Collect branch, worktree, PR, and containment data."""
-    has_remote = check_remote_ssh_auth()
+    has_remote = check_remote_auth()
     if has_remote:
         if not as_json:
             typer.echo("Fetching and pruning remote...", err=True)
