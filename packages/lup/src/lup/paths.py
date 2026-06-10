@@ -107,7 +107,8 @@ def configure(
 
     if root is not None:
         PROJECT_ROOT = root
-        AGENT_VERSION = read_agent_version(root)
+        if version is None:
+            AGENT_VERSION = read_agent_version(root)
         NOTES_DIR = root / "notes"
         RUNTIME_LOGS_DIR = root / "logs"
 
