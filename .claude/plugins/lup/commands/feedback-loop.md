@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run python -m lup:*), Read, Grep, Glob, Edit, Write, Task, WebSearch, WebFetch, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run lup:*), Read, Grep, Glob, Edit, Write, Task, WebSearch, WebFetch, AskUserQuestion, Skill(lup:fb-status), Skill(lup:fb-investigate), Skill(lup:fb-analyze), Skill(lup:fb-reflect), Skill(lup:fb-implement)
 description: Full feedback loop — orchestrates status, investigation, analysis, reflection, and implementation
 argument-hint: [optional: paste a trace, reflection, or output for single-trace analysis]
 ---
