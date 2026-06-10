@@ -99,12 +99,6 @@ class Settings(BaseSettings):
         description="Base path for notes folders",
     )
 
-    logs_path: str = Field(
-        default="./logs",
-        validation_alias="AGENT_LOGS_PATH",
-        description="Base path for trace logs",
-    )
-
     # ==========================================================================
     # LIMITS
     # ==========================================================================
