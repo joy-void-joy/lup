@@ -36,9 +36,8 @@ RULES: list[Allow | Deny] = [
     Allow(pattern=r"^ls\b"),
     Allow(pattern=r"^tree\b"),
     Allow(pattern=r"^grep\b"),
-    Allow(pattern=r"\|\s*xargs\b"),
     Allow(pattern=r"^test "),
-    Allow(pattern=r"^find"),
+    Allow(pattern=r"^find\b(?!.*(-exec|-ok|-delete))"),
     # GitHub CLI (read-only)
     Allow(pattern=r"^gh (pr|issue) (list|view|diff|status)\b"),
     # Git (safe subset)
@@ -50,11 +49,13 @@ RULES: list[Allow | Deny] = [
     Allow(pattern=r"^uv run (pyright|pytest|ruff)\b"),
     Allow(pattern=r"^uv run \S+ --help$"),
     # lup-devtools CLI
-    Allow(pattern=r"uv run lup-devtools\b"),
-    # Block all python invocations...
+    Allow(pattern=r"^uv run lup-devtools\b"),
+    # Block python invocations (at command position: start of line or after a
+    # separator, including via `uv run`). Mentions of "python" in arguments,
+    # messages, or grep patterns are unaffected.
     Deny(
-        pattern=r"(^|\b)python3?\b",
-        reason="Denied: use lup-devtools instead, or create a script in ./tmp/.",
+        pattern=r"(^|;|&&|\|\||\|)\s*(\S*/)?(uv\s+run\s+)?python3?\b",
+        reason="Denied: use lup-devtools or `uv run lup` instead, or create a script in ./tmp/.",
     ),
     # ...except tmp scripts (overrides the deny above)
     Allow(pattern=r"^uv run (python )?(\./)?tmp/\S+\.py\b"),
@@ -79,7 +80,9 @@ class HookEvent(BaseModel):
     tool_input: BashInput = BashInput()
 
 
-def _allow(reason: str = "Auto-allowed: command matches allowlist") -> HookOutput:
+def allow_decision(
+    reason: str = "Auto-allowed: command matches allowlist",
+) -> HookOutput:
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -89,7 +92,7 @@ def _allow(reason: str = "Auto-allowed: command matches allowlist") -> HookOutpu
     }
 
 
-def _deny(reason: str) -> HookOutput:
+def deny_decision(reason: str) -> HookOutput:
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -106,9 +109,9 @@ def decide(command: str) -> HookOutput | None:
     for rule in RULES:
         if re.search(rule.pattern, cmd):
             if rule.action == "allow":
-                result = _allow(rule.reason)
+                result = allow_decision(rule.reason)
             else:
-                result = _deny(rule.reason)
+                result = deny_decision(rule.reason)
 
     return result
 
