@@ -18,6 +18,7 @@ Examples::
     $ uv run lup-devtools agent serve-tools
 """
 
+import ast
 import asyncio
 import hashlib
 import inspect as inspect_mod
@@ -193,9 +194,6 @@ def collect_tools_by_server() -> dict[str, list[LupMcpTool]]:
 
 def collect_dynamic_tool_names() -> dict[str, list[str]]:
     """Discover tool names from modules that require runtime instantiation."""
-    import ast
-    from pathlib import Path
-
     tools_dir = Path(__file__).parent.parent / "agent" / "tools"
     dynamic: dict[str, list[str]] = {}
 
@@ -380,20 +378,22 @@ def serve_tools_cmd() -> None:
     This is used by the ``chat`` command — claude CLI launches it as a subprocess.
     Can also be used standalone for testing MCP tool integration.
     """
+    from typing import cast
+
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import Tool
+    from mcp.types import ImageContent, TextContent, Tool
 
-    from lup.mcp import generate_json_schema, extract_sdk_tools
+    from lup.mcp import ToolResponse, generate_json_schema, extract_sdk_tools
 
     sdk_tools = extract_sdk_tools(collect_all_tools())
     tool_map = {t.name: t for t in sdk_tools}
 
     server = Server("lup-tools", version="1.0.0")
 
-    @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
+    @server.list_tools()
     async def list_tools() -> list[Tool]:
-        tool_list = []
+        tool_list: list[Tool] = []
         for t in sdk_tools:
             schema = generate_json_schema(t.input_schema)
             tool_list.append(
@@ -401,14 +401,25 @@ def serve_tools_cmd() -> None:
             )
         return tool_list
 
-    @server.call_tool()  # type: ignore[untyped-decorator]
+    @server.call_tool()
     async def call_tool(
         name: str, arguments: dict[str, object]
-    ) -> list[dict[str, str]]:
+    ) -> list[TextContent | ImageContent]:
         if name not in tool_map:
             raise ValueError(f"Tool '{name}' not found")
-        result = await tool_map[name].handler(arguments)
-        return result.get("content", [])  # type: ignore[return-value]
+        result = cast(ToolResponse, await tool_map[name].handler(arguments))
+        content: list[TextContent | ImageContent] = []
+        for item in result.get("content", []):
+            match item.get("type"):
+                case "text":
+                    content.append(TextContent(type="text", text=item["text"]))
+                case "image":
+                    content.append(
+                        ImageContent(
+                            type="image", data=item["data"], mimeType=item["mimeType"]
+                        )
+                    )
+        return content
 
     async def run() -> None:
         init_options = server.create_initialization_options()

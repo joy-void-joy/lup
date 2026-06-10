@@ -78,7 +78,6 @@ class UsageResponse(TypedDict):
     seven_day_sonnet: UsageBucket | None
     seven_day_oauth_apps: UsageBucket | None
     seven_day_cowork: UsageBucket | None
-    iguana_necktie: UsageBucket | None
     extra_usage: ExtraUsage | None
 
 
