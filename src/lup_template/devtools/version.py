@@ -14,6 +14,7 @@ from typing import Annotated, Literal, TypedDict
 import sh
 import typer
 
+from lup.history import parse_semver
 from lup.paths import agent_version
 
 from lup_template.devtools.utils import git, output_json
@@ -233,12 +234,12 @@ def bump_cmd(
     pyproject = root / "pyproject.toml"
     current = read_agent_version(root)
 
-    parts = current.split(".")
-    if len(parts) != 3:
+    semver = parse_semver(current)
+    if semver is None:
         typer.echo(f"Version {current} is not in X.Y.Z format")
         raise typer.Exit(1)
 
-    major, minor, patch_v = int(parts[0]), int(parts[1]), int(parts[2])
+    major, minor, patch_v = semver
 
     if level is None:
         typer.echo(f"Current version: {current}")

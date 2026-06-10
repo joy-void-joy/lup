@@ -20,7 +20,14 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.history import iter_session_dirs, resolve_version
+from lup.client import TokenUsage
+from lup.history import (
+    get_latest_session_json,
+    iter_session_dirs,
+    list_all_session_ids,
+    resolve_version,
+)
+from lup.metrics import MetricsSummary, ToolMetricsDict
 from lup.paths import agent_version, feedback_path, project_root, traces_path
 from lup_template.devtools.utils import git, output_json
 
@@ -32,31 +39,16 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-class ToolData(TypedDict, total=False):
-    call_count: int
-    error_count: int
-    avg_duration_ms: float
-    total_cost_usd: float
-
-
-class ToolMetrics(TypedDict, total=False):
-    total_tool_calls: int
-    total_errors: int
-    total_cost_usd: float
-    by_tool: dict[str, ToolData]
-
-
-class TokenUsage(TypedDict, total=False):
-    input_tokens: int
-    output_tokens: int
-
-
 class SessionData(TypedDict, total=False):
-    """Raw session JSON loaded from disk."""
+    """Raw session JSON loaded from disk.
+
+    The payload shape comes from :class:`lup.history.SessionResult`;
+    ``_session_id`` and ``_file`` are injected at load time for display.
+    """
 
     timestamp: str
     outcome: object
-    tool_metrics: ToolMetrics
+    tool_metrics: MetricsSummary
     token_usage: TokenUsage
     cost_usd: float
     output: dict[str, str]
@@ -96,7 +88,7 @@ class SessionResult(BaseModel):
     session_id: str
     timestamp: str
     outcome: object | None = None
-    metrics: ToolMetrics | None = None
+    metrics: MetricsSummary | None = None
 
 
 class FeedbackMetrics(BaseModel):
@@ -206,7 +198,7 @@ class ToolUsageEntry(TypedDict):
 class ErrorSessionEntry(TypedDict):
     session_id: str
     errors: int
-    by_tool: dict[str, ToolData]
+    by_tool: dict[str, ToolMetricsDict]
 
 
 class TrendEntry(TypedDict):
@@ -252,16 +244,13 @@ def load_sessions_for_versions(
 
 
 def collect_session_ids(effective: list[str] | None) -> set[str]:
-    """Collect all session IDs for the given version list."""
-    all_session_ids: set[str] = set()
-    if effective:
-        for v in effective:
-            for d in iter_session_dirs(version=v):
-                all_session_ids.add(d.name)
-    else:
-        for d in iter_session_dirs():
-            all_session_ids.add(d.name)
-    return all_session_ids
+    """Collect all session IDs for the given version list (None = all)."""
+    if not effective:
+        return set(list_all_session_ids())
+    ids: set[str] = set()
+    for v in effective:
+        ids.update(list_all_session_ids(version=v))
+    return ids
 
 
 # =============================================================================
@@ -333,25 +322,15 @@ def get_uncommitted_session_ids() -> set[str]:
 
 def get_session_summary(session_id: str) -> str:
     """Read summary from the latest session JSON across all versions."""
-    all_json: list[Path] = []
-    for session_dir in iter_session_dirs(session_id=session_id):
-        all_json.extend(session_dir.glob("*.json"))
-
-    if not all_json:
+    data = get_latest_session_json(session_id)
+    if data is None:
         return f"session {session_id}"
-
-    latest = sorted(all_json)[-1]
-    try:
-        raw = json.loads(latest.read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            output = raw.get("output", {})
-            if isinstance(output, dict):
-                summary = output.get("summary")
-                if isinstance(summary, str):
-                    return summary[:50]
-        return f"session {session_id}"
-    except (json.JSONDecodeError, OSError):
-        return f"session {session_id}"
+    output = data.get("output", {})
+    if isinstance(output, dict):
+        summary = output.get("summary")
+        if isinstance(summary, str):
+            return summary[:50]
+    return f"session {session_id}"
 
 
 def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
@@ -443,15 +422,7 @@ def print_aggregate_stats(sessions: list[SessionData]) -> None:
     typer.echo(f"With tokens:  {with_tokens} ({100 * with_tokens / total:.0f}%)")
     typer.echo(f"With outcome: {with_outcome} ({100 * with_outcome / total:.0f}%)")
 
-    total_cost = 0.0
-    for s in sessions:
-        cost = s.get("cost_usd") or 0
-        if not cost:
-            metrics = s.get("tool_metrics")
-            if metrics:
-                cost = metrics.get("total_cost_usd", 0) or 0
-        if cost:
-            total_cost += cost
+    total_cost = sum(s.get("cost_usd") or 0 for s in sessions)
 
     if total_cost > 0:
         typer.echo(f"\nTotal cost: ${total_cost:.2f}")
