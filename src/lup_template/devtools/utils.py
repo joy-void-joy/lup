@@ -23,7 +23,7 @@ def copy_to_clipboard(text: str) -> bool:
         try:
             sh.Command(command)(*args, _in=text)
             return True
-        except (sh.ErrorReturnCode, sh.CommandNotFound):
+        except sh.ErrorReturnCode, sh.CommandNotFound:
             continue
     return False
 

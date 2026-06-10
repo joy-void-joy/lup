@@ -194,9 +194,7 @@ def claude_block_to_lup(block: ContentBlock) -> LupContentBlock:
     match block:
         case ThinkingBlock():
             is_redacted = not block.thinking and bool(block.signature)
-            return LupThinkingBlock(
-                thinking=block.thinking or "", redacted=is_redacted
-            )
+            return LupThinkingBlock(thinking=block.thinking or "", redacted=is_redacted)
         case TextBlock():
             return LupTextBlock(text=block.text)
         case ToolUseBlock():
@@ -208,10 +206,10 @@ def claude_block_to_lup(block: ContentBlock) -> LupContentBlock:
         case ServerToolUseBlock():
             return LupToolUseBlock(id=block.id, name=block.name, input=block.input)
         case ServerToolResultBlock():
-            content = block.content if isinstance(block.content, str) else str(block.content)
-            return LupToolResultBlock(
-                tool_use_id=block.tool_use_id, content=content
+            content = (
+                block.content if isinstance(block.content, str) else str(block.content)
             )
+            return LupToolResultBlock(tool_use_id=block.tool_use_id, content=content)
         case _:
             return LupTextBlock(text=str(block))
 
@@ -232,7 +230,11 @@ def claude_message_to_lup(message: Message) -> LupMessage | None:
                 return LupUserMessage(content=blocks)
             return LupUserMessage(content=message.content)
         case SystemMessage():
-            data = json.dumps(message.data) if isinstance(message.data, dict) else str(message.data)
+            data = (
+                json.dumps(message.data)
+                if isinstance(message.data, dict)
+                else str(message.data)
+            )
             return LupSystemMessage(subtype=message.subtype, data=data)
         case ResultMessage():
             return None
@@ -250,7 +252,9 @@ def lup_server_to_claude(config: LupMcpServerConfig) -> McpSdkServerConfig:
     return McpSdkServerConfig(type="sdk", name=config.name, instance=config.server)
 
 
-def lup_tools_to_sdk(tools: list[LupMcpTool]) -> list[SdkMcpTool[dict[str, Any]]]:  # claude: ignore
+def lup_tools_to_sdk(
+    tools: list[LupMcpTool],
+) -> list[SdkMcpTool[dict[str, Any]]]:  # claude: ignore
     """Convert LupMcpTool list to Claude SDK SdkMcpTool list."""
     return [
         SdkMcpTool(
@@ -311,23 +315,16 @@ class ClaudeConversation(Conversation):
                         raise RuntimeError(f"Agent error: {message.result}")
 
                 case SystemMessage():
-                    logger.info(
-                        "System [%s]: %s", message.subtype, message.data
-                    )
+                    logger.info("System [%s]: %s", message.subtype, message.data)
 
                 case UserMessage():
                     if isinstance(message.content, list):
                         lup_user = LupUserMessage(
-                            content=[
-                                claude_block_to_lup(b)
-                                for b in message.content
-                            ]
+                            content=[claude_block_to_lup(b) for b in message.content]
                         )
                         response.messages.append(lup_user)
                         for block in message.content:
-                            response.tool_results.append(
-                                claude_block_to_lup(block)
-                            )
+                            response.tool_results.append(claude_block_to_lup(block))
 
         if response.result is None:
             raise RuntimeError("No result received from agent")
@@ -374,9 +371,7 @@ class ClaudeAdapter(AgentAdapter):
                                 case TextBlock():
                                     yield LupTextEvent(text=block.text)
                                 case ToolUseBlock():
-                                    yield LupToolUseEvent(
-                                        id=block.id, name=block.name
-                                    )
+                                    yield LupToolUseEvent(id=block.id, name=block.name)
                     case UserMessage():
                         if isinstance(message.content, list):
                             for block in message.content:

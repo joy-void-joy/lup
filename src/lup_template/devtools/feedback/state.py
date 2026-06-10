@@ -292,7 +292,7 @@ def get_session_summary(session_id: str) -> str:
         if isinstance(output, dict):
             return output.get("summary", f"session {session_id}")[:50]
         return f"session {session_id}"
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         return f"session {session_id}"
 
 
@@ -715,7 +715,7 @@ def history(limit: int) -> None:
             total = data.get("total_sessions", 0)
             with_outcomes = data.get("sessions_with_outcomes", 0)
             typer.echo(f"{f.name}: {total} sessions, {with_outcomes} with outcomes")
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             typer.echo(f"{f.name}: (error reading)")
 
 

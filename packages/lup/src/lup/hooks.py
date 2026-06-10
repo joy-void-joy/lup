@@ -263,5 +263,9 @@ def create_reflection_gate(
         return deny_hook(message)
 
     return {
-        "PreToolUse": [LupHookMatcher(matcher=gated_tool, hook=reflection_gate_hook, tag="reflection_gate")],
+        "PreToolUse": [
+            LupHookMatcher(
+                matcher=gated_tool, hook=reflection_gate_hook, tag="reflection_gate"
+            )
+        ],
     }

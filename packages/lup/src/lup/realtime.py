@@ -537,9 +537,7 @@ def create_stop_guard() -> LupHooksConfig:
             return LupHookOutput()
         if input_data.get("stop_hook_active", False):
             return LupHookOutput()
-        return block_hook(
-            "You cannot end your turn. Use sleep to pause between turns."
-        )
+        return block_hook("You cannot end your turn. Use sleep to pause between turns.")
 
     return {
         "Stop": [LupHookMatcher(hook=stop_guard)],
@@ -582,9 +580,7 @@ def create_pending_event_guard(
         if not unread:
             return LupHookOutput()
 
-        return block_hook(
-            f"Blocked — {unread} unread event(s). Call context first."
-        )
+        return block_hook(f"Blocked — {unread} unread event(s). Call context first.")
 
     return {
         "PreToolUse": [
@@ -621,5 +617,3 @@ def create_meta_before_sleep_guard(
         reflection_tool_name="meta",
         denial_message="You must call meta before sleeping. Assess your process this turn.",
     )
-
-

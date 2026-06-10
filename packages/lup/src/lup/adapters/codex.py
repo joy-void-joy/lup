@@ -110,14 +110,24 @@ def codex_items_to_lup(items: Sequence[ThreadItem]) -> list[LupContentBlock]:
                     LupToolUseBlock(
                         id=inner.id,
                         name=f"mcp__{inner.server}__{inner.tool}",
-                        input=inner.arguments if isinstance(inner.arguments, dict) else None,
+                        input=inner.arguments
+                        if isinstance(inner.arguments, dict)
+                        else None,
                     )
                 )
                 result_text: str | None = None
                 if inner.error is not None:
-                    result_text = inner.error.message if hasattr(inner.error, "message") else str(inner.error)
+                    result_text = (
+                        inner.error.message
+                        if hasattr(inner.error, "message")
+                        else str(inner.error)
+                    )
                 elif inner.result is not None:
-                    result_text = json.dumps(inner.result.content) if hasattr(inner.result, "content") else str(inner.result)
+                    result_text = (
+                        json.dumps(inner.result.content)
+                        if hasattr(inner.result, "content")
+                        else str(inner.result)
+                    )
                 if result_text is not None:
                     blocks.append(
                         LupToolResultBlock(
@@ -127,9 +137,7 @@ def codex_items_to_lup(items: Sequence[ThreadItem]) -> list[LupContentBlock]:
                     )
 
             case FileChangeThreadItem():
-                changes_desc = "; ".join(
-                    f"{c.path} ({c.kind})" for c in inner.changes
-                )
+                changes_desc = "; ".join(f"{c.path} ({c.kind})" for c in inner.changes)
                 blocks.append(
                     LupToolUseBlock(
                         id=inner.id,
@@ -244,7 +252,7 @@ def build_lup_response(
     if result.final_response and output_schema:
         try:
             structured_output = json.loads(result.final_response)
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             pass
 
     result_usage: dict[str, int] | None = None

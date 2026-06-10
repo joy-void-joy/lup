@@ -147,7 +147,7 @@ def find_base_branch() -> str:
     try:
         base, _, _ = detect_base_branch()
         return base
-    except (typer.Exit, SystemExit):
+    except typer.Exit, SystemExit:
         return get_integration_branch()
 
 

@@ -40,7 +40,7 @@ def resolve_object(path: str) -> tuple[object, str]:
             for attr in parts[i:]:
                 obj = getattr(obj, attr)
             return obj, parts[-1]
-        except (ImportError, AttributeError):
+        except ImportError, AttributeError:
             continue
 
     raise ValueError(f"Could not resolve: {path}")
@@ -51,7 +51,7 @@ def format_signature(obj: object, name: str) -> str:
     try:
         sig = inspect.signature(cast(Callable[..., object], obj))
         return f"{name}{sig}"
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return name
 
 
@@ -162,7 +162,7 @@ def inspect_cmd(
             source_file = inspect.getfile(obj)
             source_lines = inspect.getsourcelines(obj)
             typer.echo(f"\nSource: {source_file}:{source_lines[1]}")
-        except (TypeError, OSError):
+        except TypeError, OSError:
             pass
 
     else:
@@ -183,14 +183,14 @@ def find_module_path(module_name: str) -> Path | None:
         spec = importlib.util.find_spec(module_name)
         if spec and spec.origin:
             return Path(spec.origin)
-    except (ImportError, ModuleNotFoundError, ValueError):
+    except ImportError, ModuleNotFoundError, ValueError:
         pass
 
     try:
         module = importlib.import_module(module_name)
         if hasattr(module, "__file__") and module.__file__:
             return Path(module.__file__)
-    except (ImportError, ModuleNotFoundError):
+    except ImportError, ModuleNotFoundError:
         pass
 
     return None
