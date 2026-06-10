@@ -19,7 +19,9 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from claude_agent_sdk.types import McpSdkServerConfig, McpServerConfig
 
 if TYPE_CHECKING:
     from lup_template.agent.config import Settings
@@ -114,24 +116,24 @@ class ToolPolicy:
             restricted_mode=restricted_mode,
         )
 
-    def get_mcp_servers(self, *additional_servers: Any) -> dict[str, Any]:
+    def get_mcp_servers(
+        self, *additional_servers: McpSdkServerConfig
+    ) -> dict[str, McpServerConfig]:
         """Get MCP server configuration based on policy.
 
         Args:
             *additional_servers: Additional MCP servers to include.
-                These should be McpSdkServerConfig objects.
 
         Returns:
             Dict mapping server name to server config.
 
         Customize this to return your domain's MCP servers.
         """
-        servers: dict[str, Any] = {}
+        servers: dict[str, McpServerConfig] = {}
 
         # Add any additional servers passed in
         for server in additional_servers:
-            name = getattr(server, "name", str(server))
-            servers[name] = server
+            servers[server["name"]] = server
 
         # TODO: Add your MCP servers
         # Example:
