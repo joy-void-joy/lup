@@ -80,13 +80,13 @@ This plan supersedes the previous SDK-interop status document. That document mar
 
 ## Phase 0 — Stabilize (independent; worktree off `dev`)
 
-- [ ] Fix `version` callback: take `ctx: typer.Context` instead of `click.get_current_context()` (restores `version`, `changelog`, `bump`, and the `/lup:bump`, `/lup:fb-status` workflows)
-- [ ] Fix `usage`: one-shot render by default, watch mode behind `--watch`; never block without output on non-TTY
-- [ ] `uv run ruff format .` (24 files) and commit
-- [ ] Add CI workflow (GitHub Actions): `uv sync` + `lup-devtools dev check` (format, lint, pyright, pytest) on PRs to `dev`/`main`
-- [ ] Pin `openai-codex` git dependency to a rev in `[tool.uv.sources]`
-- [ ] Standardize the read-only overview verb to `status` across sub-apps (`sync list` → `sync status`)
-- [ ] Dedupe `copy_to_clipboard` into `devtools/utils.py`; replace `setup.py` `parents[3]` with `lup.paths.project_root()`; guard rebase-state reads in `dev/conflicts.py`; guard `splitlines()[0]` in `version.py`
+- [x] Fix `version` callback: take `ctx: typer.Context` instead of `click.get_current_context()` (restores `version`, `changelog`, `bump`, and the `/lup:bump`, `/lup:fb-status` workflows)
+- [x] Fix `usage`: one-shot render by default, watch mode behind `--watch`; never block without output on non-TTY
+- [x] `uv run ruff format .` (24 files) and commit
+- [ ] ~~Add CI workflow~~ — deferred at user request (no GitHub workflow for now)
+- [x] Pin `openai-codex` git dependency — pinned to release tag `rust-v0.139.0` in `[tool.uv.sources]`
+- [x] Standardize the read-only overview verb to `status` across sub-apps (`sync list` → `sync status`)
+- [x] Dedupe `copy_to_clipboard` into `devtools/utils.py`; replace `setup.py` `parents[3]` with `lup.paths.project_root()`; guard rebase-state reads in `dev/conflicts.py`; guard `splitlines()[0]` in `version.py`
 
 **Verify:** `uv run lup-devtools version`, `version changelog`, `usage` all exit cleanly; `dev check` reports 4/4; CI green on a test PR.
 
