@@ -119,6 +119,8 @@ class ClaudeBackgroundAgent(BaseBackgroundAgent):
                 await client.disconnect()
         except asyncio.CancelledError:
             pass
+        # claude: ignore — task supervisor: a background crash must be
+        # logged but never propagate into (or kill) the main session.
         except Exception:
             logger.exception("Background agent '%s' crashed", self.name)
 

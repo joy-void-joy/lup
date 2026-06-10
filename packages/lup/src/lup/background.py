@@ -132,6 +132,14 @@ def create_background_agent(
 ) -> BaseBackgroundAgent:
     """Factory for creating SDK-appropriate background agents.
 
+    Tool support differs by backend: background tools communicate with
+    the main session through shared in-process state, which cannot
+    cross the Codex subprocess boundary — requesting tools with
+    ``sdk="codex"`` raises. Model defaults also differ deliberately:
+    Claude backgrounds default to an opus-class model because they can
+    act through tools; Codex backgrounds are prompt-in/text-out
+    summarizers, where a small model suffices.
+
     Args:
         sdk: "claude" or "codex".
         name: Agent identifier.
@@ -140,9 +148,9 @@ def create_background_agent(
         start_message: Initial message when agent starts.
         model: Model override (defaults vary by SDK).
         debounce_seconds: Batch rapid wakes.
-        tools: LupMcpTool instances (converted by each adapter).
-        builtin_tools: Built-in SDK tools (adapter-specific).
-        allowed_tools: Tool allowlist (adapter-specific).
+        tools: LupMcpTool instances (Claude only).
+        builtin_tools: Built-in SDK tools (Claude only).
+        allowed_tools: Tool allowlist (Claude only).
         on_response: Callback for responses.
     """
     match sdk:
@@ -162,6 +170,13 @@ def create_background_agent(
                 on_response=on_response,
             )
         case "codex":
+            if tools or builtin_tools or allowed_tools:
+                raise ValueError(
+                    "Codex background agents cannot use tools: background "
+                    "tools share in-process state with the main session, "
+                    "which cannot cross the Codex subprocess boundary. "
+                    "Use sdk='claude' for tool-using background agents."
+                )
             from lup.adapters.codex_background import CodexBackgroundAgent
 
             return CodexBackgroundAgent(
