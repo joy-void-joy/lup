@@ -149,18 +149,29 @@ def show_module(obj: object, path: str, private: bool) -> None:
     if doc:
         typer.echo(f"\n{doc}")
 
+    module_name = getattr(obj, "__name__", path)
+
     classes: list[str] = []
     functions: list[str] = []
     values: list[str] = []
+    reexports: list[str] = []
     for name in sorted(dir(obj)):
         if name.startswith("_") and not private:
             continue
         member = getattr(obj, name)
-        if inspect.isclass(member):
-            classes.append(name)
-        elif inspect.isfunction(member) or inspect.isbuiltin(member):
-            functions.append(format_signature(member, name))
-        elif not inspect.ismodule(member):
+        if inspect.ismodule(member):
+            continue
+        is_class = inspect.isclass(member)
+        is_function = inspect.isfunction(member) or inspect.isbuiltin(member)
+        if is_class or is_function:
+            origin = getattr(member, "__module__", None)
+            if isinstance(origin, str) and origin != module_name:
+                reexports.append(f"{name} (from {origin})")
+            elif is_class:
+                classes.append(name)
+            else:
+                functions.append(format_signature(member, name))
+        else:
             values.append(f"{name}: {type(member).__name__}")
 
     if classes:
@@ -175,6 +186,10 @@ def show_module(obj: object, path: str, private: bool) -> None:
         typer.echo(f"\nValues ({len(values)}):")
         for v in values:
             typer.echo(f"  {v}")
+    if reexports:
+        typer.echo(f"\nRe-exports ({len(reexports)}, defined elsewhere):")
+        for r in reexports:
+            typer.echo(f"  {r}")
 
 
 PYDANTIC_INTERNALS = frozenset(
@@ -452,7 +467,11 @@ def source_cmd(
     ] = 50,
     start: Annotated[
         int,
-        typer.Option("--start", "-s", help="Starting line number"),
+        typer.Option(
+            "--start",
+            "-s",
+            help="Starting line (file line for modules, offset within the object)",
+        ),
     ] = 1,
 ) -> None:
     """View source code for a Python object, or a package file tree with --tree."""
@@ -502,9 +521,18 @@ def source_cmd(
         fail(f"Cannot get source for '{path}': {e}")
 
     obj_lines = source.splitlines()
+    start_idx = max(0, start - 1)
+    if lines > 0:
+        selected = obj_lines[start_idx : start_idx + lines]
+    else:
+        selected = obj_lines[start_idx:]
     typer.echo(f"# {len(obj_lines)} lines")
+    if len(selected) < len(obj_lines):
+        first = start_lineno + start_idx
+        last = first + len(selected) - 1
+        typer.echo(f"# Showing lines {first}–{last} (--lines 0 for all)")
     typer.echo()
-    for i, line in enumerate(obj_lines, start=start_lineno):
+    for i, line in enumerate(selected, start=start_lineno + start_idx):
         typer.echo(f"{i:4d}  {line}")
 
 
