@@ -40,12 +40,7 @@ Examples:
         False
 """
 
-from typing import cast
-
-from claude_agent_sdk import HookInput, HookMatcher
-from claude_agent_sdk.types import HookContext, SyncHookJSONOutput
-
-from lup.hooks import HooksConfig, allow_hook_output, deny_hook_output
+from lup.hooks import HooksConfig, create_tool_gate
 
 
 class ReflectionGate:
@@ -79,8 +74,19 @@ def create_reflection_gate(
 ) -> HooksConfig:
     """Create a PreToolUse hook that denies *gated_tool* until reflection.
 
-    The hook checks ``gate.reflected``. If ``False``, denies *gated_tool*
-    with a message telling the agent to call *reflection_tool_name* first.
+    **What:** Preset over :func:`lup.hooks.create_tool_gate` — denies
+    *gated_tool* with a message naming *reflection_tool_name* while
+    ``gate.reflected`` is False, and explicitly allows it afterwards.
+
+    **When:** Wire this for any "reflect before X" pattern: gate
+    ``StructuredOutput`` for one-shot agents or ``sleep`` for persistent
+    agents. The reflection tool handler calls
+    :meth:`ReflectionGate.mark_reflected`; persistent agents reset the
+    gate per cycle via :meth:`ReflectionGate.reset`.
+
+    **Why:** The external :class:`ReflectionGate` object (rather than
+    the gate primitive's one-shot ``on_unlock_tool`` tracking) supports
+    resettable, per-cycle reflection.
 
     .. note::
 
@@ -105,22 +111,10 @@ def create_reflection_gate(
         f"BEFORE calling {gated_tool}. Reflect on your work first, "
         f"then try again."
     )
-    message = denial_message or default_message
 
-    async def reflection_gate_hook(
-        input_data: HookInput,
-        _tool_use_id: str | None,
-        _context: HookContext,
-    ) -> SyncHookJSONOutput:
-        if gate.reflected:
-            return allow_hook_output()
-        return deny_hook_output(message)
-
-    return cast(
-        HooksConfig,
-        {
-            "PreToolUse": [
-                HookMatcher(matcher=gated_tool, hooks=[reflection_gate_hook])
-            ],
-        },
+    return create_tool_gate(
+        gated_tool=gated_tool,
+        message=denial_message or default_message,
+        unlocked=lambda _input: gate.reflected,
+        allow_when_unlocked=True,
     )

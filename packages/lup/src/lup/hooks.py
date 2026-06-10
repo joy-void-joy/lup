@@ -10,6 +10,7 @@ Output helpers:
 PreToolUse hooks:
 - create_permission_hooks() — directory-based read/write access control
 - create_tool_allowlist_hook() — restrict agent to specific tools
+- create_tool_gate() — deny a tool (or Stop) until a condition unlocks it
 
 PostToolUse hooks:
 - create_nudge_hook() — inject system messages suggesting better alternatives
@@ -31,6 +32,14 @@ Examples:
 
         >>> hooks = create_tool_allowlist_hook(["Read", "Grep", "WebSearch"])
 
+    Gate a tool until another tool has run::
+
+        >>> hooks = create_tool_gate(
+        ...     gated_tool="StructuredOutput",
+        ...     message="Call review() before finalizing output.",
+        ...     on_unlock_tool="mcp__notes__review",
+        ... )
+
     Capture data from a sub-agent's tool calls::
 
         >>> hooks, captured = create_capture_hook("WebSearch", extract_urls)
@@ -39,9 +48,9 @@ Examples:
         5
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from claude_agent_sdk import HookInput, HookMatcher, PostToolUseHookInput
 from claude_agent_sdk.types import HookContext, HookEvent, SyncHookJSONOutput
@@ -109,6 +118,119 @@ def block_hook_output(reason: str) -> SyncHookJSONOutput:
     block uses the top-level ``decision`` field and works across hook types.
     """
     return SyncHookJSONOutput(decision="block", reason=reason)
+
+
+def create_tool_gate(
+    *,
+    gated_tool: str | Sequence[str] | None = None,
+    message: str | Callable[[], str],
+    unlocked: Callable[[HookInput], bool] | None = None,
+    on_unlock_tool: str | None = None,
+    event: Literal["PreToolUse", "Stop"] = "PreToolUse",
+    style: Literal["deny", "block"] = "deny",
+    allow_when_unlocked: bool = False,
+) -> HooksConfig:
+    """Create a hook that denies a tool (or Stop) until a condition unlocks it.
+
+    **What:** Registers a hook on *event* that answers with an
+    agent-readable denial *message* while the gate is locked, and passes
+    through (or explicitly allows) once it is unlocked. The gate is
+    unlocked when ``unlocked(input)`` returns True, or — with
+    *on_unlock_tool* — once that tool has run (tracked via an internal
+    PostToolUse hook).
+
+    **When:** Reach for this whenever the agent must do A before it may
+    do B: reflect before finalizing output, read pending events before
+    sleeping, call sleep instead of ending the turn. Presets built on
+    this primitive: :func:`lup.reflect.create_reflection_gate`,
+    :func:`lup.realtime.create_stop_guard`,
+    :func:`lup.realtime.create_pending_event_guard`, and
+    :func:`lup.realtime.create_meta_before_sleep_guard`.
+
+    **Why:** The denial message is the one channel that reliably
+    redirects the agent mid-turn — it states what to do instead, making
+    the workflow constraint structural rather than a prompt rule the
+    agent can skip.
+
+    Args:
+        gated_tool: Tool name(s) to gate. Required for
+            ``event="PreToolUse"``; ignored for ``event="Stop"``.
+        message: Denial text shown to the agent, or a zero-argument
+            callable evaluated at denial time (for dynamic state such as
+            unread-event counts).
+        unlocked: Predicate over the raw hook input. Return True to let
+            the call through. Receiving the input lets gates honor
+            per-call escape hatches (a ``force`` flag in ``tool_input``)
+            or event fields (``stop_hook_active``).
+        on_unlock_tool: Tool name whose use unlocks the gate. Adds a
+            PostToolUse hook that records the call; combined with
+            *unlocked* via OR. The internal flag never resets — for
+            per-cycle gates, track the state yourself and pass *unlocked*.
+        event: Hook event to gate: ``"PreToolUse"`` (default) or ``"Stop"``.
+        style: Locked response shape. ``"deny"`` uses the PreToolUse
+            permission decision; ``"block"`` uses the cross-event
+            ``decision: block`` field (required for Stop).
+        allow_when_unlocked: When True, return an explicit allow decision
+            once unlocked instead of passing through to later hooks
+            (PreToolUse only).
+
+    Returns:
+        HooksConfig to combine with other hooks via :func:`merge_hooks`.
+    """
+    if unlocked is None and on_unlock_tool is None:
+        raise ValueError("create_tool_gate requires unlocked and/or on_unlock_tool")
+    if event == "PreToolUse" and gated_tool is None:
+        raise ValueError("create_tool_gate requires gated_tool for PreToolUse gates")
+
+    unlock_seen = False
+
+    async def gate_hook(
+        input_data: HookInput,
+        _tool_use_id: str | None,
+        _context: HookContext,
+    ) -> SyncHookJSONOutput:
+        if input_data["hook_event_name"] != event:
+            return SyncHookJSONOutput()
+        if unlock_seen or (unlocked is not None and unlocked(input_data)):
+            if allow_when_unlocked and event == "PreToolUse":
+                return allow_hook_output()
+            return SyncHookJSONOutput()
+        text = message() if callable(message) else message
+        match style:
+            case "deny":
+                return deny_hook_output(text)
+            case "block":
+                return block_hook_output(text)
+
+    async def unlock_hook(
+        input_data: HookInput,
+        _tool_use_id: str | None,
+        _context: HookContext,
+    ) -> SyncHookJSONOutput:
+        nonlocal unlock_seen
+        if input_data["hook_event_name"] == "PostToolUse":
+            unlock_seen = True
+        return SyncHookJSONOutput()
+
+    match event:
+        case "Stop":
+            gate_matchers = [HookMatcher(hooks=[gate_hook])]
+        case "PreToolUse":
+            names = (
+                [gated_tool] if isinstance(gated_tool, str) else list(gated_tool or [])
+            )
+            gate_matchers = [
+                HookMatcher(matcher=name, hooks=[gate_hook]) for name in names
+            ]
+
+    hooks = cast(HooksConfig, {event: gate_matchers})
+    if on_unlock_tool is not None:
+        unlock_config = cast(
+            HooksConfig,
+            {"PostToolUse": [HookMatcher(matcher=on_unlock_tool, hooks=[unlock_hook])]},
+        )
+        hooks = merge_hooks(hooks, unlock_config)
+    return hooks
 
 
 def create_permission_hooks(
