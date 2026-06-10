@@ -67,3 +67,4 @@ def test_deny_wins_over_allow(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_unknown_urls_fall_through() -> None:
     assert fetch_decision("https://example.com/page") is None
+    assert fetch_decision("https://github.com/openai/codex") is None
