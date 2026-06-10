@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
     from lup.adapters.common import AgentAdapter
     from lup.notes import NotesConfig
-    from lup.types import SubagentSpec
 
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
@@ -213,16 +212,6 @@ def build_options(
     )
 
 
-def format_subagent_prompt_section(specs: list["SubagentSpec"]) -> str:
-    """Format subagent specs as a system prompt section for non-Claude adapters."""
-    if not specs:
-        return ""
-    lines = ["\n\n## Available Subagent Roles\n"]
-    for spec in specs:
-        lines.append(f"### {spec.name}\n{spec.description}\n")
-    return "\n".join(lines)
-
-
 def build_codex_session(
     notes: "NotesConfig",
 ) -> tuple[str, dict[str, str], list[Path]]:
@@ -241,7 +230,6 @@ def build_codex_session(
     from lup.paths import SessionContext
 
     from lup_template.agent.prompts import get_system_prompt
-    from lup_template.agent.subagents import get_subagent_specs
 
     state_dir = Path(tempfile.mkdtemp(prefix="lup_codex_session_"))
     gate_flag_path = state_dir / "reflection_gate_flag"
@@ -254,10 +242,7 @@ def build_codex_session(
         task_id=notes.output.parent.name,
     )
 
-    system_prompt = get_system_prompt()
-    system_prompt += format_subagent_prompt_section(get_subagent_specs())
-
-    return system_prompt, context.to_env(), list(notes.rw)
+    return get_system_prompt(), context.to_env(), list(notes.rw)
 
 
 def build_codex_adapter(
