@@ -335,7 +335,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
                         f"got {type(result).__name__}"
                     )
                 return mcp_response(json.dumps(result.model_dump(), default=str))
-            except Exception:
+            except Exception:  # claude: ignore — mark error for metrics, then re-raise
                 is_error = True
                 raise
             finally:
