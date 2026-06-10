@@ -103,7 +103,7 @@ Agents produce better output when forced to self-assess before committing. The r
 
 **Customizing reflection:** The gate mechanism in `lup.reflect` is domain-neutral and parametric. The reflection _tool_ and its input model (`ReflectInput` in `agent/tools/reflect.py`) are domain-specific — add fields for your domain (e.g., factor analysis for forecasting, move evaluation for games). The reviewer prompt should target your domain's common failure modes.
 
-**When to skip the reviewer:** Set `skip_reviewer=True` for speed-sensitive or trivial tasks. The reviewer adds latency (separate Sonnet call with tool access) but catches calibration errors and reasoning gaps.
+**When to skip the reviewer:** Set `skip_reviewer=True` for speed-sensitive or trivial tasks. The reviewer adds latency (separate model call with tool access) but catches calibration errors and reasoning gaps.
 
 ---
 
@@ -701,7 +701,7 @@ The `.env` file contains the template configuration. Create `.env.local` for you
 # .env.local - your secrets (ANTHROPIC_API_KEY is read directly by the SDK from env)
 
 # Optional overrides
-# AGENT_MODEL=claude-sonnet-4-20250514
+# AGENT_MODEL=claude-opus-4-6
 # AGENT_MAX_BUDGET_USD=5.00
 ```
 
