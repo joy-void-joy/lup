@@ -30,15 +30,14 @@ The previous plan mapped lup features to SDK primitives and declared anything wi
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                       Consumer Code                           │
-│  core.py, trace.py — import from lup.lib.types only           │
+│  core.py, trace.py — import from lup.types only               │
 ├──────────────────────────────────────────────────────────────┤
 │  core.py dispatches: match settings.agent_sdk                 │
 ├─────────────────────────┬────────────────────────────────────┤
-│   lib/adapters/claude   │   lib/adapters/codex               │
-│                         │                                    │
+│   adapters/claude       │   adapters/codex                   │
+│                         │   adapters/openai_compat            │
 │   ClaudeAdapter         │   CodexAdapter                     │
-│    build_options()      │    build_config()                  │
-│    build_servers()      │    build_mcp_config()              │
+│    build_options()      │   OpenAICompatibleAdapter           │
 │    type converters      │    type converters                 │
 │                         │    thread management               │
 │                         │                                    │
@@ -47,20 +46,20 @@ The previous plan mapped lup features to SDK primitives and declared anything wi
 │   AgentDefinition       │   Thread fork / query()            │
 │   ClaudeSDKClient       │   AsyncCodex threads               │
 ├─────────────────────────┴────────────────────────────────────┤
-│   lib/adapters/common — AgentAdapter ABC                      │
+│   adapters/common — AgentAdapter ABC                          │
 ├──────────────────────────────────────────────────────────────┤
-│   lib/types.py — LupContentBlock, LupMessage, LupResponse    │
+│   types.py — LupContentBlock, LupMessage, LupResponse         │
 ├──────────────────────────────────────────────────────────────┤
 │   Shared (SDK-agnostic)                                       │
-│   lib/trace.py    — trace logging (lup types only)            │
-│   lib/metrics.py  — tool call tracking                        │
-│   lib/history.py  — session storage                           │
-│   lib/notes.py    — directory structure                       │
-│   lib/realtime.py — scheduler (timing logic is SDK-agnostic)  │
+│   trace.py    — trace logging (lup types only)                │
+│   metrics.py  — tool call tracking                            │
+│   history.py  — session storage                               │
+│   notes.py    — directory structure                           │
+│   realtime.py — scheduler (timing logic is SDK-agnostic)      │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Key rule:** Consumer code never imports from `claude_agent_sdk` or `codex_app_server`. All SDK-specific logic lives in `lib/adapters/*`.
+**Key rule:** Consumer code never imports from `claude_agent_sdk` or `codex_app_server`. All SDK-specific logic lives in `adapters/*`.
 
 ## Feature Implementation Details
 
@@ -100,7 +99,7 @@ config_overrides=(
 )
 ```
 
-The hook scripts need a thin adapter (`lib/adapters/codex_hooks.py`) to translate between output formats — Claude hooks emit `SyncHookJSONOutput`; Codex hooks emit JSON with `allow`/`deny`/`systemMessage` fields. The policy logic itself stays shared.
+The hook scripts need a thin adapter (`adapters/codex_hooks.py`) to translate between output formats — Claude hooks emit `SyncHookJSONOutput`; Codex hooks emit JSON with `allow`/`deny`/`systemMessage` fields. The policy logic itself stays shared.
 
 ### 3. Reflection Gate on Codex
 
@@ -136,7 +135,7 @@ Each adapter interprets `SubagentSpec`:
 - Claude adapter → `AgentDefinition`
 - Codex adapter → thread fork or `query()` dispatch based on whether tools are needed
 
-`lib/client.py`'s `query()` needs a backend-agnostic mode — dispatch to Anthropic or OpenAI API based on model name prefix (`claude-*` → Anthropic, `gpt-*`/`o*` → OpenAI).
+`adapters/claude_client.py`'s `query()` needs a backend-agnostic mode — dispatch to Anthropic or OpenAI API based on model name prefix (`claude-*` → Anthropic, `gpt-*`/`o*` → OpenAI).
 
 ### 5. Background Agents on Codex
 
@@ -172,7 +171,7 @@ The persistent agent pattern (sleep/wake loop) maps to Codex's thread model:
 | Debounce | `Scheduler.start_debounce()` batches events | Same — `Scheduler` logic is SDK-agnostic |
 | Stop guard | PreToolUse hook blocks Stop | Not needed — thread turn model has no Stop |
 
-The `Scheduler` class (`lib/realtime.py`) is mostly SDK-agnostic — asyncio timers and state tracking. The SDK-specific parts are hook factories (`create_stop_guard`, etc.) which need Codex equivalents via config.toml hooks.
+The `Scheduler` class (`realtime.py`) is mostly SDK-agnostic — asyncio timers and state tracking. The SDK-specific parts are hook factories (`create_stop_guard`, etc.) which need Codex equivalents via config.toml hooks.
 
 ### 7. Sandbox — Shared
 
@@ -231,14 +230,15 @@ Claude has 6 permission modes (`default`, `acceptEdits`, `plan`, `auto`, `dontAs
 
 ### Phase 1: Type Layer & Basic Dispatch (DONE)
 
-- [x] `src/lup/lib/types.py` — Internal types
-- [x] `src/lup/lib/adapters/common.py` — `AgentAdapter` ABC
-- [x] `src/lup/lib/adapters/claude.py` — Claude adapter with type converters
-- [x] `src/lup/lib/adapters/codex.py` — Codex adapter (basic: prompt → run → collect)
-- [x] `src/lup/agent/core.py` — SDK dispatch, zero `claude_agent_sdk` imports
-- [x] `src/lup/lib/trace.py` — Migrated to lup types
-- [x] `src/lup/lib/client.py` — Claude→lup conversion at print boundary
-- [x] `src/lup/agent/config.py` — `agent_sdk` + Codex settings fields
+- [x] `lup/types.py` — Internal types
+- [x] `lup/adapters/common.py` — `AgentAdapter` ABC
+- [x] `lup/adapters/claude.py` — Claude adapter with type converters
+- [x] `lup/adapters/codex.py` — Codex adapter (basic: prompt → run → collect)
+- [x] `lup/adapters/openai_compat.py` — OpenAI-compatible adapter via Codex
+- [x] `agent/core.py` — SDK dispatch, zero `claude_agent_sdk` imports
+- [x] `lup/trace.py` — Migrated to lup types
+- [x] `lup/adapters/claude_client.py` — Claude→lup conversion at print boundary
+- [x] `agent/config.py` — `agent_sdk` + Codex + OpenAI settings fields
 - [x] `tests/unit/test_type_conversion.py` — 14 tests for Claude→lup conversion
 - [x] `pyproject.toml` — Codex as optional dependency
 
@@ -251,7 +251,7 @@ Claude has 6 permission modes (`default`, `acceptEdits`, `plan`, `auto`, `dontAs
 
 ### Phase 3: Permission Hooks on Codex (DONE)
 
-- [x] `lib/adapters/codex_hooks.py` — Adapter translating lup hook output ↔ Codex hook JSON format
+- [x] `adapters/codex_hooks.py` — Adapter translating lup hook output ↔ Codex hook JSON format
 - [x] `write_permission_hook_script()` generates standalone permission hook scripts
 - [x] `CodexAdapter` accepts `hook_overrides` and passes them via `config_overrides`
 - [x] `build_hook_config_overrides()` generates TOML for Codex command hooks
@@ -267,7 +267,7 @@ Claude has 6 permission modes (`default`, `acceptEdits`, `plan`, `auto`, `dontAs
 
 ### Phase 5: Subagents (DONE)
 
-- [x] `SubagentSpec` model in `lib/types.py` — SDK-agnostic subagent definition
+- [x] `SubagentSpec` model in `types.py` — SDK-agnostic subagent definition
 - [x] `agent/subagents.py` migrated from `AgentDefinition` to `SubagentSpec`
 - [x] `spec_to_claude()`: `SubagentSpec` → `AgentDefinition`
 - [x] `model_backend()`: backend-agnostic dispatch (model name prefix → Anthropic or OpenAI)
@@ -287,6 +287,7 @@ Claude has 6 permission modes (`default`, `acceptEdits`, `plan`, `auto`, `dontAs
 - [x] `AgentAdapter.run_streamed()` → `AsyncGenerator[LupEvent]`
 - [x] `LupEvent` hierarchy: `LupTextEvent`, `LupThinkingEvent`, `LupToolUseEvent`, `LupToolResultEvent`, `LupDoneEvent`
 - [x] Claude adapter: `run_streamed()` yields events from `receive_response()`
+- [x] Codex adapter: `run_streamed()` yields events from completed turn items
 - [x] `LupResponse.session_id` — populated from native session/thread ID
 - [x] `AgentAdapter.resume()` and `fork()` base methods
 - [x] `Settings.reasoning_effort` mapped to native effort on each adapter
@@ -295,8 +296,8 @@ Claude has 6 permission modes (`default`, `acceptEdits`, `plan`, `auto`, `dontAs
 
 ### Unchanged (SDK-Agnostic Already)
 
-- `lib/trace.py`, `lib/metrics.py`, `lib/history.py`, `lib/notes.py`
-- `lib/cache.py`, `lib/retry.py`, `lib/throttle.py`, `lib/paths.py`
+- `trace.py`, `metrics.py`, `history.py`, `notes.py`
+- `retry.py`, `throttle.py`, `paths.py`
 - `agent/models.py`, `agent/prompts.py`, `agent/config.py`
 - `agent/tools/example.py` — `@lup_tool` decorated (SDK-agnostic via MCP)
 - `devtools/*` — CLI tooling
