@@ -125,50 +125,52 @@ class BackgroundAgent:
         self.allowed_tools = allowed_tools
         self.on_response = on_response
 
-        self._task: asyncio.Task[None] | None = None
-        self._wake: asyncio.Event = asyncio.Event()
-        self._running = False
+        self.task: asyncio.Task[None] | None = None
+        self.wake_event: asyncio.Event = asyncio.Event()
+        self.running = False
 
     def start(self) -> None:
         """Start the background agent as an asyncio task."""
-        if self._task and not self._task.done():
+        if self.task and not self.task.done():
             return
-        self._running = True
-        self._task = asyncio.create_task(self._run())
+        self.running = True
+        self.task = asyncio.create_task(self.run())
 
     def wake(self) -> None:
         """Signal that new data is available for processing."""
-        self._wake.set()
+        self.wake_event.set()
 
     async def stop(self) -> None:
         """Cancel the background agent and wait for cleanup."""
-        self._running = False
-        if self._task and not self._task.done():
-            self._task.cancel()
+        self.running = False
+        if self.task and not self.task.done():
+            self.task.cancel()
             try:
-                await self._task
+                await self.task
             except asyncio.CancelledError:
                 pass
-        self._task = None
+        self.task = None
 
-    async def _message_generator(self) -> AsyncGenerator[dict[str, object], None]:
+    async def message_generator(
+        self,
+    ) -> AsyncGenerator[dict[str, object], None]:  # claude: ignore — SDK stream turns
         """Yield user turns: start message, then build_message on each wake."""
         yield {
             "type": "user",
             "message": {"role": "user", "content": self.start_message},
         }
 
-        while self._running:
-            await self._wake.wait()
-            self._wake.clear()
+        while self.running:
+            await self.wake_event.wait()
+            self.wake_event.clear()
 
             # Debounce: batch rapid events into a single turn
             while True:
                 try:
                     await asyncio.wait_for(
-                        self._wake.wait(), timeout=self.debounce_seconds
+                        self.wake_event.wait(), timeout=self.debounce_seconds
                     )
-                    self._wake.clear()
+                    self.wake_event.clear()
                 except TimeoutError:
                     break
 
@@ -181,7 +183,7 @@ class BackgroundAgent:
                 "message": {"role": "user", "content": content},
             }
 
-    async def _run(self) -> None:
+    async def run(self) -> None:
         """Create SDK client, connect with message generator, process responses."""
         server = create_sdk_mcp_server(
             name=self.name,
@@ -202,10 +204,10 @@ class BackgroundAgent:
 
         try:
             client = ClaudeSDKClient(options=options)
-            await client.connect(self._message_generator())
+            await client.connect(self.message_generator())
             try:
                 async for msg in client.receive_messages():
-                    self._handle_response(msg)
+                    self.handle_response(msg)
             finally:
                 await client.disconnect()
         except asyncio.CancelledError:
@@ -213,7 +215,7 @@ class BackgroundAgent:
         except Exception:
             logger.exception("Background agent '%s' crashed", self.name)
 
-    def _handle_response(self, msg: object) -> None:
+    def handle_response(self, msg: object) -> None:
         """Route response messages for logging."""
         match msg:
             case AssistantMessage():

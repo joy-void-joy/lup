@@ -107,7 +107,7 @@ logger = logging.getLogger(__name__)
 # Output format types
 # ---------------------------------------------------------------------------
 
-JsonSchema = dict[str, object]
+JsonSchema = dict[str, object]  # claude: ignore — JSON Schema is an open document
 """Type alias for JSON Schema payloads (from ``BaseModel.model_json_schema()``)."""
 
 OutputFormat = dict[str, str | JsonSchema]
