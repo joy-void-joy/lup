@@ -199,6 +199,7 @@ def collect_tools_by_server(
 
     from lup.output import create_output_tool
     from lup.reflect import ReflectionGate
+    from lup.subagents import create_run_subagent_tool
 
     from lup_template.agent.tools.reflect import create_reflect_tools
 
@@ -214,7 +215,12 @@ def collect_tools_by_server(
         gate=gate,
         reflection_tool_name="mcp__notes__review",
     )
-    servers["notes"] = [*reflect_kit["tools"], *output_kit["tools"]]
+    subagent_tool = create_run_subagent_tool(get_subagent_specs())
+    servers["notes"] = [
+        *reflect_kit["tools"],
+        *output_kit["tools"],
+        subagent_tool,
+    ]
     return servers
 
 
