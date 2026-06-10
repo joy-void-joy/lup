@@ -8,11 +8,14 @@ Each subagent has:
 - A subset of tools (only what it needs)
 - Its own model (cheaper models for simpler tasks)
 
-Definitions use SubagentSpec (SDK-agnostic). Each adapter converts
-these into its native subagent primitive at build time:
+Definitions use SubagentSpec (SDK-agnostic). Each backend interprets
+the same spec list:
 
-- Claude: :func:`~lup.lib.adapters.claude.spec_to_claude`
-- Codex: uses SubagentSpec directly via :func:`~lup.lib.adapters.codex.codex_query`
+- Claude: converted to native ``AgentDefinition`` via
+  :func:`~lup.adapters.claude.spec_to_claude`
+- Codex/OpenAI: served as the ``run_subagent`` tool via
+  :func:`~lup.subagents.create_run_subagent_tool`, which dispatches a
+  one-shot query to the backend serving the spec's model
 """
 
 from lup.types import SubagentSpec

@@ -43,16 +43,25 @@ But you could use it for so much more. Real-time monitoring, mathematical proofs
 To start using this repo either:
 
 - For a fresh repository: Use the "Use this template" button on github, or clone this repository. In the newly cloned repository, use /lup:init [description of your project] or /lup:brainstorm to first flesh out the broad shape of it
-- For an already existing repository, clone lup inside it, and either use /lup:install to install the bare plugin, or /lup:install --interactive to install the
+- For an already existing repository, clone lup inside it, and either use /lup:install to install the bare plugin, or /lup:install --interactive to pick which pieces (plugin, devtools, feedback scaffolding) to bring in
 
 You will need to install [uv] for python management and [fzf] for fuzzy-file matching. Docker is an additional dependency if you plan to use the sandboxing capabilities.
 
+To run the inner agent once everything is synced:
+
+```bash
+uv run lup run "your task here"            # single session
+uv run lup loop "task1" "task2"            # batch with auto-commit
+AGENT_SDK=codex AGENT_MODEL=gpt-5.5 uv run lup run "same task, Codex backend"
+```
+
+The agent runs on the Claude Agent SDK by default; setting `AGENT_SDK=codex` (or `openai` for any OpenAI-compatible endpoint) runs the same agent — same tools, reflection gate, structured output — on the Codex runtime.
+
 The intended workflow while using this repository is to:
 
-- Have it cloned in a bare repo
-- Creating a worktree to tree/main: ``git clone
-- When working on a new feature, branching off from it with `lup-devtools worktree create <branch-name>`
-- Going into this new branch, and working on it there
+- Have it cloned as a bare repo with worktrees as siblings under `tree/`: `git clone --bare <url> myproject.git && cd myproject.git && git worktree add tree/main main`
+- When working on a new feature, branching off with `uv run lup-devtools dev worktree create <branch-name>`
+- Going into this new worktree, and working on it there
 - Then /lup:commit it
 - When it works and you've tested it works well /lup:rebase it
 - Review it in github before merging it
@@ -71,9 +80,15 @@ This repository contains many elements and code template that are designed to ma
 
 ### Meta development
 
+Whenever you hit a pain point in your own development flow, turn it into scaffolding: /lup:add-command creates a new slash command from a description, /lup:meta reviews and reshapes the whole .claude structure, and /lup:hooks adjusts the permission patterns. The repo treats your development workflow as just another agent to improve.
+
 ### Worktree management
 
+All code changes happen in worktrees, never directly on dev. `uv run lup-devtools dev worktree create <name>` creates a sibling checkout under tree/, syncs dependencies, and refreshes the plugin cache. `lup-devtools dev check` runs the pre-flight (format, lint, pyright, pytest) before a PR, and /lup:rebase squashes history and opens it.
+
 ### Feedback loop
+
+Every agent session writes its trace, structured output, and tool metrics under notes/traces/\<version\>/. The /lup:feedback-loop command (or the individual /lup:fb-\* stages) reads those traces, classifies failures, and proposes changes to tools, prompts, or pipeline — which you then land, bump with /lup:bump, and compare across versions.
 
 # More thorough description
 
@@ -81,15 +96,15 @@ This repository contains many elements and code template that are designed to ma
 
 ### lib
 
-src/lup/lib is the [[[]]]
+packages/lup is the standalone library: SDK adapters (Claude, Codex, OpenAI-compatible) behind one AgentAdapter interface, the shared type vocabulary (lup.types), MCP tool plumbing, the submit_output finalization tool, the reflection gate, session storage, tracing, metrics, the Docker sandbox, and the persistent-agent scheduler. It is complete as-is and configurable through function arguments — domain code never modifies it.
 
 ### agent
 
-template [[[]]]
+src/lup_template/agent is the part the feedback loop improves: orchestration (core.py), output models, prompts, subagent specs, tool policy, and the domain tools (reflect, realtime, examples). /lup:init customizes these for your domain.
 
 ### Environment
 
-[[[]]]
+src/lup_template/environment is the harness around the agent — the CLI that runs sessions and auto-commits results. It evolves with application requirements rather than via the feedback loop.
 
 ## Claude code plugin
 
@@ -102,7 +117,11 @@ This repository contains many quality of life improvements over the barebone cla
 
 ### Subagents
 
+The plugin ships analysis subagents the feedback loop relies on: trace-explorer reads session traces in depth, version-explorer and version-reviewer compare agent versions, and implementer executes prioritized changes from an analysis.
+
 ### Hooks
+
+Three PreToolUse hook scripts manage permissions by pattern: auto_allow_bash.py (allow/deny rules for commands, last-match-wins), auto_allow_fetch.py (URL patterns for WebFetch), and auto_allow_edits.py (auto-allows small edits, counts "real" changed lines, detects anti-patterns like bare excepts or Any). /lup:hooks edits the patterns.
 
 ### Claude commands
 
@@ -137,18 +156,14 @@ To speed up development, many claude commands and meta-commands are built in thi
 
 ## Devtools
 
-### Agent
+One CLI, `uv run lup-devtools`, with sub-apps used by both Claude and humans:
 
-- api.py
-- trace.py
-- feedback.py
-- metrics.py
-- sync.py
-- git.py
-
-### Human
-
-- agent.py
-- charts.py
-- dev.py
-- usage.py
+- `agent` — inspect the full agent configuration, serve its MCP tools (the Codex backend launches this as its tool server), chat or REPL with the agent
+- `trace` — list, show, and search session traces; scan for errors and capability gaps
+- `feedback` — collect session metrics, show analysis state, commit session results
+- `dev` — worktrees, branches, PRs, conflict resolution, and the `check` pre-flight
+- `py` — Python module introspection (signatures, sources, trees)
+- `setup` — interactive wizard for integrations and API keys
+- `sync` — track downstream/upstream repos for /lup:update and /lup:import
+- `version` — agent version, classified changelog, version bumps
+- `usage` — live Claude Code usage display with pacing

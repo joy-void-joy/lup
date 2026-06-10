@@ -12,9 +12,9 @@ The feedback loop focuses on improving lup.agent.
 This code evolves with application requirements.
 
 Usage:
-    uv run python -m lup.environment.cli run "your task here"
-    uv run python -m lup.environment.cli run --session-id my-session "task"
-    uv run python -m lup.environment.cli loop "task1" "task2" "task3"
+    uv run python -m lup_template.environment.cli run "your task here"
+    uv run python -m lup_template.environment.cli run --session-id my-session "task"
+    uv run python -m lup_template.environment.cli loop "task1" "task2" "task3"
 """
 
 import asyncio
@@ -158,7 +158,7 @@ def loop(
     post-processing for your domain.
 
     Example:
-        uv run python -m lup.environment.cli loop "task1" "task2" "task3"
+        uv run python -m lup_template.environment.cli loop "task1" "task2" "task3"
     """
     if verbose:
         logging.basicConfig(level=logging.DEBUG)

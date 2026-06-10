@@ -9,7 +9,7 @@ This module provides the domain-neutral gate mechanism:
 The reflection *tool* and its input model are domain-specific and belong
 in ``agent/tools/``. This module only provides the enforcement mechanism.
 
-Hook factories that enforce the gate live in :mod:`lup.lib.hooks` (SDK-agnostic).
+Hook factories that enforce the gate live in :mod:`lup.hooks` (SDK-agnostic).
 Each adapter converts these to its native hook format.
 
 One-shot agents: gate ``StructuredOutput`` on reflection.
@@ -48,7 +48,7 @@ from pathlib import Path
 class ReflectionGate:
     """Tracks whether the agent has reflected in the current cycle.
 
-    Used by :func:`~lup.lib.hooks.create_reflection_gate` to enforce
+    Used by :func:`~lup.hooks.create_reflection_gate` to enforce
     "reflect before X" patterns. The reflection tool handler calls :meth:`mark_reflected`
     after saving reflection data. The orchestration layer calls
     :meth:`reset` when a new cycle begins (e.g., after each agent action

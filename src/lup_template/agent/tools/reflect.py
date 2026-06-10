@@ -205,7 +205,7 @@ def create_reflect_tools(
     """Create the reflection tool(s) and their gate state.
 
     Returns both the tools (for MCP server registration) and the
-    gate (for wiring into :func:`~lup.lib.reflect.create_reflection_gate`).
+    gate (for wiring into :func:`~lup.reflect.create_reflection_gate`).
 
     Args:
         session_dir: Where to save the review output (JSON).
