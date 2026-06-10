@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from lup.adapters.codex import (
     CodexAdapter,
@@ -51,6 +52,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
         approval_policy: str | None = None,
         mcp_tools: bool = True,
         mcp_env: dict[str, str] | None = None,
+        writable_roots: list[Path] | None = None,
         hook_overrides: list[CodexHookConfig] | None = None,
         usage_normalizer: CodexUsageNormalizer | None = None,
     ) -> None:
@@ -63,6 +65,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
             approval_policy=approval_policy,
             mcp_tools=mcp_tools,
             mcp_env=mcp_env,
+            writable_roots=writable_roots,
             hook_overrides=hook_overrides,
             usage_normalizer=usage_normalizer,
         )

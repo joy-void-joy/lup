@@ -13,6 +13,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, cast
 
 if TYPE_CHECKING:
@@ -191,6 +192,21 @@ def build_mcp_config_overrides(
     return tuple(overrides)
 
 
+def build_sandbox_config_overrides(writable_roots: Sequence[Path]) -> tuple[str, ...]:
+    """Native Codex filesystem enforcement via workspace-write sandbox.
+
+    Replaces hook-script permission enforcement on Codex: the runtime's
+    own sandbox confines writes to the workspace plus these roots. (A
+    live probe showed config.toml command hooks never fire on current
+    codex builds, so enforcement must be native or in-tool.)
+    """
+    roots_json = json.dumps([str(p) for p in writable_roots])
+    return (
+        'sandbox_mode="workspace-write"',
+        f"sandbox_workspace_write.writable_roots={roots_json}",
+    )
+
+
 class CodexHookConfigRequired(TypedDict):
     """Required fields for a Codex command hook."""
 
@@ -353,6 +369,7 @@ class CodexAdapter(AgentAdapter):
         approval_policy: str | None = None,
         mcp_tools: bool = True,
         mcp_env: dict[str, str] | None = None,
+        writable_roots: list[Path] | None = None,
         hook_overrides: list[CodexHookConfig] | None = None,
         session_id: str | None = None,
         usage_normalizer: CodexUsageNormalizer | None = None,
@@ -365,6 +382,7 @@ class CodexAdapter(AgentAdapter):
         self.approval_policy = approval_policy
         self.mcp_tools = mcp_tools
         self.mcp_env = mcp_env
+        self.writable_roots = writable_roots
         self.hook_overrides = hook_overrides
         self.session_id = session_id
         self.usage_normalizer = usage_normalizer
@@ -374,6 +392,8 @@ class CodexAdapter(AgentAdapter):
         overrides: list[str] = []
         if self.mcp_tools:
             overrides.extend(build_mcp_config_overrides(env=self.mcp_env))
+        if self.writable_roots:
+            overrides.extend(build_sandbox_config_overrides(self.writable_roots))
         if self.hook_overrides:
             overrides.extend(build_hook_config_overrides(self.hook_overrides))
         return tuple(overrides)
