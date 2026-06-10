@@ -4,7 +4,7 @@ This is a TEMPLATE. Customize the input model and reviewer prompt
 for your domain.
 
 Pattern: A tool the agent calls to record its self-assessment before
-producing final output. A :class:`~lup.lib.reflect.ReflectionGate`
+producing final output. A :class:`~lup.reflect.ReflectionGate`
 hook enforces this — StructuredOutput (or sleep) is denied until
 the agent has called ``review``.
 
@@ -205,7 +205,7 @@ def create_reflect_tools(
     """Create the reflection tool(s) and their gate state.
 
     Returns both the tools (for MCP server registration) and the
-    gate (for wiring into :func:`~lup.lib.reflect.create_reflection_gate`).
+    gate (for wiring into :func:`~lup.reflect.create_reflection_gate`).
 
     Args:
         session_dir: Where to save the review output (JSON).
