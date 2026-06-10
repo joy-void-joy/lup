@@ -5,7 +5,9 @@ Decision order:
 1. Protected files (.claude/, pyproject.toml, .env*) -> always defer
 2. Anti-patterns in .py files (typing: Any, # type: ignore, Generic[], __all__,
    dict[str, object]; string manipulation: import re, re.*, .replace, .split;
-   except Exception, dataclasses, subprocess, argparse, rich.progress, _prefixes):
+   silent swallows: except ...: pass, contextlib.suppress, bare except:,
+   except BaseException; dataclasses, subprocess, argparse, rich.progress,
+   _prefixes):
    - file already has `# claude: ignore` on disk -> allow (skip checks)
    - violating line has inline `# claude: ignore` -> ask (user prompt)
    - no marker -> deny with hint about `# claude: ignore`
@@ -80,8 +82,20 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "Avoid .split() for structured data — use proper parsers",
     ),
     (
-        re.compile(r"\bexcept\s+Exception\b"),
-        "No bare `except Exception` — catch specific exceptions (KeyError, ValueError, OSError, etc.)",
+        re.compile(r"\bexcept\s*:"),
+        "Bare `except:` catches SystemExit/KeyboardInterrupt — name the exception",
+    ),
+    (
+        re.compile(r"\bexcept\s+BaseException\b"),
+        "except BaseException catches KeyboardInterrupt — use Exception or narrower",
+    ),
+    (
+        re.compile(r"\bcontextlib\.suppress\b"),
+        "contextlib.suppress silently swallows exceptions — log, handle, or re-raise",
+    ),
+    (
+        re.compile(r"\bfrom\s+contextlib\s+import\b.*\bsuppress\b"),
+        "contextlib.suppress silently swallows exceptions — log, handle, or re-raise",
     ),
     (
         re.compile(r"@dataclass|\bfrom\s+dataclasses\s+import\b"),
@@ -174,7 +188,7 @@ def has_file_level_ignore(file_path: str, marker: str = CLAUDE_IGNORE_MARKER) ->
                 if line.strip() == marker:
                     return True
     except OSError:
-        pass
+        return False
     return False
 
 
@@ -356,14 +370,56 @@ def ask_decision(reason: str) -> AllowDecision:
     }
 
 
+SWALLOW_REASON = (
+    "Never silently swallow exceptions — log with logger.exception(), "
+    "handle meaningfully, or re-raise"
+)
+
+EXCEPT_CLAUSE_RE = re.compile(r"except\b[^:]*:\s*(?P<body>.*)$")
+
+SILENT_BODIES = ("pass", "...")
+
+
+def find_swallowed_excepts(new_lines: list[str]) -> dict[int, str]:
+    """Map line indices of silent exception swallows to a violation reason.
+
+    Flags `except ...: pass` one-liners on the except line, and multi-line
+    handlers whose first statement is `pass`/`...` on the body line — so the
+    check fires even when an edit adds only the body under an existing
+    except clause.
+    """
+    violations: dict[int, str] = {}
+    for i, line in enumerate(new_lines):
+        clause = EXCEPT_CLAUSE_RE.match(line.strip())
+        if not clause:
+            continue
+        inline = clause.group("body").partition("#")[0].strip()
+        if inline:
+            if inline in SILENT_BODIES:
+                violations[i] = SWALLOW_REASON
+            continue
+        for j in range(i + 1, len(new_lines)):
+            body = new_lines[j].strip()
+            if not body or body.startswith("#"):
+                continue
+            if body.partition("#")[0].strip() in SILENT_BODIES:
+                violations[j] = SWALLOW_REASON
+            break
+    return violations
+
+
 def find_anti_pattern_violations(
     old_string: str,
     new_string: str,
     file_path: str = "",
     patterns: list[tuple[re.Pattern[str], str]] | None = None,
     ignore_marker: str = CLAUDE_IGNORE_MARKER,
+    line_violations: dict[int, str] | None = None,
 ) -> tuple[str, str] | None:
-    """Check newly added lines for typing anti-patterns.
+    """Check newly added lines for anti-patterns.
+
+    line_violations maps new_string line indices to precomputed violation
+    reasons (e.g. silent swallows from find_swallowed_excepts).
 
     Returns (decision, reason) or None. Decision is "allow", "ask", or "deny".
     - File-level `# claude: ignore` already on disk -> "allow"
@@ -394,16 +450,17 @@ def find_anti_pattern_violations(
             stripped = new_lines[idx].strip()
             if not stripped or stripped.startswith("#") and "type:" not in stripped:
                 continue
-            for pattern, reason in patterns:
-                if not pattern.search(stripped):
-                    continue
-                preview = stripped[:80]
-                if ignore_marker in new_lines[idx]:
-                    ask_reasons.append(f"{reason} | line: {preview}")
-                else:
-                    hint = f"Add `{ignore_marker}` to the line (or file-level) to request approval"
-                    return ("deny", f"Denied: {reason} | line: {preview}. {hint}")
-                break
+            hits = [r for pattern, r in patterns if pattern.search(stripped)]
+            if line_violations and idx in line_violations:
+                hits.insert(0, line_violations[idx])
+            if not hits:
+                continue
+            preview = stripped[:80]
+            if ignore_marker in new_lines[idx]:
+                ask_reasons.append(f"{hits[0]} | line: {preview}")
+            else:
+                hint = f"Add `{ignore_marker}` to the line (or file-level) to request approval"
+                return ("deny", f"Denied: {hits[0]} | line: {preview}. {hint}")
 
     if ask_reasons:
         return ("ask", ask_reasons[0])
@@ -420,7 +477,12 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
         return None
 
     if file_path.endswith(".py") and new_string:
-        violation = find_anti_pattern_violations(old_string, new_string, file_path)
+        violation = find_anti_pattern_violations(
+            old_string,
+            new_string,
+            file_path,
+            line_violations=find_swallowed_excepts(new_string.splitlines()),
+        )
         if violation:
             decision, reason = violation
             match decision:
