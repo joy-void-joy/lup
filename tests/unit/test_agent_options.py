@@ -43,3 +43,21 @@ def test_limits_default_to_unlimited(
 
     assert options.max_turns is None
     assert options.max_budget_usd is None
+
+
+def test_sandbox_enabled_parses_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from lup_template.agent.config import Settings
+
+    monkeypatch.setenv("AGENT_SANDBOX_ENABLED", "false")
+    assert Settings.model_validate({}).sandbox_enabled is False
+
+    monkeypatch.setenv("AGENT_SANDBOX_ENABLED", "true")
+    assert Settings.model_validate({}).sandbox_enabled is True
+
+
+def test_no_sandbox_registers_no_sandbox_server(notes: NotesConfig) -> None:
+    options = build_options(notes, sandbox=None)
+
+    servers = options.mcp_servers
+    assert isinstance(servers, dict)
+    assert set(servers) == {"example", "notes"}
