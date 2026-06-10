@@ -12,7 +12,6 @@ import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, Literal, cast  # claude: ignore
 
 from claude_agent_sdk import (
@@ -33,7 +32,6 @@ from claude_agent_sdk.types import (
     HookContext,
     HookEvent,
     HookMatcher,
-    McpServerConfig,
     McpSdkServerConfig,
     ResultMessage,
     SyncHookJSONOutput,
@@ -247,135 +245,6 @@ def lup_tools_to_sdk(tools: list[LupMcpTool]) -> list[SdkMcpTool[dict[str, Any]]
         )
         for t in tools
     ]
-
-
-# ---------------------------------------------------------------------------
-# Setup functions (extracted from core.py)
-# ---------------------------------------------------------------------------
-
-
-def build_agent_servers(
-    *,
-    session_dir: Path,
-    outputs_dir: Path | None = None,
-    sandbox: object | None = None,
-    gate: object | None = None,
-) -> dict[str, McpServerConfig]:
-    """Create the agent's core MCP servers, passed through ToolPolicy.
-
-    Args:
-        session_dir: Directory for reflection tool output.
-        outputs_dir: Past outputs for reviewer calibration.
-        sandbox: Initialized Sandbox instance.
-        gate: External ReflectionGate for the reflect tools.
-    """
-    from lup_template.agent.config import settings
-    from lup_template.agent.tool_policy import ToolPolicy
-    from lup_template.agent.tools.example import EXAMPLE_TOOLS
-    from lup_template.agent.tools.reflect import create_reflect_tools
-    from lup.mcp import create_mcp_server
-    from lup.reflect import ReflectionGate
-
-    resolved_gate = gate if isinstance(gate, ReflectionGate) else ReflectionGate()
-
-    example_server = create_mcp_server(
-        name="example",
-        version="1.0.0",
-        tools=EXAMPLE_TOOLS,
-    )
-
-    reflect_kit = create_reflect_tools(
-        session_dir=session_dir,
-        outputs_dir=outputs_dir,
-        gate=resolved_gate,
-    )
-    reflect_server = create_mcp_server(
-        name="notes",
-        version="1.0.0",
-        tools=reflect_kit["tools"],
-    )
-
-    all_servers = [
-        lup_server_to_claude(example_server),
-        lup_server_to_claude(reflect_server),
-    ]
-    if sandbox is not None:
-        from lup.sandbox import Sandbox
-
-        if isinstance(sandbox, Sandbox):
-            all_servers.append(lup_server_to_claude(sandbox.create_mcp_server()))
-
-    policy = ToolPolicy.from_settings(settings)
-    return policy.get_mcp_servers(*all_servers)
-
-
-def build_options(
-    notes_config: object,
-    *,
-    sandbox: object | None = None,
-) -> ClaudeAgentOptions:
-    """Build ClaudeAgentOptions from settings and notes config."""
-    from lup_template.agent.config import settings
-    from lup_template.agent.models import AgentOutput
-    from lup_template.agent.prompts import get_system_prompt
-    from lup_template.agent.subagents import get_subagent_specs
-    from lup_template.agent.tool_policy import ToolPolicy
-    from lup.hooks import create_permission_hooks, create_reflection_gate
-    from lup.notes import NotesConfig
-    from lup.reflect import ReflectionGate
-    from lup.types import merge_hooks
-
-    if not isinstance(notes_config, NotesConfig):
-        raise TypeError(f"Expected NotesConfig, got {type(notes_config).__name__}")
-
-    gate = ReflectionGate()
-    servers = build_agent_servers(
-        session_dir=notes_config.session,
-        outputs_dir=notes_config.output.parent,
-        sandbox=sandbox,
-        gate=gate,
-    )
-
-    permission_hooks = create_permission_hooks(notes_config.rw, notes_config.ro)
-    gate_hooks = create_reflection_gate(
-        gate=gate,
-        gated_tool="StructuredOutput",
-        reflection_tool_name="mcp__notes__review",
-    )
-    lup_hooks = merge_hooks(permission_hooks, gate_hooks)
-    claude_hooks = lup_hooks_to_claude(lup_hooks)
-
-    policy = ToolPolicy.from_settings(settings)
-
-    return ClaudeAgentOptions(
-        model=settings.model,
-        system_prompt={
-            "type": "preset",
-            "preset": "claude_code",
-            "append": get_system_prompt(),
-        },
-        max_thinking_tokens=settings.max_thinking_tokens or (128_000 - 1),
-        permission_mode="bypassPermissions",
-        extra_args={"no-session-persistence": None},
-        hooks=claude_hooks,
-        sandbox={
-            "enabled": True,
-            "autoAllowBashIfSandboxed": True,
-            "allowUnsandboxedCommands": False,
-        },
-        mcp_servers=servers,
-        agents={s.name: spec_to_claude(s) for s in get_subagent_specs()},
-        add_dirs=[str(d) for d in notes_config.all_dirs],
-        allowed_tools=policy.get_allowed_tools(),
-        output_format={
-            "type": "json_schema",
-            "schema": AgentOutput.model_json_schema(),
-        },
-        effort=cast(
-            Literal["low", "medium", "high", "max"] | None,
-            settings.reasoning_effort,
-        ),
-    )
 
 
 # ---------------------------------------------------------------------------
