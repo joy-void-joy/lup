@@ -163,7 +163,8 @@ def extract_block_info(block: LupContentBlock) -> BlockInfo:
     """Extract display information from a content block."""
     match block:
         case LupThinkingBlock():
-            return BlockInfo(emoji="💭", label="Thinking", content=block.thinking)
+            content = "[redacted]" if block.redacted else block.thinking
+            return BlockInfo(emoji="💭", label="Thinking", content=content)
         case LupTextBlock():
             return BlockInfo(emoji="💬", label="Response", content=block.text)
         case LupToolUseBlock():
@@ -173,6 +174,8 @@ def extract_block_info(block: LupContentBlock) -> BlockInfo:
             return BlockInfo(
                 emoji="📋", label="Result", content=normalize_content(block.content)
             )
+        case _:
+            return BlockInfo(emoji="❓", label="Unknown", content=str(block))
 
 
 # ---------------------------------------------------------------------------

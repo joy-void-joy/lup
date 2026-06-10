@@ -35,6 +35,8 @@ from claude_agent_sdk.types import (
     McpSdkServerConfig,
     PreToolUseHookSpecificOutput,
     ResultMessage,
+    ServerToolResultBlock,
+    ServerToolUseBlock,
     SyncHookJSONOutput,
     SystemMessage,
     UserMessage,
@@ -186,9 +188,15 @@ def spec_to_claude(spec: SubagentSpec) -> AgentDefinition:
 
 def claude_block_to_lup(block: ContentBlock) -> LupContentBlock:
     """Convert a Claude SDK ContentBlock to a LupContentBlock."""
+    if hasattr(block, "type") and getattr(block, "type", None) == "redacted_thinking":
+        return LupThinkingBlock(thinking="", redacted=True)
+
     match block:
         case ThinkingBlock():
-            return LupThinkingBlock(thinking=block.thinking)
+            is_redacted = not block.thinking and bool(block.signature)
+            return LupThinkingBlock(
+                thinking=block.thinking or "", redacted=is_redacted
+            )
         case TextBlock():
             return LupTextBlock(text=block.text)
         case ToolUseBlock():
@@ -196,6 +204,13 @@ def claude_block_to_lup(block: ContentBlock) -> LupContentBlock:
         case ToolResultBlock():
             return LupToolResultBlock(
                 tool_use_id=block.tool_use_id, content=block.content
+            )
+        case ServerToolUseBlock():
+            return LupToolUseBlock(id=block.id, name=block.name, input=block.input)
+        case ServerToolResultBlock():
+            content = block.content if isinstance(block.content, str) else str(block.content)
+            return LupToolResultBlock(
+                tool_use_id=block.tool_use_id, content=content
             )
         case _:
             return LupTextBlock(text=str(block))
@@ -354,7 +369,8 @@ class ClaudeAdapter(AgentAdapter):
                         for block in message.content:
                             match block:
                                 case ThinkingBlock():
-                                    yield LupThinkingEvent(thinking=block.thinking)
+                                    if block.thinking:
+                                        yield LupThinkingEvent(thinking=block.thinking)
                                 case TextBlock():
                                     yield LupTextEvent(text=block.text)
                                 case ToolUseBlock():
