@@ -13,7 +13,7 @@ This is a **self-improving agent template and scaffold** built with the Claude A
 
 When reviewing changes from downstream repos (`/lup:update`), the goal is to **generalize domain-specific patterns back into the template**. The bias is toward inclusion: if a pattern emerged from real use, it likely belongs in the template.
 
-Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manager.
+Built with Python 3.14+ and the Claude Agent SDK. Uses `uv` as the package manager.
 
 ### Naming
 
@@ -75,8 +75,10 @@ Compare: `"Search the web for information"` vs. `"Search the web using keyword q
 packages/
 └── lup/                        # Standalone library (uv workspace member)
     ├── pyproject.toml
+    ├── README.md
     └── src/lup/
         ├── __init__.py         # Public API re-exports (__all__)
+        ├── py.typed            # PEP 561 typing marker
         ├── background.py       # Background agents for persistent sessions
         ├── client.py           # Agent SDK client (build_client, query)
         ├── history.py          # Session storage/retrieval
@@ -106,14 +108,19 @@ src/
     │       └── reflect.py      # Forced self-review tool (reviewer sub-agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
-    │   ├── trace/              # Trace display, search, and analysis
+    │   ├── agent.py            # Agent introspection (inspect, chat, repl, serve-tools)
+    │   ├── py.py               # Python module introspection (info, source, eval, ...)
+    │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
-    │   ├── dev/                # Worktrees, branches, and pre-flight checks
+    │   ├── trace/              # Trace display, search, and analysis
     │   ├── setup.py            # Interactive setup wizard (customize integrations)
+    │   ├── sync.py             # Upstream sync tracking
+    │   ├── usage.py            # Claude Code usage display
+    │   ├── utils.py            # Shared CLI helpers
     │   └── version.py          # Version display, changelog, and bump
     └── environment/            # Domain scaffolding (user interaction, game logic)
         └── cli/
-            └── __main__.py     # Typer CLI (run + loop with auto-commit)
+            └── __main__.py     # Typer CLI — the `lup` entry point (run + loop with auto-commit)
 ```
 
 ### Design Patterns
@@ -151,12 +158,12 @@ uv run pyright
 uv run pytest
 
 # Run a single agent session
-uv run python -m lup_template.environment.cli run "your task here"
-uv run python -m lup_template.environment.cli run --session-id my-session "task"
+uv run lup run "your task here"
+uv run lup run --session-id my-session "task"
 
 # Run multiple sessions with auto-commit
-uv run python -m lup_template.environment.cli loop "task1" "task2" "task3"
-uv run python -m lup_template.environment.cli loop --no-commit "task1" "task2"
+uv run lup loop "task1" "task2" "task3"
+uv run lup loop --no-commit "task1" "task2"
 
 # Commit uncommitted session results
 uv run lup-devtools feedback commit
@@ -167,7 +174,7 @@ uv run lup-devtools setup             # Full walkthrough
 uv run lup-devtools setup status      # Show what's configured
 uv run lup-devtools setup slack       # Just one integration
 
-uv run python -m lup_template.environment.cli --help
+uv run lup --help
 ```
 
 ### Testing
@@ -297,7 +304,7 @@ Use `/lup:merge-conflict` for guided resolution. See the command for the full de
 
 ### Editing Style
 
-**Prefer small, atomic edits.** A PreToolUse hook counts "real" changed lines (ignoring imports, comments, whitespace, blank lines, docstrings) and auto-allows edits with <=3 real changes. Pure deletions, TypedDict/BaseModel definitions, and single-line `replace_all` renames are always auto-allowed.
+**Prefer small, atomic edits.** A PreToolUse hook counts "real" changed lines (ignoring imports, comments, whitespace, blank lines, docstrings, string literals, type annotations, and TypedDict/BaseModel bodies) and auto-allows edits with <=3 real changes per change block. Pure deletions and single-line `replace_all` renames are auto-allowed; multi-line `replace_all` falls through to the size gate. Anti-pattern detection runs before any auto-allow, and `Write` (full-file rewrites) never auto-allows.
 
 - Split large changes into multiple small edits (<=3 real lines per Edit call)
 - Separate concerns — imports in one edit, logic in another
@@ -432,21 +439,21 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
-Sub-apps: `agent`, `api`, `dev`, `feedback`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
+Sub-apps: `agent`, `py`, `dev`, `feedback`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
 
 ### Permission Hooks
 
 Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/lup/hooks/scripts/`:
 
-| Hook                  | Tool            | Config                                                            |
-| --------------------- | --------------- | ----------------------------------------------------------------- |
-| `auto_allow_fetch.py` | WebFetch        | `ALLOW_PATTERNS` (regex), `DENY_PATTERNS` (regex + reason)        |
-| `auto_allow_bash.py`  | Bash            | `RULES` list of `Allow`/`Deny` (last-match-wins, like .gitignore) |
-| `auto_allow_edits.py` | Edit            | Anti-pattern detection, trivial-line counting, protected files     |
+| Hook                  | Tool            | Config                                                                 |
+| --------------------- | --------------- | ---------------------------------------------------------------------- |
+| `auto_allow_fetch.py` | WebFetch        | `ALLOW_PATTERNS` / `DENY_PATTERNS` (regex anchored to the URL origin)  |
+| `auto_allow_bash.py`  | Bash            | `RULES` list of `Allow`/`Deny`, evaluated per shell segment (last-match-wins, like .gitignore; deny if any segment denies, allow only if all allow) |
+| `auto_allow_edits.py` | Edit, Write     | Anti-pattern detection, trivial-line counting, protected files (Write to protected files is denied; other Writes always ask) |
 
 To add a new allowed URL or command, edit the pattern list in the corresponding hook. Non-matching inputs fall through to user prompt.
 
-`settings.json` only contains rules that don't need regex: `WebSearch` (allow), `Read(.local)` (deny), `Edit(pyproject.toml)` (ask).
+`settings.json` only contains rules that don't need regex: `WebSearch` (allow), `Read(**/*.local*)` (deny, with allow exceptions for `settings.json.local*` and `downstream.json.local`), `Edit(pyproject.toml)` and `Bash(uv sync/add)` (ask — the bash hook auto-allows `uv add`/`uv sync` before these apply).
 
 ### Pyright LSP
 
@@ -489,6 +496,10 @@ The `.env` file contains template configuration. Create `.env.local` for secrets
 # Optional overrides
 # AGENT_MODEL=claude-sonnet-4-20250514
 # AGENT_MAX_BUDGET_USD=5.00
+# AGENT_MAX_TURNS=50
+# AGENT_SANDBOX_ENABLED=false   # run without Docker (disables code execution tools)
+# AGENT_NOTES_PATH=./notes      # relocate session data
+# AGENT_LOGS_PATH=./logs        # relocate trace logs
 ```
 
 Settings in `.env.local` override `.env`. Configuration is loaded via pydantic-settings — see `src/lup_template/agent/config.py`.
@@ -508,16 +519,6 @@ Even for open-ended questions, use `AskUserQuestion` with options that include a
 **When proposing changes:** Propose (don't assume), show relevant current state, explain rationale, offer alternatives.
 
 **When in doubt, ask.**
-
-### Planning & Documentation
-
-**PLAN.md** is the source of truth for what has been built and what remains:
-
-- Reflect actual state, not aspirational designs
-- Mark completed items (`[x]`), keep status indicators current (`[ ]` pending, `[~]` in progress)
-- Update architecture decisions as they evolve
-- Add new tasks discovered during implementation
-- No speculative code — describe what to build, not how
 
 ### Slash Commands & Skills
 
