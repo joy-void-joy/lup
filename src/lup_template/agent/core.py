@@ -33,9 +33,6 @@ from lup.paths import agent_version
 
 logger = logging.getLogger(__name__)
 
-NOTES_PATH = Path(settings.notes_path)
-TRACES_PATH = NOTES_PATH / "traces"
-
 
 def extract_sources(blocks: list[LupContentBlock]) -> list[str]:
     """Extract source URLs/queries from tool use blocks."""
@@ -208,6 +205,8 @@ def build_options(
         agents=subagents,
         add_dirs=[str(d) for d in notes.all_dirs],
         allowed_tools=policy.get_allowed_tools(),
+        max_turns=settings.max_turns,
+        max_budget_usd=settings.max_budget_usd,
         effort=cast("EffortLevel | None", settings.reasoning_effort),
     )
 
@@ -230,6 +229,13 @@ def build_codex_session(
     from lup.paths import SessionContext
 
     from lup_template.agent.prompts import get_system_prompt
+
+    if settings.max_turns is not None or settings.max_budget_usd is not None:
+        raise ValueError(
+            "AGENT_MAX_TURNS / AGENT_MAX_BUDGET_USD are not supported on "
+            f"the {settings.agent_sdk} backend; unset them or use "
+            "AGENT_SDK=claude."
+        )
 
     state_dir = Path(tempfile.mkdtemp(prefix="lup_codex_session_"))
     gate_flag_path = state_dir / "reflection_gate_flag"
@@ -361,10 +367,11 @@ async def run_agent(
     logger.info("Starting session %s (sdk=%s)", session_id, settings.agent_sdk)
     reset_metrics()
 
-    trace_path = TRACES_PATH / session_id / f"{datetime.now().strftime('%H%M%S')}.md"
-    trace_logger = TraceLogger(trace_path=trace_path, title=f"Session {session_id}")
-
     adapter, ctx, notes = build_adapter(session_id, task_id)
+
+    trace_logger = TraceLogger(
+        trace_path=notes.trace_log, title=f"Session {session_id}"
+    )
 
     with ctx:
         response = await adapter.run(task, trace_logger=trace_logger)

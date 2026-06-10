@@ -207,6 +207,18 @@ class Settings(BaseSettings):
 # Singleton instance
 settings = Settings.model_validate({})
 
+# Route notes/logs paths into lup.paths so every consumer (history,
+# devtools, traces) honors the configured locations
+if settings.notes_path != "./notes" or settings.logs_path != "./logs":
+    from pathlib import Path
+
+    from lup.paths import configure
+
+    configure(
+        notes_dir=Path(settings.notes_path).resolve(),
+        logs_dir=Path(settings.logs_path).resolve(),
+    )
+
 # Route through OpenRouter when the key is set
 if settings.openrouter_api_key:
     os.environ.setdefault("ANTHROPIC_BASE_URL", "https://openrouter.ai/api")
