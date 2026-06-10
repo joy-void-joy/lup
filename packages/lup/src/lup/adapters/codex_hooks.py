@@ -246,7 +246,7 @@ def build_tool_allowlist_hook(
 ) -> list[CodexHookConfig]:
     """Generate a Codex hook config that restricts the agent to allowed tools.
 
-    Equivalent to Claude's :func:`~lup.lib.hooks.create_tool_allowlist_hook`.
+    Equivalent to Claude's :func:`~lup.hooks.create_tool_allowlist_hook`.
 
     Args:
         allowed_tools: Tool names the agent is allowed to use.
@@ -301,7 +301,7 @@ def build_nudge_hook(
 ) -> list[CodexHookConfig]:
     """Generate a Codex PostToolUse hook that nudges the agent toward alternatives.
 
-    Equivalent to Claude's :func:`~lup.lib.hooks.create_nudge_hook`, but
+    Equivalent to Claude's :func:`~lup.hooks.create_nudge_hook`, but
     simplified: each nudge is a static message string rather than a callable,
     since Codex hooks are external scripts without access to in-process state.
 

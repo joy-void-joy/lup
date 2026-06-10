@@ -30,8 +30,8 @@ For agents that exist over time — maintaining conversations, monitoring system
 Agents produce better output when forced to self-assess before committing. Three components:
 
 1. **Reflection tool** (`agent/tools/reflect.py`): Domain-customizable self-assessment — confidence, uncertainties, tool audit, process reflection. Optionally runs a reviewer sub-agent.
-2. **Reflection gate** (`lup.reflect`): `ReflectionGate` flag tracker + `create_reflection_gate()` hook factory. Denies a target tool until reflection occurs.
-3. **Wiring**: The gate blocks `StructuredOutput` (one-shot agents) or `sleep` (persistent agents) until reflection occurs.
+2. **Reflection gate** (`lup.reflect`): `ReflectionGate` flag tracker — in-memory, or file-backed when tools run in a subprocess. Enforced primarily *inside* the `submit_output` handler (`lup.output`), which rejects submission with a retriable error until reflection occurs; `create_reflection_gate()` adds a PreToolUse hook as hardening where the backend supports it.
+3. **Wiring**: The gate blocks `mcp__notes__submit_output` (one-shot agents) or `sleep` (persistent agents) until reflection occurs. Final output always flows through `submit_output` — the same tool on every SDK backend — which writes `session_dir/output.json` for the orchestration layer to read.
 
 **Customizing:** The gate in `lup.reflect` is domain-neutral and parametric. The reflection tool and `ReflectInput` in `agent/tools/reflect.py` are domain-specific — add fields for your domain. The reviewer prompt should target your domain's common failure modes.
 
@@ -68,7 +68,7 @@ async def review(params: ReviewInput) -> ReviewOutput:
     return ReviewOutput(critique=collector.text or "", score=compute_score(collector))
 ```
 
-**Library support:** `query()` in `lup.client` handles the full pipeline (build client → query → collect). Session persistence is automatically disabled. Use `collector.text` for text extraction, `collector.output(T)` for structured output, or pass `output_type=T` to `query()` to get `T | None` directly.
+**Library support:** `query()` in `lup.adapters.common` handles the full pipeline and routes by model name — Claude models via the Claude Agent SDK, GPT/o-series via the Codex runtime, everything else via OpenAI-compatible endpoints. Session persistence is automatically disabled. It returns a `LupResponse`: use `.text` for text or `.output(T)` for structured output. Claude-only options (`tools`, `max_turns`, `max_budget_usd`, …) raise `ValueError` on other backends rather than being silently dropped.
 
 **When to use each:** The axis is **context separation**. **Subagents** extend the main agent's thinking — same session, shared context, like a specialized lobe that makes reasoning more efficient. **Nested agents** are for truly separable work — the two contexts shouldn't pollute each other. The main agent doesn't need the nested agent's reasoning chain, just its conclusion. The tool handler acts as a context boundary.
 
@@ -121,4 +121,4 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 2. **Null-filling** — Multi-source fallback pipelines that recover missing fields from alternative endpoints or sibling records (e.g., primary API withholds fields → fallback endpoint fills the gaps).
 3. **Extraction** — Nested agent calls that distill large text blocks into focused answers (see [Nested Agent Pattern](#nested-agent-pattern)).
 
-**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API client wrappers. Extraction uses `query()` from `lup.client` (see [Nested Agent Pattern](#nested-agent-pattern)).
+**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API client wrappers. Extraction uses `query()` from `lup.adapters.common` (see [Nested Agent Pattern](#nested-agent-pattern)).

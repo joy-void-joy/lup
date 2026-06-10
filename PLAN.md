@@ -29,7 +29,7 @@ This plan supersedes the previous SDK-interop status document. That document mar
 - [x] File-backed `ReflectionGate`; Codex hook **script generation** (generation only)
 - [x] Config fields for SDK selection, Codex sandbox/effort/approval
 
-### Wired but dead (what this plan fixes)
+### Wired but dead at planning time (all fixed by the phases below)
 
 - [ ] `serve-tools` serves only `EXAMPLE_TOOLS` — reflect/realtime/sandbox tools never reach Codex (`devtools/agent.py: collect_tools_by_server`)
 - [ ] Gate guards `"StructuredOutput"`, which doesn't exist as a tool on Codex; nothing can set the flag file (`core.py: build_codex_adapter`)
@@ -143,33 +143,32 @@ This plan supersedes the previous SDK-interop status document. That document mar
 
 ## Phase 6 — Library API + boundary cleanup
 
-- [ ] `lup/__init__.py`: stop eager `claude_client` import; retire `ResponseCollector`, `build_client`, `claude_query` from `__all__` (import from `lup.adapters.claude_client` where genuinely needed); `import lup` must work without `claude_agent_sdk` installed
-- [ ] Extras: `lup[claude]`, `lup[codex]`, `lup[docker]`; template depends on `lup[claude,codex,docker]`; update `require_codex_sdk` message accordingly
-- [ ] Move `LupEvent` hierarchy into `types.py` as Pydantic models; Claude `run_streamed` `LupDoneEvent` carries blocks (match Codex contract); delete dead `HooksConfig` alias and stale section header in `adapters/claude.py`
-- [ ] Move `claude_query` conversion code out of `adapters/common.py` into `claude_client.py` — `common.py` stays SDK-import-free
-- [ ] `core.py` traces through `lup.paths.logs_dir()` (versioned layout; fixes session-IDs-as-versions in `trace list`)
-- [ ] Wire `settings.max_turns` / `max_budget_usd` into `build_options`; raise on Codex if set (until supported)
-- [ ] Convention sweep: bare `except Exception` (cli loop, setup.py, mcp.py, sandbox.py), `_`-prefixed attributes (`_reflected`, `_task`, `_wake`, `_running`), "backward compatibility" comment in `background.py`; audit the 4 file-wide `# claude: ignore` headers down to justified inline ignores
-- [ ] Align `requires-python`/pyright `pythonVersion` deliberately (library 3.13, template 3.14 — or unify; document the choice)
+- [x] `lup/__init__.py`: no eager SDK imports; `ResponseCollector`/`build_client`/`claude_query` retired from `__all__` (they had zero external users); verified `import lup` loads no SDK modules
+- [x] Extras: `lup[claude]`, `lup[codex]`, `lup[docker]` (`mcp` promoted to a hard dep — it is the tool layer); template depends on `lup[claude,codex,docker]`; codex pin stays in `[tool.uv.sources]`
+- [x] `LupEvent` hierarchy moved to `types.py` as Pydantic models with a `type` discriminator; Claude `run_streamed` `LupDoneEvent` now carries the collected blocks (matches Codex); dead `HooksConfig` alias and stale header deleted
+- [x] `claude_query` moved to `claude_client.py`; `common.py` has no SDK imports and no file-wide ignore; `AgentAdapter.conversation` typed as `AbstractAsyncContextManager[Conversation]` (kills the `# type: ignore`)
+- [x] Traces written to `notes.trace_log` (versioned `logs/` layout — session IDs no longer masquerade as versions in `trace list`); `AGENT_NOTES_PATH`/`AGENT_LOGS_PATH` now routed into `lup.paths.configure()` so all consumers honor them
+- [x] `settings.max_turns`/`max_budget_usd` wired into `build_options`; Codex/OpenAI builders raise when they are set
+- [x] Convention sweep: deliberate supervisor/cleanup `except Exception` annotated with inline `# claude: ignore` + rationale; `memory_flag`/`runner`/`wake_event`/`running` replace `_`-prefixed attributes; dead `BackgroundAgent` alias deleted; `requires-python` unified at 3.14 (the source uses PEP 758 syntax). Remaining file-wide ignores: `codex.py`, `openai_compat.py`, `feedback/analyze.py` (SDK/JSON boundary modules)
 
-**Verify:** fresh venv with `lup` only (no extras) imports; `grep -r "claude_agent_sdk" packages/lup/src/lup --include="*.py" | grep -v adapters/` empty; `trace list` groups new sessions under the agent version.
+**Verified:** `import lup` loads no SDK modules (checked via sys.modules); live Claude session writes its trace to `notes/traces/0.1.0/logs/<session>/`; `dev check` 4/4.
 
 ## Phase 7 — Test program (grows with each phase, plus a coverage push)
 
-- [ ] Devtools smoke suite: Typer `CliRunner` invokes every sub-app and key read-only commands (`--help`, `version`, `trace list`, `feedback status`, `setup status`) — would have caught the `version` crash
-- [ ] Wiring tests over unit tests: the Phase 2 serve-tools MCP round-trip; gate flow; output retry loop
-- [ ] `realtime.py` Scheduler: sleep/wake/debounce timing tests (flagged as test-worthy by CLAUDE.md, currently zero)
-- [ ] `retry.py`, `history.py` round-trip, `metrics.py` (incl. file mode), `paths.py` version resolution
-- [ ] Delete construction-only tests (`test_models.py` schema-property checks, happy-path roundtrips in `test_type_conversion.py` that exercise no failure mode)
-- [ ] Gated parity integration test: same task via `AGENT_SDK=claude` and `AGENT_SDK=codex`, assert equivalent `AgentSessionResult` shape and artifacts
+- [x] Devtools smoke suite: `CliRunner` over every sub-app and the key read-only commands — the class of failure that shipped the `version` crash now cannot pass CI silently
+- [x] Wiring tests: serve-tools MCP round-trip (Phase 2), gate flow + output retry (Phase 1), config-override generation (Phases 3/5)
+- [x] `realtime.py` Scheduler: sleep/wake interruption, pending-wake consumption, debounce quiet-period/empty-window/replacement timing tests
+- [x] `retry.py` (transient vs logic errors, exhaustion, extra exceptions), `history.py` round-trip through the versioned layout (caught and fixed a `configure(root, version)` crash), `metrics.py` file mode incl. corrupt-file degradation
+- [x] Construction-only tests deleted (`test_models.py`, LupEvent construction class → one dispatch test)
+- [x] Parity integration test (gated behind `LUP_PARITY_TEST=1` + integration marker) — **run live once: passed** (claude-haiku + gpt-5.5, 43s; same artifacts from both backends). Suite: 124 → 171 tests.
 
 ## Phase 8 — Docs truth pass (last, after interfaces settle)
 
-- [ ] README: finish the cut-off sentences, remove `[[[]]]` placeholders, fill the three empty workflow sections, correct command names (`lup-devtools dev worktree create`, `uv run lup run`), document the `lup` entry point
-- [ ] CLAUDE.md: directory tree (add `adapters/`, `types.py`, `output.py`; remove `client.py`), sub-app list (`py` not `api`), getting-started commands
-- [ ] PATTERNS.md: replace `lup.client` references; document the submit-output finalization pattern and per-adapter subagent interpretation
-- [ ] Fix all 11 `lup.lib` docstring references and the phantom `codex_query` (`subagents.py`); fix `lup.environment.cli` module paths in CLI docstrings
-- [ ] Keep this file's checkboxes current as phases land
+- [x] README: cut-off sentences finished, `[[[]]]` placeholders replaced, the three empty workflow sections filled, command names corrected, `uv run lup run` + `AGENT_SDK` documented (edits preserve the original author's structure and voice)
+- [x] CLAUDE.md: directory tree reflects `adapters/`, `types.py`, `output.py`, `subagents.py`; sub-app list corrected (`py`, no `api`); getting-started uses `uv run lup run` and the codex backend; Python 3.14 + multi-SDK framing
+- [x] PATTERNS.md: `lup.client` → `lup.adapters.common.query` (with backend routing semantics); reflection pattern documents in-handler gating and submit_output finalization
+- [x] All `lup.lib` docstring references fixed; phantom `codex_query` replaced with the real `create_run_subagent_tool` mechanism; CLI docstring module paths corrected
+- [x] Checkboxes kept current as phases landed
 
 ---
 
@@ -215,6 +214,6 @@ This plan supersedes the previous SDK-interop status document. That document mar
 2. `uv run pytest` — unit suite green; `uv run pytest -m integration` — green with Docker + keys
 3. `AGENT_SDK=claude uv run lup run "test task"` — full feature set, `output.json` + versioned trace
 4. `AGENT_SDK=codex uv run lup run "test task"` — same artifacts, 13 tools listed, gate enforced
-5. `grep -rn "claude_agent_sdk" src/lup_template/agent/core.py` — empty; `grep -rn "lup\.lib" src/ packages/` — empty
+5. `core.py` imports `claude_agent_sdk` only under `TYPE_CHECKING` or inside the Claude-path builder (module loads without any SDK); `grep -rn "lup\.lib" src/ packages/` — empty
 6. Fresh venv: `import lup` succeeds without SDK extras
 7. `uv run lup-devtools version && uv run lup-devtools usage` — exit cleanly

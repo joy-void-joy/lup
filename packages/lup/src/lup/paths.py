@@ -1,7 +1,7 @@
 """Centralized path constants and helpers for agent session data.
 
 Pure path layout — where things go on disk. No data discovery or disk
-iteration; see :mod:`lup.lib.history` for cross-version queries.
+iteration; see :mod:`lup.history` for cross-version queries.
 
 Paths auto-detect the project root (walking up to ``pyproject.toml``)
 but can be overridden via :func:`configure`::

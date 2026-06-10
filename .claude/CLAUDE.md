@@ -13,7 +13,7 @@ This is a **self-improving agent template and scaffold** built with the Claude A
 
 When reviewing changes from downstream repos (`/lup:update`), the goal is to **generalize domain-specific patterns back into the template**. The bias is toward inclusion: if a pattern emerged from real use, it likely belongs in the template.
 
-Built with Python 3.13+ and the Claude Agent SDK. Uses `uv` as the package manager.
+Built with Python 3.14+ on the Claude Agent SDK, with the inner agent also runnable on the OpenAI Codex SDK (`AGENT_SDK=codex`) or any OpenAI-compatible endpoint (`AGENT_SDK=openai`) through the same adapter interface. Uses `uv` as the package manager.
 
 ### Naming
 
@@ -76,19 +76,30 @@ packages/
 └── lup/                        # Standalone library (uv workspace member)
     ├── pyproject.toml
     └── src/lup/
-        ├── __init__.py         # Public API re-exports (__all__)
-        ├── background.py       # Background agents for persistent sessions
-        ├── client.py           # Agent SDK client (build_client, query)
+        ├── __init__.py         # Public API re-exports (__all__); imports no SDK
+        ├── adapters/           # ALL SDK-specific code lives here
+        │   ├── common.py       # AgentAdapter/Conversation ABCs, query() dispatcher
+        │   ├── claude.py       # Claude Agent SDK adapter + type converters
+        │   ├── claude_client.py# Claude client/ResponseCollector, claude_query
+        │   ├── claude_background.py # Claude background agent
+        │   ├── codex.py        # Codex SDK adapter, config-override builders
+        │   ├── codex_background.py  # Codex background agent (no tools)
+        │   ├── codex_hooks.py  # Quarantined: Codex hook-script generation
+        │   └── openai_compat.py# OpenAI-compatible endpoints via Codex runtime
+        ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
+        ├── background.py       # Background agent base + SDK-aware factory
         ├── history.py          # Session storage/retrieval
-        ├── hooks.py            # Claude Agent SDK hook utilities
-        ├── mcp.py              # MCP server creation utilities
-        ├── metrics.py          # Tool call tracking (@tracked decorator)
+        ├── hooks.py            # SDK-agnostic hook factories (permission, gate, completion guard)
+        ├── mcp.py              # MCP server creation, @lup_tool decorator
+        ├── metrics.py          # Tool call tracking (+ file-backed flush for subprocesses)
         ├── notes.py            # RO/RW directory structure
-        ├── paths.py            # Centralized version-aware path constants and helpers
+        ├── output.py           # submit_output finalization tool (all backends)
+        ├── paths.py            # Version-aware paths + SessionContext env relay
         ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
-        ├── reflect.py          # Reflection gate (enforce reflect-before-output)
+        ├── reflect.py          # Reflection gate (in-memory or file-backed)
         ├── retry.py            # Retry decorator with backoff
-        ├── sandbox.py          # Docker-based Python sandbox
+        ├── sandbox.py          # Docker-based Python sandbox (lazy start, orphan sweep)
+        ├── subagents.py        # run_subagent delegation tool from SubagentSpec
         ├── throttle.py         # Rate limiting (concurrency + interval)
         └── trace.py            # Trace logging, color-coded console display
 src/
@@ -150,13 +161,16 @@ uv run pyright
 # Run tests
 uv run pytest
 
-# Run a single agent session
-uv run python -m lup_template.environment.cli run "your task here"
-uv run python -m lup_template.environment.cli run --session-id my-session "task"
+# Run a single agent session (Claude backend by default)
+uv run lup run "your task here"
+uv run lup run --session-id my-session "task"
+
+# Same agent on another SDK backend
+AGENT_SDK=codex AGENT_MODEL=gpt-5.5 uv run lup run "task"
 
 # Run multiple sessions with auto-commit
-uv run python -m lup_template.environment.cli loop "task1" "task2" "task3"
-uv run python -m lup_template.environment.cli loop --no-commit "task1" "task2"
+uv run lup loop "task1" "task2" "task3"
+uv run lup loop --no-commit "task1" "task2"
 
 # Commit uncommitted session results
 uv run lup-devtools feedback commit
@@ -432,7 +446,7 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
-Sub-apps: `agent`, `api`, `dev`, `feedback`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
+Sub-apps: `agent`, `dev`, `feedback`, `py`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
 
 ### Permission Hooks
 

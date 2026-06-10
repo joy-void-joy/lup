@@ -597,7 +597,7 @@ def create_meta_before_sleep_guard(
 ) -> LupHooksConfig:
     """Create a PreToolUse hook that requires meta before sleep.
 
-    Convenience wrapper around :func:`~lup.lib.hooks.create_reflection_gate`
+    Convenience wrapper around :func:`~lup.hooks.create_reflection_gate`
     for the persistent agent pattern. Forces the agent to call the ``meta``
     tool (process self-assessment) before every sleep. The gate resets
     automatically via ``scheduler.on_agent_action()``.

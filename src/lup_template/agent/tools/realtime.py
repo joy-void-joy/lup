@@ -1,7 +1,7 @@
 """Real-time MCP tools for persistent agents.
 
 This is a TEMPLATE. These tools show how to wire the Scheduler from
-``lup.lib.realtime`` into an agent session. Customize for your domain.
+``lup.realtime`` into an agent session. Customize for your domain.
 
 The pattern:
 1. Create a Scheduler with your environment's action callback
