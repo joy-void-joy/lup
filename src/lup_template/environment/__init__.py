@@ -6,9 +6,9 @@ This package contains the domain-specific scaffolding:
 - External system integration
 - Session lifecycle management
 
-The feedback loop focuses on improving lup.agent, not this code.
+The feedback loop focuses on improving lup_template.agent, not this code.
 However, this code evolves as the application requirements change.
 
 Structure:
-- client.py: Entry point for running agent sessions
+- cli/__main__.py: Typer CLI — the ``lup`` entry point (run + loop with auto-commit)
 """

@@ -8,13 +8,13 @@ The CLI is the domain-specific harness that:
 3. Auto-commits results after each session
 4. Manages application flow and lifecycle
 
-The feedback loop focuses on improving lup.agent.
+The feedback loop focuses on improving lup_template.agent.
 This code evolves with application requirements.
 
 Usage:
-    uv run python -m lup.environment.cli run "your task here"
-    uv run python -m lup.environment.cli run --session-id my-session "task"
-    uv run python -m lup.environment.cli loop "task1" "task2" "task3"
+    uv run lup run "your task here"
+    uv run lup run --session-id my-session "task"
+    uv run lup loop "task1" "task2" "task3"
 """
 
 import asyncio
@@ -98,8 +98,8 @@ async def run_session(
 def commit_results() -> None:
     """Commit any uncommitted session results.
 
-    TEMPLATE NOTE: This auto-commits session outputs (notes/sessions/,
-    notes/traces/) after each run. For domains like
+    TEMPLATE NOTE: This auto-commits session outputs (notes/traces/)
+    after each run. For domains like
     forecasting, game playing, or batch processing, this keeps data
     commits atomic and automatic. Customize or remove if your domain
     doesn't need auto-commit (e.g., interactive coaching).
@@ -174,7 +174,7 @@ def loop(
     post-processing for your domain.
 
     Example:
-        uv run python -m lup.environment.cli loop "task1" "task2" "task3"
+        uv run lup loop "task1" "task2" "task3"
     """
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
