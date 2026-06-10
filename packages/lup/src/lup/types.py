@@ -64,7 +64,9 @@ type LupContentBlock = (
 class SubagentSpec(BaseModel):
     """SDK-agnostic subagent definition.
 
-    Each adapter interprets this into its native subagent primitive.
+    Each adapter interprets this into its native subagent primitive:
+    Claude converts to ``AgentDefinition``; other backends serve a
+    ``run_subagent`` tool that dispatches a one-shot query per spec.
     """
 
     name: str
@@ -72,6 +74,10 @@ class SubagentSpec(BaseModel):
     prompt: str
     tools: list[str] = Field(default_factory=list)
     model: str = "haiku"
+    max_turns: int | None = Field(
+        default=None,
+        description="Turn cap for delegated one-shot runs (None = backend default)",
+    )
 
 
 # ---------------------------------------------------------------------------
