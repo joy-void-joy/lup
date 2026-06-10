@@ -90,7 +90,6 @@ from pydantic import BaseModel
 
 from lup.adapters.claude import claude_message_to_lup
 from lup.trace import TraceLogger, print_message
-from lup.types import TokenUsage
 
 
 logger = logging.getLogger(__name__)
