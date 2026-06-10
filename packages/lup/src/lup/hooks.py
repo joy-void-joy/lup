@@ -315,12 +315,23 @@ def create_permission_hooks(
 def create_tool_allowlist_hook(
     allowed_tools: list[str],
 ) -> HooksConfig:
-    """Create a PreToolUse hook that restricts the agent to only allowed tools.
+    """Create a PreToolUse hook that restricts the agent to an allowed tool set.
 
-    Use this instead of allowed_tools in ClaudeAgentOptions, which is
-    ignored when permission_mode="bypassPermissions".
+    **What:** Denies every tool call whose name is not in *allowed_tools*,
+    answering with the full list of tools that ARE available so the agent
+    can re-plan instead of retrying blindly. Allowed tools get an explicit
+    allow decision.
+
+    **When:** Use whenever ``permission_mode="bypassPermissions"`` is set —
+    the SDK's ``allowed_tools`` option is ignored in that mode, so a
+    PreToolUse hook is the only enforcement point.
+
+    **Why:** Makes tool availability a structural guarantee instead of a
+    prompt rule: excluded tools cannot run, and the denial message turns a
+    dead end into a redirect.
     """
     allowed = frozenset(allowed_tools)
+    available = ", ".join(sorted(allowed))
 
     async def allowlist_hook(
         input_data: HookInput,
@@ -333,7 +344,10 @@ def create_tool_allowlist_hook(
         tool_name = input_data["tool_name"]
         if tool_name in allowed:
             return allow_hook_output()
-        return deny_hook_output(f"Tool '{tool_name}' not in allowed list.")
+        return deny_hook_output(
+            f"Tool '{tool_name}' is not available in this session. "
+            f"Available tools: {available}"
+        )
 
     return cast(
         HooksConfig,
