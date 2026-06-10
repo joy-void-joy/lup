@@ -49,13 +49,22 @@ class BranchClassification(TypedDict, total=False):
     pr_url: str
 
 
-def parse_branches() -> list[dict[str, str | bool | None]]:
+class ParsedBranch(TypedDict):
+    """One row of ``git branch -vv`` output."""
+
+    name: str
+    commit: str
+    tracking: str | None
+    is_current: bool
+
+
+def parse_branches() -> list[ParsedBranch]:
     """Parse ``git branch -vv`` into structured data.
 
     Handles prefix markers: ``*`` (current), ``+`` (checked out in another worktree).
     """
     output = str(git("branch", "-vv")).strip()
-    results: list[dict[str, str | bool | None]] = []
+    results: list[ParsedBranch] = []
 
     for line in output.splitlines():
         is_current = line.startswith("*")
@@ -619,7 +628,7 @@ def survey(as_json: bool) -> None:
 
     raw_branches = parse_branches()
     worktrees = parse_worktrees()
-    branch_names = [str(b["name"]) for b in raw_branches]
+    branch_names = [b["name"] for b in raw_branches]
     containment = build_containment(branch_names)
 
     if has_remote:
@@ -631,7 +640,7 @@ def survey(as_json: bool) -> None:
 
     branches_list: list[BranchInfo] = []
     for b in raw_branches:
-        name = str(b["name"])
+        name = b["name"]
         contained_in = containment.get(name, [])
         is_contained = bool(contained_in)
         pr_merged = name in pr_map and pr_map[name].state == "MERGED"
@@ -646,10 +655,10 @@ def survey(as_json: bool) -> None:
         branches_list.append(
             BranchInfo(
                 name=name,
-                commit=str(b["commit"]),
-                tracking=str(b["tracking"]) if b["tracking"] else None,
+                commit=b["commit"],
+                tracking=b["tracking"],
                 worktree=worktrees.get(name),
-                is_current=bool(b["is_current"]),
+                is_current=b["is_current"],
                 contained_in=contained_in,
                 pr=pr_map.get(name),
                 unique_commits=unique,
