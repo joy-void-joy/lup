@@ -15,7 +15,7 @@ Core tools:
 - ``reply`` delivers actions to the environment
 - Timing tools (debounce, remind, schedule) are non-blocking
 
-Background agents (see ``lup.lib.background.ClaudeBackgroundAgent``):
+Background agents (see ``lup.background.create_background_agent``):
 - Run companion agents alongside the main session
 - Observer example at the bottom shows conversation summarization
 - Any use case: research, execution, monitoring — not just observation
@@ -30,7 +30,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.adapters.claude_background import ClaudeBackgroundAgent
+from lup.background import BaseBackgroundAgent, create_background_agent
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime import (
     DebounceInput,
@@ -383,7 +383,7 @@ def create_realtime_tools(
 # Background agent example: Observer
 # =====================================================================
 #
-# An observer is one use of ClaudeBackgroundAgent — it maintains running
+# An observer is one use of background agents — it maintains running
 # summaries of the conversation. Other uses: research agents that
 # fetch data, executor agents that run long tasks, etc.
 #
@@ -456,8 +456,8 @@ def create_observer(
     *,
     notes: list[str],
     transcript: list[object],
-    model: str = "claude-sonnet-4-20250514",
-) -> ClaudeBackgroundAgent:
+    model: str = "claude-sonnet-4-6",
+) -> BaseBackgroundAgent:
     """Create an observer background agent.
 
     This is a TEMPLATE — customize the system prompt, model, and
@@ -474,7 +474,7 @@ def create_observer(
         model: Model to use for the observer.
 
     Returns:
-        A configured ClaudeBackgroundAgent (call ``.start()`` to begin).
+        A configured background agent (call ``.start()`` to begin).
     """
     read_index = [0]  # Mutable container for closure
 
@@ -493,7 +493,10 @@ def create_observer(
         last_note = notes[-1] if notes else "(none yet)"
         return f"New messages:\n{msgs_text}\n\nYour last note:\n{last_note}"
 
-    return ClaudeBackgroundAgent(
+    from lup_template.agent.config import settings
+
+    return create_background_agent(
+        settings.agent_sdk,
         name="observer",
         system_prompt=OBSERVER_SYSTEM_PROMPT,
         tools=create_observer_tools(notes=notes),
