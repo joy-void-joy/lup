@@ -120,9 +120,13 @@ def truncate_str_fields(
     """Recursively truncate string values in a JSON-like structure."""
     match obj:
         case dict() as d:
-            return {k: truncate_str_fields(v, max_len) for k, v in d.items()}
+            return {
+                k: truncate_str_fields(v, max_len, max_len_list) for k, v in d.items()
+            }
         case list() as items:
-            return [truncate_str_fields(item, max_len) for item in items][:max_len_list]
+            return [truncate_str_fields(item, max_len, max_len_list) for item in items][
+                :max_len_list
+            ]
         case str() as s:
             return truncate_str(s, max_len)
         case _:
