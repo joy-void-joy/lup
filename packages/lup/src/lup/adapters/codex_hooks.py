@@ -424,7 +424,9 @@ def lup_hooks_to_codex(
                         )
                         seen_tags.add(tag)
                     else:
-                        log.warning("reflection_gate hook requires gate_flag_path and matcher")
+                        log.warning(
+                            "reflection_gate hook requires gate_flag_path and matcher"
+                        )
 
                 case "allowlist":
                     if allowed_tools:

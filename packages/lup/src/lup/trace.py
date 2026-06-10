@@ -140,7 +140,7 @@ def format_tool_result(
     text = normalize_content(content)
     try:
         parsed = json.loads(text)
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError, TypeError:
         return truncate_str(text, max_len)
     truncated = truncate_str_fields(parsed, max_len)
     return json.dumps(truncated, indent=2)

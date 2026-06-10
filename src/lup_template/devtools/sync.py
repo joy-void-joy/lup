@@ -184,7 +184,7 @@ def status_cmd() -> None:
 
         try:
             resolved = ensure_local(p)
-        except (typer.Exit, sh.ErrorReturnCode):
+        except typer.Exit, sh.ErrorReturnCode:
             url = p.get("url", "NO PATH")
             typer.echo(
                 f"{p['name']:<20} {'?':<10} {synced_short:<12} {url} (clone failed)"

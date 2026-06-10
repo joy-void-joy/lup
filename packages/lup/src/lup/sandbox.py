@@ -55,7 +55,13 @@ from docker.models.containers import Container, ExecResult
 from docker.utils.socket import SocketError, next_frame_header, read_exactly
 from pydantic import BaseModel, Field
 
-from lup.mcp import LupMcpServerConfig, LupMcpTool, ToolError, create_mcp_server, lup_tool
+from lup.mcp import (
+    LupMcpServerConfig,
+    LupMcpTool,
+    ToolError,
+    create_mcp_server,
+    lup_tool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -446,7 +452,7 @@ class Sandbox:
             try:
                 vol = self.docker_client.volumes.get(self.volume_name)
                 vol.remove()
-            except (NotFound, APIError):
+            except NotFound, APIError:
                 pass
 
     def write_repl_script(self) -> None:
@@ -594,7 +600,7 @@ class Sandbox:
             self.repl.stop()
             try:
                 self.repl.start()
-            except (RuntimeError, DockerException, APIError, SocketError):
+            except RuntimeError, DockerException, APIError, SocketError:
                 logger.exception("REPL restart failed")
                 self.repl = None
                 raise SandboxNotInitializedError("REPL restart failed")

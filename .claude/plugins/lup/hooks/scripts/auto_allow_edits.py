@@ -470,7 +470,7 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
 def main() -> None:
     try:
         event = HookEvent.model_validate_json(sys.stdin.read())
-    except (ValidationError, OSError):
+    except ValidationError, OSError:
         sys.exit(0)
 
     if event.tool_name != "Edit":

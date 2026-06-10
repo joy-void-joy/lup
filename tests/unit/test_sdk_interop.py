@@ -52,6 +52,7 @@ from lup.types import (
 def run_awaitable[T](aw: Awaitable[T]) -> T:
     async def wrapper() -> T:
         return await aw
+
     return asyncio.run(wrapper())
 
 
@@ -629,9 +630,7 @@ class TestGenericReflectionGate:
 
 class TestGenericNudgeHook:
     def test_nudge_triggered(self) -> None:
-        hooks = create_nudge_hook(
-            {"Bash": lambda inp: "Use Grep instead"}
-        )
+        hooks = create_nudge_hook({"Bash": lambda inp: "Use Grep instead"})
         hook_fn = hooks["PostToolUse"][0].hook
         inp = LupHookInput(
             hook_event_name="PostToolUse",
@@ -642,9 +641,7 @@ class TestGenericNudgeHook:
         assert result.get("system_message") == "Use Grep instead"
 
     def test_nudge_not_triggered_for_other_tools(self) -> None:
-        hooks = create_nudge_hook(
-            {"Bash": lambda inp: "Use Grep instead"}
-        )
+        hooks = create_nudge_hook({"Bash": lambda inp: "Use Grep instead"})
         hook_fn = hooks["PostToolUse"][0].hook
         inp = LupHookInput(
             hook_event_name="PostToolUse",
@@ -655,9 +652,7 @@ class TestGenericNudgeHook:
         assert "system_message" not in result
 
     def test_nudge_skipped_when_check_returns_none(self) -> None:
-        hooks = create_nudge_hook(
-            {"Bash": lambda inp: None}
-        )
+        hooks = create_nudge_hook({"Bash": lambda inp: None})
         hook_fn = hooks["PostToolUse"][0].hook
         inp = LupHookInput(
             hook_event_name="PostToolUse",
@@ -749,9 +744,7 @@ class TestLupHooksToClaudeConversion:
     def test_full_hook_conversion_roundtrip(self) -> None:
         from lup.adapters.claude import lup_hooks_to_claude
 
-        hooks = create_permission_hooks(
-            rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")]
-        )
+        hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")])
         claude_hooks = lup_hooks_to_claude(hooks)
         assert "PreToolUse" in claude_hooks
         assert len(claude_hooks["PreToolUse"]) == 1
@@ -773,9 +766,7 @@ class TestLupHooksToCodexConversion:
     def test_converts_permission_hooks(self) -> None:
         from lup.adapters.codex_hooks import lup_hooks_to_codex
 
-        hooks = create_permission_hooks(
-            rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")]
-        )
+        hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")])
         with tempfile.TemporaryDirectory() as tmpdir:
             configs = lup_hooks_to_codex(
                 hooks,
@@ -812,9 +803,7 @@ class TestLupHooksToCodexConversion:
         from lup.adapters.codex_hooks import lup_hooks_to_codex
 
         gate = ReflectionGate()
-        perm_hooks = create_permission_hooks(
-            rw_dirs=[Path("/data")], ro_dirs=[]
-        )
+        perm_hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[])
         gate_hooks = create_reflection_gate(
             gate=gate,
             gated_tool="StructuredOutput",
@@ -834,9 +823,7 @@ class TestLupHooksToCodexConversion:
     def test_converts_nudge_hooks(self) -> None:
         from lup.adapters.codex_hooks import lup_hooks_to_codex
 
-        hooks = create_nudge_hook(
-            {"Bash": lambda inp: "Use Grep instead"}
-        )
+        hooks = create_nudge_hook({"Bash": lambda inp: "Use Grep instead"})
         with tempfile.TemporaryDirectory() as tmpdir:
             configs = lup_hooks_to_codex(
                 hooks,
@@ -881,9 +868,7 @@ class TestLupHooksToCodexConversion:
             gated_tool="StructuredOutput",
             reflection_tool_name="review",
         )
-        nudge_hooks = create_nudge_hook(
-            {"Bash": lambda inp: "Use Grep instead"}
-        )
+        nudge_hooks = create_nudge_hook({"Bash": lambda inp: "Use Grep instead"})
         combined = merge_hooks(merge_hooks(perm_hooks, gate_hooks), nudge_hooks)
         with tempfile.TemporaryDirectory() as tmpdir:
             gate_flag = Path(tmpdir) / "flag"

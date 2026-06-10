@@ -208,7 +208,7 @@ def load_stats() -> StatsCache | None:
         return None
     try:
         return StatsCache.model_validate_json(STATS_PATH.read_bytes())
-    except (ValueError, OSError):
+    except ValueError, OSError:
         return None
 
 
@@ -695,7 +695,7 @@ def main(
     )
     try:
         panel = fetch_and_build(detail, bar_width)
-    except (httpx.HTTPStatusError, httpx.ConnectError):
+    except httpx.HTTPStatusError, httpx.ConnectError:
         panel = build_error_panel("Initial fetch failed")
 
     with Live(

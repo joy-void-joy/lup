@@ -130,9 +130,7 @@ class AgentAdapter(ABC):
     ) -> LupResponse:
         """One-shot convenience: open conversation, send one prompt, close."""
         async with self.conversation() as conv:
-            return await conv.send(
-                prompt, trace_logger=trace_logger, prefix=prefix
-            )
+            return await conv.send(prompt, trace_logger=trace_logger, prefix=prefix)
 
     async def resume(self, session_id: str, prompt: str) -> LupResponse:
         """Resume a previous session by ID. Not all adapters support this."""
@@ -261,9 +259,7 @@ async def claude_query(
         permission_mode=permission_mode,
         max_budget_usd=max_budget_usd,
         output_format=(
-            {"type": "json_schema", "schema": output_schema}
-            if output_schema
-            else None
+            {"type": "json_schema", "schema": output_schema} if output_schema else None
         ),
     )
 

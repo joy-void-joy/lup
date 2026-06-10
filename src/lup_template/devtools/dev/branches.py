@@ -170,7 +170,7 @@ def count_unique_commits(branch: str, integration: str) -> int:
             )
         ).strip()
         return int(output)
-    except (sh.ErrorReturnCode, ValueError):
+    except sh.ErrorReturnCode, ValueError:
         return -1
 
 
@@ -254,7 +254,7 @@ def get_pr_info(branch: str) -> dict[str, str]:
         items: list[dict[str, str]] = json.loads(output)
         if items:
             return items[0]
-    except (sh.ErrorReturnCode, sh.CommandNotFound, json.JSONDecodeError):
+    except sh.ErrorReturnCode, sh.CommandNotFound, json.JSONDecodeError:
         pass
     return {}
 

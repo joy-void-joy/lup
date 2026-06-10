@@ -88,7 +88,7 @@ def read_clipboard_image() -> tuple[str, bytes] | None:
     try:
         xclip = sh.Command("xclip")
         targets = str(xclip("-selection", "clipboard", "-o", "-t", "TARGETS"))
-    except (sh.ErrorReturnCode, sh.CommandNotFound):
+    except sh.ErrorReturnCode, sh.CommandNotFound:
         return None
 
     for mime in CLIPBOARD_IMAGE_MIMES:
@@ -111,7 +111,7 @@ def read_clipboard_text() -> str | None:
         xclip = sh.Command("xclip")
         text = str(xclip("-selection", "clipboard", "-o"))
         return text if text else None
-    except (sh.ErrorReturnCode, sh.CommandNotFound):
+    except sh.ErrorReturnCode, sh.CommandNotFound:
         return None
 
 
@@ -129,7 +129,7 @@ def print_model_source(
         source = inspect_mod.getsource(model)
         for line in source.splitlines():
             out.write(f"{indent}  {line}\n")
-    except (OSError, TypeError):
+    except OSError, TypeError:
         out.write(f"{indent}  {model.__name__} (source unavailable)\n")
 
 
@@ -141,7 +141,7 @@ def tool_location(tool: LupMcpTool) -> str:
         filename = os.path.basename(filepath)
         _, lineno = inspect_mod.getsourcelines(handler)
         return f"{filename}:{lineno}"
-    except (OSError, TypeError):
+    except OSError, TypeError:
         return "?"
 
 
@@ -252,7 +252,7 @@ def page_output(text: str) -> None:
         tmp.close()
         less = sh.Command("less")
         less("-R", "-F", "-X", tmp.name, _fg=True)
-    except (sh.CommandNotFound, sh.ErrorReturnCode):
+    except sh.CommandNotFound, sh.ErrorReturnCode:
         sys.stdout.write(text)
     finally:
         os.unlink(tmp.name)
@@ -398,15 +398,15 @@ def serve_tools_cmd() -> None:
         return tool_list
 
     @server.call_tool()
-    async def call_tool(
-        name: str, arguments: dict[str, object]
-    ) -> CallToolResult:
+    async def call_tool(name: str, arguments: dict[str, object]) -> CallToolResult:
         if name not in tool_map:
             raise ValueError(f"Tool '{name}' not found")
         result = await tool_map[name].handler(arguments)
         content_dicts: list[dict[str, str]] = result.get("content", [])
         return CallToolResult(
-            content=[TextContent(type="text", text=d.get("text", "")) for d in content_dicts],
+            content=[
+                TextContent(type="text", text=d.get("text", "")) for d in content_dicts
+            ],
             isError=result.get("is_error", False),
         )
 
@@ -574,8 +574,7 @@ async def repl(
         servers = collect_tools_by_server()
         dynamic = collect_dynamic_tool_names()
         group_names: list[tuple[str, list[str]]] = [
-            (name, [t.name for t in stools])
-            for name, stools in servers.items()
+            (name, [t.name for t in stools]) for name, stools in servers.items()
         ] + list(dynamic.items())
         for i, (name, tool_names_list) in enumerate(group_names):
             is_last_server = i == len(group_names) - 1
@@ -678,7 +677,7 @@ async def repl(
                 while True:
                     try:
                         user_input = await pt_session.prompt_async()
-                    except (EOFError, asyncio.CancelledError):
+                    except EOFError, asyncio.CancelledError:
                         console.print()
                         break
                     except KeyboardInterrupt:
