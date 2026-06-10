@@ -210,7 +210,7 @@ class BackgroundAgent:
                 await client.disconnect()
         except asyncio.CancelledError:
             logger.debug("Background agent '%s' cancelled", self.name)
-        except Exception:
+        except Exception:  # claude: ignore — daemon guard, log crashes
             logger.exception("Background agent '%s' crashed", self.name)
 
     def _handle_response(self, msg: object) -> None:
