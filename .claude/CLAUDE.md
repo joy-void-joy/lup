@@ -534,7 +534,7 @@ Even for open-ended questions, use `AskUserQuestion` with options that include a
 
 When questions involve Claude Code, Agent SDK, or Claude API:
 
-1. Use the `claude-code-guide` subagent: `Task(subagent_type="claude-code-guide", prompt="...")`
+1. Use the `claude-code-guide` subagent: `Agent(subagent_type="claude-code-guide", prompt="...")`
 2. Fetch docs directly: `WebFetch(url="https://docs.claude.com/en/agent-sdk/<topic>")`
 
 When the user provides documentation links, incorporate that knowledge into CLAUDE.md or relevant commands.
