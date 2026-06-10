@@ -113,6 +113,12 @@ def test_background_ampersand_separates_segments() -> None:
     assert decision("uv run pytest 2>&1") == "allow"
 
 
+def test_uv_dependency_management_is_allowed() -> None:
+    assert decision("uv add httpx") == "allow"
+    assert decision("uv add --dev pytest-cov") == "allow"
+    assert decision("uv sync") == "allow"
+
+
 def test_plain_cd_allows_only_as_navigation() -> None:
     assert decision("cd /somewhere") == "allow"
     assert decision("cd /somewhere && rm -rf /") is None
