@@ -39,6 +39,7 @@ Examples:
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -286,7 +287,10 @@ class Scheduler:
 
     def build_sleep_result(self) -> SleepResult:
         """Build the minimal wake result."""
-        result = SleepResult(reason=self._wake_reason or "timer")
+        result = SleepResult(
+            reason=self._wake_reason or "timer",
+            time=datetime.now().strftime("%H:%M:%S"),
+        )
         if self._fired_reminder_labels:
             result["fired_reminders"] = list(self._fired_reminder_labels)
             self._fired_reminder_labels.clear()
