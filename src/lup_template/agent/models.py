@@ -4,7 +4,7 @@ This is a TEMPLATE. Customize these models for your domain.
 
 The key pattern is:
 1. Define Pydantic models for structured agent output
-2. Use these models with the Claude SDK's output_format option
+2. The agent submits them via the submit_output tool (see lup.output)
 3. Store results in notes/sessions/ for feedback loop analysis
 """
 

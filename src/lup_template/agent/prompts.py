@@ -29,7 +29,10 @@ PURPOSE = """\
 OUTPUT_FORMAT = """\
 ## Output Format
 
-Provide your output as structured JSON with:
+When your analysis is complete, submit your final result with the
+submit_output tool — the session's result is exactly what you submit
+there. Reflect with the review tool first; submission is rejected
+until you have. Your submission includes:
 - **summary**: Brief summary of your decision/output
 - **factors**: Key factors that influenced your reasoning
 - **confidence**: Your confidence level (0.0-1.0)"""

@@ -667,7 +667,7 @@ async def repl(
     )
 
     try:
-        adapter, adapter_ctx = build_adapter("repl")
+        adapter, adapter_ctx, _notes = build_adapter("repl")
         stack.enter_context(adapter_ctx)
 
         async with stack:
