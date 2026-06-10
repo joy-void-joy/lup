@@ -1,14 +1,10 @@
 # claude: ignore
 """OpenAI Codex SDK adapter.
 
-Wraps the Codex Python SDK (``codex_app_server``) behind the
+Wraps the Codex Python SDK (``openai_codex``) behind the
 ``AgentAdapter`` interface. Exposes lup MCP tools via external
 stdio server (serve-tools), permission hooks via config.toml
 command hooks, and the reflection gate via a file-backed flag.
-
-Install the Codex SDK to use this adapter::
-
-    uv sync --extra codex
 """
 
 from __future__ import annotations
@@ -20,10 +16,21 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, TypedDict, cast
 
 if TYPE_CHECKING:
-    from codex_app_server import AsyncThread, ThreadItem
-    from codex_app_server.models import JsonObject
+    from openai_codex import AsyncThread, TurnResult
+    from openai_codex.models import JsonObject
 
-from lup.adapters.common import AgentAdapter, Conversation
+    from openai_codex.generated.v2_all import ThreadItem
+
+from lup.adapters.common import (
+    AgentAdapter,
+    Conversation,
+    LupDoneEvent,
+    LupEvent,
+    LupTextEvent,
+    LupThinkingEvent,
+    LupToolResultEvent,
+    LupToolUseEvent,
+)
 from lup.trace import TraceLogger, print_message
 from lup.types import (
     LupAssistantMessage,
@@ -43,10 +50,10 @@ logger = logging.getLogger(__name__)
 def require_codex_sdk() -> None:
     """Raise a clear error if the Codex SDK is not installed."""
     try:
-        import codex_app_server as _  # noqa: F401
+        import openai_codex as _  # noqa: F401
     except ImportError as exc:
         raise ImportError(
-            "Codex SDK not installed. Install with: uv sync --extra codex"
+            "Codex SDK not installed. Install with: uv add openai-codex"
         ) from exc
 
 
@@ -57,7 +64,7 @@ def codex_items_to_lup(items: Sequence[ThreadItem]) -> list[LupContentBlock]:
     We extract ``.root`` to get the typed variant, then map by
     ``type`` field.
     """
-    from codex_app_server.generated.v2_all import (
+    from openai_codex.generated.v2_all import (
         AgentMessageThreadItem,
         CommandExecutionThreadItem,
         FileChangeThreadItem,
@@ -200,18 +207,14 @@ def build_hook_config_overrides(
 
 
 def build_lup_response(
-    result: object,
+    result: "TurnResult",
     *,
     output_schema: dict[str, object] | None = None,
     session_id: str | None = None,
     trace_logger: TraceLogger | None = None,
     prefix: str = "",
 ) -> LupResponse:
-    """Convert a Codex RunResult into a LupResponse."""
-    from codex_app_server import RunResult
-
-    if not isinstance(result, RunResult):
-        raise TypeError(f"Expected RunResult, got {type(result).__name__}")
+    """Convert a Codex TurnResult into a LupResponse."""
 
     blocks = codex_items_to_lup(result.items)
     response = LupResponse(blocks=blocks)
@@ -281,7 +284,7 @@ class CodexConversation(Conversation):
         trace_logger: TraceLogger | None = None,
         prefix: str = "",
     ) -> LupResponse:
-        from codex_app_server import ReasoningEffort
+        from openai_codex.generated.v2_all import ReasoningEffort
 
         effort = ReasoningEffort(self.effort) if self.effort else None
         result = await self.thread.run(
@@ -337,26 +340,20 @@ class CodexAdapter(AgentAdapter):
     async def conversation(self) -> AsyncGenerator[Conversation, None]:
         require_codex_sdk()
 
-        from codex_app_server import (
-            AppServerConfig,
-            AskForApproval,
-            AsyncCodex,
-            SandboxMode,
-        )
-        from codex_app_server.generated.v2_all import AskForApprovalValue
+        from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
         config_overrides = self.build_config_overrides()
-        config = AppServerConfig(config_overrides=config_overrides)
+        config = CodexConfig(config_overrides=config_overrides)
 
         async with AsyncCodex(config=config) as codex:
             thread = await codex.thread_start(
                 model=self.model,
                 developer_instructions=self.system_prompt,
-                sandbox=SandboxMode(self.sandbox) if self.sandbox else None,
-                approval_policy=(
-                    AskForApproval(root=AskForApprovalValue(self.approval_policy))
+                sandbox=Sandbox(self.sandbox) if self.sandbox else None,
+                approval_mode=(
+                    ApprovalMode(self.approval_policy)
                     if self.approval_policy
-                    else None
+                    else ApprovalMode.auto_review
                 ),
             )
             yield CodexConversation(
@@ -369,9 +366,9 @@ class CodexAdapter(AgentAdapter):
         """Resume a Codex thread by ID."""
         require_codex_sdk()
 
-        from codex_app_server import AppServerConfig, AsyncCodex
+        from openai_codex import AsyncCodex, CodexConfig
 
-        config = AppServerConfig(config_overrides=self.build_config_overrides())
+        config = CodexConfig(config_overrides=self.build_config_overrides())
 
         async with AsyncCodex(config=config) as codex:
             thread = await codex.thread_resume(thread_id=session_id)
@@ -386,9 +383,9 @@ class CodexAdapter(AgentAdapter):
         """Fork a Codex thread and run on the fork."""
         require_codex_sdk()
 
-        from codex_app_server import AppServerConfig, AsyncCodex
+        from openai_codex import AsyncCodex, CodexConfig
 
-        config = AppServerConfig(config_overrides=self.build_config_overrides())
+        config = CodexConfig(config_overrides=self.build_config_overrides())
 
         async with AsyncCodex(config=config) as codex:
             forked_thread = await codex.thread_fork(thread_id=session_id)
