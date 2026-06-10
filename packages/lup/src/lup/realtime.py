@@ -207,41 +207,37 @@ class Scheduler:
         on_sleep: Callable[[], None] | None = None,
         ideas: list[str] | None = None,
     ) -> None:
-        self._on_action = on_action
-        self._on_sleep = on_sleep
-        self._ideas: list[str] = ideas if ideas is not None else []
+        self.on_action = on_action
+        self.on_sleep = on_sleep
+        # Cancelled actions and agent-captured threads
+        self.ideas: list[str] = ideas if ideas is not None else []
 
         # Wake mechanism
-        self._wake: asyncio.Event = asyncio.Event()
-        self._wake_reason: str | None = None
+        self.wake_event: asyncio.Event = asyncio.Event()
+        self.wake_reason: str | None = None
 
         # Debounce
-        self._debounce_task: asyncio.Task[None] | None = None
-        self._debounce_event: asyncio.Event = asyncio.Event()
+        self.debounce_task: asyncio.Task[None] | None = None
+        self.debounce_event: asyncio.Event = asyncio.Event()
 
         # Scheduled action
-        self._scheduled_action_task: asyncio.Task[None] | None = None
-        self._scheduled_action_content: str | None = None
-        self._scheduled_action_fire_at: float | None = None
+        self.scheduled_action_task: asyncio.Task[None] | None = None
+        self.scheduled_action_content: str | None = None
+        self.scheduled_action_fire_at: float | None = None
 
         # Reminders
-        self._reminders: list[PendingReminder] = []
-        self._fired_reminder_labels: list[str] = []
+        self.reminders: list[PendingReminder] = []
+        self.fired_reminder_labels: list[str] = []
 
         # Delayed actions
-        self._pending_actions: list[tuple[asyncio.Task[None], str]] = []
+        self.pending_actions: list[tuple[asyncio.Task[None], str]] = []
 
         # Meta-before-sleep gate (uses lib-level ReflectionGate)
         self.meta_gate = ReflectionGate()
 
-    @property
-    def ideas(self) -> list[str]:
-        """Cancelled actions and agent-captured threads."""
-        return self._ideas
-
     async def send_action(self, content: str) -> None:
         """Deliver an action to the environment via the registered callback."""
-        await self._on_action(content)
+        await self.on_action(content)
 
     # ------------------------------------------------------------------
     # Wake / Sleep
@@ -249,8 +245,8 @@ class Scheduler:
 
     def wake(self, reason: str) -> None:
         """Wake the sleeping agent with a reason."""
-        self._wake_reason = reason
-        self._wake.set()
+        self.wake_reason = reason
+        self.wake_event.set()
 
     def consume_wake(self) -> None:
         """Clear a pending wake event after the agent has read its cause.
@@ -259,8 +255,8 @@ class Scheduler:
         a wake, to prevent ``sleep()`` from returning immediately on
         the stale event.
         """
-        self._wake.clear()
-        self._wake_reason = None
+        self.wake_event.clear()
+        self.wake_reason = None
 
     async def sleep(self, seconds: int) -> SleepResult:
         """Block until timer expires or a wake event fires.
@@ -270,30 +266,30 @@ class Scheduler:
 
         Returns a context dict with ``reason`` and scheduling state.
         """
-        if self._on_sleep:
-            self._on_sleep()
+        if self.on_sleep:
+            self.on_sleep()
 
-        if self._wake.is_set():
+        if self.wake_event.is_set():
             pass  # Already have a pending wake — return immediately
         else:
-            self._wake_reason = None
+            self.wake_reason = None
             try:
-                await asyncio.wait_for(self._wake.wait(), timeout=seconds)
+                await asyncio.wait_for(self.wake_event.wait(), timeout=seconds)
             except asyncio.TimeoutError:
-                self._wake_reason = "timer"
+                self.wake_reason = "timer"
 
-        self._wake.clear()
+        self.wake_event.clear()
         return self.build_sleep_result()
 
     def build_sleep_result(self) -> SleepResult:
         """Build the minimal wake result."""
         result = SleepResult(
-            reason=self._wake_reason or "timer",
+            reason=self.wake_reason or "timer",
             time=datetime.now().strftime("%H:%M:%S"),
         )
-        if self._fired_reminder_labels:
-            result["fired_reminders"] = list(self._fired_reminder_labels)
-            self._fired_reminder_labels.clear()
+        if self.fired_reminder_labels:
+            result["fired_reminders"] = list(self.fired_reminder_labels)
+            self.fired_reminder_labels.clear()
         return result
 
     # ------------------------------------------------------------------
@@ -303,12 +299,12 @@ class Scheduler:
     @property
     def debounce_active(self) -> bool:
         """Whether a debounce window is currently open."""
-        return self._debounce_task is not None and not self._debounce_task.done()
+        return self.debounce_task is not None and not self.debounce_task.done()
 
     @property
     def wake_pending(self) -> bool:
         """Whether a wake event is already queued."""
-        return self._wake.is_set()
+        return self.wake_event.is_set()
 
     def start_debounce(
         self,
@@ -325,24 +321,24 @@ class Scheduler:
         Phase 2 (quiet): Once activity is detected, wait ``quiet_seconds``
         after each event. Wake when the quiet period elapses.
         """
-        if self._debounce_task and not self._debounce_task.done():
-            self._debounce_task.cancel()
-        self._debounce_event.clear()
+        if self.debounce_task and not self.debounce_task.done():
+            self.debounce_task.cancel()
+        self.debounce_event.clear()
 
         # Absorb pending wake so sleep doesn't return immediately
-        if self._wake.is_set():
-            self._wake.clear()
-            self._wake_reason = None
-            self._debounce_event.set()
+        if self.wake_event.is_set():
+            self.wake_event.clear()
+            self.wake_reason = None
+            self.debounce_event.set()
 
-        self._debounce_task = asyncio.create_task(
+        self.debounce_task = asyncio.create_task(
             self.run_debounce(initial_seconds, quiet_seconds, wake_on_empty)
         )
 
     def extend_debounce(self) -> None:
         """Signal activity to reset the quiet timer."""
         if self.debounce_active:
-            self._debounce_event.set()
+            self.debounce_event.set()
 
     async def run_debounce(
         self,
@@ -355,7 +351,7 @@ class Scheduler:
             # Phase 1: wait for first activity
             try:
                 await asyncio.wait_for(
-                    self._debounce_event.wait(), timeout=initial_seconds
+                    self.debounce_event.wait(), timeout=initial_seconds
                 )
             except asyncio.TimeoutError:
                 if wake_on_empty:
@@ -364,10 +360,10 @@ class Scheduler:
 
             # Phase 2: quiet-period loop
             while True:
-                self._debounce_event.clear()
+                self.debounce_event.clear()
                 try:
                     await asyncio.wait_for(
-                        self._debounce_event.wait(), timeout=quiet_seconds
+                        self.debounce_event.wait(), timeout=quiet_seconds
                     )
                 except asyncio.TimeoutError:
                     break
@@ -386,32 +382,32 @@ class Scheduler:
         Cancelled actions are saved as ideas.
         """
         self.cancel_scheduled_action()
-        self._scheduled_action_content = content
-        self._scheduled_action_fire_at = asyncio.get_running_loop().time() + delay
-        self._scheduled_action_task = asyncio.create_task(
+        self.scheduled_action_content = content
+        self.scheduled_action_fire_at = asyncio.get_running_loop().time() + delay
+        self.scheduled_action_task = asyncio.create_task(
             self.run_scheduled_action(content, delay)
         )
 
     def cancel_scheduled_action(self) -> None:
         """Cancel the pending scheduled action, saving it as an idea."""
-        if self._scheduled_action_task and not self._scheduled_action_task.done():
-            self._scheduled_action_task.cancel()
-            if self._scheduled_action_content:
-                self._ideas.append(self._scheduled_action_content)
-        self._scheduled_action_content = None
-        self._scheduled_action_fire_at = None
-        self._scheduled_action_task = None
+        if self.scheduled_action_task and not self.scheduled_action_task.done():
+            self.scheduled_action_task.cancel()
+            if self.scheduled_action_content:
+                self.ideas.append(self.scheduled_action_content)
+        self.scheduled_action_content = None
+        self.scheduled_action_fire_at = None
+        self.scheduled_action_task = None
 
     async def run_scheduled_action(self, content: str, delay: int) -> None:
         """Scheduled action coroutine. Fires but does NOT wake the agent."""
         try:
             await asyncio.sleep(delay)
-            if self._on_sleep:
-                self._on_sleep()
-            await self._on_action(content)
-            self._scheduled_action_content = None
-            self._scheduled_action_fire_at = None
-            self._scheduled_action_task = None
+            if self.on_sleep:
+                self.on_sleep()
+            await self.on_action(content)
+            self.scheduled_action_content = None
+            self.scheduled_action_fire_at = None
+            self.scheduled_action_task = None
         except asyncio.CancelledError:
             pass
 
@@ -423,15 +419,15 @@ class Scheduler:
         """Schedule a self-prompt reminder that wakes the agent."""
         fire_at = asyncio.get_running_loop().time() + delay
         task = asyncio.create_task(self.run_reminder(label, delay))
-        self._reminders.append(PendingReminder(task=task, label=label, fire_at=fire_at))
+        self.reminders.append(PendingReminder(task=task, label=label, fire_at=fire_at))
 
     async def run_reminder(self, label: str, delay: int) -> None:
         """Reminder coroutine. Records label and wakes agent."""
         try:
             await asyncio.sleep(delay)
-            self._fired_reminder_labels.append(label)
+            self.fired_reminder_labels.append(label)
             self.wake("reminder")
-            self._reminders = [r for r in self._reminders if not r.task.done()]
+            self.reminders = [r for r in self.reminders if not r.task.done()]
         except asyncio.CancelledError:
             pass
 
@@ -442,25 +438,25 @@ class Scheduler:
     def add_delayed_action(self, content: str, delay: int) -> None:
         """Schedule an action with a delay. Cancelled if an event arrives."""
         task = asyncio.create_task(self.run_delayed_action(content, delay))
-        self._pending_actions.append((task, content))
+        self.pending_actions.append((task, content))
 
     def cancel_delayed_actions(self) -> None:
         """Cancel all pending delayed actions, saving them as ideas."""
-        for task, content in self._pending_actions:
+        for task, content in self.pending_actions:
             if not task.done():
                 task.cancel()
-                self._ideas.append(content)
-        self._pending_actions.clear()
+                self.ideas.append(content)
+        self.pending_actions.clear()
 
     async def run_delayed_action(self, content: str, delay: int) -> None:
         """Delayed action coroutine."""
         try:
             await asyncio.sleep(delay)
-            if self._on_sleep:
-                self._on_sleep()
-            await self._on_action(content)
-            self._pending_actions = [
-                (t, c) for t, c in self._pending_actions if not t.done()
+            if self.on_sleep:
+                self.on_sleep()
+            await self.on_action(content)
+            self.pending_actions = [
+                (t, c) for t, c in self.pending_actions if not t.done()
             ]
         except asyncio.CancelledError:
             pass
@@ -490,15 +486,15 @@ class Scheduler:
 
         state = SchedulerState(debounce_active=self.debounce_active)
 
-        if self._scheduled_action_task and not self._scheduled_action_task.done():
-            remaining = max(0, int((self._scheduled_action_fire_at or now) - now))
+        if self.scheduled_action_task and not self.scheduled_action_task.done():
+            remaining = max(0, int((self.scheduled_action_fire_at or now) - now))
             state["scheduled_action"] = ScheduledActionState(
-                content=self._scheduled_action_content,
+                content=self.scheduled_action_content,
                 remaining_seconds=remaining,
             )
 
-        active_reminders = [r for r in self._reminders if not r.task.done()]
-        self._reminders = active_reminders
+        active_reminders = [r for r in self.reminders if not r.task.done()]
+        self.reminders = active_reminders
         if active_reminders:
             state["pending_reminders"] = [
                 ReminderState(

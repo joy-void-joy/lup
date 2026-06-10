@@ -69,7 +69,7 @@ from lup.paths import (
 logger = logging.getLogger(__name__)
 
 # Type alias for raw session JSON — schema varies by domain
-type SessionData = dict[str, object]
+type SessionData = dict[str, object]  # claude: ignore — domain-defined JSON shape
 
 
 class SessionResult[OutputT: BaseModel](BaseModel):
