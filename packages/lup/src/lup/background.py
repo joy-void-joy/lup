@@ -106,7 +106,7 @@ class BackgroundAgent:
         tools: list[Any],  # claude: ignore
         build_message: Callable[[], str | None],
         start_message: str = "",
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-4-6",
         max_thinking_tokens: int | None = None,
         debounce_seconds: float = 3.0,
         builtin_tools: list[str] | None = None,
