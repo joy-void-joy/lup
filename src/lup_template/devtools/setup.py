@@ -23,12 +23,12 @@ Customization:
 from __future__ import annotations
 
 import shutil
-import subprocess
 import webbrowser
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+import sh
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -113,9 +113,9 @@ def copy_to_clipboard(text: str) -> bool:
     ):
         if shutil.which(cmd[0]):
             try:
-                subprocess.run(cmd, input=text.encode(), check=True)
+                sh.Command(cmd[0])(*cmd[1:], _in=text)
                 return True
-            except subprocess.CalledProcessError:
+            except sh.ErrorReturnCode:
                 continue
     return False
 
