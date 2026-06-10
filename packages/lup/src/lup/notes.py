@@ -24,6 +24,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from lup.paths import (
+    TIMESTAMP_FMT,
     outputs_dir,
     runtime_logs_path,
     sessions_dir,
@@ -95,7 +96,7 @@ def setup_notes(
     Returns:
         NotesConfig with RW and RO directories separated.
     """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime(TIMESTAMP_FMT)
 
     sessions_base = sessions_dir() / type if type else sessions_dir()
     outputs_base = outputs_dir() / type if type else outputs_dir()
