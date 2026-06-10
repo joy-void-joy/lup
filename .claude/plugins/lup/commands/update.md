@@ -37,7 +37,7 @@ Invoke `/lup:commit` to commit any uncommitted work before applying upstream cha
 ### 2. Check for new commits
 
 ```bash
-uv run lup-devtools sync list
+uv run lup-devtools sync status
 ```
 
 If no projects have new commits, report that everything is up to date and stop.

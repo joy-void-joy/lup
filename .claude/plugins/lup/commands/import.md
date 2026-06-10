@@ -34,7 +34,7 @@ Invoke `/lup:commit` to commit any uncommitted work before importing.
 ### 2. Resolve the project
 
 ```bash
-uv run lup-devtools sync list
+uv run lup-devtools sync status
 ```
 
 Verify the project exists and has a local path. If not configured:

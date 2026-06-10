@@ -13,6 +13,21 @@ gh = sh.Command("gh").bake(_tty_out=False)
 uv = sh.Command("uv")
 
 
+def copy_to_clipboard(text: str) -> bool:
+    """Copy text to the system clipboard. Returns True on success."""
+    for command, args in (
+        ("xclip", ["-selection", "clipboard"]),
+        ("xsel", ["--clipboard", "--input"]),
+        ("pbcopy", []),
+    ):
+        try:
+            sh.Command(command)(*args, _in=text)
+            return True
+        except (sh.ErrorReturnCode, sh.CommandNotFound):
+            continue
+    return False
+
+
 def output_json(  # claude: ignore
     data: BaseModel | Mapping[str, object] | Sequence[object],
 ) -> None:

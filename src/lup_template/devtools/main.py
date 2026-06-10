@@ -14,7 +14,7 @@ Examples::
     $ uv run lup-devtools dev worktree create feat-name
     $ uv run lup-devtools dev check --no-test
     $ uv run lup-devtools version
-    $ uv run lup-devtools sync list
+    $ uv run lup-devtools sync status
     $ uv run lup-devtools usage --no-detail
 """
 
