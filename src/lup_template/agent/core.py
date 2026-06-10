@@ -129,6 +129,8 @@ def build_options(
             "append": get_system_prompt(),
         },
         max_thinking_tokens=settings.max_thinking_tokens or (128_000 - 1),
+        max_turns=settings.max_turns,
+        max_budget_usd=settings.max_budget_usd,
         permission_mode="bypassPermissions",
         extra_args={"no-session-persistence": None},
         hooks=hooks,
