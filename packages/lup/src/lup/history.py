@@ -155,15 +155,6 @@ def get_latest_session_json(session_id: str) -> SessionData | None:
     return sessions[-1] if sessions else None
 
 
-def list_all_sessions() -> list[str]:
-    """List all session IDs across all versions.
-
-    Returns:
-        Sorted, deduplicated list of session IDs.
-    """
-    return list_all_session_ids()
-
-
 def update_session_metadata(
     session_id: str,
     *,
@@ -187,7 +178,14 @@ def update_session_metadata(
     if not all_files:
         return False
 
-    latest_file = sorted(all_files)[-1]
+    def file_timestamp(path: Path) -> str:
+        try:
+            data: SessionData = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError, OSError:
+            return ""
+        return str(data.get("timestamp", ""))
+
+    latest_file = max(all_files, key=file_timestamp)
 
     try:
         data: SessionData = json.loads(latest_file.read_text(encoding="utf-8"))

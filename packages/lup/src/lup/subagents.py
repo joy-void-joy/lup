@@ -65,12 +65,19 @@ def create_run_subagent_tool(specs: list[SubagentSpec]) -> LupMcpTool:
             )
 
         backend = model_backend(spec.model)
-        if spec.tools and backend != "anthropic":
-            raise ToolError(
-                f"Subagent {spec.name!r} requires tools {spec.tools}, which "
-                f"one-shot queries on the {backend} backend cannot provide. "
-                "Give the spec a Claude model, or drop its tools."
-            )
+        if backend != "anthropic":
+            claude_only: list[str] = []
+            if spec.tools:
+                claude_only.append(f"tools={spec.tools}")
+            if spec.max_turns is not None:
+                claude_only.append(f"max_turns={spec.max_turns}")
+            if claude_only:
+                fields = ", ".join(claude_only)
+                raise ToolError(
+                    f"Subagent {spec.name!r} sets Claude-only fields ({fields}), "
+                    f"which one-shot queries on the {backend} backend cannot "
+                    "honor. Give the spec a Claude model, or drop these fields."
+                )
 
         logger.info(
             "Delegating to subagent %r (model=%s, backend=%s)",

@@ -35,7 +35,7 @@ from typing import Any, TypedDict, cast, get_type_hints
 
 from mcp.server import Server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -55,52 +55,6 @@ def mcp_response(text: str, *, is_error: bool = False) -> ToolResponse:
     return response
 
 
-def generate_json_schema(
-    input_schema: type | dict[str, type | str],
-) -> dict[str, object]:
-    """Generate JSON Schema from input_schema (TypedDict, BaseModel, or dict).
-
-    Args:
-        input_schema: Either a dict (simple type mapping or full schema),
-                      a TypedDict class, or a Pydantic BaseModel class.
-
-    Returns:
-        A valid JSON Schema dict for MCP tool registration.
-    """
-    if isinstance(input_schema, dict):
-        if "type" in input_schema and "properties" in input_schema:
-            return cast(dict[str, object], input_schema)
-        type_map: dict[type, str] = {
-            str: "string",
-            int: "integer",
-            float: "number",
-            bool: "boolean",
-            list: "array",
-        }
-        properties: dict[str, dict[str, str]] = {}
-        for param_name, param_type in input_schema.items():
-            if isinstance(param_type, type):
-                properties[param_name] = {"type": type_map.get(param_type, "string")}
-            else:
-                properties[param_name] = {"type": str(param_type)}
-        return {
-            "type": "object",
-            "properties": properties,
-            "required": list(properties.keys()),
-        }
-
-    try:
-        adapter = TypeAdapter(input_schema)
-        return cast(dict[str, object], adapter.json_schema())
-    except TypeError as e:
-        logger.warning(
-            "TypeAdapter doesn't support %s: %s. Using empty schema.",
-            input_schema,
-            e,
-        )
-        return {"type": "object", "properties": {}}
-
-
 class CallToolResultWithAlias(CallToolResult):
     """CallToolResult with snake_case alias for SDK compatibility.
 
@@ -115,7 +69,11 @@ class CallToolResultWithAlias(CallToolResult):
         return self.isError
 
 
-type LupToolHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+# MCP hands an arbitrary JSON args object validated by the per-tool BaseModel;
+# the handler returns a ToolResponse-shaped dict the SDK consumes as a plain dict.
+type LupToolHandler = Callable[
+    [dict[str, Any]], Awaitable[dict[str, Any]]
+]  # claude: ignore
 
 
 class LupMcpServerConfig(BaseModel):
@@ -294,7 +252,11 @@ def lup_tool(
 
         final_input: type[BaseModel] = resolved_input
 
-        async def wrapper(args: dict[str, Any]) -> ToolResponse:
+        async def wrapper(
+            args: dict[str, Any],
+        ) -> (
+            ToolResponse
+        ):  # claude: ignore — raw MCP JSON args, validated below by final_input
             start = time.perf_counter()
             is_error = False
             try:
