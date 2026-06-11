@@ -25,6 +25,7 @@ Examples:
 
 import json
 import logging
+import os
 import time
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
@@ -139,14 +140,23 @@ class MetricsCollector:
             self.flush()
 
     def flush(self) -> None:
-        """Write the current summary to ``flush_path``."""
+        """Write the current summary to ``flush_path`` atomically.
+
+        A kill mid-write must not corrupt the snapshot the parent reads,
+        so the summary lands on a temp file in the same directory and is
+        renamed onto the target (``os.replace`` is atomic on POSIX).
+        """
         if self.flush_path is None:
             return
         try:
             self.flush_path.parent.mkdir(parents=True, exist_ok=True)
-            self.flush_path.write_text(
+            tmp_path = self.flush_path.with_suffix(".tmp")
+            tmp_path.write_text(
                 json.dumps(self.get_summary(), indent=2), encoding="utf-8"
             )
+            os.replace(
+                tmp_path, self.flush_path
+            )  # claude: ignore — atomic file rename, not str.replace
         except OSError:
             logger.exception("Failed to flush metrics to %s", self.flush_path)
 

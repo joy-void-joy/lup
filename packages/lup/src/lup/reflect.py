@@ -77,8 +77,8 @@ class ReflectionGate:
             if value:
                 self.flag_path.parent.mkdir(parents=True, exist_ok=True)
                 self.flag_path.touch()
-            elif self.flag_path.exists():
-                self.flag_path.unlink()
+            else:
+                self.flag_path.unlink(missing_ok=True)
 
     def mark_reflected(self) -> None:
         """Record that reflection has occurred."""

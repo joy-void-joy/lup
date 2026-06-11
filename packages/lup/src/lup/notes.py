@@ -12,8 +12,8 @@ Examples:
         >>> notes = setup_notes(session_id="12345", task_id="my-task")
         >>> notes.rw  # Agent can write here
         [PosixPath('.../sessions/12345'), PosixPath('.../outputs/my-task/...')]
-        >>> notes.ro  # Agent can only read here
-        [PosixPath('.../traces')]
+        >>> notes.ro  # Agent can only read here (logs excluded)
+        [PosixPath('.../sessions'), PosixPath('.../outputs')]
 """
 
 from datetime import datetime
@@ -83,5 +83,5 @@ def setup_notes(
         output=output_path,
         trace_log=trace_log,
         rw=[session_path, output_path],
-        ro=[outputs_dir().parent],
+        ro=[sessions_dir(), outputs_dir()],
     )

@@ -38,6 +38,7 @@ Examples:
 import io
 import json
 import logging
+import os
 import tarfile
 import time
 from collections.abc import Generator, Iterator, Sequence
@@ -143,6 +144,56 @@ def decode_output(output: bytes | Iterator[bytes] | None) -> str:
     if isinstance(output, bytes):
         return output.decode("utf-8", errors="replace")
     return b"".join(output).decode("utf-8", errors="replace")
+
+
+def process_start_token(pid: int) -> str | None:
+    """Return a stable creation-time token for ``pid``, or None if unknown.
+
+    Distinguishes a live owner from a reused PID: two processes that
+    happen to share a PID number across time get different tokens. On
+    Linux this is the ``starttime`` field of ``/proc/<pid>/stat`` (clock
+    ticks since boot); elsewhere there is no portable stdlib source, so
+    callers fall back to a liveness-only signal.
+    """
+    stat_path = Path(f"/proc/{pid}/stat")
+    try:
+        raw = stat_path.read_text(encoding="utf-8")
+    except FileNotFoundError, ProcessLookupError, PermissionError, OSError:
+        return None
+    # Fields: "pid (comm) state ppid ...". comm may contain spaces and
+    # parentheses, so split on the final ')' — every later field is a
+    # plain space-separated token. starttime is field 22 (1-indexed),
+    # i.e. index 19 of the post-comm remainder (which begins at field 3).
+    rest = raw.rpartition(")")[
+        2
+    ].split()  # claude: ignore — /proc stat is whitespace-delimited, no stdlib parser
+    if len(rest) < 20:
+        return None
+    return rest[19]
+
+
+def process_is_alive(pid: int, start_token: str | None) -> bool:
+    """Whether the process that created a container is still running.
+
+    ``start_token`` guards against PID reuse: when present it must match
+    the live process's current token, otherwise the original owner is
+    gone and a new process merely inherited its PID number.
+    """
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Alive but owned by another user — treat as live.
+        return True
+    except OSError:
+        return False
+    if start_token is None:
+        return True
+    current = process_start_token(pid)
+    return current is None or current == start_token
 
 
 # --- Sandbox class ---
@@ -304,7 +355,12 @@ class ReplSession:
         request = json.dumps({"code": code, "timeout": timeout_seconds}) + "\n"
         self.send(request.encode("utf-8"))
 
-        deadline = time.monotonic() + timeout_seconds + 5
+        # timeout_seconds == 0 means "no timeout" — the in-container side
+        # disables its alarm, so the parent must wait indefinitely too,
+        # otherwise a finite deadline expires and restarts the REPL.
+        deadline = (
+            None if timeout_seconds == 0 else time.monotonic() + timeout_seconds + 5
+        )
         try:
             response = self.recv_response(deadline)
         except (SocketError, OSError) as e:
@@ -333,14 +389,21 @@ class ReplSession:
         except (BrokenPipeError, OSError) as e:
             raise ReplCrashedError(f"REPL write failed: {e}") from e
 
-    def recv_response(self, deadline: float) -> dict[str, int | str]:
-        """Read Docker multiplex frames until a complete JSON line arrives."""
+    def recv_response(self, deadline: float | None) -> dict[str, int | str]:
+        """Read Docker multiplex frames until a complete JSON line arrives.
+
+        ``deadline`` of None means no timeout (blocking reads), matching a
+        request with ``timeout_seconds == 0``.
+        """
         stdout_buf = b""
         while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise ReplCrashedError("Timed out waiting for REPL response")
-            self.set_socket_timeout(remaining)
+            if deadline is None:
+                self.set_socket_timeout(None)
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ReplCrashedError("Timed out waiting for REPL response")
+                self.set_socket_timeout(remaining)
 
             stream_type, size = next_frame_header(self.sock)
             if size < 0:
@@ -364,8 +427,8 @@ class ReplSession:
                         "REPL stderr: %s", data.decode("utf-8", errors="replace")
                     )
 
-    def set_socket_timeout(self, timeout: float) -> None:
-        """Set timeout on the underlying socket."""
+    def set_socket_timeout(self, timeout: float | None) -> None:
+        """Set timeout on the underlying socket (None blocks indefinitely)."""
         sock = self.sock
         for candidate in [sock, getattr(sock, "_sock", None)]:
             if hasattr(candidate, "settimeout"):
@@ -429,6 +492,8 @@ class Sandbox:
     SANDBOX_LABEL = "lup.sandbox"
     CREATED_AT_LABEL = "lup.sandbox.created_at"
     VOLUME_LABEL = "lup.sandbox.volume"
+    OWNER_PID_LABEL = "lup.sandbox.owner_pid"
+    OWNER_START_LABEL = "lup.sandbox.owner_start"
     STALE_AGE_HOURS = 24.0
 
     def remove_stale_container(self) -> None:
@@ -442,19 +507,40 @@ class Sandbox:
         except NotFound:
             pass
 
+    def container_is_orphaned(self, labels: dict[str, str]) -> bool:
+        """Decide whether a labelled container belongs to a dead owner.
+
+        Liveness is owner-driven: a container whose creating process is
+        still running is kept even past ``STALE_AGE_HOURS`` — this
+        library's persistent/relay agents are meant to run indefinitely.
+        Only when the owner-pid label is missing (older containers, or
+        ones created elsewhere) do we fall back to the age heuristic.
+        """
+        owner_pid_raw = labels.get(self.OWNER_PID_LABEL)
+        if owner_pid_raw is not None:
+            try:
+                owner_pid = int(owner_pid_raw)
+            except ValueError:
+                return True
+            return not process_is_alive(owner_pid, labels.get(self.OWNER_START_LABEL))
+        try:
+            created_at = float(labels.get(self.CREATED_AT_LABEL, "0"))
+        except ValueError:
+            created_at = 0.0
+        return created_at <= time.time() - self.STALE_AGE_HOURS * 3600
+
     def sweep_orphaned_containers(self) -> None:
-        """Remove lup sandbox containers orphaned by killed processes.
+        """Remove lup sandbox containers whose creating process is gone.
 
         A SIGKILLed owner leaves its uniquely-named container running
         forever (``remove_stale_container`` only matches this session's
-        name). Every lup sandbox carries its creation time and volume
-        name as labels; any labelled container older than
-        ``STALE_AGE_HOURS`` cannot belong to a live session and is
-        removed together with its volume.
+        name). Every lup sandbox is labelled with its owner's PID and
+        start token; a container is swept (with its volume) only when
+        that owner process is no longer alive, so a long-lived persistent
+        session is never destroyed out from under itself.
         """
         if self.docker_client is None:
             return
-        cutoff = time.time() - self.STALE_AGE_HOURS * 3600
         try:
             candidates = self.docker_client.containers.list(
                 all=True, filters={"label": self.SANDBOX_LABEL}
@@ -466,11 +552,7 @@ class Sandbox:
             if container.name == self.container_name:
                 continue
             labels = container.labels or {}
-            try:
-                created_at = float(labels.get(self.CREATED_AT_LABEL, "0"))
-            except ValueError:
-                created_at = 0.0
-            if created_at > cutoff:
+            if not self.container_is_orphaned(labels):
                 continue
             logger.warning("Removing orphaned sandbox container: %s", container.name)
             try:
@@ -535,7 +617,16 @@ class Sandbox:
         stale container with the same name first.
         """
         self.docker_client = docker.from_env()
+        try:
+            self.start_container()
+        except APIError, DockerException, OSError, RuntimeError:
+            self.stop()
+            raise
 
+    def start_container(self) -> None:
+        """Create the container and bring up the REPL (assumes a client)."""
+        if self.docker_client is None:
+            raise SandboxNotInitializedError("Docker client not created")
         self.remove_stale_container()
         self.sweep_orphaned_containers()
 
@@ -563,6 +654,8 @@ class Sandbox:
                 self.SANDBOX_LABEL: "1",
                 self.CREATED_AT_LABEL: str(time.time()),
                 self.VOLUME_LABEL: self.volume_name,
+                self.OWNER_PID_LABEL: str(os.getpid()),
+                self.OWNER_START_LABEL: process_start_token(os.getpid()) or "",
             },
         )
 
@@ -584,7 +677,9 @@ class Sandbox:
             self.repl = None
         logger.info("Destroying sandbox container")
         self.destroy_container()
-        self.docker_client = None
+        if self.docker_client is not None:
+            self.docker_client.close()
+            self.docker_client = None
 
     def ensure_started(self) -> None:
         """Start the sandbox if it isn't running (lazy initialization).
@@ -780,11 +875,14 @@ def sandbox_cleanup(session_id: str, shared_dir: Path) -> Generator[None]:
         yield
     finally:
         sandbox = Sandbox(session_id=session_id, shared_dir=shared_dir)
+        client = docker.from_env()
+        sandbox.docker_client = client
         try:
-            sandbox.docker_client = docker.from_env()
             sandbox.remove_stale_container()
-            sandbox.docker_client.volumes.get(sandbox.volume_name).remove()
+            client.volumes.get(sandbox.volume_name).remove()
         except NotFound:
             pass
         except (APIError, DockerException) as e:
             logger.warning("Post-session sandbox cleanup failed: %s", e)
+        finally:
+            client.close()

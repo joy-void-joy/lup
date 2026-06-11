@@ -24,6 +24,7 @@ Examples:
 
 import asyncio
 import time
+import weakref
 from types import TracebackType
 
 
@@ -50,30 +51,39 @@ class Throttle:
     """
 
     def __init__(self, max_concurrent: int, min_interval: float = 0.0) -> None:
-        self._max_concurrent = max_concurrent
-        self._min_interval = min_interval
-        self._state: dict[int, LoopState] = {}
+        self.max_concurrent = max_concurrent
+        self.min_interval = min_interval
+        self.loop_states: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, LoopState
+        ] = weakref.WeakKeyDictionary()
 
     def get_state(self) -> LoopState:
         loop = asyncio.get_running_loop()
-        loop_id = id(loop)
-        if loop_id not in self._state:
-            self._state[loop_id] = LoopState(
-                asyncio.Semaphore(self._max_concurrent),
-            )
-        return self._state[loop_id]
+        state = self.loop_states.get(loop)
+        if state is None:
+            state = LoopState(asyncio.Semaphore(self.max_concurrent))
+            self.loop_states[loop] = state
+        return state
 
     async def __aenter__(self) -> None:
         state = self.get_state()
         await state.semaphore.acquire()
-        if self._min_interval > 0:
+        if self.min_interval <= 0:
+            return
+        # The permit is held; an interval wait can be cancelled at the
+        # sleep below, and a cancelled __aenter__ never reaches __aexit__.
+        # Release here on any propagating exception so the permit can't leak.
+        try:
             async with state.lock:
                 if state.last_request_time > 0:
                     elapsed = time.monotonic() - state.last_request_time
-                    remaining = self._min_interval - elapsed
+                    remaining = self.min_interval - elapsed
                     if remaining > 0:
                         await asyncio.sleep(remaining)
                 state.last_request_time = time.monotonic()
+        except BaseException:
+            state.semaphore.release()
+            raise
 
     async def __aexit__(
         self,
