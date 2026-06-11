@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -439,11 +440,13 @@ class CodexConversation(Conversation):
 
         self.check_budget()
         effort = ReasoningEffort(self.effort) if self.effort else None
+        started = time.perf_counter()
         result = await self.thread.run(
             prompt,
             effort=effort,
             output_schema=cast("JsonObject | None", self.output_schema),
         )
+        elapsed_ms = (time.perf_counter() - started) * 1000
         response = build_lup_response(
             result,
             output_schema=self.output_schema,
@@ -453,8 +456,12 @@ class CodexConversation(Conversation):
             usage_normalizer=self.usage_normalizer,
         )
         self.record_turn_usage(result.usage)
-        if response.result is not None and self.cost_usd is not None:
-            response.result.total_cost_usd = self.cost_usd
+        if response.result is not None:
+            # Wall-clock turn time, including MCP subprocess work — the
+            # Codex SDK reports token usage but no duration of its own.
+            response.result.duration_ms = elapsed_ms
+            if self.cost_usd is not None:
+                response.result.total_cost_usd = self.cost_usd
         return response
 
 
@@ -511,7 +518,7 @@ class CodexAdapter(AgentAdapter):
             interrupt=False,
             stop_event=False,
             cost_reporting="rates" if self.usage_cost is not None else "none",
-            duration_reporting=False,
+            duration_reporting=True,
             permission_modes=False,
             max_turns=False,
             max_thinking_tokens=False,

@@ -83,6 +83,11 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     agent_version: str = Field(
         default="", description="Agent version that produced this result"
     )
+    agent_sdk: str | None = Field(
+        default=None,
+        description="Backend that ran the session (claude/codex/openai); "
+        "None on results predating the stamp",
+    )
     timestamp: str
     output: OutputT
     reasoning: str = Field(default="", description="Raw reasoning text")
@@ -114,6 +119,25 @@ def save_session(result: BaseModel, *, session_id: str) -> Path:
     logger.info("Saved session %s to %s", session_id, filepath)
 
     return filepath
+
+
+def session_backend(session_dir: Path) -> str | None:
+    """Read the ``agent_sdk`` stamp from a session dir's newest result JSON.
+
+    Returns None when no result JSON exists or none carries the stamp
+    (sessions predating it) — display code renders that as unknown
+    rather than guessing a backend.
+    """
+    for filepath in sorted(session_dir.glob("*.json"), reverse=True):
+        try:
+            data = json.loads(filepath.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(data, dict):
+            sdk = data.get("agent_sdk")
+            if isinstance(sdk, str):
+                return sdk
+    return None
 
 
 def load_sessions_json(session_id: str) -> list[SessionData]:

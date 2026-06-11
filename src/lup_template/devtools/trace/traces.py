@@ -20,7 +20,7 @@ from typing import TypedDict
 
 import typer
 
-from lup.history import iter_session_dirs, iter_trace_log_files
+from lup.history import iter_session_dirs, iter_trace_log_files, session_backend
 from lup.paths import traces_path
 
 from lup_template.devtools.utils import output_json
@@ -50,6 +50,7 @@ class SearchMatch(TypedDict):
 class TraceEntry(TypedDict):
     session_id: str
     source: str
+    backend: str | None
     files: int
     size_kb: float
 
@@ -438,6 +439,7 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
             {
                 "session_id": session_id,
                 "source": source,
+                "backend": session_backend(path),
                 "files": len(files),
                 "size_kb": round(size / 1024, 1),
             }
@@ -449,8 +451,10 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
 
     typer.echo(f"\n=== Available Traces ({len(unique)} total) ===\n")
     for e in entries:
+        backend = e["backend"] or "—"
         typer.echo(
-            f"{e['session_id']} ({e['source']}): {e['files']} files, {e['size_kb']}KB"
+            f"{e['session_id']} ({e['source']}, {backend}): "
+            f"{e['files']} files, {e['size_kb']}KB"
         )
 
 
