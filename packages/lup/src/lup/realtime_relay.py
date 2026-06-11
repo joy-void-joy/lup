@@ -51,7 +51,6 @@ import asyncio
 import logging
 import os
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -228,8 +227,16 @@ class RealtimeMailbox:
 
     # -- parent side -----------------------------------------------------
 
-    def read_new_events(self) -> list[RelayEvent]:
-        """Return events appended since the last read (complete lines only)."""
+    def peek_new_events(self) -> list[tuple[RelayEvent, int]]:
+        """Parse new events without advancing past un-applied ones.
+
+        Returns ``(event, commit_offset)`` pairs in file order. Applying
+        an event and then setting :attr:`read_offset` to its
+        ``commit_offset`` consumes exactly that event (and any malformed
+        or blank lines preceding it); the final pair's offset covers the
+        whole complete region. The caller commits per event so a crash or
+        cancellation between events never drops an un-applied one.
+        """
         if not self.actions_path.exists():
             return []
         with self.actions_path.open("rb") as f:
@@ -238,17 +245,31 @@ class RealtimeMailbox:
         end = data.rfind(b"\n")
         if end < 0:
             return []
-        self.read_offset += end + 1
+        region = data[: end + 1]
+        region_end = self.read_offset + len(region)
 
-        events: list[RelayEvent] = []
-        for line in data[:end].split(b"\n"):
-            if not line.strip():
+        pairs: list[tuple[RelayEvent, int]] = []
+        consumed = self.read_offset
+        for raw_line in region.splitlines(keepends=True):
+            consumed += len(raw_line)
+            line = raw_line.strip()
+            if not line:
                 continue
             try:
-                events.append(RELAY_EVENT_ADAPTER.validate_json(line))
+                pairs.append((RELAY_EVENT_ADAPTER.validate_json(line), consumed))
             except ValidationError:
                 logger.exception("Skipping malformed relay event: %r", line)
-        return events
+        if pairs:
+            event, _ = pairs[-1]
+            pairs[-1] = (event, region_end)
+        return pairs
+
+    def read_new_events(self) -> list[RelayEvent]:
+        """Return events appended since the last read (complete lines only)."""
+        pairs = self.peek_new_events()
+        if pairs:
+            self.read_offset = pairs[-1][1]
+        return [event for event, _ in pairs]
 
     def consume_sleep_request(self) -> SleepInput | None:
         """Read and remove the sleep request, or None when the agent didn't sleep."""
@@ -268,7 +289,25 @@ class RealtimeMailbox:
         self.root.mkdir(parents=True, exist_ok=True)
         tmp_path = self.state_path.with_suffix(".tmp")
         tmp_path.write_text(state.model_dump_json(), encoding="utf-8")
-        os.replace(tmp_path, self.state_path)
+        os.replace(
+            tmp_path, self.state_path
+        )  # claude: ignore — atomic file rename, not str.replace
+
+    def reset_for_new_run(self) -> None:
+        """Clear leftover protocol files so a fresh run starts clean.
+
+        Re-running the same ``session_id`` (crash recovery or an
+        intentional resume) must not replay the previous run's events: a
+        leftover ``actions.jsonl`` would be consumed from offset 0, and a
+        stale ``sleep_request.json`` or ``meta_flag`` would mis-drive the
+        first turn. Truncating here is safe — the within-run protocol
+        appends and offset-tracks only after this point.
+        """
+        self.read_offset = 0
+        if self.actions_path.exists():
+            self.actions_path.write_text("", encoding="utf-8")
+        self.sleep_request_path.unlink(missing_ok=True)
+        self.meta_flag_path.unlink(missing_ok=True)
 
 
 # =====================================================================
@@ -535,6 +574,7 @@ async def run_relay_session(
     Returns:
         The number of completed turns.
     """
+    mailbox.reset_for_new_run()
     gate = ReflectionGate(flag_path=mailbox.meta_flag_path)
     builder = build_wake_message or default_wake_message
     message = initial_prompt
@@ -542,29 +582,38 @@ async def run_relay_session(
     missing_sleep = 0
 
     async def apply_new_events() -> None:
-        for event in mailbox.read_new_events():
+        # Commit the read offset per event, only after it is fully
+        # applied — a cancellation or a raising handler then leaves the
+        # offset on the first un-applied event, so the next poll redelivers
+        # it. No agent event (the user-facing replies) is ever dropped.
+        for event, commit_offset in mailbox.peek_new_events():
             await apply_relay_event(
                 event, scheduler=scheduler, trace_logger=trace_logger
             )
             if on_event is not None:
                 await on_event(event)
+            mailbox.read_offset = commit_offset
 
     async def watch_mailbox() -> None:
-        while True:
+        while not stop_watching.is_set():
             await apply_new_events()
-            await asyncio.sleep(poll_interval_seconds)
+            try:
+                await asyncio.wait_for(stop_watching.wait(), poll_interval_seconds)
+            except TimeoutError:
+                pass
+        await apply_new_events()
 
     while should_continue is None or should_continue():
         if build_state is not None:
             mailbox.write_state(build_state())
 
+        stop_watching = asyncio.Event()
         watcher = asyncio.create_task(watch_mailbox())
         try:
             await conversation.send(message, trace_logger=trace_logger)
         finally:
-            watcher.cancel()
-            with suppress(asyncio.CancelledError):
-                await watcher
+            stop_watching.set()
+            await watcher
         await apply_new_events()
         turns += 1
 
