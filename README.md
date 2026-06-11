@@ -55,7 +55,7 @@ uv run lup loop "task1" "task2"            # batch with auto-commit
 AGENT_SDK=codex AGENT_MODEL=gpt-5.5 uv run lup run "same task, Codex backend"
 ```
 
-The agent runs on the Claude Agent SDK by default; setting `AGENT_SDK=codex` (or `openai` for any OpenAI-compatible endpoint) runs the same agent — same tools, reflection gate, structured output — on the Codex runtime.
+The agent runs on the Claude Agent SDK by default; setting `AGENT_SDK=codex` (or `openai` for any OpenAI-compatible endpoint) runs the same agent — same tools, reflection gate, structured output — on the Codex runtime. Budget caps and persistent (sleep/wake) mode work on every backend too: `AGENT_MAX_BUDGET_USD` on codex/openai needs `CODEX_USD_PER_MTOK_*` rates in `.env` (the Codex SDK reports tokens, not cost), and persistent mode runs in-process on Claude or through the file relay (`lup.realtime_relay`) on the Codex runtime.
 
 The intended workflow while using this repository is to:
 

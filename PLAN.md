@@ -14,7 +14,7 @@ This plan supersedes the previous SDK-interop status document. That document mar
 4. **State crosses process boundaries via filesystem + env.** One convention everywhere: session context enters subprocesses through env vars; mutable state (gate flag, output, metrics) relays through files in the session directory.
 5. **One MCP server name on all backends: `notes`.** Tool names like `mcp__notes__submit_output` must be identical on every path, or gates and prompts diverge again.
 6. **Subagent spec is shared; implementation is per-adapter.** Claude keeps native `AgentDefinition` subagents. Codex gets a served `run_subagent` tool that dispatches `query()` from the same `SubagentSpec` list.
-7. **Persistent/realtime mode stays Claude-only in this refactor.** The sleep/wake tools require tool→parent IPC on Codex (different problem class). Deferred with a design sketch — see Deferred Work.
+7. **Persistent/realtime mode stays Claude-only in this refactor.** The sleep/wake tools require tool→parent IPC on Codex (different problem class). Deferred with a design sketch — built after Phases 2–5 proved the relay pattern, exactly as the sketch prescribed (Phase 9).
 8. **Phase 0 (devtools regressions, CI) ships independently off `dev`** — it is unrelated to interop and unblocks everything else.
 
 ## Current State
@@ -31,16 +31,16 @@ This plan supersedes the previous SDK-interop status document. That document mar
 
 ### Wired but dead at planning time (all fixed by the phases below)
 
-- [ ] `serve-tools` serves only `EXAMPLE_TOOLS` — reflect/realtime/sandbox tools never reach Codex (`devtools/agent.py: collect_tools_by_server`)
-- [ ] Gate guards `"StructuredOutput"`, which doesn't exist as a tool on Codex; nothing can set the flag file (`core.py: build_codex_adapter`)
-- [ ] Generated permission scripts match Claude tool names (`Write`/`Edit`/`Read`/`Glob`/`Grep`) — unverified against real Codex hook events (`adapters/codex_hooks.py`)
-- [ ] Subagents on Codex are a system-prompt section with no invocation mechanism (`core.py: format_subagent_prompt_section`)
-- [ ] Sandbox constructed only on the Claude path (`core.py: build_adapter`)
-- [ ] `settings.max_turns` / `settings.max_budget_usd` never wired into `build_options`; `query()` silently drops options on non-Claude backends; background factory silently drops `tools` on Codex
-- [ ] `lup/__init__.py` eagerly imports `adapters.claude_client`; exports retired `ResponseCollector` alongside its replacement
-- [ ] `core.py` writes traces to `notes/traces/<session_id>/` bypassing the versioned `lup.paths` layout
-- [ ] Devtools: `version` sub-app crashes (`click.get_current_context()`), `usage` hangs in non-TTY, `ruff format` failing on 24 files, no CI
-- [ ] Docs: README unfinished, CLAUDE.md structure stale, 11 `lup.lib` docstring refs, PATTERNS.md references `lup.client`
+- [x] `serve-tools` serves only `EXAMPLE_TOOLS` — reflect/realtime/sandbox tools never reach Codex (`devtools/agent.py: collect_tools_by_server`) — fixed in Phases 2/5/9
+- [x] Gate guards `"StructuredOutput"`, which doesn't exist as a tool on Codex; nothing can set the flag file (`core.py: build_codex_adapter`) — fixed in Phase 2
+- [x] Generated permission scripts match Claude tool names (`Write`/`Edit`/`Read`/`Glob`/`Grep`) — unverified against real Codex hook events (`adapters/codex_hooks.py`) — resolved in Phase 3 (hooks unusable; native sandbox + in-tool gate)
+- [x] Subagents on Codex are a system-prompt section with no invocation mechanism (`core.py: format_subagent_prompt_section`) — fixed in Phase 4
+- [x] Sandbox constructed only on the Claude path (`core.py: build_adapter`) — fixed in Phase 5
+- [x] `settings.max_turns` / `settings.max_budget_usd` never wired into `build_options`; `query()` silently drops options on non-Claude backends; background factory silently drops `tools` on Codex — fixed in Phases 4/6 (budget on Codex in Phase 9)
+- [x] `lup/__init__.py` eagerly imports `adapters.claude_client`; exports retired `ResponseCollector` alongside its replacement — fixed in Phase 6
+- [x] `core.py` writes traces to `notes/traces/<session_id>/` bypassing the versioned `lup.paths` layout — fixed in Phase 6
+- [x] Devtools: `version` sub-app crashes (`click.get_current_context()`), `usage` hangs in non-TTY, `ruff format` failing on 24 files, no CI — fixed in Phase 0 (CI deferred at user request)
+- [x] Docs: README unfinished, CLAUDE.md structure stale, 11 `lup.lib` docstring refs, PATTERNS.md references `lup.client` — fixed in Phase 8
 
 ## Target Architecture
 
@@ -170,13 +170,21 @@ This plan supersedes the previous SDK-interop status document. That document mar
 - [x] All `lup.lib` docstring references fixed; phantom `codex_query` replaced with the real `create_run_subagent_tool` mechanism; CLI docstring module paths corrected
 - [x] Checkboxes kept current as phases landed
 
+## Phase 9 — Deferred work follow-through
+
+- [x] Budget enforcement on Codex: `CodexConversation` accumulates per-turn token usage; a caller-supplied `usage_cost` estimator (template builds one from `CODEX_USD_PER_MTOK_INPUT`/`_OUTPUT`/`_CACHED_INPUT`) turns it into USD, stamped into `total_cost_usd` on every turn; the turn after the budget is crossed raises `BudgetExceededError`. A budget without rates fails loudly. Enforcement is between turns — a Codex turn is atomic from the caller's side, so `query()` one-shots still reject `max_budget_usd`.
+- [x] Persistent/realtime mode on Codex (`lup/realtime_relay.py`): the parent keeps the `Scheduler` and wake loop (`run_relay_session`); each cycle is one turn on the same thread. Served `session` tools (reply, sleep, context, meta, debounce, remind, schedule_action — same `mcp__session__*` names as the Claude wiring) relay through `session_dir/realtime/`: events JSONL applied mid-turn by a parent-side watcher, sleep request consumed at turn end, state snapshot for context reads, file-backed meta gate. Meta-before-sleep and unread-events guards are enforced in-handler (no hooks); bounded corrective turns replace the Stop hook. `build_codex_realtime_adapter` + `LUP_REALTIME_DIR` wire it per session.
+- [x] Codex `dynamicTools` probe: still blocked upstream — the pinned SDK defines `DynamicToolSpec` wire types but no thread/turn param accepts them, and the client routes only responses and notifications (no server→client request channel for tool dispatch). Stays deferred.
+
+**Verified:** budget accounting and refusal pinned by unit tests (fake thread, real SDK usage models); relay round-tripped twice — in-process (mailbox/tools/loop unit suite) and through the real serve-tools subprocess (`tests/integration/test_serve_tools.py::test_serve_tools_realtime_session_group`). **Live on gpt-5.5:** a two-cycle persistent session — agent read context, replied through the relay (delivered mid-turn by the parent), recorded meta, slept; woken by a simulated user message and completed the second cycle the same way.
+
 ---
 
 ## Deferred Work (explicit, with design notes)
 
-- **Persistent/realtime mode on Codex.** Sketch: parent process keeps `Scheduler` and the wake loop; each cycle is `thread/resume` with a built message; sleep/reply tools are served tools that write a mailbox file (`session_dir/realtime/`) the parent polls/watches between turns. Requires no Codex hooks. Build only after Phases 2–5 prove the relay pattern.
-- **Codex `dynamicTools` migration.** When the Python SDK exposes in-process tool handlers over JSON-RPC, swap serve-tools for direct registration behind the same `collect_tools_by_server(context)` seam. The env contract remains the test harness.
-- **Budget enforcement on Codex.** Needs per-turn usage accumulation in `CodexConversation`; until then, setting a budget on Codex raises.
+- **CI workflow** — deferred at user request (no GitHub workflow for now); `uv run lup-devtools dev check` is the gate.
+- **Codex `dynamicTools` migration.** When the Python SDK exposes in-process tool handlers over JSON-RPC, swap serve-tools for direct registration behind the same `collect_tools_by_server(context)` seam. The env contract remains the test harness. Probed at the current pin (Phase 9): `DynamicToolSpec` exists in the generated wire types only — no client-side registration parameter, no server→client request routing — so the migration remains blocked upstream.
+- **Mid-turn budget interruption on Codex.** Phase 9 enforces budgets between turns. Bounding a single turn would take the notification stream (`ThreadTokenUsageUpdatedNotification`) plus `AsyncTurnHandle.interrupt()`, at the cost of reimplementing the SDK's private turn-result collector; revisit if one-shot budget caps become a real need.
 
 ## Risks
 
@@ -217,3 +225,5 @@ This plan supersedes the previous SDK-interop status document. That document mar
 5. `core.py` imports `claude_agent_sdk` only under `TYPE_CHECKING` or inside the Claude-path builder (module loads without any SDK); `grep -rn "lup\.lib" src/ packages/` — empty
 6. Fresh venv: `import lup` succeeds without SDK extras
 7. `uv run lup-devtools version && uv run lup-devtools usage` — exit cleanly
+8. `uv run pytest tests/integration/test_serve_tools.py -m integration` — one-shot and realtime session groups round-trip through the real subprocess
+9. Budget: `AGENT_MAX_BUDGET_USD` enforced on every backend (Claude natively; codex/openai between turns via `CODEX_USD_PER_MTOK_*` rates, raising without them)
