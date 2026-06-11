@@ -192,42 +192,14 @@ def collect_tools_by_server(
     by the Codex/OpenAI adapters via env vars), the session-bound
     reflect and submit_output tools are constructed and served too.
     """
-    servers: dict[str, list[LupMcpTool]] = {
-        "example": list(EXAMPLE_TOOLS),
-    }
     if context is None:
-        return servers
+        return {"example": list(EXAMPLE_TOOLS)}
 
-    from lup.output import create_output_tool
     from lup.reflect import ReflectionGate
-    from lup.subagents import create_run_subagent_tool
 
-    from lup_template.agent.tools.reflect import create_reflect_tools
+    from lup_template.agent.toolsets import build_session_toolset
 
-    gate = ReflectionGate(flag_path=context.gate_flag)
-    reflect_kit = create_reflect_tools(
-        session_dir=context.session_dir,
-        outputs_dir=context.outputs_dir,
-        gate=gate,
-    )
-    output_kit = create_output_tool(
-        AgentOutput,
-        session_dir=context.session_dir,
-        gate=gate,
-        reflection_tool_name="mcp__notes__review",
-    )
-    subagent_tool = create_run_subagent_tool(get_subagent_specs())
-    servers["notes"] = [
-        *reflect_kit["tools"],
-        *output_kit["tools"],
-        subagent_tool,
-    ]
-
-    if context.realtime_dir is not None:
-        from lup.realtime_relay import create_realtime_relay_tools
-
-        servers["session"] = create_realtime_relay_tools(context.realtime_dir)
-
+    sandbox = None
     if context.session_id:
         from lup.sandbox import Sandbox
 
@@ -236,9 +208,16 @@ def collect_tools_by_server(
             shared_dir=context.session_dir / "sandbox_shared",
         )
         atexit.register(sandbox.stop)
-        servers["sandbox"] = sandbox.create_tools()
 
-    return servers
+    toolset = build_session_toolset(
+        session_dir=context.session_dir,
+        outputs_dir=context.outputs_dir,
+        gate=ReflectionGate(flag_path=context.gate_flag),
+        include_subagent_tool=True,
+        sandbox=sandbox,
+        realtime_dir=context.realtime_dir,
+    )
+    return toolset["groups"]
 
 
 def collect_dynamic_tool_names() -> dict[str, list[str]]:
