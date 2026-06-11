@@ -23,7 +23,7 @@ This plan supersedes the previous SDK-interop status document. That document mar
 
 - [x] `lup/types.py` type layer (blocks, messages, response, hooks, `SubagentSpec`)
 - [x] `AgentAdapter` / `Conversation` ABCs; Claude adapter + converters (tested)
-- [x] Codex adapter basics: prompt → run → collect, `resume()`, `fork()`, config-override assembly
+- [x] Codex adapter basics: prompt → run → collect, config-override assembly (thread `resume()`/`fork()` shipped here, later removed unused — see Deferred Work)
 - [x] OpenAI-compatible adapter (Codex runtime + `model_provider`)
 - [x] `core.py` dispatch with zero `claude_agent_sdk` imports
 - [x] File-backed `ReflectionGate`; Codex hook **script generation** (generation only)
@@ -185,6 +185,7 @@ This plan supersedes the previous SDK-interop status document. That document mar
 - **CI workflow** — deferred at user request (no GitHub workflow for now); `uv run lup-devtools dev check` is the gate.
 - **Codex `dynamicTools` migration.** When the Python SDK exposes in-process tool handlers over JSON-RPC, swap serve-tools for direct registration behind the same `collect_tools_by_server(context)` seam. The env contract remains the test harness. Probed at the current pin (Phase 9): `DynamicToolSpec` exists in the generated wire types only — no client-side registration parameter, no server→client request routing — so the migration remains blocked upstream.
 - **Mid-turn budget interruption on Codex.** Phase 9 enforces budgets between turns. Bounding a single turn would take the notification stream (`ThreadTokenUsageUpdatedNotification`) plus `AsyncTurnHandle.interrupt()`, at the cost of reimplementing the SDK's private turn-result collector; revisit if one-shot budget caps become a real need.
+- **Codex thread resume/fork.** Implementations shipped with the adapter but nothing ever called them, and the Claude path runs `no-session-persistence`, so a portable contract was impossible — removed with the capabilities pass. Recover from git history if persistent-session crash recovery becomes real; the relay keeps one thread open, so resume-by-id is the natural recovery point.
 
 ## Risks
 
