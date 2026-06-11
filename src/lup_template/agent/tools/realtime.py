@@ -28,16 +28,26 @@ import logging
 from collections.abc import Callable
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.background import BaseBackgroundAgent, create_background_agent
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime import (
+    ContextInput,
+    ContextOutput,
     DebounceInput,
+    DebounceOutput,
+    MetaInput,
+    MetaOutput,
     RemindInput,
+    RemindOutput,
+    ReplyInput,
+    ReplyOutput,
     ScheduleActionInput,
+    ScheduleActionOutput,
     Scheduler,
     SleepInput,
+    SleepOutput,
 )
 from lup.trace import TraceLogger
 
@@ -47,44 +57,6 @@ logger = logging.getLogger(__name__)
 # =====================================================================
 # Additional input models (domain-specific, customize these)
 # =====================================================================
-
-
-class ReplyMessageItem(BaseModel):
-    """A single message in a reply batch."""
-
-    message: str = Field(description="The message content.")
-    delay_seconds: int = Field(
-        default=0,
-        description="Cumulative delay before sending (0 = immediate).",
-    )
-
-
-class ReplyInput(BaseModel):
-    """Input for the reply tool."""
-
-    messages: list[ReplyMessageItem] = Field(
-        description="Messages to send, with optional staggered delays."
-    )
-
-
-class ContextInput(BaseModel):
-    """Input for the context tool."""
-
-    last_events: int = Field(
-        default=5,
-        description="Number of recent read events to include (0 = unread only).",
-    )
-
-
-class MetaInput(BaseModel):
-    """Input for the meta tool."""
-
-    thought: str = Field(
-        description=(
-            "Process self-assessment: pacing, timing, what worked, "
-            "what you'd change. Required before sleep."
-        )
-    )
 
 
 class NotesInput(BaseModel):
@@ -111,47 +83,6 @@ class IdeasInput(BaseModel):
 # =====================================================================
 
 
-class ReplyOutput(BaseModel):
-    """Output for the reply tool."""
-
-    sent: int
-    scheduled: int
-
-
-class ScheduleActionOutput(BaseModel):
-    """Output for the schedule_action tool."""
-
-    delay_seconds: int
-
-
-class DebounceOutput(BaseModel):
-    """Output for the debounce tool."""
-
-    initial_seconds: int
-    quiet_seconds: int
-
-
-class SleepOutput(BaseModel):
-    """Output for the sleep tool."""
-
-    reason: str = Field(default="timer")
-    time: str = Field(default="")
-    fired_reminders: list[str] = Field(default_factory=list)
-
-
-class RemindOutput(BaseModel):
-    """Output for the remind tool."""
-
-    label: str
-    delay_seconds: int
-
-
-class ContextOutput(BaseModel):
-    """Output for the context tool. Accepts domain-specific fields."""
-
-    model_config = ConfigDict(extra="allow")
-
-
 class NotesOutput(BaseModel):
     """Output for the notes tool."""
 
@@ -163,12 +94,6 @@ class IdeasOutput(BaseModel):
 
     message: str
     ideas: list[str] = Field(default_factory=list)
-
-
-class MetaOutput(BaseModel):
-    """Output for the meta tool."""
-
-    status: str = Field(default="recorded")
 
 
 class ObserverNotesOutput(BaseModel):
