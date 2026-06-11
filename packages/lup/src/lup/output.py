@@ -36,17 +36,27 @@ Examples:
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict
 
 from pydantic import BaseModel, Field, ValidationError
 
+from lup.adapters.common import BudgetExceededError, Conversation
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.reflect import ReflectionGate
+from lup.trace import TraceLogger
+from lup.types import LupResponse
 
 logger = logging.getLogger(__name__)
 
 OUTPUT_FILENAME = "output.json"
+
+MISSING_OUTPUT_MESSAGE = (
+    "Your turn ended without submitting output. Call "
+    "mcp__notes__submit_output with your structured output now — the "
+    "session result is recorded only through that tool."
+)
 
 
 class SubmitOutputResult(BaseModel):
@@ -78,6 +88,63 @@ def read_output[T: BaseModel](session_dir: Path, output_model: type[T]) -> T | N
     except ValidationError, OSError:
         logger.exception("Submitted output at %s is unreadable or invalid", path)
         return None
+
+
+async def ensure_output_submitted(
+    conv: Conversation,
+    *,
+    output_exists: Callable[[], bool],
+    max_retries: int = 2,
+    message: str = MISSING_OUTPUT_MESSAGE,
+    trace_logger: TraceLogger | None = None,
+    prefix: str = "",
+) -> LupResponse | None:
+    """Push a conversation to submit output — the no-stop-event completion guard.
+
+    On backends with a stop event, :func:`lup.hooks.create_completion_guard`
+    blocks finishing until the output exists. Backends without one (Codex,
+    OpenAI-compatible through the Codex runtime) end their turn
+    unconditionally, so this guard sends corrective turns afterward
+    instead — the same invariant, enforced at the only point those
+    backends offer. The relay's missing-sleep message is the same pattern
+    for persistent sessions.
+
+    A ``BudgetExceededError`` ends the attempts: a session past budget
+    keeps its missing output, and the orchestration layer surfaces it.
+
+    Args:
+        conv: The still-open conversation to push.
+        output_exists: Returns True once the final output is on disk.
+        max_retries: Corrective turns before giving up (mirrors
+            ``create_completion_guard(max_blocks=...)``).
+        message: The corrective prompt.
+        trace_logger: Trace logger for the corrective turns.
+        prefix: Display prefix for trace output.
+
+    Returns:
+        The last corrective turn's response — the caller's new final
+        response — or None when no corrective turn ran.
+    """
+    if output_exists():
+        return None
+
+    last: LupResponse | None = None
+    for attempt in range(1, max_retries + 1):
+        logger.warning(
+            "No output submitted; sending corrective turn %d/%d",
+            attempt,
+            max_retries,
+        )
+        try:
+            last = await conv.send(message, trace_logger=trace_logger, prefix=prefix)
+        except BudgetExceededError:
+            logger.warning("Budget exhausted before output was submitted; giving up")
+            return last
+        if output_exists():
+            return last
+
+    logger.error("Output still missing after %d corrective turns", max_retries)
+    return last
 
 
 def create_output_tool(
