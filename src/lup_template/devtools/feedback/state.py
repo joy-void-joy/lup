@@ -11,7 +11,7 @@ Examples::
 
 import json
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict  # claude: ignore
@@ -20,7 +20,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.history import iter_session_dirs, resolve_version
+from lup.history import iter_session_dirs, resolve_version, session_backend
 from lup.paths import feedback_path, project_root, traces_path, AGENT_VERSION
 from lup_template.devtools.utils import git, output_json
 
@@ -365,6 +365,16 @@ def status(  # noqa: C901
         typer.echo(f"Sessions: {session_count} (versions: {', '.join(effective)})")
     else:
         typer.echo(f"Sessions: {session_count} (all versions in {traces_path()})")
+
+    backend_counts: Counter[str] = Counter()
+    for session_id in all_session_ids:
+        for session_dir in iter_session_dirs(session_id=session_id):
+            backend_counts[session_backend(session_dir) or "—"] += 1
+    if backend_counts:
+        breakdown = ", ".join(
+            f"{name}: {count}" for name, count in sorted(backend_counts.items())
+        )
+        typer.echo(f"Backends: {breakdown}")
 
     if traces_path().exists():
         version_count = sum(1 for d in traces_path().iterdir() if d.is_dir())

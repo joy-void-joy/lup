@@ -85,6 +85,7 @@ def build_result(
         session_id=session_id,
         task_id=task_id,
         agent_version=agent_version(),
+        agent_sdk=settings.agent_sdk,
         timestamp=datetime.now().isoformat(),
         output=output,
         reasoning="".join(
