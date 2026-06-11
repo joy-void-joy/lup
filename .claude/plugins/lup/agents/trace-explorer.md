@@ -37,12 +37,12 @@ uv run lup-devtools trace show <session_id> --full
 uv run lup-devtools trace search "pattern"
 
 # Traces are markdown files
-ls notes/traces/
-ls notes/sessions/
+ls notes/traces/<version>/logs/
+ls notes/traces/<version>/sessions/
 ```
 
-Session outputs are typically in `notes/sessions/<session_id>/`.
-Trace files are typically in `notes/traces/<session_id>/`.
+Session outputs are typically in `notes/traces/<version>/sessions/<session_id>/`.
+Trace files are typically in `notes/traces/<version>/logs/<session_id>/`.
 
 ## Process
 

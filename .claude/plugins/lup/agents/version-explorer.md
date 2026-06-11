@@ -53,7 +53,7 @@ These are the files that matter most for version comparison. Check these by defa
 | `src/lup_template/agent/subagents.py` | Subagent definitions |
 | `src/lup_template/agent/config.py` | Configuration settings |
 | `packages/lup/src/lup/paths.py` | AGENT_VERSION constant |
-| `CHANGELOG.md` | Version history with change summaries |
+| `uv run lup-devtools version changelog` | Version history (classified from git log; not a file) |
 
 Tool implementations live in `src/lup_template/agent/tools/*.py` — diff these when the caller asks about tool changes.
 
@@ -81,8 +81,9 @@ git log -S "<string>" --oneline -- src/lup_template/
 # Find when a string was introduced with context
 git log -S "<string>" -p -- src/lup_template/agent/prompts.py
 
-# Changelog entry for a version
-git show v<VERSION>:CHANGELOG.md
+# Classified changelog since a version (dynamic — no CHANGELOG.md file;
+# degrades to the root commit until the first `version bump` creates a tag)
+uv run lup-devtools version changelog --since v<VERSION>
 ```
 
 ## Request Types
@@ -107,7 +108,7 @@ Diff code between two versions. This is the most common request.
 
 **Process:**
 1. Verify both tags exist
-2. Read the changelog entries for both versions: `git show v<A>:CHANGELOG.md` and `git show v<B>:CHANGELOG.md`
+2. Read the classified changelog spanning the two versions: `uv run lup-devtools version changelog --since v<A>` (dynamic — there is no `CHANGELOG.md` file; the command degrades to the root commit until the first `version bump` creates a tag)
 3. List commits between them: `git log --oneline v<A>..v<B>`
 4. Diff the key files (prompts.py first, then others as relevant):
    - `git diff v<A> v<B> -- src/lup_template/agent/prompts.py`
