@@ -5,24 +5,30 @@ This is a TEMPLATE. Customize for your domain.
 Key patterns:
 1. Define tool sets as frozensets for fast membership testing
 2. ToolPolicy class computes excluded tools at construction
-3. from_settings() factory for easy initialization
-4. Separate get_mcp_servers() and get_allowed_tools() methods
+3. Separate get_mcp_servers() and get_allowed_tools() methods
 
 Usage:
     from lup_template.agent.config import settings
     from lup_template.agent.tool_policy import ToolPolicy
 
-    policy = ToolPolicy.from_settings(settings)
+    policy = ToolPolicy(settings)
     mcp_servers = policy.get_mcp_servers()
     allowed_tools = policy.get_allowed_tools()
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any  # claude: ignore — for the ServerConfig alias
 
 if TYPE_CHECKING:
+    from lup.mcp import LupMcpServerConfig
     from lup_template.agent.config import Settings
+
+# An MCP server entry is either an in-process LupMcpServerConfig or a raw SDK
+# McpServerConfig (stdio/http/sse). core.py narrows each by hasattr(server,
+# "server"), which pyright can't follow through that union — so the dict is
+# typed Any here and resolved at the conversion site.
+type ServerConfig = Any  # claude: ignore — runtime-narrowed union, see above
 
 
 # =============================================================================
@@ -40,7 +46,6 @@ BUILTIN_TOOLS: frozenset[str] = frozenset(
         "Grep",
         "Bash",
         "Task",
-        "TodoRead",
         "TodoWrite",
     }
 )
@@ -93,45 +98,29 @@ class ToolPolicy:
 
         self.excluded_tools: frozenset[str] = frozenset(excluded)
 
-    @classmethod
-    def from_settings(
-        cls,
-        settings: Settings,
-        *,
-        restricted_mode: bool = False,
-    ) -> ToolPolicy:
-        """Create a ToolPolicy from application settings.
-
-        Args:
-            settings: Application settings with API keys.
-            restricted_mode: If True, enables additional restrictions.
-
-        Returns:
-            ToolPolicy configured based on settings.
-        """
-        return cls(
-            settings,
-            restricted_mode=restricted_mode,
-        )
-
-    def get_mcp_servers(self, *additional_servers: Any) -> dict[str, Any]:
+    def get_mcp_servers(
+        self, *additional_servers: LupMcpServerConfig
+    ) -> dict[str, ServerConfig]:
         """Get MCP server configuration based on policy.
 
         Args:
-            *additional_servers: Additional MCP servers to include.
-                These should be McpSdkServerConfig objects.
+            *additional_servers: Additional in-process servers to include
+                (``LupMcpServerConfig`` from ``create_mcp_server``).
 
         Returns:
-            Dict mapping server name to server config.
+            Dict mapping server name to server config. Values are in-process
+            ``LupMcpServerConfig`` or a raw SDK ``McpServerConfig``
+            (stdio/http/sse); core.py converts the former to the SDK type at
+            build time, narrowing each value by whether it has a ``server``
+            attribute.
 
         Customize this to return your domain's MCP servers.
         """
-        servers: dict[str, Any] = {}
+        servers: dict[str, ServerConfig] = {}
 
         # Add any additional servers passed in
         for server in additional_servers:
-            name = getattr(server, "name", str(server))
-            servers[name] = server
+            servers[server.name] = server
 
         # TODO: Add your MCP servers
         # Example:

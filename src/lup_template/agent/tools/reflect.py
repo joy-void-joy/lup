@@ -10,7 +10,7 @@ the agent has called ``review``.
 
 Optionally runs a reviewer sub-agent (an independent one-shot query)
 that critiques the main agent's reasoning with sandboxed file access
-to past outputs and web search.
+to past outputs (Read/Glob/Grep) and WebFetch for known URLs.
 
 Usage in core.py:
     1. Call ``create_reflect_tools(session_dir=..., outputs_dir=...)``
@@ -152,6 +152,11 @@ async def run_reviewer(
     model: str = "claude-sonnet-4-6",
 ) -> str | None:
     """Run the reviewer sub-agent and return its critique text.
+
+    Cross-backend note: the default model is an Anthropic one, and
+    ``query`` routes by model — so the reviewer needs Anthropic credentials
+    even when the main agent runs on ``AGENT_SDK=codex``/``openai``. Pass a
+    backend-native ``model`` to keep the reviewer on the same provider.
 
     Args:
         validated: The reflection input from the main agent.

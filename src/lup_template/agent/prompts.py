@@ -4,15 +4,19 @@ This is a TEMPLATE. Customize for your domain.
 
 Key patterns:
 1. Named sections composed at render time — add, remove, or reorder
-2. Use {date} placeholder for current date
-3. Tools self-document via their descriptions — listing them here
+2. Use {date} placeholder in a section to get the current date; only the
+   section declaring it is substituted, so literal braces (a JSON output
+   example, say) in other sections are passed through verbatim
+3. The output-format section is derived from the ``AgentOutput`` model, so
+   customizing models.py keeps the prompt in sync — no hand-listed fields
+4. Tools self-document via their descriptions — listing them here
    creates a second source of truth that drifts as tools change
    (see Tool Design Philosophy in CLAUDE.md)
 """
 
 from datetime import datetime
-from typing import Any
 
+from lup_template.agent.models import AgentOutput
 
 # ---------------------------------------------------------------------------
 # Prompt sections — customize for your domain
@@ -26,16 +30,28 @@ PURPOSE = """\
 
 [Describe what the agent does]"""
 
-OUTPUT_FORMAT = """\
-## Output Format
 
-When your analysis is complete, submit your final result with the
-submit_output tool — the session's result is exactly what you submit
-there. Reflect with the review tool first; submission is rejected
-until you have. Your submission includes:
-- **summary**: Brief summary of your decision/output
-- **factors**: Key factors that influenced your reasoning
-- **confidence**: Your confidence level (0.0-1.0)"""
+def output_format() -> str:
+    """Render the output-format section from the ``AgentOutput`` schema.
+
+    Fields and their descriptions come straight from the model, so adding
+    or renaming a field in models.py updates the prompt automatically —
+    avoiding the two-sources-of-truth drift CLAUDE.md warns against.
+    """
+    lines = [
+        "## Output Format",
+        "",
+        "When your analysis is complete, submit your final result with the",
+        "submit_output tool — the session's result is exactly what you submit",
+        "there. Reflect with the review tool first; submission is rejected",
+        "until you have. Your submission includes:",
+    ]
+    properties = AgentOutput.model_json_schema().get("properties", {})
+    for name, schema in properties.items():
+        description = schema.get("description", "")
+        lines.append(f"- **{name}**: {description}" if description else f"- **{name}**")
+    return "\n".join(lines)
+
 
 GUIDELINES = """\
 ## Guidelines
@@ -55,7 +71,7 @@ GUIDELINES = """\
 SECTIONS: list[str] = [
     INTRO,
     PURPOSE,
-    OUTPUT_FORMAT,
+    output_format(),
     GUIDELINES,
 ]
 
@@ -63,59 +79,27 @@ SECTIONS: list[str] = [
 def get_system_prompt(
     *,
     date: datetime | None = None,
-    mcp_servers: dict[str, Any] | None = None,
     extra_sections: list[str] | None = None,
 ) -> str:
     """Generate the system prompt by composing sections.
 
+    Only the section declaring the ``{date}`` placeholder is substituted,
+    so customized sections may contain literal braces (e.g. a JSON example)
+    without raising.
+
     Args:
         date: Date to use as "today". If None, uses current date.
-        mcp_servers: Optional dict of MCP servers to auto-generate tool docs.
         extra_sections: Additional prompt sections appended after SECTIONS.
 
     Returns:
         The formatted system prompt.
     """
-    effective_date = date or datetime.now()
-    all_sections = list(SECTIONS)
+    effective_date = (date or datetime.now()).strftime("%Y-%m-%d")
+    rendered = [
+        section.format(date=effective_date) if "{date}" in section else section
+        for section in SECTIONS
+    ]
     if extra_sections:
-        all_sections.extend(extra_sections)
+        rendered.extend(extra_sections)
 
-    prompt = "\n\n".join(all_sections)
-    prompt = prompt.format(date=effective_date.strftime("%Y-%m-%d"))
-
-    if mcp_servers:
-        tool_docs = generate_tool_docs(mcp_servers)
-        prompt += f"\n\n{tool_docs}"
-
-    return prompt + "\n"
-
-
-def generate_tool_docs(mcp_servers: dict[str, Any]) -> str:
-    """Generate tool documentation from MCP server tool descriptions.
-
-    Tool descriptions are the single source of truth for what each tool does,
-    when to use it, and why it exists. This function passes them through
-    untruncated — comprehensive descriptions are intentional.
-    """
-    lines = ["## Auto-Generated Tool Reference\n"]
-
-    for server_name, server_config in mcp_servers.items():
-        tools = getattr(server_config, "tools", [])
-        if not tools:
-            continue
-
-        lines.append(f"### {server_name.title()}\n")
-
-        for tool in tools:
-            tool_name = getattr(tool, "name", str(tool))
-            tool_desc = getattr(tool, "description", "")
-
-            if tool_desc:
-                lines.append(f"- **{tool_name}**: {tool_desc}")
-            else:
-                lines.append(f"- **{tool_name}**")
-
-        lines.append("")
-
-    return "\n".join(lines)
+    return "\n\n".join(rendered) + "\n"

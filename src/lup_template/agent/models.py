@@ -72,6 +72,17 @@ class AgentOutput(BaseModel):
     # move: str           # For game playing
     # response: str       # For coaching
 
+    @classmethod
+    def empty(cls) -> "AgentOutput":
+        """Fallback output when a session finishes without submitting one.
+
+        Orchestration (core.py) constructs this when ``submit_output`` was
+        never called. Customize alongside the fields above: any required
+        field you add must get a placeholder here so a missing submission
+        degrades gracefully instead of raising ValidationError.
+        """
+        return cls(summary="No output produced", factors=[], confidence=0.5)
+
 
 # Domain-specific type alias: SessionResult parameterized with AgentOutput
 AgentSessionResult = SessionResult[AgentOutput]

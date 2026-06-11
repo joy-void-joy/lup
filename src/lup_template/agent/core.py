@@ -76,7 +76,7 @@ def build_result(
     output = read_output(session_dir, AgentOutput)
     if output is None:
         logger.error("Session %s finished without submitting output", session_id)
-        output = AgentOutput(summary="No output produced", factors=[], confidence=0.5)
+        output = AgentOutput.empty()
 
     return AgentSessionResult(
         session_id=session_id,
@@ -153,7 +153,7 @@ def build_options(
         if isinstance(sandbox, Sandbox):
             all_servers.append(sandbox.create_mcp_server())
 
-    policy = ToolPolicy.from_settings(settings)
+    policy = ToolPolicy(settings)
     policy_servers = policy.get_mcp_servers(*all_servers)
 
     system_prompt = get_system_prompt()
@@ -194,7 +194,7 @@ def build_options(
         },
         # ThinkingConfigEnabled(budget_tokens=N) is the newer alternative, but
         # max_thinking_tokens is simpler and avoids adaptive mode's variable allocation.
-        max_thinking_tokens=settings.max_thinking_tokens or (128_000 - 1),
+        max_thinking_tokens=settings.max_thinking_tokens,
         permission_mode=settings.permission_mode,
         extra_args={"no-session-persistence": None},
         hooks=claude_hooks,
