@@ -74,12 +74,36 @@ def read_agent_version(root: Path) -> str:
 
 
 # -- Mutable path state -------------------------------------------------------
-# Auto-detected on first import; overridable via configure().
+# Lazily auto-detected on first access; overridable via configure(). Detection
+# is deferred so that ``import lup`` never fails outside a [tool.lup] tree —
+# a consumer can call configure(root=...) before touching any path accessor.
 
-PROJECT_ROOT = find_project_root()
-AGENT_VERSION = read_agent_version(PROJECT_ROOT)
-NOTES_DIR = PROJECT_ROOT / "notes"
-RUNTIME_LOGS_DIR = PROJECT_ROOT / "logs"
+PATH_GLOBALS = ("PROJECT_ROOT", "AGENT_VERSION", "NOTES_DIR", "RUNTIME_LOGS_DIR")
+
+
+def ensure_initialized() -> None:
+    """Populate the path globals from root detection if not already set."""
+    if "PROJECT_ROOT" in globals():
+        return
+    root = find_project_root()
+    globals().update(
+        PROJECT_ROOT=root,
+        AGENT_VERSION=read_agent_version(root),
+        NOTES_DIR=root / "notes",
+        RUNTIME_LOGS_DIR=root / "logs",
+    )
+
+
+def __getattr__(name: str) -> object:
+    """Lazily resolve path globals on first attribute access (PEP 562).
+
+    Lets ``from lup.paths import AGENT_VERSION`` work without forcing root
+    detection at module import time.
+    """
+    if name in PATH_GLOBALS:
+        ensure_initialized()
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def configure(
@@ -111,6 +135,8 @@ def configure(
             AGENT_VERSION = read_agent_version(root)
         NOTES_DIR = root / "notes"
         RUNTIME_LOGS_DIR = root / "logs"
+    else:
+        ensure_initialized()
 
     if notes_dir is not None:
         NOTES_DIR = notes_dir
@@ -125,32 +151,36 @@ def configure(
 
 def project_root() -> Path:
     """Return the project root directory."""
+    ensure_initialized()
     return PROJECT_ROOT
 
 
 def agent_version() -> str:
     """Return the agent version from [tool.lup] in pyproject.toml."""
+    ensure_initialized()
     return AGENT_VERSION
 
 
 def notes_path() -> Path:
     """Return the notes directory (``<root>/notes`` by default)."""
+    ensure_initialized()
     return NOTES_DIR
 
 
 def runtime_logs_path() -> Path:
     """Return the runtime logs directory (``<root>/logs`` by default)."""
+    ensure_initialized()
     return RUNTIME_LOGS_DIR
 
 
 def traces_path() -> Path:
     """Return ``notes/traces/``."""
-    return NOTES_DIR / "traces"
+    return notes_path() / "traces"
 
 
 def feedback_path() -> Path:
     """Return ``notes/feedback_loop/``."""
-    return NOTES_DIR / "feedback_loop"
+    return notes_path() / "feedback_loop"
 
 
 # -- Timestamp helpers --------------------------------------------------------
@@ -172,17 +202,17 @@ def parse_timestamp(name: str) -> datetime:
 
 def sessions_dir(version: str | None = None) -> Path:
     """Directory for session JSONs: notes/traces/<version>/sessions/"""
-    return traces_path() / (version or AGENT_VERSION) / "sessions"
+    return traces_path() / (version or agent_version()) / "sessions"
 
 
 def outputs_dir(version: str | None = None) -> Path:
     """Directory for agent outputs: notes/traces/<version>/outputs/"""
-    return traces_path() / (version or AGENT_VERSION) / "outputs"
+    return traces_path() / (version or agent_version()) / "outputs"
 
 
 def trace_logs_dir(version: str | None = None) -> Path:
     """Directory for reasoning logs: notes/traces/<version>/logs/"""
-    return traces_path() / (version or AGENT_VERSION) / "logs"
+    return traces_path() / (version or agent_version()) / "logs"
 
 
 # -- Path utilities -----------------------------------------------------------
