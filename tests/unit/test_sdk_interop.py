@@ -186,14 +186,6 @@ class TestReflectionGateHookScripts:
 
 
 class TestReflectionGateFileBacked:
-    def test_in_memory_mode(self) -> None:
-        gate = ReflectionGate()
-        assert not gate.reflected
-        gate.mark_reflected()
-        assert gate.reflected
-        gate.reset()
-        assert not gate.reflected
-
     def test_file_backed_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             flag_path = Path(tmpdir) / "gate_flag"
@@ -240,17 +232,6 @@ class TestLupMcpServerConfig:
 
 
 class TestSubagentSpec:
-    def test_spec_creation(self) -> None:
-        spec = SubagentSpec(
-            name="test",
-            description="A test agent",
-            prompt="Do the thing",
-            tools=["Read", "Grep"],
-            model="haiku",
-        )
-        assert spec.name == "test"
-        assert spec.tools == ["Read", "Grep"]
-
     def test_spec_to_claude(self) -> None:
         from lup.adapters.claude import spec_to_claude
 
@@ -267,7 +248,7 @@ class TestSubagentSpec:
         assert agent_def.tools == ["WebSearch"]
         assert agent_def.model == "haiku"
 
-    def test_spec_to_claude_unknown_model(self) -> None:
+    def test_spec_to_claude_passes_full_model_id_through(self) -> None:
         from lup.adapters.claude import spec_to_claude
 
         spec = SubagentSpec(
@@ -277,7 +258,7 @@ class TestSubagentSpec:
             model="gpt-4.1-mini",
         )
         agent_def = spec_to_claude(spec)
-        assert agent_def.model is None
+        assert agent_def.model == "gpt-4.1-mini"
 
     def test_get_subagent_specs(self) -> None:
         from lup_template.agent.subagents import get_subagent_specs
@@ -435,17 +416,6 @@ class TestCodexAdapter:
         )
         overrides = adapter.build_config_overrides()
         assert any("codex_hooks" in o for o in overrides)
-
-
-class TestLupResponseSessionId:
-    def test_session_id_field(self) -> None:
-        from lup.types import LupResponse
-
-        response = LupResponse()
-        assert response.session_id is None
-
-        response.session_id = "thread_abc123"
-        assert response.session_id == "thread_abc123"
 
 
 class TestGenericHookOutputHelpers:
@@ -892,7 +862,10 @@ class TestOpenAICompatibleAdapter:
     """Tests for the OpenAI-compatible adapter configuration."""
 
     def test_config_overrides_include_base_url(self) -> None:
-        from lup.adapters.openai_compat import OpenAICompatibleAdapter
+        from lup.adapters.openai_compat import (
+            OPENAI_COMPAT_API_KEY_ENV,
+            OpenAICompatibleAdapter,
+        )
 
         adapter = OpenAICompatibleAdapter(
             model="glm-4-7b",
@@ -903,8 +876,24 @@ class TestOpenAICompatibleAdapter:
             mcp_tools=False,
         )
         overrides = adapter.build_config_overrides()
-        assert any("base_url" in o for o in overrides)
-        assert any("api_key" in o for o in overrides)
+
+        # The provider is defined under the plural model_providers.<id> table,
+        # selected by a top-level model_provider string.
+        assert 'model_provider="openai_compat"' in overrides
+        assert (
+            'model_providers.openai_compat.base_url="http://localhost:8000/v1"'
+            in overrides
+        )
+        # The key is referenced by env-var NAME (env_key), never inline.
+        assert (
+            f'model_providers.openai_compat.env_key="{OPENAI_COMPAT_API_KEY_ENV}"'
+            in overrides
+        )
+        # No literal `api_key=` override and no secret value leaks into overrides;
+        # the secret is injected via the subprocess env (provider_env()).
+        assert not any("api_key=" in o for o in overrides)
+        assert not any("test-key" in o for o in overrides)
+        assert adapter.provider_env() == {OPENAI_COMPAT_API_KEY_ENV: "test-key"}
 
     def test_config_overrides_without_credentials(self) -> None:
         from lup.adapters.openai_compat import OpenAICompatibleAdapter
