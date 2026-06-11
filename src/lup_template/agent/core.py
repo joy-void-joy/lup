@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from lup.adapters.codex import UsageCost
     from lup.adapters.common import AgentAdapter
     from lup.notes import NotesConfig
+    from lup.realtime_relay import RealtimeMailbox
 
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
@@ -214,6 +215,8 @@ def build_options(
 
 def build_codex_session(
     notes: "NotesConfig",
+    *,
+    realtime_dir: Path | None = None,
 ) -> tuple[str, dict[str, str], list[Path]]:
     """Shared scaffolding for Codex-runtime adapters.
 
@@ -247,6 +250,7 @@ def build_codex_session(
         gate_flag=gate_flag_path,
         session_id=notes.session.name,
         task_id=notes.output.parent.name,
+        realtime_dir=realtime_dir,
     )
 
     return get_system_prompt(), context.to_env(), list(notes.rw)
@@ -302,6 +306,44 @@ def build_codex_adapter(
         max_budget_usd=max_budget_usd,
         usage_cost=usage_cost,
     )
+
+
+def build_codex_realtime_adapter(
+    notes: "NotesConfig",
+) -> tuple["AgentAdapter", "RealtimeMailbox"]:
+    """Build a CodexAdapter wired for persistent (sleep/wake) mode.
+
+    Adds the ``session`` tool group (reply, sleep, context, meta, …) to
+    the served servers and relays the realtime directory so the tool
+    subprocess and the parent share one mailbox. The returned mailbox is
+    the parent-side endpoint: construct a ``Scheduler`` with your
+    environment's action callback, open ``adapter.conversation()``, and
+    drive it with :func:`lup.realtime_relay.run_relay_session`
+    (customization step 8 — see PATTERNS.md, Persistent Agent).
+    """
+    from lup.adapters.codex import CodexAdapter
+    from lup.realtime_relay import REALTIME_DIRNAME, RealtimeMailbox
+
+    realtime_dir = notes.session / REALTIME_DIRNAME
+    system_prompt, mcp_env, writable_roots = build_codex_session(
+        notes, realtime_dir=realtime_dir
+    )
+    max_budget_usd, usage_cost = codex_budget_options()
+
+    adapter = CodexAdapter(
+        model=settings.model,
+        system_prompt=system_prompt,
+        sandbox=settings.codex_sandbox,
+        effort=settings.codex_effort or settings.reasoning_effort,
+        approval_policy=settings.codex_approval_policy,
+        mcp_tools=True,
+        mcp_env=mcp_env,
+        writable_roots=writable_roots,
+        mcp_servers=("notes", "sandbox", "session"),
+        max_budget_usd=max_budget_usd,
+        usage_cost=usage_cost,
+    )
+    return adapter, RealtimeMailbox(realtime_dir)
 
 
 def build_openai_adapter(
