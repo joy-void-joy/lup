@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
+from lup.adapters.common import AdapterCapabilities
 from lup.history import save_session
 from lup.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
 from lup.notes import setup_notes
@@ -213,6 +214,32 @@ def build_options(
     )
 
 
+def check_settings_supported(capabilities: AdapterCapabilities) -> None:
+    """Reject explicitly-set settings the backend cannot honor.
+
+    Only env-provided fields (``settings.model_fields_set``) are checked,
+    so Claude-tier defaults don't break Codex/OpenAI runs. One policy for
+    every capability-gated setting: explicit and unsupported is an error,
+    defaulted and unsupported passes silently.
+    """
+    requirements = {
+        "max_turns": capabilities.max_turns,
+        "permission_mode": capabilities.permission_modes,
+        "max_thinking_tokens": capabilities.max_thinking_tokens,
+    }
+    offenders = sorted(
+        name
+        for name, supported in requirements.items()
+        if not supported and name in settings.model_fields_set
+    )
+    if offenders:
+        env_names = ", ".join(f"AGENT_{name.upper()}" for name in offenders)
+        raise ValueError(
+            f"{env_names} not supported on the {settings.agent_sdk} "
+            "backend; unset or use AGENT_SDK=claude."
+        )
+
+
 def build_codex_session(
     notes: "NotesConfig",
     *,
@@ -233,13 +260,6 @@ def build_codex_session(
     from lup.paths import SessionContext
 
     from lup_template.agent.prompts import get_system_prompt
-
-    if settings.max_turns is not None:
-        raise ValueError(
-            "AGENT_MAX_TURNS is not supported on "
-            f"the {settings.agent_sdk} backend; unset it or use "
-            "AGENT_SDK=claude."
-        )
 
     state_dir = Path(tempfile.mkdtemp(prefix="lup_codex_session_"))
     gate_flag_path = state_dir / "reflection_gate_flag"
@@ -343,6 +363,7 @@ def build_codex_realtime_adapter(
         max_budget_usd=max_budget_usd,
         usage_cost=usage_cost,
     )
+    check_settings_supported(adapter.capabilities)
     return adapter, RealtimeMailbox(realtime_dir)
 
 
@@ -403,6 +424,8 @@ def build_adapter(
     """
     notes = setup_notes(session_id, task_id or "0")
 
+    adapter: AgentAdapter
+    ctx: AbstractContextManager[object]
     match settings.agent_sdk:
         case "claude":
             from lup.adapters.claude import ClaudeAdapter
@@ -413,19 +436,22 @@ def build_adapter(
                 shared_dir=notes.session / "sandbox_shared",
                 timeout_seconds=settings.sandbox_timeout_seconds,
             )
-            options = build_options(notes, sandbox=sb)
-            adapter: AgentAdapter = ClaudeAdapter(options)
-            return adapter, sb, notes
+            adapter, ctx = ClaudeAdapter(build_options(notes, sandbox=sb)), sb
 
         case "codex":
-            return build_codex_adapter(notes), subprocess_sandbox_cleanup(notes), notes
+            adapter, ctx = (
+                build_codex_adapter(notes),
+                subprocess_sandbox_cleanup(notes),
+            )
 
         case "openai":
-            return (
+            adapter, ctx = (
                 build_openai_adapter(notes),
                 subprocess_sandbox_cleanup(notes),
-                notes,
             )
+
+    check_settings_supported(adapter.capabilities)
+    return adapter, ctx, notes
 
 
 async def run_agent(
