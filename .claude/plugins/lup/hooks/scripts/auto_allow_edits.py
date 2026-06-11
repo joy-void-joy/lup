@@ -11,7 +11,8 @@ Decision order:
    - no marker -> deny with hint about `# claude: ignore`
 3. Edit introduces `# claude: ignore` -> ask (user prompt)
 4. Pure deletion (new_string is empty) -> allow
-5. replace_all: allow
+5. replace_all that is a single-line identifier rename -> allow
+   (a multi-line logic-rewriting replace_all falls through to "ask")
 6. Count nontrivial added lines per change block (using a state machine
    for context-aware classification) -> allow if every block <= MAX_REAL_CHANGES
 """
@@ -196,6 +197,25 @@ def is_string_literal(stripped: str) -> bool:
         if bare.startswith(q) and bare.endswith(q):
             return True
     return False
+
+
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+
+
+def is_identifier_rename(old_string: str, new_string: str) -> bool:
+    """Whether a replace_all is a genuine single-line symbol rename.
+
+    Both sides must be single-line, non-empty, and look like an identifier
+    (optionally a dotted attribute path). A multi-line ``replace_all`` that
+    rewrites logic is not a rename and must fall through to the user.
+    """
+    if not old_string or not new_string:
+        return False
+    if "\n" in old_string or "\n" in new_string:
+        return False
+    return bool(IDENTIFIER_RE.match(old_string.strip())) and bool(
+        IDENTIFIER_RE.match(new_string.strip())
+    )
 
 
 def is_trivial_content(stripped: str) -> bool:
@@ -458,7 +478,7 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
     if old_string and not new_string:
         return allow_decision()
 
-    if replace_all:
+    if replace_all and is_identifier_rename(old_string, new_string):
         return allow_decision()
 
     if count_real_additions(old_string, new_string) <= MAX_REAL_CHANGES:
