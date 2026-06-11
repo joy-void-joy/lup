@@ -17,11 +17,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from collections.abc import Sequence
+
 from lup.adapters.codex import (
     CodexAdapter,
     CodexConversation,
     CodexHookConfig,
     CodexUsageNormalizer,
+    UsageCost,
     require_codex_sdk,
 )
 from lup.adapters.common import Conversation
@@ -55,6 +58,9 @@ class OpenAICompatibleAdapter(CodexAdapter):
         writable_roots: list[Path] | None = None,
         hook_overrides: list[CodexHookConfig] | None = None,
         usage_normalizer: CodexUsageNormalizer | None = None,
+        mcp_servers: Sequence[str] = ("notes", "sandbox"),
+        max_budget_usd: float | None = None,
+        usage_cost: UsageCost | None = None,
     ) -> None:
         super().__init__(
             model=model,
@@ -68,6 +74,9 @@ class OpenAICompatibleAdapter(CodexAdapter):
             writable_roots=writable_roots,
             hook_overrides=hook_overrides,
             usage_normalizer=usage_normalizer,
+            mcp_servers=mcp_servers,
+            max_budget_usd=max_budget_usd,
+            usage_cost=usage_cost,
         )
         self.base_url = base_url
         self.api_key = api_key
@@ -107,6 +116,8 @@ class OpenAICompatibleAdapter(CodexAdapter):
                 output_schema=self.output_schema,
                 effort=self.effort,
                 usage_normalizer=self.usage_normalizer,
+                max_budget_usd=self.max_budget_usd,
+                usage_cost=self.usage_cost,
             )
 
 
