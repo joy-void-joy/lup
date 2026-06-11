@@ -24,8 +24,11 @@ from lup.types import SubagentSpec
 # TOOL LISTS (customize for your domain)
 # =============================================================================
 #
-# Use functions (not constants) so tool lists can be computed at runtime
-# based on available API keys, session context, etc.
+# Tool lists are functions so the selection logic (which tools depend on
+# which API keys, etc.) lives in one place. The specs below are module
+# constants, so these functions run once at import. To pick tools per
+# session instead, build the specs inside get_subagent_specs() so the
+# functions run at session-build time (when settings are loaded).
 #
 # Example with conditional inclusion:
 #   def research_tools() -> list[str]:

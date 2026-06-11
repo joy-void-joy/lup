@@ -8,7 +8,7 @@ The CLI is the domain-specific harness that:
 3. Auto-commits results after each session
 4. Manages application flow and lifecycle
 
-The feedback loop focuses on improving lup.agent.
+The feedback loop focuses on improving lup_template.agent.
 This code evolves with application requirements.
 
 Usage:

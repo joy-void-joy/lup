@@ -80,7 +80,12 @@ class Settings(BaseSettings):
     agent_sdk: Literal["claude", "codex", "openai"] = Field(
         default="claude",
         validation_alias="AGENT_SDK",
-        description="Which agent SDK backend to use (claude, codex, openai)",
+        description=(
+            "Which agent SDK backend to use (claude, codex, openai). Note: "
+            "the reviewer and subagents default to Anthropic models and "
+            "route by model name, so they need Anthropic credentials even "
+            "on codex/openai — override their models to stay single-provider."
+        ),
     )
 
     openai_base_url: str | None = Field(
@@ -140,7 +145,12 @@ class Settings(BaseSettings):
     reasoning_effort: str | None = Field(
         default=None,
         validation_alias="AGENT_REASONING_EFFORT",
-        description="Reasoning effort level: low, medium, high, xhigh, max",
+        description=(
+            "Backend-agnostic reasoning effort. Valid levels differ by "
+            "backend: Claude accepts low, medium, high, xhigh, max; "
+            "Codex/OpenAI accept none, minimal, low, medium, high, xhigh "
+            "(CODEX_EFFORT overrides this on those backends)."
+        ),
     )
 
     permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"] = (
@@ -199,26 +209,10 @@ class Settings(BaseSettings):
         description="Maximum agent turns per session (None = unlimited)",
     )
 
-    http_timeout_seconds: int = Field(
-        default=30,
-        validation_alias="AGENT_HTTP_TIMEOUT_SECONDS",
-        description="Timeout for HTTP requests",
-    )
-
     sandbox_timeout_seconds: int = Field(
         default=30,
         validation_alias="AGENT_SANDBOX_TIMEOUT_SECONDS",
         description="Timeout for sandbox code execution",
-    )
-
-    # ==========================================================================
-    # RATE LIMITS / CONCURRENCY
-    # ==========================================================================
-
-    max_concurrent_requests: int = Field(
-        default=5,
-        validation_alias="AGENT_MAX_CONCURRENT_REQUESTS",
-        description="Max concurrent external API requests",
     )
 
 
