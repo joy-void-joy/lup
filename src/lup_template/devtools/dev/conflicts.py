@@ -12,6 +12,7 @@ Examples::
     $ uv run lup-devtools dev conflict complete --dry-run
 """
 
+import logging
 import re
 from pathlib import Path
 from typing import TypedDict
@@ -20,7 +21,9 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup_template.devtools.utils import git, output_json
+from lup_template.devtools.utils import git, decode_stderr, output_json
+
+logger = logging.getLogger(__name__)
 
 
 class ConflictFile(TypedDict):
@@ -161,8 +164,19 @@ def conflicts(as_json: bool) -> None:
     """Show conflicted files with scope classification."""
     state = detect_conflict_state()
     if not state:
-        typer.echo("Not in a merge, rebase, or cherry-pick state", err=True)
-        raise typer.Exit(1)
+        if as_json:
+            output_json(
+                ConflictReport(
+                    state="none",
+                    base="",
+                    files=[],
+                    in_scope_count=0,
+                    out_of_scope_count=0,
+                )
+            )
+        else:
+            typer.echo("Not in a merge, rebase, or cherry-pick state")
+        return
 
     conflicted = list_conflicted_files()
     if not conflicted:
@@ -218,6 +232,22 @@ SIGNIFICANT_PATTERN = re.compile(
 )
 
 
+def theirs_ref_for(operation: str) -> str:
+    """Return the git ref for the *other* side of an in-progress operation.
+
+    A rebase exposes the commit being replayed as ``REBASE_HEAD`` — not
+    ``CHERRY_PICK_HEAD`` — so diffing against the wrong ref yields empty
+    "theirs" diffs during a rebase.
+    """
+    match operation:
+        case "merge":
+            return "MERGE_HEAD"
+        case "rebase":
+            return "REBASE_HEAD"
+        case _:
+            return "CHERRY_PICK_HEAD"
+
+
 def extract_removals(diff_output: str) -> list[str]:
     """Find removed functions/classes/decorators in a diff."""
     removals: list[str] = []
@@ -249,7 +279,7 @@ def conflict_status(as_json: bool) -> None:
     conflicted = list_conflicted_files()
 
     ours_ref = "HEAD"
-    theirs_ref = "MERGE_HEAD" if operation == "merge" else "CHERRY_PICK_HEAD"
+    theirs_ref = theirs_ref_for(operation)
 
     ours_commits: list[str] = []
     theirs_commits: list[str] = []
@@ -304,7 +334,7 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
         typer.echo("No merge/rebase/cherry-pick in progress", err=True)
         raise typer.Exit(1)
 
-    theirs_ref = "MERGE_HEAD" if operation == "merge" else "CHERRY_PICK_HEAD"
+    theirs_ref = theirs_ref_for(operation)
 
     file_results: list[FileAuditResult] = []
     for path in files:
@@ -316,8 +346,10 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
             theirs_diff = str(
                 git("diff", theirs_ref, "--", path, _ok_code=[0, 1])
             ).strip()
-        except sh.ErrorReturnCode:
-            pass
+        except sh.ErrorReturnCode as e:
+            logger.warning(
+                "Could not diff '%s' against %s: %s", path, theirs_ref, decode_stderr(e)
+            )
         theirs_removals = extract_removals(theirs_diff)
 
         has_warning = bool(ours_removals or theirs_removals)
@@ -389,6 +421,5 @@ def conflict_complete(dry_run: bool) -> None:
                 git("cherry-pick", "--continue")
         typer.echo(f"Completed {operation}")
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        typer.echo(f"Failed to complete {operation}: {stderr}", err=True)
+        typer.echo(f"Failed to complete {operation}: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)

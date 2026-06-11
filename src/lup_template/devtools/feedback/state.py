@@ -13,7 +13,6 @@ import json
 import logging
 from collections import defaultdict
 from datetime import datetime
-from glob import glob
 from pathlib import Path
 from typing import Any, TypedDict  # claude: ignore
 
@@ -22,7 +21,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.history import iter_session_dirs, resolve_version
-from lup.paths import feedback_path, traces_path, AGENT_VERSION
+from lup.paths import feedback_path, project_root, traces_path, AGENT_VERSION
 from lup_template.devtools.utils import git, output_json
 
 logger = logging.getLogger(__name__)
@@ -363,7 +362,7 @@ def status(  # noqa: C901
     session_count = len(all_session_ids)
 
     if effective:
-        typer.echo(f"Sessions: {session_count} (versions: {effective})")
+        typer.echo(f"Sessions: {session_count} (versions: {', '.join(effective)})")
     else:
         typer.echo(f"Sessions: {session_count} (all versions in {traces_path()})")
 
@@ -386,7 +385,7 @@ def status(  # noqa: C901
     unanalyzed = sorted(all_session_ids - analyzed)
 
     typer.echo("\n=== Analysis State ===\n")
-    typer.echo(f"Total sessions: {session_count}")
+    typer.echo(f"Session directories: {session_count}")
     typer.echo(f"Analyzed: {len(analyzed & all_session_ids)}")
     typer.echo(f"Unanalyzed: {len(unanalyzed)}")
 
@@ -398,14 +397,14 @@ def status(  # noqa: C901
         with_tokens = sum(1 for s in sessions if s.get("token_usage"))
         with_outcome = sum(1 for s in sessions if s.get("outcome") is not None)
 
-        typer.echo(f"\n=== Aggregate Stats ({total} sessions) ===\n")
+        typer.echo(f"\n=== Aggregate Stats ({total} sessions with result JSON) ===\n")
         typer.echo(f"With metrics: {with_metrics} ({100 * with_metrics / total:.0f}%)")
         typer.echo(f"With tokens:  {with_tokens} ({100 * with_tokens / total:.0f}%)")
         typer.echo(f"With outcome: {with_outcome} ({100 * with_outcome / total:.0f}%)")
 
         total_cost = 0.0
         for s in sessions:
-            cost = s.get("cost_usd") or s.get("tool_metrics", {}).get(
+            cost = s.get("cost_usd") or (s.get("tool_metrics") or {}).get(
                 "total_cost_usd", 0
             )
             if cost:
@@ -527,7 +526,7 @@ def tools(
     )
 
     for s in sessions:
-        metrics = s.get("tool_metrics", {})
+        metrics = s.get("tool_metrics") or {}
         by_tool = metrics.get("by_tool", {})
         for tool_name, data in by_tool.items():
             tool_stats[tool_name]["calls"] += data.get("call_count", 0)
@@ -595,7 +594,7 @@ def errors(  # claude: ignore
 
     with_errors: list[ErrorSessionEntry] = []
     for s in sessions:
-        metrics = s.get("tool_metrics", {})
+        metrics = s.get("tool_metrics") or {}
         total_errors = metrics.get("total_errors", 0)
         if total_errors and total_errors > 0:
             with_errors.append(
@@ -661,13 +660,14 @@ def trends(window: int, version: str | None, all_versions: bool, as_json: bool) 
         window_sessions = sessions_with_ts[i - window + 1 : i + 1]
 
         total_calls = sum(
-            s.get("tool_metrics", {}).get("total_tool_calls", 0)
+            (s.get("tool_metrics") or {}).get("total_tool_calls", 0)
             for s in window_sessions
         )
         avg_calls = total_calls / window
 
         total_errors = sum(
-            s.get("tool_metrics", {}).get("total_errors", 0) for s in window_sessions
+            (s.get("tool_metrics") or {}).get("total_errors", 0)
+            for s in window_sessions
         )
         error_rate = total_errors / max(1, total_calls)
 
@@ -751,11 +751,8 @@ def prompt_health(as_json: bool) -> None:
     """
     from lup_template.agent.prompts import SECTIONS, get_system_prompt
 
-    prompts_file = (
-        Path(glob("src/*/agent/prompts.py")[0])
-        if glob("src/*/agent/prompts.py")
-        else None
-    )
+    prompts_matches = sorted(project_root().glob("src/*/agent/prompts.py"))
+    prompts_file = prompts_matches[0] if prompts_matches else None
     rendered = get_system_prompt()
     char_count = len(rendered)
     estimated_tokens = char_count // 4

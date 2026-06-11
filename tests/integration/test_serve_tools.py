@@ -46,12 +46,12 @@ async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
 
             listed = await session.list_tools()
             names = {tool.name for tool in listed.tools}
-            assert {
-                "search_example",
-                "fetch_example",
-                "review",
-                "submit_output",
-            } <= names
+            assert {"review", "submit_output"} <= names
+            # The example placeholder ships fabricated data and is served to no
+            # live agent by default — matching the Claude path. It is reachable
+            # only via an explicit --server example.
+            assert "search_example" not in names
+            assert "fetch_example" not in names
 
             premature = await session.call_tool("submit_output", {"summary": "early"})
             assert premature.isError is True

@@ -31,7 +31,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, TypedDict
 
 if TYPE_CHECKING:
     from rich.console import Console
@@ -282,7 +282,18 @@ def collect_all_tools(context: SessionContext | None = None) -> list[LupMcpTool]
     return tools
 
 
-def tool_to_dict(t: LupMcpTool) -> dict[str, object]:
+class ToolDict(TypedDict):
+    name: str
+    description: str
+    input_schema: dict[
+        str, object
+    ]  # claude: ignore  # JSON Schema is arbitrary nesting
+    output_schema: (
+        dict[str, object] | None
+    )  # claude: ignore  # JSON Schema is arbitrary nesting
+
+
+def tool_to_dict(t: LupMcpTool) -> ToolDict:
     """Serialize a LupMcpTool for JSON output."""
     return {
         "name": t.name,
@@ -328,7 +339,9 @@ def inspect_cmd(
     prompt = get_system_prompt()
 
     if as_json:
-        data: dict[str, object] = {
+        data: dict[
+            str, object
+        ] = {  # claude: ignore  # heterogeneous JSON inspect payload
             "model": settings.model,
             "max_thinking_tokens": settings.max_thinking_tokens,
             "tools": [tool_to_dict(t) for t in all_tools],
@@ -433,7 +446,7 @@ def serve_tools_cmd(
         str | None,
         typer.Option(
             "--server",
-            help="Serve only this tool group (notes, sandbox, or session); default: all",
+            help="Serve only this group (notes, sandbox, session, example); default: all but example",
         ),
     ] = None,
 ) -> None:
@@ -455,14 +468,19 @@ def serve_tools_cmd(
     by_server = collect_tools_by_server(context)
     match server_group:
         case None:
-            lup_tools = [t for tools in by_server.values() for t in tools]
-        case "sandbox" | "session":
+            # Default tool set excludes the example placeholder, which ships
+            # fabricated data and is served to no live agent — matching the
+            # Claude path. Serve it explicitly with --server example to test it.
+            lup_tools = [
+                t for key, tools in by_server.items() if key != "example" for t in tools
+            ]
+        case "sandbox" | "session" | "example":
             lup_tools = list(by_server.get(server_group, []))
         case "notes":
             lup_tools = [
                 t
                 for key, tools in by_server.items()
-                if key not in ("sandbox", "session")
+                if key not in ("sandbox", "session", "example")
                 for t in tools
             ]
         case _:
@@ -496,7 +514,9 @@ def serve_tools_cmd(
         return tool_list
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict[str, object]) -> CallToolResult:
+    async def call_tool(
+        name: str, arguments: dict[str, object]
+    ) -> CallToolResult:  # claude: ignore  # MCP protocol boundary: arbitrary tool args
         if name not in tool_map:
             raise ValueError(f"Tool '{name}' not found")
         result = await tool_map[name].handler(arguments)
@@ -638,6 +658,39 @@ async def send_interruptible(
         loop.remove_signal_handler(signal.SIGINT)
 
 
+def apply_repl_overrides(
+    adapter: object,
+    *,
+    no_tools: bool,
+    no_prompt: bool,
+) -> None:
+    """Apply ``--no-tools``/``--no-prompt`` to a built adapter.
+
+    These toggles are realized on the Claude adapter's options object
+    (the REPL's default and only fully-wired backend). For other backends
+    the model override still applies, but a warning is emitted so the flags
+    are not silently ignored.
+    """
+    if not no_tools and not no_prompt:
+        return
+
+    from lup.adapters.claude import ClaudeAdapter
+
+    if not isinstance(adapter, ClaudeAdapter):
+        typer.echo(
+            "Warning: --no-tools/--no-prompt are only applied on the Claude backend",
+            err=True,
+        )
+        return
+
+    options = adapter.options
+    if no_tools:
+        options.mcp_servers = {}
+        options.allowed_tools = []
+    if no_prompt:
+        options.system_prompt = None
+
+
 async def repl(
     *,
     model: str | None = None,
@@ -765,7 +818,18 @@ async def repl(
     )
 
     try:
-        adapter, adapter_ctx, _notes = build_adapter("repl")
+        # ``build_adapter`` reads ``settings.model`` for every backend, so
+        # override it here to make ``--model`` actually take effect (not just
+        # decorate the panel). ``--no-tools``/``--no-prompt`` are applied to the
+        # built Claude options below.
+        original_model = settings.model
+        if model:
+            settings.model = model
+        try:
+            adapter, adapter_ctx, _notes = build_adapter("repl")
+        finally:
+            settings.model = original_model
+        apply_repl_overrides(adapter, no_tools=no_tools, no_prompt=no_prompt)
         stack.enter_context(adapter_ctx)
 
         async with stack:

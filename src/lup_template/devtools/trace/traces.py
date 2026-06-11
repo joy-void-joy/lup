@@ -12,6 +12,7 @@ Examples::
     $ uv run lup-devtools trace capabilities --json
 """
 
+import json
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -60,6 +61,38 @@ ERROR_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# Trace files are free-form markdown (prose + truncated JSON fragments +
+# code), not parseable JSON documents — a line scan is the right tool here.
+# Successful-result lines often contain "error" as a falsy field
+# (e.g. ``"is_error": false``, ``"status": "reviewed"``); suppress those so
+# the error view shows real failures, not healthy JSON blobs.
+SUCCESS_PATTERNS = (
+    re.compile(  # claude: ignore  # keyword scan over markdown, not JSON parsing
+        r'"(is_error|error)"\s*:\s*(false|null|0|""|\[\])'
+        r'|"error_count"\s*:\s*0'
+        r'|"status"\s*:\s*"(ok|success|succeeded|reviewed|passed|complete[d]?)"',
+        re.IGNORECASE,
+    )
+)
+
+
+def keyword_window(line: str, width: int = 80) -> str:
+    """Return a window of *line* centered on the first error keyword."""
+    line = line.strip()
+    match = ERROR_PATTERNS.search(line)
+    if match is None or len(line) <= width:
+        return line if len(line) <= width else line[:width] + "..."
+
+    start = max(0, match.start() - width // 2)
+    end = min(len(line), start + width)
+    snippet = line[start:end]
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(line):
+        snippet = snippet + "..."
+    return snippet
+
+
 CAPABILITY_PATTERNS = re.compile(
     r"would be useful|would have helped|would benefit from|wish I had|"
     r"if I could|tool that|need.* access to|cannot .* because",
@@ -102,11 +135,13 @@ def scan_for_errors(
             session_id = session_id_from_path(trace_file)
 
             for line in content.split("\n"):
-                if ERROR_PATTERNS.search(line):
-                    if session_id not in errors_by_session:
-                        errors_by_session[session_id] = []
-                    error_line = line[:100] + "..." if len(line) > 100 else line
-                    errors_by_session[session_id].append(error_line.strip())
+                if not ERROR_PATTERNS.search(line):
+                    continue
+                if SUCCESS_PATTERNS.search(line):
+                    continue
+                if session_id not in errors_by_session:
+                    errors_by_session[session_id] = []
+                errors_by_session[session_id].append(keyword_window(line))
         except OSError:
             pass
 
@@ -159,36 +194,63 @@ def scan_for_capability_gaps(
 
 
 def find_trace(session_id: str) -> Path | None:
-    """Find the trace file for a session across all versions."""
+    """Find a showable trace for a session across all versions.
+
+    Prefers a markdown reasoning log, then any ``.md`` in the session dir,
+    then the session dir itself — whose JSON ``trace list`` enumerates, so
+    every listed id is showable (rendered readably by :func:`load_trace`).
+    """
     log_files = list(iter_trace_log_files(session_id=session_id))
     if log_files:
         return sorted(log_files)[-1]
 
-    for session_dir in iter_session_dirs(session_id=session_id):
+    session_dirs = list(iter_session_dirs(session_id=session_id))
+    for session_dir in session_dirs:
         md_files = list(session_dir.glob("*.md"))
         if md_files:
             return sorted(md_files)[-1]
 
+    if session_dirs:
+        return sorted(session_dirs)[-1]
+
     return None
 
 
+def render_json_trace(path: Path) -> str:
+    """Render a session JSON file as readable, pretty-printed text."""
+    raw = path.read_text(encoding="utf-8")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    return json.dumps(parsed, indent=2, ensure_ascii=False)
+
+
 def load_trace(trace_path: Path) -> str:
-    """Load trace content from a file or directory."""
+    """Load trace content from a file or directory, rendering JSON readably."""
     if trace_path.is_file():
+        if trace_path.suffix == ".json":
+            return render_json_trace(trace_path)
         return trace_path.read_text(encoding="utf-8")
 
     if trace_path.is_dir():
         contents = []
         for f in sorted(trace_path.glob("*")):
-            if f.is_file():
-                contents.append(f"--- {f.name} ---\n{f.read_text(encoding='utf-8')}")
+            if not f.is_file():
+                continue
+            body = (
+                render_json_trace(f)
+                if f.suffix == ".json"
+                else f.read_text(encoding="utf-8")
+            )
+            contents.append(f"--- {f.name} ---\n{body}")
         return "\n\n".join(contents)
 
     return ""
 
 
 TOOL_CALL_PATTERNS = re.compile(
-    r"tool_use|tool_result|^##\s+Tool:|^###\s+Tool:|^Tool:|^\w+_?\w+:",
+    r"tool_use|tool_result|^#{2,3}\s+\S+\s+Tool:|^#{2,3}\s+\S+\s+Result\b",
     re.IGNORECASE,
 )
 
@@ -286,7 +348,7 @@ def search(pattern: str, context: int, as_json: bool) -> None:
                     end = min(len(lines), i + context + 1)
                     matches.append(
                         {
-                            "file": str(trace_file.relative_to(Path.cwd())),
+                            "file": str(trace_file.relative_to(traces_path())),
                             "line": i + 1,
                             "context": lines[start:end],
                         }
@@ -346,7 +408,11 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
         for session_dir in iter_session_dirs(version=ver):
             raw.append(("sessions", session_dir.name, session_dir))
 
+    allowed_versions = set(effective) if effective else None
     for log_file in iter_trace_log_files():
+        version_name = log_file.parent.parent.parent.name
+        if allowed_versions is not None and version_name not in allowed_versions:
+            continue
         session_id = log_file.parent.name
         raw.append(("logs", session_id, log_file.parent))
 

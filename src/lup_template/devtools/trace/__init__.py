@@ -35,7 +35,7 @@ def search_cmd(
 
 @app.command("list")
 def list_cmd(
-    limit: int = typer.Option(20, "-n", "--limit", help="Max to show"),
+    limit: int = typer.Option(20, "-l", "--limit", help="Max to show"),
     version: VERSION_OPT = AGENT_VERSION,
     all_versions: ALL_VERSIONS_OPT = False,
     as_json: JSON_OPT = False,
@@ -49,7 +49,7 @@ def list_cmd(
 
 @app.command("errors")
 def errors_cmd(
-    limit: int = typer.Option(20, "-n", "--limit", help="Max errors to show"),
+    limit: int = typer.Option(20, "-l", "--limit", help="Max errors to show"),
     version: VERSION_OPT = AGENT_VERSION,
     all_versions: ALL_VERSIONS_OPT = False,
     as_json: JSON_OPT = False,
