@@ -31,6 +31,7 @@ from lup.adapters.common import AdapterCapabilities
 from lup.history import save_session
 from lup.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
 from lup.notes import setup_notes
+from lup.output import ensure_output_submitted, output_path
 from lup.trace import TraceLogger
 from lup.types import LupContentBlock, LupResponse, LupTextBlock, LupToolUseBlock
 from lup.paths import agent_version
@@ -488,7 +489,16 @@ async def run_agent(
     )
 
     with ctx:
-        response = await adapter.run(task, trace_logger=trace_logger)
+        async with adapter.conversation() as conv:
+            response = await conv.send(task, trace_logger=trace_logger)
+            if not adapter.capabilities.stop_event:
+                retry = await ensure_output_submitted(
+                    conv,
+                    output_exists=output_path(notes.session).exists,
+                    trace_logger=trace_logger,
+                )
+                if retry is not None:
+                    response = retry
 
     trace_logger.save()
     log_metrics_summary()
