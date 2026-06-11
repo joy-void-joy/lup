@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 from lup.adapters.common import (
     AgentAdapter,
+    BudgetExceededError,
     Conversation,
 )
 from lup.trace import TraceLogger, print_message
@@ -253,6 +254,37 @@ def build_hook_config_overrides(
 type CodexUsageNormalizer = Callable[[ThreadTokenUsage], Usage | None]
 """Transforms the Codex SDK usage object into a (subclass of) Usage."""
 
+type UsageCost = Callable[[Usage], float]
+"""Estimates the USD cost of accumulated token usage."""
+
+
+def per_mtok_usage_cost(
+    *,
+    input_usd: float,
+    output_usd: float,
+    cached_input_usd: float | None = None,
+) -> UsageCost:
+    """Build a usage→USD estimator from per-million-token rates.
+
+    The Codex runtime reports token counts, never cost — budget
+    enforcement needs the caller to supply pricing. Cached input tokens
+    are treated as a subset of ``input_tokens`` (OpenAI-style usage
+    reporting); when ``cached_input_usd`` is given, that subset is
+    billed at the cached rate instead of the input rate.
+    """
+
+    def cost(usage: Usage) -> float:
+        cached = usage.cache_read_input_tokens
+        uncached = max(usage.input_tokens - cached, 0)
+        cached_rate = input_usd if cached_input_usd is None else cached_input_usd
+        return (
+            uncached * input_usd
+            + cached * cached_rate
+            + usage.output_tokens * output_usd
+        ) / 1_000_000
+
+    return cost
+
 
 def codex_usage_to_lup(usage: ThreadTokenUsage) -> Usage | None:
     """Default Codex usage normalizer — portable token counts only."""
@@ -329,11 +361,47 @@ class CodexConversation(Conversation):
         output_schema: dict[str, object] | None = None,
         effort: str | None = None,
         usage_normalizer: CodexUsageNormalizer | None = None,
+        max_budget_usd: float | None = None,
+        usage_cost: UsageCost | None = None,
     ) -> None:
         self.thread = thread
         self.output_schema = output_schema
         self.effort = effort
         self.usage_normalizer = usage_normalizer
+        self.max_budget_usd = max_budget_usd
+        self.usage_cost = usage_cost
+        self.turns_usage = Usage()
+        self.cost_usd: float | None = None
+
+    def check_budget(self) -> None:
+        """Refuse to start a turn once accumulated cost reached the budget.
+
+        Codex turns are atomic from the caller's side, so enforcement is
+        between turns: the turn that crosses the budget completes, and
+        every turn after it raises.
+        """
+        if self.max_budget_usd is None or self.cost_usd is None:
+            return
+        if self.cost_usd >= self.max_budget_usd:
+            raise BudgetExceededError(
+                f"Session cost ${self.cost_usd:.4f} reached the "
+                f"${self.max_budget_usd:.2f} budget; refusing to start a turn."
+            )
+
+    def record_turn_usage(self, usage: "ThreadTokenUsage | None") -> None:
+        """Accumulate one turn's token usage and re-estimate session cost."""
+        if usage is None:
+            return
+        last = usage.last
+        self.turns_usage = Usage(
+            input_tokens=self.turns_usage.input_tokens + last.input_tokens,
+            output_tokens=self.turns_usage.output_tokens + last.output_tokens,
+            cache_read_input_tokens=(
+                self.turns_usage.cache_read_input_tokens + last.cached_input_tokens
+            ),
+        )
+        if self.usage_cost is not None:
+            self.cost_usd = self.usage_cost(self.turns_usage)
 
     async def send(
         self,
@@ -344,13 +412,14 @@ class CodexConversation(Conversation):
     ) -> LupResponse:
         from openai_codex.generated.v2_all import ReasoningEffort
 
+        self.check_budget()
         effort = ReasoningEffort(self.effort) if self.effort else None
         result = await self.thread.run(
             prompt,
             effort=effort,
             output_schema=cast("JsonObject | None", self.output_schema),
         )
-        return build_lup_response(
+        response = build_lup_response(
             result,
             output_schema=self.output_schema,
             session_id=self.thread.id,
@@ -358,6 +427,10 @@ class CodexConversation(Conversation):
             prefix=prefix,
             usage_normalizer=self.usage_normalizer,
         )
+        self.record_turn_usage(result.usage)
+        if response.result is not None and self.cost_usd is not None:
+            response.result.total_cost_usd = self.cost_usd
+        return response
 
 
 class CodexAdapter(AgentAdapter):
@@ -378,7 +451,16 @@ class CodexAdapter(AgentAdapter):
         hook_overrides: list[CodexHookConfig] | None = None,
         session_id: str | None = None,
         usage_normalizer: CodexUsageNormalizer | None = None,
+        mcp_servers: Sequence[str] = ("notes", "sandbox"),
+        max_budget_usd: float | None = None,
+        usage_cost: UsageCost | None = None,
     ) -> None:
+        if max_budget_usd is not None and usage_cost is None:
+            raise ValueError(
+                "max_budget_usd on the Codex runtime requires a usage_cost "
+                "estimator — the SDK reports token counts, not cost. Build "
+                "one with per_mtok_usage_cost(...)."
+            )
         self.model = model
         self.system_prompt = system_prompt
         self.output_schema = output_schema
@@ -391,12 +473,17 @@ class CodexAdapter(AgentAdapter):
         self.hook_overrides = hook_overrides
         self.session_id = session_id
         self.usage_normalizer = usage_normalizer
+        self.mcp_servers = mcp_servers
+        self.max_budget_usd = max_budget_usd
+        self.usage_cost = usage_cost
 
     def build_config_overrides(self) -> tuple[str, ...]:
         """Assemble all config_overrides for this adapter run."""
         overrides: list[str] = []
         if self.mcp_tools:
-            overrides.extend(build_mcp_config_overrides(env=self.mcp_env))
+            overrides.extend(
+                build_mcp_config_overrides(env=self.mcp_env, servers=self.mcp_servers)
+            )
         if self.writable_roots:
             overrides.extend(build_sandbox_config_overrides(self.writable_roots))
         if self.hook_overrides:
@@ -428,6 +515,8 @@ class CodexAdapter(AgentAdapter):
                 output_schema=self.output_schema,
                 effort=self.effort,
                 usage_normalizer=self.usage_normalizer,
+                max_budget_usd=self.max_budget_usd,
+                usage_cost=self.usage_cost,
             )
 
     async def resume(self, session_id: str, prompt: str) -> LupResponse:

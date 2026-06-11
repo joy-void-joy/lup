@@ -22,6 +22,16 @@ from lup.types import LupDoneEvent, LupEvent, LupResponse, model_backend
 type PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 
 
+class BudgetExceededError(RuntimeError):
+    """A conversation refused to start a turn: accumulated cost reached the budget.
+
+    Raised between turns by adapters that enforce ``max_budget_usd``
+    through their own usage accounting (the Codex runtime reports token
+    counts, not cost). The turn that crossed the budget has already
+    completed — this error stops the *next* one.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Conversation (multi-turn session)
 # ---------------------------------------------------------------------------
