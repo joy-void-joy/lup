@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, Agent, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, Task, AskUserQuestion
 description: Deep trace reading and error classification for selected sessions
 argument-hint: <session_id1> [session_id2 ...]
 ---

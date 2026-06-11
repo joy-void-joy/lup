@@ -40,7 +40,7 @@ This plan supersedes the previous SDK-interop status document. That document mar
 - [x] `lup/__init__.py` eagerly imports `adapters.claude_client`; exports retired `ResponseCollector` alongside its replacement — fixed in Phase 6
 - [x] `core.py` writes traces to `notes/traces/<session_id>/` bypassing the versioned `lup.paths` layout — fixed in Phase 6
 - [x] Devtools: `version` sub-app crashes (`click.get_current_context()`), `usage` hangs in non-TTY, `ruff format` failing on 24 files, no CI — fixed in Phase 0 (CI deferred at user request)
-- [x] Docs: README unfinished, CLAUDE.md structure stale, 11 `lup.lib` docstring refs, PATTERNS.md references `lup.client` — fixed in Phase 8
+- [~] Docs: README unfinished, CLAUDE.md structure stale, `lup.lib` docstring refs (path-form `lup/lib/` refs still in progress), PATTERNS.md references `lup.client` — addressed in Phase 8
 
 ## Target Architecture
 
@@ -167,7 +167,7 @@ This plan supersedes the previous SDK-interop status document. That document mar
 - [x] README: cut-off sentences finished, `[[[]]]` placeholders replaced, the three empty workflow sections filled, command names corrected, `uv run lup run` + `AGENT_SDK` documented (edits preserve the original author's structure and voice)
 - [x] CLAUDE.md: directory tree reflects `adapters/`, `types.py`, `output.py`, `subagents.py`; sub-app list corrected (`py`, no `api`); getting-started uses `uv run lup run` and the codex backend; Python 3.14 + multi-SDK framing
 - [x] PATTERNS.md: `lup.client` → `lup.adapters.common.query` (with backend routing semantics); reflection pattern documents in-handler gating and submit_output finalization
-- [x] All `lup.lib` docstring references fixed; phantom `codex_query` replaced with the real `create_run_subagent_tool` mechanism; CLI docstring module paths corrected
+- [~] Dotted `lup.lib` docstring references fixed; path-form `lup/lib/` references that evaded the dotted-name grep are still being corrected. Phantom `codex_query` replaced with the real `create_run_subagent_tool` mechanism; CLI docstring module paths corrected
 - [x] Checkboxes kept current as phases landed
 
 ## Phase 9 — Deferred work follow-through

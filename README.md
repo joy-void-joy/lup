@@ -134,7 +134,7 @@ To speed up development, many claude commands and meta-commands are built in thi
 
 - commit
 - rebase
-- merge-conflict
+- merge
 - clean-gone
 - close
 
@@ -142,8 +142,16 @@ To speed up development, many claude commands and meta-commands are built in thi
 - debug
 
 - feedback-loop
+- fb-status
+- fb-investigate
+- fb-analyze
+- fb-reflect
+- fb-implement
 
 - hooks
+- meta
+- principle
+- review
 
 - refactor
 - refactor-tools

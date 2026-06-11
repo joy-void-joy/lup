@@ -43,11 +43,11 @@ Agents produce better output when forced to self-assess before committing. Three
 
 ## Nested Agent Pattern
 
-Distinct from **subagents** (SDK-native `Task()` dispatch, defined upfront in `get_subagents()`, same session). A nested agent is a tool that internally creates an independent SDK client, runs it, and folds the result back into its tool response.
+Distinct from **subagents** (SDK-native `Task()` dispatch, defined upfront in `get_subagent_specs()`, same session). A nested agent is a tool that internally creates an independent SDK client, runs it, and folds the result back into its tool response.
 
 | Aspect     | Subagent                          | Nested Agent                        |
 | ---------- | --------------------------------- | ----------------------------------- |
-| Definition | Upfront in `get_subagents()`      | On-demand inside a tool handler     |
+| Definition | Upfront in `get_subagent_specs()` | On-demand inside a tool handler     |
 | Client     | Main agent's SDK session          | Independent client via `query()`    |
 | Session    | Shared — same trace, same metrics | Isolated — no session persistence   |
 | Return     | SDK `ResultMessage` (structured)  | Scalar result augmented by the tool |
@@ -58,7 +58,7 @@ Distinct from **subagents** (SDK-native `Task()` dispatch, defined upfront in `g
 ```python
 @lup_tool("Review code quality and return structured assessment")
 async def review(params: ReviewInput) -> ReviewOutput:
-    collector = await query(
+    response = await query(
         build_review_prompt(params),
         model="sonnet",
         system_prompt=REVIEWER_PROMPT,
@@ -67,7 +67,7 @@ async def review(params: ReviewInput) -> ReviewOutput:
         max_turns=5,
     )
     # Augment: fold nested agent's text into structured tool output
-    return ReviewOutput(critique=collector.text or "", score=compute_score(collector))
+    return ReviewOutput(critique=response.text or "", score=compute_score(response))
 ```
 
 **Library support:** `query()` in `lup.adapters.common` handles the full pipeline and routes by model name — Claude models via the Claude Agent SDK, GPT/o-series via the Codex runtime, everything else via OpenAI-compatible endpoints. Session persistence is automatically disabled. It returns a `LupResponse`: use `.text` for text or `.output(T)` for structured output. Claude-only options (`tools`, `max_turns`, `max_budget_usd`, …) raise `ValueError` on other backends rather than being silently dropped.
@@ -83,7 +83,7 @@ For persistent agents that need parallel processing, a **background agent** runs
 | Aspect        | Subagent                     | Nested Agent                | Background Agent                |
 | ------------- | ---------------------------- | --------------------------- | ------------------------------- |
 | Lifetime      | Per-task (SDK dispatch)      | Per-tool-call               | Session-long                    |
-| Client        | Main agent's SDK session     | Independent via `query()`   | Independent `ClaudeSDKClient`   |
+| Client        | Main agent's SDK session     | Independent via `query()`   | Independent, SDK-aware via factory |
 | Initiation    | Agent dispatches via `Task()`| Tool handler creates on-demand| Wake events trigger turns       |
 | Communication | SDK `ResultMessage`          | Tool return value           | Shared mutable state            |
 | Use case      | Specialized long-running work| Quick generation, review    | Observation, research, execution|
@@ -97,7 +97,7 @@ For persistent agents that need parallel processing, a **background agent** runs
 
 **Lifecycle:** `start()` spawns an asyncio task. `wake()` signals new data. The message generator debounces rapid wakes and calls `build_message()` to produce the next turn. `stop()` cancels the task.
 
-**Library support:** `packages/lup/src/lup/background.py` provides the `BackgroundAgent` class. See observer example in `src/lup_template/agent/tools/realtime.py`.
+**Library support:** `packages/lup/src/lup/background.py` provides the `BaseBackgroundAgent` base class and the `create_background_agent` factory, which selects `ClaudeBackgroundAgent` or `CodexBackgroundAgent` based on the model's backend. See observer example in `src/lup_template/agent/tools/realtime.py`.
 
 **Customizing:** The `build_message` callback is the main extension point — it reads shared state, advances its own read pointer, and returns the next user turn content (or `None` to skip). The observer example in `agent/tools/realtime.py` shows the full wiring.
 

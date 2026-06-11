@@ -30,7 +30,7 @@ Invoke `/lup:commit` to commit any uncommitted work before starting the rebase.
 uv run lup-devtools dev pr sync-base --json
 ```
 
-If conflicts are reported, resolve with `/lup:merge-conflict` first.
+If conflicts are reported, resolve with `/lup:merge` (no argument) first.
 
 ### 3. Merge local settings into shared config
 

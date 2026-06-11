@@ -162,9 +162,9 @@ Ask the user:
 
 The reflection gate (`lup.reflect`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
 
-### 7. `feedback_collect.py`
+### 7. `devtools/feedback/state.py`
 
-The main feedback collection script. Customize for the domain's ground truth type.
+The feedback collection module (exposed via `uv run lup-devtools feedback collect`). Customize `load_outcomes()` and `compute_metrics()` for the domain's ground truth type.
 
 ### 8. Update `CLAUDE.md`
 

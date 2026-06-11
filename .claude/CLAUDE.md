@@ -182,7 +182,7 @@ uv run lup-devtools setup             # Full walkthrough
 uv run lup-devtools setup status      # Show what's configured
 uv run lup-devtools setup slack       # Just one integration
 
-uv run python -m lup_template.environment.cli --help
+uv run lup --help
 ```
 
 ### Testing
@@ -288,7 +288,7 @@ Worktrees typically branch from `dev`, but can also branch from other feature br
 
 Before completing any merge, **audit for deletions**: compare the result against both parents and verify that every removed function, parameter, or command was intentionally removed, not lost as a side effect of choosing one conflict side.
 
-Use `/lup:merge-conflict` for guided resolution. See the command for the full decision tree.
+Use `/lup:merge` (with no argument) for guided conflict resolution. See the command for the full decision tree.
 
 ### Commit Guidelines
 
