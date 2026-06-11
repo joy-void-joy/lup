@@ -43,6 +43,7 @@ from claude_agent_sdk.types import (
 )
 
 from lup.adapters.common import (
+    AdapterCapabilities,
     AgentAdapter,
     Conversation,
 )
@@ -373,6 +374,21 @@ class ClaudeAdapter(AgentAdapter):
     ) -> None:
         self.options = options
         self.usage_normalizer = usage_normalizer
+
+    @property
+    def capabilities(self) -> AdapterCapabilities:
+        return AdapterCapabilities(
+            hooks=True,
+            native_subagents=True,
+            streaming="live",
+            interrupt=True,
+            stop_event=True,
+            cost_reporting="native",
+            duration_reporting=True,
+            permission_modes=True,
+            max_turns=True,
+            max_thinking_tokens=True,
+        )
 
     @asynccontextmanager
     async def conversation(self) -> AsyncGenerator[Conversation, None]:

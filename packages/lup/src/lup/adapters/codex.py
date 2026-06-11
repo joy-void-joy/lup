@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from openai_codex.generated.v2_all import ThreadItem, ThreadTokenUsage
 
 from lup.adapters.common import (
+    AdapterCapabilities,
     AgentAdapter,
     BudgetExceededError,
     Conversation,
@@ -500,6 +501,21 @@ class CodexAdapter(AgentAdapter):
         self.mcp_servers = mcp_servers
         self.max_budget_usd = max_budget_usd
         self.usage_cost = usage_cost
+
+    @property
+    def capabilities(self) -> AdapterCapabilities:
+        return AdapterCapabilities(
+            hooks=False,
+            native_subagents=False,
+            streaming="post_hoc",
+            interrupt=False,
+            stop_event=False,
+            cost_reporting="rates" if self.usage_cost is not None else "none",
+            duration_reporting=False,
+            permission_modes=False,
+            max_turns=False,
+            max_thinking_tokens=False,
+        )
 
     def build_config_overrides(self) -> tuple[str, ...]:
         """Assemble all config_overrides for this adapter run."""

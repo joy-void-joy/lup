@@ -8,6 +8,7 @@ The module-level ``query()`` dispatches to the appropriate SDK adapter
 based on model name — consumer code never imports from SDK packages.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager
@@ -19,7 +20,51 @@ from pydantic import BaseModel
 from lup.trace import TraceLogger
 from lup.types import LupDoneEvent, LupEvent, LupResponse, model_backend
 
+logger = logging.getLogger(__name__)
+
 type PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
+
+
+class AdapterCapabilities(BaseModel):
+    """What a backend can do — the parity contract as data.
+
+    Consumers branch on these fields instead of matching backend names,
+    devtools render them (``lup-devtools agent capabilities``), and the
+    parity test asserts them. A new cross-backend feature must add a
+    field here, which forces every adapter to take a position.
+    """
+
+    model_config = {"use_attribute_docstrings": True}
+
+    hooks: bool
+    """In-process LupHooksConfig is honored (PreToolUse/PostToolUse/Stop)."""
+
+    native_subagents: bool
+    """SubagentSpec runs natively in parallel (vs the run_subagent tool)."""
+
+    streaming: Literal["live", "post_hoc"]
+    """run_streamed yields events during the turn, or replays them after."""
+
+    interrupt: bool
+    """Conversation.interrupt() actually stops the current response."""
+
+    stop_event: bool
+    """Backend emits a stop event, so Stop hooks (completion guard) fire."""
+
+    cost_reporting: Literal["native", "rates", "none"]
+    """Cost is SDK-reported, estimated from caller-supplied rates, or absent."""
+
+    duration_reporting: bool
+    """Result messages carry duration_ms."""
+
+    permission_modes: bool
+    """Backend honors PermissionMode settings."""
+
+    max_turns: bool
+    """Backend enforces a per-session turn cap."""
+
+    max_thinking_tokens: bool
+    """Backend accepts an explicit thinking-token budget."""
 
 
 class BudgetExceededError(RuntimeError):
@@ -55,8 +100,13 @@ class Conversation(ABC):
     ) -> LupResponse: ...
 
     async def interrupt(self) -> None:
-        """Signal the backend to stop the current response. No-op by default."""
-        pass
+        """Signal the backend to stop the current response.
+
+        Backends without interruption support inherit this default, which
+        logs and returns — check ``adapter.capabilities.interrupt`` before
+        offering an interrupt affordance that would do nothing.
+        """
+        logger.warning("interrupt() is not supported on %s", type(self).__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +129,16 @@ class AgentAdapter(ABC):
         Implementations are ``@asynccontextmanager`` async generators
         yielding a ``Conversation`` that maintains state across turns.
         The SDK client/thread is created on entry and cleaned up on exit.
+        """
+
+    @property
+    @abstractmethod
+    def capabilities(self) -> AdapterCapabilities:
+        """Declare what this backend supports — see :class:`AdapterCapabilities`.
+
+        A property (not a constant) because some entries depend on
+        instance configuration, e.g. Codex cost reporting requires a
+        caller-supplied rate estimator.
         """
 
     async def run(
@@ -153,7 +213,6 @@ async def query(
             "tools": tools,
             "allowed_tools": allowed_tools,
             "permission_mode": permission_mode,
-            "max_budget_usd": max_budget_usd,
         }
         requested = sorted(k for k, v in claude_only.items() if v is not None)
         if requested:
@@ -161,6 +220,15 @@ async def query(
                 f"query() options {requested} are not supported on the "
                 f"{backend} backend (model={effective_model!r}); use a "
                 "Claude model or drop these options."
+            )
+        if max_budget_usd is not None:
+            raise ValueError(
+                "max_budget_usd cannot be enforced by a one-shot query() on "
+                f"the {backend} backend: the Codex runtime enforces budgets "
+                "between turns from caller-supplied rates, and a one-shot "
+                "query has no next turn to refuse. Use "
+                "CodexAdapter(max_budget_usd=..., usage_cost=...) for "
+                "multi-turn enforcement."
             )
 
     match backend:

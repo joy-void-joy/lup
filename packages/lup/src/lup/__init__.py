@@ -6,7 +6,7 @@ package imports no SDK at load time — install the ``claude`` and/or
 ``codex`` extras for the backend you use.
 """
 
-from lup.adapters.common import query
+from lup.adapters.common import AdapterCapabilities, query
 from lup.hooks import (
     create_capture_hook,
     create_nudge_hook,
@@ -39,6 +39,7 @@ from lup.types import (
 )
 
 __all__ = [
+    "AdapterCapabilities",
     "LupHooksConfig",
     "LupMcpTool",
     "MetricsSummary",
