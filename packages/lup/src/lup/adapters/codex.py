@@ -540,8 +540,9 @@ class CodexAdapter(AgentAdapter):
     def make_conversation(self, thread: "AsyncThread") -> CodexConversation:
         """Wrap a thread in a conversation carrying this adapter's settings.
 
-        The single construction point for the send path so resume/fork
-        inherit identical effort, output-schema, and budget wiring.
+        The single construction point for the send path, shared with the
+        OpenAI-compatible subclass so both inherit identical effort,
+        output-schema, and budget wiring.
         """
         return CodexConversation(
             thread,
@@ -573,30 +574,6 @@ class CodexAdapter(AgentAdapter):
                 ),
             )
             yield self.make_conversation(thread)
-
-    async def resume(self, session_id: str, prompt: str) -> LupResponse:
-        """Resume a Codex thread by ID."""
-        require_codex_sdk()
-
-        from openai_codex import AsyncCodex, CodexConfig
-
-        config = CodexConfig(config_overrides=self.build_config_overrides())
-
-        async with AsyncCodex(config=config) as codex:
-            thread = await codex.thread_resume(thread_id=session_id)
-            return await self.make_conversation(thread).send(prompt)
-
-    async def fork(self, session_id: str, prompt: str) -> LupResponse:
-        """Fork a Codex thread and run on the fork."""
-        require_codex_sdk()
-
-        from openai_codex import AsyncCodex, CodexConfig
-
-        config = CodexConfig(config_overrides=self.build_config_overrides())
-
-        async with AsyncCodex(config=config) as codex:
-            forked_thread = await codex.thread_fork(thread_id=session_id)
-            return await self.make_conversation(forked_thread).send(prompt)
 
     async def run_streamed(
         self,

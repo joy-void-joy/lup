@@ -152,14 +152,6 @@ class AgentAdapter(ABC):
         async with self.conversation() as conv:
             return await conv.send(prompt, trace_logger=trace_logger, prefix=prefix)
 
-    async def resume(self, session_id: str, prompt: str) -> LupResponse:
-        """Resume a previous session by ID. Not all adapters support this."""
-        raise NotImplementedError(f"{type(self).__name__} does not support resume")
-
-    async def fork(self, session_id: str, prompt: str) -> LupResponse:
-        """Fork a previous session and run on the fork."""
-        raise NotImplementedError(f"{type(self).__name__} does not support fork")
-
     async def run_streamed(
         self,
         prompt: str,
