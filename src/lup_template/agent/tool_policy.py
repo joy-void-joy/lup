@@ -18,6 +18,7 @@ Usage:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any  # claude: ignore — for the ServerConfig alias
 
 if TYPE_CHECKING:
@@ -120,7 +121,8 @@ class ToolPolicy:
 
         # Add any additional servers passed in
         for server in additional_servers:
-            servers[server.name] = server
+            if self.group_enabled(server.name):
+                servers[server.name] = server
 
         # TODO: Add your MCP servers
         # Example:
@@ -132,6 +134,26 @@ class ToolPolicy:
         #     servers["live_data"] = live_data_server
 
         return servers
+
+    def group_enabled(self, name: str) -> bool:
+        """Whether a tool group is available under this policy.
+
+        One predicate for every backend: the Claude path filters the
+        in-process servers it registers (:meth:`get_mcp_servers`), the
+        Codex/OpenAI path filters the group names it serves
+        (:meth:`filter_group_names`).
+
+        Customize with your domain's conditions, e.g.::
+
+            if name == "live_data":
+                return not self.restricted_mode
+        """
+        _ = name
+        return True
+
+    def filter_group_names(self, names: Sequence[str]) -> tuple[str, ...]:
+        """Filter tool-group names by policy (subprocess-served backends)."""
+        return tuple(name for name in names if self.group_enabled(name))
 
     def get_allowed_tools(self) -> list[str]:
         """Get list of allowed tools based on policy.

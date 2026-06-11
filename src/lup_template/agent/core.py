@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from lup.adapters.common import AgentAdapter
     from lup.notes import NotesConfig
     from lup.realtime_relay import RealtimeMailbox
+    from lup.sandbox import Sandbox
 
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
@@ -122,37 +123,32 @@ def build_options(
     )
     from lup.hooks import create_permission_hooks
     from lup.mcp import create_mcp_server
-    from lup.output import create_output_tool
     from lup.types import merge_hooks
 
     from lup_template.agent.prompts import get_system_prompt
     from lup_template.agent.subagents import get_subagent_specs
     from lup_template.agent.tool_policy import ToolPolicy
-    from lup_template.agent.tools.reflect import create_reflect_tools
+    from lup_template.agent.toolsets import EXAMPLE_GROUP, build_session_toolset
 
-    reflect_kit = create_reflect_tools(
-        session_dir=notes.session,
-        outputs_dir=notes.output.parent,
-    )
-
-    output_kit = create_output_tool(
-        AgentOutput,
-        session_dir=notes.session,
-        gate=reflect_kit["gate"],
-        reflection_tool_name="mcp__notes__review",
-    )
-
-    reflect_server = create_mcp_server(
-        name="notes",
-        tools=[*reflect_kit["tools"], *output_kit["tools"]],
-    )
-
-    all_servers = [reflect_server]
+    session_sandbox: Sandbox | None = None
     if sandbox is not None:
         from lup.sandbox import Sandbox
 
         if isinstance(sandbox, Sandbox):
-            all_servers.append(sandbox.create_mcp_server())
+            session_sandbox = sandbox
+
+    toolset = build_session_toolset(
+        session_dir=notes.session,
+        outputs_dir=notes.output.parent,
+        include_subagent_tool=False,
+        sandbox=session_sandbox,
+    )
+
+    all_servers = [
+        create_mcp_server(name, tools=tools)
+        for name, tools in toolset["groups"].items()
+        if name != EXAMPLE_GROUP
+    ]
 
     policy = ToolPolicy(settings)
     policy_servers = policy.get_mcp_servers(*all_servers)
@@ -167,13 +163,13 @@ def build_options(
     from lup.hooks import create_completion_guard, create_reflection_gate
 
     reflection_hooks = create_reflection_gate(
-        gate=reflect_kit["gate"],
+        gate=toolset["gate"],
         gated_tool="mcp__notes__submit_output",
         reflection_tool_name="mcp__notes__review",
     )
     hooks = merge_hooks(hooks, reflection_hooks)
 
-    completion_hooks = create_completion_guard(output_kit["output_path"].exists)
+    completion_hooks = create_completion_guard(toolset["output_path"].exists)
     hooks = merge_hooks(hooks, completion_hooks)
 
     claude_hooks = lup_hooks_to_claude(hooks)
@@ -311,8 +307,12 @@ def build_codex_adapter(
     """Build a CodexAdapter for the agent session."""
     from lup.adapters.codex import CodexAdapter
 
+    from lup_template.agent.tool_policy import ToolPolicy
+    from lup_template.agent.toolsets import tool_group_names
+
     system_prompt, mcp_env, writable_roots = build_codex_session(notes)
     max_budget_usd, usage_cost = codex_budget_options()
+    policy = ToolPolicy(settings)
 
     return CodexAdapter(
         model=settings.model,
@@ -323,6 +323,7 @@ def build_codex_adapter(
         mcp_tools=True,
         mcp_env=mcp_env,
         writable_roots=writable_roots,
+        mcp_servers=policy.filter_group_names(tool_group_names(realtime=False)),
         max_budget_usd=max_budget_usd,
         usage_cost=usage_cost,
     )
@@ -344,11 +345,15 @@ def build_codex_realtime_adapter(
     from lup.adapters.codex import CodexAdapter
     from lup.realtime_relay import REALTIME_DIRNAME, RealtimeMailbox
 
+    from lup_template.agent.tool_policy import ToolPolicy
+    from lup_template.agent.toolsets import tool_group_names
+
     realtime_dir = notes.session / REALTIME_DIRNAME
     system_prompt, mcp_env, writable_roots = build_codex_session(
         notes, realtime_dir=realtime_dir
     )
     max_budget_usd, usage_cost = codex_budget_options()
+    policy = ToolPolicy(settings)
 
     adapter = CodexAdapter(
         model=settings.model,
@@ -359,7 +364,7 @@ def build_codex_realtime_adapter(
         mcp_tools=True,
         mcp_env=mcp_env,
         writable_roots=writable_roots,
-        mcp_servers=("notes", "sandbox", "session"),
+        mcp_servers=policy.filter_group_names(tool_group_names(realtime=True)),
         max_budget_usd=max_budget_usd,
         usage_cost=usage_cost,
     )
@@ -373,8 +378,12 @@ def build_openai_adapter(
     """Build an OpenAICompatibleAdapter with full tools and enforcement."""
     from lup.adapters.openai_compat import OpenAICompatibleAdapter
 
+    from lup_template.agent.tool_policy import ToolPolicy
+    from lup_template.agent.toolsets import tool_group_names
+
     system_prompt, mcp_env, writable_roots = build_codex_session(notes)
     max_budget_usd, usage_cost = codex_budget_options()
+    policy = ToolPolicy(settings)
 
     return OpenAICompatibleAdapter(
         model=settings.model,
@@ -388,6 +397,7 @@ def build_openai_adapter(
         mcp_tools=True,
         mcp_env=mcp_env,
         writable_roots=writable_roots,
+        mcp_servers=policy.filter_group_names(tool_group_names(realtime=False)),
         max_budget_usd=max_budget_usd,
         usage_cost=usage_cost,
     )
