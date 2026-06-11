@@ -10,7 +10,10 @@
       "Read(./downstream.json.local)"
     ],
     "deny": [
-      "Read(./**/*.local*)"
+      "Read(./**/.env*.local)",
+      "Read(./**/.env.local)",
+      "Read(./**/secrets*.local)",
+      "Read(./**/*.secret.local)"
     ],
     "ask": [
       "Edit(./**/pyproject.toml)",
