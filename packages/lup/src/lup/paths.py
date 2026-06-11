@@ -247,6 +247,7 @@ OUTPUTS_DIR_ENV = "LUP_OUTPUTS_DIR"
 GATE_FLAG_ENV = "LUP_GATE_FLAG"
 SESSION_ID_ENV = "LUP_SESSION_ID"
 TASK_ID_ENV = "LUP_TASK_ID"
+REALTIME_DIR_ENV = "LUP_REALTIME_DIR"
 
 
 class SessionContext(BaseModel):
@@ -265,6 +266,7 @@ class SessionContext(BaseModel):
     gate_flag: Path | None = None
     session_id: str | None = None
     task_id: str | None = None
+    realtime_dir: Path | None = None
 
     def to_env(self) -> dict[str, str]:
         """Serialize to the env vars consumed by read_session_context()."""
@@ -277,6 +279,8 @@ class SessionContext(BaseModel):
             env[SESSION_ID_ENV] = self.session_id
         if self.task_id:
             env[TASK_ID_ENV] = self.task_id
+        if self.realtime_dir is not None:
+            env[REALTIME_DIR_ENV] = str(self.realtime_dir)
         return env
 
 
@@ -303,4 +307,5 @@ def read_session_context(
         gate_flag=path_or_none(GATE_FLAG_ENV),
         session_id=env.get(SESSION_ID_ENV) or None,
         task_id=env.get(TASK_ID_ENV) or None,
+        realtime_dir=path_or_none(REALTIME_DIR_ENV),
     )
