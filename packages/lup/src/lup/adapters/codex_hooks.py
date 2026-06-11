@@ -1,5 +1,17 @@
 """Codex hook adapter — translates lup hook policies to Codex command hooks.
 
+.. warning::
+
+    **Quarantined — non-functional on current Codex builds.** A live probe
+    confirmed that config.toml command hooks never fire on the Codex builds
+    this project targets, so production code deliberately does **not** use
+    this module: permission enforcement is native instead (the
+    workspace-write sandbox in :func:`lup.adapters.codex.build_sandbox_config_overrides`).
+    This module is imported only by tests and kept as a reference for the
+    hook-config wire format should Codex hooks start firing. Do not wire it
+    into a live adapter without re-verifying that the runtime honors the
+    generated hooks.
+
 Codex uses config.toml command hooks with PreToolUse/PostToolUse/
 PermissionRequest/Stop events. Each hook script receives JSON on stdin
 and emits JSON to stdout with allow/deny/systemMessage fields.

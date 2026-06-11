@@ -12,7 +12,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
-from typing import Any, Literal, cast  # claude: ignore
+from typing import Any, cast  # claude: ignore
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -104,6 +104,13 @@ def build_claude_hook_handler(
         )
         if "stop_hook_active" in input_data:
             lup_input["stop_hook_active"] = input_data["stop_hook_active"]
+        if "tool_response" in input_data:
+            response = input_data["tool_response"]
+            lup_input["tool_result"] = (
+                response
+                if isinstance(response, str)
+                else json.dumps(response, default=str)
+            )
 
         lup_output = await hook_fn(lup_input)
         return lup_hook_output_to_claude(lup_output)
@@ -165,22 +172,20 @@ def lup_hook_output_to_claude(output: LupHookOutput) -> SyncHookJSONOutput:
 # SubagentSpec → Claude AgentDefinition
 # ---------------------------------------------------------------------------
 
-CLAUDE_MODEL_LITERALS = {"sonnet", "opus", "haiku", "inherit"}
-
-type ClaudeModelLiteral = Literal["sonnet", "opus", "haiku", "inherit"]
-
 
 def spec_to_claude(spec: SubagentSpec) -> AgentDefinition:
-    """Convert a SubagentSpec to a Claude AgentDefinition."""
-    model: ClaudeModelLiteral | None = None
-    if spec.model in CLAUDE_MODEL_LITERALS:
-        model = cast(ClaudeModelLiteral, spec.model)
+    """Convert a SubagentSpec to a Claude AgentDefinition.
 
+    ``AgentDefinition.model`` is ``str | None`` and accepts both the
+    short aliases (``sonnet``/``opus``/``haiku``) and full model IDs
+    (``claude-opus-4-6``), so the spec's model passes straight through
+    rather than collapsing unknown IDs to the inherited main-loop model.
+    """
     return AgentDefinition(
         description=spec.description,
         prompt=spec.prompt,
         tools=spec.tools,
-        model=model,
+        model=spec.model,
     )
 
 
@@ -316,6 +321,7 @@ class ClaudeConversation(Conversation):
                         response.blocks.append(claude_block_to_lup(block))
 
                 case ResultMessage():
+                    response.session_id = message.session_id
                     response.result = LupResultMessage(
                         structured_output=message.structured_output,
                         is_error=message.is_error,

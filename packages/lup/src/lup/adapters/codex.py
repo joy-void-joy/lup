@@ -75,6 +75,7 @@ def codex_items_to_lup(items: Sequence[ThreadItem]) -> list[LupContentBlock]:
         McpToolCallThreadItem,
         MessagePhase,
         ReasoningThreadItem,
+        WebSearchThreadItem,
     )
 
     blocks: list[LupContentBlock] = []
@@ -157,6 +158,25 @@ def codex_items_to_lup(items: Sequence[ThreadItem]) -> list[LupContentBlock]:
                             content=diff_text,
                         )
                     )
+
+            case WebSearchThreadItem():
+                blocks.append(
+                    LupToolUseBlock(
+                        id=inner.id,
+                        name="WebSearch",
+                        input={"query": inner.query},
+                    )
+                )
+
+            case _:
+                item_type = getattr(inner, "type", type(inner).__name__)
+                logger.warning(
+                    "codex_items_to_lup: unhandled ThreadItem variant %r (%s); "
+                    "emitting diagnostic text block",
+                    item_type,
+                    type(inner).__name__,
+                )
+                blocks.append(LupTextBlock(text=f"[unhandled codex item: {item_type}]"))
 
     return blocks
 
@@ -336,7 +356,11 @@ def build_lup_response(
         try:
             structured_output = json.loads(result.final_response)
         except json.JSONDecodeError, TypeError:
-            pass
+            logger.warning(
+                "Codex structured-output parse failed; final_response was not "
+                "JSON matching the schema. Offending text (truncated): %r",
+                result.final_response[:500],
+            )
 
     result_usage = safe_normalize_usage(
         usage_normalizer or codex_usage_to_lup, result.usage
@@ -490,6 +514,21 @@ class CodexAdapter(AgentAdapter):
             overrides.extend(build_hook_config_overrides(self.hook_overrides))
         return tuple(overrides)
 
+    def make_conversation(self, thread: "AsyncThread") -> CodexConversation:
+        """Wrap a thread in a conversation carrying this adapter's settings.
+
+        The single construction point for the send path so resume/fork
+        inherit identical effort, output-schema, and budget wiring.
+        """
+        return CodexConversation(
+            thread,
+            output_schema=self.output_schema,
+            effort=self.effort,
+            usage_normalizer=self.usage_normalizer,
+            max_budget_usd=self.max_budget_usd,
+            usage_cost=self.usage_cost,
+        )
+
     @asynccontextmanager
     async def conversation(self) -> AsyncGenerator[Conversation, None]:
         require_codex_sdk()
@@ -510,14 +549,7 @@ class CodexAdapter(AgentAdapter):
                     else ApprovalMode.auto_review
                 ),
             )
-            yield CodexConversation(
-                thread,
-                output_schema=self.output_schema,
-                effort=self.effort,
-                usage_normalizer=self.usage_normalizer,
-                max_budget_usd=self.max_budget_usd,
-                usage_cost=self.usage_cost,
-            )
+            yield self.make_conversation(thread)
 
     async def resume(self, session_id: str, prompt: str) -> LupResponse:
         """Resume a Codex thread by ID."""
@@ -529,13 +561,7 @@ class CodexAdapter(AgentAdapter):
 
         async with AsyncCodex(config=config) as codex:
             thread = await codex.thread_resume(thread_id=session_id)
-            result = await thread.run(prompt)
-            return build_lup_response(
-                result,
-                output_schema=self.output_schema,
-                session_id=session_id,
-                usage_normalizer=self.usage_normalizer,
-            )
+            return await self.make_conversation(thread).send(prompt)
 
     async def fork(self, session_id: str, prompt: str) -> LupResponse:
         """Fork a Codex thread and run on the fork."""
@@ -547,13 +573,7 @@ class CodexAdapter(AgentAdapter):
 
         async with AsyncCodex(config=config) as codex:
             forked_thread = await codex.thread_fork(thread_id=session_id)
-            result = await forked_thread.run(prompt)
-            return build_lup_response(
-                result,
-                output_schema=self.output_schema,
-                session_id=forked_thread.id,
-                usage_normalizer=self.usage_normalizer,
-            )
+            return await self.make_conversation(forked_thread).send(prompt)
 
     async def run_streamed(
         self,

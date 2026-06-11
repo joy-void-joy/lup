@@ -21,7 +21,6 @@ from collections.abc import Sequence
 
 from lup.adapters.codex import (
     CodexAdapter,
-    CodexConversation,
     CodexHookConfig,
     CodexUsageNormalizer,
     UsageCost,
@@ -32,6 +31,21 @@ from lup.trace import TraceLogger
 from lup.types import LupResponse
 
 logger = logging.getLogger(__name__)
+
+OPENAI_COMPAT_PROVIDER_ID = "lup_openai_compat"
+"""Codex ``model_providers`` table id for the synthesized custom provider.
+
+Built-in ids (``openai``, ``ollama``, ``lmstudio``) are reserved by the
+Codex runtime, so the generated provider definition uses a namespaced id.
+"""
+
+OPENAI_COMPAT_API_KEY_ENV = "LUP_OPENAI_COMPAT_API_KEY"
+"""Env var the generated provider's ``env_key`` points at.
+
+Codex providers reference the API key by environment-variable *name*
+(``env_key``), never an inline literal — the supplied ``api_key`` is
+injected into the Codex subprocess env under this name.
+"""
 
 
 class OpenAICompatibleAdapter(CodexAdapter):
@@ -82,13 +96,48 @@ class OpenAICompatibleAdapter(CodexAdapter):
         self.api_key = api_key
         self.model_provider = model_provider
 
+    def provider_id(self) -> str:
+        """Codex ``model_providers`` id this endpoint is defined under.
+
+        An explicit ``model_provider`` names the table; otherwise the
+        generated namespaced id is used (built-in ids are reserved).
+        """
+        return self.model_provider or OPENAI_COMPAT_PROVIDER_ID
+
+    def provider_env(self) -> dict[str, str]:
+        """Env vars the Codex subprocess needs for the custom provider.
+
+        Codex resolves the provider key from the ``env_key`` env var, so
+        the literal ``api_key`` is surfaced under that name whenever a
+        ``base_url`` endpoint is configured.
+        """
+        if self.base_url and self.api_key:
+            return {OPENAI_COMPAT_API_KEY_ENV: self.api_key}
+        return {}
+
     def build_config_overrides(self) -> tuple[str, ...]:
-        """Extend parent config with OpenAI-compatible endpoint settings."""
+        """Extend parent config with a Codex custom-provider definition.
+
+        Provider definitions live in the plural ``model_providers.<id>``
+        table (``base_url`` + ``env_key``, where ``env_key`` names the
+        environment variable holding the key — never an inline literal),
+        and the top-level ``model_provider`` string selects one. A
+        ``base_url`` is the signal to define the provider; without it the
+        provider is assumed to live in the caller's own Codex config and
+        is only selected (via ``model_provider`` on thread start).
+        """
         overrides = list(super().build_config_overrides())
-        if self.base_url:
-            overrides.append(f'model_provider.openai_compat.base_url="{self.base_url}"')
+        if not self.base_url:
+            return tuple(overrides)
+
+        provider = self.provider_id()
+        overrides.append(f'model_provider="{provider}"')
+        overrides.append(f'model_providers.{provider}.name="{provider}"')
+        overrides.append(f'model_providers.{provider}.base_url="{self.base_url}"')
         if self.api_key:
-            overrides.append(f'model_provider.openai_compat.api_key="{self.api_key}"')
+            overrides.append(
+                f'model_providers.{provider}.env_key="{OPENAI_COMPAT_API_KEY_ENV}"'
+            )
         return tuple(overrides)
 
     @asynccontextmanager
@@ -97,7 +146,10 @@ class OpenAICompatibleAdapter(CodexAdapter):
 
         from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
-        config = CodexConfig(config_overrides=self.build_config_overrides())
+        config = CodexConfig(
+            config_overrides=self.build_config_overrides(),
+            env=self.provider_env() or None,
+        )
 
         async with AsyncCodex(config=config) as codex:
             thread = await codex.thread_start(
@@ -111,14 +163,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
                     else ApprovalMode.auto_review
                 ),
             )
-            yield CodexConversation(
-                thread,
-                output_schema=self.output_schema,
-                effort=self.effort,
-                usage_normalizer=self.usage_normalizer,
-                max_budget_usd=self.max_budget_usd,
-                usage_cost=self.usage_cost,
-            )
+            yield self.make_conversation(thread)
 
 
 async def openai_query(

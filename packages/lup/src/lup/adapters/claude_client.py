@@ -365,6 +365,14 @@ async def query(
             "schema": output_type.model_json_schema(),
         }
 
+    if options is not None and (output_type is not None or output_format is not None):
+        logger.warning(
+            "query() received a pre-built options object together with "
+            "output_type/output_format; the structured-output schema cannot "
+            "be applied because build_client uses pre-built options as-is. "
+            "Set output_format on the options object instead, or omit options."
+        )
+
     async with build_client(
         options=options,
         model=model,
@@ -437,6 +445,7 @@ async def claude_query(
             response.messages.append(LupAssistantMessage(content=lup_blocks))
 
     if collector.result is not None:
+        response.session_id = collector.result.session_id
         response.result = LupResultMessage(
             structured_output=collector.result.structured_output,
             is_error=collector.result.is_error,
