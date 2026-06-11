@@ -223,6 +223,11 @@ def collect_tools_by_server(
         subagent_tool,
     ]
 
+    if context.realtime_dir is not None:
+        from lup.realtime_relay import create_realtime_relay_tools
+
+        servers["session"] = create_realtime_relay_tools(context.realtime_dir)
+
     if context.session_id:
         from lup.sandbox import Sandbox
 
@@ -428,7 +433,7 @@ def serve_tools_cmd(
         str | None,
         typer.Option(
             "--server",
-            help="Serve only this tool group (notes or sandbox); default: all",
+            help="Serve only this tool group (notes, sandbox, or session); default: all",
         ),
     ] = None,
 ) -> None:
@@ -451,11 +456,14 @@ def serve_tools_cmd(
     match server_group:
         case None:
             lup_tools = [t for tools in by_server.values() for t in tools]
-        case "sandbox":
-            lup_tools = list(by_server.get("sandbox", []))
+        case "sandbox" | "session":
+            lup_tools = list(by_server.get(server_group, []))
         case "notes":
             lup_tools = [
-                t for key, tools in by_server.items() if key != "sandbox" for t in tools
+                t
+                for key, tools in by_server.items()
+                if key not in ("sandbox", "session")
+                for t in tools
             ]
         case _:
             typer.echo(f"Unknown server group: {server_group}", err=True)
