@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from claude_agent_sdk import ClaudeAgentOptions
     from claude_agent_sdk.types import EffortLevel
 
+    from lup.adapters.codex import UsageCost
     from lup.adapters.common import AgentAdapter
     from lup.notes import NotesConfig
 
@@ -230,10 +231,10 @@ def build_codex_session(
 
     from lup_template.agent.prompts import get_system_prompt
 
-    if settings.max_turns is not None or settings.max_budget_usd is not None:
+    if settings.max_turns is not None:
         raise ValueError(
-            "AGENT_MAX_TURNS / AGENT_MAX_BUDGET_USD are not supported on "
-            f"the {settings.agent_sdk} backend; unset them or use "
+            "AGENT_MAX_TURNS is not supported on "
+            f"the {settings.agent_sdk} backend; unset it or use "
             "AGENT_SDK=claude."
         )
 
@@ -251,6 +252,35 @@ def build_codex_session(
     return get_system_prompt(), context.to_env(), list(notes.rw)
 
 
+def codex_budget_options() -> tuple[float | None, "UsageCost | None"]:
+    """Budget enforcement options for Codex-runtime adapters.
+
+    The Codex SDK reports token counts, not cost — enforcing
+    ``AGENT_MAX_BUDGET_USD`` requires per-MTok rates for the configured
+    model (``CODEX_USD_PER_MTOK_INPUT`` / ``_OUTPUT``, optional
+    ``_CACHED_INPUT``). A budget without rates fails loudly.
+    """
+    from lup.adapters.codex import per_mtok_usage_cost
+
+    usage_cost: UsageCost | None = None
+    if (
+        settings.codex_usd_per_mtok_input is not None
+        and settings.codex_usd_per_mtok_output is not None
+    ):
+        usage_cost = per_mtok_usage_cost(
+            input_usd=settings.codex_usd_per_mtok_input,
+            output_usd=settings.codex_usd_per_mtok_output,
+            cached_input_usd=settings.codex_usd_per_mtok_cached_input,
+        )
+    if settings.max_budget_usd is not None and usage_cost is None:
+        raise ValueError(
+            "AGENT_MAX_BUDGET_USD on the codex/openai backends requires "
+            "CODEX_USD_PER_MTOK_INPUT and CODEX_USD_PER_MTOK_OUTPUT — the "
+            "Codex SDK reports tokens, not cost."
+        )
+    return settings.max_budget_usd, usage_cost
+
+
 def build_codex_adapter(
     notes: "NotesConfig",
 ) -> "AgentAdapter":
@@ -258,6 +288,7 @@ def build_codex_adapter(
     from lup.adapters.codex import CodexAdapter
 
     system_prompt, mcp_env, writable_roots = build_codex_session(notes)
+    max_budget_usd, usage_cost = codex_budget_options()
 
     return CodexAdapter(
         model=settings.model,
@@ -268,6 +299,8 @@ def build_codex_adapter(
         mcp_tools=True,
         mcp_env=mcp_env,
         writable_roots=writable_roots,
+        max_budget_usd=max_budget_usd,
+        usage_cost=usage_cost,
     )
 
 
@@ -278,6 +311,7 @@ def build_openai_adapter(
     from lup.adapters.openai_compat import OpenAICompatibleAdapter
 
     system_prompt, mcp_env, writable_roots = build_codex_session(notes)
+    max_budget_usd, usage_cost = codex_budget_options()
 
     return OpenAICompatibleAdapter(
         model=settings.model,
@@ -291,6 +325,8 @@ def build_openai_adapter(
         mcp_tools=True,
         mcp_env=mcp_env,
         writable_roots=writable_roots,
+        max_budget_usd=max_budget_usd,
+        usage_cost=usage_cost,
     )
 
 

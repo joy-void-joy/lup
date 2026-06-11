@@ -119,6 +119,24 @@ class Settings(BaseSettings):
         description="Codex approval policy for tool use",
     )
 
+    codex_usd_per_mtok_input: float | None = Field(
+        default=None,
+        validation_alias="CODEX_USD_PER_MTOK_INPUT",
+        description="USD per million input tokens (enables budget enforcement on codex/openai)",
+    )
+
+    codex_usd_per_mtok_output: float | None = Field(
+        default=None,
+        validation_alias="CODEX_USD_PER_MTOK_OUTPUT",
+        description="USD per million output tokens (enables budget enforcement on codex/openai)",
+    )
+
+    codex_usd_per_mtok_cached_input: float | None = Field(
+        default=None,
+        validation_alias="CODEX_USD_PER_MTOK_CACHED_INPUT",
+        description="USD per million cached input tokens (defaults to the input rate)",
+    )
+
     reasoning_effort: str | None = Field(
         default=None,
         validation_alias="AGENT_REASONING_EFFORT",
