@@ -96,6 +96,7 @@ packages/
         ├── output.py           # submit_output finalization tool (all backends)
         ├── paths.py            # Version-aware paths + SessionContext env relay
         ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
+        ├── realtime_relay.py   # Persistent mode for subprocess backends (file mailbox)
         ├── reflect.py          # Reflection gate (in-memory or file-backed)
         ├── retry.py            # Retry decorator with backoff
         ├── sandbox.py          # Docker-based Python sandbox (lazy start, orphan sweep)
