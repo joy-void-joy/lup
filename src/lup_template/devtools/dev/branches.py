@@ -4,12 +4,13 @@ import json
 import logging
 from collections import defaultdict
 from typing import Required, TypedDict
+from urllib.parse import urlparse
 
 import sh
 import typer
 from pydantic import BaseModel
 
-from lup_template.devtools.utils import git, gh, output_json
+from lup_template.devtools.utils import git, gh, decode_stderr, output_json
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +51,20 @@ class BranchClassification(TypedDict, total=False):
     pr_url: str
 
 
-def parse_branches() -> list[dict[str, str | bool | None]]:
+class ParsedBranch(TypedDict):
+    name: str
+    commit: str
+    tracking: str | None
+    is_current: bool
+
+
+def parse_branches() -> list[ParsedBranch]:
     """Parse ``git branch -vv`` into structured data.
 
     Handles prefix markers: ``*`` (current), ``+`` (checked out in another worktree).
     """
     output = str(git("branch", "-vv")).strip()
-    results: list[dict[str, str | bool | None]] = []
+    results: list[ParsedBranch] = []
 
     for line in output.splitlines():
         is_current = line.startswith("*")
@@ -150,8 +158,7 @@ def fetch_pr_status(branch_names: list[str]) -> dict[str, PRStatus]:
                     merged_at=pr.get("mergedAt"),
                 )
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        logger.warning("Failed to fetch PR status: %s", stderr)
+        logger.warning("Failed to fetch PR status: %s", decode_stderr(e))
 
     return mapping
 
@@ -397,11 +404,35 @@ def detect_base_branch(branch: str | None = None) -> tuple[str, str, int]:
     return best_branch, best_merge_base, best_distance
 
 
+def ssh_host_for_remote(remote_url: str) -> str | None:
+    """Return the ssh host to probe, or None when no ssh probe applies.
+
+    Only SCP-style (``user@host:path``) and ``ssh://`` remotes use ssh.
+    ``https://`` remotes are served by ``gh``/HTTP and must not be ssh-probed
+    (their leading token before ``:`` is the scheme, not a host).
+    """
+    parsed = urlparse(remote_url)
+    if parsed.scheme == "ssh":
+        return parsed.hostname
+    if parsed.scheme:  # https, http, git, file, ... — not ssh
+        return None
+    # SCP form ``[user@]host:path`` is git-equivalent to ``ssh://[user@]host/path``.
+    # It is SCP-style only when a colon precedes the first slash.
+    colon, slash = remote_url.find(":"), remote_url.find("/")
+    if colon == -1 or (slash != -1 and slash < colon):
+        return None
+    normalized = "ssh://" + remote_url[:colon] + "/" + remote_url[colon + 1 :]
+    return urlparse(normalized).hostname
+
+
 def check_remote_ssh_auth() -> bool:
-    """Test SSH auth for the origin remote. Returns True if authenticated."""
+    """Test SSH auth for the origin remote. Returns True if authenticated.
+
+    For ``https`` remotes (handled by ``gh``) the ssh probe is skipped and
+    auth is assumed available.
+    """
     remote_url = str(git("remote", "get-url", "origin")).strip()
-    # SCP-style git URLs (host:path) have no stdlib parser — urlparse misparses them
-    host = remote_url.split(":")[0] if ":" in remote_url else None  # claude: ignore
+    host = ssh_host_for_remote(remote_url)
     if not host:
         return True
     try:
@@ -554,8 +585,7 @@ def survey(as_json: bool) -> None:
         try:
             git("fetch", "--prune")
         except sh.ErrorReturnCode as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-            logger.warning("Failed to fetch: %s", stderr)
+            logger.warning("Failed to fetch: %s", decode_stderr(e))
 
     integration = get_integration_branch()
     cur = str(git("branch", "--show-current")).strip()
@@ -663,8 +693,9 @@ def delete_branch(
             git("worktree", "remove", worktree_path)
             typer.echo(f"Removed worktree: {worktree_path}")
         except sh.ErrorReturnCode as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-            typer.echo(f"Warning: worktree removal failed: {stderr}", err=True)
+            typer.echo(
+                f"Warning: worktree removal failed: {decode_stderr(e)}", err=True
+            )
 
     try:
         if force:
@@ -673,8 +704,7 @@ def delete_branch(
             git("branch", "-d", name)
         typer.echo(f"Deleted branch: {name}")
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        typer.echo(f"Failed to delete branch: {stderr}", err=True)
+        typer.echo(f"Failed to delete branch: {decode_stderr(e)}", err=True)
         typer.echo("Use --force to force delete", err=True)
         raise typer.Exit(1)
 
@@ -683,5 +713,4 @@ def delete_branch(
             git("push", "origin", "--delete", name)
             typer.echo(f"Deleted remote branch: origin/{name}")
         except sh.ErrorReturnCode as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-            typer.echo(f"Warning: remote deletion failed: {stderr}", err=True)
+            typer.echo(f"Warning: remote deletion failed: {decode_stderr(e)}", err=True)

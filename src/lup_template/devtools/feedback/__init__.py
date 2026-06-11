@@ -63,7 +63,7 @@ def tools_cmd(
 
 @app.command("errors")
 def errors_cmd(
-    limit: int = typer.Option(20, "-n", "--limit", help="Max errors to show"),
+    limit: int = typer.Option(20, "-l", "--limit", help="Max errors to show"),
     version: VERSION_OPT = AGENT_VERSION,
     all_versions: ALL_VERSIONS_OPT = False,
     as_json: JSON_OPT = False,
@@ -90,7 +90,7 @@ def trends_cmd(
 def history_cmd(
     limit: Annotated[
         int,
-        typer.Option("-n", "--limit", help="Max to show"),
+        typer.Option("-l", "--limit", help="Max to show"),
     ] = 10,
 ) -> None:
     """Show previous feedback collection runs."""

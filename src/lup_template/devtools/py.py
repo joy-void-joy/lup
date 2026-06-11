@@ -30,9 +30,28 @@ app = typer.Typer(no_args_is_help=True)
 
 
 def resolve_object(path: str) -> tuple[object, str]:
-    """Resolve a dotted path to a Python object."""
-    parts = path.split(".")
+    """Resolve a dotted or colon path to a Python object.
 
+    Accepts both ``module.sub.Object`` (dot form) and the entry-point
+    ``module.sub:Object.attr`` (colon form, module left of the colon).
+    """
+    if ":" in path:
+        module_path, _, attr_path = path.partition(":")
+        attrs = [
+            a for a in attr_path.split(".") if a
+        ]  # claude: ignore  # dotted attribute path, no stdlib parser
+        try:
+            obj: object = importlib.import_module(module_path)
+        except ImportError as e:
+            raise ValueError(f"Could not import module '{module_path}': {e}") from e
+        for attr in attrs:
+            try:
+                obj = getattr(obj, attr)
+            except AttributeError as e:
+                raise ValueError(f"'{module_path}' has no attribute '{attr}'") from e
+        return obj, attrs[-1] if attrs else module_path.rsplit(".", 1)[-1]
+
+    parts = path.split(".")
     for i in range(len(parts), 0, -1):
         module_path = ".".join(parts[:i])
         try:
@@ -281,12 +300,36 @@ def module_tree(
 
     typer.echo(f"{package_root}/")
 
+    seen_dirs: set[Path] = set()
     py_files = sorted(package_root.rglob("*.py"))
     for py_file in py_files:
         relative = py_file.relative_to(package_root)
-        depth = len(relative.parts) - 1
-        indent = "  " * depth
+        for d in range(len(relative.parts) - 1):
+            sub = Path(*relative.parts[: d + 1])
+            if sub in seen_dirs:
+                continue
+            seen_dirs.add(sub)
+            typer.echo(f"{'  ' * d}├── {sub.name}/")
+        indent = "  " * (len(relative.parts) - 1)
         typer.echo(f"{indent}├── {py_file.name}")
+
+
+def defined_in(mod: object, attr: str) -> bool:
+    """Whether ``attr`` is defined in ``mod`` rather than imported into it.
+
+    Classes and functions carry ``__module__`` pointing at their defining
+    module — names imported from elsewhere are excluded. Imported submodules
+    (whose own ``__name__`` differs) are excluded too. Plain values without a
+    ``__module__`` (module-level constants assigned here) are kept.
+    """
+    obj = getattr(mod, attr)
+    host = getattr(mod, "__name__", None)
+    if inspect.ismodule(obj):
+        return getattr(obj, "__name__", None) == host
+    owner = getattr(obj, "__module__", None)
+    if owner is None:
+        return True
+    return owner == host
 
 
 @app.command("module-info")
@@ -311,9 +354,9 @@ def module_info(module: Annotated[str, typer.Argument(help="Module name")]) -> N
         first_para = doc.split("\n\n")[0]
         typer.echo(f"\nDocstring:\n{first_para[:500]}")
 
-    public_attrs = [a for a in dir(mod) if not a.startswith("_")]
+    public_attrs = [a for a in dir(mod) if not a.startswith("_") and defined_in(mod, a)]
     if public_attrs:
-        typer.echo(f"\nPublic API ({len(public_attrs)} items):")
+        typer.echo(f"\nDefined API ({len(public_attrs)} items):")
         for attr in sorted(public_attrs)[:30]:
             obj = getattr(mod, attr)
             obj_type = type(obj).__name__

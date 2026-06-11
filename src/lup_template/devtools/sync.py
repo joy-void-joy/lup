@@ -98,6 +98,21 @@ def find_project(name: str) -> dict[str, str]:
     return proj
 
 
+def resolve_existing_path(proj: dict[str, str]) -> str | None:
+    """Return a usable local path WITHOUT cloning or fetching, or None.
+
+    Read-only counterpart to :func:`ensure_local` — for status reporting
+    that must never mutate the working tree or hit the network.
+    """
+    path = proj.get("path", "")
+    if path and Path(path).exists():
+        return path
+    cache_path = CACHE_DIR / proj["name"]
+    if cache_path.exists():
+        return str(cache_path)
+    return None
+
+
 def ensure_local(proj: dict[str, str]) -> str:
     """Ensure a project has a usable local path."""
     path = proj.get("path", "")
@@ -164,7 +179,11 @@ def current_head(path: str) -> str:
 
 @app.command("status")
 def status_cmd() -> None:
-    """Show tracked projects and their sync status."""
+    """Show tracked projects and their sync status (read-only).
+
+    Reports cached/not-cloned/behind state without cloning, fetching, or
+    resetting. Run ``sync fetch`` to materialize and refresh repos.
+    """
     projects = load_projects()
 
     if not projects:
@@ -181,22 +200,45 @@ def status_cmd() -> None:
 
         synced = p.get("last_synced_commit", "")
         synced_short = synced[:8] if synced else "never"
+        branch = p.get("branch", "")
 
-        try:
-            resolved = ensure_local(p)
-        except typer.Exit, sh.ErrorReturnCode:
-            url = p.get("url", "NO PATH")
-            typer.echo(
-                f"{p['name']:<20} {'?':<10} {synced_short:<12} {url} (clone failed)"
-            )
+        resolved = resolve_existing_path(p)
+        if resolved is None:
+            has_url = bool(p.get("url"))
+            note = "not cloned (run: sync fetch)" if has_url else "no path/url"
+            typer.echo(f"{p['name']:<20} {'—':<10} {synced_short:<12} {note}")
             continue
 
-        behind = commit_count(resolved, synced)
-        branch = p.get("branch", "")
+        try:
+            behind: int | str = commit_count(resolved, synced)
+        except sh.ErrorReturnCode, ValueError:
+            behind = "?"
         source = f"{resolved} ({branch})" if branch else resolved
-        typer.echo(f"{p['name']:<20} {behind:<10} {synced_short:<12} {source}")
+        typer.echo(f"{p['name']:<20} {behind!s:<10} {synced_short:<12} {source}")
 
     typer.echo()
+
+
+@app.command("fetch")
+def fetch_cmd(
+    project: Annotated[
+        str | None,
+        typer.Argument(help="Project to materialize/refresh (default: all)"),
+    ] = None,
+) -> None:
+    """Clone missing repos and fetch/reset cached ones (network + writes)."""
+    projects = load_projects()
+    targets = (
+        [find_project(project)]
+        if project
+        else [p for p in projects if not p.get("ignore")]
+    )
+    for p in targets:
+        try:
+            resolved = ensure_local(p)
+            typer.echo(f"{p['name']}: ready at {resolved}")
+        except typer.Exit, sh.ErrorReturnCode:
+            typer.echo(f"{p['name']}: could not materialize", err=True)
 
 
 @app.command("log")

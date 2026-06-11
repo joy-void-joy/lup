@@ -6,7 +6,7 @@ from pathlib import Path
 import sh
 import typer
 
-from lup_template.devtools.utils import copy_to_clipboard, git
+from lup_template.devtools.utils import copy_to_clipboard, decode_stderr, git
 
 
 PLUGIN_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache" / "local" / "lup"
@@ -98,8 +98,7 @@ def create(
         else:
             git("worktree", "add", str(worktree_path), "-b", name)
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        typer.echo(f"Error creating worktree: {stderr}")
+        typer.echo(f"Error creating worktree: {decode_stderr(e)}")
         raise typer.Exit(1)
 
     if not no_copy_data:
@@ -121,8 +120,7 @@ def create(
         try:
             uv("sync", _cwd=str(worktree_path))
         except sh.ErrorReturnCode as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-            typer.echo(f"Warning: uv sync failed: {stderr}")
+            typer.echo(f"Warning: uv sync failed: {decode_stderr(e)}")
 
     if not no_plugin_refresh:
         if PLUGIN_CACHE_DIR.exists():
@@ -142,8 +140,7 @@ def create(
             )
             typer.echo("Installed lup plugin (project scope)")
         except sh.ErrorReturnCode as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-            typer.echo(f"Warning: plugin install failed: {stderr}", err=True)
+            typer.echo(f"Warning: plugin install failed: {decode_stderr(e)}", err=True)
 
     typer.echo()
     cd_command = f"cd /; cd {worktree_path}; claude"
@@ -240,8 +237,7 @@ def remove(name: str, force: bool) -> None:
         git(*args)
         typer.echo(f"Removed worktree: {path}")
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        typer.echo(f"Error removing worktree: {stderr}", err=True)
+        typer.echo(f"Error removing worktree: {decode_stderr(e)}", err=True)
         if not force:
             typer.echo("Use --force to remove even if dirty")
         raise typer.Exit(1)
