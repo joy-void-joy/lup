@@ -522,9 +522,11 @@ async def run_relay_session(
             turn (unread counts, domain context).
         on_event: Optional domain hook invoked after each applied event
             (e.g. mark inbox messages read on ContextReadEvent).
-        should_continue: Checked at each cycle start; return False to
-            end the session. None runs until cancelled or the budget is
-            exhausted (BudgetExceededError propagates to the caller).
+        should_continue: Pure predicate ending the session when False.
+            Checked at each cycle start and again before sleeping (a
+            finished session must not wait out a final sleep). None runs
+            until cancelled or the budget is exhausted
+            (BudgetExceededError propagates to the caller).
         poll_interval_seconds: Mailbox poll cadence during a turn.
         max_missing_sleep_retries: Corrective turns granted to an agent
             that ends a turn without sleeping before the session ends.
@@ -590,6 +592,8 @@ async def run_relay_session(
         for follow_up in request.follow_ups:
             scheduler.add_delayed_action(follow_up.message, follow_up.delay_seconds)
 
+        if should_continue is not None and not should_continue():
+            break
         result = await scheduler.sleep(request.seconds)
         message = builder(result)
 
