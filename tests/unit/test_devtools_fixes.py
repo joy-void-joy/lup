@@ -109,29 +109,35 @@ class TestDecodeStderr:
         assert decode_stderr(err) == "already text"
 
 
-# ── fix 9: ssh host parsing distinguishes https from scp/ssh ──────────────
+# ── fix 9: remote parsing distinguishes https from scp/ssh ────────────────
 
 
-class TestSshHostForRemote:
-    def test_https_remote_is_not_ssh_probed(self) -> None:
-        from lup_template.devtools.dev.branches import ssh_host_for_remote
+class TestParseRemote:
+    def test_https_remote_routes_to_https_scheme(self) -> None:
+        from lup_template.devtools.dev.branches import parse_remote
 
-        assert ssh_host_for_remote("https://github.com/org/repo.git") is None
+        assert parse_remote("https://github.com/org/repo.git") == (
+            "https",
+            "github.com",
+        )
 
-    def test_scp_style_extracts_host(self) -> None:
-        from lup_template.devtools.dev.branches import ssh_host_for_remote
+    def test_scp_style_extracts_user_and_host(self) -> None:
+        from lup_template.devtools.dev.branches import parse_remote
 
-        assert ssh_host_for_remote("git@github.com:org/repo.git") == "github.com"
+        assert parse_remote("git@github.com:org/repo.git") == ("ssh", "git@github.com")
 
-    def test_ssh_scheme_extracts_host(self) -> None:
-        from lup_template.devtools.dev.branches import ssh_host_for_remote
+    def test_ssh_scheme_extracts_user_and_host(self) -> None:
+        from lup_template.devtools.dev.branches import parse_remote
 
-        assert ssh_host_for_remote("ssh://git@example.com/org/repo") == "example.com"
+        assert parse_remote("ssh://git@example.com/org/repo") == (
+            "ssh",
+            "git@example.com",
+        )
 
-    def test_local_path_is_not_ssh(self) -> None:
-        from lup_template.devtools.dev.branches import ssh_host_for_remote
+    def test_local_path_is_not_a_remote(self) -> None:
+        from lup_template.devtools.dev.branches import parse_remote
 
-        assert ssh_host_for_remote("/srv/git/repo.git") is None
+        assert parse_remote("/srv/git/repo.git") is None
 
 
 # ── fix 13: rebase uses REBASE_HEAD, not CHERRY_PICK_HEAD ──────────────────

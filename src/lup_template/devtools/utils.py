@@ -10,44 +10,37 @@ from pydantic import BaseModel
 
 
 class LazyCommand:
-    """A ``sh.Command`` resolved on first use.
+    """Shell command that resolves its binary on first use.
 
-    Resolving ``git``/``gh``/``uv`` at import time means a single missing
-    optional tool (e.g. ``gh``) aborts the whole CLI — including commands
-    that never touch it. Deferring the lookup until the command is actually
-    invoked keeps the failure scoped to the commands that need it, raising a
-    clean :class:`sh.CommandNotFound` only then.
+    ``sh.Command`` raises ``CommandNotFound`` at construction time, so a
+    module-level command for a missing binary (e.g. ``gh``) would crash
+    every CLI invocation at import — including ``--help``. Resolution is
+    deferred to the first call or sub-command attribute access instead.
     """
 
-    def __init__(
-        self, name: str, *bake_args: str, **bake_kwargs: object
-    ) -> None:  # claude: ignore  # sh.bake accepts arbitrary kwargs
+    def __init__(self, name: str, *bake_args: str, tty_out: bool = True) -> None:
         self.name = name
         self.bake_args = bake_args
-        self.bake_kwargs = bake_kwargs
+        self.tty_out = tty_out
         self.resolved: sh.Command | None = None
 
-    def command(self) -> sh.Command:
+    def resolve(self) -> sh.Command:
         if self.resolved is None:
-            base = sh.Command(self.name)
-            self.resolved = (
-                base.bake(*self.bake_args, **self.bake_kwargs)
-                if self.bake_args or self.bake_kwargs
-                else base
-            )
+            command = sh.Command(self.name)
+            if self.bake_args or not self.tty_out:
+                command = command.bake(*self.bake_args, _tty_out=self.tty_out)
+            self.resolved = command
         return self.resolved
 
-    def __call__(
-        self, *args: object, **kwargs: object
-    ) -> "str | sh.RunningCommand | None":  # claude: ignore  # sh passthrough
-        return self.command()(*args, **kwargs)
+    def __call__(self, *args: str, **kwargs: object) -> sh.RunningCommand | str | None:
+        return self.resolve()(*args, **kwargs)
 
     def __getattr__(self, attr: str) -> sh.Command:
-        return getattr(self.command(), attr)
+        return getattr(self.resolve(), attr)
 
 
-git = LazyCommand("git", "--no-pager", "-c", "color.ui=never", _tty_out=False)
-gh = LazyCommand("gh", _tty_out=False)
+git = LazyCommand("git", "--no-pager", "-c", "color.ui=never", tty_out=False)
+gh = LazyCommand("gh", tty_out=False)
 uv = LazyCommand("uv")
 
 
