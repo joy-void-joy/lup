@@ -645,29 +645,37 @@ def apply_repl_overrides(
 ) -> None:
     """Apply ``--no-tools``/``--no-prompt`` to a built adapter.
 
-    These toggles are realized on the Claude adapter's options object
-    (the REPL's default and only fully-wired backend). For other backends
-    the model override still applies, but a warning is emitted so the flags
-    are not silently ignored.
+    Claude: realized on the options object. Codex/OpenAI: realized on
+    the adapter attributes, which ``conversation()`` reads at open time
+    (``mcp_tools`` gates the served-tools config, ``system_prompt``
+    becomes the developer instructions). Unknown adapter types warn so
+    the flags are never silently ignored.
     """
     if not no_tools and not no_prompt:
         return
 
     from lup.adapters.claude import ClaudeAdapter
+    from lup.adapters.codex import CodexAdapter
 
-    if not isinstance(adapter, ClaudeAdapter):
-        typer.echo(
-            "Warning: --no-tools/--no-prompt are only applied on the Claude backend",
-            err=True,
-        )
-        return
-
-    options = adapter.options
-    if no_tools:
-        options.mcp_servers = {}
-        options.allowed_tools = []
-    if no_prompt:
-        options.system_prompt = None
+    match adapter:
+        case ClaudeAdapter():
+            options = adapter.options
+            if no_tools:
+                options.mcp_servers = {}
+                options.allowed_tools = []
+            if no_prompt:
+                options.system_prompt = None
+        case CodexAdapter():
+            if no_tools:
+                adapter.mcp_tools = False
+            if no_prompt:
+                adapter.system_prompt = ""
+        case _:
+            typer.echo(
+                "Warning: --no-tools/--no-prompt not supported on "
+                f"{type(adapter).__name__}",
+                err=True,
+            )
 
 
 async def repl(
@@ -866,6 +874,13 @@ async def repl(
                         if response.result and response.result.total_cost_usd:
                             session_cost += response.result.total_cost_usd
                             parts.append(f"${response.result.total_cost_usd:.4f}")
+                        elif response.result and response.result.usage:
+                            # Backends without cost reporting (Codex sans
+                            # rates) still show what they can: token counts
+                            usage = response.result.usage
+                            parts.append(
+                                f"{usage.input_tokens}in/{usage.output_tokens}out tok"
+                            )
                         if parts:
                             console.print(f"  [dim]{' · '.join(parts)}[/dim]")
                         console.print()
