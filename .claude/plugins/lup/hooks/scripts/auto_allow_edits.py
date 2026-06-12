@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
-"""PreToolUse hook that auto-allows small, safe Edit operations.
+"""PreToolUse hook that gates Edit and Write operations.
 
-Decision order:
+Edit decision order:
 1. Protected files (.claude/, pyproject.toml, .env*) -> always defer
-2. Anti-patterns in .py files (typing: Any, # type: ignore, Generic[], __all__,
-   dict[str, object]; string manipulation: import re, re.*, .replace, .split;
-   silent swallows: except ...: pass, contextlib.suppress, bare except:,
-   except BaseException; dataclasses, subprocess, argparse, rich.progress,
-   _prefixes):
-   - file already has `# claude: ignore` on disk -> allow (skip checks)
-   - violating line has inline `# claude: ignore` -> ask (user prompt)
+2. Anti-patterns scanned over added lines in .py and TS-family files
+   (see ANTI_PATTERNS / TS_ANTI_PATTERNS):
+   - file has `# claude: ignore` in its first 10 lines on disk -> skip the
+     anti-pattern scan (the size gate below still applies)
+   - violating line carries an inline `# claude: ignore` -> ask (user prompt)
    - no marker -> deny with hint about `# claude: ignore`
-3. Edit introduces `# claude: ignore` -> ask (user prompt)
+3. Edit introduces an ignore marker (in new_string, not old_string) -> ask
 4. Pure deletion (new_string is empty) -> allow
 5. replace_all that is a single-line identifier rename -> allow
-   (a multi-line logic-rewriting replace_all falls through to "ask")
-6. Count nontrivial added lines per change block (using a state machine
-   for context-aware classification) -> allow if every block <= MAX_REAL_CHANGES
+   (any other replace_all falls through to the size gate)
+6. Size gate: count nontrivial added lines per change block (using a state
+   machine for context-aware classification) -> allow if every block stays
+   within MAX_REAL_CHANGES
+
+Write decision order:
+1. Protected files -> deny (use targeted Edits instead)
+2. Otherwise -> defer to the user (full-file rewrites never auto-allow)
 """
 
 import difflib
@@ -24,10 +27,17 @@ import json
 import re
 import sys
 
+from typing import Literal
+
 from pydantic import BaseModel, ValidationError
 
 MAX_REAL_CHANGES = 3
 
+# ---------------------------------------------------------------------------
+# Configuration: protected paths and anti-pattern tables
+# ---------------------------------------------------------------------------
+
+# Files this hook never auto-allows: Edits defer to the user, Writes deny.
 PROTECTED_PATTERNS = [
     r"(^|/)\.claude/",
     r"(^|/)pyproject\.toml$",
@@ -36,6 +46,10 @@ PROTECTED_PATTERNS = [
 
 CLAUDE_IGNORE_MARKER = "# claude: ignore"
 
+# (pattern, reason) rows checked against every line an edit adds to a .py
+# file. A matching line denies the edit; an inline `# claude: ignore` on the
+# line downgrades to a user prompt, and a file-level marker (first 10 lines
+# on disk) skips this table entirely.
 ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\bAny\b"),
@@ -122,15 +136,20 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"\bclass\s+_[A-Z]"),
         "No `_` prefix on classes — nothing is private",
     ),
+    # Fires only on assignments: bare annotations and trailing-comma lines
+    # are function parameters, which may use `_` for unused arguments.
     (
-        re.compile(r"^_[a-zA-Z]\w*\s*[:=](?!.*,\s*$)"),
-        "No `_` prefix on variables/constants — nothing is private",
+        re.compile(r"^_[a-zA-Z]\w*\s*(?::[^=]*)?=(?!=)(?!.*,\s*$)"),
+        "No `_` prefix on variables/constants — nothing is private "
+        "(unused `_` function parameters are exempt)",
     ),
 ]
 
 TS_FILE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 TS_CLAUDE_IGNORE_MARKER = "// claude: ignore"
 
+# Same contract as ANTI_PATTERNS, for TypeScript/JavaScript-family files,
+# using the `// claude: ignore` marker.
 TS_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\bas\s+any\b"),
@@ -284,7 +303,13 @@ def classify_trivial(lines: list[str]) -> list[bool]:
                 result.append(True)
                 break
         else:
-            if is_trivial_content(stripped) and "(" in stripped and ")" not in stripped:
+            # Continuation mode only for actual multi-line import statements
+            # (`from x import (`); other open parens stay nontrivial context.
+            if (
+                stripped.startswith(("import ", "from "))
+                and "(" in stripped
+                and ")" not in stripped
+            ):
                 in_import = True
                 result.append(True)
                 continue
@@ -355,9 +380,21 @@ class EditInput(BaseModel):
     replace_all: bool = False
 
 
-class HookEvent(BaseModel):
+class WriteInput(BaseModel):
+    file_path: str = ""
+    content: str = ""
+
+
+class HookEnvelope(BaseModel):
     tool_name: str = ""
+
+
+class EditEvent(BaseModel):
     tool_input: EditInput = EditInput()
+
+
+class WriteEvent(BaseModel):
+    tool_input: WriteInput = WriteInput()
 
 
 def allow_decision() -> AllowDecision:
@@ -428,6 +465,9 @@ def find_swallowed_excepts(new_lines: list[str]) -> dict[int, str]:
     return violations
 
 
+Violation = tuple[Literal["ask", "deny"], str]
+
+
 def find_anti_pattern_violations(
     old_string: str,
     new_string: str,
@@ -435,22 +475,23 @@ def find_anti_pattern_violations(
     patterns: list[tuple[re.Pattern[str], str]] | None = None,
     ignore_marker: str = CLAUDE_IGNORE_MARKER,
     line_violations: dict[int, str] | None = None,
-) -> tuple[str, str] | None:
+) -> Violation | None:
     """Check newly added lines for anti-patterns.
 
-    line_violations maps new_string line indices to precomputed violation
-    reasons (e.g. silent swallows from find_swallowed_excepts).
+    A file-level ignore marker (first 10 lines on disk) disables the scan;
+    the caller's size gate still applies. line_violations maps new_string
+    line indices to precomputed violation reasons (e.g. silent swallows
+    from find_swallowed_excepts).
 
-    Returns (decision, reason) or None. Decision is "allow", "ask", or "deny".
-    - File-level `# claude: ignore` already on disk -> "allow"
-    - Inline `# claude: ignore` on the violating line -> "ask"
-    - No marker -> "deny" with hint
+    Returns (decision, reason) or None:
+    - inline ignore marker on the violating line -> ("ask", reason)
+    - no marker -> ("deny", reason with hint)
     """
     if patterns is None:
         patterns = ANTI_PATTERNS
 
     if file_path and has_file_level_ignore(file_path, ignore_marker):
-        return ("allow", f"File has `{ignore_marker}` marker")
+        return None
 
     old_lines = old_string.splitlines() if old_string else []
     new_lines = new_string.splitlines() if new_string else []
@@ -487,6 +528,15 @@ def find_anti_pattern_violations(
     return None
 
 
+def violation_decision(violation: Violation) -> AllowDecision:
+    decision, reason = violation
+    match decision:
+        case "ask":
+            return ask_decision(reason)
+        case "deny":
+            return deny_decision(reason)
+
+
 def decide(tool_input: EditInput) -> AllowDecision | None:
     file_path = tool_input.file_path
     old_string = tool_input.old_string
@@ -504,14 +554,7 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
             line_violations=find_swallowed_excepts(new_string.splitlines()),
         )
         if violation:
-            decision, reason = violation
-            match decision:
-                case "allow":
-                    return allow_decision()
-                case "ask":
-                    return ask_decision(reason)
-                case "deny":
-                    return deny_decision(reason)
+            return violation_decision(violation)
 
     if file_path.endswith(TS_FILE_EXTENSIONS) and new_string:
         violation = find_anti_pattern_violations(
@@ -522,19 +565,14 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
             ignore_marker=TS_CLAUDE_IGNORE_MARKER,
         )
         if violation:
-            decision, reason = violation
-            match decision:
-                case "allow":
-                    return allow_decision()
-                case "ask":
-                    return ask_decision(reason)
-                case "deny":
-                    return deny_decision(reason)
+            return violation_decision(violation)
 
-    ignore_markers = [CLAUDE_IGNORE_MARKER]
-    if file_path.endswith(TS_FILE_EXTENSIONS):
-        ignore_markers = [TS_CLAUDE_IGNORE_MARKER]
-    if any(m in (new_string or "") for m in ignore_markers):
+    marker = (
+        TS_CLAUDE_IGNORE_MARKER
+        if file_path.endswith(TS_FILE_EXTENSIONS)
+        else CLAUDE_IGNORE_MARKER
+    )
+    if marker in new_string and marker not in old_string:
         return ask_decision("Edit introduces ignore marker — requires user approval")
 
     if old_string and not new_string:
@@ -549,16 +587,33 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
     return None
 
 
+def decide_write(tool_input: WriteInput) -> AllowDecision | None:
+    """Gate Write (full-file) operations.
+
+    Writes never auto-allow — a whole-file rewrite needs user eyes — so the
+    only automated decision is denying protected files outright.
+    """
+    if is_protected_file(tool_input.file_path):
+        return deny_decision(
+            f"Denied: Write to protected file ({tool_input.file_path}) — "
+            "use targeted Edit calls, which prompt for approval"
+        )
+    return None
+
+
 def main() -> None:
     try:
-        event = HookEvent.model_validate_json(sys.stdin.read())
-    except ValidationError, OSError:
+        raw = sys.stdin.read()
+        match HookEnvelope.model_validate_json(raw).tool_name:
+            case "Edit":
+                result = decide(EditEvent.model_validate_json(raw).tool_input)
+            case "Write":
+                result = decide_write(WriteEvent.model_validate_json(raw).tool_input)
+            case _:
+                sys.exit(0)
+    except (ValidationError, OSError):
         sys.exit(0)
 
-    if event.tool_name != "Edit":
-        sys.exit(0)
-
-    result = decide(event.tool_input)
     if result:
         json.dump(result, sys.stdout)
 
