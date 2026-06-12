@@ -82,6 +82,26 @@ def test_color_tag_pairs_use_with_result() -> None:
     assert resolve_color_tag(LupTextBlock(text="plain")) is None
 
 
+def test_separate_color_assigners_isolate_pairings() -> None:
+    """Concurrent streams with their own assigners can't cross-pair: an
+    assigner that never saw a tool use resolves its result to default."""
+    from lup.trace import ColorAssigner
+
+    own = ColorAssigner()
+    other = ColorAssigner()
+    use_tag = resolve_color_tag(LupToolUseBlock(id="iso-1", name="Read", input={}), own)
+    crossed = resolve_color_tag(
+        LupToolResultBlock(tool_use_id="iso-1", content="x"), other
+    )
+    paired = resolve_color_tag(
+        LupToolResultBlock(tool_use_id="iso-1", content="x"), own
+    )
+
+    assert use_tag is not None and crossed is not None and paired is not None
+    assert crossed.color == "default"
+    assert paired.color == use_tag.color
+
+
 def test_tool_result_formatting_truncates_inside_json() -> None:
     long_value = "x" * 600
     formatted = format_tool_result(f'{{"key": "{long_value}"}}')
