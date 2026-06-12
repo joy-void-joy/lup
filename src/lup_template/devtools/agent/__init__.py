@@ -17,6 +17,7 @@ Examples::
     $ uv run lup-devtools agent chat --model opus --no-tools
     $ uv run lup-devtools agent repl
     $ uv run lup-devtools agent repl --model sonnet --no-prompt
+    $ uv run lup-devtools agent repl --exec "ping" --no-tools
     $ uv run lup-devtools agent serve-tools
 """
 
@@ -121,9 +122,26 @@ def repl_cmd(
         bool,
         typer.Option("--no-prompt", help="Skip agent system prompt"),
     ] = False,
+    exec_prompt: Annotated[
+        str | None,
+        typer.Option(
+            "--exec",
+            help=(
+                "Run one prompt non-interactively and exit "
+                "(for smoke tests and scripting)"
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Interactive REPL — continuous session with the agent via the SDK."""
     try:
-        asyncio.run(repl.repl(model=model, no_tools=no_tools, no_prompt=no_prompt))
+        if exec_prompt is not None:
+            asyncio.run(
+                repl.exec_once(
+                    exec_prompt, model=model, no_tools=no_tools, no_prompt=no_prompt
+                )
+            )
+        else:
+            asyncio.run(repl.repl(model=model, no_tools=no_tools, no_prompt=no_prompt))
     except KeyboardInterrupt:
         pass

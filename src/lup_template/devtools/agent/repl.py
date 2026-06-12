@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
     from rich.console import Console
 
-    from lup.adapters.common import Conversation
+    from lup.adapters.common import AgentAdapter, Conversation
     from lup.types import LupResponse
 
 import sh
@@ -164,6 +166,91 @@ def apply_repl_overrides(
             )
 
 
+def build_repl_adapter(
+    model: str | None,
+    *,
+    no_tools: bool,
+    no_prompt: bool,
+) -> tuple[AgentAdapter, AbstractContextManager[object]]:
+    """Build the agent adapter for a REPL session, overrides applied.
+
+    ``build_adapter`` reads ``settings.model`` for every backend, so the
+    ``--model`` override is set there for the build and restored after.
+    ``--no-tools``/``--no-prompt`` are realized via
+    :func:`apply_repl_overrides`. The caller enters the returned context
+    (e.g. sandbox lifecycle) around the conversation.
+    """
+    from lup_template.agent.core import build_adapter
+
+    original_model = settings.model
+    if model:
+        settings.model = model
+    try:
+        adapter, adapter_ctx, _notes = build_adapter("repl")
+    finally:
+        settings.model = original_model
+    apply_repl_overrides(adapter, no_tools=no_tools, no_prompt=no_prompt)
+    return adapter, adapter_ctx
+
+
+def print_response_stats(response: LupResponse, console: "Console") -> float:
+    """Print the duration/cost (or token-count) summary line for a turn.
+
+    Returns the turn's cost in USD (0.0 when the backend reports none)
+    so callers can accumulate a session total.
+    """
+    parts: list[str] = []
+    cost = 0.0
+    if response.result and response.result.duration_ms:
+        secs = response.result.duration_ms / 1000
+        parts.append(f"{secs:.1f}s")
+    if response.result and response.result.total_cost_usd:
+        cost = response.result.total_cost_usd
+        parts.append(f"${cost:.4f}")
+    elif response.result and response.result.usage:
+        # Backends without cost reporting (Codex sans rates) still show
+        # what they can: token counts
+        usage = response.result.usage
+        parts.append(f"{usage.input_tokens}in/{usage.output_tokens}out tok")
+    if parts:
+        console.print(f"  [dim]{' · '.join(parts)}[/dim]")
+    console.print()
+    return cost
+
+
+async def exec_once(
+    prompt: str,
+    *,
+    model: str | None = None,
+    no_tools: bool = False,
+    no_prompt: bool = False,
+) -> None:
+    """Run a single prompt through the REPL machinery, then return.
+
+    The non-interactive counterpart of :func:`repl` — same adapter and
+    conversation construction, same overrides — for smoke tests and
+    scripting. The response streams to the console as it arrives; no
+    interactive prompt loop is entered.
+    """
+    from rich.console import Console
+
+    console = Console(highlight=False)
+    adapter, adapter_ctx = build_repl_adapter(
+        model, no_tools=no_tools, no_prompt=no_prompt
+    )
+    with adapter_ctx:
+        async with adapter.conversation() as conv:
+            try:
+                response = await send_interruptible(conv, prompt, console)
+            except Interrupted:
+                console.print("  [dim]interrupted[/dim]\n")
+                return
+            except RuntimeError as e:
+                console.print(f"  [red]error:[/red] {e}\n")
+                raise typer.Exit(1) from e
+            print_response_stats(response, console)
+
+
 async def repl(
     *,
     model: str | None = None,
@@ -182,7 +269,6 @@ async def repl(
     from rich.console import Console
     from rich.panel import Panel
 
-    from lup_template.agent.core import build_adapter
     from lup.paths import project_root
 
     console = Console(highlight=False)
@@ -291,18 +377,9 @@ async def repl(
     )
 
     try:
-        # ``build_adapter`` reads ``settings.model`` for every backend, so
-        # override it here to make ``--model`` actually take effect (not just
-        # decorate the panel). ``--no-tools``/``--no-prompt`` are applied to the
-        # built Claude options below.
-        original_model = settings.model
-        if model:
-            settings.model = model
-        try:
-            adapter, adapter_ctx, _notes = build_adapter("repl")
-        finally:
-            settings.model = original_model
-        apply_repl_overrides(adapter, no_tools=no_tools, no_prompt=no_prompt)
+        adapter, adapter_ctx = build_repl_adapter(
+            model, no_tools=no_tools, no_prompt=no_prompt
+        )
         stack.enter_context(adapter_ctx)
 
         async with stack:
@@ -353,23 +430,7 @@ async def repl(
                             prompt_text,
                             console,
                         )
-                        parts: list[str] = []
-                        if response.result and response.result.duration_ms:
-                            secs = response.result.duration_ms / 1000
-                            parts.append(f"{secs:.1f}s")
-                        if response.result and response.result.total_cost_usd:
-                            session_cost += response.result.total_cost_usd
-                            parts.append(f"${response.result.total_cost_usd:.4f}")
-                        elif response.result and response.result.usage:
-                            # Backends without cost reporting (Codex sans
-                            # rates) still show what they can: token counts
-                            usage = response.result.usage
-                            parts.append(
-                                f"{usage.input_tokens}in/{usage.output_tokens}out tok"
-                            )
-                        if parts:
-                            console.print(f"  [dim]{' · '.join(parts)}[/dim]")
-                        console.print()
+                        session_cost += print_response_stats(response, console)
                     except Interrupted:
                         console.print("  [dim]interrupted[/dim]\n")
                     except RuntimeError as e:
