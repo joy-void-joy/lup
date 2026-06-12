@@ -51,6 +51,16 @@ def collect_cmd(
     state.collect(since, all_time, version, all_versions, output, dry_run=dry_run)
 
 
+@app.command("costs")
+def costs_cmd(
+    version: VERSION_OPT = AGENT_VERSION,
+    all_versions: ALL_VERSIONS_OPT = False,
+    as_json: JSON_OPT = False,
+) -> None:
+    """Per-backend cost/token rollup from session JSONs (any backend)."""
+    state.costs(version, all_versions, as_json)
+
+
 @app.command("tools")
 def tools_cmd(
     version: VERSION_OPT = AGENT_VERSION,
