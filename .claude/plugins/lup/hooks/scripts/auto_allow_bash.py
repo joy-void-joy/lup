@@ -47,7 +47,7 @@ RULES: list[Allow | Deny] = [
     # whitelists the payload rather than blanket-approving any xargs.
     Allow(pattern=r"^xargs\s+(ls|tree|grep|cat|echo|test|file|wc|head|tail)\b"),
     Allow(pattern=r"^test "),
-    Allow(pattern=r"^find"),
+    Allow(pattern=r"^find\b(?!.*(-exec|-ok|-delete))"),
     # GitHub CLI (read-only)
     Allow(pattern=r"^gh (pr|issue) (list|view|diff|status)\b"),
     # Git (safe subset)
@@ -59,11 +59,14 @@ RULES: list[Allow | Deny] = [
     Allow(pattern=r"^uv run (pyright|pytest|ruff)\b"),
     Allow(pattern=r"^uv run \S+ --help$"),
     # lup-devtools CLI
-    Allow(pattern=r"uv run lup-devtools\b"),
-    # Block all python invocations...
+    Allow(pattern=r"^uv run lup-devtools\b"),
+    # Block python invocations at command position (segments are already
+    # operator-split, so command position is the segment start, possibly via
+    # `uv run` or a path prefix). Mentions of "python" in arguments,
+    # messages, or grep patterns are unaffected.
     Deny(
-        pattern=r"(^|\b)python3?\b",
-        reason="Denied: use lup-devtools instead, or create a script in ./tmp/.",
+        pattern=r"^(\S*/)?(uv\s+run\s+)?python3?\b",
+        reason="Denied: use lup-devtools or `uv run lup` instead, or create a script in ./tmp/.",
     ),
     # ...except tmp scripts (overrides the deny above)
     Allow(pattern=r"^uv run (python )?(\./)?tmp/\S+\.py\b"),
@@ -88,7 +91,9 @@ class HookEvent(BaseModel):
     tool_input: BashInput = BashInput()
 
 
-def _allow(reason: str = "Auto-allowed: command matches allowlist") -> HookOutput:
+def allow_decision(
+    reason: str = "Auto-allowed: command matches allowlist",
+) -> HookOutput:
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -98,7 +103,7 @@ def _allow(reason: str = "Auto-allowed: command matches allowlist") -> HookOutpu
     }
 
 
-def _deny(reason: str) -> HookOutput:
+def deny_decision(reason: str) -> HookOutput:
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -164,12 +169,14 @@ def decide(command: str) -> HookOutput | None:
     # in the pipeline must block the whole command).
     for segment, decision in decisions:
         if decision == "deny":
-            return _deny(f"Denied: segment is denylisted | segment: {segment[:80]}")
+            return deny_decision(
+                f"Denied: segment is denylisted | segment: {segment[:80]}"
+            )
 
     # Auto-allow only when EVERY segment is explicitly allowlisted; a single
     # non-allowlisted segment falls through to the user.
     if all(decision == "allow" for _segment, decision in decisions):
-        return _allow()
+        return allow_decision()
 
     return None
 
