@@ -24,21 +24,34 @@ Examples::
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
 import sh
 import typer
 
+from lup.paths import project_root
 from lup_template.devtools.utils import git
 
 app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
 
-DOWNSTREAM_FILE = Path("downstream.json")
-LOCAL_FILE = Path("downstream.json.local")
-CACHE_DIR = Path(".cache/downstream")
-REFS_DIR = Path("refs")
+
+def downstream_file() -> Path:
+    return project_root() / "downstream.json"
+
+
+def local_file() -> Path:
+    return project_root() / "downstream.json.local"
+
+
+def cache_dir() -> Path:
+    return project_root() / ".cache" / "downstream"
+
+
+def refs_dir() -> Path:
+    return project_root() / "refs"
 
 
 def load_json(path: Path) -> dict[str, list[dict[str, str]]]:
@@ -49,13 +62,13 @@ def load_json(path: Path) -> dict[str, list[dict[str, str]]]:
 
 
 def save_local(data: dict[str, list[dict[str, str]]]) -> None:
-    LOCAL_FILE.write_text(json.dumps(data, indent=2) + "\n")
+    local_file().write_text(json.dumps(data, indent=2) + "\n")
 
 
 def ensure_ref_symlink(name: str, target: str) -> None:
     """Create or update refs/<name> symlink pointing to a resolved project path."""
-    REFS_DIR.mkdir(exist_ok=True)
-    link = REFS_DIR / name
+    refs_dir().mkdir(exist_ok=True)
+    link = refs_dir() / name
     target_path = Path(target).resolve()
     if link.is_symlink():
         if link.resolve() == target_path:
@@ -70,8 +83,8 @@ def ensure_ref_symlink(name: str, target: str) -> None:
 
 def load_projects() -> list[dict[str, str]]:
     """Load and merge projects from downstream.json + downstream.json.local."""
-    base = load_json(DOWNSTREAM_FILE)
-    local = load_json(LOCAL_FILE)
+    base = load_json(downstream_file())
+    local = load_json(local_file())
 
     merged: dict[str, dict[str, str]] = {}
     for p in base.get("projects", []):
@@ -107,14 +120,21 @@ def resolve_existing_path(proj: dict[str, str]) -> str | None:
     path = proj.get("path", "")
     if path and Path(path).exists():
         return path
-    cache_path = CACHE_DIR / proj["name"]
+    cache_path = cache_dir() / proj["name"]
     if cache_path.exists():
         return str(cache_path)
     return None
 
 
-def ensure_local(proj: dict[str, str]) -> str:
-    """Ensure a project has a usable local path."""
+def ensure_local(
+    proj: dict[str, str],
+    report: Callable[[str], None] = typer.echo,
+) -> str:
+    """Ensure a project has a usable local path.
+
+    Progress and error text goes through ``report`` so callers rendering
+    tables can defer the messages instead of interleaving them mid-table.
+    """
     path = proj.get("path", "")
     name = proj["name"]
     branch = proj.get("branch", "")
@@ -122,23 +142,23 @@ def ensure_local(proj: dict[str, str]) -> str:
         ensure_ref_symlink(name, path)
         return path
 
-    cache_path = CACHE_DIR / name
+    cache_path = cache_dir() / name
     url = proj.get("url", "")
     reset_target = f"origin/{branch}" if branch else "origin/HEAD"
 
     if cache_path.exists():
-        typer.echo(f"Fetching latest for '{name}' from cache...")
+        report(f"Fetching latest for '{name}' from cache...")
         try:
             git("-C", str(cache_path), "fetch", "--quiet")
             git("-C", str(cache_path), "reset", "--hard", reset_target, "--quiet")
         except sh.ErrorReturnCode as e:
-            typer.echo(f"Warning: fetch failed: {e.stderr.decode().strip()}")
+            report(f"Warning: fetch failed: {e.stderr.decode().strip()}")
         ensure_ref_symlink(name, str(cache_path))
         return str(cache_path)
 
     if url:
-        typer.echo(f"Cloning '{name}' from {url}...")
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        report(f"Cloning '{name}' from {url}...")
+        cache_dir().mkdir(parents=True, exist_ok=True)
         clone_args = ["clone", "--depth=200"]
         if branch:
             clone_args.extend(["--branch", branch])
@@ -146,15 +166,17 @@ def ensure_local(proj: dict[str, str]) -> str:
         try:
             git(*clone_args)
         except sh.ErrorReturnCode as e:
-            typer.echo(f"Clone failed: {e.stderr.decode().strip()}")
+            report(f"Clone failed: {e.stderr.decode().strip()}")
             raise typer.Exit(1)
         ensure_ref_symlink(name, str(cache_path))
         return str(cache_path)
 
-    typer.echo(f"Project '{name}' has no local path or URL configured.")
-    typer.echo("\nEither:")
-    typer.echo("  1. Add a URL to downstream.json")
-    typer.echo(f"  2. Run: uv run lup-devtools sync setup {name} /path/to/repo")
+    report(
+        f"Project '{name}' has no local path or URL configured.\n"
+        "Either:\n"
+        "  1. Add a URL to downstream.json\n"
+        f"  2. Run: uv run lup-devtools sync setup {name} /path/to/repo"
+    )
     raise typer.Exit(1)
 
 
@@ -289,7 +311,7 @@ def mark_synced(
 
     head = current_head(path)
 
-    local_data = load_json(LOCAL_FILE)
+    local_data = load_json(local_file())
     local_projects = local_data.get("projects", [])
 
     entry = next((p for p in local_projects if p["name"] == project), None)
@@ -331,7 +353,7 @@ def setup_project(
         typer.echo(f"Not a git repository: {resolved}")
         raise typer.Exit(1)
 
-    local_data = load_json(LOCAL_FILE)
+    local_data = load_json(local_file())
     local_projects = local_data.get("projects", [])
 
     entry = next((p for p in local_projects if p["name"] == name), None)

@@ -15,13 +15,14 @@ Examples::
 import json
 import re
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
 
 import typer
 
 from lup.history import iter_session_dirs, iter_trace_log_files, session_backend
-from lup.paths import traces_path
+from lup.paths import parse_timestamp, project_root, traces_path
 
 from lup_template.devtools.utils import output_json
 
@@ -47,7 +48,7 @@ class SearchMatch(TypedDict):
     context: list[str]
 
 
-class TraceEntry(TypedDict):
+class TraceRow(TypedDict):
     session_id: str
     source: str
     backend: str | None
@@ -113,6 +114,14 @@ def resolve_trace_paths(effective: list[str] | None) -> list[Path]:
                 paths.extend(ver_dir.rglob("*.md"))
         return paths
     return list(traces_path().rglob("*.md"))
+
+
+def display_path(path: Path) -> str:
+    """Project-relative path for display, absolute when outside the project."""
+    try:
+        return str(path.relative_to(project_root()))
+    except ValueError:
+        return str(path)
 
 
 def session_id_from_path(trace_file: Path) -> str:
@@ -349,7 +358,7 @@ def search(pattern: str, context: int, as_json: bool) -> None:
                     end = min(len(lines), i + context + 1)
                     matches.append(
                         {
-                            "file": str(trace_file.relative_to(traces_path())),
+                            "file": display_path(trace_file),
                             "line": i + 1,
                             "context": lines[start:end],
                         }
@@ -400,22 +409,36 @@ def errors_in_traces(
         typer.echo()
 
 
+def entry_recency(path: Path) -> datetime:
+    """Newest timestamp parsed from contained filenames, falling back to mtime."""
+    try:
+        names = [f.name for f in path.iterdir()]
+    except OSError:
+        names = []
+    stamps: list[datetime] = []
+    for name in names:
+        try:
+            stamps.append(parse_timestamp(name))
+        except ValueError:
+            continue
+    if stamps:
+        return max(stamps)
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime)
+    except OSError:
+        return datetime.min
+
+
 def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
-    """List available traces."""
+    """List available traces, most recent first."""
     raw: list[tuple[str, str, Path]] = []
 
     versions_iter = effective if effective else [None]
     for ver in versions_iter:
         for session_dir in iter_session_dirs(version=ver):
             raw.append(("sessions", session_dir.name, session_dir))
-
-    allowed_versions = set(effective) if effective else None
-    for log_file in iter_trace_log_files():
-        version_name = log_file.parent.parent.parent.name
-        if allowed_versions is not None and version_name not in allowed_versions:
-            continue
-        session_id = log_file.parent.name
-        raw.append(("logs", session_id, log_file.parent))
+        for log_file in iter_trace_log_files(version=ver):
+            raw.append(("logs", log_file.parent.name, log_file.parent))
 
     if not raw:
         if as_json:
@@ -430,9 +453,9 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
         if session_id not in seen or source == "logs":
             seen[session_id] = (source, session_id, path)
 
-    unique = list(seen.values())
-    entries: list[TraceEntry] = []
-    for source, session_id, path in sorted(unique, reverse=True)[:limit]:
+    unique = sorted(seen.values(), key=lambda row: entry_recency(row[2]), reverse=True)
+    entries: list[TraceRow] = []
+    for source, session_id, path in unique[:limit]:
         files = list(path.glob("*"))
         size = sum(f.stat().st_size for f in files if f.is_file())
         entries.append(

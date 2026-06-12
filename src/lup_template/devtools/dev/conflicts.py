@@ -220,6 +220,7 @@ class FileAuditResult(BaseModel):
     ours_removals: list[str]
     theirs_removals: list[str]
     warning: bool
+    partial: bool = False
 
 
 class AuditResult(BaseModel):
@@ -284,22 +285,19 @@ def conflict_status(as_json: bool) -> None:
     ours_commits: list[str] = []
     theirs_commits: list[str] = []
 
-    if operation == "merge":
-        try:
-            merge_base = str(
-                git("merge-base", "HEAD", "MERGE_HEAD", _ok_code=[0])
-            ).strip()
-            ours_raw = str(
-                git("log", "--oneline", f"{merge_base}..HEAD", _ok_code=[0])
-            ).strip()
-            ours_commits = [line for line in ours_raw.splitlines() if line][:10]
+    try:
+        merge_base = str(git("merge-base", "HEAD", theirs_ref, _ok_code=[0])).strip()
+        ours_raw = str(
+            git("log", "--oneline", f"{merge_base}..HEAD", _ok_code=[0])
+        ).strip()
+        ours_commits = [line for line in ours_raw.splitlines() if line][:10]
 
-            theirs_raw = str(
-                git("log", "--oneline", f"{merge_base}..MERGE_HEAD", _ok_code=[0])
-            ).strip()
-            theirs_commits = [line for line in theirs_raw.splitlines() if line][:10]
-        except sh.ErrorReturnCode:
-            pass
+        theirs_raw = str(
+            git("log", "--oneline", f"{merge_base}..{theirs_ref}", _ok_code=[0])
+        ).strip()
+        theirs_commits = [line for line in theirs_raw.splitlines() if line][:10]
+    except sh.ErrorReturnCode:
+        pass
 
     result = ConflictStatusResult(
         operation=operation,
@@ -342,13 +340,17 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
         ours_removals = extract_removals(ours_diff)
 
         theirs_diff = ""
+        partial = False
         try:
             theirs_diff = str(
                 git("diff", theirs_ref, "--", path, _ok_code=[0, 1])
             ).strip()
         except sh.ErrorReturnCode as e:
-            logger.warning(
-                "Could not diff '%s' against %s: %s", path, theirs_ref, decode_stderr(e)
+            partial = True
+            typer.echo(
+                f"Warning: could not diff {path} against {theirs_ref} — "
+                f"theirs-side audit is partial ({decode_stderr(e).strip()})",
+                err=True,
             )
         theirs_removals = extract_removals(theirs_diff)
 
@@ -359,6 +361,7 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
                 ours_removals=ours_removals,
                 theirs_removals=theirs_removals,
                 warning=has_warning,
+                partial=partial,
             )
         )
 
@@ -372,6 +375,8 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
     else:
         for f in file_results:
             status = "WARNING" if f.warning else "OK"
+            if f.partial:
+                status += " (partial)"
             typer.echo(f"  {f.path}: {status}")
             for r in f.ours_removals:
                 typer.echo(f"    - [ours] {r}")

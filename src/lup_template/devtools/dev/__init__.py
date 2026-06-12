@@ -48,9 +48,16 @@ def worktree_create_cmd(
         str | None,
         typer.Option("--base", "-b", help="Base branch (default: current branch)"),
     ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Delete an existing unregistered directory at the worktree path",
+        ),
+    ] = False,
 ) -> None:
     """Create or re-attach a git worktree."""
-    worktree.create(name, no_sync, no_copy_data, no_plugin_refresh, base_branch)
+    worktree.create(name, no_sync, no_copy_data, no_plugin_refresh, base_branch, force)
 
 
 @worktree_app.command("list")

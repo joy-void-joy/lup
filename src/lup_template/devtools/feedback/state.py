@@ -663,6 +663,10 @@ def collect(
     dry_run: bool = False,
 ) -> None:
     """Collect feedback metrics from sessions."""
+    if since and all_time:
+        typer.echo("Error: --since and --all-time are mutually exclusive", err=True)
+        raise typer.Exit(1)
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     effective, ver_warning = resolve_version(version, all_versions)
