@@ -154,13 +154,12 @@ async def run_reviewer(
 ) -> str | None:
     """Run the reviewer sub-agent and return its critique text.
 
-    Cross-backend note: ``query`` routes by model name, and the default
-    model is an Anthropic one — so out of the box the reviewer needs
-    Anthropic credentials even when the main agent runs on
-    ``AGENT_SDK=codex``/``openai``. Passing a backend-native ``model``
-    keeps the reviewer on one provider; its options then narrow to what
-    that backend's one-shot queries support — a text critique without
-    file tools or historical calibration.
+    Cross-backend note: ``query`` routes by model name. The template
+    wires ``reviewer_model=aux_model()`` (config.py), so the reviewer
+    follows the session's backend by default — no Anthropic credentials
+    needed on ``AGENT_SDK=codex``/``openai``. A non-Anthropic reviewer
+    narrows to what that backend's one-shot queries support — a text
+    critique without file tools or historical calibration.
 
     Args:
         validated: The reflection input from the main agent.
@@ -237,6 +236,8 @@ def create_reflect_tools(
         outputs_dir: Path to past outputs for the reviewer to Read.
             If None, the reviewer won't have historical data access.
         gate: External gate instance to use. Creates a new one if None.
+        reviewer_model: Model for the reviewer sub-agent. The template
+            passes ``aux_model()`` so the reviewer follows the backend.
     """
     gate = gate or ReflectionGate()
 

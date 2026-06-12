@@ -81,10 +81,11 @@ class Settings(BaseSettings):
         default="claude",
         validation_alias="AGENT_SDK",
         description=(
-            "Which agent SDK backend to use (claude, codex, openai). Note: "
-            "the reviewer and subagents default to Anthropic models and "
-            "route by model name, so they need Anthropic credentials even "
-            "on codex/openai — override their models to stay single-provider."
+            "Which agent SDK backend to use (claude, codex, openai). The "
+            "reviewer and background agents follow AGENT_AUX_MODEL, which "
+            "defaults to a backend-native model. Subagent specs pin their "
+            "own models — the template's pin Anthropic ones, so they need "
+            "Anthropic credentials on codex/openai unless overridden."
         ),
     )
 
@@ -177,6 +178,17 @@ class Settings(BaseSettings):
         description="Max thinking tokens (None = model default)",
     )
 
+    aux_model: str | None = Field(
+        default=None,
+        validation_alias="AGENT_AUX_MODEL",
+        description=(
+            "Model for auxiliary agents (reviewer, background agents). "
+            "None resolves per backend: a sonnet-class reviewer on claude, "
+            "the session model on codex/openai — so AGENT_SDK=codex/openai "
+            "runs without Anthropic credentials."
+        ),
+    )
+
     # ==========================================================================
     # PATHS
     # ==========================================================================
@@ -218,6 +230,19 @@ class Settings(BaseSettings):
 
 # Singleton instance
 settings = Settings.model_validate({})
+
+
+def aux_model() -> str:
+    """Backend-coherent model for auxiliary agents (reviewer, backgrounds).
+
+    Explicit ``AGENT_AUX_MODEL`` wins. Otherwise Claude sessions get a
+    sonnet-class reviewer and Codex/OpenAI sessions reuse the session
+    model — the one model the account is known to accept.
+    """
+    if settings.aux_model:
+        return settings.aux_model
+    return "claude-sonnet-4-6" if settings.agent_sdk == "claude" else settings.model
+
 
 # Route notes/logs paths into lup.paths so every consumer (history,
 # devtools, traces) honors the configured locations
