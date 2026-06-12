@@ -39,17 +39,16 @@ Examples:
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.hooks import create_tool_gate
 from lup.reflect import ReflectionGate
 from lup.types import (
     LupHookInput,
-    LupHookMatcher,
-    LupHookOutput,
     LupHooksConfig,
-    block_hook,
 )
 
 logger = logging.getLogger(__name__)
@@ -377,7 +376,10 @@ class Scheduler:
 
     def build_sleep_result(self) -> SleepResult:
         """Build the minimal wake result."""
-        result = SleepResult(reason=self.wake_reason or "timer")
+        result = SleepResult(
+            reason=self.wake_reason or "timer",
+            time=datetime.now().strftime("%H:%M:%S"),
+        )
         if self.fired_reminder_labels:
             result["fired_reminders"] = list(self.fired_reminder_labels)
             self.fired_reminder_labels.clear()
@@ -606,8 +608,17 @@ class Scheduler:
 def create_stop_guard() -> LupHooksConfig:
     """Create a Stop hook that prevents the agent from ending its turn.
 
-    The agent must use the ``sleep`` tool to yield control. This keeps
-    the agent in a persistent loop: wake -> act -> sleep -> wake.
+    **What:** Preset over :func:`lup.hooks.create_tool_gate` — blocks the
+    Stop event with a redirect to the ``sleep`` tool, unless the SDK
+    reports ``stop_hook_active`` (the guard already fired during this
+    stop sequence; passing through avoids an infinite block loop).
+
+    **When:** Wire into every persistent agent session. This keeps the
+    agent in the wake -> act -> sleep -> wake loop: the only way to
+    yield control is the (blocking) ``sleep`` tool.
+
+    **Why:** Without it, the agent ends its turn after responding and
+    the persistent session dies.
 
     Returns:
         LupHooksConfig with a Stop hook.
@@ -619,16 +630,17 @@ def create_stop_guard() -> LupHooksConfig:
         hooks = merge_hooks(permission_hooks, create_stop_guard())
     """
 
-    async def stop_guard(input_data: LupHookInput) -> LupHookOutput:
-        if input_data.get("hook_event_name") != "Stop":
-            return LupHookOutput()
-        if input_data.get("stop_hook_active", False):
-            return LupHookOutput()
-        return block_hook("You cannot end your turn. Use sleep to pause between turns.")
+    def stop_already_handled(input_data: LupHookInput) -> bool:
+        return input_data.get("hook_event_name") == "Stop" and input_data.get(
+            "stop_hook_active", False
+        )
 
-    return {
-        "Stop": [LupHookMatcher(hook=stop_guard)],
-    }
+    return create_tool_gate(
+        event="Stop",
+        style="block",
+        message="You cannot end your turn. Use sleep to pause between turns.",
+        unlocked=stop_already_handled,
+    )
 
 
 def create_pending_event_guard(
@@ -639,7 +651,17 @@ def create_pending_event_guard(
 ) -> LupHooksConfig:
     """Create a PreToolUse hook that blocks timing tools when unread events exist.
 
-    Forces the agent to call ``context`` before sleeping or scheduling.
+    **What:** Preset over :func:`lup.hooks.create_tool_gate` — blocks the
+    guarded timing tools while unread events exist, with the live count
+    in the denial message. Unlocked when the call forces through
+    (``force=true``), starts its own debounce window, a debounce window
+    is already open, a wake is pending, or there is nothing unread.
+
+    **When:** Guard ``sleep`` and scheduling tools in persistent agents
+    so the agent reads pending events (via ``context``) before yielding.
+
+    **Why:** Sleeping past unread events means reacting a full cycle
+    late; the denial redirects the agent to ``context`` first.
 
     Args:
         check_unread: Callable returning the count of unread events.
@@ -650,31 +672,28 @@ def create_pending_event_guard(
         LupHooksConfig with PreToolUse hooks.
     """
 
-    async def event_guard(input_data: LupHookInput) -> LupHookOutput:
+    def no_unread_events(input_data: LupHookInput) -> bool:
         if input_data.get("hook_event_name") != "PreToolUse":
-            return LupHookOutput()
+            return True
         tool_input = input_data.get("tool_input", {})
         if tool_input.get("force", False):
-            return LupHookOutput()
+            return True
         if tool_input.get("debounce_initial") is not None:
-            return LupHookOutput()
+            return True
         if scheduler.debounce_active:
-            return LupHookOutput()
+            return True
         if scheduler.wake_pending:
-            return LupHookOutput()
+            return True
+        return not check_unread()
 
-        unread = check_unread()
-        if not unread:
-            return LupHookOutput()
-
-        return block_hook(f"Blocked — {unread} unread event(s). Call context first.")
-
-    return {
-        "PreToolUse": [
-            LupHookMatcher(matcher=tool_name, hook=event_guard)
-            for tool_name in guarded_tools
-        ],
-    }
+    return create_tool_gate(
+        gated_tool=guarded_tools,
+        style="block",
+        message=lambda: (
+            f"Blocked — {check_unread()} unread event(s). Call context first."
+        ),
+        unlocked=no_unread_events,
+    )
 
 
 def create_meta_before_sleep_guard(
@@ -684,10 +703,11 @@ def create_meta_before_sleep_guard(
 ) -> LupHooksConfig:
     """Create a PreToolUse hook that requires meta before sleep.
 
-    Convenience wrapper around :func:`~lup.hooks.create_reflection_gate`
-    for the persistent agent pattern. Forces the agent to call the ``meta``
-    tool (process self-assessment) before every sleep. The gate resets
-    automatically via ``scheduler.on_agent_action()``.
+    Preset over :func:`lup.hooks.create_tool_gate`, via
+    :func:`~lup.reflect.create_reflection_gate`, for the persistent
+    agent pattern. Forces the agent to call the ``meta`` tool (process
+    self-assessment) before every sleep. The gate resets automatically
+    via ``scheduler.on_agent_action()``.
 
     Args:
         scheduler: The Scheduler instance (uses ``scheduler.meta_gate``).
@@ -696,7 +716,7 @@ def create_meta_before_sleep_guard(
     Returns:
         LupHooksConfig with PreToolUse hooks.
     """
-    from lup.hooks import create_reflection_gate
+    from lup.reflect import create_reflection_gate
 
     return create_reflection_gate(
         gate=scheduler.meta_gate,

@@ -39,7 +39,7 @@ def test_status_reports_session_counts(tmp_lup_project: Path) -> None:
     result = runner.invoke(app, ["feedback", "status", "-v", LUP_PROJECT_VERSION])
 
     assert result.exit_code == 0, result.output
-    assert "Total sessions: 10" in result.output
+    assert "Session directories: 10" in result.output
     assert "Unanalyzed: 10" in result.output
 
 

@@ -3,7 +3,9 @@
 Key patterns:
 1. Explicit separation of RW (session can write) and RO (historical, read-only)
 2. Session-specific directories prevent cross-session pollution
-3. Logs directory is NOT accessible to agent (for feedback loop only)
+3. Logs directory is NOT accessible to agent (for feedback loop only) —
+   the RO grant lists each version's ``sessions/`` and ``outputs/``
+   explicitly so ``logs/`` is never readable
 4. Permission hooks enforce the access control
 
 Examples:
@@ -12,8 +14,8 @@ Examples:
         >>> notes = setup_notes(session_id="12345", task_id="my-task")
         >>> notes.rw  # Agent can write here
         [PosixPath('.../sessions/12345'), PosixPath('.../outputs/my-task/...')]
-        >>> notes.ro  # Agent can only read here (logs excluded)
-        [PosixPath('.../sessions'), PosixPath('.../outputs')]
+        >>> notes.ro  # Agent can only read here — every version, never logs/
+        [PosixPath('.../traces/0.1.0/sessions'), PosixPath('.../traces/0.1.0/outputs')]
 """
 
 from datetime import datetime
@@ -21,7 +23,14 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.paths import outputs_dir, runtime_logs_path, sessions_dir, trace_logs_dir
+from lup.paths import (
+    TIMESTAMP_FMT,
+    outputs_dir,
+    runtime_logs_path,
+    sessions_dir,
+    trace_logs_dir,
+    traces_path,
+)
 
 
 class NotesConfig(BaseModel):
@@ -39,6 +48,31 @@ class NotesConfig(BaseModel):
     def all_dirs(self) -> list[Path]:
         """All directories the agent can access (RW + RO)."""
         return self.rw + self.ro
+
+
+def collect_ro_dirs() -> list[Path]:
+    """Read-only grants: ``sessions/`` and ``outputs/`` of every version.
+
+    Iterates version directories under ``traces_path()`` and grants each
+    version's ``sessions/`` and ``outputs/`` (the current version's are
+    always included — they exist by the time this runs). Granting the
+    version directories themselves would also expose ``logs/``, which is
+    reserved for the feedback loop and must stay invisible to the agent.
+    """
+    ro: list[Path] = []
+
+    def add(candidate: Path) -> None:
+        if candidate.is_dir() and candidate not in ro:
+            ro.append(candidate)
+
+    add(sessions_dir())
+    add(outputs_dir())
+    if traces_path().exists():
+        for version_dir in sorted(traces_path().iterdir()):
+            if version_dir.is_dir():
+                add(version_dir / "sessions")
+                add(version_dir / "outputs")
+    return ro
 
 
 def setup_notes(
@@ -62,7 +96,7 @@ def setup_notes(
     Returns:
         NotesConfig with RW and RO directories separated.
     """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime(TIMESTAMP_FMT)
 
     sessions_base = sessions_dir() / type if type else sessions_dir()
     outputs_base = outputs_dir() / type if type else outputs_dir()
@@ -83,5 +117,5 @@ def setup_notes(
         output=output_path,
         trace_log=trace_log,
         rw=[session_path, output_path],
-        ro=[sessions_dir(), outputs_dir()],
+        ro=collect_ro_dirs(),
     )

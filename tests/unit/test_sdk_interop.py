@@ -35,10 +35,9 @@ from lup.hooks import (
     create_capture_hook,
     create_nudge_hook,
     create_permission_hooks,
-    create_reflection_gate,
     create_tool_allowlist_hook,
 )
-from lup.reflect import ReflectionGate
+from lup.reflect import ReflectionGate, create_reflection_gate
 from lup.types import (
     LupHookInput,
     LupHooksConfig,

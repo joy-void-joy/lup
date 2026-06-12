@@ -133,9 +133,13 @@ def truncate_str_fields(
     """Recursively truncate string values in a JSON-like structure."""
     match obj:
         case dict() as d:
-            return {k: truncate_str_fields(v, max_len) for k, v in d.items()}
+            return {
+                k: truncate_str_fields(v, max_len, max_len_list) for k, v in d.items()
+            }
         case list() as items:
-            return [truncate_str_fields(item, max_len) for item in items][:max_len_list]
+            return [truncate_str_fields(item, max_len, max_len_list) for item in items][
+                :max_len_list
+            ]
         case str() as s:
             return truncate_str(s, max_len)
         case _:
@@ -339,8 +343,9 @@ class TraceLogger(BaseModel):
     """Accumulates agent reasoning for feedback loop analysis.
 
     Collects content blocks during agent execution and saves them
-    as a markdown trace file for later analysis. Supports both
-    raw line access (for saving) and indexed entry access (for slicing).
+    as a markdown trace file for later analysis. ``entries`` is the
+    single store: ``save()`` renders the markdown stream from it, and
+    ``read_entries()`` slices it for in-session replay.
 
     Typically passed to ``print_message(message, trace=trace)`` for
     combined display and tracing. Methods like ``log_message`` and
@@ -351,27 +356,16 @@ class TraceLogger(BaseModel):
 
     trace_path: Path = Field(description="Path to save the trace file")
     title: str = Field(description="Title for the trace")
-    lines: list[str] = Field(default_factory=list)
     entries: list[TraceEntry] = Field(default_factory=list)
 
     def model_post_init(self, _context: object) -> None:
         """Initialize the trace with header."""
-        if not self.lines:
-            header = f"# Trace: {self.title}\n"
-            generated = f"*Generated: {datetime.now().isoformat()}*\n\n"
-            self.lines.append(header)
-            self.lines.append(generated)
-            self.entries.append(
-                TraceEntry(
-                    index=0,
-                    timestamp=datetime.now().isoformat(),
-                    content=header + generated,
-                )
-            )
+        if not self.entries:
+            self.append_entry(f"# Trace: {self.title}\n")
+            self.append_entry(f"*Generated: {datetime.now().isoformat()}*\n\n")
 
     def append_entry(self, content: str) -> None:
         """Create and append a new trace entry."""
-        self.lines.append(content)
         self.entries.append(
             TraceEntry(
                 index=len(self.entries),
@@ -408,12 +402,18 @@ class TraceLogger(BaseModel):
         after_n: int | None = None,
         before_n: int | None = None,
     ) -> list[TraceEntry]:
-        """Slice entries by index. Supports negative indexing."""
+        """Slice entries by index. Supports negative indexing.
+
+        Lets a persistent agent replay recent trace context (e.g. the
+        last N entries) without re-reading the saved file.
+        """
         return self.entries[after_n:before_n]
 
     def save(self) -> Path:
-        """Write accumulated trace to file."""
+        """Write the accumulated trace to file, rendered from entries."""
         self.trace_path.parent.mkdir(parents=True, exist_ok=True)
-        self.trace_path.write_text("\n".join(self.lines), encoding="utf-8")
+        self.trace_path.write_text(
+            "\n".join(entry.content for entry in self.entries), encoding="utf-8"
+        )
         logger.info("Saved trace to %s", self.trace_path)
         return self.trace_path

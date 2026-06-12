@@ -34,7 +34,7 @@ def emitted_tool_trace() -> str:
     trace.log_block(LupToolUseBlock(id="a", name="search", input={"q": "x"}))
     trace.log_block(LupToolResultBlock(tool_use_id="a", content="done"))
     trace.log_block(LupTextBlock(text="some prose, not a tool call"))
-    return "\n".join(trace.lines)
+    return "\n".join(entry.content for entry in trace.entries)
 
 
 class TestToolCallPattern:

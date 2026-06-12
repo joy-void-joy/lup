@@ -322,7 +322,7 @@ class TestApplyRelayEvent:
             scheduler=Scheduler(on_action=on_action),
             trace_logger=trace,
         )
-        assert any("pacing was rushed" in line for line in trace.lines)
+        assert any("pacing was rushed" in entry.content for entry in trace.entries)
 
 
 class AgentTurn:

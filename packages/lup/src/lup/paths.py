@@ -4,10 +4,15 @@ Pure path layout — where things go on disk. No data discovery or disk
 iteration; see :mod:`lup.history` for cross-version queries.
 
 Paths auto-detect the project root (walking up to ``pyproject.toml``)
-but can be overridden via :func:`configure`::
+on first access, but can be overridden via :func:`configure`::
 
     from lup.paths import configure
     configure(root=Path("/my/project"), notes_dir=Path("/my/data/notes"))
+
+Resolution is lazy and cached: importing this module never touches the
+filesystem, so ``lup`` is importable outside a ``[tool.lup]`` project
+(e.g. when pip-installed). Auto-detection runs on the first accessor
+call; calling :func:`configure` first skips it entirely.
 
 Layout:
     notes/traces/<version>/sessions/<session_id>/<timestamp>.json
@@ -16,14 +21,15 @@ Layout:
     notes/feedback_loop/
 
 Examples:
-    Override paths for testing::
+    Override paths for testing (the root does not need a pyproject.toml;
+    the version falls back to "0.0.0" unless given explicitly)::
 
         >>> from lup.paths import configure, sessions_dir, project_root
         >>> configure(root=Path("/tmp/test-project"))
         >>> project_root()
         PosixPath('/tmp/test-project')
         >>> sessions_dir()
-        PosixPath('/tmp/test-project/notes/traces/0.1.0/sessions')
+        PosixPath('/tmp/test-project/notes/traces/0.0.0/sessions')
 
     Check if a path is within allowed directories::
 
@@ -66,44 +72,49 @@ def find_project_root() -> Path:
 
 
 def read_agent_version(root: Path) -> str:
-    """Read agent_version from [tool.lup] in pyproject.toml."""
+    """Read agent_version from [tool.lup] in pyproject.toml.
+
+    Returns "0.0.0" when the file or the [tool.lup] table is absent, so
+    :func:`configure` accepts roots that are not lup projects (e.g. test
+    fixtures or scratch directories).
+    """
     pyproject = root / "pyproject.toml"
+    if not pyproject.exists():
+        return "0.0.0"
     with pyproject.open("rb") as f:
         data = tomllib.load(f)
     return data.get("tool", {}).get("lup", {}).get("agent_version", "0.0.0")
 
 
 # -- Mutable path state -------------------------------------------------------
-# Lazily auto-detected on first access; overridable via configure(). Detection
-# is deferred so that ``import lup`` never fails outside a [tool.lup] tree —
-# a consumer can call configure(root=...) before touching any path accessor.
-
-PATH_GLOBALS = ("PROJECT_ROOT", "AGENT_VERSION", "NOTES_DIR", "RUNTIME_LOGS_DIR")
+# Resolved lazily on first accessor call; overridable via configure().
+# Internal — read it through the accessor functions, never import it by name.
 
 
-def ensure_initialized() -> None:
-    """Populate the path globals from root detection if not already set."""
-    if "PROJECT_ROOT" in globals():
-        return
-    root = find_project_root()
-    globals().update(
-        PROJECT_ROOT=root,
-        AGENT_VERSION=read_agent_version(root),
-        NOTES_DIR=root / "notes",
-        RUNTIME_LOGS_DIR=root / "logs",
-    )
+class PathConfig(BaseModel):
+    """Resolved path state: project root, agent version, base directories."""
+
+    root: Path
+    version: str
+    notes_dir: Path
+    logs_dir: Path
 
 
-def __getattr__(name: str) -> object:
-    """Lazily resolve path globals on first attribute access (PEP 562).
+state: PathConfig | None = None
 
-    Lets ``from lup.paths import AGENT_VERSION`` work without forcing root
-    detection at module import time.
-    """
-    if name in PATH_GLOBALS:
-        ensure_initialized()
-        return globals()[name]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+def resolve_state() -> PathConfig:
+    """Return the cached path state, auto-detecting the project root on first use."""
+    global state  # noqa: PLW0603
+    if state is None:
+        root = find_project_root()
+        state = PathConfig(
+            root=root,
+            version=read_agent_version(root),
+            notes_dir=root / "notes",
+            logs_dir=root / "logs",
+        )
+    return state
 
 
 def configure(
@@ -117,7 +128,11 @@ def configure(
 
     Call before any session operations. All derived paths
     (``traces_path``, ``feedback_path``, etc.)
-    update automatically since they read from these values.
+    update automatically since they read from this state.
+
+    ``pyproject.toml`` is consulted only when ``root`` is given without
+    ``version``, and even then it does not have to exist — a missing
+    file or missing ``[tool.lup]`` table falls back to version "0.0.0".
 
     Args:
         root: Project root directory. Resets ``notes_dir``,
@@ -127,23 +142,26 @@ def configure(
         logs_dir: Override runtime logs directory independently.
         version: Override agent version (read from [tool.lup] by default).
     """
-    global PROJECT_ROOT, AGENT_VERSION, NOTES_DIR, RUNTIME_LOGS_DIR  # noqa: PLW0603
+    global state  # noqa: PLW0603
 
     if root is not None:
-        PROJECT_ROOT = root
-        if version is None:
-            AGENT_VERSION = read_agent_version(root)
-        NOTES_DIR = root / "notes"
-        RUNTIME_LOGS_DIR = root / "logs"
-    else:
-        ensure_initialized()
+        state = PathConfig(
+            root=root,
+            version=version if version is not None else read_agent_version(root),
+            notes_dir=notes_dir if notes_dir is not None else root / "notes",
+            logs_dir=logs_dir if logs_dir is not None else root / "logs",
+        )
+        return
 
+    updates: dict[str, Path | str] = {}
     if notes_dir is not None:
-        NOTES_DIR = notes_dir
+        updates["notes_dir"] = notes_dir
     if logs_dir is not None:
-        RUNTIME_LOGS_DIR = logs_dir
+        updates["logs_dir"] = logs_dir
     if version is not None:
-        AGENT_VERSION = version
+        updates["version"] = version
+    if updates:
+        state = resolve_state().model_copy(update=updates)
 
 
 # -- Public path accessors ----------------------------------------------------
@@ -151,26 +169,22 @@ def configure(
 
 def project_root() -> Path:
     """Return the project root directory."""
-    ensure_initialized()
-    return PROJECT_ROOT
+    return resolve_state().root
 
 
 def agent_version() -> str:
-    """Return the agent version from [tool.lup] in pyproject.toml."""
-    ensure_initialized()
-    return AGENT_VERSION
+    """Return the agent version ([tool.lup] in pyproject.toml unless overridden)."""
+    return resolve_state().version
 
 
 def notes_path() -> Path:
     """Return the notes directory (``<root>/notes`` by default)."""
-    ensure_initialized()
-    return NOTES_DIR
+    return resolve_state().notes_dir
 
 
 def runtime_logs_path() -> Path:
     """Return the runtime logs directory (``<root>/logs`` by default)."""
-    ensure_initialized()
-    return RUNTIME_LOGS_DIR
+    return resolve_state().logs_dir
 
 
 def traces_path() -> Path:
@@ -256,7 +270,7 @@ def path_is_under(file_path: str | Path, allowed_dirs: list[Path]) -> bool:
     """
     try:
         path = Path(file_path).resolve()
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return False
 
     for allowed in allowed_dirs:
