@@ -131,10 +131,11 @@ def create_background_agent(
     Tool support differs by backend: background tools communicate with
     the main session through shared in-process state, which cannot
     cross the Codex subprocess boundary — requesting tools with
-    ``sdk="codex"`` raises. Model defaults also differ deliberately:
-    Claude backgrounds default to an opus-class model because they can
-    act through tools; Codex backgrounds are prompt-in/text-out
-    summarizers, where a small model suffices.
+    ``sdk="codex"`` raises. Claude backgrounds default to an opus-class
+    model because they can act through tools; Codex backgrounds are
+    prompt-in/text-out summarizers and require an explicit model —
+    Codex accounts accept only their own model list, so there is no
+    safe default.
 
     Args:
         sdk: "claude" or "codex".
@@ -173,6 +174,12 @@ def create_background_agent(
                     "which cannot cross the Codex subprocess boundary. "
                     "Use sdk='claude' for tool-using background agents."
                 )
+            if model is None:
+                raise ValueError(
+                    "Codex background agents need an explicit model: Codex "
+                    "accounts accept only their own model list (e.g. "
+                    "gpt-5.5), so there is no safe default."
+                )
             from lup.adapters.codex_background import CodexBackgroundAgent
 
             return CodexBackgroundAgent(
@@ -180,7 +187,7 @@ def create_background_agent(
                 system_prompt=system_prompt,
                 build_message=build_message,
                 start_message=start_message,
-                model=model or "gpt-4.1-mini",
+                model=model,
                 debounce_seconds=debounce_seconds,
                 on_response=on_response,
             )
