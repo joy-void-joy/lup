@@ -19,7 +19,7 @@ The configurable hooks live in `.claude/plugins/lup/hooks/scripts/`:
 | --------------------- | --------------- | ---------------------------------------------------------------------------------- |
 | `auto_allow_bash.py`  | Bash commands   | `RULES` list of `Allow`/`Deny` (last-match-wins)                                   |
 | `auto_allow_fetch.py` | WebFetch URLs   | `ALLOW_PATTERNS` (list of regex), `DENY_PATTERNS` (list of (regex, reason) tuples) |
-| `auto_allow_edits.py` | Edit operations | `PROTECTED_PATTERNS` (list of regex), `MAX_REAL_CHANGES` (int)                     |
+| `auto_allow_edits.py` | Edit operations | `PROTECTED_PATTERNS` (list of regex), `MAX_REAL_CHANGES` (int), `ANTI_PATTERNS` / `TS_ANTI_PATTERNS` (list of (regex, reason)) |
 
 ## How It Works
 
@@ -28,6 +28,7 @@ The configurable hooks live in `.claude/plugins/lup/hooks/scripts/`:
 - **Neither**: Falls through to ask the user interactively
 - **PROTECTED_PATTERNS** (edits only): Files matching these always defer to user
 - **MAX_REAL_CHANGES** (edits only): Edits with more nontrivial lines than this defer to user
+- **ANTI_PATTERNS / TS_ANTI_PATTERNS** (edits only): Added lines matching these are denied with a reason; an inline `# claude: ignore` escalates to ask instead. `find_swallowed_excepts` adds a structural check for silent `except ...: pass` handlers on top of the line regexes
 
 ## Your Task
 
@@ -47,6 +48,7 @@ The configurable hooks live in `.claude/plugins/lup/hooks/scripts/`:
 - When adding allow patterns, prefer precise patterns over broad ones (e.g., `r"^npm run build$"` not `r"^npm"`)
 - When the user's request is ambiguous about which hook, ask
 - Show the exact pattern you'll add so the user can verify the regex
+- When a rule misfires or is questioned, diagnose before editing: survey the codebase's real matches and retarget the rule at the failure mode it exists to catch, not at the surface pattern
 
 ## Examples
 

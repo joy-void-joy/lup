@@ -411,7 +411,7 @@ src/
 
 ## Type Safety Requirements
 
-- **No bare `except Exception`** -- always catch specific exceptions
+- **Never silently swallow exceptions** -- no `except ...: pass`, no `contextlib.suppress`; log with `logger.exception()`, handle meaningfully, or re-raise. Catch-all `except Exception` is fine at boundaries (task loops, subagent delegation) that do so; bare `except:` and `except BaseException` are never fine
 - **Every function must specify input and output types**
 - **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** -- Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types. These erase type information and defeat static analysis.
   - **MCP tool inputs**: The SDK types `@tool` handler args as `dict[str, Any]`. Always `BaseModel.model_validate(args)` immediately — don't pass around the raw dict.
