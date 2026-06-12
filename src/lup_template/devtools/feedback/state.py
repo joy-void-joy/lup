@@ -110,16 +110,30 @@ def load_sessions(  # claude: ignore
 def load_outcomes() -> dict[str, Any]:  # claude: ignore
     """Load outcome data for sessions.
 
-    Customize this to load outcomes for your domain.
+    TEMPLATE STUB — customize for your domain (customization step 9).
+    Raises until customized so callers can tell "not implemented" from
+    "implemented, no outcomes yet" instead of silently aggregating
+    nothing.
     """
-    return {}
+    raise NotImplementedError(
+        "load_outcomes() is a template stub — implement it for your domain "
+        "(CLAUDE.md customization step 9)"
+    )
 
 
 def match_outcomes(  # claude: ignore
     sessions: list[dict[str, Any]],
 ) -> list[SessionResult]:
-    """Match sessions to their outcomes/feedback."""
-    outcomes = load_outcomes()
+    """Match sessions to their outcomes/feedback.
+
+    A stub ``load_outcomes`` (NotImplementedError) degrades to no
+    outcomes with a visible warning rather than failing collection.
+    """
+    try:
+        outcomes = load_outcomes()
+    except NotImplementedError as e:
+        typer.echo(f"note: collecting without outcomes — {e}", err=True)
+        outcomes = {}
     results = []
 
     for session in sessions:
@@ -253,24 +267,44 @@ def save_analyzed(session_ids: set[str]) -> None:
 
 
 def get_uncommitted_session_ids() -> set[str]:
-    """Find session IDs with uncommitted result files."""
+    """Find session IDs with uncommitted result files.
+
+    Paths are matched against the *configured* trace root (``lup.paths``),
+    so a relocated ``AGENT_NOTES_PATH`` keeps ``feedback commit`` working.
+    The layout below the root is ``<version>/(sessions|logs)/<session_id>/``.
+    Uses ``-z`` so paths with spaces or quoting never shear.
+    """
+    try:
+        traces_rel = traces_path().relative_to(project_root())
+    except ValueError:
+        # Trace root configured outside the repo — nothing for git to commit
+        return set()
+
+    status = str(git.status("--porcelain", "-z", "--", str(traces_rel), _ok_code=[0]))
+    return session_ids_from_status(status, traces_rel)
+
+
+def session_ids_from_status(status: str, traces_rel: Path) -> set[str]:
+    """Parse ``git status --porcelain -z`` output into session IDs.
+
+    Only paths under ``traces_rel`` with the versioned layout
+    (``<version>/(sessions|logs)/<session_id>/...``) count; rename/copy
+    entries contribute their target path and their source is discarded.
+    """
     session_ids: set[str] = set()
-
-    status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0])).strip()
-    if not status:
-        return session_ids
-
-    for line in status.splitlines():
-        file_path = line[3:].split(" -> ")[0].strip()
-        parts = Path(file_path).parts
-
-        if (
-            len(parts) >= 5
-            and parts[0] == "notes"
-            and parts[1] == "traces"
-            and parts[3] in ("sessions", "logs")
-        ):
-            session_ids.add(parts[4])
+    chunks = iter(status.split("\0"))  # claude: ignore — NUL is porcelain -z framing
+    for chunk in chunks:
+        if len(chunk) < 4:
+            continue
+        code, file_path = chunk[:2], chunk[3:]
+        if code.startswith(("R", "C")):
+            next(chunks, None)  # discard the rename/copy source path
+        relative = Path(file_path)
+        if not relative.is_relative_to(traces_rel):
+            continue
+        match relative.relative_to(traces_rel).parts:
+            case (_, "sessions" | "logs", session_id, *_):
+                session_ids.add(session_id)
 
     return session_ids
 

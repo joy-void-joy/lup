@@ -272,3 +272,42 @@ class TestWriteEnvLocal:
         assert "NEW_KEY=added" in text
         # Existing key updated in place, before the appended new key.
         assert text.index("API_KEY=new") < text.index("NEW_KEY=added")
+
+
+# ── fix: porcelain -z parsing anchored on the configured trace root ───────
+
+
+class TestSessionIdsFromStatus:
+    def test_versioned_layout_and_root_anchoring(self) -> None:
+        from lup_template.devtools.feedback.state import session_ids_from_status
+
+        root = Path("notes/traces")
+        status = "\0".join(
+            [
+                " M notes/traces/0.1.0/sessions/sess with space/result.json",
+                "?? notes/traces/0.2.0/logs/sess-2/trace.md",
+                "?? notes/other/sessions/ignored/x.json",
+                "?? unrelated.py",
+                "",
+            ]
+        )
+
+        ids = session_ids_from_status(status, root)
+
+        assert ids == {"sess with space", "sess-2"}
+
+    def test_rename_source_is_discarded(self) -> None:
+        from lup_template.devtools.feedback.state import session_ids_from_status
+
+        root = Path("notes/traces")
+        status = "\0".join(
+            [
+                "R  notes/traces/0.1.0/sessions/new-id/result.json",
+                "notes/traces/0.1.0/sessions/old-id/result.json",
+                "",
+            ]
+        )
+
+        ids = session_ids_from_status(status, root)
+
+        assert ids == {"new-id"}
