@@ -93,7 +93,7 @@ packages/
         ├── mcp.py              # MCP server creation, @lup_tool decorator
         ├── metrics.py          # Tool call tracking (+ file-backed flush for subprocesses)
         ├── notes.py            # RO/RW directory structure
-        ├── output.py           # submit_output finalization tool (all backends)
+        ├── output.py           # submit_output finalization + missing-output guard (all backends)
         ├── paths.py            # Version-aware paths + SessionContext env relay
         ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
         ├── realtime_relay.py   # Persistent mode for subprocess backends (file mailbox)
@@ -112,6 +112,7 @@ src/
     │   ├── prompts.py          # System prompt templates
     │   ├── subagents.py        # Subagent definitions
     │   ├── tool_policy.py      # Conditional tool availability
+    │   ├── toolsets.py         # Tool-group registry (one source for every backend)
     │   └── tools/
     │       ├── example.py      # Example MCP tools (customize)
     │       ├── realtime.py     # Real-time tools template (sleep, context, reply)
@@ -238,7 +239,7 @@ uv run lup-devtools trace show <session_id>
 2. **Run `/lup:init`** — Walks through domain customization (what the agent does, how outcomes are measured, what metrics matter)
 3. **Models** (`agent/models.py`) — `AgentOutput`, `Factor`, `SessionResult`
 4. **Subagents** (`agent/subagents.py`) — Specialized subagents, tool sets, model choices
-5. **Tools** (`agent/tool_policy.py`) — API key requirements, conditional availability, MCP configs
+5. **Tools** (`agent/toolsets.py`, `agent/tool_policy.py`) — register tool groups once for every backend; gate availability (API keys, modes) via the policy
 6. **Reflection** (`agent/tools/reflect.py`) — Domain-specific `ReflectInput` fields, reviewer prompt
 7. **Version** (`[tool.lup] agent_version` in `pyproject.toml`) — Set initial version, bump on behavior changes
 8. **Persistent mode** (optional) — Wire `Scheduler` from `lup.realtime`, add Stop hook, implement sleep/context/reply tools, replace request-response with sleep/wake loop
