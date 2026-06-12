@@ -44,6 +44,9 @@ Examples:
 
 from pathlib import Path
 
+from lup.hooks import create_tool_gate
+from lup.types import LupHooksConfig
+
 
 class ReflectionGate:
     """Tracks whether the agent has reflected in the current cycle.
@@ -87,3 +90,59 @@ class ReflectionGate:
     def reset(self) -> None:
         """Require fresh reflection (start of new cycle)."""
         self.reflected = False
+
+
+def create_reflection_gate(
+    *,
+    gate: ReflectionGate,
+    gated_tool: str,
+    reflection_tool_name: str = "reflection",
+    denial_message: str | None = None,
+) -> LupHooksConfig:
+    """Create a PreToolUse hook that denies *gated_tool* until reflection.
+
+    **What:** Preset over :func:`lup.hooks.create_tool_gate` — denies
+    *gated_tool* with a message naming *reflection_tool_name* while
+    ``gate.reflected`` is False, and explicitly allows it afterwards.
+
+    **When:** Wire this for any "reflect before X" pattern: gate
+    ``StructuredOutput`` for one-shot agents or ``sleep`` for persistent
+    agents. The reflection tool handler calls
+    :meth:`ReflectionGate.mark_reflected`; persistent agents reset the
+    gate per cycle via :meth:`ReflectionGate.reset`.
+
+    **Why:** The external :class:`ReflectionGate` object (rather than
+    the gate primitive's one-shot ``on_unlock_tool`` tracking) supports
+    resettable, per-cycle reflection.
+
+    .. note::
+
+        If you also need to rewrite the gated tool's input (e.g., unwrap
+        a ``{"parameter": {...}}`` wrapper), combine both checks in a
+        single hook to avoid the CLI bug where multiple PreToolUse hooks
+        overwrite each other's ``updatedInput`` (SDK issue #15897).
+        Register this gate as the **last** PreToolUse hook.
+
+    Args:
+        gate: The :class:`ReflectionGate` instance tracking status.
+        gated_tool: Tool name to block (e.g., ``"StructuredOutput"``).
+        reflection_tool_name: Name shown in the denial message.
+        denial_message: Custom denial text. Uses a sensible default
+            if ``None``.
+
+    Returns:
+        SDK-agnostic hooks configuration with a PreToolUse hook.
+    """
+    default_message = (
+        f"You must call {reflection_tool_name}() with your assessment "
+        f"BEFORE calling {gated_tool}. Reflect on your work first, "
+        f"then try again."
+    )
+
+    return create_tool_gate(
+        gated_tool=gated_tool,
+        message=denial_message or default_message,
+        unlocked=lambda _input: gate.reflected,
+        allow_when_unlocked=True,
+        tag="reflection_gate",
+    )

@@ -100,7 +100,7 @@ logger = logging.getLogger(__name__)
 # Output format types
 # ---------------------------------------------------------------------------
 
-JsonSchema = dict[str, object]
+JsonSchema = dict[str, object]  # claude: ignore — JSON Schema is an open document
 """Type alias for JSON Schema payloads (from ``BaseModel.model_json_schema()``)."""
 
 OutputFormat = dict[str, str | JsonSchema]
@@ -169,7 +169,9 @@ class ResponseCollector:
     async def __aiter__(self) -> AsyncIterator[Message]:
         """Yield messages, accumulating state but not displaying.
 
-        Raises RuntimeError on agent error results.
+        Raises RuntimeError on agent error results — after logging,
+        tracing, and yielding the failing ResultMessage, so consumers
+        see it and the trace records what went wrong.
         """
         async for message in self.client.receive_response():
             match message:
@@ -181,7 +183,11 @@ class ResponseCollector:
                 case ResultMessage():
                     self.result = message
                     if message.is_error:
-                        raise RuntimeError(f"Agent error: {message.result}")
+                        logger.error("Agent error result: %s", message.result)
+                        if self.trace_logger:
+                            self.trace_logger.log_text(
+                                str(message.result), heading="Agent error result"
+                            )
 
                 case SystemMessage():
                     logger.info("System [%s]: %s", message.subtype, message.data)
@@ -193,6 +199,9 @@ class ResponseCollector:
                             self.tool_results.append(block)
 
             yield message
+
+            if isinstance(message, ResultMessage) and message.is_error:
+                raise RuntimeError(f"Agent error: {message.result}")
 
     async def collect(self) -> ResultMessage:
         """Drain all messages, displaying and tracing each one.
@@ -240,8 +249,38 @@ async def build_client(
     construct ClaudeAgentOptions.  When using keyword arguments, always
     injects ``no-session-persistence`` into extra_args (caller wins on
     conflict).
+
+    Combining a pre-built ``options`` with other keyword arguments
+    raises ValueError — they would otherwise be silently ignored.
+    Set them on the options object instead.
     """
-    if options is None:
+    if options is not None:
+        ignored = [
+            name
+            for name, value in (
+                ("model", model),
+                ("system_prompt", system_prompt),
+                ("tools", tools),
+                ("allowed_tools", allowed_tools),
+                ("permission_mode", permission_mode),
+                ("mcp_servers", mcp_servers),
+                ("agents", agents),
+                ("max_thinking_tokens", max_thinking_tokens),
+                ("max_turns", max_turns),
+                ("max_budget_usd", max_budget_usd),
+                ("output_format", output_format),
+                ("extra_args", extra_args),
+                ("hooks", hooks),
+            )
+            if value is not None
+        ]
+        if ignored:
+            raise ValueError(
+                "build_client: a pre-built options object was given together "
+                f"with keyword arguments {ignored}, which would be silently "
+                "ignored — set them on the options object instead."
+            )
+    else:
         merged_extra: dict[str, str | None] = {
             "no-session-persistence": None,
             **(extra_args or {}),
@@ -269,6 +308,45 @@ async def build_client(
 # ---------------------------------------------------------------------------
 # Query helpers
 # ---------------------------------------------------------------------------
+
+
+def prepare_output_format(
+    *,
+    output_type: type[BaseModel] | None,
+    output_format: OutputFormat | None,
+    options: ClaudeAgentOptions | None,
+) -> OutputFormat | None:
+    """Resolve the structured-output format for :func:`query`.
+
+    Computes a ``json_schema`` format from *output_type* when no explicit
+    *output_format* is given, and injects the result into a pre-built
+    *options* object — ``build_client`` uses pre-built options as-is, so
+    a format left in keyword arguments would be silently dropped and the
+    structured output would come back ``None``.
+
+    Returns:
+        The output format to pass to ``build_client`` as a keyword
+        argument, or ``None`` when it was injected into *options*
+        (or no structured output was requested).
+
+    Raises:
+        ValueError: If *options* already sets ``output_format`` and
+            *output_type* or an explicit *output_format* is also given.
+    """
+    if output_type is not None and output_format is None:
+        output_format = {
+            "type": "json_schema",
+            "schema": output_type.model_json_schema(),
+        }
+    if options is None or output_format is None:
+        return output_format
+    if options.output_format is not None:
+        raise ValueError(
+            "options.output_format is already set — pass either the pre-built "
+            "format or output_type/output_format, not both."
+        )
+    options.output_format = output_format
+    return None
 
 
 @overload
@@ -351,13 +429,13 @@ async def query(
     if the agent produced no structured output).
 
     Pass ``options`` (pre-built) to use as-is, or keyword arguments to
-    construct ``ClaudeAgentOptions``.
+    construct ``ClaudeAgentOptions``. ``output_type`` works with both:
+    for pre-built options the computed format is injected into them
+    (ValueError if they already set ``output_format``).
     """
-    if output_type is not None and output_format is None:
-        output_format = {
-            "type": "json_schema",
-            "schema": output_type.model_json_schema(),
-        }
+    output_format = prepare_output_format(
+        output_type=output_type, output_format=output_format, options=options
+    )
 
     if options is not None and (output_type is not None or output_format is not None):
         raise ValueError(

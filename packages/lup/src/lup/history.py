@@ -58,12 +58,18 @@ from pydantic import BaseModel, Field, SerializeAsAny
 
 from lup.types import Usage
 from lup.metrics import MetricsSummary
-from lup.paths import agent_version, sessions_dir, traces_path
+from lup.paths import (
+    TIMESTAMP_FMT,
+    agent_version,
+    parse_timestamp,
+    sessions_dir,
+    traces_path,
+)
 
 logger = logging.getLogger(__name__)
 
 # Type alias for raw session JSON — schema varies by domain
-type SessionData = dict[str, object]
+type SessionData = dict[str, object]  # claude: ignore — domain-defined JSON shape
 
 
 class SessionResult[OutputT: BaseModel](BaseModel):
@@ -112,7 +118,7 @@ def save_session(result: BaseModel, *, session_id: str) -> Path:
     session_dir = sessions_dir() / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime(TIMESTAMP_FMT)
     filepath = session_dir / f"{timestamp}.json"
 
     filepath.write_text(result.model_dump_json(indent=2), encoding="utf-8")
@@ -202,13 +208,15 @@ def update_session_metadata(
     if not all_files:
         return False
 
-    def file_timestamp(path: Path) -> str:
+    def file_timestamp(path: Path) -> datetime:
+        """Sort key: parsed filename timestamp (non-timestamped names sort first)."""
         try:
-            data: SessionData = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError, OSError:
-            return ""
-        return str(data.get("timestamp", ""))
+            return parse_timestamp(path.name)
+        except ValueError:
+            return datetime.min
 
+    # Latest by parsed timestamp — a lexicographic full-path sort would
+    # order version directories wrong (0.10.0 < 0.9.0).
     latest_file = max(all_files, key=file_timestamp)
 
     try:

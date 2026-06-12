@@ -21,7 +21,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.history import iter_session_dirs, resolve_version, session_backend
-from lup.paths import feedback_path, project_root, traces_path, AGENT_VERSION
+from lup.paths import agent_version, feedback_path, project_root, traces_path
 from lup_template.devtools.utils import git, output_json
 
 logger = logging.getLogger(__name__)
@@ -530,7 +530,7 @@ def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
 
 def print_version_info(effective: list[str] | None) -> None:
     typer.echo("\n=== Agent Version ===\n")
-    typer.echo(f"Current: {AGENT_VERSION}")
+    typer.echo(f"Current: {agent_version()}")
     if effective:
         typer.echo(f"Showing: {', '.join(effective)}")
 

@@ -39,6 +39,8 @@ Agents produce better output when forced to self-assess before committing. Three
 
 **Skip reviewer:** Set `skip_reviewer=True` for speed-sensitive or trivial tasks. The reviewer adds latency but catches calibration errors and reasoning gaps.
 
+**Tool gates (generalization):** The reflection gate is one instance of a general primitive: `create_tool_gate()` in `lup.hooks` denies a tool (or Stop) with an agent-readable message until a condition unlocks it — "the agent must do A before it may do B" as a structural constraint instead of a prompt rule. Presets built on it: `create_reflection_gate` (reflect before finalizing output), `create_stop_guard` (sleep instead of ending the turn), `create_pending_event_guard` (read events before timing tools), and `create_meta_before_sleep_guard` (meta-assess before sleep). Reach for the primitive directly when your domain needs a new ordering constraint.
+
 ---
 
 ## Nested Agent Pattern

@@ -196,6 +196,23 @@ def process_is_alive(pid: int, start_token: str | None) -> bool:
     return current is None or current == start_token
 
 
+def compute_deadline(timeout_seconds: int, grace_seconds: float = 5.0) -> float | None:
+    """Host-side deadline (monotonic clock) for a REPL request.
+
+    Returns ``None`` for non-positive timeouts: "no timeout" means no
+    host deadline at all, mirroring the in-sandbox behavior where the
+    REPL server skips ``signal.alarm`` for non-positive values. Killing
+    the connection after a fixed grace would lose the REPL state for
+    deliberately long-running code.
+
+    The grace period covers protocol overhead on top of the in-sandbox
+    timeout, so the in-sandbox SIGALRM fires first under normal operation.
+    """
+    if timeout_seconds <= 0:
+        return None
+    return time.monotonic() + timeout_seconds + grace_seconds
+
+
 # --- Sandbox class ---
 
 
@@ -342,25 +359,27 @@ class ReplSession:
                 if response is not None:
                     response.close()
                 self.sock.close()
-            except Exception:
+            except (OSError, ValueError):
+                # Socket-layer close failures (already closed, broken pipe)
+                # are expected during teardown; anything else propagates.
                 logger.debug("Closing REPL connection failed", exc_info=True)
             self.sock = None
         self.exec_id = None
 
     def execute(self, code: str, timeout_seconds: int) -> ExecuteCodeResult:
-        """Send code to the REPL and return the result."""
+        """Send code to the REPL and return the result.
+
+        Non-positive ``timeout_seconds`` disables both the in-sandbox
+        SIGALRM and the host-side deadline — the call blocks until the
+        code finishes.
+        """
         if self.sock is None:
             raise SandboxNotInitializedError("REPL not connected")
 
         request = json.dumps({"code": code, "timeout": timeout_seconds}) + "\n"
         self.send(request.encode("utf-8"))
 
-        # timeout_seconds == 0 means "no timeout" — the in-container side
-        # disables its alarm, so the parent must wait indefinitely too,
-        # otherwise a finite deadline expires and restarts the REPL.
-        deadline = (
-            None if timeout_seconds == 0 else time.monotonic() + timeout_seconds + 5
-        )
+        deadline = compute_deadline(timeout_seconds)
         try:
             response = self.recv_response(deadline)
         except (SocketError, OSError) as e:
@@ -392,8 +411,7 @@ class ReplSession:
     def recv_response(self, deadline: float | None) -> dict[str, int | str]:
         """Read Docker multiplex frames until a complete JSON line arrives.
 
-        ``deadline`` of None means no timeout (blocking reads), matching a
-        request with ``timeout_seconds == 0``.
+        ``deadline=None`` blocks indefinitely (no-timeout requests).
         """
         stdout_buf = b""
         while True:
@@ -428,7 +446,7 @@ class ReplSession:
                     )
 
     def set_socket_timeout(self, timeout: float | None) -> None:
-        """Set timeout on the underlying socket (None blocks indefinitely)."""
+        """Set timeout on the underlying socket (None = blocking mode)."""
         sock = self.sock
         for candidate in [sock, getattr(sock, "_sock", None)]:
             if hasattr(candidate, "settimeout"):
@@ -738,7 +756,9 @@ class Sandbox:
         Args:
             code: Python code to execute.
             timeout_seconds: Max execution time in seconds. If None, uses
-                the sandbox's default timeout. Set to 0 for no timeout.
+                the sandbox's default timeout. Zero or negative means no
+                timeout at all — no in-sandbox alarm and no host deadline,
+                so long-running code completes without losing REPL state.
 
         Returns:
             Result containing exit code, stdout, stderr, and duration.

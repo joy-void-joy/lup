@@ -3,12 +3,14 @@
 The trace file is the feedback loop's raw material: if block formatting,
 entry accumulation, or the save round-trip break, every downstream
 analysis reads garbage. Also pins the tool-use/result color pairing,
-which is stateful (a result must pop its use's color, not leak it).
+which is stateful (a result must pop its use's color, not leak it),
+and the entries-as-single-store rendering contract.
 """
 
 from pathlib import Path
 
 from lup.trace import (
+    JsonValue,
     TraceLogger,
     format_block_markdown,
     format_tool_result,
@@ -36,8 +38,22 @@ def test_logger_accumulates_and_saves(tmp_path: Path) -> None:
     assert content.startswith("# Trace: Session X")
     assert "hello" in content
     assert "## Note" in content
-    # Header entry plus the two logged entries, indexed in order
-    assert [entry.index for entry in logger.entries] == [0, 1, 2]
+    # Two header entries plus the two logged entries, indexed in order
+    assert [entry.index for entry in logger.entries] == [0, 1, 2, 3]
+
+
+def test_save_renders_file_from_entries(tmp_path: Path) -> None:
+    trace = TraceLogger(trace_path=tmp_path / "deep" / "t.md", title="Session X")
+    trace.log_text("hello world", heading="Step")
+    trace.log_text("plain text")
+
+    saved = trace.save()
+
+    content = saved.read_text(encoding="utf-8")
+    assert content == "\n".join(entry.content for entry in trace.entries)
+    assert "# Trace: Session X" in content
+    assert "## Step" in content
+    assert "plain text" in content
 
 
 def test_read_entries_slices_with_negative_index(tmp_path: Path) -> None:
@@ -49,6 +65,16 @@ def test_read_entries_slices_with_negative_index(tmp_path: Path) -> None:
 
     assert len(tail) == 2
     assert "entry 2" in tail[-1].content
+
+
+def test_read_entries_slices_head_with_before_n(tmp_path: Path) -> None:
+    trace = TraceLogger(trace_path=tmp_path / "t.md", title="T")
+    for i in range(5):
+        trace.log_text(f"entry {i}")
+
+    head = trace.read_entries(before_n=2)
+    assert len(head) == 2
+    assert head[0].content.startswith("# Trace: T")
 
 
 def test_block_markdown_fences_by_block_type() -> None:
@@ -116,3 +142,29 @@ def test_truncate_str_fields_caps_lists() -> None:
 
     assert isinstance(truncated, list)
     assert len(truncated) == 10
+
+
+def test_truncate_keeps_list_limit_in_nested_structures() -> None:
+    data: JsonValue = {"outer": [[f"x{i}" for i in range(20)]]}
+
+    result = truncate_str_fields(data, max_len=500, max_len_list=3)
+
+    assert isinstance(result, dict)
+    outer = result["outer"]
+    assert isinstance(outer, list)
+    inner = outer[0]
+    assert isinstance(inner, list)
+    assert len(inner) == 3
+
+
+def test_truncate_shortens_nested_strings() -> None:
+    data: JsonValue = {"a": {"b": ["y" * 100]}}
+
+    result = truncate_str_fields(data, max_len=10, max_len_list=5)
+
+    assert isinstance(result, dict)
+    a = result["a"]
+    assert isinstance(a, dict)
+    b = a["b"]
+    assert isinstance(b, list)
+    assert b[0] == "y" * 10 + "..."

@@ -164,7 +164,8 @@ def build_options(
         ro_dirs=notes.ro,
     )
 
-    from lup.hooks import create_completion_guard, create_reflection_gate
+    from lup.hooks import create_completion_guard
+    from lup.reflect import create_reflection_gate
 
     reflection_hooks = create_reflection_gate(
         gate=toolset["gate"],
