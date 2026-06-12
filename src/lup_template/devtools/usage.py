@@ -3,6 +3,12 @@
 Calls the /api/oauth/usage endpoint for real-time utilization data
 and supplements with stats-cache.json for daily detail.
 
+Anthropic-only by nature: it reads Claude Code OAuth credentials and an
+Anthropic endpoint. There is no Codex/OpenAI equivalent (the Codex
+runtime exposes no usage API) — for per-session cost and token usage on
+any backend, read the session JSON (``trace list`` shows the backend;
+Codex cost needs ``CODEX_USD_PER_MTOK_*`` rates).
+
 Examples::
 
     $ uv run lup-devtools usage
@@ -665,9 +671,15 @@ def main(
         ),
     ] = 600,
 ) -> None:
-    """Show live Claude Code usage with pacing bars."""
+    """Show live Claude Code usage with pacing bars (Anthropic OAuth only)."""
     if not CREDS_PATH.exists():
         console.print("[red]No credentials at ~/.claude/.credentials.json[/red]")
+        console.print(
+            "[dim]This command reads Claude Code OAuth usage from "
+            "api.anthropic.com; there is no codex/openai equivalent. "
+            "For per-session cost/tokens on any backend, see the session "
+            "JSON (trace list shows the backend).[/dim]"
+        )
         raise typer.Exit(1)
 
     bar_width = min(console.width - 10, 58)
