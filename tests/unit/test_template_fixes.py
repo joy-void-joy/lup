@@ -158,6 +158,18 @@ def test_codex_session_env_relays_backend_settings(
     assert mcp_env["AGENT_AUX_MODEL"] == "my-reviewer"
 
 
+async def test_persistent_entry_point_rejects_claude(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The relay entry point is codex/openai-only; Claude persistent mode
+    is in-process and must not silently fall through to the relay."""
+    from lup_template.agent.core import run_persistent_agent
+
+    monkeypatch.setattr(settings, "agent_sdk", "claude")
+    with pytest.raises(ValueError, match="AGENT_SDK=codex or openai"):
+        await run_persistent_agent("hello")
+
+
 def test_aux_model_explicit_override_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     """AGENT_AUX_MODEL overrides backend resolution."""
     monkeypatch.setattr(settings, "aux_model", "my-reviewer")

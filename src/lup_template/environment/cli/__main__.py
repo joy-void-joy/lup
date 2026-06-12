@@ -121,6 +121,15 @@ def run(
         str | None,
         typer.Option("--session-id", "-s", help="Optional session identifier"),
     ] = None,
+    persistent: Annotated[
+        bool,
+        typer.Option(
+            "--persistent",
+            help="Persistent (sleep/wake) session via the file relay — "
+            "AGENT_SDK=codex/openai; replies print to stdout "
+            "(see PATTERNS.md, Persistent Agent)",
+        ),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Enable verbose logging"),
@@ -131,6 +140,13 @@ def run(
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+
+    if persistent:
+        from lup_template.agent.core import run_persistent_agent
+
+        turns = asyncio.run(run_persistent_agent(task, session_id=session_id))
+        typer.echo(f"\nPersistent session ended after {turns} turn(s).")
+        return
 
     result = asyncio.run(run_session(task, session_id=session_id))
     print_result(result)
