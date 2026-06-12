@@ -84,6 +84,7 @@ def build_session_toolset(
     from lup.output import create_output_tool
     from lup.subagents import create_run_subagent_tool
 
+    from lup_template.agent.config import settings
     from lup_template.agent.models import AgentOutput
     from lup_template.agent.subagents import get_subagent_specs
     from lup_template.agent.tools.example import EXAMPLE_TOOLS
@@ -103,7 +104,11 @@ def build_session_toolset(
 
     notes_tools = [*reflect_kit["tools"], *output_kit["tools"]]
     if include_subagent_tool:
-        notes_tools.append(create_run_subagent_tool(get_subagent_specs()))
+        notes_tools.append(
+            create_run_subagent_tool(
+                get_subagent_specs(), default_model=settings.model
+            )
+        )
 
     groups: dict[str, list[LupMcpTool]] = {NOTES_GROUP: notes_tools}
 

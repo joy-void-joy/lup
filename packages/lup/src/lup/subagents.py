@@ -37,12 +37,20 @@ class RunSubagentOutput(BaseModel):
     result: str = Field(description="The subagent's final text output")
 
 
-def create_run_subagent_tool(specs: list[SubagentSpec]) -> LupMcpTool:
+def create_run_subagent_tool(
+    specs: list[SubagentSpec],
+    *,
+    default_model: str,
+) -> LupMcpTool:
     """Create the run_subagent tool from the shared spec list.
 
     Args:
         specs: SDK-agnostic subagent definitions (the same list the
             Claude adapter converts to native ``AgentDefinition``).
+        default_model: Resolves specs that pin no model
+            (``SubagentSpec.model is None`` means "inherit the session's
+            model"); the caller supplies it so this module reads no
+            application config.
 
     Returns:
         A LupMcpTool for backends without native subagent support.
@@ -64,7 +72,8 @@ def create_run_subagent_tool(specs: list[SubagentSpec]) -> LupMcpTool:
                 f"Unknown subagent {validated.name!r}. Available: {sorted(by_name)}"
             )
 
-        backend = model_backend(spec.model)
+        model = spec.model or default_model
+        backend = model_backend(model)
         if backend != "anthropic":
             claude_only: list[str] = []
             if spec.tools:
@@ -82,12 +91,12 @@ def create_run_subagent_tool(specs: list[SubagentSpec]) -> LupMcpTool:
         logger.info(
             "Delegating to subagent %r (model=%s, backend=%s)",
             spec.name,
-            spec.model,
+            model,
             backend,
         )
         response = await query(
             validated.task,
-            model=spec.model,
+            model=model,
             system_prompt=spec.prompt,
             tools=spec.tools or None,
             max_turns=spec.max_turns,

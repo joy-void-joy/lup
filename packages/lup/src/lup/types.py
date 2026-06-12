@@ -73,7 +73,11 @@ class SubagentSpec(BaseModel):
     description: str
     prompt: str
     tools: list[str] = Field(default_factory=list)
-    model: str = "haiku"
+    model: str | None = Field(
+        default=None,
+        description="Model for this subagent; None inherits the session's "
+        "main model on every backend",
+    )
     max_turns: int | None = Field(
         default=None,
         description="Turn cap for delegated one-shot runs (None = backend default)",
