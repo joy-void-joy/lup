@@ -87,6 +87,7 @@ class LupMcpServerConfig(BaseModel):
 
     name: str
     server: Server
+    tool_names: list[str] = []
 
 
 def create_mcp_server(
@@ -153,7 +154,28 @@ def create_mcp_server(
                 content=cast(list[ContentBlock], content), isError=is_error
             )
 
-    return LupMcpServerConfig(name=name, server=server)
+    return LupMcpServerConfig(
+        name=name,
+        server=server,
+        tool_names=[t.name for t in tools or []],
+    )
+
+
+def server_tool_names(server: object) -> list[str]:
+    """List the tool names registered on an in-process MCP server.
+
+    Servers built with :func:`create_mcp_server` carry their tool list on
+    the config. Use this to compute the full ``mcp__{server}__{tool}``
+    names the agent will see — e.g. when building a tool allowlist or an
+    inspection display — without maintaining a second tool list that can
+    drift. External server configs (stdio, SSE, HTTP) cannot be
+    introspected without connecting, so they yield an empty list.
+    """
+    match server:
+        case LupMcpServerConfig():
+            return list(server.tool_names)
+        case _:
+            return []
 
 
 class ToolError(Exception):

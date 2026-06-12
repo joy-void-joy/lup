@@ -18,6 +18,8 @@ Customization:
     1. Define ``setup_<name>()`` functions that return ``dict[str, str]``
     2. Register them in ``INTEGRATIONS`` with a name and status checker
     3. Optionally add individual subcommands via ``@app.command``
+    4. Shell helpers live in ``lup_template.devtools.utils`` (e.g.
+       ``copy_to_clipboard`` for wizard steps that hand the user a value)
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -142,19 +144,17 @@ def detect_system_timezone() -> str:
 
 
 class Integration(BaseModel):
-    """A single integration that the setup wizard can configure.
+    """A single integration that the setup wizard can configure."""
 
-    Each integration has:
-    - ``name``: Display name (e.g., "Slack", "Google")
-    - ``env_keys``: Env vars to check for status display
-    - ``setup_func``: Interactive function that returns env vars to write
-    - ``status_func``: Optional custom status checker (default: checks env_keys)
-    """
-
-    name: str
-    env_keys: list[str]
-    setup_func: Callable[[], dict[str, str]]
-    status_func: Callable[[dict[str, str]], tuple[bool, str]] | None = None
+    name: str = Field(description="Display name (e.g., 'Slack', 'Google')")
+    env_keys: list[str] = Field(description="Env vars to check for status display")
+    setup_func: Callable[[], dict[str, str]] = Field(
+        description="Interactive function that returns env vars to write"
+    )
+    status_func: Callable[[dict[str, str]], tuple[bool, str]] | None = Field(
+        default=None,
+        description="Custom status checker (default: checks env_keys)",
+    )
 
     def check_status(self, env: dict[str, str]) -> tuple[bool, str]:
         """Return (is_configured, detail_string)."""

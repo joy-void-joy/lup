@@ -43,8 +43,8 @@ class Settings(BaseSettings):
         missing = []
 
         # TODO: Add checks for your optional API keys
-        # if not self.some_api_key:
-        #     missing.append("SOME_API_KEY")
+        # if not self.example_api_key:
+        #     missing.append("EXAMPLE_API_KEY")
 
         if missing:
             logger.warning(
@@ -56,12 +56,14 @@ class Settings(BaseSettings):
     # OPTIONAL API KEYS (tools degrade gracefully without these)
     # ==========================================================================
 
-    # TODO: Add optional API keys for your domain
-    # exa_api_key: str | None = Field(
-    #     default=None,
-    #     validation_alias="EXA_API_KEY",
-    #     description="Exa search API key",
-    # )
+    # TEMPLATE example: tools tagged "requires:example-api" are excluded by
+    # ToolPolicy when this key is missing. Replace with your domain's keys
+    # and add one tag per service.
+    example_api_key: str | None = Field(
+        default=None,
+        validation_alias="EXAMPLE_API_KEY",
+        description="Example service API key (placeholder for your domain)",
+    )
 
     # ==========================================================================
     # LLM ROUTING (optional)
@@ -229,6 +231,13 @@ class Settings(BaseSettings):
             "turn is otherwise unbounded: no max_turns, no interrupt). "
             "None = no limit."
         ),
+    )
+
+    sandbox_enabled: bool = Field(
+        default=True,
+        validation_alias="AGENT_SANDBOX_ENABLED",
+        description="Run code execution tools in a Docker sandbox "
+        "(requires Docker; disable to run the agent without code execution)",
     )
 
     sandbox_timeout_seconds: int = Field(

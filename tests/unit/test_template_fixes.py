@@ -121,7 +121,7 @@ def test_builtin_tools_excludes_todoread() -> None:
 
 def test_allowed_tools_excludes_todoread() -> None:
     """The computed allow-list also omits the stale TodoRead tool."""
-    allowed = ToolPolicy(settings).get_allowed_tools()
+    allowed = ToolPolicy(settings).get_allowed_tools({})
     assert "TodoRead" not in allowed
     assert "TodoWrite" in allowed
 

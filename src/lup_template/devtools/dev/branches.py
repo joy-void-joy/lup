@@ -50,6 +50,8 @@ class BranchClassification(TypedDict, total=False):
 
 
 class ParsedBranch(TypedDict):
+    """One row of ``git branch -vv`` output."""
+
     name: str
     commit: str
     tracking: str | None
@@ -629,7 +631,7 @@ def survey(as_json: bool) -> None:
 
     raw_branches = parse_branches()
     worktrees = parse_worktrees()
-    branch_names = [str(b["name"]) for b in raw_branches]
+    branch_names = [b["name"] for b in raw_branches]
     containment = build_containment(branch_names)
 
     if has_remote:
@@ -641,7 +643,7 @@ def survey(as_json: bool) -> None:
 
     branches_list: list[BranchInfo] = []
     for b in raw_branches:
-        name = str(b["name"])
+        name = b["name"]
         contained_in = containment.get(name, [])
         is_contained = bool(contained_in)
         pr_merged = name in pr_map and pr_map[name].state == "MERGED"
@@ -656,10 +658,10 @@ def survey(as_json: bool) -> None:
         branches_list.append(
             BranchInfo(
                 name=name,
-                commit=str(b["commit"]),
-                tracking=str(b["tracking"]) if b["tracking"] else None,
+                commit=b["commit"],
+                tracking=b["tracking"],
                 worktree=worktrees.get(name),
-                is_current=bool(b["is_current"]),
+                is_current=b["is_current"],
                 contained_in=contained_in,
                 pr=pr_map.get(name),
                 unique_commits=unique,

@@ -135,7 +135,7 @@ def serve_tools(list_only: bool, server_group: str | None) -> None:
 
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import CallToolResult, TextContent, Tool
+    from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
 
     server = Server(server_group or "notes", version="1.0.0")
 
@@ -156,10 +156,19 @@ def serve_tools(list_only: bool, server_group: str | None) -> None:
             raise ValueError(f"Tool '{name}' not found")
         result = await tool_map[name].handler(arguments)
         content_dicts: list[dict[str, str]] = result.get("content", [])
+        content: list[ContentBlock] = []
+        for d in content_dicts:
+            match d.get("type"):
+                case "image":
+                    content.append(
+                        ImageContent(
+                            type="image", data=d["data"], mimeType=d["mimeType"]
+                        )
+                    )
+                case _:
+                    content.append(TextContent(type="text", text=d.get("text", "")))
         return CallToolResult(
-            content=[
-                TextContent(type="text", text=d.get("text", "")) for d in content_dicts
-            ],
+            content=content,
             isError=result.get("is_error", False),
         )
 

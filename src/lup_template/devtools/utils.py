@@ -50,7 +50,11 @@ def decode_stderr(e: sh.ErrorReturnCode) -> str:
 
 
 def copy_to_clipboard(text: str) -> bool:
-    """Copy text to the system clipboard. Returns True on success."""
+    """Copy text to the system clipboard. Returns True on success.
+
+    Tries xclip, xsel, then pbcopy; returns False when none is available
+    so callers can fall back to printing the text for manual copying.
+    """
     for command, args in (
         ("xclip", ["-selection", "clipboard"]),
         ("xsel", ["--clipboard", "--input"]),
