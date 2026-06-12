@@ -458,7 +458,7 @@ def probe_gh_auth(remote_url: str) -> bool:
     try:
         gh("auth", "status", _ok_code=[0])
         return True
-    except (sh.ErrorReturnCode, sh.CommandNotFound):
+    except sh.ErrorReturnCode, sh.CommandNotFound:
         typer.echo(
             f"gh auth failed for remote '{remote_url}'. Run: gh auth login",
             err=True,

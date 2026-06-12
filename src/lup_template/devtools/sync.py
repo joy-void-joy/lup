@@ -127,7 +127,7 @@ def find_project(name: str) -> ProjectEntry:
     return proj
 
 
-def resolve_existing_path(proj: dict[str, str]) -> str | None:
+def resolve_existing_path(proj: ProjectEntry) -> str | None:
     """Return a usable local path WITHOUT cloning or fetching, or None.
 
     Read-only counterpart to :func:`ensure_local` — for status reporting

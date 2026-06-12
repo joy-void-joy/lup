@@ -611,7 +611,7 @@ def main() -> None:
                 result = decide_write(WriteEvent.model_validate_json(raw).tool_input)
             case _:
                 sys.exit(0)
-    except (ValidationError, OSError):
+    except ValidationError, OSError:
         sys.exit(0)
 
     if result:
