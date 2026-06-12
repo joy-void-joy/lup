@@ -2,6 +2,7 @@
 
 Commands:
 - inspect: Pretty-print the full agent configuration (tools, schemas, prompt, subagents)
+- capabilities: Render the backend capability matrix (the parity contract)
 - serve-tools: Start SDK tools as an MCP stdio server (used by ``chat``)
 - chat: Launch an interactive ``claude`` session with the agent's tools and prompt
 - repl: Interactive REPL with the agent via the SDK (continuous session)
@@ -11,6 +12,7 @@ Examples::
     $ uv run lup-devtools agent inspect
     $ uv run lup-devtools agent inspect --json
     $ uv run lup-devtools agent inspect --full
+    $ uv run lup-devtools agent capabilities --markdown
     $ uv run lup-devtools agent chat
     $ uv run lup-devtools agent chat --model opus --no-tools
     $ uv run lup-devtools agent repl
@@ -44,6 +46,17 @@ def inspect_cmd(
 ) -> None:
     """Inspect the full agent configuration: tools, schemas, prompt, subagents."""
     inspect_agent.run_inspect(as_json, full)
+
+
+@app.command("capabilities")
+def capabilities_cmd(
+    markdown: Annotated[
+        bool,
+        typer.Option("--markdown", help="Emit the README-ready markdown table"),
+    ] = False,
+) -> None:
+    """Show the backend capability matrix (the parity contract, generated)."""
+    inspect_agent.run_capabilities(markdown)
 
 
 @app.command("serve-tools")
