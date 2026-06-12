@@ -342,8 +342,8 @@ class ReplSession:
                 if response is not None:
                     response.close()
                 self.sock.close()
-            except Exception:  # claude: ignore — best-effort socket cleanup
-                pass
+            except Exception:
+                logger.debug("Closing REPL connection failed", exc_info=True)
             self.sock = None
         self.exec_id = None
 
