@@ -45,7 +45,6 @@ class TokenUsage(TypedDict, total=False):
     cache_read_input_tokens: int
 
 
-
 class SessionData(TypedDict, total=False):
     """Raw session JSON loaded from disk.
 
@@ -906,7 +905,7 @@ def history(limit: int) -> None:
                 typer.echo(f"{f.name}: {total} sessions, {with_outcomes} with outcomes")
             else:
                 typer.echo(f"{f.name}: (unexpected format)")
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             typer.echo(f"{f.name}: (error reading)")
 
 

@@ -361,8 +361,7 @@ def create_tool_gate(
                 [gated_tool] if isinstance(gated_tool, str) else list(gated_tool or [])
             )
             gate_matchers = [
-                LupHookMatcher(matcher=name, hook=gate_hook, tag=tag)
-                for name in names
+                LupHookMatcher(matcher=name, hook=gate_hook, tag=tag) for name in names
             ]
 
     hooks: LupHooksConfig = {event: gate_matchers}

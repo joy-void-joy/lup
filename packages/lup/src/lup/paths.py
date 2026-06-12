@@ -270,7 +270,7 @@ def path_is_under(file_path: str | Path, allowed_dirs: list[Path]) -> bool:
     """
     try:
         path = Path(file_path).resolve()
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return False
 
     for allowed in allowed_dirs:
