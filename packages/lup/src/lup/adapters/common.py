@@ -18,7 +18,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from lup.trace import TraceLogger
-from lup.types import LupDoneEvent, LupEvent, LupResponse, model_backend
+from lup.types import Backend, LupDoneEvent, LupEvent, LupResponse, model_backend
 
 logger = logging.getLogger(__name__)
 
@@ -253,18 +253,21 @@ async def query(
     allowed_tools: list[str] | None = None,
     permission_mode: PermissionMode | None = None,
     max_budget_usd: float | None = None,
+    backend: Backend | None = None,
 ) -> LupResponse:
     """One-shot query that routes to the right SDK adapter by model name.
 
     For Claude models (``claude-*``, ``haiku``, ``sonnet``, ``opus``),
     uses the Claude Agent SDK. For Codex/GPT models, uses the Codex SDK.
     For everything else, uses the OpenAI-compatible adapter via Codex.
+    An explicit ``backend`` bypasses the prefix inference — use it for
+    aliased or gateway model ids the tables in ``lup.types`` can't know.
 
     Returns a ``LupResponse`` — use ``.text`` for text or
     ``.output(MyModel)`` for structured output.
     """
     effective_model = model or "claude-sonnet-4-6"
-    backend = model_backend(effective_model)
+    backend = backend or model_backend(effective_model)
 
     output_schema = output_type.model_json_schema() if output_type else None
 

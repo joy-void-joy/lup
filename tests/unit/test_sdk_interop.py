@@ -283,6 +283,8 @@ class TestModelBackend:
         assert model_backend("o1-preview") == "openai"
         assert model_backend("o3-mini") == "openai"
         assert model_backend("o4-mini") == "openai"
+        assert model_backend("o5-preview") == "openai"
+        assert model_backend("codex-mini-latest") == "openai"
 
     def test_default_openai_compatible(self) -> None:
         assert model_backend("unknown-model") == "openai-compatible"
