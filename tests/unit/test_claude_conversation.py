@@ -118,9 +118,7 @@ async def test_send_partitions_blocks_and_collects_result() -> None:
 
 
 async def test_send_raises_on_error_result() -> None:
-    conv, fake = conversation(
-        [result_message(is_error=True, result="exploded")]
-    )
+    conv, fake = conversation([result_message(is_error=True, result="exploded")])
     _ = fake
 
     with pytest.raises(RuntimeError, match="exploded"):
@@ -169,9 +167,7 @@ async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None
         result_message(),
     ]
     fake = FakeClient(script)
-    monkeypatch.setattr(
-        lup.adapters.claude, "ClaudeSDKClient", lambda options: fake
-    )
+    monkeypatch.setattr(lup.adapters.claude, "ClaudeSDKClient", lambda options: fake)
 
     adapter = ClaudeAdapter(ClaudeAgentOptions())
     events = [event async for event in adapter.run_streamed("go")]

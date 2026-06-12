@@ -36,9 +36,7 @@ async def test_anthropic_reviewer_keeps_full_options(
     recorder = QueryRecorder()
     monkeypatch.setattr(reflect, "query", recorder)
 
-    critique = await reflect.run_reviewer(
-        make_input(), None, model="claude-sonnet-4-6"
-    )
+    critique = await reflect.run_reviewer(make_input(), None, model="claude-sonnet-4-6")
 
     assert critique == "critique"
     assert recorder.kwargs["tools"] == ["Read", "Glob", "Grep", "WebFetch"]

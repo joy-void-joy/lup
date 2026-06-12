@@ -131,7 +131,7 @@ def session_backend(session_dir: Path) -> str | None:
     for filepath in sorted(session_dir.glob("*.json"), reverse=True):
         try:
             data = json.loads(filepath.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             continue
         if isinstance(data, dict):
             sdk = data.get("agent_sdk")
