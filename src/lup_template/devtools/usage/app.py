@@ -1,0 +1,118 @@
+"""Typer app for the usage display: one-shot output and the watch loop."""
+
+import time
+from datetime import datetime
+from typing import Annotated
+
+import httpx
+import typer
+from rich.console import Console, Group
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
+
+from lup_template.devtools.usage.api import CREDS_PATH, fetch_usage, load_stats
+from lup_template.devtools.usage.render import build_display, build_error_panel
+
+app = typer.Typer(
+    help="Claude Code live usage display",
+    invoke_without_command=True,
+)
+console = Console()
+
+
+def fetch_and_build(detail: bool, bar_width: int) -> Panel:
+    """Fetch usage and build the display panel."""
+    usage = fetch_usage()
+    stats = load_stats() if detail else None
+    return build_display(usage, stats, detail, bar_width)
+
+
+# ── CLI ────────────────────────────────────────────────────
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    detail: Annotated[
+        bool,
+        typer.Option(
+            "--detail/--no-detail",
+            help="Show daily breakdown from stats cache.",
+        ),
+    ] = True,
+    watch: Annotated[
+        bool,
+        typer.Option(
+            "--watch/--no-watch",
+            "-w",
+            help="Continuously refresh the display (requires a terminal).",
+        ),
+    ] = False,
+    interval: Annotated[
+        int,
+        typer.Option(
+            "--interval",
+            "-n",
+            help="Refresh interval in seconds (with --watch).",
+        ),
+    ] = 600,
+) -> None:
+    """Show live Claude Code usage with pacing bars (Anthropic OAuth only)."""
+    if not CREDS_PATH.exists():
+        console.print("[red]No credentials at ~/.claude/.credentials.json[/red]")
+        console.print(
+            "[dim]This command reads Claude Code OAuth usage from "
+            "api.anthropic.com; there is no codex/openai equivalent. "
+            "For per-session cost/tokens on any backend, see the session "
+            "JSON (trace list shows the backend).[/dim]"
+        )
+        raise typer.Exit(1)
+
+    bar_width = min(console.width - 10, 58)
+
+    if not watch or not console.is_terminal:
+        try:
+            panel = fetch_and_build(detail, bar_width)
+        except httpx.HTTPStatusError as e:
+            console.print(
+                f"[red]API error: {e.response.status_code}"
+                f" {e.response.text[:200]}[/red]"
+            )
+            raise typer.Exit(1) from e
+        except httpx.ConnectError as e:
+            console.print(f"[red]Connection failed: {e}[/red]")
+            raise typer.Exit(1) from e
+        console.print()
+        console.print(panel)
+        return
+
+    timestamp = Text(
+        f"  updated {datetime.now().strftime('%H:%M:%S')}"
+        f"  ·  every {interval}s  ·  ctrl-c to quit",
+        style="dim",
+    )
+    try:
+        panel = fetch_and_build(detail, bar_width)
+    except httpx.HTTPStatusError, httpx.ConnectError:
+        panel = build_error_panel("Initial fetch failed")
+
+    with Live(
+        Group(panel, timestamp),
+        console=console,
+        refresh_per_second=1,
+        screen=True,
+    ) as live:
+        while True:
+            try:
+                time.sleep(interval)
+                panel = fetch_and_build(detail, bar_width)
+            except (httpx.HTTPStatusError, httpx.ConnectError) as e:
+                panel = build_error_panel(str(e)[:120])
+            except KeyboardInterrupt:
+                break
+            timestamp = Text(
+                f"  updated {datetime.now().strftime('%H:%M:%S')}"
+                f"  ·  every {interval}s  ·  ctrl-c to quit",
+                style="dim",
+            )
+            live.update(Group(panel, timestamp))

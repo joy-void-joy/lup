@@ -1,50 +1,25 @@
-"""Display Claude Code usage from the live API.
+"""Pure rendering for the usage display.
 
-Calls the /api/oauth/usage endpoint for real-time utilization data
-and supplements with stats-cache.json for daily detail.
-
-Anthropic-only by nature: it reads Claude Code OAuth credentials and an
-Anthropic endpoint. There is no Codex/OpenAI equivalent (the Codex
-runtime exposes no usage API) — for per-session cost and token usage on
-any backend, read the session JSON (``trace list`` shows the backend;
-Codex cost needs ``CODEX_USD_PER_MTOK_*`` rates).
-
-Examples::
-
-    $ uv run lup-devtools usage
-    $ uv run lup-devtools usage --no-watch
-    $ uv run lup-devtools usage --no-detail
-    $ uv run lup-devtools usage --watch --interval 300
+Formats pacing bars, labels, bucket sections, the daily breakdown, and
+the assembled panel from already-fetched data — no I/O here.
 """
 
-import json
-import time
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Annotated, TypedDict
 
-import httpx
-import typer
-from pydantic import BaseModel, ConfigDict, Field
-from rich.console import Console, Group
-from rich.live import Live
+from pydantic import BaseModel
 from rich.panel import Panel
 from rich.text import Text
 
-app = typer.Typer(
-    help="Claude Code live usage display",
-    invoke_without_command=True,
+from lup_template.devtools.usage.api import (
+    DailyBreakdown,
+    ExtraUsage,
+    StatsCache,
+    UsageBucket,
+    UsageResponse,
+    get_daily_breakdown,
 )
-console = Console()
-
 
 # ── constants ──────────────────────────────────────────────
-
-CREDS_PATH = Path.home() / ".claude" / ".credentials.json"
-STATS_PATH = Path.home() / ".claude" / "stats-cache.json"
-
-USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage"
-ANTHROPIC_BETA = "oauth-2025-04-20"
 
 MODEL_NAMES: dict[str, str] = {
     "claude-opus-4-8": "Opus 4.8",
@@ -64,107 +39,12 @@ MODEL_COLORS: dict[str, str] = {
 DAY_NAMES = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 
 
-# ── API response types ─────────────────────────────────────
-
-
-class UsageBucket(TypedDict):
-    utilization: float
-    resets_at: str
-
-
-class ExtraUsage(TypedDict):
-    is_enabled: bool
-    monthly_limit: int
-    used_credits: float
-    utilization: float
-
-
-class UsageResponse(TypedDict):
-    five_hour: UsageBucket | None
-    seven_day: UsageBucket | None
-    seven_day_opus: UsageBucket | None
-    seven_day_sonnet: UsageBucket | None
-    seven_day_oauth_apps: UsageBucket | None
-    seven_day_cowork: UsageBucket | None
-    iguana_necktie: UsageBucket | None
-    extra_usage: ExtraUsage | None
-
-
-# ── stats cache models ─────────────────────────────────────
-
-
-class DailyActivity(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    date: str
-    message_count: int = Field(alias="messageCount", default=0)
-    session_count: int = Field(alias="sessionCount", default=0)
-    tool_call_count: int = Field(alias="toolCallCount", default=0)
-
-
-class DailyModelTokens(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    date: str
-    tokens_by_model: dict[str, int] = Field(alias="tokensByModel", default_factory=dict)
-
-
-class ModelUsageEntry(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    input_tokens: int = Field(alias="inputTokens", default=0)
-    output_tokens: int = Field(alias="outputTokens", default=0)
-    cache_read_input_tokens: int = Field(alias="cacheReadInputTokens", default=0)
-    cache_creation_input_tokens: int = Field(
-        alias="cacheCreationInputTokens", default=0
-    )
-    web_search_requests: int = Field(alias="webSearchRequests", default=0)
-    cost_usd: float = Field(alias="costUSD", default=0)
-    context_window: int = Field(alias="contextWindow", default=0)
-    max_output_tokens: int = Field(alias="maxOutputTokens", default=0)
-
-
-class LongestSession(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    session_id: str = Field(alias="sessionId")
-    duration: int
-    message_count: int = Field(alias="messageCount")
-    timestamp: str
-
-
-class StatsCache(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    version: int = 0
-    last_computed_date: str = Field(alias="lastComputedDate", default="")
-    daily_activity: list[DailyActivity] = Field(
-        alias="dailyActivity", default_factory=list
-    )
-    daily_model_tokens: list[DailyModelTokens] = Field(
-        alias="dailyModelTokens", default_factory=list
-    )
-    model_usage: dict[str, ModelUsageEntry] = Field(
-        alias="modelUsage", default_factory=dict
-    )
-    total_sessions: int = Field(alias="totalSessions", default=0)
-    total_messages: int = Field(alias="totalMessages", default=0)
-    longest_session: LongestSession | None = Field(alias="longestSession", default=None)
-    first_session_date: str = Field(alias="firstSessionDate", default="")
-    hour_counts: dict[str, int] = Field(alias="hourCounts", default_factory=dict)
-    total_speculation_time_saved_ms: int = Field(
-        alias="totalSpeculationTimeSavedMs", default=0
-    )
-
-
 # ── display models ─────────────────────────────────────────
 
 
 class PaceLabel(BaseModel):
     word: str
     style: str
-
-
-class DailyBreakdown(BaseModel):
-    date: str
-    total_tokens: int
-    tokens_by_model: dict[str, int]
-    activity: DailyActivity | None
 
 
 # ── pacing thresholds ──────────────────────────────────────
@@ -177,74 +57,6 @@ PACE_LABEL_THRESHOLDS: list[tuple[float, PaceLabel]] = [
     (1.6, PaceLabel(word="running hot", style="bold bright_red")),
 ]
 PACE_LABEL_DEFAULT = PaceLabel(word="heavy usage", style="bold red")
-
-
-# ── API ────────────────────────────────────────────────────
-
-
-def fetch_usage() -> UsageResponse:
-    """Call the live usage API."""
-    try:
-        creds = json.loads(CREDS_PATH.read_text())
-        oauth = creds["claudeAiOauth"]
-        token: str = oauth["accessToken"]
-    except (json.JSONDecodeError, KeyError, OSError) as e:
-        msg = f"Bad credentials file at {CREDS_PATH}: {e}"
-        raise RuntimeError(msg) from e
-
-    resp = httpx.get(
-        USAGE_API_URL,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "anthropic-beta": ANTHROPIC_BETA,
-            "Content-Type": "application/json",
-        },
-        timeout=10,
-    )
-    resp.raise_for_status()
-    data: UsageResponse = resp.json()
-    return data
-
-
-# ── stats cache ────────────────────────────────────────────
-
-
-def load_stats() -> StatsCache | None:
-    if not STATS_PATH.exists():
-        return None
-    try:
-        return StatsCache.model_validate_json(STATS_PATH.read_bytes())
-    except ValueError, OSError:
-        return None
-
-
-def get_daily_breakdown(
-    stats: StatsCache,
-    window_start: datetime,
-    window_end: datetime,
-) -> list[DailyBreakdown]:
-    """Get per-day token and activity breakdown for a time window."""
-    tokens_by_date = {
-        entry.date: entry.tokens_by_model for entry in stats.daily_model_tokens
-    }
-    activity_by_date = {entry.date: entry for entry in stats.daily_activity}
-
-    days: list[DailyBreakdown] = []
-    d = window_start.date()
-    end = window_end.date()
-    while d <= end:
-        ds = d.isoformat()
-        by_model = tokens_by_date.get(ds, {})
-        days.append(
-            DailyBreakdown(
-                date=ds,
-                total_tokens=sum(by_model.values()),
-                tokens_by_model=by_model,
-                activity=activity_by_date.get(ds),
-            )
-        )
-        d += timedelta(days=1)
-    return days
 
 
 # ── formatting helpers ─────────────────────────────────────
@@ -623,13 +435,6 @@ def build_display(
     )
 
 
-def fetch_and_build(detail: bool, bar_width: int) -> Panel:
-    """Fetch usage and build the display panel."""
-    usage = fetch_usage()
-    stats = load_stats() if detail else None
-    return build_display(usage, stats, detail, bar_width)
-
-
 def build_error_panel(message: str) -> Panel:
     out = Text()
     out.append(f"  {message}", style="red")
@@ -640,93 +445,3 @@ def build_error_panel(message: str) -> Panel:
         border_style="red",
         padding=(1, 1),
     )
-
-
-# ── CLI ────────────────────────────────────────────────────
-
-
-@app.callback(invoke_without_command=True)
-def main(
-    detail: Annotated[
-        bool,
-        typer.Option(
-            "--detail/--no-detail",
-            help="Show daily breakdown from stats cache.",
-        ),
-    ] = True,
-    watch: Annotated[
-        bool,
-        typer.Option(
-            "--watch/--no-watch",
-            "-w",
-            help="Continuously refresh the display (requires a terminal).",
-        ),
-    ] = False,
-    interval: Annotated[
-        int,
-        typer.Option(
-            "--interval",
-            "-n",
-            help="Refresh interval in seconds (with --watch).",
-        ),
-    ] = 600,
-) -> None:
-    """Show live Claude Code usage with pacing bars (Anthropic OAuth only)."""
-    if not CREDS_PATH.exists():
-        console.print("[red]No credentials at ~/.claude/.credentials.json[/red]")
-        console.print(
-            "[dim]This command reads Claude Code OAuth usage from "
-            "api.anthropic.com; there is no codex/openai equivalent. "
-            "For per-session cost/tokens on any backend, see the session "
-            "JSON (trace list shows the backend).[/dim]"
-        )
-        raise typer.Exit(1)
-
-    bar_width = min(console.width - 10, 58)
-
-    if not watch or not console.is_terminal:
-        try:
-            panel = fetch_and_build(detail, bar_width)
-        except httpx.HTTPStatusError as e:
-            console.print(
-                f"[red]API error: {e.response.status_code}"
-                f" {e.response.text[:200]}[/red]"
-            )
-            raise typer.Exit(1) from e
-        except httpx.ConnectError as e:
-            console.print(f"[red]Connection failed: {e}[/red]")
-            raise typer.Exit(1) from e
-        console.print()
-        console.print(panel)
-        return
-
-    timestamp = Text(
-        f"  updated {datetime.now().strftime('%H:%M:%S')}"
-        f"  ·  every {interval}s  ·  ctrl-c to quit",
-        style="dim",
-    )
-    try:
-        panel = fetch_and_build(detail, bar_width)
-    except httpx.HTTPStatusError, httpx.ConnectError:
-        panel = build_error_panel("Initial fetch failed")
-
-    with Live(
-        Group(panel, timestamp),
-        console=console,
-        refresh_per_second=1,
-        screen=True,
-    ) as live:
-        while True:
-            try:
-                time.sleep(interval)
-                panel = fetch_and_build(detail, bar_width)
-            except (httpx.HTTPStatusError, httpx.ConnectError) as e:
-                panel = build_error_panel(str(e)[:120])
-            except KeyboardInterrupt:
-                break
-            timestamp = Text(
-                f"  updated {datetime.now().strftime('%H:%M:%S')}"
-                f"  ·  every {interval}s  ·  ctrl-c to quit",
-                style="dim",
-            )
-            live.update(Group(panel, timestamp))

@@ -27,7 +27,7 @@ from lup_template.devtools.feedback import app as feedback_app
 from lup_template.devtools.setup import app as setup_app
 from lup_template.devtools.sync import app as sync_app
 from lup_template.devtools.trace import app as trace_app
-from lup_template.devtools.usage import app as usage_app
+from lup_template.devtools.usage.app import app as usage_app
 from lup_template.devtools.version import app as version_app
 
 app = typer.Typer(
