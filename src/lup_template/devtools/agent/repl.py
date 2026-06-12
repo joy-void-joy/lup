@@ -1,0 +1,380 @@
+"""Interactive REPL with the agent via the SDK (continuous session)."""
+
+import asyncio
+import hashlib
+import io
+import signal
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rich.console import Console
+
+    from lup.adapters.common import Conversation
+    from lup.types import LupResponse
+
+import sh
+import typer
+
+from lup_template.agent.config import settings
+from lup_template.devtools.agent.serve import (
+    collect_dynamic_tool_names,
+    collect_tools_by_server,
+)
+
+MIME_TO_EXT: dict[str, str] = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
+
+def save_images(
+    images: list[tuple[str, bytes]],
+    images_dir: Path,
+) -> list[Path]:
+    """Save raw image data to disk, deduplicating by content hash."""
+    images_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    for media_type, data in images:
+        ext = MIME_TO_EXT.get(media_type, ".bin")
+        name = hashlib.sha256(data).hexdigest()[:12] + ext
+        path = images_dir / name
+        if not path.exists():
+            path.write_bytes(data)
+        paths.append(path)
+    return paths
+
+
+CLIPBOARD_IMAGE_MIMES = ("image/png", "image/jpeg", "image/webp")
+
+
+def read_clipboard_image() -> tuple[str, bytes] | None:
+    """Read image data from the system clipboard via xclip.
+
+    Returns ``(media_type, raw_bytes)`` or ``None`` when no image is available.
+    """
+    try:
+        xclip = sh.Command("xclip")
+        targets = str(xclip("-selection", "clipboard", "-o", "-t", "TARGETS"))
+    except sh.ErrorReturnCode, sh.CommandNotFound:
+        return None
+
+    for mime in CLIPBOARD_IMAGE_MIMES:
+        if mime not in targets:
+            continue
+        try:
+            buf = io.BytesIO()
+            xclip("-selection", "clipboard", "-o", "-t", mime, _out=buf)
+            data = buf.getvalue()
+            if data:
+                return (mime, data)
+        except sh.ErrorReturnCode:
+            continue
+    return None
+
+
+def read_clipboard_text() -> str | None:
+    """Read text from the system clipboard via xclip."""
+    try:
+        xclip = sh.Command("xclip")
+        text = str(xclip("-selection", "clipboard", "-o"))
+        return text if text else None
+    except sh.ErrorReturnCode, sh.CommandNotFound:
+        return None
+
+
+class Interrupted(Exception):
+    """Raised when the user interrupts response collection via Ctrl-C."""
+
+
+async def send_interruptible(
+    conv: "Conversation",
+    prompt: str,
+    console: "Console",
+) -> LupResponse:
+    """Send a prompt with Ctrl-C interrupt support.
+
+    First Ctrl-C sends an interrupt signal (graceful stop).
+    Second Ctrl-C cancels the task (force stop).
+    """
+    loop = asyncio.get_running_loop()
+    interrupt_count = 0
+
+    send_task = asyncio.create_task(conv.send(prompt))
+
+    def on_sigint() -> None:
+        nonlocal interrupt_count
+        interrupt_count += 1
+        if interrupt_count == 1:
+            console.print("\n  [dim]interrupting...[/dim]")
+            asyncio.ensure_future(conv.interrupt())
+        else:
+            send_task.cancel()
+
+    loop.add_signal_handler(signal.SIGINT, on_sigint)
+    try:
+        return await send_task
+    except asyncio.CancelledError:
+        raise Interrupted from None
+    finally:
+        loop.remove_signal_handler(signal.SIGINT)
+
+
+def apply_repl_overrides(
+    adapter: object,
+    *,
+    no_tools: bool,
+    no_prompt: bool,
+) -> None:
+    """Apply ``--no-tools``/``--no-prompt`` to a built adapter.
+
+    Claude: realized on the options object. Codex/OpenAI: realized on
+    the adapter attributes, which ``conversation()`` reads at open time
+    (``mcp_tools`` gates the served-tools config, ``system_prompt``
+    becomes the developer instructions). Unknown adapter types warn so
+    the flags are never silently ignored.
+    """
+    if not no_tools and not no_prompt:
+        return
+
+    from lup.adapters.claude import ClaudeAdapter
+    from lup.adapters.codex import CodexAdapter
+
+    match adapter:
+        case ClaudeAdapter():
+            options = adapter.options
+            if no_tools:
+                options.mcp_servers = {}
+                options.allowed_tools = []
+            if no_prompt:
+                options.system_prompt = None
+        case CodexAdapter():
+            if no_tools:
+                adapter.mcp_tools = False
+            if no_prompt:
+                adapter.system_prompt = ""
+        case _:
+            typer.echo(
+                "Warning: --no-tools/--no-prompt not supported on "
+                f"{type(adapter).__name__}",
+                err=True,
+            )
+
+
+async def repl(
+    *,
+    model: str | None = None,
+    no_tools: bool = False,
+    no_prompt: bool = False,
+) -> None:
+    """Run the interactive REPL loop."""
+    from contextlib import AsyncExitStack
+
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import WordCompleter
+    from prompt_toolkit.formatted_text import FormattedText
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.styles import Style as PTStyle
+    from rich.console import Console
+    from rich.panel import Panel
+
+    from lup_template.agent.core import build_adapter
+    from lup.paths import project_root
+
+    console = Console(highlight=False)
+    effective_model = model or settings.model
+    stack = AsyncExitStack()
+
+    # Welcome panel with server → tool listing
+    panel_lines = [
+        "[bold]✻ Agent REPL[/bold]",
+        f"[dim]model:[/dim] {effective_model}",
+    ]
+    if not no_tools:
+        servers = collect_tools_by_server()
+        dynamic = collect_dynamic_tool_names()
+        group_names: list[tuple[str, list[str]]] = [
+            (name, [t.name for t in stools]) for name, stools in servers.items()
+        ] + list(dynamic.items())
+        for i, (name, tool_names_list) in enumerate(group_names):
+            is_last_server = i == len(group_names) - 1
+            panel_lines.append(f"[dim]{'└' if is_last_server else '├'} {name}[/dim]")
+            for j, tname in enumerate(tool_names_list):
+                is_last_tool = j == len(tool_names_list) - 1
+                branch = "  └" if is_last_tool else "  ├"
+                if not is_last_server:
+                    branch = f"[dim]│[/dim] {'└' if is_last_tool else '├'}"
+                panel_lines.append(f"[dim]{branch}[/dim] {tname}")
+    else:
+        panel_lines.append("[dim]no tools[/dim]")
+    panel_lines += [
+        "",
+        "[dim]/quit · Ctrl-C stop · Ctrl-V paste image · Alt+Enter newline[/dim]",
+    ]
+
+    console.print()
+    console.print(Panel("\n".join(panel_lines), border_style="blue", width=60))
+    console.print()
+
+    # -- prompt_toolkit session --
+    session_cost = 0.0
+    pending_images: list[tuple[str, bytes]] = []
+
+    def rprompt() -> FormattedText:
+        parts = [effective_model]
+        if pending_images:
+            n = len(pending_images)
+            parts.append(f"{n} img{'s' if n > 1 else ''}")
+        if session_cost:
+            parts.append(f"${session_cost:.4f}")
+        return FormattedText([("class:rprompt", " · ".join(parts))])
+
+    history_dir = project_root() / ".lup"
+    history_dir.mkdir(parents=True, exist_ok=True)
+
+    # Key bindings: Enter submits, Alt+Enter inserts newline
+    kb = KeyBindings()
+
+    @kb.add("escape", "enter")  # Alt+Enter or Esc then Enter
+    def newline_binding(event: object) -> None:
+        from prompt_toolkit.key_binding import KeyPressEvent
+
+        assert isinstance(event, KeyPressEvent)
+        event.current_buffer.newline()
+
+    @kb.add("enter")
+    def submit_binding(event: object) -> None:
+        from prompt_toolkit.key_binding import KeyPressEvent
+
+        assert isinstance(event, KeyPressEvent)
+        event.current_buffer.validate_and_handle()
+
+    @kb.add("c-v")
+    def paste_binding(event: object) -> None:
+        from prompt_toolkit.key_binding import KeyPressEvent
+
+        assert isinstance(event, KeyPressEvent)
+        result = read_clipboard_image()
+        if result is not None:
+            pending_images.append(result)
+            n = len(pending_images)
+            console.print(
+                f"[dim]{n} image{'s' if n > 1 else ''} attached (/drop to clear)[/dim]"
+            )
+        else:
+            text = read_clipboard_text()
+            if text:
+                event.current_buffer.insert_text(text)
+
+    pt_session: PromptSession[str] = PromptSession(
+        message=FormattedText([("class:prompt", "❯ ")]),
+        rprompt=rprompt,
+        style=PTStyle.from_dict(
+            {
+                "prompt": "fg:ansiblue bold",
+                "prompt-continuation": "fg:ansiblue",
+                "rprompt": "fg:#666666",
+            }
+        ),
+        history=FileHistory(str(history_dir / "repl_history")),
+        completer=WordCompleter(
+            ["/quit", "/exit", "/q", "/help", "/drop"],
+            sentence=True,
+        ),
+        key_bindings=kb,
+        multiline=True,
+        prompt_continuation=FormattedText([("class:prompt-continuation", "··· ")]),
+    )
+
+    try:
+        # ``build_adapter`` reads ``settings.model`` for every backend, so
+        # override it here to make ``--model`` actually take effect (not just
+        # decorate the panel). ``--no-tools``/``--no-prompt`` are applied to the
+        # built Claude options below.
+        original_model = settings.model
+        if model:
+            settings.model = model
+        try:
+            adapter, adapter_ctx, _notes = build_adapter("repl")
+        finally:
+            settings.model = original_model
+        apply_repl_overrides(adapter, no_tools=no_tools, no_prompt=no_prompt)
+        stack.enter_context(adapter_ctx)
+
+        async with stack:
+            async with adapter.conversation() as conv:
+                last_input_sigint = 0.0
+
+                while True:
+                    try:
+                        user_input = await pt_session.prompt_async()
+                    except EOFError, asyncio.CancelledError:
+                        console.print()
+                        break
+                    except KeyboardInterrupt:
+                        now = time.monotonic()
+                        if now - last_input_sigint < 2.0:
+                            console.print()
+                            break
+                        last_input_sigint = now
+                        console.print("[dim]Press Ctrl-C again to exit[/dim]")
+                        continue
+
+                    last_input_sigint = 0.0
+                    stripped = user_input.strip()
+                    if not stripped:
+                        continue
+                    if stripped in ("/quit", "/exit", "/q"):
+                        break
+                    if stripped == "/drop":
+                        pending_images.clear()
+                        console.print("[dim]images cleared[/dim]")
+                        continue
+
+                    console.print("[dim]thinking...[/dim]")
+                    if pending_images:
+                        images_dir = project_root() / ".lup" / "images"
+                        saved = save_images(pending_images, images_dir)
+                        path_list = ", ".join(str(p) for p in saved)
+                        query_text = (stripped + "\n\n" if stripped else "") + (
+                            f"[image attached: {path_list}]"
+                        )
+                        prompt_text = query_text
+                        pending_images.clear()
+                    else:
+                        prompt_text = user_input
+                    try:
+                        response = await send_interruptible(
+                            conv,
+                            prompt_text,
+                            console,
+                        )
+                        parts: list[str] = []
+                        if response.result and response.result.duration_ms:
+                            secs = response.result.duration_ms / 1000
+                            parts.append(f"{secs:.1f}s")
+                        if response.result and response.result.total_cost_usd:
+                            session_cost += response.result.total_cost_usd
+                            parts.append(f"${response.result.total_cost_usd:.4f}")
+                        elif response.result and response.result.usage:
+                            # Backends without cost reporting (Codex sans
+                            # rates) still show what they can: token counts
+                            usage = response.result.usage
+                            parts.append(
+                                f"{usage.input_tokens}in/{usage.output_tokens}out tok"
+                            )
+                        if parts:
+                            console.print(f"  [dim]{' · '.join(parts)}[/dim]")
+                        console.print()
+                    except Interrupted:
+                        console.print("  [dim]interrupted[/dim]\n")
+                    except RuntimeError as e:
+                        console.print(f"  [red]error:[/red] {e}\n")
+    except KeyboardInterrupt:
+        # Additional Ctrl+C during cleanup — containers will be cleaned
+        # on next start via stale container removal
+        pass

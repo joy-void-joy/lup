@@ -1,0 +1,116 @@
+"""Agent introspection and interactive debugging tools.
+
+Commands:
+- inspect: Pretty-print the full agent configuration (tools, schemas, prompt, subagents)
+- serve-tools: Start SDK tools as an MCP stdio server (used by ``chat``)
+- chat: Launch an interactive ``claude`` session with the agent's tools and prompt
+- repl: Interactive REPL with the agent via the SDK (continuous session)
+
+Examples::
+
+    $ uv run lup-devtools agent inspect
+    $ uv run lup-devtools agent inspect --json
+    $ uv run lup-devtools agent inspect --full
+    $ uv run lup-devtools agent chat
+    $ uv run lup-devtools agent chat --model opus --no-tools
+    $ uv run lup-devtools agent repl
+    $ uv run lup-devtools agent repl --model sonnet --no-prompt
+    $ uv run lup-devtools agent serve-tools
+"""
+
+import asyncio
+from typing import Annotated
+
+import typer
+
+import lup_template.devtools.agent.chat as chat
+import lup_template.devtools.agent.inspect_agent as inspect_agent
+import lup_template.devtools.agent.repl as repl
+import lup_template.devtools.agent.serve as serve
+
+app = typer.Typer(no_args_is_help=True)
+
+
+@app.command("inspect")
+def inspect_cmd(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as machine-readable JSON"),
+    ] = False,
+    full: Annotated[
+        bool,
+        typer.Option("--full", help="Show full details (tool schemas, full prompt)"),
+    ] = False,
+) -> None:
+    """Inspect the full agent configuration: tools, schemas, prompt, subagents."""
+    inspect_agent.run_inspect(as_json, full)
+
+
+@app.command("serve-tools")
+def serve_tools_cmd(
+    list_only: Annotated[
+        bool,
+        typer.Option("--list", help="Print served tool names and exit"),
+    ] = False,
+    server_group: Annotated[
+        str | None,
+        typer.Option(
+            "--server",
+            help="Serve only this group (notes, sandbox, session, example); default: all but example",
+        ),
+    ] = None,
+) -> None:
+    """Start SDK tools as an MCP stdio server (the ``notes`` server).
+
+    Launched as a subprocess by the Codex/OpenAI adapters and by the
+    ``chat`` command. When session-context env vars are present (see
+    ``lup.paths.SessionContext``), session-bound tools — reflect and
+    submit_output — are served alongside the static tools, and tool
+    metrics are flushed to the session directory for the parent to read.
+    """
+    serve.serve_tools(list_only, server_group)
+
+
+@app.command("chat")
+def chat_cmd(
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Override the model (e.g. sonnet, opus)"),
+    ] = None,
+    no_tools: Annotated[
+        bool,
+        typer.Option("--no-tools", help="Skip MCP tool server"),
+    ] = False,
+    no_prompt: Annotated[
+        bool,
+        typer.Option("--no-prompt", help="Skip appending the agent system prompt"),
+    ] = False,
+) -> None:
+    """Launch an interactive claude session with the agent's tools and prompt.
+
+    Starts the SDK MCP tools as a stdio server, generates the system prompt,
+    and execs into ``claude`` with the right flags.
+    """
+    chat.run_chat(model, no_tools, no_prompt)
+
+
+@app.command("repl")
+def repl_cmd(
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Override the model"),
+    ] = None,
+    no_tools: Annotated[
+        bool,
+        typer.Option("--no-tools", help="Skip MCP tools"),
+    ] = False,
+    no_prompt: Annotated[
+        bool,
+        typer.Option("--no-prompt", help="Skip agent system prompt"),
+    ] = False,
+) -> None:
+    """Interactive REPL — continuous session with the agent via the SDK."""
+    try:
+        asyncio.run(repl.repl(model=model, no_tools=no_tools, no_prompt=no_prompt))
+    except KeyboardInterrupt:
+        pass
