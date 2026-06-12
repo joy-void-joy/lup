@@ -15,6 +15,8 @@ When reviewing changes from downstream repos (`/lup:update`), the goal is to **g
 
 Built with Python 3.14+ on the Claude Agent SDK, with the inner agent also runnable on the OpenAI Codex SDK (`AGENT_SDK=codex`) or any OpenAI-compatible endpoint (`AGENT_SDK=openai`) through the same adapter interface. Uses `uv` as the package manager.
 
+The security envelope differs by backend: Claude enforces per-tool permission hooks and permission modes; Codex/OpenAI rely on the runtime's filesystem sandbox plus in-tool checks only (Codex hooks never fire — live-probed). See README § Backend support before choosing a backend for a new domain.
+
 ### Naming
 
 - **Claude** = the meta-agent (Claude Code) that modifies the codebase, runs commands, and manages the development workflow
