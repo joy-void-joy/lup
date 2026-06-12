@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """PreToolUse hook that controls Bash permissions via regex patterns.
 
-A command is split on shell operators (``&&``, ``||``, ``;``, ``|``) into
-segments. Within each segment, rules are evaluated like .gitignore: all
-patterns are checked top-to-bottom and the last matching rule wins. The
-whole command auto-allows only when EVERY segment resolves to allow; if any
-segment matches a deny rule the command is denied, and if any segment
-matches no rule the decision falls through to the user (ask). This closes
-the chaining bypass where a harmless prefix (``ls && rm -rf ~``) would
-auto-approve a dangerous compound.
+The command is split into segments on unquoted shell separators (`;`, `&&`,
+`||`, `|`, newline, and background `&`). Each segment is evaluated against
+RULES like .gitignore: all patterns are checked top-to-bottom, and the last
+matching rule wins. Segment verdicts combine conservatively:
+
+- any segment denies   -> deny (with that segment's reason)
+- every segment allows -> allow
+- otherwise            -> fall through to the user (ask)
+
+Segments containing command or process substitution (`$(`, backticks, `<(`,
+`>(`) never auto-allow, since the substituted command could be anything.
+Redirections stay in their segment's text; prefix-anchored patterns keep
+them from enabling auto-allows on their own.
 """
 
 import json
 import re
-import shlex
 import sys
 
 from typing import Literal
@@ -34,7 +38,7 @@ class Deny(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Configuration: rules evaluated top-to-bottom, last match wins
+# Configuration: rules evaluated per segment, top-to-bottom, last match wins
 # ---------------------------------------------------------------------------
 
 RULES: list[Allow | Deny] = [
@@ -48,6 +52,9 @@ RULES: list[Allow | Deny] = [
     Allow(pattern=r"^xargs\s+(ls|tree|grep|cat|echo|test|file|wc|head|tail)\b"),
     Allow(pattern=r"^test "),
     Allow(pattern=r"^find\b(?!.*(-exec|-ok|-delete))"),
+    # Navigation: a plain `cd <path>` segment, so compounds like
+    # `cd <worktree> && uv run pytest` auto-allow when every part is safe
+    Allow(pattern=r"^cd(\s+\S+)?$"),
     # GitHub CLI (read-only)
     Allow(pattern=r"^gh (pr|issue) (list|view|diff|status)\b"),
     # Git (safe subset)
@@ -55,17 +62,16 @@ RULES: list[Allow | Deny] = [
         pattern=r"^git (status|log|diff|show|branch|worktree|stash|remote|fetch|tag|add|commit)\b"
     ),
     # uv package management
-    Allow(pattern=r"^uv (remove|lock)\b"),
+    Allow(pattern=r"^uv (add|remove|sync|lock)\b"),
     Allow(pattern=r"^uv run (pyright|pytest|ruff)\b"),
     Allow(pattern=r"^uv run \S+ --help$"),
     # lup-devtools CLI
     Allow(pattern=r"^uv run lup-devtools\b"),
-    # Block python invocations at command position (segments are already
-    # operator-split, so command position is the segment start, possibly via
-    # `uv run` or a path prefix). Mentions of "python" in arguments,
+    # Block python invocations (at command position: start of segment or after
+    # a separator, including via `uv run`). Mentions of "python" in arguments,
     # messages, or grep patterns are unaffected.
     Deny(
-        pattern=r"^(\S*/)?(uv\s+run\s+)?python3?\b",
+        pattern=r"(^|;|&&|\|\||\|)\s*(\S*/)?(uv\s+run\s+)?python3?\b",
         reason="Denied: use lup-devtools or `uv run lup` instead, or create a script in ./tmp/.",
     ),
     # ...except tmp scripts (overrides the deny above)
@@ -77,6 +83,9 @@ RULES: list[Allow | Deny] = [
 # ---------------------------------------------------------------------------
 
 HookOutput = dict[str, dict[str, str]]
+
+TWO_CHAR_SEPARATORS = ("&&", "||")
+SUBSTITUTION_PREFIXES = ("$", "<", ">")
 
 
 class BashInput(BaseModel):
@@ -113,78 +122,112 @@ def deny_decision(reason: str) -> HookOutput:
     }
 
 
-SHELL_OPERATORS = ("&&", "||", ";", "|", "\n")
-
-
 def split_segments(command: str) -> list[str]:
-    """Split a command into segments on shell operators, respecting quotes.
+    """Split a shell command on unquoted separators into trimmed segments.
 
-    ``shlex`` tokenization keeps quoted strings intact so an operator inside
-    a quoted argument (``grep "a|b" f``) does not create a spurious segment.
-    On a tokenization error (unbalanced quotes, etc.) the whole command is
-    returned as a single segment so the caller errs toward "ask".
+    Tracks single/double quotes and backslash escapes so separators inside
+    quoted strings stay in their segment. `&&` and `||` are single
+    separators; a lone `&` separates (background job), but `>&` and `&>`
+    redirections stay in the segment text.
     """
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    try:
-        tokens = list(lexer)
-    except ValueError:
-        return [command.strip()]
-
     segments: list[str] = []
     current: list[str] = []
-    for token in tokens:
-        if token in SHELL_OPERATORS or set(token) <= {"|", "&", ";"}:
-            if current:
-                segments.append(" ".join(current))
+    in_single = False
+    in_double = False
+    escaped = False
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        pair = command[i : i + 2]
+        step = 1
+        match ch:
+            case _ if escaped:
+                current.append(ch)
+                escaped = False
+            case "\\" if not in_single:
+                current.append(ch)
+                escaped = True
+            case "'" if not in_double:
+                in_single = not in_single
+                current.append(ch)
+            case '"' if not in_single:
+                in_double = not in_double
+                current.append(ch)
+            case _ if in_single or in_double:
+                current.append(ch)
+            case _ if pair in TWO_CHAR_SEPARATORS:
+                segments.append("".join(current))
                 current = []
+                step = 2
+            case ";" | "|" | "\n":
+                segments.append("".join(current))
+                current = []
+            case "&" if pair != "&>" and (not current or current[-1] != ">"):
+                segments.append("".join(current))
+                current = []
+            case _:
+                current.append(ch)
+        i += step
+    segments.append("".join(current))
+    return [stripped for s in segments if (stripped := s.strip())]
+
+
+def has_substitution(segment: str) -> bool:
+    """True when the segment contains command or process substitution.
+
+    `$(`, backticks, `<(`, and `>(` can execute arbitrary commands, so a
+    segment containing any of them (unescaped) never auto-allows. Quoting
+    is deliberately ignored: double quotes don't stop substitution.
+    """
+    escaped = False
+    for i, ch in enumerate(segment):
+        if escaped:
+            escaped = False
             continue
-        current.append(token)
-    if current:
-        segments.append(" ".join(current))
-    return [s for s in segments if s]
+        match ch:
+            case "\\":
+                escaped = True
+            case "`":
+                return True
+            case _ if ch in SUBSTITUTION_PREFIXES and segment[i + 1 : i + 2] == "(":
+                return True
+            case _:
+                pass
+    return False
 
 
-def decide_segment(segment: str) -> Literal["allow", "deny", "ask"]:
-    """Resolve a single segment via last-match-wins over RULES."""
-    decision: Literal["allow", "deny", "ask"] = "ask"
+def evaluate_segment(segment: str) -> Allow | Deny | None:
+    """Apply RULES to a single segment; the last matching rule wins."""
+    matched: Allow | Deny | None = None
     for rule in RULES:
         if re.search(rule.pattern, segment):
-            decision = rule.action
-    return decision
+            matched = rule
+    return matched
 
 
 def decide(command: str) -> HookOutput | None:
-    cmd = command.strip()
-    if not cmd:
-        return None
-
-    segments = split_segments(cmd)
+    segments = split_segments(command)
     if not segments:
         return None
 
-    decisions = [(segment, decide_segment(segment)) for segment in segments]
+    all_allowed = True
+    reason = "Auto-allowed: command matches allowlist"
+    for segment in segments:
+        match evaluate_segment(segment):
+            case Deny(reason=deny_reason):
+                return deny_decision(deny_reason)
+            case Allow(reason=allow_reason) if not has_substitution(segment):
+                reason = allow_reason
+            case _:
+                all_allowed = False
 
-    # A deny on any segment wins over everything (a dangerous payload anywhere
-    # in the pipeline must block the whole command).
-    for segment, decision in decisions:
-        if decision == "deny":
-            return deny_decision(
-                f"Denied: segment is denylisted | segment: {segment[:80]}"
-            )
-
-    # Auto-allow only when EVERY segment is explicitly allowlisted; a single
-    # non-allowlisted segment falls through to the user.
-    if all(decision == "allow" for _segment, decision in decisions):
-        return allow_decision()
-
-    return None
+    return allow_decision(reason) if all_allowed else None
 
 
 def main() -> None:
     try:
         event = HookEvent.model_validate_json(sys.stdin.read())
-    except ValidationError, OSError:
+    except (ValidationError, OSError):
         sys.exit(0)
 
     if event.tool_name != "Bash":
