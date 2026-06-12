@@ -75,8 +75,11 @@ Each adapter declares what it supports (`adapter.capabilities`); the matrix belo
 | permission_modes | ✅ | — | — |
 | max_turns | ✅ | — | — |
 | max_thinking_tokens | ✅ | — | — |
+| background_tools | ✅ | — | — |
+| realtime | in_process | relay | relay |
+| turn_timeout | — | ✅ | ✅ |
 
-(`rates` = cost is estimated from `CODEX_USD_PER_MTOK_*`; without them it degrades to `none`. Codex `duration` is wall-clock, not API-reported. Where there's no `stop_event`, the completion guard runs as corrective turns instead of a Stop hook.)
+(`rates` = cost is estimated from `CODEX_USD_PER_MTOK_*`; without them it degrades to `none`. Codex `duration` is wall-clock, not API-reported. Where there's no `stop_event`, the completion guard runs as corrective turns instead of a Stop hook. `turn_timeout` is the Codex-side substitute for `max_turns`/`interrupt`: `AGENT_TURN_TIMEOUT_SECONDS` cancels a runaway turn client-side after a wall-clock cap.)
 
 The intended workflow while using this repository is to:
 

@@ -390,6 +390,9 @@ class ClaudeAdapter(AgentAdapter):
             permission_modes=True,
             max_turns=True,
             max_thinking_tokens=True,
+            background_tools=True,
+            realtime="in_process",
+            turn_timeout=False,
         )
 
     @asynccontextmanager

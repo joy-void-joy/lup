@@ -9,6 +9,7 @@ command hooks, and the reflection gate via a file-backed flag.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -28,6 +29,7 @@ from lup.adapters.common import (
     AgentAdapter,
     BudgetExceededError,
     Conversation,
+    TurnTimeoutError,
 )
 from lup.trace import TraceLogger, print_message
 from lup.types import (
@@ -389,6 +391,7 @@ class CodexConversation(Conversation):
         usage_normalizer: CodexUsageNormalizer | None = None,
         max_budget_usd: float | None = None,
         usage_cost: UsageCost | None = None,
+        turn_timeout_seconds: float | None = None,
     ) -> None:
         self.thread = thread
         self.output_schema = output_schema
@@ -396,6 +399,7 @@ class CodexConversation(Conversation):
         self.usage_normalizer = usage_normalizer
         self.max_budget_usd = max_budget_usd
         self.usage_cost = usage_cost
+        self.turn_timeout_seconds = turn_timeout_seconds
         self.turns_usage = Usage()
         self.cost_usd: float | None = None
 
@@ -441,11 +445,19 @@ class CodexConversation(Conversation):
         self.check_budget()
         effort = ReasoningEffort(self.effort) if self.effort else None
         started = time.perf_counter()
-        result = await self.thread.run(
-            prompt,
-            effort=effort,
-            output_schema=cast("JsonObject | None", self.output_schema),
-        )
+        try:
+            async with asyncio.timeout(self.turn_timeout_seconds):
+                result = await self.thread.run(
+                    prompt,
+                    effort=effort,
+                    output_schema=cast("JsonObject | None", self.output_schema),
+                )
+        except TimeoutError as exc:
+            raise TurnTimeoutError(
+                f"Codex turn exceeded the {self.turn_timeout_seconds}s "
+                "wall-clock timeout and was cancelled client-side; close "
+                "the conversation rather than reusing this thread."
+            ) from exc
         elapsed_ms = (time.perf_counter() - started) * 1000
         response = build_lup_response(
             result,
@@ -486,6 +498,7 @@ class CodexAdapter(AgentAdapter):
         mcp_servers: Sequence[str] = ("notes", "sandbox"),
         max_budget_usd: float | None = None,
         usage_cost: UsageCost | None = None,
+        turn_timeout_seconds: float | None = None,
     ) -> None:
         if max_budget_usd is not None and usage_cost is None:
             raise ValueError(
@@ -508,6 +521,7 @@ class CodexAdapter(AgentAdapter):
         self.mcp_servers = mcp_servers
         self.max_budget_usd = max_budget_usd
         self.usage_cost = usage_cost
+        self.turn_timeout_seconds = turn_timeout_seconds
 
     @property
     def capabilities(self) -> AdapterCapabilities:
@@ -522,6 +536,9 @@ class CodexAdapter(AgentAdapter):
             permission_modes=False,
             max_turns=False,
             max_thinking_tokens=False,
+            background_tools=False,
+            realtime="relay",
+            turn_timeout=True,
         )
 
     def build_config_overrides(self) -> tuple[str, ...]:
@@ -551,6 +568,7 @@ class CodexAdapter(AgentAdapter):
             usage_normalizer=self.usage_normalizer,
             max_budget_usd=self.max_budget_usd,
             usage_cost=self.usage_cost,
+            turn_timeout_seconds=self.turn_timeout_seconds,
         )
 
     @asynccontextmanager

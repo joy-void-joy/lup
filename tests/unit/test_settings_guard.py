@@ -14,10 +14,11 @@ from lup.adapters.common import AdapterCapabilities
 from lup_template.agent import core
 from lup_template.agent.config import Settings
 
-CLAUDE_ONLY_ENV = (
+GUARDED_ENV = (
     "AGENT_MAX_TURNS",
     "AGENT_PERMISSION_MODE",
     "AGENT_MAX_THINKING_TOKENS",
+    "AGENT_TURN_TIMEOUT_SECONDS",
 )
 
 
@@ -39,6 +40,9 @@ def intersection_capabilities() -> AdapterCapabilities:
         permission_modes=False,
         max_turns=False,
         max_thinking_tokens=False,
+        background_tools=False,
+        realtime="relay",
+        turn_timeout=False,
     )
 
 
@@ -54,6 +58,9 @@ def full_capabilities() -> AdapterCapabilities:
         permission_modes=True,
         max_turns=True,
         max_thinking_tokens=True,
+        background_tools=True,
+        realtime="in_process",
+        turn_timeout=True,
     )
 
 
@@ -64,21 +71,21 @@ def fresh_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
     return built
 
 
-def clear_claude_only_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in CLAUDE_ONLY_ENV:
+def clear_guarded_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in GUARDED_ENV:
         monkeypatch.delenv(name, raising=False)
 
 
 def test_defaults_pass_on_intersection_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_claude_only_env(monkeypatch)
+    clear_guarded_env(monkeypatch)
     fresh_settings(monkeypatch)
     core.check_settings_supported(intersection_capabilities())
 
 
 def test_explicit_max_turns_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    clear_claude_only_env(monkeypatch)
+    clear_guarded_env(monkeypatch)
     monkeypatch.setenv("AGENT_MAX_TURNS", "5")
     fresh_settings(monkeypatch)
     with pytest.raises(ValueError, match="AGENT_MAX_TURNS"):
@@ -88,15 +95,25 @@ def test_explicit_max_turns_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_explicit_permission_mode_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_claude_only_env(monkeypatch)
+    clear_guarded_env(monkeypatch)
     monkeypatch.setenv("AGENT_PERMISSION_MODE", "plan")
     fresh_settings(monkeypatch)
     with pytest.raises(ValueError, match="AGENT_PERMISSION_MODE"):
         core.check_settings_supported(intersection_capabilities())
 
 
+def test_explicit_turn_timeout_rejected_without_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clear_guarded_env(monkeypatch)
+    monkeypatch.setenv("AGENT_TURN_TIMEOUT_SECONDS", "120")
+    fresh_settings(monkeypatch)
+    with pytest.raises(ValueError, match="AGENT_TURN_TIMEOUT_SECONDS"):
+        core.check_settings_supported(intersection_capabilities())
+
+
 def test_all_offenders_listed_together(monkeypatch: pytest.MonkeyPatch) -> None:
-    clear_claude_only_env(monkeypatch)
+    clear_guarded_env(monkeypatch)
     monkeypatch.setenv("AGENT_MAX_TURNS", "5")
     monkeypatch.setenv("AGENT_MAX_THINKING_TOKENS", "1024")
     fresh_settings(monkeypatch)
@@ -109,7 +126,7 @@ def test_all_offenders_listed_together(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_explicit_settings_pass_on_full_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_claude_only_env(monkeypatch)
+    clear_guarded_env(monkeypatch)
     monkeypatch.setenv("AGENT_MAX_TURNS", "5")
     monkeypatch.setenv("AGENT_PERMISSION_MODE", "plan")
     fresh_settings(monkeypatch)

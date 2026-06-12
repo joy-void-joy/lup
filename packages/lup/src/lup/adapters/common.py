@@ -66,6 +66,15 @@ class AdapterCapabilities(BaseModel):
     max_thinking_tokens: bool
     """Backend accepts an explicit thinking-token budget."""
 
+    background_tools: bool
+    """Background agents can act through tools (vs text-only summarizers)."""
+
+    realtime: Literal["in_process", "relay"]
+    """Persistent (sleep/wake) transport: in-process tools or the file relay."""
+
+    turn_timeout: bool
+    """Conversations enforce a wall-clock per-turn timeout (turn_timeout_seconds)."""
+
 
 def canonical_capability_matrix() -> dict[str, AdapterCapabilities]:
     """The shipped backends' capabilities, in canonical display form.
@@ -116,6 +125,16 @@ def capability_matrix_markdown(adapters: Mapping[str, AdapterCapabilities]) -> s
                     cells.append(str(value))
         lines.append(f"| {field} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
+
+
+class TurnTimeoutError(RuntimeError):
+    """A turn exceeded its wall-clock timeout and was cancelled client-side.
+
+    Raised by adapters with ``capabilities.turn_timeout`` when a single
+    turn runs past ``turn_timeout_seconds``. The backend thread's state
+    is undefined afterwards — close the conversation rather than sending
+    further turns on it.
+    """
 
 
 class BudgetExceededError(RuntimeError):

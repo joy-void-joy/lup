@@ -224,6 +224,7 @@ def check_settings_supported(capabilities: AdapterCapabilities) -> None:
         "max_turns": capabilities.max_turns,
         "permission_mode": capabilities.permission_modes,
         "max_thinking_tokens": capabilities.max_thinking_tokens,
+        "turn_timeout_seconds": capabilities.turn_timeout,
     }
     offenders = sorted(
         name
@@ -339,6 +340,7 @@ def build_codex_adapter(
         mcp_servers=policy.filter_group_names(tool_group_names(realtime=False)),
         max_budget_usd=max_budget_usd,
         usage_cost=usage_cost,
+        turn_timeout_seconds=settings.turn_timeout_seconds,
     )
 
 
@@ -380,6 +382,7 @@ def build_codex_realtime_adapter(
         mcp_servers=policy.filter_group_names(tool_group_names(realtime=True)),
         max_budget_usd=max_budget_usd,
         usage_cost=usage_cost,
+        turn_timeout_seconds=settings.turn_timeout_seconds,
     )
     check_settings_supported(adapter.capabilities)
     return adapter, RealtimeMailbox(realtime_dir)
@@ -413,6 +416,7 @@ def build_openai_adapter(
         mcp_servers=policy.filter_group_names(tool_group_names(realtime=False)),
         max_budget_usd=max_budget_usd,
         usage_cost=usage_cost,
+        turn_timeout_seconds=settings.turn_timeout_seconds,
     )
 
 

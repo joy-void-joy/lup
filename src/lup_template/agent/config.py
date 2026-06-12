@@ -221,6 +221,16 @@ class Settings(BaseSettings):
         description="Maximum agent turns per session (None = unlimited)",
     )
 
+    turn_timeout_seconds: float | None = Field(
+        default=None,
+        validation_alias="AGENT_TURN_TIMEOUT_SECONDS",
+        description=(
+            "Wall-clock cap on a single turn (codex/openai only — a Codex "
+            "turn is otherwise unbounded: no max_turns, no interrupt). "
+            "None = no limit."
+        ),
+    )
+
     sandbox_timeout_seconds: int = Field(
         default=30,
         validation_alias="AGENT_SANDBOX_TIMEOUT_SECONDS",
