@@ -36,8 +36,10 @@ type ServerConfig = Any  # claude: ignore — runtime-narrowed union, see above
 # TOOL SETS - Define tools that require specific API keys
 # =============================================================================
 
-# Built-in SDK tools (always available)
-BUILTIN_TOOLS: frozenset[str] = frozenset(
+# Claude Agent SDK builtin tool names — consumed only by build_options()
+# on the Claude path. Codex/OpenAI agents get tools from the served MCP
+# groups (toolsets.py) plus the Codex runtime's native shell/file/web tools.
+CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(
     {
         "WebSearch",
         "WebFetch",
@@ -156,7 +158,8 @@ class ToolPolicy:
         return tuple(name for name in names if self.group_enabled(name))
 
     def get_allowed_tools(self) -> list[str]:
-        """Get list of allowed tools based on policy.
+        """Get list of allowed tools based on policy (Claude path only —
+        Codex/OpenAI tool availability is the served MCP groups).
 
         Returns:
             Sorted list of tool names that are allowed.
@@ -165,7 +168,7 @@ class ToolPolicy:
         tools: set[str] = set()
 
         # Built-in tools
-        tools.update(BUILTIN_TOOLS)
+        tools.update(CLAUDE_BUILTIN_TOOLS)
 
         # TODO: Add your tool sets
         # tools.update(EXA_TOOLS)

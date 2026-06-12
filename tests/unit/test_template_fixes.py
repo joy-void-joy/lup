@@ -19,7 +19,7 @@ from lup_template.agent import prompts
 from lup_template.agent.config import aux_model, settings
 from lup_template.agent.core import build_result
 from lup_template.agent.models import AgentOutput
-from lup_template.agent.tool_policy import BUILTIN_TOOLS, ToolPolicy
+from lup_template.agent.tool_policy import CLAUDE_BUILTIN_TOOLS, ToolPolicy
 from lup.types import LupResponse, LupResultMessage
 
 
@@ -115,8 +115,8 @@ def test_build_result_falls_back_when_no_output_submitted(tmp_path: Path) -> Non
 
 def test_builtin_tools_excludes_todoread() -> None:
     """TodoRead is not a current Claude Code tool; only TodoWrite exists."""
-    assert "TodoRead" not in BUILTIN_TOOLS
-    assert "TodoWrite" in BUILTIN_TOOLS
+    assert "TodoRead" not in CLAUDE_BUILTIN_TOOLS
+    assert "TodoWrite" in CLAUDE_BUILTIN_TOOLS
 
 
 def test_allowed_tools_excludes_todoread() -> None:
