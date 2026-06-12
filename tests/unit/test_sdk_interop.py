@@ -696,6 +696,28 @@ class TestLupHooksToClaudeConversion:
         assert result.get("decision") == "block"
         assert result.get("reason") == "blocked"
 
+    def test_deny_outside_pre_tool_use_converts_to_block(self) -> None:
+        """Permission decisions exist only on PreToolUse — a denial from a
+        Stop/PostToolUse hook must become the generic block decision, not a
+        misrouted PreToolUse hookSpecificOutput."""
+        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.types import LupHookOutput
+
+        output = LupHookOutput(decision="deny", reason="not done yet")
+        result = lup_hook_output_to_claude(output, event="Stop")
+        assert result.get("hookSpecificOutput") is None
+        assert result.get("decision") == "block"
+        assert result.get("reason") == "not done yet"
+
+    def test_allow_outside_pre_tool_use_is_noop(self) -> None:
+        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.types import LupHookOutput
+
+        output = LupHookOutput(decision="allow")
+        result = lup_hook_output_to_claude(output, event="PostToolUse")
+        assert result.get("hookSpecificOutput") is None
+        assert result.get("decision") is None
+
     def test_converts_system_message(self) -> None:
         from lup.adapters.claude import lup_hook_output_to_claude
         from lup.types import LupHookOutput

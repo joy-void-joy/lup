@@ -54,6 +54,7 @@ from lup.types import (
     LupContentBlock,
     LupDoneEvent,
     LupEvent,
+    LupHookEvent,
     LupHookInput,
     LupHookMatcher,
     LupHookOutput,
@@ -89,8 +90,15 @@ type ClaudeHooksConfig = dict[HookEvent, list[HookMatcher]]
 
 def build_claude_hook_handler(
     lup_matcher: LupHookMatcher,
+    *,
+    event: LupHookEvent,
 ) -> Callable[[HookInput, str | None, HookContext], Awaitable[SyncHookJSONOutput]]:
-    """Build a Claude SDK hook handler from a LupHookMatcher."""
+    """Build a Claude SDK hook handler from a LupHookMatcher.
+
+    ``event`` is the hook event this handler is registered under — the
+    output conversion depends on it (permission decisions exist only on
+    PreToolUse).
+    """
     hook_fn = lup_matcher.hook
 
     async def claude_hook(
@@ -114,7 +122,7 @@ def build_claude_hook_handler(
             )
 
         lup_output = await hook_fn(lup_input)
-        return lup_hook_output_to_claude(lup_output)
+        return lup_hook_output_to_claude(lup_output, event=event)
 
     return claude_hook
 
@@ -126,7 +134,7 @@ def lup_hooks_to_claude(hooks: LupHooksConfig) -> ClaudeHooksConfig:
     for event_name, matchers in hooks.items():
         claude_matchers: list[HookMatcher] = []
         for lup_matcher in matchers:
-            handler = build_claude_hook_handler(lup_matcher)
+            handler = build_claude_hook_handler(lup_matcher, event=event_name)
             if lup_matcher.matcher:
                 claude_matchers.append(
                     HookMatcher(matcher=lup_matcher.matcher, hooks=[handler])
@@ -139,21 +147,30 @@ def lup_hooks_to_claude(hooks: LupHooksConfig) -> ClaudeHooksConfig:
     return result
 
 
-def lup_hook_output_to_claude(output: LupHookOutput) -> SyncHookJSONOutput:
-    """Convert a LupHookOutput to Claude SDK SyncHookJSONOutput."""
+def lup_hook_output_to_claude(
+    output: LupHookOutput,
+    *,
+    event: LupHookEvent = "PreToolUse",
+) -> SyncHookJSONOutput:
+    """Convert a LupHookOutput to Claude SDK SyncHookJSONOutput.
+
+    Permission decisions (``allow``/``deny``) exist only on PreToolUse;
+    on every other event a denial converts to the generic ``block``
+    decision, and an allow is a no-op output.
+    """
     decision = output.get("decision")
     reason = output.get("reason", "")
     system_message = output.get("system_message")
 
-    match decision:
-        case "allow":
+    match event, decision:
+        case ("PreToolUse", "allow"):
             return SyncHookJSONOutput(
                 hookSpecificOutput=PreToolUseHookSpecificOutput(
                     hookEventName="PreToolUse",
                     permissionDecision="allow",
                 )
             )
-        case "deny":
+        case ("PreToolUse", "deny"):
             return SyncHookJSONOutput(
                 hookSpecificOutput=PreToolUseHookSpecificOutput(
                     hookEventName="PreToolUse",
@@ -161,7 +178,7 @@ def lup_hook_output_to_claude(output: LupHookOutput) -> SyncHookJSONOutput:
                     permissionDecisionReason=reason,
                 )
             )
-        case "block":
+        case (_, "deny" | "block"):
             return SyncHookJSONOutput(decision="block", reason=reason)
         case _:
             if system_message:
@@ -287,6 +304,67 @@ type ClaudeUsageNormalizer = Callable[[Mapping[str, object]], Usage | None]
 """Transforms the raw Claude SDK usage payload into a (subclass of) Usage."""
 
 
+async def collect_lup_response(
+    client: ClaudeSDKClient,
+    *,
+    usage_normalizer: ClaudeUsageNormalizer = extract_token_usage,
+    trace_logger: TraceLogger | None = None,
+    prefix: str = "",
+) -> LupResponse:
+    """Drain a queried client's response stream into a LupResponse.
+
+    The single conversion path from a live SDK client to lup types —
+    ``ClaudeConversation.send`` and ``claude_query`` both collect
+    through it. Displays and traces each message as it arrives, raises
+    on agent errors and on streams that end without a result.
+    """
+    response = LupResponse()
+
+    async for message in client.receive_response():
+        lup_msg = claude_message_to_lup(message)
+        if lup_msg is not None:
+            print_message(lup_msg, prefix=prefix, trace=trace_logger)
+
+        match message:
+            case AssistantMessage():
+                lup_assistant = LupAssistantMessage(
+                    content=[claude_block_to_lup(b) for b in message.content]
+                )
+                response.messages.append(lup_assistant)
+                for block in message.content:
+                    response.blocks.append(claude_block_to_lup(block))
+
+            case ResultMessage():
+                response.session_id = message.session_id
+                response.result = LupResultMessage(
+                    structured_output=message.structured_output,
+                    is_error=message.is_error,
+                    result=message.result,
+                    duration_ms=message.duration_ms,
+                    total_cost_usd=message.total_cost_usd,
+                    usage=safe_normalize_usage(usage_normalizer, message.usage),
+                )
+                if message.is_error:
+                    raise RuntimeError(f"Agent error: {message.result}")
+
+            case SystemMessage():
+                logger.info("System [%s]: %s", message.subtype, message.data)
+
+            case UserMessage():
+                if isinstance(message.content, list):
+                    lup_user = LupUserMessage(
+                        content=[claude_block_to_lup(b) for b in message.content]
+                    )
+                    response.messages.append(lup_user)
+                    for block in message.content:
+                        response.tool_results.append(claude_block_to_lup(block))
+
+    if response.result is None:
+        raise RuntimeError("No result received from agent")
+
+    return response
+
+
 class ClaudeConversation(Conversation):
     """Multi-turn conversation via the Claude Agent SDK."""
 
@@ -306,54 +384,13 @@ class ClaudeConversation(Conversation):
         trace_logger: TraceLogger | None = None,
         prefix: str = "",
     ) -> LupResponse:
-        response = LupResponse()
-
         await self.client.query(prompt)
-        async for message in self.client.receive_response():
-            lup_msg = claude_message_to_lup(message)
-            if lup_msg is not None:
-                print_message(lup_msg, prefix=prefix, trace=trace_logger)
-
-            match message:
-                case AssistantMessage():
-                    lup_assistant = LupAssistantMessage(
-                        content=[claude_block_to_lup(b) for b in message.content]
-                    )
-                    response.messages.append(lup_assistant)
-                    for block in message.content:
-                        response.blocks.append(claude_block_to_lup(block))
-
-                case ResultMessage():
-                    response.session_id = message.session_id
-                    response.result = LupResultMessage(
-                        structured_output=message.structured_output,
-                        is_error=message.is_error,
-                        result=message.result,
-                        duration_ms=message.duration_ms,
-                        total_cost_usd=message.total_cost_usd,
-                        usage=safe_normalize_usage(
-                            self.usage_normalizer, message.usage
-                        ),
-                    )
-                    if message.is_error:
-                        raise RuntimeError(f"Agent error: {message.result}")
-
-                case SystemMessage():
-                    logger.info("System [%s]: %s", message.subtype, message.data)
-
-                case UserMessage():
-                    if isinstance(message.content, list):
-                        lup_user = LupUserMessage(
-                            content=[claude_block_to_lup(b) for b in message.content]
-                        )
-                        response.messages.append(lup_user)
-                        for block in message.content:
-                            response.tool_results.append(claude_block_to_lup(block))
-
-        if response.result is None:
-            raise RuntimeError("No result received from agent")
-
-        return response
+        return await collect_lup_response(
+            self.client,
+            usage_normalizer=self.usage_normalizer,
+            trace_logger=trace_logger,
+            prefix=prefix,
+        )
 
     async def interrupt(self) -> None:
         await self.client.interrupt()
