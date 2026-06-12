@@ -86,6 +86,9 @@ SLEEP_REQUEST_FILENAME = "sleep_request.json"
 STATE_FILENAME = "state.json"
 META_FLAG_FILENAME = "meta_flag"
 
+MAX_ACTIONS_BYTES = 32 * 1024 * 1024
+"""Default cap on the actions file — backpressure against a looping agent."""
+
 MISSING_SLEEP_MESSAGE = (
     "Your turn ended without calling sleep. This is a persistent session: "
     "you yield control with the sleep tool, and the environment wakes you "
@@ -183,6 +186,16 @@ class SleepRecordedOutput(BaseModel):
 # =====================================================================
 
 
+class RelayOverflowError(ToolError):
+    """The actions file exceeded its cap — events are not being consumed.
+
+    Raised by the writing side so a looping agent learns the channel is
+    wedged (``ToolError`` → ``is_error`` tool response) instead of
+    growing the file without bound. The file is append-only within a
+    run; a very long legitimate session can raise ``max_actions_bytes``.
+    """
+
+
 class RealtimeMailbox:
     """File-backed agent↔parent relay rooted at a realtime directory.
 
@@ -192,19 +205,36 @@ class RealtimeMailbox:
     One instance per side — the read offset lives in the parent's copy.
     """
 
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self, root: Path, *, max_actions_bytes: int | None = MAX_ACTIONS_BYTES
+    ) -> None:
         self.root = root
         self.actions_path = root / ACTIONS_FILENAME
         self.sleep_request_path = root / SLEEP_REQUEST_FILENAME
         self.state_path = root / STATE_FILENAME
         self.meta_flag_path = root / META_FLAG_FILENAME
+        self.max_actions_bytes = max_actions_bytes
         self.read_offset = 0
 
     # -- tool side (subprocess) -----------------------------------------
 
     def append_event(self, event: RelayEvent) -> None:
-        """Append one event line for the parent to apply."""
+        """Append one event line for the parent to apply.
+
+        Raises :class:`RelayOverflowError` once the actions file reaches
+        ``max_actions_bytes`` (None disables the cap).
+        """
         self.root.mkdir(parents=True, exist_ok=True)
+        if (
+            self.max_actions_bytes is not None
+            and self.actions_path.exists()
+            and self.actions_path.stat().st_size >= self.max_actions_bytes
+        ):
+            raise RelayOverflowError(
+                f"Relay actions file reached {self.max_actions_bytes} bytes; "
+                "the parent is not consuming events. Stop emitting and end "
+                "the turn."
+            )
         with self.actions_path.open("a", encoding="utf-8") as f:
             f.write(event.model_dump_json() + "\n")
 

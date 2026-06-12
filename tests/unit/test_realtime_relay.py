@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 
 from lup.adapters.common import Conversation
 from lup.mcp import LupMcpTool
@@ -118,6 +120,23 @@ class TestMailbox:
         assert state is not None
         assert state.unread_events == 2
         assert state.model_dump()["channel"] == "general"
+
+    def test_append_event_backpressure(self, tmp_path: Path) -> None:
+        """Once the actions file reaches the cap, writes raise instead of
+        growing without bound — a looping agent gets an is_error response
+        (RelayOverflowError is a ToolError) rather than a wedged parent."""
+        from lup.realtime_relay import RelayOverflowError
+
+        mailbox = RealtimeMailbox(tmp_path, max_actions_bytes=16)
+        mailbox.append_event(ReplyEvent(message="x" * 64))
+        with pytest.raises(RelayOverflowError, match="not consuming"):
+            mailbox.append_event(ReplyEvent(message="y"))
+
+    def test_append_event_cap_disabled(self, tmp_path: Path) -> None:
+        mailbox = RealtimeMailbox(tmp_path, max_actions_bytes=None)
+        for n in range(3):
+            mailbox.append_event(ReplyEvent(message=f"{n}" * 64))
+        assert len(RealtimeMailbox(tmp_path).read_new_events()) == 3
 
 
 class TestRelayTools:
