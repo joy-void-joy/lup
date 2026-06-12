@@ -57,6 +57,7 @@ class SessionResult(BaseModel):  # claude: ignore
 
     session_id: str
     timestamp: str
+    agent_sdk: str | None = None
     outcome: Any | None = None
     metrics: dict[str, Any] | None = None
 
@@ -71,6 +72,7 @@ class FeedbackMetrics(BaseModel):  # claude: ignore
     since_timestamp: str | None = None
     total_sessions: int
     sessions_with_outcomes: int
+    sessions_by_sdk: dict[str, int] = {}
     results: list[SessionResult] = []
 
 
@@ -145,6 +147,7 @@ def match_outcomes(  # claude: ignore
         result = SessionResult(
             session_id=session_id,
             timestamp=timestamp,
+            agent_sdk=session.get("agent_sdk"),
             outcome=outcome_data,
             metrics=session.get("tool_metrics"),
         )
@@ -154,13 +157,19 @@ def match_outcomes(  # claude: ignore
 
 
 def compute_metrics(results: list[SessionResult]) -> FeedbackMetrics:
-    """Compute aggregate metrics from session results."""
+    """Compute aggregate metrics from session results.
+
+    Sessions are counted per backend (``sessions_by_sdk``) so mixed
+    Claude/Codex collections never pool silently into one trend.
+    """
     sessions_with_outcomes = sum(1 for r in results if r.outcome is not None)
+    by_sdk = Counter(r.agent_sdk or "unknown" for r in results)
 
     return FeedbackMetrics(
         collection_timestamp=datetime.now().isoformat(),
         total_sessions=len(results),
         sessions_with_outcomes=sessions_with_outcomes,
+        sessions_by_sdk=dict(by_sdk),
         results=results,
     )
 
@@ -219,6 +228,100 @@ def load_sessions_for_versions(  # claude: ignore
     for v in versions:
         results.extend(load_sessions(version=v))
     return results
+
+
+class BackendCostRow(TypedDict):
+    """Per-backend rollup row for the costs command."""
+
+    sessions: int
+    cost_usd: float
+    without_cost: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+
+
+def empty_cost_row() -> BackendCostRow:
+    return BackendCostRow(
+        sessions=0,
+        cost_usd=0.0,
+        without_cost=0,
+        input_tokens=0,
+        output_tokens=0,
+        cache_read_input_tokens=0,
+    )
+
+
+def rollup_costs(
+    sessions: list[dict[str, Any]],
+) -> dict[str, BackendCostRow]:  # claude: ignore
+    """Group session cost and token totals by ``agent_sdk``.
+
+    Sessions without a cost (codex/openai runs without
+    ``CODEX_USD_PER_MTOK_*`` rates) count into ``without_cost`` so a
+    missing-rates gap stays visible instead of reading as free.
+    """
+    rows: dict[str, BackendCostRow] = {}
+    for s in sessions:
+        sdk = s.get("agent_sdk") or "unknown"
+        row = rows.setdefault(sdk, empty_cost_row())
+        row["sessions"] += 1
+        cost = s.get("cost_usd")
+        if cost:
+            row["cost_usd"] += cost
+        else:
+            row["without_cost"] += 1
+        usage = s.get("token_usage") or {}
+        row["input_tokens"] += usage.get("input_tokens", 0) or 0
+        row["output_tokens"] += usage.get("output_tokens", 0) or 0
+        row["cache_read_input_tokens"] += usage.get("cache_read_input_tokens", 0) or 0
+    return rows
+
+
+def costs(version: str | None, all_versions: bool, as_json: bool) -> None:
+    """Per-backend session cost/token rollup from session result JSONs.
+
+    The cross-backend counterpart of ``lup-devtools usage`` (which is
+    Anthropic-OAuth only): codex/openai sessions carry normalized token
+    usage and rate-estimated cost in their session JSON, and this is
+    where they aggregate.
+    """
+    effective, ver_warning = resolve_version(version, all_versions)
+    if ver_warning:
+        typer.echo(ver_warning)
+
+    sessions = load_sessions_for_versions(effective)
+    rows = rollup_costs(sessions)
+
+    if as_json:
+        output_json(rows)
+        return
+    if not rows:
+        typer.echo("No sessions with result JSON found.")
+        return
+
+    scope = ", ".join(effective) if effective else "all versions"
+    typer.echo(f"=== Cost/token rollup by backend ({scope}) ===\n")
+    typer.echo(
+        f"{'backend':<10} {'sessions':>8} {'cost_usd':>10} {'no-cost':>8} "
+        f"{'input':>12} {'output':>12} {'cached':>12}"
+    )
+    for name in sorted(rows):
+        row = rows[name]
+        cost_display = f"${row['cost_usd']:.2f}" if row["cost_usd"] else "—"
+        typer.echo(
+            f"{name:<10} {row['sessions']:>8} {cost_display:>10} "
+            f"{row['without_cost']:>8} {row['input_tokens']:>12,} "
+            f"{row['output_tokens']:>12,} {row['cache_read_input_tokens']:>12,}"
+        )
+    total_cost = sum(row["cost_usd"] for row in rows.values())
+    no_cost = sum(row["without_cost"] for row in rows.values())
+    typer.echo(f"\nTotal: ${total_cost:.2f} across {len(sessions)} sessions")
+    if no_cost:
+        typer.echo(
+            f"({no_cost} session(s) carry tokens but no cost — set "
+            "CODEX_USD_PER_MTOK_* rates to estimate codex/openai cost)"
+        )
 
 
 def collect_session_ids(effective: list[str] | None) -> set[str]:
@@ -457,6 +560,7 @@ def status(  # noqa: C901
         if total_cost > 0:
             typer.echo(f"\nTotal cost: ${total_cost:.2f}")
             typer.echo(f"Avg cost/session: ${total_cost / total:.4f}")
+            typer.echo("Per-backend rollup: uv run lup-devtools feedback costs")
 
         total_input = 0
         total_output = 0
