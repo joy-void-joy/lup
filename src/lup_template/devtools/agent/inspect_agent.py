@@ -223,3 +223,37 @@ def run_inspect(as_json: bool, full: bool) -> None:
     out.write("\n")
 
     page_output(out.getvalue())
+
+
+def run_capabilities(markdown: bool) -> None:
+    """Print the backend capability matrix — the parity contract, generated.
+
+    ``--markdown`` emits the README-ready table; the regression test in
+    ``tests/unit/test_capability_matrix_docs.py`` keeps the README copy
+    identical to this output.
+    """
+    from lup.adapters.common import (
+        AdapterCapabilities,
+        canonical_capability_matrix,
+        capability_matrix_markdown,
+    )
+
+    matrix = canonical_capability_matrix()
+    if markdown:
+        typer.echo(capability_matrix_markdown(matrix))
+        return
+
+    names = list(matrix)
+    fields = list(AdapterCapabilities.model_fields)
+    label_width = max(len(field) for field in fields)
+
+    typer.echo(" " * (label_width + 2) + "".join(f"{name:>10}" for name in names))
+    for field in fields:
+        cells: list[str] = []
+        for name in names:
+            match getattr(matrix[name], field):
+                case bool() as flag:
+                    cells.append(f"{'yes' if flag else '—':>10}")
+                case value:
+                    cells.append(f"{value:>10}")
+        typer.echo(f"{field:<{label_width}}  " + "".join(cells))
