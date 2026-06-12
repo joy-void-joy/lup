@@ -26,7 +26,7 @@ import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Required, TypedDict, cast
 
 import sh
 import typer
@@ -36,6 +36,23 @@ from lup_template.devtools.utils import git
 
 app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
+
+
+class ProjectEntry(TypedDict, total=False):
+    """One tracked upstream project, merged from downstream.json(.local)."""
+
+    name: Required[str]
+    path: str
+    url: str
+    branch: str
+    last_synced_commit: str
+    ignore: bool
+
+
+class DownstreamConfig(TypedDict):
+    """Top-level shape of downstream.json and downstream.json.local."""
+
+    projects: list[ProjectEntry]
 
 
 def downstream_file() -> Path:
@@ -54,14 +71,13 @@ def refs_dir() -> Path:
     return project_root() / "refs"
 
 
-def load_json(path: Path) -> dict[str, list[dict[str, str]]]:
+def load_json(path: Path) -> DownstreamConfig:
     if not path.exists():
         return {"projects": []}
-    result: dict[str, list[dict[str, str]]] = json.loads(path.read_text())
-    return result
+    return cast(DownstreamConfig, json.loads(path.read_text()))
 
 
-def save_local(data: dict[str, list[dict[str, str]]]) -> None:
+def save_local(data: DownstreamConfig) -> None:
     local_file().write_text(json.dumps(data, indent=2) + "\n")
 
 
@@ -81,26 +97,26 @@ def ensure_ref_symlink(name: str, target: str) -> None:
     logger.debug("refs/%s -> %s", name, target_path)
 
 
-def load_projects() -> list[dict[str, str]]:
+def load_projects() -> list[ProjectEntry]:
     """Load and merge projects from downstream.json + downstream.json.local."""
     base = load_json(downstream_file())
     local = load_json(local_file())
 
-    merged: dict[str, dict[str, str]] = {}
+    merged: dict[str, ProjectEntry] = {}
     for p in base.get("projects", []):
-        merged[p["name"]] = dict(p)
+        merged[p["name"]] = p.copy()
     for p in local.get("projects", []):
         name = p["name"]
         if name in merged:
             base_entry = merged[name]
-            merged[name] = {**base_entry, **p}
+            merged[name] = cast(ProjectEntry, {**base_entry, **p})
         else:
-            merged[name] = dict(p)
+            merged[name] = p.copy()
 
     return list(merged.values())
 
 
-def find_project(name: str) -> dict[str, str]:
+def find_project(name: str) -> ProjectEntry:
     """Find a project by name, raising Exit if not found."""
     projects = load_projects()
     proj = next((p for p in projects if p["name"] == name), None)
@@ -127,7 +143,7 @@ def resolve_existing_path(proj: dict[str, str]) -> str | None:
 
 
 def ensure_local(
-    proj: dict[str, str],
+    proj: ProjectEntry,
     report: Callable[[str], None] = typer.echo,
 ) -> str:
     """Ensure a project has a usable local path.
@@ -360,15 +376,16 @@ def setup_project(
     if entry:
         entry["path"] = str(resolved)
     else:
-        entry = {"name": name, "path": str(resolved)}
+        entry = ProjectEntry(name=name, path=str(resolved))
         local_projects.append(entry)
         local_data["projects"] = local_projects
 
     if branch:
         entry["branch"] = branch
 
+    head = current_head(str(resolved)) if synced else ""
     if synced:
-        entry["last_synced_commit"] = current_head(str(resolved))
+        entry["last_synced_commit"] = head
 
     save_local(local_data)
     ensure_ref_symlink(name, str(resolved))
@@ -376,4 +393,4 @@ def setup_project(
     if branch:
         typer.echo(f"  Tracking branch: {branch}")
     if synced:
-        typer.echo(f"  Marked as synced at {entry['last_synced_commit'][:8]}")
+        typer.echo(f"  Marked as synced at {head[:8]}")

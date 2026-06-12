@@ -36,8 +36,20 @@ def with_retry[T](
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Decorator for retrying async functions with exponential backoff.
 
-    Retries on HTTP errors (status errors, timeouts, connection errors)
-    plus any additional exception types specified via extra_exceptions.
+    **What:** Re-invokes the wrapped function on transient HTTP failures
+    (``httpx`` status errors, timeouts, connection errors) plus any types
+    in *extra_exceptions*, waiting exponentially longer between attempts
+    (bounded by *min_wait*/*max_wait*) and re-raising the last error once
+    *max_attempts* is exhausted. Exceptions outside the retryable set
+    propagate immediately.
+
+    **When:** Wrap outbound API and network calls whose failures are
+    usually transient — rate limits, flaky connections, upstream hiccups.
+    Don't wrap logic errors or non-idempotent operations.
+
+    **Why:** A tool handler that surfaces a one-off network blip as an
+    error pollutes traces and misleads the agent; retrying at the call
+    boundary absorbs that noise without hand-rolled loops.
 
     Args:
         max_attempts: Maximum number of retry attempts.

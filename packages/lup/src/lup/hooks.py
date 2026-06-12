@@ -146,8 +146,23 @@ def create_permission_hooks(
 def create_tool_allowlist_hook(
     allowed_tools: list[str],
 ) -> LupHooksConfig:
-    """Create a PreToolUse hook that restricts the agent to only allowed tools."""
+    """Create a PreToolUse hook that restricts the agent to an allowed tool set.
+
+    **What:** Denies every tool call whose name is not in *allowed_tools*,
+    answering with the full list of tools that ARE available so the agent
+    can re-plan instead of retrying blindly. Allowed tools get an explicit
+    allow decision.
+
+    **When:** Use whenever ``permission_mode="bypassPermissions"`` is set —
+    the SDK's ``allowed_tools`` option is ignored in that mode, so a
+    PreToolUse hook is the only enforcement point.
+
+    **Why:** Makes tool availability a structural guarantee instead of a
+    prompt rule: excluded tools cannot run, and the denial message turns a
+    dead end into a redirect.
+    """
     allowed = frozenset(allowed_tools)
+    available = ", ".join(sorted(allowed))
 
     async def allowlist_hook(input_data: LupHookInput) -> LupHookOutput:
         if input_data.get("hook_event_name") != "PreToolUse":
@@ -156,7 +171,10 @@ def create_tool_allowlist_hook(
         tool_name = input_data.get("tool_name", "")
         if tool_name in allowed:
             return allow_hook()
-        return deny_hook(f"Tool '{tool_name}' not in allowed list.")
+        return deny_hook(
+            f"Tool '{tool_name}' is not available in this session. "
+            f"Available tools: {available}"
+        )
 
     return {
         "PreToolUse": [LupHookMatcher(hook=allowlist_hook, tag="allowlist")],
@@ -168,9 +186,20 @@ def create_nudge_hook(
 ) -> LupHooksConfig:
     """Create a PostToolUse hook that nudges the agent toward better alternatives.
 
-    Instead of hard-blocking a tool via PreToolUse denial, this injects a
-    system message after the tool runs, suggesting a better approach. The
-    agent remains free to ignore the nudge.
+    **What:** After a tool in *nudges* runs, calls its check function with
+    the full hook input; when the check returns a message, that message is
+    injected as a system message. The tool result itself is untouched, and
+    the agent remains free to ignore the nudge.
+
+    **When:** Use when an alternative tool or approach exists but a
+    PreToolUse denial would be too restrictive — the original tool still
+    works, just suboptimally (e.g. WebFetch on a site with a structured
+    API, or Bash where a dedicated tool exists). For hard constraints,
+    use :func:`create_tool_gate` instead.
+
+    **Why:** Mid-turn guidance lands where prompt rules don't: the nudge
+    arrives exactly at the suboptimal call, with the call's own context,
+    instead of being a standing instruction the agent must remember.
 
     Args:
         nudges: Mapping of tool_name to a check function. The check receives

@@ -553,7 +553,7 @@ class TestGenericToolAllowlistHook:
         )
         result = run_awaitable(hook_fn(inp))
         assert result.get("decision") == "deny"
-        assert "not in allowed list" in result.get("reason", "")
+        assert "is not available in this session" in result.get("reason", "")
 
 
 class TestGenericReflectionGate:

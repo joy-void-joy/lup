@@ -148,13 +148,14 @@ def build_options(
         sandbox=session_sandbox,
     )
 
+    policy = ToolPolicy(settings)
+
     all_servers = [
-        create_mcp_server(name, tools=tools)
+        create_mcp_server(name, tools=policy.filter_tools(tools))
         for name, tools in toolset["groups"].items()
         if name != EXAMPLE_GROUP
     ]
 
-    policy = ToolPolicy(settings)
     policy_servers = policy.get_mcp_servers(*all_servers)
 
     system_prompt = get_system_prompt()
@@ -176,6 +177,13 @@ def build_options(
 
     completion_hooks = create_completion_guard(toolset["output_path"].exists)
     hooks = merge_hooks(hooks, completion_hooks)
+
+    # Tool allowlist: allowed_tools in options is ignored under
+    # bypassPermissions, so availability is enforced by a PreToolUse hook.
+    from lup.hooks import create_tool_allowlist_hook
+
+    allowed_tools = policy.get_allowed_tools(policy_servers)
+    hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
 
     claude_hooks = lup_hooks_to_claude(hooks)
 
@@ -208,7 +216,7 @@ def build_options(
         mcp_servers=mcp_servers,
         agents=subagents,
         add_dirs=[str(d) for d in notes.all_dirs],
-        allowed_tools=policy.get_allowed_tools(),
+        allowed_tools=allowed_tools,
         max_turns=settings.max_turns,
         max_budget_usd=settings.max_budget_usd,
         effort=cast("EffortLevel | None", settings.reasoning_effort),
@@ -483,14 +491,20 @@ def build_adapter(
     match settings.agent_sdk:
         case "claude":
             from lup.adapters.claude import ClaudeAdapter
-            from lup.sandbox import Sandbox
 
-            sb = Sandbox(
-                session_id=session_id,
-                shared_dir=notes.session / "sandbox_shared",
-                timeout_seconds=settings.sandbox_timeout_seconds,
-            )
-            adapter, ctx = ClaudeAdapter(build_options(notes, sandbox=sb)), sb
+            # Sandbox is optional: AGENT_SANDBOX_ENABLED=false runs the
+            # agent without code execution tools (no Docker required).
+            sb: Sandbox | None = None
+            if settings.sandbox_enabled:
+                from lup.sandbox import Sandbox
+
+                sb = Sandbox(
+                    session_id=session_id,
+                    shared_dir=notes.session / "sandbox_shared",
+                    timeout_seconds=settings.sandbox_timeout_seconds,
+                )
+            adapter = ClaudeAdapter(build_options(notes, sandbox=sb))
+            ctx = sb if sb is not None else nullcontext()
 
         case "codex":
             adapter, ctx = (
