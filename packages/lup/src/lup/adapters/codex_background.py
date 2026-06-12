@@ -24,7 +24,7 @@ class CodexBackgroundAgent(BaseBackgroundAgent):
         system_prompt: str,
         build_message: Callable[[], str | None],
         start_message: str = "",
-        model: str = "gpt-4.1-mini",
+        model: str,
         debounce_seconds: float = 3.0,
         on_response: Callable[[str], None] | None = None,
     ) -> None:

@@ -24,6 +24,15 @@ class TestCreateBackgroundAgent:
                 builtin_tools=["Read"],
             )
 
+    def test_codex_requires_explicit_model(self) -> None:
+        with pytest.raises(ValueError, match="explicit model"):
+            create_background_agent(
+                "codex",
+                name="observer",
+                system_prompt="summarize",
+                build_message=build_message,
+            )
+
     def test_unknown_sdk_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown SDK"):
             create_background_agent(
