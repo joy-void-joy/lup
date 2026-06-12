@@ -19,9 +19,9 @@ I believe that claude code may be underappreciated right now. Not just the agent
 
 The basic pattern is to create a ClaudeAgentSDK client, connect many tools to it (like fetching from APIs, searching the web, executing code, interacting with the world) and let claude code decide when to call them.
 
-I've found developping those SDK applications with the help of Claude Code to work very well, as well as using Claude Code to improve the whole development scaffolding, using it to add /-commands that speeds up my development, to document general principles and developping devtools to help me or itself navigate it faster. More importantly, Claude Code can review results from past sessions, and tweak the agent based on it, be it its tools, prompts, or all aspect of the pipeline and workflow.
+I've found developing those SDK applications with the help of Claude Code to work very well, as well as using Claude Code to improve the whole development scaffolding, using it to add /-commands that speeds up my development, to document general principles and developing devtools to help me or itself navigate it faster. More importantly, Claude Code can review results from past sessions, and tweak the agent based on it, be it its tools, prompts, or all aspect of the pipeline and workflow.
 
-This repository is focused on this sort of agent-improvement and meta-self-improvement. It contains tools for storing the traces of all past agents, versionning the current agent, commands for reviewing them and seeing how to improve based on it, common multi-agents pattterns I've found useful, as well as meta-commands to add commands or review your own development with Claude Code.
+This repository is focused on this sort of agent-improvement and meta-self-improvement. It contains tools for storing the traces of all past agents, versioning the current agent, commands for reviewing them and seeing how to improve based on it, common multi-agents patterns I've found useful, as well as meta-commands to add commands or review your own development with Claude Code.
 
 Over writing and reusing this technique over the past month, I have come to find that having a template and plugin as a base can really speed up the development and the coherence of Claude. This repository is a sort of extract of all the common patterns and plugin command and scripts I have found useful.
 
@@ -43,9 +43,9 @@ But you could use it for so much more. Real-time monitoring, mathematical proofs
 To start using this repo either:
 
 - For a fresh repository: Use the "Use this template" button on github, or clone this repository. In the newly cloned repository, use /lup:init [description of your project] or /lup:brainstorm to first flesh out the broad shape of it
-- For an already existing repository, clone lup inside it, and either use /lup:install to install the bare plugin, or /lup:install --interactive to pick which pieces (plugin, devtools, feedback scaffolding) to bring in
+- For an already existing repository, clone lup inside it, and either use /lup:install to install the bare plugin, or /lup:install --interactive to install the plugin and walk through which pieces of the scaffolding (hooks, commands, devtools, CLAUDE.md sections) to bring over
 
-You will need to install [uv] for python management and [fzf] for fuzzy-file matching. Docker is an additional dependency if you plan to use the sandboxing capabilities.
+You will need to install [uv] for python management, and [fzf] and [jq] for fuzzy-file matching. Docker is an additional dependency if you plan to use the sandboxing capabilities (set `AGENT_SANDBOX_ENABLED=false` to run without it).
 
 To run the inner agent once everything is synced:
 
@@ -106,15 +106,15 @@ This repository contains many elements and code template that are designed to ma
 
 ### Meta development
 
-Whenever you hit a pain point in your own development flow, turn it into scaffolding: /lup:add-command creates a new slash command from a description, /lup:meta reviews and reshapes the whole .claude structure, and /lup:hooks adjusts the permission patterns. The repo treats your development workflow as just another agent to improve.
+The Claude Code setup itself is treated as part of the product. Whenever a pain point shows up in your workflow, you fix the workflow, not just the instance: /lup:add-command and /lup:modify-command create and evolve slash commands, /lup:hooks edits the permission hook patterns, /lup:meta reviews the whole .claude structure and brainstorms improvements, and /lup:principle propagates a general principle across the entire repo. Downstream projects can pull improvements from this template with /lup:update, and patterns that emerged downstream flow back here with /lup:import.
 
 ### Worktree management
 
-All code changes happen in worktrees, never directly on dev. `uv run lup-devtools dev worktree create <name>` creates a sibling checkout under tree/, syncs dependencies, and refreshes the plugin cache. `lup-devtools dev check` runs the pre-flight (format, lint, pyright, pytest) before a PR, and /lup:rebase squashes history and opens it.
+Development happens in git worktrees — one directory per branch, siblings under `tree/` — so several features can be worked on in parallel without switching files in place. `uv run lup-devtools dev worktree create <name>` creates one (and syncs dependencies and plugins), `lup-devtools dev check` runs the pre-flight (format, lint, pyright, pytest) before a PR, /lup:rebase pushes the branch and opens a PR with a cleaned-up history, /lup:close merges the approved PR, and /lup:clean-gone prunes worktrees whose branches are gone. `uv run lup-devtools dev branches` and `dev survey` show branch containment and PR status at a glance.
 
 ### Feedback loop
 
-Every agent session writes its trace, structured output, and tool metrics under notes/traces/\<version\>/. The /lup:feedback-loop command (or the individual /lup:fb-\* stages) reads those traces, classifies failures, and proposes changes to tools, prompts, or pipeline — which you then land, bump with /lup:bump, and compare across versions.
+Every agent session writes its traces, outputs, and session JSONs under `notes/traces/<version>/`. /lup:feedback-loop orchestrates the analysis over them: collect metrics (`lup-devtools feedback collect`), read traces deeply (`lup-devtools trace show`), classify what failed and why, then implement changes — tools first, prompts last. /lup:bump versions the agent (`[tool.lup] agent_version` in pyproject.toml) so results stay comparable across behavior changes.
 
 # More thorough description
 
@@ -122,32 +122,37 @@ Every agent session writes its trace, structured output, and tool metrics under 
 
 ### lib
 
-packages/lup is the standalone library: SDK adapters (Claude, Codex, OpenAI-compatible) behind one AgentAdapter interface, the shared type vocabulary (lup.types), MCP tool plumbing, the submit_output finalization tool, the reflection gate, session storage, tracing, metrics, the Docker sandbox, and the persistent-agent scheduler. It is complete as-is and configurable through function arguments — domain code never modifies it.
+`packages/lup` is the standalone library — a uv workspace member that any project can depend on without modification. It contains the reusable building blocks: SDK adapters (Claude, Codex, OpenAI-compatible) behind one AgentAdapter interface (`lup.adapters`), the shared type vocabulary (`lup.types`), MCP tool creation (`lup.mcp`), hook utilities and tool gates (`lup.hooks`), the submit_output finalization tool (`lup.output`), the reflection gate (`lup.reflect`), trace logging (`lup.trace`), session history (`lup.history`), version-aware paths (`lup.paths`), the scheduler for persistent agents (`lup.realtime`), and the Docker sandbox (`lup.sandbox`). It is configured through function arguments, never by editing its source, and it never gets renamed in downstream projects.
 
 ### agent
 
-src/lup_template/agent is the part the feedback loop improves: orchestration (core.py), output models, prompts, subagent specs, tool policy, and the domain tools (reflect, realtime, examples). /lup:init customizes these for your domain.
+`src/lup_template/agent` is the part the feedback loop improves: the orchestration (`core.py`), the system prompts (`prompts.py`), the output models (`models.py`), the SDK-agnostic subagent specs (`subagents.py`), the MCP tools (`tools/`), and the tag-based tool policy (`tool_policy.py`) that excludes tools whose API keys are missing. /lup:init renames and customizes this package for your domain.
 
 ### Environment
 
-src/lup_template/environment is the harness around the agent — the CLI that runs sessions and auto-commits results. It evolves with application requirements rather than via the feedback loop.
+`src/lup_template/environment` is the domain scaffolding around the agent — user interaction, game logic, application flow. It exposes the `lup` CLI entry point (`uv run lup run "task"`, `uv run lup loop "task1" "task2"`) that runs sessions and auto-commits their results. It evolves with your application's requirements, but not via the feedback loop.
 
 ## Claude code plugin
 
 This repository contains many quality of life improvements over the barebone claude code experience:
 
-- Hooks for automatically aproving and denying edition and code executions: I am too worried with potential prompt injections and hallucination to let Claude Code run python unprompted. Likewise, I have found that letting claude code in auto-edit mode makes a patch of code that's quite unreadable with many questionable decision, no matter the initial direction and content of Claude.md. On the other hand, manually reviewing everything is exhausting and leads to counterproductive decision-fatigue where you just approve everything repeatedly. I have found that auto-denying python calls while pre-approving investigative commands (see #devtools) means it's manageable, and same for auto-accepting small edits.
+- Hooks for automatically approving and denying edition and code executions: I am too worried with potential prompt injections and hallucination to let Claude Code run python unprompted. Likewise, I have found that letting claude code in auto-edit mode makes a patch of code that's quite unreadable with many questionable decision, no matter the initial direction and content of Claude.md. On the other hand, manually reviewing everything is exhausting and leads to counterproductive decision-fatigue where you just approve everything repeatedly. I have found that auto-denying python calls while pre-approving investigative commands (see #devtools) means it's manageable, and same for auto-accepting small edits.
 - Commands and meta-commands for modifying your experience whenever you find a pain point (like /lup:add-command or /lup:meta)
 - subagents specialized in reading the traces and the different versions of your project, and understanding the strength of one version over another
 - fzf fuzzy matching for @ file references
 
 ### Subagents
 
-The plugin ships analysis subagents the feedback loop relies on: trace-explorer reads session traces in depth, version-explorer and version-reviewer compare agent versions, and implementer executes prioritized changes from an analysis.
+The plugin ships four subagents that do context-heavy work in their own window and return a compact report:
+
+- **trace-explorer** — reads many session traces in bulk and returns cross-cutting patterns (tool failures, capability gaps, reasoning quality)
+- **version-explorer** — retrieves and diffs agent code across version tags
+- **version-reviewer** — holistic review of one agent version: its prompt, its performance data, what to keep and what to change
+- **implementer** — TDD implementer that writes production code to make tests pass but will not touch test files
 
 ### Hooks
 
-Three PreToolUse hook scripts manage permissions by pattern: auto_allow_bash.py (allow/deny rules for commands, last-match-wins), auto_allow_fetch.py (URL patterns for WebFetch), and auto_allow_edits.py (auto-allows small edits, counts "real" changed lines, detects anti-patterns like bare excepts or Any). /lup:hooks edits the patterns.
+Three PreToolUse hook scripts manage permissions instead of glob rules in settings.json. `auto_allow_bash.py` evaluates each shell segment of a command against an allow/deny rule list — denying python invocations, pre-approving investigative commands like git, grep, and lup-devtools. `auto_allow_edits.py` auto-allows small edits (<=3 real changed lines, ignoring imports, comments, and docstrings) and scans added lines for anti-patterns like `Any` or `# type: ignore`; it also gates Write, so full-file rewrites always go through you. `auto_allow_fetch.py` matches URLs against an allowlist anchored to the URL origin. Everything that doesn't match falls through to the normal permission prompt, and /lup:hooks lets you view and modify the patterns.
 
 ### Claude commands
 
@@ -155,24 +160,23 @@ To speed up development, many claude commands and meta-commands are built in thi
 
 - add-command
 - modify-command
+- meta
+- principle
 
 - bump
 
 - commit
 - rebase
 - merge
+- merge-conflict
 - clean-gone
 - close
 
 - create-investigator
 - debug
+- review
 
-- feedback-loop
-- fb-status
-- fb-investigate
-- fb-analyze
-- fb-reflect
-- fb-implement
+- feedback-loop (and its fb-status / fb-investigate / fb-analyze / fb-reflect / fb-implement phases)
 
 - hooks
 - meta
@@ -190,14 +194,14 @@ To speed up development, many claude commands and meta-commands are built in thi
 
 ## Devtools
 
-One CLI, `uv run lup-devtools`, with sub-apps used by both Claude and humans:
+All development tooling is exposed as the `lup-devtools` CLI (run `uv run lup-devtools --help` for the full tree), aimed at both human use and agent use:
 
-- `agent` — inspect the full agent configuration, serve its MCP tools (the Codex backend launches this as its tool server), chat or REPL with the agent
-- `trace` — list, show, and search session traces; scan for errors and capability gaps
-- `feedback` — collect session metrics, show analysis state, commit session results
-- `dev` — worktrees, branches, PRs, conflict resolution, and the `check` pre-flight
-- `py` — Python module introspection (signatures, sources, trees)
-- `setup` — interactive wizard for integrations and API keys
-- `sync` — track downstream/upstream repos for /lup:update and /lup:import
-- `version` — agent version, classified changelog, version bumps
-- `usage` — live Claude Code usage display with pacing
+- `agent` — agent introspection and debugging (inspect, serve-tools, chat, repl); the Codex backend launches `serve-tools` as its tool server
+- `py` — Python module introspection (info, source, eval, imports, search)
+- `dev` — worktrees, branches, PRs, conflicts, and pre-flight checks
+- `feedback` — feedback state, metrics, and session commits
+- `setup` — interactive setup wizard for integrations and API keys
+- `sync` — upstream sync tracking against the lup template
+- `trace` — trace display, search, and analysis
+- `usage` — Claude Code usage display
+- `version` — agent version, changelog, and bump

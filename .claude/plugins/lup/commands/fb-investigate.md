@@ -8,6 +8,16 @@ argument-hint: <session_id1> [session_id2 ...]
 
 Build first-hand understanding of what happened in each target session.
 
+## Breadth vs. Depth
+
+For the deep pass (the 5-10 selected target sessions), read the traces directly — first-hand reading is the point of this phase. When the session list is larger, or you need cross-cutting patterns over many sessions, delegate the bulk reading to the `trace-explorer` agent instead of reading every trace in this conversation: it reads traces in its own context window and returns a compact pattern report.
+
+```
+Agent(subagent_type="lup:trace-explorer", prompt="Analyze traces for sessions <ids>; report tool failures, capability gaps, reasoning quality")
+```
+
+Use its report to pick which sessions deserve the direct deep read below.
+
 ## Per-Session Investigation
 
 For each target session:

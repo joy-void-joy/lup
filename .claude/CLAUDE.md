@@ -77,8 +77,10 @@ Compare: `"Search the web for information"` vs. `"Search the web using keyword q
 packages/
 └── lup/                        # Standalone library (uv workspace member)
     ├── pyproject.toml
+    ├── README.md
     └── src/lup/
         ├── __init__.py         # Public API re-exports (__all__); imports no SDK
+        ├── py.typed            # PEP 561 typing marker
         ├── adapters/           # ALL SDK-specific code lives here
         │   ├── common.py       # AgentAdapter/Conversation ABCs, query() dispatcher
         │   ├── claude.py       # Claude Agent SDK adapter + type converters
@@ -121,14 +123,19 @@ src/
     │       └── reflect.py      # Forced self-review tool (reviewer sub-agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
-    │   ├── trace/              # Trace display, search, and analysis
+    │   ├── agent.py            # Agent introspection (inspect, chat, repl, serve-tools)
+    │   ├── py.py               # Python module introspection (info, source, eval, ...)
+    │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
-    │   ├── dev/                # Worktrees, branches, and pre-flight checks
+    │   ├── trace/              # Trace display, search, and analysis
     │   ├── setup.py            # Interactive setup wizard (customize integrations)
+    │   ├── sync.py             # Upstream sync tracking
+    │   ├── usage.py            # Claude Code usage display
+    │   ├── utils.py            # Shared CLI helpers
     │   └── version.py          # Version display, changelog, and bump
     └── environment/            # Domain scaffolding (user interaction, game logic)
         └── cli/
-            └── __main__.py     # Typer CLI (run + loop with auto-commit)
+            └── __main__.py     # Typer CLI — the `lup` entry point (run + loop with auto-commit)
 ```
 
 ### Design Patterns
@@ -315,7 +322,7 @@ Use `/lup:merge` (with no argument) for guided conflict resolution. See the comm
 
 ### Editing Style
 
-**Prefer small, atomic edits.** A PreToolUse hook counts "real" changed lines (ignoring imports, comments, whitespace, blank lines, docstrings) and auto-allows edits with <=3 real changes. Pure deletions, TypedDict/BaseModel definitions, and single-line `replace_all` renames are always auto-allowed.
+**Prefer small, atomic edits.** A PreToolUse hook counts "real" changed lines (ignoring imports, comments, whitespace, blank lines, docstrings, string literals, type annotations, and TypedDict/BaseModel bodies) and auto-allows edits with <=3 real changes per change block. Pure deletions and single-line `replace_all` renames are auto-allowed; multi-line `replace_all` falls through to the size gate. Anti-pattern detection runs before any auto-allow, and `Write` (full-file rewrites) never auto-allows.
 
 - Split large changes into multiple small edits (<=3 real lines per Edit call)
 - Separate concerns — imports in one edit, logic in another
@@ -456,15 +463,15 @@ Sub-apps: `agent`, `dev`, `feedback`, `py`, `setup`, `sync`, `trace`, `usage`, `
 
 Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/lup/hooks/scripts/`:
 
-| Hook                  | Tool            | Config                                                            |
-| --------------------- | --------------- | ----------------------------------------------------------------- |
-| `auto_allow_fetch.py` | WebFetch        | `ALLOW_PATTERNS` (regex), `DENY_PATTERNS` (regex + reason)        |
-| `auto_allow_bash.py`  | Bash            | `RULES` list of `Allow`/`Deny` (last-match-wins, like .gitignore) |
-| `auto_allow_edits.py` | Edit            | Anti-pattern detection, trivial-line counting, protected files     |
+| Hook                  | Tool            | Config                                                                 |
+| --------------------- | --------------- | ---------------------------------------------------------------------- |
+| `auto_allow_fetch.py` | WebFetch        | `ALLOW_PATTERNS` / `DENY_PATTERNS` (regex anchored to the URL origin)  |
+| `auto_allow_bash.py`  | Bash            | `RULES` list of `Allow`/`Deny`, evaluated per shell segment (last-match-wins, like .gitignore; deny if any segment denies, allow only if all allow) |
+| `auto_allow_edits.py` | Edit, Write     | Anti-pattern detection, trivial-line counting, protected files (Write to protected files is denied; other Writes always ask) |
 
 To add a new allowed URL or command, edit the pattern list in the corresponding hook. Non-matching inputs fall through to user prompt.
 
-`settings.json` only contains rules that don't need regex: `WebSearch` (allow), `Read(.local)` (deny), `Edit(pyproject.toml)` (ask).
+`settings.json` only contains rules that don't need regex: `WebSearch` (allow), `Read(**/*.local*)` (deny, with allow exceptions for `settings.json.local*` and `downstream.json.local`), `Edit(pyproject.toml)` and `Bash(uv sync/add)` (ask — the bash hook auto-allows `uv add`/`uv sync` before these apply).
 
 ### Pyright LSP
 
@@ -507,6 +514,10 @@ The `.env` file contains template configuration. Create `.env.local` for secrets
 # Optional overrides
 # AGENT_MODEL=claude-opus-4-6
 # AGENT_MAX_BUDGET_USD=5.00
+# AGENT_MAX_TURNS=50
+# AGENT_SANDBOX_ENABLED=false   # run without Docker (disables code execution tools)
+# AGENT_NOTES_PATH=./notes      # relocate session data
+# AGENT_LOGS_PATH=./logs        # relocate trace logs
 ```
 
 Settings in `.env.local` override `.env`. Configuration is loaded via pydantic-settings — see `src/lup_template/agent/config.py`.
@@ -527,16 +538,6 @@ Even for open-ended questions, use `AskUserQuestion` with options that include a
 
 **When in doubt, ask.**
 
-### Planning & Documentation
-
-**PLAN.md** is the source of truth for what has been built and what remains:
-
-- Reflect actual state, not aspirational designs
-- Mark completed items (`[x]`), keep status indicators current (`[ ]` pending, `[~]` in progress)
-- Update architecture decisions as they evolve
-- Add new tasks discovered during implementation
-- No speculative code — describe what to build, not how
-
 ### Slash Commands & Skills
 
 **After every command invocation**, reflect on how it was actually used vs. documented:
@@ -551,7 +552,7 @@ Even for open-ended questions, use `AskUserQuestion` with options that include a
 
 When questions involve Claude Code, Agent SDK, or Claude API:
 
-1. Use the `claude-code-guide` subagent: `Task(subagent_type="claude-code-guide", prompt="...")`
+1. Use the `claude-code-guide` subagent: `Agent(subagent_type="claude-code-guide", prompt="...")`
 2. Fetch docs directly: `WebFetch(url="https://docs.claude.com/en/agent-sdk/<topic>")`
 
 When the user provides documentation links, incorporate that knowledge into CLAUDE.md or relevant commands.

@@ -10,5 +10,5 @@ The feedback loop focuses on improving lup_template.agent, not this code.
 However, this code evolves as the application requirements change.
 
 Structure:
-- cli/__main__.py: Typer CLI entry point (run + loop with auto-commit)
+- cli/__main__.py: Typer CLI — the ``lup`` entry point (run + loop with auto-commit)
 """

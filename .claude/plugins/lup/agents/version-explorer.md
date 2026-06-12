@@ -52,7 +52,7 @@ These are the files that matter most for version comparison. Check these by defa
 | `src/lup_template/agent/models.py` | Structured output models |
 | `src/lup_template/agent/subagents.py` | Subagent definitions |
 | `src/lup_template/agent/config.py` | Configuration settings |
-| `packages/lup/src/lup/paths.py` | AGENT_VERSION constant |
+| `pyproject.toml` | `[tool.lup] agent_version` — the version being tagged |
 | `uv run lup-devtools version changelog` | Version history (classified from git log; not a file) |
 
 Tool implementations live in `src/lup_template/agent/tools/*.py` — diff these when the caller asks about tool changes.

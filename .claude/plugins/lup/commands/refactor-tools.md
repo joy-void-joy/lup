@@ -1,5 +1,5 @@
 ---
-allowed-tools: Read, Grep, Glob, Bash(ls:*, uv run lup-devtools:*), Task, WebSearch, AskUserQuestion
+allowed-tools: Read, Grep, Glob, Bash(ls:*, uv run lup-devtools:*), Agent, WebSearch, AskUserQuestion
 description: Audit SDK agent tools and subagents — find gaps, overlaps, and refactoring opportunities
 ---
 
@@ -77,7 +77,7 @@ With the pipeline and inventory in hand, assess the design:
 - Does the implementation match the interface? (Read the actual code — does the tool deliver what its docstring promises?)
 - Are tool names consistent and self-explanatory?
 - Do input/output patterns follow consistent conventions?
-- Do tools use the shared response helpers (`mcp_error`, `mcp_success`)?
+- Do tools use the shared MCP plumbing (`lup_tool` for definition, `ToolError` from `lup.mcp` for recoverable failures)?
 - Is anything in the wrong server or confusingly organized?
 
 ### What's Missing
@@ -130,7 +130,7 @@ Present findings as:
 
 - **Draw the pipeline first.** Understanding the flow makes individual tool assessments meaningful.
 - **Read the code, don't guess.** Open every tool file and read the actual implementations. Tool names and docstrings don't tell the full story.
-- **Ground in the current version.** When running devtools commands, they auto-scope to the current AGENT_VERSION. Unfiltered aggregates mix old bugs with current state.
+- **Ground in the current version.** When running devtools commands, they auto-scope to the current agent version. Unfiltered aggregates mix old bugs with current state.
 - **Think from the agent's perspective.** The agent sees a flat list of tools. Does the naming and organization help it choose the right tool?
 - **Propose, don't implement.** This is a review, not a refactoring session. Present findings and let the user decide what to act on.
 - **Use AskUserQuestion** for any decisions or prioritization that need user input.

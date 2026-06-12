@@ -11,14 +11,14 @@ Structure:
   - models.py: Output models (AgentOutput, Factor, AgentSessionResult)
   - prompts.py: System prompt sections and composition
   - subagents.py: Subagent definitions (SDK-agnostic SubagentSpec)
-  - tool_policy.py: Conditional tool availability
+  - tool_policy.py: Conditional tool availability (tag-based filtering)
   - tools/: Domain MCP tools
     - example.py: Template MCP tools to customize
     - reflect.py: Forced self-review tool (reviewer sub-agent)
     - realtime.py: Real-time tools template (sleep, context, reply)
 
 - lup_template/environment/: Domain scaffolding (user interaction, app flow)
-  - cli/__main__.py: Typer CLI entry point (run + loop with auto-commit)
+  - cli/__main__.py: Typer CLI — the ``lup`` entry point (run + loop)
 
 - lup_template/devtools/: Development CLI (lup-devtools entry point)
 
