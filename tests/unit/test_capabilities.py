@@ -23,6 +23,9 @@ def test_claude_capabilities_full_tier() -> None:
     assert caps.stop_event
     assert caps.cost_reporting == "native"
     assert caps.interrupt
+    assert caps.background_tools
+    assert caps.realtime == "in_process"
+    assert not caps.turn_timeout
 
 
 def test_codex_capabilities_intersection_tier() -> None:
@@ -32,6 +35,9 @@ def test_codex_capabilities_intersection_tier() -> None:
     assert not caps.stop_event
     assert not caps.interrupt
     assert caps.streaming == "post_hoc"
+    assert not caps.background_tools
+    assert caps.realtime == "relay"
+    assert caps.turn_timeout
 
 
 def test_codex_cost_reporting_depends_on_rates() -> None:

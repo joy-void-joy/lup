@@ -7,13 +7,14 @@ the turn after the budget is crossed is refused. These tests pin that
 contract without any LLM call.
 """
 
+import asyncio
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
 from lup.adapters.codex import CodexAdapter, CodexConversation, per_mtok_usage_cost
-from lup.adapters.common import BudgetExceededError
+from lup.adapters.common import BudgetExceededError, TurnTimeoutError
 from lup.types import Usage
 
 if TYPE_CHECKING:
@@ -59,6 +60,32 @@ class FakeThread:
     ) -> FakeTurnResult:
         self.prompts.append(prompt)
         return FakeTurnResult(self.usages[len(self.prompts) - 1])
+
+
+class SlowFakeThread:
+    """AsyncThread stand-in whose turn outlives any test timeout."""
+
+    def __init__(self) -> None:
+        self.id = "thread-slow"
+
+    async def run(
+        self,
+        prompt: str,
+        *,
+        effort: object = None,
+        output_schema: object = None,
+    ) -> FakeTurnResult:
+        await asyncio.sleep(10)
+        return FakeTurnResult(usage_for_turn(0, 0))
+
+
+async def test_turn_timeout_cancels_slow_turn() -> None:
+    conv = CodexConversation(
+        cast("AsyncThread", SlowFakeThread()),
+        turn_timeout_seconds=0.05,
+    )
+    with pytest.raises(TurnTimeoutError, match="wall-clock"):
+        await conv.send("hi")
 
 
 def conversation(

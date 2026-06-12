@@ -75,6 +75,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
         mcp_servers: Sequence[str] = ("notes", "sandbox"),
         max_budget_usd: float | None = None,
         usage_cost: UsageCost | None = None,
+        turn_timeout_seconds: float | None = None,
     ) -> None:
         super().__init__(
             model=model,
@@ -91,6 +92,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
             mcp_servers=mcp_servers,
             max_budget_usd=max_budget_usd,
             usage_cost=usage_cost,
+            turn_timeout_seconds=turn_timeout_seconds,
         )
         self.base_url = base_url
         self.api_key = api_key
