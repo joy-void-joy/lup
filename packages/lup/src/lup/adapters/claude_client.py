@@ -88,16 +88,10 @@ from claude_agent_sdk.types import (
 )
 from pydantic import BaseModel
 
-from lup.adapters.claude import claude_block_to_lup, claude_message_to_lup
+from lup.adapters.claude import claude_message_to_lup, collect_lup_response
 from lup.adapters.common import PermissionMode
 from lup.trace import TraceLogger, print_message
-from lup.types import (
-    LupAssistantMessage,
-    LupResponse,
-    LupResultMessage,
-    extract_token_usage,
-    safe_normalize_usage,
-)
+from lup.types import LupResponse
 
 logger = logging.getLogger(__name__)
 
@@ -366,7 +360,7 @@ async def query(
         }
 
     if options is not None and (output_type is not None or output_format is not None):
-        logger.warning(
+        raise ValueError(
             "query() received a pre-built options object together with "
             "output_type/output_format; the structured-output schema cannot "
             "be applied because build_client uses pre-built options as-is. "
@@ -418,41 +412,20 @@ async def claude_query(
     The lup-typed counterpart of :func:`query` — the anthropic backend
     of ``lup.adapters.common.query`` dispatches here.
     """
-    collector = await query(
-        prompt,
+    async with build_client(
         model=model,
         system_prompt=system_prompt,
-        prefix=prefix,
-        trace_logger=trace_logger,
-        max_turns=max_turns,
-        max_thinking_tokens=max_thinking_tokens,
         tools=tools,
         allowed_tools=allowed_tools,
         permission_mode=permission_mode,
+        max_thinking_tokens=max_thinking_tokens,
+        max_turns=max_turns,
         max_budget_usd=max_budget_usd,
         output_format=(
             {"type": "json_schema", "schema": output_schema} if output_schema else None
         ),
-    )
-
-    blocks = [claude_block_to_lup(b) for b in collector.blocks]
-    tool_results = [claude_block_to_lup(b) for b in collector.tool_results]
-
-    response = LupResponse(blocks=blocks, tool_results=tool_results)
-    for msg in collector.messages:
-        if isinstance(msg, AssistantMessage):
-            lup_blocks = [claude_block_to_lup(b) for b in msg.content]
-            response.messages.append(LupAssistantMessage(content=lup_blocks))
-
-    if collector.result is not None:
-        response.session_id = collector.result.session_id
-        response.result = LupResultMessage(
-            structured_output=collector.result.structured_output,
-            is_error=collector.result.is_error,
-            result=collector.result.result,
-            duration_ms=collector.result.duration_ms,
-            total_cost_usd=collector.result.total_cost_usd,
-            usage=safe_normalize_usage(extract_token_usage, collector.result.usage),
+    ) as client:
+        await client.query(prompt)
+        return await collect_lup_response(
+            client, trace_logger=trace_logger, prefix=prefix
         )
-
-    return response

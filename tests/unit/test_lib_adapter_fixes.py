@@ -151,7 +151,9 @@ class TestToolResultRelay:
             seen["tool_result"] = inp.get("tool_result", "<missing>")
             return LupHookOutput()
 
-        handler = build_claude_hook_handler(LupHookMatcher(hook=capture))
+        handler = build_claude_hook_handler(
+            LupHookMatcher(hook=capture), event="PostToolUse"
+        )
         hook_input = cast(
             PostToolUseHookInput,
             {
