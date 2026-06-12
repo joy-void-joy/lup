@@ -49,3 +49,35 @@ class TestSessionRoundTrip:
 
     def test_load_missing_session_returns_empty(self, isolated_root: Path) -> None:
         assert load_sessions_json("ghost") == []
+
+
+class CodexResult(BaseModel):
+    session_id: str
+    agent_sdk: str
+    token_usage: dict[str, int]
+
+
+class TestBackendStamp:
+    def test_codex_session_round_trips_with_backend_stamp(
+        self, isolated_root: Path
+    ) -> None:
+        """The codex path persists through the same layout as claude: the
+        agent_sdk stamp survives the round-trip and session_backend reads
+        it back for the trace tooling."""
+        from lup.history import session_backend
+
+        save_session(
+            CodexResult(
+                session_id="cx1",
+                agent_sdk="codex",
+                token_usage={"input_tokens": 540, "output_tokens": 88},
+            ),
+            session_id="cx1",
+        )
+
+        loaded = load_sessions_json("cx1")
+        assert loaded[0]["agent_sdk"] == "codex"
+        assert loaded[0]["token_usage"] == {"input_tokens": 540, "output_tokens": 88}
+
+        session_dirs = list(iter_session_dirs(session_id="cx1"))
+        assert session_backend(session_dirs[0]) == "codex"

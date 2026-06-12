@@ -86,6 +86,48 @@ class TestMailbox:
             "partial"
         ]
 
+    def test_peek_without_commit_redelivers(self, tmp_path: Path) -> None:
+        """A crash between applying an event and committing its offset must
+        redeliver it — peek alone never consumes."""
+        writer = RealtimeMailbox(tmp_path)
+        reader = RealtimeMailbox(tmp_path)
+        writer.append_event(ReplyEvent(message="first"))
+        writer.append_event(ReplyEvent(message="second"))
+
+        pairs = reader.peek_new_events()
+        assert len(pairs) == 2
+        repeated = reader.peek_new_events()
+        assert [e.message for e, _ in repeated if isinstance(e, ReplyEvent)] == [
+            "first",
+            "second",
+        ]
+
+        first_event, first_offset = pairs[0]
+        assert isinstance(first_event, ReplyEvent)
+        reader.read_offset = first_offset
+
+        redelivered = reader.peek_new_events()
+        assert [e.message for e, _ in redelivered if isinstance(e, ReplyEvent)] == [
+            "second"
+        ]
+
+    def test_reset_for_new_run_clears_protocol_files(self, tmp_path: Path) -> None:
+        """Re-running a session id must not replay the previous run: events,
+        the sleep request, and the meta flag all clear."""
+        from lup.realtime import SleepInput
+
+        old = RealtimeMailbox(tmp_path)
+        old.append_event(ReplyEvent(message="stale"))
+        old.write_sleep_request(SleepInput(seconds=60))
+        old.meta_flag_path.write_text("", encoding="utf-8")
+
+        fresh = RealtimeMailbox(tmp_path)
+        fresh.reset_for_new_run()
+
+        assert fresh.read_new_events() == []
+        assert fresh.consume_sleep_request() is None
+        assert not fresh.meta_flag_path.exists()
+
     def test_malformed_line_skipped(self, tmp_path: Path) -> None:
         mailbox = RealtimeMailbox(tmp_path)
         mailbox.root.mkdir(parents=True, exist_ok=True)
