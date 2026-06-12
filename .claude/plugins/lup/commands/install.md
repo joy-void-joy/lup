@@ -35,7 +35,7 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 ### Reusable Library Code
 
 - `packages/lup/src/lup/` — utilities (trace, hooks, metrics, mcp, retry, notes, history, paths)
-- `lup.paths.AGENT_VERSION` — version tracking pattern
+- `lup.paths.agent_version()` — version tracking pattern (reads `[tool.lup] agent_version` from pyproject.toml)
 
 ### DevTools CLI
 
@@ -91,7 +91,7 @@ These work in any repo:
 - **Plugin infrastructure**: The `.claude/plugins/lup/` directory structure itself
 - **Permission hooks**: auto_allow_bash (adapt patterns), auto_allow_edits (adapt for target's file types), auto_allow_fetch (adapt URL patterns)
 - **Pre-push quality gates**: Adapt to target's linter/type-checker/test runner
-- **Generic commands**: commit, rebase, close, clean-gone, meta, debug, refactor, add-command, modify-command, merge, principle, review, create-investigator
+- **Generic commands**: commit, rebase, close, clean-gone, meta, debug, refactor, add-command, modify-command, merge, merge-conflict, principle, review, create-investigator
 - **CLAUDE.md patterns**: Git workflow, editing style, asking questions, debugging philosophy
 - **Settings patterns**: permission structure in settings.json
 
@@ -100,7 +100,7 @@ These work in any repo:
 These port well to other Python projects:
 
 - **Library utilities**: hook composition, version tracking, retry, cache
-- **DevTools CLI**: The `lup-devtools` typer app structure — `main.py` composing sub-apps, `pyproject.toml` entry point. Even if the target doesn't need every subcommand, the skeleton (api, dev, git, sync) gives Claude Code reliable tooling instead of ad-hoc scripts.
+- **DevTools CLI**: The `lup-devtools` typer app structure — `main.py` composing sub-apps, `pyproject.toml` entry point. Even if the target doesn't need every subcommand, the skeleton (dev, py, sync, usage, version) gives Claude Code reliable tooling instead of ad-hoc scripts.
 - **Upstream sync**: downstream.json + sync commands (`lup-devtools sync`)
 
 ### Portable if Agent SDK
@@ -111,7 +111,7 @@ If the target repo uses (or will use) the Claude Agent SDK, the **self-improveme
 - **Feedback loop**: feedback collection, trace analysis, metrics aggregation, scoring CSV
 - **Session management**: CLI with `run` + `loop` commands, auto-commit, session storage
 - **DevTools**: The full `lup-devtools` CLI (trace, feedback, dev, version, usage)
-- **Version tracking**: version.py pattern for tracking agent behavior changes
+- **Version tracking**: `[tool.lup] agent_version` in pyproject.toml + `lup-devtools version bump` for tracking agent behavior changes
 - **Commands**: `init`, `feedback-loop`, `bump`, `update` — the self-improvement workflow
 - **TEMPLATE_CLAUDE.md**: Section-level merge into the target's existing CLAUDE.md (add missing sections, leave existing ones)
 

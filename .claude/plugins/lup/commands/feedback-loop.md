@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run python -m lup:*), Read, Grep, Glob, Edit, Write, Task, WebSearch, WebFetch, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run lup:*), Read, Grep, Glob, Edit, Write, Agent, WebSearch, WebFetch, AskUserQuestion, Skill(lup:fb-status), Skill(lup:fb-investigate), Skill(lup:fb-analyze), Skill(lup:fb-reflect), Skill(lup:fb-implement)
 description: Full feedback loop — orchestrates status, investigation, analysis, reflection, and implementation
 argument-hint: [optional: paste a trace, reflection, or output for single-trace analysis]
 ---
@@ -98,7 +98,7 @@ uv run lup loop "task1" "task2" "task3"
 
 ## Key Questions
 
-1. **What AGENT_VERSION am I analyzing?** Filter ALL data by version.
+1. **What agent version am I analyzing?** Filter ALL data by version.
 2. **Do we have outcome data?** If no, focus on process not accuracy.
 3. **What tools fail repeatedly?** Fix or replace them.
 4. **What does the agent say it needs?** Trust and provide.

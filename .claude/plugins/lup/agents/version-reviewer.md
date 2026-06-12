@@ -36,7 +36,8 @@ The caller provides:
 ```bash
 # Classified changelog for context on what this version changed (dynamic — no
 # CHANGELOG.md file; degrades to the root commit until the first `version bump`)
-uv run lup-devtools version changelog --since v<VERSION>
+uv run lup-devtools version changelog --since v<PREVIOUS_VERSION>
+git log --oneline v<PREVIOUS_VERSION>..v<VERSION>
 
 # Check when this version was active (git log for the tag)
 git log --oneline v<VERSION> -1
@@ -96,7 +97,7 @@ Combine all findings into the structured report below.
 ## Version Context
 - **Version**: <VERSION>
 - **Date**: <date from git tag>
-- **Changelog**: <summary from `lup-devtools version changelog`>
+- **Changelog**: <summary of the commits between the previous tag and this one>
 - **Prompt size**: <approximate line count of prompts.py at this version>
 
 ## Prompt Summary

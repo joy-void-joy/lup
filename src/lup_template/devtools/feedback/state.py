@@ -669,10 +669,7 @@ def collect(
 
     if not sessions:
         typer.echo("No sessions found. Nothing to collect.")
-        typer.echo(
-            "Run agent sessions first: "
-            'uv run python -m lup_template.environment.cli run "task"'
-        )
+        typer.echo('Run agent sessions first: uv run lup run "task"')
         return
 
     logger.info("Found %d sessions", len(sessions))
