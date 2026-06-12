@@ -24,6 +24,7 @@ from lup.metrics import (
     MetricsSummary,
     get_metrics_summary,
     log_metrics_summary,
+    read_metrics_summary,
     reset_metrics,
 )
 from lup.paths import agent_version, configure, project_root
@@ -65,5 +66,6 @@ __all__ = [
     "print_message",
     "project_root",
     "query",
+    "read_metrics_summary",
     "reset_metrics",
 ]
