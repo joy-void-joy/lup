@@ -229,7 +229,7 @@ class TestSubagentMaxTurnsGuard:
             model="gpt-5.5",
             max_turns=4,
         )
-        tool = create_run_subagent_tool([spec])
+        tool = create_run_subagent_tool([spec], default_model="claude-sonnet-4-6")
 
         result = cast(
             ToolResponse, await tool.handler({"name": "gpt-worker", "task": "go"})
@@ -258,7 +258,7 @@ class TestSubagentMaxTurnsGuard:
             model="haiku",
             max_turns=4,
         )
-        tool = create_run_subagent_tool([spec])
+        tool = create_run_subagent_tool([spec], default_model="claude-sonnet-4-6")
 
         result = cast(
             ToolResponse, await tool.handler({"name": "claude-worker", "task": "go"})

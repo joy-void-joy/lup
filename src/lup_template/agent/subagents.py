@@ -16,6 +16,10 @@ the same spec list:
 - Codex/OpenAI: served as the ``run_subagent`` tool via
   :func:`~lup.subagents.create_run_subagent_tool`, which dispatches a
   one-shot query to the backend serving the spec's model
+
+A spec without a ``model`` inherits the session's main model on every
+backend; pinning one (as the specs below do) is a deliberate cost/skill
+choice that holds regardless of ``AGENT_SDK``.
 """
 
 from lup.types import SubagentSpec

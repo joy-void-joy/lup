@@ -181,6 +181,8 @@ def spec_to_claude(spec: SubagentSpec) -> AgentDefinition:
     short aliases (``sonnet``/``opus``/``haiku``) and full model IDs
     (``claude-opus-4-6``), so the spec's model passes straight through
     rather than collapsing unknown IDs to the inherited main-loop model.
+    A spec without a model (``None``) inherits the main-loop model —
+    the same semantics ``run_subagent`` gives it on other backends.
     """
     return AgentDefinition(
         description=spec.description,

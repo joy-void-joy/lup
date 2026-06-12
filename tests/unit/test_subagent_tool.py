@@ -32,6 +32,12 @@ GPT_ANALYST = SubagentSpec(
     model="gpt-5.5",
 )
 
+INHERITOR = SubagentSpec(
+    name="inheritor",
+    description="Pins no model; runs on whatever the session runs",
+    prompt="You adapt.",
+)
+
 
 def response_text(response: ToolResponse) -> str:
     return "".join(item.get("text", "") for item in response.get("content", []))
@@ -39,14 +45,14 @@ def response_text(response: ToolResponse) -> str:
 
 class TestRunSubagentTool:
     async def test_unknown_role_lists_available(self) -> None:
-        tool = create_run_subagent_tool([RESEARCHER])
+        tool = create_run_subagent_tool([RESEARCHER], default_model="haiku")
 
         result = cast(ToolResponse, await tool.handler({"name": "ghost", "task": "x"}))
         assert result.get("is_error") is True
         assert "researcher" in response_text(result)
 
     async def test_tools_on_non_claude_backend_fail_loudly(self) -> None:
-        tool = create_run_subagent_tool([GPT_ANALYST])
+        tool = create_run_subagent_tool([GPT_ANALYST], default_model="haiku")
 
         result = cast(
             ToolResponse, await tool.handler({"name": "gpt-analyst", "task": "x"})
@@ -65,7 +71,7 @@ class TestRunSubagentTool:
             return LupResponse(blocks=[LupTextBlock(text="findings")])
 
         monkeypatch.setattr(lup.subagents, "query", fake_query)
-        tool = create_run_subagent_tool([RESEARCHER])
+        tool = create_run_subagent_tool([RESEARCHER], default_model="opus")
 
         result = cast(
             ToolResponse,
@@ -77,6 +83,25 @@ class TestRunSubagentTool:
         assert captured["model"] == "haiku"
         assert captured["system_prompt"] == "You research."
         assert captured["tools"] == ["WebSearch"]
+
+    async def test_modelless_spec_inherits_default_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}  # claude: ignore — heterogeneous kwargs capture
+
+        async def fake_query(prompt: str, **kwargs: object) -> LupResponse:
+            captured["prompt"] = prompt
+            captured.update(kwargs)
+            return LupResponse(blocks=[LupTextBlock(text="adapted")])
+
+        monkeypatch.setattr(lup.subagents, "query", fake_query)
+        tool = create_run_subagent_tool([INHERITOR], default_model="gpt-5.5")
+
+        result = cast(
+            ToolResponse, await tool.handler({"name": "inheritor", "task": "go"})
+        )
+        assert result.get("is_error", False) is False
+        assert captured["model"] == "gpt-5.5"
 
 
 class TestQueryOptionHonesty:
