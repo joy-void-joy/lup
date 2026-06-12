@@ -81,6 +81,8 @@ Each adapter declares what it supports (`adapter.capabilities`); the matrix belo
 
 (`rates` = cost is estimated from `CODEX_USD_PER_MTOK_*`; without them it degrades to `none`. Codex `duration` is wall-clock, not API-reported. Where there's no `stop_event`, the completion guard runs as corrective turns instead of a Stop hook. `turn_timeout` is the Codex-side substitute for `max_turns`/`interrupt`: `AGENT_TURN_TIMEOUT_SECONDS` cancels a runaway turn client-side after a wall-clock cap.)
 
+**Security model per backend.** On Claude, enforcement is layered: PreToolUse permission hooks (per-tool, per-path), permission modes, and the SDK sandbox. On Codex/OpenAI there are **no hooks** (config.toml command hooks never fire — live-probed) and no permission modes: enforcement is the runtime's `workspace-write` filesystem sandbox plus in-tool checks (reflection gate, output validation). A Codex agent may run any command the sandbox permits — there is no command-policy or tool-allowlist layer. Domains that depend on fine-grained tool gating are Claude-only until Codex ships working hooks; `packages/lup/src/lup/adapters/codex_hooks.py` keeps the hook wire format quarantined, ready to re-verify.
+
 The intended workflow while using this repository is to:
 
 - Have it cloned as a bare repo with worktrees as siblings under `tree/`: `git clone --bare <url> myproject.git && cd myproject.git && git worktree add tree/main main`
