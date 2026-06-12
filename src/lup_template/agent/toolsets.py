@@ -105,9 +105,7 @@ def build_session_toolset(
     notes_tools = [*reflect_kit["tools"], *output_kit["tools"]]
     if include_subagent_tool:
         notes_tools.append(
-            create_run_subagent_tool(
-                get_subagent_specs(), default_model=settings.model
-            )
+            create_run_subagent_tool(get_subagent_specs(), default_model=settings.model)
         )
 
     groups: dict[str, list[LupMcpTool]] = {NOTES_GROUP: notes_tools}
