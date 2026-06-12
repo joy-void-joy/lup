@@ -20,7 +20,15 @@ Use its report to pick which sessions deserve the direct deep read below.
 
 ## Per-Session Investigation
 
-For each target session:
+Delegate each session to a `lup:trace-explorer` agent — one per session, launched in parallel when investigating multiple sessions:
+
+```
+Agent(subagent_type="lup:trace-explorer", prompt="Investigate session <session_id> following the per-session steps in /lup:fb-investigate. Report: tool call inventory, errors with quoted output, workflow assessment, outcome classification, counterfactuals.")
+```
+
+Before presenting findings, spot-check each report against the trace itself (`uv run lup-devtools trace show <session_id>`) — quoted errors must appear verbatim in the trace, not paraphrased from a truncated read.
+
+The per-session steps (for the subagent, or for investigating a single session directly):
 
 ### 1. Read the trace
 
