@@ -372,6 +372,60 @@ def setup_api_key() -> dict[str, str]:
     return {}
 
 
+def setup_codex_backend() -> dict[str, str]:
+    """Walk through Codex/OpenAI backend pricing configuration.
+
+    The Codex runtime reports token counts, never cost — budget caps
+    (``AGENT_MAX_BUDGET_USD``) on ``AGENT_SDK=codex``/``openai`` need
+    per-MTok USD rates for the configured model. Claude-only projects
+    can skip this entirely.
+    """
+    console.print()
+    console.rule("[bold]Codex/OpenAI backend pricing[/]")
+    console.print()
+
+    env = read_env_local()
+
+    console.print(
+        "  Budget caps on AGENT_SDK=codex/openai need per-MTok USD rates\n"
+        "  (the Codex SDK reports tokens, not cost). Leave blank to skip —\n"
+        "  a budget without rates fails loudly at session start.\n"
+    )
+
+    values: dict[str, str] = {}
+    for key in (
+        "CODEX_USD_PER_MTOK_INPUT",
+        "CODEX_USD_PER_MTOK_OUTPUT",
+        "CODEX_USD_PER_MTOK_CACHED_INPUT",
+    ):
+        raw = typer.prompt(
+            key,
+            default=env.get(key, ""),
+            show_default=bool(env.get(key)),
+        ).strip()
+        if not raw:
+            continue
+        try:
+            float(raw)
+        except ValueError:
+            console.print(f"  [yellow]Skipping {key}: not a number[/]")
+            continue
+        values[key] = raw
+    return values
+
+
+def codex_backend_status(env: dict[str, str]) -> tuple[bool, str]:
+    """Rates present = budget caps enforceable on codex/openai."""
+    rates = [
+        key
+        for key in ("CODEX_USD_PER_MTOK_INPUT", "CODEX_USD_PER_MTOK_OUTPUT")
+        if env.get(key)
+    ]
+    if len(rates) == 2:
+        return True, "rates set (budget caps enforceable)"
+    return False, "no rates (budget caps unavailable on codex/openai)"
+
+
 def setup_timezone() -> dict[str, str]:
     """Walk through timezone configuration."""
     console.print()
@@ -439,6 +493,12 @@ INTEGRATIONS: list[Integration] = [
     Integration(name="Notion", env_keys=["NOTION_TOKEN"], setup_func=setup_notion),
     Integration(
         name="Example API", env_keys=["EXAMPLE_API_KEY"], setup_func=setup_api_key
+    ),
+    Integration(
+        name="Codex/OpenAI pricing",
+        env_keys=["CODEX_USD_PER_MTOK_INPUT", "CODEX_USD_PER_MTOK_OUTPUT"],
+        setup_func=setup_codex_backend,
+        status_func=codex_backend_status,
     ),
     Integration(
         name="Timezone",
@@ -509,6 +569,12 @@ def notion_cmd() -> None:
 def api_key_cmd() -> None:
     """Set up Example API key."""
     save_and_confirm(setup_api_key())
+
+
+@app.command("codex")
+def codex_cmd() -> None:
+    """Set Codex/OpenAI per-MTok pricing (enables budget caps)."""
+    save_and_confirm(setup_codex_backend())
 
 
 @app.command("timezone")
