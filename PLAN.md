@@ -160,7 +160,7 @@ This plan supersedes the previous SDK-interop status document. That document mar
 - [x] `realtime.py` Scheduler: sleep/wake interruption, pending-wake consumption, debounce quiet-period/empty-window/replacement timing tests
 - [x] `retry.py` (transient vs logic errors, exhaustion, extra exceptions), `history.py` round-trip through the versioned layout (caught and fixed a `configure(root, version)` crash), `metrics.py` file mode incl. corrupt-file degradation
 - [x] Construction-only tests deleted (`test_models.py`, LupEvent construction class → one dispatch test)
-- [x] Parity integration test (gated behind `LUP_PARITY_TEST=1` + integration marker) — **run live once: passed** (claude-haiku + gpt-5.5, 43s; same artifacts from both backends). Suite: 124 → 171 tests.
+- [x] Parity integration test (integration marker; the extra `LUP_PARITY_TEST=1` gate was later dropped so the nightly `-m integration` lane runs it) — **run live once: passed** (claude-haiku + gpt-5.5, 43s; same artifacts from both backends). Suite: 124 → 171 tests.
 
 ## Phase 8 — Docs truth pass (last, after interfaces settle)
 
