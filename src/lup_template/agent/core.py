@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from claude_agent_sdk import ClaudeAgentOptions
     from claude_agent_sdk.types import EffortLevel
 
@@ -347,17 +349,16 @@ def build_codex_adapter(
 def build_codex_realtime_adapter(
     notes: "NotesConfig",
 ) -> tuple["AgentAdapter", "RealtimeMailbox"]:
-    """Build a CodexAdapter wired for persistent (sleep/wake) mode.
+    """Build a Codex-runtime adapter (codex or openai) wired for persistent mode.
 
     Adds the ``session`` tool group (reply, sleep, context, meta, …) to
     the served servers and relays the realtime directory so the tool
     subprocess and the parent share one mailbox. The returned mailbox is
-    the parent-side endpoint: construct a ``Scheduler`` with your
-    environment's action callback, open ``adapter.conversation()``, and
-    drive it with :func:`lup.realtime_relay.run_relay_session`
-    (customization step 8 — see PATTERNS.md, Persistent Agent).
+    the parent-side endpoint: :func:`run_persistent_agent` is the
+    minimal wiring (Scheduler + ``run_relay_session``); customize it for
+    your environment (customization step 8 — see PATTERNS.md,
+    Persistent Agent).
     """
-    from lup.adapters.codex import CodexAdapter
     from lup.realtime_relay import REALTIME_DIRNAME, RealtimeMailbox
 
     from lup_template.agent.tool_policy import ToolPolicy
@@ -370,20 +371,45 @@ def build_codex_realtime_adapter(
     max_budget_usd, usage_cost = codex_budget_options()
     policy = ToolPolicy(settings)
 
-    adapter = CodexAdapter(
-        model=settings.model,
-        system_prompt=system_prompt,
-        sandbox=settings.codex_sandbox,
-        effort=settings.codex_effort or settings.reasoning_effort,
-        approval_policy=settings.codex_approval_policy,
-        mcp_tools=True,
-        mcp_env=mcp_env,
-        writable_roots=writable_roots,
-        mcp_servers=policy.filter_group_names(tool_group_names(realtime=True)),
-        max_budget_usd=max_budget_usd,
-        usage_cost=usage_cost,
-        turn_timeout_seconds=settings.turn_timeout_seconds,
-    )
+    adapter: AgentAdapter
+    match settings.agent_sdk:
+        case "openai":
+            from lup.adapters.openai_compat import OpenAICompatibleAdapter
+
+            adapter = OpenAICompatibleAdapter(
+                model=settings.model,
+                system_prompt=system_prompt,
+                base_url=settings.openai_base_url,
+                api_key=settings.openai_api_key,
+                model_provider=settings.openai_model_provider,
+                sandbox=settings.codex_sandbox,
+                effort=settings.codex_effort or settings.reasoning_effort,
+                approval_policy=settings.codex_approval_policy,
+                mcp_tools=True,
+                mcp_env=mcp_env,
+                writable_roots=writable_roots,
+                mcp_servers=policy.filter_group_names(tool_group_names(realtime=True)),
+                max_budget_usd=max_budget_usd,
+                usage_cost=usage_cost,
+                turn_timeout_seconds=settings.turn_timeout_seconds,
+            )
+        case _:
+            from lup.adapters.codex import CodexAdapter
+
+            adapter = CodexAdapter(
+                model=settings.model,
+                system_prompt=system_prompt,
+                sandbox=settings.codex_sandbox,
+                effort=settings.codex_effort or settings.reasoning_effort,
+                approval_policy=settings.codex_approval_policy,
+                mcp_tools=True,
+                mcp_env=mcp_env,
+                writable_roots=writable_roots,
+                mcp_servers=policy.filter_group_names(tool_group_names(realtime=True)),
+                max_budget_usd=max_budget_usd,
+                usage_cost=usage_cost,
+                turn_timeout_seconds=settings.turn_timeout_seconds,
+            )
     check_settings_supported(adapter.capabilities)
     return adapter, RealtimeMailbox(realtime_dir)
 
@@ -529,3 +555,71 @@ async def run_agent(
     save_session(session_result, session_id=session_result.session_id)
 
     return session_result
+
+
+async def run_persistent_agent(
+    task: str,
+    *,
+    session_id: str | None = None,
+    on_reply: "Callable[[str], Awaitable[None]] | None" = None,
+) -> int:
+    """Run a persistent (sleep/wake) session through the file relay.
+
+    The minimal wiring of the Persistent Agent pattern on the Codex
+    runtime (codex/openai): the parent owns the Scheduler, each wake is
+    one SDK turn, and the served ``session`` tools relay through the
+    mailbox. Replies surface through ``on_reply`` (stdout by default) —
+    replace it with your environment's delivery callback, and call
+    ``scheduler.wake(...)`` from your event sources (customization
+    step 8). Artifacts are the trace log and the relay directory; a
+    persistent session has no ``submit_output`` finalization, so no
+    session JSON is saved.
+
+    On Claude, persistent mode is in-process (one never-ending turn with
+    a Stop hook — see PATTERNS.md, Persistent Agent) and this relay
+    entry point raises.
+
+    Returns:
+        The number of completed turns.
+    """
+    from lup.realtime import Scheduler
+    from lup.realtime_relay import run_relay_session
+
+    if settings.agent_sdk == "claude":
+        raise ValueError(
+            "Persistent mode on claude runs in-process (customization "
+            "step 8; PATTERNS.md 'Persistent Agent'); the relay entry "
+            "point needs AGENT_SDK=codex or openai."
+        )
+
+    if session_id is None:
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    logger.info(
+        "Starting persistent session %s (sdk=%s)", session_id, settings.agent_sdk
+    )
+    reset_metrics()
+    notes = setup_notes(session_id, "0")
+
+    async def echo_reply(message: str) -> None:
+        print(f"[lup] {message}")
+
+    scheduler = Scheduler(on_action=on_reply or echo_reply)
+    adapter, mailbox = build_codex_realtime_adapter(notes)
+    trace_logger = TraceLogger(
+        trace_path=notes.trace_log, title=f"Session {session_id}"
+    )
+
+    with subprocess_sandbox_cleanup(notes):
+        async with adapter.conversation() as conv:
+            turns = await run_relay_session(
+                conv,
+                scheduler=scheduler,
+                mailbox=mailbox,
+                initial_prompt=task,
+                trace_logger=trace_logger,
+            )
+
+    trace_logger.save()
+    log_metrics_summary()
+    return turns
