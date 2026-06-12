@@ -11,7 +11,7 @@ This is a **self-improving agent template and scaffold** built with the Claude A
 1. **Template** — Code that downstream projects customize for their domain: agent prompts, tools, models, environment scaffolding. `/lup:brainstorm` explores the design, `/lup:init` executes the customization.
 2. **Scaffold** — Agents, commands, hooks, and workflows that downstream projects inherit and extend. These provide the development workflow (commit, rebase, feedback loop) and analysis infrastructure (trace exploration, version comparison) that every project needs.
 
-When reviewing changes from downstream repos (`/lup:update`), the goal is to **generalize domain-specific patterns back into the template**. The bias is toward inclusion: if a pattern emerged from real use, it likely belongs in the template.
+When reviewing changes from downstream repos (`/lup:update`), the goal is to **generalize domain-specific patterns back into the template**. The bias is toward inclusion: if a pattern emerged from real use, it likely belongs in the template. Downstream projects are tracked in `downstream.json` (names and URLs; machine-local paths go in the gitignored `downstream.json.local`), consumed by `lup-devtools sync` and the `/lup:update` and `/lup:import` commands.
 
 Built with Python 3.14+ on the Claude Agent SDK, with the inner agent also runnable on the OpenAI Codex SDK (`AGENT_SDK=codex`) or any OpenAI-compatible endpoint (`AGENT_SDK=openai`) through the same adapter interface. Uses `uv` as the package manager.
 
@@ -123,15 +123,15 @@ src/
     │       └── reflect.py      # Forced self-review tool (reviewer sub-agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
-    │   ├── agent.py            # Agent introspection (inspect, chat, repl, serve-tools)
+    │   ├── agent/              # Agent introspection (inspect, serve-tools, chat, repl)
     │   ├── py.py               # Python module introspection (info, source, eval, ...)
     │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
+    │   ├── usage/              # Claude Code usage display (api/render/app)
     │   ├── setup.py            # Interactive setup wizard (customize integrations)
-    │   ├── sync.py             # Upstream sync tracking
-    │   ├── usage.py            # Claude Code usage display
-    │   ├── utils.py            # Shared CLI helpers
+    │   ├── sync.py             # Downstream project sync tracking
+    │   ├── utils.py            # Shared CLI helpers (git command, JSON output)
     │   └── version.py          # Version display, changelog, and bump
     └── environment/            # Domain scaffolding (user interaction, game logic)
         └── cli/

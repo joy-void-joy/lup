@@ -11,7 +11,7 @@ Exports:
 Examples:
     One-shot query (text result)::
 
-        >>> collector = await query("Summarize this text", model="sonnet")
+        >>> collector = await query("Summarize this text", model="opus")
         >>> collector.text
         'Here is the summary...'
 
@@ -30,7 +30,7 @@ Examples:
         >>> collector = await query(
         ...     "Review this code",
         ...     tools=["Read", "Grep"],
-        ...     model="sonnet",
+        ...     model="opus",
         ...     permission_mode="bypassPermissions",
         ...     max_turns=5,
         ... )
@@ -39,7 +39,7 @@ Examples:
 
     Streaming with ``async for`` for per-message handling::
 
-        >>> async with build_client(tools=["Read"], model="sonnet") as client:
+        >>> async with build_client(tools=["Read"], model="opus") as client:
         ...     await client.query("Analyze main.py")
         ...     collector = ResponseCollector(client)
         ...     async for message in collector:

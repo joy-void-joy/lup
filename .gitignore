@@ -211,6 +211,7 @@ __marimo__/
 # Project-specific
 worktrees/
 tmp/
+.lup/
 downstream.json.local
 .cache/
 refs/
