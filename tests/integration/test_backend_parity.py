@@ -1,25 +1,23 @@
 """Live parity test: the same task on both SDK backends.
 
-Costs real LLM calls on two providers, so it is gated behind
-``LUP_PARITY_TEST=1`` in addition to the integration marker. Both
-backends must produce the same session artifacts through the same
-finalization mechanism (submit_output → output.json).
-"""
+Costs real LLM calls on two providers, so it carries the integration
+marker and runs only with ``-m integration`` (the nightly lane). This is
+the executable half of the parity contract: both backends must finish
+the Tier-1 core loop — reflection gate, submit_output finalization,
+metrics flush, usage accounting, backend stamp — and produce results of
+identical shape.
 
-import os
+A non-empty output is itself proof the gate ran: submit_output rejects
+until review has been called, so output implies reflection ordered
+correctly end to end.
+"""
 
 import pytest
 
 from lup_template.agent.config import settings
 from lup_template.agent.core import run_agent
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("LUP_PARITY_TEST"),
-        reason="set LUP_PARITY_TEST=1 to run live two-backend parity (costs money)",
-    ),
-]
+pytestmark = pytest.mark.integration
 
 TASK = (
     "Smoke task: reflect via review with skip_reviewer=true, then submit "
@@ -27,7 +25,7 @@ TASK = (
 )
 
 
-async def test_both_backends_produce_equivalent_results(
+async def test_both_backends_complete_the_core_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     results = {}
@@ -39,6 +37,17 @@ async def test_both_backends_produce_equivalent_results(
     for sdk, result in results.items():
         assert result.output.summary, f"{sdk}: empty output summary"
         assert result.output.summary != "No output produced", f"{sdk}: no submission"
+        assert result.agent_sdk == sdk, f"{sdk}: backend stamp missing or wrong"
         assert result.tool_metrics is not None, f"{sdk}: missing tool metrics"
         assert result.token_usage is not None, f"{sdk}: missing token usage"
+        assert result.token_usage.output_tokens > 0, f"{sdk}: zero output tokens"
+        assert result.duration_seconds, f"{sdk}: missing duration"
         assert result.agent_version == results["claude"].agent_version
+
+    claude_fields = set(results["claude"].model_dump(exclude_none=True))
+    codex_fields = set(results["codex"].model_dump(exclude_none=True))
+    # cost_usd is the one allowed asymmetry: native on Claude, absent on
+    # Codex unless CODEX_USD_PER_MTOK_* rates are configured.
+    assert claude_fields - codex_fields <= {"cost_usd"}, (
+        f"shape drift: {claude_fields ^ codex_fields}"
+    )
