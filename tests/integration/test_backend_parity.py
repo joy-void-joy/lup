@@ -51,3 +51,14 @@ async def test_both_backends_complete_the_core_loop(
     assert claude_fields - codex_fields <= {"cost_usd"}, (
         f"shape drift: {claude_fields ^ codex_fields}"
     )
+
+    from lup.history import iter_session_dirs, load_sessions_json, session_backend
+
+    for sdk in results:
+        loaded = load_sessions_json(f"parity-{sdk}")
+        assert loaded, f"{sdk}: session JSON not retrievable through lup.history"
+        assert loaded[0]["agent_sdk"] == sdk, f"{sdk}: stamp lost in persistence"
+        session_dirs = list(iter_session_dirs(session_id=f"parity-{sdk}"))
+        assert session_dirs and session_backend(session_dirs[0]) == sdk, (
+            f"{sdk}: trace tooling cannot detect the backend"
+        )
