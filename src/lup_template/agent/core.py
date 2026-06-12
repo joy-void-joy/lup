@@ -271,7 +271,18 @@ def build_codex_session(
         realtime_dir=realtime_dir,
     )
 
-    return get_system_prompt(), context.to_env(), list(notes.rw)
+    # The serve-tools subprocess resolves aux_model() from its own settings,
+    # and the Codex runtime does not pass the parent's shell env through to
+    # MCP servers — relay the inputs that resolution needs.
+    mcp_env = {
+        **context.to_env(),
+        "AGENT_SDK": settings.agent_sdk,
+        "AGENT_MODEL": settings.model,
+    }
+    if settings.aux_model:
+        mcp_env["AGENT_AUX_MODEL"] = settings.aux_model
+
+    return get_system_prompt(), mcp_env, list(notes.rw)
 
 
 def codex_budget_options() -> tuple[float | None, "UsageCost | None"]:

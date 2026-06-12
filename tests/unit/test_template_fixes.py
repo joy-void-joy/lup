@@ -16,7 +16,7 @@ import pytest
 from pydantic import Field
 
 from lup_template.agent import prompts
-from lup_template.agent.config import settings
+from lup_template.agent.config import aux_model, settings
 from lup_template.agent.core import build_result
 from lup_template.agent.models import AgentOutput
 from lup_template.agent.tool_policy import BUILTIN_TOOLS, ToolPolicy
@@ -124,3 +124,61 @@ def test_allowed_tools_excludes_todoread() -> None:
     allowed = ToolPolicy(settings).get_allowed_tools()
     assert "TodoRead" not in allowed
     assert "TodoWrite" in allowed
+
+
+def test_codex_session_env_relays_backend_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The serve-tools subprocess resolves aux_model() from its own
+    settings, and the Codex runtime does not inherit the shell env —
+    the relay must carry the inputs that resolution needs."""
+    from lup.notes import NotesConfig
+
+    from lup_template.agent.core import build_codex_session
+
+    monkeypatch.setattr(settings, "agent_sdk", "codex")
+    monkeypatch.setattr(settings, "model", "gpt-5.5")
+    monkeypatch.setattr(settings, "aux_model", None)
+    notes = NotesConfig(
+        session=tmp_path / "session",
+        output=tmp_path / "outputs" / "t1",
+        trace_log=tmp_path / "trace.md",
+        rw=[tmp_path / "session"],
+    )
+
+    _prompt, mcp_env, _roots = build_codex_session(notes)
+
+    assert mcp_env["AGENT_SDK"] == "codex"
+    assert mcp_env["AGENT_MODEL"] == "gpt-5.5"
+    assert "AGENT_AUX_MODEL" not in mcp_env
+
+    monkeypatch.setattr(settings, "aux_model", "my-reviewer")
+    _prompt, mcp_env, _roots = build_codex_session(notes)
+
+    assert mcp_env["AGENT_AUX_MODEL"] == "my-reviewer"
+
+
+def test_aux_model_explicit_override_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AGENT_AUX_MODEL overrides backend resolution."""
+    monkeypatch.setattr(settings, "aux_model", "my-reviewer")
+    monkeypatch.setattr(settings, "agent_sdk", "codex")
+
+    assert aux_model() == "my-reviewer"
+
+
+def test_aux_model_claude_defaults_to_sonnet(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Claude sessions get a sonnet-class auxiliary model."""
+    monkeypatch.setattr(settings, "aux_model", None)
+    monkeypatch.setattr(settings, "agent_sdk", "claude")
+
+    assert aux_model() == "claude-sonnet-4-6"
+
+
+def test_aux_model_codex_reuses_session_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Codex/OpenAI sessions reuse the session model, which the account
+    is known to accept — no Anthropic credentials required."""
+    monkeypatch.setattr(settings, "aux_model", None)
+    monkeypatch.setattr(settings, "agent_sdk", "codex")
+    monkeypatch.setattr(settings, "model", "gpt-5.5")
+
+    assert aux_model() == "gpt-5.5"

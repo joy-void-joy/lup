@@ -84,7 +84,7 @@ def build_session_toolset(
     from lup.output import create_output_tool
     from lup.subagents import create_run_subagent_tool
 
-    from lup_template.agent.config import settings
+    from lup_template.agent.config import aux_model, settings
     from lup_template.agent.models import AgentOutput
     from lup_template.agent.subagents import get_subagent_specs
     from lup_template.agent.tools.example import EXAMPLE_TOOLS
@@ -94,6 +94,7 @@ def build_session_toolset(
         session_dir=session_dir,
         outputs_dir=outputs_dir,
         gate=gate,
+        reviewer_model=aux_model(),
     )
     output_kit = create_output_tool(
         AgentOutput,
