@@ -77,13 +77,26 @@ TOOL_COLORS = [
     "bright_blue",
     "bright_red",
 ]
-# Module-level state for color-coded tool use / result pairing.
-# Assumes single-session usage: one TraceLogger per agent run.
-# ToolUseBlock assigns a color; the matching ToolResultBlock pops it.
-# Not thread-safe — concurrent sessions should use separate modules or
-# reset state between runs.
-color_cycle = itertools.cycle(TOOL_COLORS)
-id_to_color: dict[str, str] = {}
+
+
+class ColorAssigner:
+    """Rotating tool-color state for tool use / result pairing.
+
+    One instance per concurrent output stream: sharing an assigner
+    across sessions interleaves the palette rotation. ToolUseBlock
+    assigns a color; the matching ToolResultBlock pops it. The
+    module-level :data:`DEFAULT_COLORS` keeps the single-session
+    default; pass a dedicated instance to ``print_block``/
+    ``print_message`` for concurrent streams (background agents, relay
+    watchers) so their pairings can't cross.
+    """
+
+    def __init__(self) -> None:
+        self.cycle = itertools.cycle(TOOL_COLORS)
+        self.by_id: dict[str, str] = {}
+
+
+DEFAULT_COLORS = ColorAssigner()
 console = Console(highlight=False, markup=False)
 stream_log = logging.getLogger("lup.agent.stream")
 
@@ -190,7 +203,9 @@ class ColorTag(BaseModel):
     color: str
 
 
-def resolve_color_tag(block: LupContentBlock) -> ColorTag | None:
+def resolve_color_tag(
+    block: LupContentBlock, colors: ColorAssigner = DEFAULT_COLORS
+) -> ColorTag | None:
     """Assign or retrieve a color for tool use/result pairing.
 
     LupToolUseBlock gets a fresh color from the rotating palette and
@@ -199,11 +214,11 @@ def resolve_color_tag(block: LupContentBlock) -> ColorTag | None:
     """
     match block:
         case LupToolUseBlock():
-            color = next(color_cycle)
-            id_to_color[block.id] = color
+            color = next(colors.cycle)
+            colors.by_id[block.id] = color
             return ColorTag(id=block.id, color=color)
         case LupToolResultBlock():
-            color = id_to_color.pop(block.tool_use_id, "default")
+            color = colors.by_id.pop(block.tool_use_id, "default")
             return ColorTag(id=block.tool_use_id, color=color)
         case _:
             return None
@@ -215,19 +230,23 @@ def resolve_color_tag(block: LupContentBlock) -> ColorTag | None:
 
 
 def print_block(
-    block: LupContentBlock, prefix: str = "", trace: TraceLogger | None = None
+    block: LupContentBlock,
+    prefix: str = "",
+    trace: TraceLogger | None = None,
+    colors: ColorAssigner | None = None,
 ) -> None:
     """Print a content block with color-coded tool use/result pairing.
 
     LupToolUseBlock and LupToolResultBlock are linked by color: when a
     tool use is printed, its ID is assigned a color from a rotating
     palette. When the corresponding result arrives, the same color is
-    used, making it easy to visually pair them.
+    used, making it easy to visually pair them. Concurrent streams pass
+    their own :class:`ColorAssigner` so pairings can't cross.
 
     If *trace* is provided, the block is also logged to the trace.
     """
     info = extract_block_info(block)
-    tag = resolve_color_tag(block)
+    tag = resolve_color_tag(block, colors or DEFAULT_COLORS)
 
     display_content = (
         format_tool_result(block.content)
@@ -267,7 +286,10 @@ def print_block(
 
 
 def print_message(
-    message: LupMessage, prefix: str = "", trace: TraceLogger | None = None
+    message: LupMessage,
+    prefix: str = "",
+    trace: TraceLogger | None = None,
+    colors: ColorAssigner | None = None,
 ) -> None:
     """Print all content blocks in a message.
 
@@ -279,7 +301,7 @@ def print_message(
         case LupAssistantMessage() | LupUserMessage():
             blocks = message.content if isinstance(message.content, list) else []
             for block in blocks:
-                print_block(block, prefix=prefix, trace=trace)
+                print_block(block, prefix=prefix, trace=trace, colors=colors)
 
 
 # ---------------------------------------------------------------------------
