@@ -10,7 +10,7 @@ based on model name — consumer code never imports from SDK packages.
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import AbstractAsyncContextManager
 
 from typing import Literal
@@ -65,6 +65,57 @@ class AdapterCapabilities(BaseModel):
 
     max_thinking_tokens: bool
     """Backend accepts an explicit thinking-token budget."""
+
+
+def canonical_capability_matrix() -> dict[str, AdapterCapabilities]:
+    """The shipped backends' capabilities, in canonical display form.
+
+    The single source for every rendering of the parity contract: the
+    ``lup-devtools agent capabilities`` command, the README table, and
+    the regression test that keeps the two identical. Codex/OpenAI are
+    shown with budget rates configured (their best case) —
+    ``cost_reporting`` degrades to ``none`` without ``CODEX_USD_PER_MTOK``
+    rates.
+    """
+    from claude_agent_sdk import ClaudeAgentOptions
+
+    from lup.adapters.claude import ClaudeAdapter
+    from lup.adapters.codex import CodexAdapter, per_mtok_usage_cost
+    from lup.adapters.openai_compat import OpenAICompatibleAdapter
+
+    rates = per_mtok_usage_cost(input_usd=1.0, output_usd=1.0)
+    return {
+        "claude": ClaudeAdapter(ClaudeAgentOptions()).capabilities,
+        "codex": CodexAdapter(
+            model="gpt-5.5", system_prompt="", usage_cost=rates
+        ).capabilities,
+        "openai": OpenAICompatibleAdapter(model="local", usage_cost=rates).capabilities,
+    }
+
+
+def capability_matrix_markdown(adapters: Mapping[str, AdapterCapabilities]) -> str:
+    """Render a capability matrix as a markdown table.
+
+    One row per capability field, one column per backend — the generated
+    form of the parity contract. The README embeds it and a regression
+    test regenerates and diffs it, so prose cannot drift from the
+    declarations.
+    """
+    names = list(adapters)
+    lines = [
+        "| Capability | " + " | ".join(names) + " |",
+        "|---" * (len(names) + 1) + "|",
+    ]
+    for field in AdapterCapabilities.model_fields:
+        cells: list[str] = []
+        for name in names:
+            match getattr(adapters[name], field):
+                case bool() as flag:
+                    cells.append("✅" if flag else "—")
+                case value:
+                    cells.append(str(value))
+        lines.append(f"| {field} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
 
 
 class BudgetExceededError(RuntimeError):

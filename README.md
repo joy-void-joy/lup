@@ -57,6 +57,27 @@ AGENT_SDK=codex AGENT_MODEL=gpt-5.5 uv run lup run "same task, Codex backend"
 
 The agent runs on the Claude Agent SDK by default; setting `AGENT_SDK=codex` (or `openai` for any OpenAI-compatible endpoint) runs the same agent — same tools, reflection gate, structured output — on the Codex runtime. Budget caps and persistent (sleep/wake) mode work on every backend too: `AGENT_MAX_BUDGET_USD` on codex/openai needs `CODEX_USD_PER_MTOK_*` rates in `.env` (the Codex SDK reports tokens, not cost), and persistent mode runs in-process on Claude or through the file relay (`lup.realtime_relay`) on the Codex runtime.
 
+### Backend support
+
+The portable contract is **tiered**, deliberately. Tier 1 — the core loop every backend gets — is: run → MCP tools → reflection gate → `submit_output` finalization → session JSON, traces, and metrics, plus subagents (native on Claude, the `run_subagent` tool elsewhere), budget caps, and persistent mode. Tier 2 is Claude-native and intentionally unported: in-process hooks, parallel native subagents, permission modes, live streaming, and SDK-reported cost. Don't generalize Tier 2 features into the adapter abstraction — pass native options to `ClaudeAdapter` instead.
+
+Each adapter declares what it supports (`adapter.capabilities`); the matrix below is generated from those declarations (`uv run lup-devtools agent capabilities --markdown`) and a regression test keeps it current:
+
+| Capability | claude | codex | openai |
+|---|---|---|---|
+| hooks | ✅ | — | — |
+| native_subagents | ✅ | — | — |
+| streaming | live | post_hoc | post_hoc |
+| interrupt | ✅ | — | — |
+| stop_event | ✅ | — | — |
+| cost_reporting | native | rates | rates |
+| duration_reporting | ✅ | ✅ | ✅ |
+| permission_modes | ✅ | — | — |
+| max_turns | ✅ | — | — |
+| max_thinking_tokens | ✅ | — | — |
+
+(`rates` = cost is estimated from `CODEX_USD_PER_MTOK_*`; without them it degrades to `none`. Codex `duration` is wall-clock, not API-reported. Where there's no `stop_event`, the completion guard runs as corrective turns instead of a Stop hook.)
+
 The intended workflow while using this repository is to:
 
 - Have it cloned as a bare repo with worktrees as siblings under `tree/`: `git clone --bare <url> myproject.git && cd myproject.git && git worktree add tree/main main`
