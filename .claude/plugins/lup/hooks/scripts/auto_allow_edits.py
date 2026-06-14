@@ -9,7 +9,7 @@ Edit decision order:
      anti-pattern scan (the size gate below still applies)
    - violating line carries an inline `# claude: ignore` -> ask (user prompt)
    - no marker -> deny with hint about `# claude: ignore`
-3. Edit introduces an ignore marker (in new_string, not old_string) -> ask
+3. Edit adds or removes any `# claude:` marker (count differs) -> ask
 4. Pure deletion (new_string is empty) -> allow
 5. replace_all that is a single-line identifier rename -> allow
    (any other replace_all falls through to the size gate)
@@ -45,6 +45,14 @@ PROTECTED_PATTERNS = [
 ]
 
 CLAUDE_IGNORE_MARKER = "# claude: ignore"
+
+# Inline review-comment markers, mirroring lup.markers. Inlined so this safety
+# hook stays hermetic — no package import on the per-edit hot path; keep both in
+# sync. A marker is `#`/`//` + `claude:` (any case, optional spaces); the
+# `ignore` keyword is the escape hatch, any other note is actionable feedback.
+MARKER_RE = re.compile(r"(#|//)\s*claude\s*:", re.IGNORECASE)
+IGNORE_RE = re.compile(r"(#|//)\s*claude\s*:\s*ignore\b", re.IGNORECASE)
+FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*claude\s*:\s*ignore\s*$", re.IGNORECASE)
 
 # (pattern, reason) rows checked against every line an edit adds to a .py
 # file. A matching line denies the edit; an inline `# claude: ignore` on the
@@ -198,14 +206,19 @@ def is_protected_file(file_path: str) -> bool:
     return any(re.search(p, file_path) for p in PROTECTED_PATTERNS)
 
 
-def has_file_level_ignore(file_path: str, marker: str = CLAUDE_IGNORE_MARKER) -> bool:
+def marker_count(text: str) -> int:
+    """Count `# claude:` markers (feedback or ignore) for add/remove detection."""
+    return len(MARKER_RE.findall(text))
+
+
+def has_file_level_ignore(file_path: str) -> bool:
     """Check if the file on disk has a `# claude: ignore` marker in the first 10 lines."""
     try:
         with open(file_path) as f:
             for i, line in enumerate(f):
                 if i >= 10:
                     break
-                if line.strip() == marker:
+                if FILE_IGNORE_RE.match(line):
                     return True
     except OSError:
         return False
@@ -490,7 +503,7 @@ def find_anti_pattern_violations(
     if patterns is None:
         patterns = ANTI_PATTERNS
 
-    if file_path and has_file_level_ignore(file_path, ignore_marker):
+    if file_path and has_file_level_ignore(file_path):
         return None
 
     old_lines = old_string.splitlines() if old_string else []
@@ -517,7 +530,7 @@ def find_anti_pattern_violations(
             if not hits:
                 continue
             preview = stripped[:80]
-            if ignore_marker in new_lines[idx]:
+            if IGNORE_RE.search(new_lines[idx]):
                 ask_reasons.append(f"{hits[0]} | line: {preview}")
             else:
                 hint = f"Add `{ignore_marker}` to the line (or file-level) to request approval"
@@ -567,13 +580,10 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
         if violation:
             return violation_decision(violation)
 
-    marker = (
-        TS_CLAUDE_IGNORE_MARKER
-        if file_path.endswith(TS_FILE_EXTENSIONS)
-        else CLAUDE_IGNORE_MARKER
-    )
-    if marker in new_string and marker not in old_string:
-        return ask_decision("Edit introduces ignore marker — requires user approval")
+    if marker_count(old_string) != marker_count(new_string):
+        return ask_decision(
+            "Edit adds or removes a `# claude:` marker — review before applying"
+        )
 
     if old_string and not new_string:
         return allow_decision()
