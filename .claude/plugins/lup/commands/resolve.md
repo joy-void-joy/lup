@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(uv run lup-devtools:*), Read, Edit, Glob, Grep, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, Edit, Glob, Grep, AskUserQuestion, Agent
 description: Work through inline review comments and clear them all
 ---
 
@@ -31,10 +31,19 @@ If the list is empty, report that and stop.
 
 ## Phase 3: Address each note
 
-Work file by file, top to bottom. For each note:
+Work file by file, top to bottom. Two habits before you start editing:
+
+- **Interview first.** For any non-trivial concern, ask precise questions (`AskUserQuestion`) to pin down exactly what the user means. Several small clarifying questions beat one wrong fix.
+- **Fan out for breadth.** When a concern spans many files or calls for an ontology revision, dispatch subagents (`Agent`) to investigate and/or implement in parallel, then synthesize.
+
+For each note:
 
 1. **Read** the `read_start`-`read_end` window so you understand what the note refers to. Read wider if the answer needs it.
 2. **Classify and act:**
+   - **Clarity complaint** ("unclear why this is here", "what is this for?", "confusing", "hard to follow") → the fix is **structural, never an explanatory comment**. Do not annotate the code to explain it. Instead:
+     - Revise the *ontology*: is this function/class even needed? Is the control flow straight, or tangled? Could it be renamed, inlined, split, or deleted?
+     - Rewrite so the code reads clearly **from scratch** — understandable with no comments and no knowledge of its history. A file should read like a workflow.
+     - A comment is usually a patch over unclear structure; reach for one only when the structure genuinely cannot carry the meaning.
    - **Instruction** ("simplify this", "rename to X", "drop this field") → make the change.
    - **Question** ("why is this here?", "is this still needed?", "any problems?") → investigate and answer. If the answer implies a change, make it. If it is a judgment call, present your finding and recommendation with `AskUserQuestion` and act on the reply.
    - **Brainstorm / open-ended** ("brainstorm more X", "run me through this") → engage the user with `AskUserQuestion` (or a written answer if they only asked for an explanation). Do not silently guess.
@@ -54,6 +63,8 @@ Each edit that removes a marker triggers a permission prompt by design — that 
 ## Guidelines
 
 - **The note is the spec** — do exactly what it asks, nothing more.
+- **Clarity is structural, not a comment** — if a note flags confusion, fix the code's shape (naming, flow, decomposition) so it reads on its own. Explaining unclear code with a comment is the wrong fix.
+- **A file should read like a workflow** — comments are usually patches; prefer to make the code self-evident, and delete code that isn't needed rather than leaving it dead.
 - **One concern per edit** — do not fold unrelated fixes together.
 - **When in doubt, ask** — a wrong "fix" is worse than a question.
 - **Never delete a note you did not address** — removing the marker without doing the work defeats the entire purpose.
