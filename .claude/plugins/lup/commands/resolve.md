@@ -52,13 +52,13 @@ For each note:
 
 Each edit that removes a marker triggers a permission prompt by design — that is the verification checkpoint. Keep edits small and self-explanatory so they can be approved at a glance.
 
-## Phase 4: Confirm none remain
+## Phase 4: Confirm and report
 
 1. Re-run `uv run lup-devtools dev comments`.
-2. If any remain:
-   - The user explicitly deferred them → list them and say why.
-   - Otherwise → keep going. The job is not done until the scan is clean.
-3. Run `uv run lup-devtools dev check` to confirm nothing broke (it also fails while any notes remain).
+2. Keep going while notes remain that you can resolve — address each, then remove its marker.
+3. **Never delete a note to make the scan pass.** Removing a marker without doing the work is the one thing you must not do.
+4. When you are done and notes still remain (the user deferred them, you are blocked, or you could not address them), **stop and report them explicitly** — list each with its `file:line` and why it is unresolved. Do not quietly delete them to clean up the scan.
+5. Run `uv run lup-devtools dev check`. If you intentionally left notes for the user, its `claude comments` check will fail — that is expected, and is not a reason to delete the notes.
 
 ## Guidelines
 
@@ -67,5 +67,5 @@ Each edit that removes a marker triggers a permission prompt by design — that 
 - **A file should read like a workflow** — comments are usually patches; prefer to make the code self-evident, and delete code that isn't needed rather than leaving it dead.
 - **One concern per edit** — do not fold unrelated fixes together.
 - **When in doubt, ask** — a wrong "fix" is worse than a question.
-- **Never delete a note you did not address** — removing the marker without doing the work defeats the entire purpose.
+- **Never delete a note you did not address** — if you cannot resolve it, report it to the user with its `file:line`; removing the marker without doing the work defeats the entire purpose.
 - **A note may be wrong** — if acting on it would break something or contradicts the code, surface that instead of blindly complying.
