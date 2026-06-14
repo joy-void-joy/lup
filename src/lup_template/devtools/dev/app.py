@@ -6,6 +6,7 @@ import typer
 
 import lup_template.devtools.dev.branches as branches
 import lup_template.devtools.dev.check as check
+import lup_template.devtools.dev.comments as comments
 import lup_template.devtools.dev.conflicts as conflicts
 import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.pr as pr
@@ -222,6 +223,24 @@ def check_cmd(
 ) -> None:
     """Run ruff format, ruff check, pyright, and pytest. Read-only by default."""
     check.run_checks(fix, no_test)
+
+
+# -- comments command --
+
+
+@app.command("comments")
+def comments_cmd(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+    commit: Annotated[
+        bool,
+        typer.Option("--commit", help="Commit comment-bearing files as a prompt snapshot"),
+    ] = False,
+) -> None:
+    """List unresolved `# claude:` feedback comments in tracked files."""
+    comments.report(as_json, commit)
 
 
 # -- init commands --

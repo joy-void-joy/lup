@@ -3,6 +3,7 @@
 import sh
 import typer
 
+from lup_template.devtools.dev.comments import scan_feedback
 from lup_template.devtools.utils import git, uv
 
 
@@ -73,6 +74,16 @@ def run_checks(fix: bool, no_test: bool) -> None:
             if e.stdout:
                 typer.echo(e.stdout.decode().rstrip())
             results.append(("pytest", False))
+
+    found = scan_feedback()
+    if found:
+        typer.echo(f"claude comments: FAIL ({len(found)} unresolved)")
+        for comment in found[:10]:
+            typer.echo(f"  {comment.file}:{comment.start_line}-{comment.end_line}")
+        results.append(("claude comments", False))
+    else:
+        typer.echo("claude comments: ok")
+        results.append(("claude comments", True))
 
     # summary
     passed = sum(1 for _, ok in results if ok)
