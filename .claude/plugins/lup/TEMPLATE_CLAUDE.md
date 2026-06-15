@@ -1,3 +1,4 @@
+# claude: can you check that this file is 1. up-to-date with CLAUDE.md and best practices and 2. that it makes sense? Can you run me through what it says?
 # CLAUDE.md Template
 
 This file exports portable sections from the upstream CLAUDE.md as a scaffold for downstream projects. It contains conventions, workflow patterns, and coding standards that apply to any project using lup.
@@ -523,6 +524,12 @@ The codebase should read as a **monolithic source of truth** -- understandable w
 - Use commit messages for change history, not code comments
 - Only add comments that document genuinely non-obvious behavior
 
+## Inline `# claude:` Notes
+
+A `# claude:` (or `// claude:`) comment is **actionable review feedback** for the agent to address — distinct from the `# claude: ignore` anti-pattern escape hatch. The edits hook prompts whenever an edit changes a file's `# claude:` marker count, and `lup-devtools` scans for unresolved notes.
+
+**Never delete a `# claude:` note until its concern is actually resolved** — fix the code it points at, or answer the question and reflect that answer in code, docs, or an explicit user decision. Making a file parse or tidying up does not count. A note in a comment-less format (e.g. JSON) still can't be silently dropped: resolve it, or relocate it to a file that can hold it. Use `/lup:resolve` to clear resolved notes.
+
 ## Error Handling Philosophy
 
 **MCP tools should:**
@@ -649,11 +656,11 @@ Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/lup/h
 | --------------------- | ----------- | ---------------------------------------------------------------------- |
 | `auto_allow_fetch.py` | WebFetch    | `ALLOW_PATTERNS` / `DENY_PATTERNS` (regex anchored to the URL origin)  |
 | `auto_allow_bash.py`  | Bash        | `RULES` list of `Allow`/`Deny`, evaluated per shell segment (last-match-wins, like .gitignore; deny if any segment denies, allow only if all allow) |
-| `auto_allow_edits.py` | Edit, Write | Anti-pattern detection, trivial-line counting (<=3 real changes auto-allow), protected files (Write to protected files is denied; other Writes always ask) |
+| `auto_allow_edits.py` | Edit, Write | Anti-pattern detection, trivial-line counting (<=3 real changes auto-allow), `# claude:` marker review; protected files always prompt on Edit and are denied on Write; other Writes always prompt |
 
 **To add a new allowed URL or command**, edit the pattern list at the top of the corresponding hook script. Non-matching inputs fall through to the user prompt (ask).
 
-`settings.json` only contains rules that don't need regex (e.g. `WebSearch` allow, `Read(**/*.local*)` deny, `Edit(pyproject.toml)` ask).
+`settings.json` only contains rules that don't need regex (e.g. `WebSearch` allow, `Read(**/*.local*)` deny). Decisions that overlap a hook belong in the hook instead — e.g. the edits hook protects `pyproject.toml` and the bash hook asks before `uv add`/`uv sync`.
 
 ## Settings & Configuration
 
