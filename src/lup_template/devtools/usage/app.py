@@ -2,6 +2,7 @@
 
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
 import httpx
@@ -11,7 +12,8 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
-from lup_template.devtools.usage.api import CREDS_PATH, fetch_usage, load_stats
+import lup.profiles as profiles
+from lup_template.devtools.usage.api import creds_path, fetch_usage, load_stats
 from lup_template.devtools.usage.render import build_display, build_error_panel
 
 app = typer.Typer(
@@ -21,10 +23,10 @@ app = typer.Typer(
 console = Console()
 
 
-def fetch_and_build(detail: bool, bar_width: int) -> Panel:
+def fetch_and_build(config_dir: Path, detail: bool, bar_width: int) -> Panel:
     """Fetch usage and build the display panel."""
-    usage = fetch_usage()
-    stats = load_stats() if detail else None
+    usage = fetch_usage(config_dir)
+    stats = load_stats(config_dir) if detail else None
     return build_display(usage, stats, detail, bar_width)
 
 
@@ -33,13 +35,22 @@ def fetch_and_build(detail: bool, bar_width: int) -> Panel:
 
 @app.callback(invoke_without_command=True)
 def main(
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            "-p",
+            help="Claude profile to read usage for (default: active profile).",
+        ),
+    ] = None,
     detail: Annotated[
         bool,
         typer.Option(
             "--detail/--no-detail",
             help="Show daily breakdown from stats cache.",
         ),
-    ] = True,
+    ] = True,  # claude: I'm not seeing any daily breakdown when calling the devtool directly
+    # claude: Seems like it's missing a --json option or similar, that would allow an agent to know how much usage is currently used
     watch: Annotated[
         bool,
         typer.Option(
@@ -58,8 +69,10 @@ def main(
     ] = 600,
 ) -> None:
     """Show live Claude Code usage with pacing bars (Anthropic OAuth only)."""
-    if not CREDS_PATH.exists():
-        console.print("[red]No credentials at ~/.claude/.credentials.json[/red]")
+    config_dir = profiles.resolve_config_dir(profile)
+    creds = creds_path(config_dir)
+    if not creds.exists():
+        console.print(f"[red]No credentials at {creds}[/red]")
         console.print(
             "[dim]This command reads Claude Code OAuth usage from "
             "api.anthropic.com; there is no codex/openai equivalent. "
@@ -72,7 +85,7 @@ def main(
 
     if not watch or not console.is_terminal:
         try:
-            panel = fetch_and_build(detail, bar_width)
+            panel = fetch_and_build(config_dir, detail, bar_width)
         except httpx.HTTPStatusError as e:
             console.print(
                 f"[red]API error: {e.response.status_code}"
@@ -92,7 +105,7 @@ def main(
         style="dim",
     )
     try:
-        panel = fetch_and_build(detail, bar_width)
+        panel = fetch_and_build(config_dir, detail, bar_width)
     except httpx.HTTPStatusError, httpx.ConnectError:
         panel = build_error_panel("Initial fetch failed")
 
@@ -105,7 +118,7 @@ def main(
         while True:
             try:
                 time.sleep(interval)
-                panel = fetch_and_build(detail, bar_width)
+                panel = fetch_and_build(config_dir, detail, bar_width)
             except (httpx.HTTPStatusError, httpx.ConnectError) as e:
                 panel = build_error_panel(str(e)[:120])
             except KeyboardInterrupt:

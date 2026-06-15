@@ -3,8 +3,7 @@
 Commands:
 - inspect: Pretty-print the full agent configuration (tools, schemas, prompt, subagents)
 - capabilities: Render the backend capability matrix (the parity contract)
-- serve-tools: Start SDK tools as an MCP stdio server (used by ``chat``)
-- chat: Launch an interactive ``claude`` session with the agent's tools and prompt
+- serve-tools: Start SDK tools as an MCP stdio server (used by the ``claude`` runner)
 - repl: Interactive REPL with the agent via the SDK (continuous session)
 
 Examples::
@@ -13,8 +12,6 @@ Examples::
     $ uv run lup-devtools agent inspect --json
     $ uv run lup-devtools agent inspect --full
     $ uv run lup-devtools agent capabilities --markdown
-    $ uv run lup-devtools agent chat
-    $ uv run lup-devtools agent chat --model opus --no-tools
     $ uv run lup-devtools agent repl
     $ uv run lup-devtools agent repl --model sonnet --no-prompt
     $ uv run lup-devtools agent repl --exec "ping" --no-tools
@@ -26,7 +23,6 @@ from typing import Annotated
 
 import typer
 
-import lup_template.devtools.agent.chat as chat
 import lup_template.devtools.agent.inspect_agent as inspect_agent
 import lup_template.devtools.agent.repl as repl
 import lup_template.devtools.agent.serve as serve
@@ -77,35 +73,12 @@ def serve_tools_cmd(
     """Start SDK tools as an MCP stdio server (the ``notes`` server).
 
     Launched as a subprocess by the Codex/OpenAI adapters and by the
-    ``chat`` command. When session-context env vars are present (see
+    ``claude`` runner. When session-context env vars are present (see
     ``lup.paths.SessionContext``), session-bound tools — reflect and
     submit_output — are served alongside the static tools, and tool
     metrics are flushed to the session directory for the parent to read.
     """
     serve.serve_tools(list_only, server_group)
-
-
-@app.command("chat")
-def chat_cmd(
-    model: Annotated[
-        str | None,
-        typer.Option("--model", "-m", help="Override the model (e.g. sonnet, opus)"),
-    ] = None,
-    no_tools: Annotated[
-        bool,
-        typer.Option("--no-tools", help="Skip MCP tool server"),
-    ] = False,
-    no_prompt: Annotated[
-        bool,
-        typer.Option("--no-prompt", help="Skip appending the agent system prompt"),
-    ] = False,
-) -> None:
-    """Launch an interactive claude session with the agent's tools and prompt.
-
-    Starts the SDK MCP tools as a stdio server, generates the system prompt,
-    and execs into ``claude`` with the right flags.
-    """
-    chat.run_chat(model, no_tools, no_prompt)
 
 
 @app.command("repl")

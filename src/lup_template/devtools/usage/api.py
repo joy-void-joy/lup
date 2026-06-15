@@ -14,8 +14,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # ── constants ──────────────────────────────────────────────
 
-CREDS_PATH = Path.home() / ".claude" / ".credentials.json"
-STATS_PATH = Path.home() / ".claude" / "stats-cache.json"
+
+def creds_path(config_dir: Path) -> Path:
+    """OAuth credentials file inside a Claude config dir."""
+    return config_dir / ".credentials.json"
+
+
+def stats_path(config_dir: Path) -> Path:
+    """Stats cache file inside a Claude config dir."""
+    return config_dir / "stats-cache.json"
+
 
 USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage"
 ANTHROPIC_BETA = "oauth-2025-04-20"
@@ -122,14 +130,15 @@ class DailyBreakdown(BaseModel):
 # ── API ────────────────────────────────────────────────────
 
 
-def fetch_usage() -> UsageResponse:
-    """Call the live usage API."""
+def fetch_usage(config_dir: Path) -> UsageResponse:
+    """Call the live usage API using the profile's OAuth credentials."""
+    creds_file = creds_path(config_dir)
     try:
-        creds = json.loads(CREDS_PATH.read_text())
+        creds = json.loads(creds_file.read_text())
         oauth = creds["claudeAiOauth"]
         token: str = oauth["accessToken"]
     except (json.JSONDecodeError, KeyError, OSError) as e:
-        msg = f"Bad credentials file at {CREDS_PATH}: {e}"
+        msg = f"Bad credentials file at {creds_file}: {e}"
         raise RuntimeError(msg) from e
 
     resp = httpx.get(
@@ -149,11 +158,12 @@ def fetch_usage() -> UsageResponse:
 # ── stats cache ────────────────────────────────────────────
 
 
-def load_stats() -> StatsCache | None:
-    if not STATS_PATH.exists():
+def load_stats(config_dir: Path) -> StatsCache | None:
+    path = stats_path(config_dir)
+    if not path.exists():
         return None
     try:
-        return StatsCache.model_validate_json(STATS_PATH.read_bytes())
+        return StatsCache.model_validate_json(path.read_bytes())
     except ValueError, OSError:
         return None
 
