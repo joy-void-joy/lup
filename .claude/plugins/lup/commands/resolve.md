@@ -1,71 +1,99 @@
 ---
-allowed-tools: Bash(uv run lup-devtools:*), Read, Edit, Glob, Grep, AskUserQuestion, Agent
-description: Work through inline review comments and clear them all
+allowed-tools: Bash(uv run lup-devtools:*), Bash(git:*), Read, Edit, Write, Glob, Grep, AskUserQuestion, Agent, Workflow, Skill
+description: Cluster inline review notes into concerns, fan out isolated fixes, verify each, and merge
 ---
 
 # Resolve Inline Feedback
 
-Address every `# claude:` / `// claude:` note left in the codebase, then ensure none remain.
+Turn every `# claude:` / `// claude:` note in the codebase into a fix, verify each one independently, and clear only the notes that are genuinely resolved.
 
-These notes are how the user queues feedback: they read through files and drop `# claude: <note>` comments anywhere (any language — the keyword `ignore` is reserved for the anti-pattern escape hatch, everything else is for you). Your job is to act on each one and remove it.
+These notes are how the user queues feedback: they read through files and drop `# claude: <note>` anywhere (any language — `ignore` is reserved for the anti-pattern escape hatch, everything else is for you). At scale, working note-by-note is both slow and **myopic**: many notes are the *same* concern seen from different files, and a note about one line ("why is this an `int`?") usually implies a codebase-wide change ("give domain primitives named type aliases"). So this command works at the level of **concerns**, not comments: it clusters the notes, fans the editing out to isolated worktrees in parallel, verifies each diff independently, and merges only what's confirmed.
 
-## Phase 1: Snapshot the prompts
+The human-judgment steps stay in this conversation; the parallel editing runs in a background **workflow** that cannot pause to ask questions. So the shape is:
 
-Before changing anything, capture the notes in their own commit so there is a record of what was asked (squash or rebase it away later if you like):
+**snapshot → triage → decide with you → execute (workflow) → merge & clear → report.**
+
+## Phase 1 — Snapshot
 
 ```
 uv run lup-devtools dev comments --commit
 ```
 
-This stages the comment-bearing files and commits them with a message listing every prompt. If the working tree has unrelated uncommitted changes you do not want swept into that snapshot, stop and tell the user first.
+Records every note in one commit so the fan-out worktrees branch from a clean, shared base. If the working tree has unrelated uncommitted changes you do not want swept into that snapshot, **stop and tell the user first**. Then capture the base ref the workflow will branch from and diff against:
 
-## Phase 2: Scan
+```
+git rev-parse HEAD
+```
 
-Run `uv run lup-devtools dev comments --json`. Each item has:
+If the scan is empty, report that and stop.
 
-- `file`, `start_line`, `end_line` — where the note lives (a marker plus any comment lines merged below it)
-- `read_start`, `read_end` — the window to read for context
-- `text` — the merged note
+## Phase 2 — Triage into concerns
 
-If the list is empty, report that and stop.
+Get the raw notes:
 
-## Phase 3: Address each note
+```
+uv run lup-devtools dev comments --json
+```
 
-Work file by file, top to bottom. Two habits before you start editing:
+Dispatch a single **triage `Agent`** (the planner). It reads each note's `read_start`–`read_end` window and returns a **plan**: a list of concerns. For each concern:
 
-- **Interview first.** For any non-trivial concern, ask precise questions (`AskUserQuestion`) to pin down exactly what the user means. Several small clarifying questions beat one wrong fix.
-- **Fan out for breadth.** When a concern spans many files or calls for an ontology revision, dispatch subagents (`Agent`) to investigate and/or implement in parallel, then synthesize.
+- `id` — short slug (becomes branch `resolve/<id>`)
+- `title` — one line
+- `spec` — the **generalized, marker-free** task: the *underlying* issue stated at the ontology level, not the literal note. (A note questioning one `int` → "give domain primitives named type aliases wherever a raw built-in stands in for a concept.")
+- `files` — the blast radius (starting points, not a fence)
+- `notes` — every `{file, line, text}` this concern subsumes
+- `needs_user` — true when resolving it needs a decision only the user can make (taste, architecture direction, ambiguous intent)
 
-For each note:
+Two rules for the planner, because they are what keep the later merge safe:
 
-1. **Read** the `read_start`-`read_end` window so you understand what the note refers to. Read wider if the answer needs it.
-2. **Classify and act:**
-   - **Clarity complaint** ("unclear why this is here", "what is this for?", "confusing", "hard to follow") → the fix is **structural, never an explanatory comment**. Do not annotate the code to explain it. Instead:
-     - Revise the *ontology*: is this function/class even needed? Is the control flow straight, or tangled? Could it be renamed, inlined, split, or deleted?
-     - Rewrite so the code reads clearly **from scratch** — understandable with no comments and no knowledge of its history. A file should read like a workflow.
-     - A comment is usually a patch over unclear structure; reach for one only when the structure genuinely cannot carry the meaning.
-   - **Instruction** ("simplify this", "rename to X", "drop this field") → make the change.
-   - **Question** ("why is this here?", "is this still needed?", "any problems?") → investigate and answer. If the answer implies a change, make it. If it is a judgment call, present your finding and recommendation with `AskUserQuestion` and act on the reply.
-   - **Brainstorm / open-ended** ("brainstorm more X", "run me through this") → engage the user with `AskUserQuestion` (or a written answer if they only asked for an explanation). Do not silently guess.
-   - **Ambiguous / underspecified** → do NOT guess. Use `AskUserQuestion` to confirm intent first.
-3. **Remove the note** (the marker line and any merged continuation lines) in the same edit that addresses it.
+- **Generalize, don't transcribe.** One concern may subsume many notes across many files. The dominant theme in this repo — *"backend concerns belong behind an ABC in `lup`, not matched or leaked into `core` and the template"* — is **one** concern spanning ~10 files, not eighteen separate ones.
+- **Union overlapping concerns.** Any two concerns whose `files` overlap must be merged into one. Parallel worktrees that touch the same file would collide at merge — so a cross-cutting refactor is *one* concern fixed in *one* worktree, and the concerns that run in parallel have **disjoint file sets**.
 
-Each edit that removes a marker triggers a permission prompt by design — that is the verification checkpoint. Keep edits small and self-explanatory so they can be approved at a glance.
+Write the plan to `tmp/resolve-plan.json` and read it back, so the rest of the run works from a concrete, inspectable artifact.
 
-## Phase 4: Confirm and report
+## Phase 3 — Decide with the user
 
-1. Re-run `uv run lup-devtools dev comments`.
-2. Keep going while notes remain that you can resolve — address each, then remove its marker.
-3. **Never delete a note to make the scan pass.** Removing a marker without doing the work is the one thing you must not do.
-4. When you are done and notes still remain (the user deferred them, you are blocked, or you could not address them), **stop and report them explicitly** — list each with its `file:line` and why it is unresolved. Do not quietly delete them to clean up the scan.
-5. Run `uv run lup-devtools dev check`. If you intentionally left notes for the user, its `claude comments` check will fail — that is expected, and is not a reason to delete the notes.
+Before anything is edited, settle every `needs_user` concern **in one batch** — do not drip dozens of questions mid-fix. For each, use `AskUserQuestion` to surface the concern, your reading of it, and a recommendation. Fold the answer into that concern's `spec` (so the editor receives a self-contained, already-decided task) and mark it ready.
+
+- A concern that produces **no code change** (a pure brainstorm or explanation) is handled here in the conversation; its note is cleared only once the outcome lands somewhere real (code, docs, or a recorded decision) — never just deleted.
+- If the user defers a concern, drop it from the ready set and report it later — leave its notes in place.
+
+## Phase 4 — Execute (background workflow)
+
+Hand the ready, autonomous concerns to the execute workflow:
+
+```
+Workflow(
+  scriptPath=".claude/workflows/commands/resolve.js",
+  args={ "base": "<HEAD from Phase 1>", "concerns": [ ...ready concerns... ] },
+)
+```
+
+It runs one **worktree-isolated editor per concern** (each fixes the whole pattern and is told to leave `# claude:` markers untouched), then an **independent verifier** per concern that judges the diff against the *original* notes. It merges nothing — it returns a **manifest**, one entry per concern: `{ id, title, branch, accepted, generalized, reason, residual, notes }`. Watch it with `/workflows`; you are notified when it finishes.
+
+## Phase 5 — Merge accepted branches & clear their markers
+
+For each manifest entry with `accepted: true`, **in this conversation** (so the edits run under the permission hooks):
+
+1. Merge its branch: `git merge --no-ff resolve/<id>`. Branches are disjoint by design, so this is clean. If a conflict does arise, resolve it with the `/lup:merge` guidance and **audit for dropped code** — never let a merge silently lose a feature (see CLAUDE.md § Merge Conflict Resolution).
+2. Clear that concern's notes: `Edit` out each marker line listed in its `notes`. Removing a marker trips the marker-count hook — that prompt is the final review checkpoint, and you only reach it for work an independent verifier already accepted.
+
+Do **not** touch markers for concerns that were not accepted.
+
+## Phase 6 — Report
+
+```
+uv run lup-devtools dev comments
+uv run lup-devtools dev check
+```
+
+List everything still unresolved with its `file:line` and *why*: rejected by the verifier (quote its `residual`), deferred by the user, or never committed. If you intentionally left notes, `dev check`'s `claude comments` gate will fail — that is expected, not a reason to delete them.
 
 ## Guidelines
 
-- **The note is the spec** — do exactly what it asks, nothing more.
-- **Clarity is structural, not a comment** — if a note flags confusion, fix the code's shape (naming, flow, decomposition) so it reads on its own. Explaining unclear code with a comment is the wrong fix.
-- **A file should read like a workflow** — comments are usually patches; prefer to make the code self-evident, and delete code that isn't needed rather than leaving it dead.
-- **One concern per edit** — do not fold unrelated fixes together.
-- **When in doubt, ask** — a wrong "fix" is worse than a question.
-- **Never delete a note you did not address** — if you cannot resolve it, report it to the user with its `file:line`; removing the marker without doing the work defeats the entire purpose.
-- **A note may be wrong** — if acting on it would break something or contradicts the code, surface that instead of blindly complying.
+- **Concern, not comment, is the unit.** Generalizing up front is what prevents myopic one-line fixes; the planner does it once, before any editing.
+- **Resolution is decoupled from the marker.** Editors never resolve a note by deleting it — they are told hands-off and run on throwaway worktrees. A note is cleared only after an independent verifier accepts the work and you merge it. **Never delete a note to make the scan pass** — that is the one thing you must not do.
+- **Clarity notes are structural.** "unclear why this is here" is fixed by reshaping the code (rename, inline, split, delete) so it reads on its own — not by adding an explanatory comment. Bake that into the concern's `spec`.
+- **A note may be wrong.** If acting on it would break something or contradicts the code, surface that instead of complying.
+- **Small runs use the same flow.** A handful of notes simply yields a handful of concerns; the workflow fans out fewer agents. A single trivial instruction you can also just do inline.
+- **When in doubt, ask** — a wrong fix is worse than a question.
