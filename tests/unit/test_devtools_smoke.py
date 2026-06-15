@@ -19,11 +19,15 @@ SMOKE_COMMANDS: list[list[str]] = [
     ["trace", "list"],
     ["feedback", "status"],
     ["setup", "status"],
+    ["setup", "profile", "list"],
     ["sync", "status"],
     ["agent", "--help"],
     ["py", "--help"],
     ["dev", "--help"],
-    ["usage", "--help"],
+    ["dev", "plugin", "--help"],
+    ["claude", "--help"],
+    ["claude", "run", "--help"],
+    ["claude", "usage", "--help"],
 ]
 
 
