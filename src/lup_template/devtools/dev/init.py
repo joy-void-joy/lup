@@ -16,6 +16,7 @@ from pathlib import Path
 import typer
 
 from lup.paths import find_project_root
+from lup_template.devtools.dev.plugin import set_marketplace_name
 from lup_template.devtools.utils import git
 
 PACKAGE_IMPORT_RE = re.compile(
@@ -191,6 +192,9 @@ def rename_package(
             all_changes.append(f"  CLI app name: lup -> {new_name}")
     else:
         all_changes.extend(rename_cli_app_name(cli_path, new_name))
+
+    typer.echo("\nMarketplace:" if dry_run else "Naming the plugin marketplace...")
+    all_changes.extend(f"  {c}" for c in set_marketplace_name(root, new_name, dry_run))
 
     if dry_run:
         typer.echo("\nDirectory rename:")

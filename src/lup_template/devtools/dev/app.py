@@ -9,6 +9,7 @@ import lup_template.devtools.dev.check as check
 import lup_template.devtools.dev.comments as comments
 import lup_template.devtools.dev.conflicts as conflicts
 import lup_template.devtools.dev.init as init
+import lup_template.devtools.dev.plugin as plugin
 import lup_template.devtools.dev.pr as pr
 import lup_template.devtools.dev.worktree as worktree
 
@@ -17,10 +18,12 @@ worktree_app = typer.Typer(no_args_is_help=True)
 pr_app = typer.Typer(no_args_is_help=True)
 conflict_app = typer.Typer(no_args_is_help=True)
 init_app = typer.Typer(no_args_is_help=True)
+plugin_app = typer.Typer(no_args_is_help=True)
 app.add_typer(worktree_app, name="worktree", help="Worktree management")
 app.add_typer(pr_app, name="pr", help="PR lifecycle (status, merge, push, checks)")
 app.add_typer(conflict_app, name="conflict", help="Merge/rebase conflict resolution")
 app.add_typer(init_app, name="init", help="Project initialization")
+app.add_typer(plugin_app, name="plugin", help="Local plugin marketplace wiring")
 
 
 # -- worktree commands --
@@ -263,6 +266,29 @@ def init_rename_package_cmd(
 ) -> None:
     """Rename the lup Python package to a project-specific name."""
     init.rename_package(new_name, dry_run)
+
+
+# -- plugin commands --
+
+
+@plugin_app.command("name")
+def plugin_name_cmd(
+    name: Annotated[
+        str | None,
+        typer.Argument(help="Marketplace name (default: pyproject [project].name)"),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", "-n", help="Show changes without writing"),
+    ] = False,
+) -> None:
+    """Name this repo's plugin marketplace uniquely (the plugin entry stays 'lup').
+
+    Marketplace names share one global namespace, so a shared name like
+    'lup'/'local' collides across repos and worktrees and installs shadow
+    each other. Naming the marketplace after the project fixes that.
+    """
+    plugin.name_marketplace(name, dry_run)
 
 
 # -- pr commands --
