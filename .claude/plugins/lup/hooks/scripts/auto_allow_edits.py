@@ -2,7 +2,9 @@
 """PreToolUse hook that gates Edit and Write operations.
 
 Edit decision order:
-1. Protected files (.claude/, pyproject.toml, .env*) -> always defer
+1. Protected files (.claude/, pyproject.toml, .env*) and tmp/ scratch paths
+   -> ask, always (overriding auto-accept). A `# claude:` marker change shows
+   the review-gate reason; any other change shows a generic reason.
 2. Anti-patterns scanned over added lines in .py and TS-family files
    (see ANTI_PATTERNS / TS_ANTI_PATTERNS):
    - file has `# claude: ignore` in its first 10 lines on disk -> skip the
@@ -18,8 +20,8 @@ Edit decision order:
    within MAX_REAL_CHANGES
 
 Write decision order:
-1. Protected files -> deny (use targeted Edits instead)
-2. Otherwise -> defer to the user (full-file rewrites never auto-allow)
+1. Protected files and tmp/ scratch paths -> ask (identical to Edit)
+2. Otherwise -> defer to the user (None; full-file rewrites never auto-allow)
 """
 
 import difflib
@@ -27,6 +29,7 @@ import json
 import re
 import sys
 
+from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, ValidationError
@@ -37,12 +40,16 @@ MAX_REAL_CHANGES = 3
 # Configuration: protected paths and anti-pattern tables
 # ---------------------------------------------------------------------------
 
-# Files this hook never auto-allows: Edits defer to the user, Writes deny.
+# Files this hook never auto-allows: Edit and Write both prompt the user.
 PROTECTED_PATTERNS = [
     r"(^|/)\.claude/",
     r"(^|/)pyproject\.toml$",
     r"(^|/)\.env($|\.)",
 ]
+
+# The repo's own scratch dir (one-off scripts live here). The system temp dir
+# (/tmp/..., used by pytest fixtures) is deliberately excluded — see is_tmp_path.
+TMP_DIR = "tmp"
 
 CLAUDE_IGNORE_MARKER = "# claude: ignore"
 
@@ -54,10 +61,16 @@ MARKER_RE = re.compile(r"(#|//)\s*claude\s*:", re.IGNORECASE)
 IGNORE_RE = re.compile(r"(#|//)\s*claude\s*:\s*ignore\b", re.IGNORECASE)
 FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*claude\s*:\s*ignore\s*$", re.IGNORECASE)
 
+MARKER_REVIEW_REASON = "Edit adds or removes a `# claude:` marker — review before applying"
+PROTECTED_REVIEW_REASON = "Protected file — review before applying"
+TMP_REVIEW_REASON = "Scratch file under tmp/ — review before applying"
+
 # (pattern, reason) rows checked against every line an edit adds to a .py
 # file. A matching line denies the edit; an inline `# claude: ignore` on the
 # line downgrades to a user prompt, and a file-level marker (first 10 lines
 # on disk) skips this table entirely.
+
+# claude: I am wondering whether this is something we can do with a linter actually? Is there a way to specify custome rules this way? Might be the best way to unify this?
 ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\bAny\b"),
@@ -81,16 +94,17 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "No __all__ — import directly from the defining module",
     ),
     (
-        re.compile(r"\bdict\[\s*str\s*,\s*object\s*\]"),
+        re.compile(r"\bdict\[\s*str\s*,\s*object\s*\]"), #claude: seems a bit overspecific. Shouldn't it be about object?
+        # claude: In fact, the model frequently uses Mapping[str, object] instead. Can't say if it's to avoid being detected, or if there are legitimate reasonsn there
         "Never use dict[str, object] — use TypedDict or BaseModel",
     ),
     (
         re.compile(r"\bimport\s+re\b"),
-        "`import re` is a code smell — use structured APIs (json, pathlib, urllib.parse, etc.)",
+        "`import re` is a code smell — use structured APIs (json, pathlib, urllib.parse, etc.)", #claude: I notice the agent often tries to push through anyway. Maybe we're missing better explanation about what to do instead, or something?
     ),
     (
         re.compile(r"\bfrom\s+re\s+import\b"),
-        "`from re import` is a code smell — use structured APIs instead",
+        "`from re import` is a code smell — use structured APIs instead", #claude: We might want something like a anti-pattern library
     ),
     (
         re.compile(r"\bre\.(compile|search|match|fullmatch|sub|findall|split)\s*\("),
@@ -122,7 +136,7 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(r"@dataclass|\bfrom\s+dataclasses\s+import\b"),
-        "Use Pydantic BaseModel (or TypedDict) instead of dataclasses",
+        "Use Pydantic BaseModel (or TypedDict) instead of dataclasses", #claude: Do we have good instructions about when to use which, BaseModel or TypedDict? Also you don't capture import dataclass (see my comment about needing an anti-pattern library)
     ),
     (
         re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
@@ -151,6 +165,7 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "No `_` prefix on variables/constants — nothing is private "
         "(unused `_` function parameters are exempt)",
     ),
+    # claude: Can you brainstorm more anti-patterns, or things we might want? Let's brainstorm about them
 ]
 
 TS_FILE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
@@ -199,11 +214,25 @@ TS_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"//\s*tslint:disable"),
         "Never use tslint:disable — migrate to eslint and fix the issue",
     ),
+
+    # claude: Same here, would like a bit more
 ]
 
 
 def is_protected_file(file_path: str) -> bool:
     return any(re.search(p, file_path) for p in PROTECTED_PATTERNS)
+
+
+def is_tmp_path(file_path: str) -> bool:
+    """Whether a path is under the repo's ./tmp/ scratch dir.
+
+    The system temp dir (/tmp/..., used by pytest fixtures) is excluded — only
+    the project's own tmp/ is gated.
+    """
+    parts = PurePosixPath(file_path).parts
+    if parts[:2] == ("/", TMP_DIR):
+        return False
+    return TMP_DIR in parts
 
 
 def marker_count(text: str) -> int:
@@ -550,14 +579,33 @@ def violation_decision(violation: Violation) -> AllowDecision:
             return deny_decision(reason)
 
 
+def always_ask_decision(
+    file_path: str, old_string: str = "", new_string: str = ""
+) -> AllowDecision | None:
+    """Paths the hook never auto-allows — Edit and Write both prompt the user.
+
+    Protected config and tmp/ scratch files always defer to a prompt rather
+    than auto-allowing (Edit) or denying (Write), so the two tools behave
+    identically here. Any other path returns None.
+    """
+    if is_protected_file(file_path):
+        if marker_count(old_string) != marker_count(new_string):
+            return ask_decision(MARKER_REVIEW_REASON)
+        return ask_decision(PROTECTED_REVIEW_REASON)
+    if is_tmp_path(file_path):
+        return ask_decision(TMP_REVIEW_REASON)
+    return None
+
+
 def decide(tool_input: EditInput) -> AllowDecision | None:
     file_path = tool_input.file_path
     old_string = tool_input.old_string
     new_string = tool_input.new_string
     replace_all = tool_input.replace_all
 
-    if is_protected_file(file_path):
-        return None
+    gate = always_ask_decision(file_path, old_string, new_string)
+    if gate is not None:
+        return gate
 
     if file_path.endswith(".py") and new_string:
         violation = find_anti_pattern_violations(
@@ -581,9 +629,7 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
             return violation_decision(violation)
 
     if marker_count(old_string) != marker_count(new_string):
-        return ask_decision(
-            "Edit adds or removes a `# claude:` marker — review before applying"
-        )
+        return ask_decision(MARKER_REVIEW_REASON)
 
     if old_string and not new_string:
         return allow_decision()
@@ -600,15 +646,11 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
 def decide_write(tool_input: WriteInput) -> AllowDecision | None:
     """Gate Write (full-file) operations.
 
-    Writes never auto-allow — a whole-file rewrite needs user eyes — so the
-    only automated decision is denying protected files outright.
+    Writes never auto-allow — a whole-file rewrite needs user eyes. Protected
+    and tmp/ paths prompt (identical to Edit); everything else defers to the
+    normal permission flow.
     """
-    if is_protected_file(tool_input.file_path):
-        return deny_decision(
-            f"Denied: Write to protected file ({tool_input.file_path}) — "
-            "use targeted Edit calls, which prompt for approval"
-        )
-    return None
+    return always_ask_decision(tool_input.file_path)
 
 
 def main() -> None:
@@ -621,7 +663,7 @@ def main() -> None:
                 result = decide_write(WriteEvent.model_validate_json(raw).tool_input)
             case _:
                 sys.exit(0)
-    except ValidationError, OSError:
+    except (ValidationError, OSError):
         sys.exit(0)
 
     if result:

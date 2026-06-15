@@ -24,7 +24,7 @@ spec.loader.exec_module(hook)
 
 
 def decision(command: str) -> str | None:
-    """Return 'allow', 'deny', or None (fall through to user prompt)."""
+    """Return 'allow', 'deny', 'ask', or None (fall through to user prompt)."""
     result = hook.decide(command)
     if result is None:
         return None
@@ -113,10 +113,14 @@ def test_background_ampersand_separates_segments() -> None:
     assert decision("uv run pytest 2>&1") == "allow"
 
 
-def test_uv_dependency_management_is_allowed() -> None:
-    assert decision("uv add httpx") == "allow"
-    assert decision("uv add --dev pytest-cov") == "allow"
-    assert decision("uv sync") == "allow"
+def test_uv_add_sync_ask_remove_lock_allow() -> None:
+    # add/sync fetch and execute dependency code -> require approval
+    assert decision("uv add httpx") == "ask"
+    assert decision("uv add --dev pytest-cov") == "ask"
+    assert decision("uv sync") == "ask"
+    # remove/lock only touch local files -> auto-allowed
+    assert decision("uv remove httpx") == "allow"
+    assert decision("uv lock") == "allow"
 
 
 def test_plain_cd_allows_only_as_navigation() -> None:
