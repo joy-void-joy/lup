@@ -22,13 +22,14 @@ Customization:
        ``copy_to_clipboard`` for wizard steps that hand the user a value)
 """
 
-from __future__ import annotations
+from __future__ import annotations  # claude: Again, annotations kinda feel redundant
 
 import shutil
 import webbrowser
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from pydantic import BaseModel, Field
@@ -36,6 +37,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+import lup.profiles as profiles
 from lup.paths import project_root
 
 app = typer.Typer(
@@ -50,6 +52,9 @@ PROJECT_ROOT = project_root()
 ENV_LOCAL = PROJECT_ROOT / ".env.local"
 CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 
+profile_app = typer.Typer(no_args_is_help=True, help="Manage Claude account profiles")
+app.add_typer(profile_app, name="profile")
+
 
 # =====================================================================
 # .env.local helpers
@@ -57,6 +62,7 @@ CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 
 
 def read_env_local() -> dict[str, str]:
+    # claude: this seems extremely hacky. Why do we need it when we already have config? Seems like reinventing the wheel there
     """Parse .env.local into a dict. Returns empty dict if file missing."""
     if not ENV_LOCAL.exists():
         return {}
@@ -78,6 +84,8 @@ def write_env_local(values: dict[str, str]) -> None:
     Existing ``KEY=...`` lines are rewritten in place; new keys are appended.
     Comments, blank lines, and ordering are left untouched.
     """
+    # claude: I'm unsure we should do it like that this seems brittle maybe?
+    # claude: But at least this one is straightforward to understand
     if not values:
         return
 
@@ -108,7 +116,7 @@ def save_and_confirm(values: dict[str, str]) -> None:
 
 
 def mask(value: str, show: int = 6) -> str:
-    """Mask a secret string, showing only the first few characters."""
+    """Mask a secret string, showing only the first few characters."""  # claude: this seems a bit superfluous when we could use pydantic-setting's SecretStr instead?
     if len(value) <= show:
         return value
     return value[:show] + "..." + "*" * min(8, len(value) - show)
@@ -123,7 +131,9 @@ def open_browser(url: str) -> None:
         console.print(f"  [dim]Could not open browser. Go to: {url}[/dim]")
 
 
-def detect_system_timezone() -> str:
+def detect_system_timezone() -> (
+    str
+):  # claude: Yes okay, but like, using str manipulation for that seems brittle? Likewise parsing /etc/localtime, what if I'm on windows? Surely there's an actual builtin or a package for that
     """Detect the system's IANA timezone name."""
     try:
         local_now = datetime.now(timezone.utc).astimezone()
@@ -170,8 +180,11 @@ class Integration(BaseModel):
 # TEMPLATE integrations — replace these with your domain's services
 # =====================================================================
 
+# claude: Probably need some todos here. I'd like /init to have a step where it explicitely gathers (like dev currently gathers the "# claude:" comments) all TODOs and places where it has to make a decision
+
 
 def setup_slack() -> dict[str, str]:
+    # claude: the type is extreme code smell. You defined an integration basemodel, so probably you can make a decorator, or at least have the return type be uniform
     """Walk through Slack bot token configuration.
 
     TEMPLATE: Replace with your Slack app's manifest and scopes.
@@ -214,6 +227,8 @@ def setup_slack() -> dict[str, str]:
     ).strip()
     if bot_token:
         values["SLACK_BOT_TOKEN"] = bot_token
+
+    # claude: Yeah, this all feels very hacky and copy-pasty where we could have something more general
 
     user_id = typer.prompt(
         "SLACK_USER_ID (your Slack user ID, or email for lookup)",
@@ -380,6 +395,7 @@ def setup_codex_backend() -> dict[str, str]:
     per-MTok USD rates for the configured model. Claude-only projects
     can skip this entirely.
     """
+    # claude: Why do we need this?
     console.print()
     console.rule("[bold]Codex/OpenAI backend pricing[/]")
     console.print()
@@ -416,6 +432,9 @@ def setup_codex_backend() -> dict[str, str]:
 
 def codex_backend_status(env: dict[str, str]) -> tuple[bool, str]:
     """Rates present = budget caps enforceable on codex/openai."""
+    # claude: Same question here, this feels like just a continuation of the last function?
+    # claude: Also, we need a generate setup function for claude/codex login, see how we do it in https://github.com/joy-void-joy/inkwell/tree/dev
+
     rates = [
         key
         for key in ("CODEX_USD_PER_MTOK_INPUT", "CODEX_USD_PER_MTOK_OUTPUT")
@@ -477,6 +496,7 @@ def timezone_status(env: dict[str, str]) -> tuple[bool, str]:
 # and optionally a custom status checker.
 # =====================================================================
 
+# claude: Yeah, I really like this part
 INTEGRATIONS: list[Integration] = [
     Integration(
         name="Slack",
@@ -536,6 +556,9 @@ def status() -> None:
     """Show current integration status."""
     console.print()
     console.print(build_status_table())
+    active = profiles.active_profile()
+    if active:
+        console.print(f"  Active Claude profile: [bold]{active}[/]")
     console.print()
 
 
@@ -581,6 +604,78 @@ def codex_cmd() -> None:
 def timezone_cmd() -> None:
     """Set timezone."""
     save_and_confirm(setup_timezone())
+
+
+# =====================================================================
+# Claude profiles
+#
+# A profile maps a name to a Claude config dir (CLAUDE_CONFIG_DIR) — its
+# own login and usage data. The `claude` runner launches under the active
+# profile and `claude usage` reports on it. The registry is machine-wide.
+# =====================================================================
+
+
+@profile_app.command("list")
+def profile_list_cmd() -> None:
+    """List Claude profiles; the active one is marked."""
+    registry = profiles.load_registry()
+    active = registry.get("active")
+    profs = registry.get("profiles") or {}
+    if not profs:
+        console.print(
+            "[dim]No profiles. Add one: "
+            "lup-devtools setup profile add <name> --config-dir <path>[/dim]"
+        )
+        return
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column("", width=2)
+    table.add_column("Profile", min_width=16)
+    table.add_column("Config dir", style="dim")
+    for name, prof in profs.items():
+        marker = "[green]●[/]" if name == active else " "
+        table.add_row(marker, name, prof["config_dir"])
+    console.print()
+    console.print(table)
+    console.print()
+
+
+@profile_app.command("add")
+def profile_add_cmd(
+    name: Annotated[str, typer.Argument(help="Profile name")],
+    config_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--config-dir", help="Claude config dir (default: ~/.claude-<name>)"
+        ),
+    ] = None,
+) -> None:
+    """Register a Claude profile pointing at its own config dir."""
+    target = (config_dir or Path.home() / f".claude-{name}").expanduser()
+    profiles.add_profile(name, target)
+    console.print(f"[green]Added profile {name!r}[/] -> {target}")
+    console.print(f"[dim]Log in to it: CLAUDE_CONFIG_DIR={target} claude /login[/dim]")
+
+
+@profile_app.command("use")
+def profile_use_cmd(
+    name: Annotated[str, typer.Argument(help="Profile name")],
+) -> None:
+    """Set the active profile."""
+    try:
+        profiles.set_active(name)
+    except KeyError as e:
+        console.print(f"[red]No such profile: {name}[/red]")
+        raise typer.Exit(1) from e
+    console.print(f"[green]Active profile: {name}[/]")
+
+
+@profile_app.command("remove")
+def profile_remove_cmd(
+    name: Annotated[str, typer.Argument(help="Profile name")],
+) -> None:
+    """Remove a profile from the registry (leaves its config dir on disk)."""
+    profiles.remove_profile(name)
+    console.print(f"Removed profile {name!r}")
 
 
 # =====================================================================
