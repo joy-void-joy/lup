@@ -1,3 +1,5 @@
+# claude: Same comment as in TEMPLATE_CLAUDE.md 
+# claude: I think that in general, in this codebase, we should remove all the # claude: ignore
 # CLAUDE.md
 
 This file provides guidance to Claude Code when working with code in this repository.
@@ -401,6 +403,14 @@ The codebase should read as a **monolithic source of truth** — understandable 
 - Never use "now", "new", "updated", "fixed", or "changed" in comments
 - Use commit messages for change history, not code comments
 
+### Inline `# claude:` Notes
+
+A `# claude:` (or `// claude:`) comment is **actionable review feedback** left in the code for the agent to address — distinct from the `# claude: ignore` escape hatch under [Type Safety](#type-safety). The edits hook prompts whenever an edit changes a file's `# claude:` marker count, and `lup-devtools` scans for unresolved notes.
+
+**Never delete a `# claude:` note until its concern is actually resolved.** Making a file parse, tidying up, or editing past it does not count. Resolve a note by fixing the code or structure it points at, or — for a question — by answering it definitively and reflecting that answer in the code, the docs, or an explicit user decision. Only then does the note come out (use `/lup:resolve`).
+
+A note in a comment-less format (e.g. JSON) is the trap: you can't keep it there, but you still can't silently drop it to satisfy the parser. Resolve its concern first, or relocate it to a file that can hold it (the code it refers to, a tracking doc). If a note raises several concerns, remove it only once every one is resolved; otherwise keep the unresolved parts.
+
 ### DRY: Don't Repeat Yourself
 
 - If logic exists in `lup` (the library), import it. Don't copy-paste.
@@ -457,7 +467,11 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
-Sub-apps: `agent`, `dev`, `feedback`, `py`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
+Sub-apps: `agent`, `claude`, `dev`, `feedback`, `py`, `setup`, `sync`, `trace`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
+
+`lup-devtools claude` runs Claude Code wired for this project: the local lup plugin loaded live from disk (`--plugin-dir`, so plugin edits show up without reinstalling), the agent's MCP tools attached, and — when set — the active **profile**'s account (`CLAUDE_CONFIG_DIR`). `claude usage` reports usage for the chosen profile. Profiles (named Claude config dirs) are managed with `lup-devtools setup profile`.
+
+Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `/lup:*` is identical everywhere. Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name like `lup`/`local` collides across repos and an install from one shadows the others; `lup-devtools dev plugin name` (run by `/lup:init` and `/lup:install`) wires the per-project name.
 
 ### Permission Hooks
 
@@ -467,11 +481,11 @@ Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/lup/h
 | --------------------- | --------------- | ---------------------------------------------------------------------- |
 | `auto_allow_fetch.py` | WebFetch        | `ALLOW_PATTERNS` / `DENY_PATTERNS` (regex anchored to the URL origin)  |
 | `auto_allow_bash.py`  | Bash            | `RULES` list of `Allow`/`Deny`, evaluated per shell segment (last-match-wins, like .gitignore; deny if any segment denies, allow only if all allow) |
-| `auto_allow_edits.py` | Edit, Write     | Anti-pattern detection, trivial-line counting, protected files (Write to protected files is denied; other Writes always ask) |
+| `auto_allow_edits.py` | Edit, Write     | Anti-pattern detection, trivial-line counting, `# claude:` marker review; protected files always prompt on Edit and are denied on Write; other Writes always prompt |
 
 To add a new allowed URL or command, edit the pattern list in the corresponding hook. Non-matching inputs fall through to user prompt.
 
-`settings.json` only contains rules that don't need regex: `WebSearch` (allow), `Read(**/*.local*)` (deny, with allow exceptions for `settings.json.local*` and `downstream.json.local`), `Edit(pyproject.toml)` and `Bash(uv sync/add)` (ask — the bash hook auto-allows `uv add`/`uv sync` before these apply).
+`settings.json` only contains rules that don't need regex: `WebSearch` (allow) and the `Read(**/*.local*)` deny (with allow exceptions for `settings.json.local*` and `downstream.json.local`). Permission decisions that overlap a hook live in the hook, not here: the bash hook **asks** before `uv add`/`uv sync` (they fetch and run dependency code) while auto-allowing `uv remove`/`uv lock`, and the edits hook treats `pyproject.toml` — with all of `.claude/` and `.env*` — as protected, so it never auto-allows.
 
 ### Pyright LSP
 
