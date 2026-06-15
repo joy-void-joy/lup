@@ -1,3 +1,4 @@
+# claude: Also, what's the difference between realtime_relay and realtime?
 """Realtime relay for backends whose tools run in a subprocess.
 
 On Claude, a persistent agent holds one never-ending SDK turn: its tools
@@ -363,6 +364,7 @@ def create_realtime_relay_tools(realtime_dir: Path) -> list[LupMcpTool]:
     gate = ReflectionGate(flag_path=mailbox.meta_flag_path)
     context_read = [False]  # Mutable container for closure
 
+    # claude: Wait I'm very confused, shouldn't this go to template instead? This seems rigid
     @lup_tool(
         "Deliver a message to the environment. Text output and thinking "
         "don't reach the user — this is the only way to communicate. "

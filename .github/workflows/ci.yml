@@ -1,3 +1,4 @@
+# claude: Very uncertain about having a CI here. Maybe we should remove it for now. What do you think
 name: CI
 
 on:

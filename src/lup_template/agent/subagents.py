@@ -3,6 +3,7 @@
 This is a TEMPLATE. Define subagents for specialized tasks in your domain.
 
 Subagents are spawned by the main agent to perform focused work.
+# claude: Do we have a similar file dedicated to nested agents? We should. Please review all of the different ontologies for agent in the doc file (nested, background, etc...) and ensure each one has a python file corresponding to those common patterns.
 Each subagent has:
 - A specialized prompt (focused on one job)
 - A subset of tools (only what it needs)
@@ -30,6 +31,7 @@ from lup.types import SubagentSpec
 #
 # Tool lists are functions so the selection logic (which tools depend on
 # which API keys, etc.) lives in one place. The specs below are module
+# claude: Really not understandable what this mean. What should I care? is it just a list of str that subagents will have access to?
 # constants, so these functions run once at import. To pick tools per
 # session instead, build the specs inside get_subagent_specs() so the
 # functions run at session-build time (when settings are loaded).
@@ -135,6 +137,7 @@ analyzer = SubagentSpec(
     tools=analysis_tools(),
     model="haiku",
 )
+# claude: Okay this make sense. Please ensure (in claude.md and in the doc and everywhere to advise to always use opus4.6 at least (or Fable) for everything. There are often little reason to use cheaper models like Sonnet and almost never to use Haiku. We are on subscription and want the best result )
 
 
 # =============================================================================

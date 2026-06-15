@@ -17,6 +17,7 @@ class LazyCommand:
     every CLI invocation at import — including ``--help``. Resolution is
     deferred to the first call or sub-command attribute access instead.
     """
+    # claude: Didn't get that. Why do we need LazyCommand? As in, when is it used? Is it just to construct the command at top-level without crashing the import?
 
     def __init__(self, name: str, *bake_args: str, tty_out: bool = True) -> None:
         self.name = name
@@ -39,13 +40,14 @@ class LazyCommand:
         return getattr(self.resolve(), attr)
 
 
+# claude: Yeah, okay, this makes sense
 git = LazyCommand("git", "--no-pager", "-c", "color.ui=never", tty_out=False)
 gh = LazyCommand("gh", tty_out=False)
 uv = LazyCommand("uv")
 
 
 def decode_stderr(e: sh.ErrorReturnCode) -> str:
-    """Decode the stderr of a failed ``sh`` command to a string."""
+    """Decode the stderr of a failed ``sh`` command to a string.""" # claude: Huh? There's no sh builtin for this?
     return e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
 
 
@@ -55,6 +57,7 @@ def copy_to_clipboard(text: str) -> bool:
     Tries xclip, xsel, then pbcopy; returns False when none is available
     so callers can fall back to printing the text for manual copying.
     """
+    # claude: Would that work on windows or mac os?
     for command, args in (
         ("xclip", ["-selection", "clipboard"]),
         ("xsel", ["--clipboard", "--input"]),
@@ -68,8 +71,9 @@ def copy_to_clipboard(text: str) -> bool:
     return False
 
 
-def output_json(  # claude: ignore
-    data: BaseModel | Mapping[str, object] | Sequence[object],
+def output_json(
+    data: BaseModel | Mapping[str, object] | Sequence[object], # claude: ignore
+    # claude: Inputting this #claude: ignore makes me realize that in the devtool check, we probably want something that rechecks the whole codebase and verifies if there should be claude: ignore when there isn't any
 ) -> None:
     if isinstance(data, BaseModel):
         typer.echo(data.model_dump_json(indent=2))

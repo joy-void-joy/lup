@@ -3,6 +3,8 @@
 # Uses git ls-files + fzf for fuzzy matching. Includes refs/ entries.
 # Dependencies: jq (parses the {"query": ...} payload on stdin), fzf, git.
 # A missing refs/ directory or zero fzf matches yields empty output, exit 0.
+
+# claude: Do I need to do anything for this to work? Does it work out of the blue?
 set -euo pipefail
 
 QUERY=$(jq -r '.query // ""')

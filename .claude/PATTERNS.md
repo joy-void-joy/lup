@@ -1,3 +1,4 @@
+# claude: same as CLAUDE.md and TEMPLATE_CLAUDE.md
 # Design Patterns
 
 Architectural patterns used in this project. For daily development guidance, see [CLAUDE.md](CLAUDE.md).

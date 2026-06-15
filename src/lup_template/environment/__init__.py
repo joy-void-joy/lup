@@ -12,3 +12,5 @@ However, this code evolves as the application requirements change.
 Structure:
 - cli/__main__.py: Typer CLI — the ``lup`` entry point (run + loop with auto-commit)
 """
+
+# claude: there should also be something about how we need to have this for website ui input, and expand more on when to tweak that (agents often tend to ignore environment and just put everything in)

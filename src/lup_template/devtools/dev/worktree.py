@@ -9,9 +9,9 @@ import typer
 from lup_template.devtools.utils import copy_to_clipboard, decode_stderr, git
 
 
-PLUGIN_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache" / "local" / "lup"
+PLUGIN_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache" / "local" / "lup" # claude: To reinstall it later I presume?
 
-GITIGNORED_EXTRAS = [
+GITIGNORED_EXTRAS = [ # claude: this need an explanation for what this is and why we need it
     ".env.local",
     "downstream.json.local",
     ".claude/settings.local.json",
@@ -41,17 +41,18 @@ def worktree_is_registered(path: Path) -> bool:
 
 def get_tree_dir() -> Path:
     """Find the tree/ directory that contains worktrees."""
-    cwd = Path.cwd().resolve()
+    cwd = Path.cwd().resolve() # claude: Are you sure this works? 
 
     if cwd.parent.name == "tree":
         return cwd.parent
 
-    tree = cwd / "tree"
+    tree = cwd / "tree" # claude: So either I'm in the bare git (in a "worktree" subfolder), and so what I want is to create the folder in ..
+    # claude: Or I'm in the non-bare git, and I want to create the folder in ./worktree/[feature name]
     if tree.is_dir():
         return tree
 
     for parent in cwd.parents:
-        tree = parent / "tree"
+        tree = parent / "tree" # claude: some redundancy there?
         if tree.is_dir():
             return tree
 
@@ -68,7 +69,7 @@ def create(
     force: bool = False,
 ) -> None:
     """Create or re-attach a git worktree."""
-    uv = sh.Command("uv")
+    uv = sh.Command("uv") # claude: Just reuse from utils, no?
     current_dir = Path.cwd()
 
     tree_dir = get_tree_dir()

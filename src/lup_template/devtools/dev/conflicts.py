@@ -428,3 +428,5 @@ def conflict_complete(dry_run: bool) -> None:
     except sh.ErrorReturnCode as e:
         typer.echo(f"Failed to complete {operation}: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)
+
+# claude: this also doesn't seem wired in?

@@ -1,3 +1,5 @@
+# claude: It's unclear to me what a toolset is, how does it differ from a set of tools?
+
 """Single source of truth for the agent's MCP tool groups.
 
 Both backend paths consume this module: the Claude path registers the
@@ -19,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
-if TYPE_CHECKING:
+if TYPE_CHECKING: # claude: I'm wondering if we should just drop all if TYPE_CHECKING here
     from lup.mcp import LupMcpTool
     from lup.reflect import ReflectionGate
     from lup.sandbox import Sandbox

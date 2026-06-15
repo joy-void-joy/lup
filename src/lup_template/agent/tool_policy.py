@@ -3,7 +3,7 @@
 This is a TEMPLATE. Customize for your domain.
 
 Key patterns:
-1. Define tool sets as frozensets for fast membership testing
+1. Define tool sets as frozensets for fast membership testing #claude: This is bad writing. I do not care about why you re using frozensets. I care about what you're doing in this file and why. Why is it useful for. Why should I care?
 2. ToolPolicy class computes excluded tools and tags at construction
 3. get_mcp_servers() registers servers; get_allowed_tools() feeds the
    allowlist hook that enforces availability at call time
@@ -18,14 +18,14 @@ Usage:
     hooks = create_tool_allowlist_hook(policy.get_allowed_tools(mcp_servers))
 """
 
-from __future__ import annotations
+from __future__ import annotations #claude: we're on python3.14, doesn't seem to make a difference (please check)
 
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any  # claude: ignore — for the ServerConfig alias
 
 from lup.mcp import LupMcpTool, server_tool_names
 
-if TYPE_CHECKING:
+if TYPE_CHECKING: #Icl
     from lup.mcp import LupMcpServerConfig
     from lup_template.agent.config import Settings
 
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 # McpServerConfig (stdio/http/sse). core.py narrows each by hasattr(server,
 # "server"), which pyright can't follow through that union — so the dict is
 # typed Any here and resolved at the conversion site.
+# claude: What? This is extremely confusing. Why do you type alias any? Seems like something that should stay purely in the backend?
 type ServerConfig = Any  # claude: ignore — runtime-narrowed union, see above
 
 
@@ -43,6 +44,8 @@ type ServerConfig = Any  # claude: ignore — runtime-narrowed union, see above
 # Claude Agent SDK builtin tool names — consumed only by build_options()
 # on the Claude path. Codex/OpenAI agents get tools from the served MCP
 # groups (toolsets.py) plus the Codex runtime's native shell/file/web tools.
+
+# claude: I feel like this could be unified? Also, this feels fundamental enough thaat I don't understand why this is in the template
 CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(
     {
         "Bash",
@@ -63,11 +66,13 @@ CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(
 # toolset: StructuredOutput emits the final structured output when
 # ClaudeAgentOptions.output_format is set, so denying it would leave the
 # agent unable to finish.
+# claude: What? You're saying "we shouldn't deny it", but I don't even know why I would have denied it in the first place
 FRAMEWORK_TOOLS: frozenset[str] = frozenset({"StructuredOutput"})
 
 # Two complementary mechanisms control which tools the agent gets:
 #
 # 1. Tags (primary) — declare the requirement on the tool itself:
+# claude: What? What are tags? How are they defined?
 #
 #        @lup_tool("...", tags=["requires:example-api"])
 #
@@ -89,6 +94,7 @@ FRAMEWORK_TOOLS: frozenset[str] = frozenset({"StructuredOutput"})
 
 
 class ToolPolicy:
+    # claude: Are you sure this should be in template? Seems like the construct itself should be universal and go in lib?
     """Centralized policy for tool availability.
 
     Determines which tools are available based on:
@@ -115,10 +121,12 @@ class ToolPolicy:
 
         # Tags: map each unmet requirement to its tag (TEMPLATE example —
         # replace with your domain's keys).
+        #claude: I really don't know if I buy this whole tag logic
         if not settings.example_api_key:
             tags.add("requires:example-api")
 
         # TODO: Add your name-set exclusion logic
+        # claude: Yes. TODOs are great. I think we should have more TODOs for the agent in the template, there's not enough of those
         # Example:
         # if self.restricted_mode:
         #     excluded.update(LIVE_DATA_TOOLS)

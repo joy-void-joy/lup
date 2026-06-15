@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field, SerializeAsAny, ValidationError
 logger = logging.getLogger(__name__)
 
 
+# claude: Yeah, this file is excellent, exactly what I wanted in terms of having a unified codex, claude, ..., backend
+
 # ---------------------------------------------------------------------------
 # Content blocks
 # ---------------------------------------------------------------------------
