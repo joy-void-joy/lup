@@ -60,10 +60,10 @@ def test_pure_deletion_is_allowed() -> None:
     assert edit_decision("src/module.py", "x = 1\ny = 2\n", "") == "allow"
 
 
-def test_protected_files_defer_to_user() -> None:
-    assert edit_decision(".claude/settings.json", "a", "b") is None
-    assert edit_decision("pyproject.toml", "a", "b") is None
-    assert edit_decision(".env.local", "a", "b") is None
+def test_protected_files_ask() -> None:
+    assert edit_decision(".claude/settings.json", "a", "b") == "ask"
+    assert edit_decision("pyproject.toml", "a", "b") == "ask"
+    assert edit_decision(".env.local", "a", "b") == "ask"
 
 
 def test_anti_pattern_is_denied() -> None:
@@ -152,20 +152,38 @@ def test_underscore_module_assignments_are_still_denied() -> None:
 
 
 def write_decision(file_path: str, content: str) -> str | None:
-    """Return 'deny' or None (fall through to user prompt)."""
+    """Return 'ask' or None (fall through to user prompt)."""
     result = hook.decide_write(hook.WriteInput(file_path=file_path, content=content))
     if result is None:
         return None
     return result["hookSpecificOutput"]["permissionDecision"]
 
 
-def test_write_to_protected_file_is_denied() -> None:
-    assert write_decision(".claude/settings.json", "{}") == "deny"
-    assert write_decision("pyproject.toml", "") == "deny"
-    assert write_decision(".env", "SECRET=1") == "deny"
-    assert write_decision("sub/dir/.env.local", "SECRET=1") == "deny"
+def test_write_to_protected_file_asks() -> None:
+    assert write_decision(".claude/settings.json", "{}") == "ask"
+    assert write_decision("pyproject.toml", "") == "ask"
+    assert write_decision(".env", "SECRET=1") == "ask"
+    assert write_decision("sub/dir/.env.local", "SECRET=1") == "ask"
 
 
 def test_ordinary_write_falls_through() -> None:
     assert write_decision("src/new_module.py", "x = 1\n") is None
     assert write_decision("notes/scratch.md", "hello") is None
+
+
+def test_tmp_paths_always_ask() -> None:
+    # A small edit that would normally auto-allow instead asks under tmp/.
+    assert edit_decision("tmp/scratch.py", "x = 1\n", "x = 2\n") == "ask"
+    # A large edit that would normally fall through also asks under tmp/.
+    big = "x = 1\n" + "".join(f"value{i} = compute{i}()\n" for i in range(6))
+    assert edit_decision("tmp/scratch.py", "x = 1\n", big) == "ask"
+    # Write under tmp/ asks too.
+    assert write_decision("tmp/scratch.py", "x = 1\n") == "ask"
+    # Absolute paths with a tmp/ segment are gated as well.
+    assert edit_decision("/home/u/proj/tmp/x.py", "", "y = 1\n") == "ask"
+
+
+def test_system_tmp_is_not_gated() -> None:
+    # The system temp dir (pytest fixtures) is not the repo's ./tmp/.
+    assert edit_decision("/tmp/pytest-of-u/module.py", "a = 1\n", "a = 2\n") == "allow"
+    assert write_decision("/tmp/pytest-of-u/module.py", "a = 1\n") is None
