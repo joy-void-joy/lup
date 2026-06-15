@@ -131,19 +131,19 @@ Before deciding what to install, determine **where** it goes. Two options:
 
 Create `.claude/plugins/lup/` as a standalone local plugin in the target repo. This requires:
 
-1. **Plugin directory**: `.claude/plugins/lup/.claude-plugin/plugin.json`
-2. **Local marketplace** in settings.json — add `extraKnownMarketplaces.local` pointing to the target's `.claude/plugins/` directory:
+1. **Plugin directory**: `.claude/plugins/lup/.claude-plugin/plugin.json` — the plugin entry's `name` stays `lup` (so commands keep the `lup:` prefix everywhere).
+2. **Marketplace**: `.claude/plugins/.claude-plugin/marketplace.json` with a **project-unique** `name` (use the target's package/repo name, e.g. `myproject`), listing the `lup` plugin:
    ```json
-   "extraKnownMarketplaces": {
-     "local": { "source": { "source": "directory", "path": "." } }
-   }
+   { "name": "myproject", "plugins": [{ "name": "lup", "source": "./lup" }] }
    ```
-3. **Enable the plugin** in settings.json:
+3. **Register + enable** in settings.json under that same unique name:
    ```json
-   "enabledPlugins": { "lup@local": true }
+   "extraKnownMarketplaces": { "myproject": { "source": { "source": "directory", "path": "./.claude/plugins" } } },
+   "enabledPlugins": { "lup@myproject": true }
    ```
+   On a Python target where `lup-devtools` is installed, `lup-devtools dev plugin name` does steps 2–3 automatically (default name: the target's `[project].name`).
 
-This is the cleanest approach — lup lives in its own namespace, hooks don't collide, commands get the `lup:` prefix.
+**Never name the marketplace `lup` or `local`.** Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name collides across every repo that registers it — an install from one repo silently shadows the others. The plugin entry stays `lup`; only the *marketplace* is named per-project.
 
 ### Option B: Merge into an existing plugin
 
@@ -151,7 +151,7 @@ If the target already has a local plugin (e.g., `.claude/plugins/myproject/`), o
 
 **In non-interactive mode, always use Option A.**
 
-When the target already has `extraKnownMarketplaces.local` and other local plugins, lup installs alongside them naturally — no conflict.
+When the target already has other local plugins, lup installs alongside them under its own project-named marketplace — no conflict.
 
 ## Phase 5: Decide What to Install
 
@@ -161,7 +161,7 @@ Use your judgment based on what you found in Phases 1-3. The analysis should dri
 
 Be conservative — only install what clearly adds value. Typical candidates (but decide based on the actual target):
 
-- **Plugin infrastructure**: plugin.json, hooks.json, settings.json (local marketplace + plugin enablement)
+- **Plugin infrastructure**: plugin.json, hooks.json, settings.json (project-named marketplace + plugin enablement)
 - **Permission hooks** adapted to the target's ecosystem (its build tool, test runner, linter, doc URLs)
 - **Generic commands** that work in any repo (git workflow, CLAUDE.md maintenance, meta, refactor, etc.)
 - **CLAUDE.md**: Perform a **section-level merge** using `TEMPLATE_CLAUDE.md` (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`). Read the template, use the `<!-- section: ... -->` markers to identify independent merge units, adapt for the target's project name and ecosystem, then compare marked sections against the target's existing CLAUDE.md. Add sections that are missing; leave existing sections untouched. If no CLAUDE.md exists, create one from the adapted template.
@@ -208,7 +208,8 @@ For each item being installed:
 |---|---|
 | `from lup_template.*` → `from <target>.*` imports | `lup-devtools` CLI entry point name |
 | `src/lup_template/` → `src/<target>/` paths | `@lup_tool(...)`, `LupMcpTool` |
-| `pyproject.toml` package name | `.claude/plugins/lup/`, `lup@local` |
+| `pyproject.toml` package name | `.claude/plugins/lup/` directory |
+| marketplace `name` (marketplace.json) → `<target>` | plugin entry `name`: `lup` (so `/lup:*` is stable) |
 | Main CLI entry point name | `.lup/` state directory |
 | Logger module paths | `lup-tools`, `lup-sandbox-*`, `lup-mcp-*` |
 | | Naming convention ("Lup" = inner agent) |
