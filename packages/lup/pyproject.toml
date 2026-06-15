@@ -6,15 +6,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"
 authors = [{ name = "Joy Void Joy", email = "joy.void.joy@gmail.com" }]
-keywords = [
-    "agent",
-    "ai",
-    "claude",
-    "llm",
-    "mcp",
-    "sdk",
-    "tools",
-]
+keywords = ["agent", "ai", "claude", "llm", "mcp", "sdk", "tools"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -55,3 +47,5 @@ lup = ["py.typed"]
 [tool.pyright]
 include = ["src"]
 pythonVersion = "3.14"
+
+# claude: hmm, maybe this collides with @/pyproject.toml? Also, is it normal that for packages/lup, we're getting the file in packages/lup/src/lup?

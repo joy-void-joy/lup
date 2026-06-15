@@ -7,8 +7,6 @@ Examples::
     $ uv run lup-devtools feedback analyze --output report.json
 """
 
-# claude: ignore
-
 from collections import defaultdict
 from pathlib import Path
 from collections.abc import Sequence

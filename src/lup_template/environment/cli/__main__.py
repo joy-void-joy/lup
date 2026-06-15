@@ -1,3 +1,4 @@
+#claude: Can you review this? I get why there's the commit loop, but I feel like it should be marked way more about when to use the commit loop and that this _can_ be removed 
 """Environment CLI for running agent sessions.
 
 This is a TEMPLATE. Customize for your domain.

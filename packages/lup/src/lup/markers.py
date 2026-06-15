@@ -1,4 +1,6 @@
 # claude: ignore
+# claude: I do not feel comfortable with a generic # claude: ignore like that. I think this should have types, like pyright does, for instance # claude: ignore[regex]
+# claude: Also, while on that topic, we may want to pivot away from # claude to # lup (both in markers and in the edit_hooks)
 """Inline review-comment markers (`# claude:` / `// claude:`).
 
 Single source of truth for what counts as an actionable feedback note, an
@@ -73,6 +75,8 @@ def find_feedback(text: str, is_markdown: bool = False) -> list[FeedbackComment]
     in_fence = False
     i = 0
 
+    # claude: Why do it this way? This seems a bit ugly
+    # claude: Maybe we're lacking a directive in claude.md about using for, not while
     while i < total:
         line = lines[i]
 

@@ -20,7 +20,7 @@ from lup.paths import agent_version
 from lup_template.devtools.utils import git, output_json
 
 
-ChangelogCategory = Literal["behavior", "data", "infrastructure"]
+ChangelogCategory = Literal["behavior", "data", "infrastructure"] # claude: Why do we need that? This seems very restrictive in terms of what is possible, a very narrow ontology there 
 
 app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
 
@@ -45,7 +45,7 @@ class ChangelogReport(TypedDict):
     infrastructure: list[ChangelogEntry]
 
 
-BEHAVIOR_PREFIXES = ("feat", "fix", "refactor")
+BEHAVIOR_PREFIXES = ("feat", "fix", "refactor") # claude: I don't know if I feel comfortable parsing the git this way. Why do we do this?
 DATA_PREFIXES = ("data",)
 
 

@@ -67,6 +67,7 @@ class SessionData(TypedDict, total=False):
 # CUSTOMIZE THESE MODELS FOR YOUR DOMAIN
 # =============================================================================
 
+# claude: Sounds like something where we should have a todo
 
 class SessionResult(BaseModel):
     """A session matched with its outcome/feedback.

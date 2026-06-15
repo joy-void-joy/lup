@@ -41,6 +41,7 @@ from lup.paths import agent_version
 logger = logging.getLogger(__name__)
 
 
+# claude: unclear why this is there
 def extract_sources(blocks: list[LupContentBlock]) -> list[str]:
     """Extract source URLs/queries from tool use blocks."""
     sources: list[str] = []
@@ -56,6 +57,7 @@ def extract_sources(blocks: list[LupContentBlock]) -> list[str]:
     return sources
 
 
+# claude: Same. This doesn't feel like this belong in core. Maybe there's a missing part in the library?
 def build_result(
     *,
     session_id: str,
@@ -106,6 +108,9 @@ def build_options(
     *,
     sandbox: object | None = None,
 ) -> "ClaudeAgentOptions":
+    # claude: Probably should return a generic option instead that transmit the same info, and can be passed to something like build_claude or something?
+    # I don't like seeing the backend be so tightly integrated there. Would be okay if it were more minimal
+
     """Build ClaudeAgentOptions for the agent session.
 
     Composes system prompt, MCP servers, hooks, subagents, and
@@ -118,6 +123,8 @@ def build_options(
     Returns:
         Configured ClaudeAgentOptions.
     """
+    # claude: This function is a bit hard to read. I get what it does conceptually, but not really why it's there or whats' the workflow there.
+
     from claude_agent_sdk import ClaudeAgentOptions
 
     from lup.adapters.claude import (
@@ -165,6 +172,8 @@ def build_options(
         ro_dirs=notes.ro,
     )
 
+    # claude: Really unsure about those nested import. I can get behind importing at function level to not overwhelm the import section in the file, but at least it should be unified in a function at the top?
+    # In general this function feels very long in a way I'm not sure I understand why it needs to be so long
     from lup.hooks import create_completion_guard
     from lup.reflect import create_reflection_gate
 
@@ -180,6 +189,7 @@ def build_options(
 
     # Tool allowlist: allowed_tools in options is ignored under
     # bypassPermissions, so availability is enforced by a PreToolUse hook.
+    # claude: This is good, that I see why it is needed
     from lup.hooks import create_tool_allowlist_hook
 
     allowed_tools = policy.get_allowed_tools(policy_servers)
@@ -192,6 +202,7 @@ def build_options(
         for name, server in policy_servers.items()
     }
 
+    # claude: same here
     subagent_specs = get_subagent_specs()
     subagents = {spec.name: spec_to_claude(spec) for spec in subagent_specs}
 
@@ -204,9 +215,14 @@ def build_options(
         },
         # ThinkingConfigEnabled(budget_tokens=N) is the newer alternative, but
         # max_thinking_tokens is simpler and avoids adaptive mode's variable allocation.
+
+        # claude: we might want to allow both. In particular, we probably should auto switch for models newer than 4.6 since this is disallowed (verify with the doc)
+        # claude: Another reason not to merge backend concerns here, and have build_claude or something construct the max_thinking_tokens params itself
         max_thinking_tokens=settings.max_thinking_tokens,
         permission_mode=settings.permission_mode,
-        extra_args={"no-session-persistence": None},
+        extra_args={"no-session-persistence": None}, # claude: A pattern I would like you to import from inkwell is that we often want to resume conversations later down the line. no-session-persistence was there in order to ensure claudeagentsdk session did not clutter claude code
+        # claude: To this end, can you port from it the pattern where it always save to a different cache folder (running with cwd tuned differently to a cache folder probably? Would be cool if the agent's cwd was the same, just it stores the session separately @claude-code-agent
+        # claude: And another thing: Can you add to the lup library resume capabilities that would enable one to resume such sessions properly?
         hooks=claude_hooks,
         sandbox={
             "enabled": True,
@@ -215,15 +231,16 @@ def build_options(
         },
         mcp_servers=mcp_servers,
         agents=subagents,
-        add_dirs=[str(d) for d in notes.all_dirs],
+        add_dirs=[str(d) for d in notes.all_dirs], # claude: this feels a bit obtuse
         allowed_tools=allowed_tools,
         max_turns=settings.max_turns,
         max_budget_usd=settings.max_budget_usd,
-        effort=cast("EffortLevel | None", settings.reasoning_effort),
+        effort=cast("EffortLevel | None", settings.reasoning_effort), # claude: Cast is code smell. Can you add it to the .claude hooks anti-patterns (/lup:hooks ?). And then see why you're using cast here and removing it?
     )
 
 
 def check_settings_supported(capabilities: AdapterCapabilities) -> None:
+    # claude: Yeah okay, this is actually good.
     """Reject explicitly-set settings the backend cannot honor.
 
     Only env-provided fields (``settings.model_fields_set``) are checked,
@@ -255,6 +272,14 @@ def build_codex_session(
     *,
     realtime_dir: Path | None = None,
 ) -> tuple[str, dict[str, str], list[Path]]:
+     # claude: Oof, several things here.
+     
+     # claude: 1. tuple[] is code smell. Please add it to the hooks
+     # claude: 2. The return type is impossible to read. Please either use pydantic, typeddict, or last resort type = 
+     # claude: 3. Again. Why do we need both build_claude_options and build_codex_sessions. Why is this in core? Everything should pass through a unified option object, backend management should only appear in lup's backend management (please add this to Claude.md and other documentations)
+     # claude: This is really not unified. We have build_codex_session, build_claude_options, ...
+     
+
     """Shared scaffolding for Codex-runtime adapters.
 
     Returns (system_prompt, mcp_env, writable_roots). Enforcement on
@@ -298,6 +323,7 @@ def build_codex_session(
 
 
 def codex_budget_options() -> tuple[float | None, "UsageCost | None"]:
+    # claude: this feels extremely patchy there
     """Budget enforcement options for Codex-runtime adapters.
 
     The Codex SDK reports token counts, not cost — enforcing
@@ -330,6 +356,8 @@ def build_codex_adapter(
     notes: "NotesConfig",
 ) -> "AgentAdapter":
     """Build a CodexAdapter for the agent session."""
+    # claude: same
+
     from lup.adapters.codex import CodexAdapter
 
     from lup_template.agent.tool_policy import ToolPolicy
@@ -368,6 +396,7 @@ def build_codex_realtime_adapter(
     your environment (customization step 8 — see PATTERNS.md,
     Persistent Agent).
     """
+    # claude: Again, same. build_codex shouldn't be so fragmented, and more importantly, this shouldn't be in core
     from lup.realtime_relay import REALTIME_DIRNAME, RealtimeMailbox
 
     from lup_template.agent.tool_policy import ToolPolicy
@@ -382,7 +411,7 @@ def build_codex_realtime_adapter(
 
     adapter: AgentAdapter
     match settings.agent_sdk:
-        case "openai":
+        case "openai": # claude: no. Do not match backend in core
             from lup.adapters.openai_compat import OpenAICompatibleAdapter
 
             adapter = OpenAICompatibleAdapter(
@@ -426,6 +455,7 @@ def build_codex_realtime_adapter(
 def build_openai_adapter(
     notes: "NotesConfig",
 ) -> "AgentAdapter":
+    # claude: Still no
     """Build an OpenAICompatibleAdapter with full tools and enforcement."""
     from lup.adapters.openai_compat import OpenAICompatibleAdapter
 
@@ -464,6 +494,8 @@ def subprocess_sandbox_cleanup(
     own cleanup; the parent removes the session's container on exit.
     No-op when the docker extra is not installed.
     """
+    # claude: This I can see the use of if it were at the beginning of the section, and then called
+    # claude: Feel like it is badly named though?
     try:
         from lup.sandbox import sandbox_cleanup
     except ImportError:
@@ -484,10 +516,11 @@ def build_adapter(
     context (e.g. sandbox lifecycle) around the adapter run and reads
     session artifacts from the notes config.
     """
+    # claude: As I said tuple[] is code smell. it's not clear what build_adapter does, why do you need it (why is this in core?)
     notes = setup_notes(session_id, task_id or "0")
 
     adapter: AgentAdapter
-    ctx: AbstractContextManager[object]
+    ctx: AbstractContextManager[object] # claude: really?
     match settings.agent_sdk:
         case "claude":
             from lup.adapters.claude import ClaudeAdapter
@@ -512,7 +545,7 @@ def build_adapter(
                 subprocess_sandbox_cleanup(notes),
             )
 
-        case "openai":
+        case "openai": #claude: Wait, how is openai different from codex? Why does this exist?
             adapter, ctx = (
                 build_openai_adapter(notes),
                 subprocess_sandbox_cleanup(notes),
@@ -557,6 +590,8 @@ async def run_agent(
                 if retry is not None:
                     response = retry
 
+    # claude: Code is fairly normal here. Only thing to be wary about is whether the logging is coherent all over the place (I often notice logging gets jumbled up with the block streaming from query(). I like the emoji printing function, wish it was primary)
+    # claude: Also re: The UI, it should be able to stream and show an agent output like inkwell does, along with progression, etc
     trace_logger.save()
     log_metrics_summary()
 
@@ -578,6 +613,7 @@ async def run_persistent_agent(
     session_id: str | None = None,
     on_reply: "Callable[[str], Awaitable[None]] | None" = None,
 ) -> int:
+    # claude: Why is that here? Why do we need to have a separate function? Why does it return an int (did you forget to type alias?)
     """Run a persistent (sleep/wake) session through the file relay.
 
     The minimal wiring of the Persistent Agent pattern on the Codex

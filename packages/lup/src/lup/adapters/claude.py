@@ -1,3 +1,6 @@
+# claude: Yeah, this is very unclear to me why we need this file, claude_client.py and claude_background.py. Seems like a flawed dicotomy
+# claude: if you really need several files to handle claude, you should probably put them in a "claude" subfolder
+
 """Claude Agent SDK adapter.
 
 Owns all Claude-specific logic: option building, MCP server setup,
@@ -214,6 +217,7 @@ def spec_to_claude(spec: SubagentSpec) -> AgentDefinition:
 # ---------------------------------------------------------------------------
 
 
+# claude: this really seems like we're lacking an abstraction, ABC, etc... See how we do it in tacocast, there's an abstract base class specifying the abstraction, then each engine is one file that fulfills this spec
 def claude_block_to_lup(block: ContentBlock) -> LupContentBlock:
     """Convert a Claude SDK ContentBlock to a LupContentBlock."""
     if hasattr(block, "type") and getattr(block, "type", None) == "redacted_thinking":

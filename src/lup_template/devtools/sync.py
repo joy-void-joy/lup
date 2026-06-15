@@ -1,6 +1,7 @@
 """Track upstream repos and review commits since last sync.
 
 Mechanical helper for /lup:update. Two config files:
+# claude: need more context about what /lup: update is, and what the mechanical helper does
 
 - downstream.json (committed): declares upstream repos with URLs.
   Ships with the lup template GitHub URL by default.
@@ -38,7 +39,7 @@ app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
 
 
-class ProjectEntry(TypedDict, total=False):
+class ProjectEntry(TypedDict, total=False): # claude: Why is this a TypedDict and not a BaseModel? Do you have a comprehensive reason for when you're using one or the other?
     """One tracked upstream project, merged from downstream.json(.local)."""
 
     name: Required[str]
@@ -49,7 +50,7 @@ class ProjectEntry(TypedDict, total=False):
     ignore: bool
 
 
-class DownstreamConfig(TypedDict):
+class DownstreamConfig(TypedDict): #claude: Same here
     """Top-level shape of downstream.json and downstream.json.local."""
 
     projects: list[ProjectEntry]
@@ -83,6 +84,7 @@ def save_local(data: DownstreamConfig) -> None:
 
 def ensure_ref_symlink(name: str, target: str) -> None:
     """Create or update refs/<name> symlink pointing to a resolved project path."""
+    # claude: this is a bit terse, this assumes the reader knows what refs/ do and why they exist
     refs_dir().mkdir(exist_ok=True)
     link = refs_dir() / name
     target_path = Path(target).resolve()
@@ -151,6 +153,9 @@ def ensure_local(
     Progress and error text goes through ``report`` so callers rendering
     tables can defer the messages instead of interleaving them mid-table.
     """
+    # claude: It's very hard to understand why this function exist. The typeddict makes the get and access of the object shakey.
+    # claude: I'm assuming this is because we want to download the remote project before comparing them to update the current project?
+    # claude: General comment here, we kind of need an explanation in general (put this in Claude.md) about _why_ we do stuff. Not patch, but like: Why is this function there, where does it inscribe itself in the general pipeline, why can't we do it the normal and quick way
     path = proj.get("path", "")
     name = proj["name"]
     branch = proj.get("branch", "")
@@ -233,18 +238,18 @@ def status_cmd() -> None:
 
     for p in projects:
         if p.get("ignore"):
-            typer.echo(f"{p['name']:<20} {'—':<10} {'ignored':<12} (skipped)")
+            typer.echo(f"{p['name']:<20} {'—':<10} {'ignored':<12} (skipped)") # claude: I don't like those magic numbers here
             continue
 
         synced = p.get("last_synced_commit", "")
-        synced_short = synced[:8] if synced else "never"
+        synced_short = synced[:8] if synced else "never" #claude: Wait what is this truncation? Please don't truncate with fixed numbers like that. We should ensure there's no such general truncation in the codebase
         branch = p.get("branch", "")
 
         resolved = resolve_existing_path(p)
         if resolved is None:
             has_url = bool(p.get("url"))
             note = "not cloned (run: sync fetch)" if has_url else "no path/url"
-            typer.echo(f"{p['name']:<20} {'—':<10} {synced_short:<12} {note}")
+            typer.echo(f"{p['name']:<20} {'—':<10} {synced_short:<12} {note}") # claude: same here
             continue
 
         try:
@@ -394,3 +399,5 @@ def setup_project(
         typer.echo(f"  Tracking branch: {branch}")
     if synced:
         typer.echo(f"  Marked as synced at {head[:8]}")
+
+# claude: Overall this is kinda missing motivation/help text for why this command exist, and what the different commands are useful for

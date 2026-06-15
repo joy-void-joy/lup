@@ -59,7 +59,9 @@ class TraceRow(TypedDict):
 # ── shared scanners ───────────────────────────────────────
 
 ERROR_PATTERNS = re.compile(
-    r"error|failed|exception|traceback|couldn't|unable to|not found|timeout",
+    r"error|failed|exception|traceback|couldn't|unable to|not found|timeout", #claude: Gosh this is extremely bad, this is exactly why re should be on the banned list
+    # claude: Yeah, this seems useless and not principled at all.
+
     re.IGNORECASE,
 )
 
@@ -70,6 +72,7 @@ ERROR_PATTERNS = re.compile(
 # the error view shows real failures, not healthy JSON blobs.
 SUCCESS_PATTERNS = (
     re.compile(  # claude: ignore  # keyword scan over markdown, not JSON parsing
+    # claude: Same here. The previous agent decided to "claude: ignore" where it really shouldn't have
         r'"(is_error|error)"\s*:\s*(false|null|0|""|\[\])'
         r'|"error_count"\s*:\s*0'
         r'|"status"\s*:\s*"(ok|success|succeeded|reviewed|passed|complete[d]?)"',
@@ -99,7 +102,7 @@ CAPABILITY_PATTERNS = re.compile(
     r"would be useful|would have helped|would benefit from|wish I had|"
     r"if I could|tool that|need.* access to|cannot .* because",
     re.IGNORECASE,
-)
+) # claude: Again, same. We really need to have the agent output in a more parseable way so we don't have to deal with this.
 
 
 def resolve_trace_paths(effective: list[str] | None) -> list[Path]:
@@ -262,7 +265,7 @@ def load_trace(trace_path: Path) -> str:
 TOOL_CALL_PATTERNS = re.compile(
     r"tool_use|tool_result|^#{2,3}\s+\S+\s+Tool:|^#{2,3}\s+\S+\s+Result\b",
     re.IGNORECASE,
-)
+) # claude: Yeah, most of this file is just regex matches and should be completely refactored
 
 
 def filter_tool_calls(content: str, context_lines: int = 3) -> str:
@@ -482,7 +485,7 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
 
 
 def capabilities(as_json: bool) -> None:
-    """Extract capability requests from traces."""
+    """Extract capability requests from traces.""" #claude: Really unclear what this does, or why this is needed
     results = scan_for_capability_gaps()
 
     if as_json:
@@ -495,7 +498,7 @@ def capabilities(as_json: bool) -> None:
 
     typer.echo(f"\n=== Capability Requests ({len(results)} found) ===\n")
 
-    for req in results[:30]:
+    for req in results[:30]: #claude: Please don't arbitrarily truncate
         text = req["text"]
-        text_short = text[:80] + "..." if len(text) > 80 else text
+        text_short = text[:80] + "..." if len(text) > 80 else text # claude: Same here. 30 and 80 comes out of nowhere
         typer.echo(f"- {text_short}")

@@ -1,4 +1,3 @@
-# claude: ignore
 """Scan tracked files for unresolved `# claude:` / `// claude:` feedback notes.
 
 Examples::
@@ -16,7 +15,7 @@ from pydantic import BaseModel
 from lup.markers import find_feedback
 from lup_template.devtools.utils import decode_stderr, git, output_json
 
-MARKDOWN_SUFFIXES = {".md", ".markdown"}
+MARKDOWN_SUFFIXES = {".md", ".markdown"} #claude: Huh? Why is this needed? We can just always scan for # claude, // claude, etc... in all files
 
 
 class FoundComment(BaseModel):
@@ -83,3 +82,5 @@ def report(as_json: bool, commit: bool) -> None:
         typer.echo(f"    {comment.text}")
     files = {comment.file for comment in found}
     typer.echo(f"\n{len(found)} comment(s) in {len(files)} file(s)")
+
+# claude: This does not seem wired in? The docstring say we can call lup-devtools run comments, but I don't see how that works here

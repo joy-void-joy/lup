@@ -3,15 +3,15 @@
 This is a TEMPLATE. Customize for your domain.
 
 Key patterns:
-1. Named sections composed at render time — add, remove, or reorder
+1. Named sections composed at render time — add, remove, or reorder #claude: What does that mean? This feels very obtuse.
 2. Use {date} placeholder in a section to get the current date; only the
    section declaring it is substituted, so literal braces (a JSON output
    example, say) in other sections are passed through verbatim
 3. The output-format section is derived from the ``AgentOutput`` model, so
-   customizing models.py keeps the prompt in sync — no hand-listed fields
+   customizing models.py keeps the prompt in sync — no hand-listed fields #claude: ??? What?
 4. Tools self-document via their descriptions — listing them here
    creates a second source of truth that drifts as tools change
-   (see Tool Design Philosophy in CLAUDE.md)
+   (see Tool Design Philosophy in CLAUDE.md) #claude: Then why do we need this file at all? What does it do that lup_tool does not do?
 """
 
 from datetime import datetime

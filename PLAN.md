@@ -1,3 +1,4 @@
+# Claude: Sounds like we can delete this? Can you check it's all good?
 # Refactor Plan: True SDK Parity + Repo Stabilization
 
 ## Goal

@@ -89,7 +89,7 @@ class CreateResult(BaseModel):
     url: str
 
 
-def output_result(result: BaseModel, as_json: bool) -> None:
+def output_result(result: BaseModel, as_json: bool) -> None: #claude: why is the type so extremely generic? Probably BaseModel should be a #claude: ignore as well
     if as_json:
         output_json(result)
         return
