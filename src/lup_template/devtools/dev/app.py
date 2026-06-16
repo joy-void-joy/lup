@@ -233,16 +233,36 @@ def check_cmd(
 
 @app.command("comments")
 def comments_cmd(
+    targets: Annotated[
+        list[str] | None,
+        typer.Argument(help="file:line markers to remove with --clear"),
+    ] = None,
     as_json: Annotated[
         bool,
         typer.Option("--json", help="Output as JSON"),
     ] = False,
     commit: Annotated[
         bool,
-        typer.Option("--commit", help="Commit comment-bearing files as a prompt snapshot"),
+        typer.Option(
+            "--commit", help="Commit comment-bearing files as a prompt snapshot"
+        ),
+    ] = False,
+    clear: Annotated[
+        bool,
+        typer.Option(
+            "--clear",
+            help="Strip the file:line markers given (only on a resolve/* worktree branch)",
+        ),
     ] = False,
 ) -> None:
-    """List unresolved `# claude:` feedback comments in tracked files."""
+    """List unresolved `# claude:` feedback comments, or clear specific ones.
+
+    With --clear, removes each `file:line` marker named as an argument; used at
+    fork time to strip a concern's own notes from an editor's worktree.
+    """
+    if clear:
+        comments.clear_markers(targets or [])
+        return
     comments.report(as_json, commit)
 
 
