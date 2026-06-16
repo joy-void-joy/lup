@@ -324,7 +324,7 @@ def safe_normalize_usage[T](
         return None
     try:
         return normalizer(raw)
-    except ValidationError, KeyError, TypeError, AttributeError:
+    except (ValidationError, KeyError, TypeError, AttributeError):
         name = getattr(normalizer, "__name__", repr(normalizer))
         logger.exception("Usage normalizer %s failed; dropping usage", name)
         return None

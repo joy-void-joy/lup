@@ -36,7 +36,7 @@ def print_model_source(
         source = inspect_mod.getsource(model)
         for line in source.splitlines():
             out.write(f"{indent}  {line}\n")
-    except OSError, TypeError:
+    except (OSError, TypeError):
         out.write(f"{indent}  {model.__name__} (source unavailable)\n")
 
 
@@ -48,7 +48,7 @@ def tool_location(tool: LupMcpTool) -> str:
         filename = os.path.basename(filepath)
         _, lineno = inspect_mod.getsourcelines(handler)
         return f"{filename}:{lineno}"
-    except OSError, TypeError:
+    except (OSError, TypeError):
         return "?"
 
 
@@ -118,7 +118,7 @@ def page_output(text: str) -> None:
         tmp.close()
         less = sh.Command("less")
         less("-R", "-F", "-X", tmp.name, _fg=True)
-    except sh.CommandNotFound, sh.ErrorReturnCode:
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
         sys.stdout.write(text)
     finally:
         os.unlink(tmp.name)

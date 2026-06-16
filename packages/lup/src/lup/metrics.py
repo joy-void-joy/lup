@@ -280,7 +280,7 @@ def read_metrics_summary(session_dir: Path) -> MetricsSummary | None:
         return None
     try:
         return cast(MetricsSummary, json.loads(path.read_text(encoding="utf-8")))
-    except json.JSONDecodeError, OSError:
+    except (json.JSONDecodeError, OSError):
         logger.exception("Flushed metrics at %s are unreadable", path)
         return None
 

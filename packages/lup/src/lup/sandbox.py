@@ -158,7 +158,7 @@ def process_start_token(pid: int) -> str | None:
     stat_path = Path(f"/proc/{pid}/stat")
     try:
         raw = stat_path.read_text(encoding="utf-8")
-    except FileNotFoundError, ProcessLookupError, PermissionError, OSError:
+    except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
         return None
     # Fields: "pid (comm) state ppid ...". comm may contain spaces and
     # parentheses, so split on the final ')' — every later field is a
@@ -359,7 +359,7 @@ class ReplSession:
                 if response is not None:
                     response.close()
                 self.sock.close()
-            except OSError, ValueError:
+            except (OSError, ValueError):
                 # Socket-layer close failures (already closed, broken pipe)
                 # are expected during teardown; anything else propagates.
                 logger.debug("Closing REPL connection failed", exc_info=True)
@@ -597,7 +597,7 @@ class Sandbox:
             try:
                 vol = self.docker_client.volumes.get(self.volume_name)
                 vol.remove()
-            except NotFound, APIError:
+            except (NotFound, APIError):
                 pass
 
     def write_repl_script(self) -> None:
@@ -637,7 +637,7 @@ class Sandbox:
         self.docker_client = docker.from_env()
         try:
             self.start_container()
-        except APIError, DockerException, OSError, RuntimeError:
+        except (APIError, DockerException, OSError, RuntimeError):
             self.stop()
             raise
 
@@ -775,7 +775,7 @@ class Sandbox:
             self.repl.stop()
             try:
                 self.repl.start()
-            except RuntimeError, DockerException, APIError, SocketError:
+            except (RuntimeError, DockerException, APIError, SocketError):
                 logger.exception("REPL restart failed")
                 self.repl = None
                 raise SandboxNotInitializedError("REPL restart failed")

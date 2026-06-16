@@ -106,7 +106,7 @@ def main(
     )
     try:
         panel = fetch_and_build(config_dir, detail, bar_width)
-    except httpx.HTTPStatusError, httpx.ConnectError:
+    except (httpx.HTTPStatusError, httpx.ConnectError):
         panel = build_error_panel("Initial fetch failed")
 
     with Live(

@@ -359,7 +359,7 @@ def build_lup_response(
     if result.final_response and output_schema:
         try:
             structured_output = json.loads(result.final_response)
-        except json.JSONDecodeError, TypeError:
+        except (json.JSONDecodeError, TypeError):
             logger.warning(
                 "Codex structured-output parse failed; final_response was not "
                 "JSON matching the schema. Offending text (truncated): %r",

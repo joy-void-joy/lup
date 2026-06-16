@@ -82,3 +82,9 @@ include = ["src", "packages/lup/src", "tests"]
 pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"
+
+[tool.ruff]
+# Pinned below requires-python (>=3.14) so ruff keeps `except (A, B):`
+# parenthesized. Inferring py314 would treat the parens as redundant and
+# strip them, since `except A, B:` is valid syntax from 3.14 on.
+target-version = "py313"
