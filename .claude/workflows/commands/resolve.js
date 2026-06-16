@@ -18,8 +18,9 @@ export const meta = {
 //     notes: [{ file, line, text }],  // the original markers this concern subsumes
 //   }],
 // }
-const base = (args && args.base) || 'HEAD'
-const concerns = (args && args.concerns) || []
+const input = typeof args === 'string' ? JSON.parse(args) : args || {}
+const base = input.base || 'HEAD'
+const concerns = input.concerns || []
 
 if (!concerns.length) {
   log('No concerns passed; nothing to execute.')
