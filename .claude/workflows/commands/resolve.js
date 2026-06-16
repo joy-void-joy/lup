@@ -62,6 +62,10 @@ const VERDICT_SCHEMA = {
 
 function editPrompt(c) {
   const starts = (c.files || []).join(', ') || '(discover them)'
+  const targets = (c.notes || []).map((n) => `${n.file}:${n.line}`).join(' ')
+  const strip = targets
+    ? `uv run lup-devtools dev comments --clear ${targets}`
+    : `true   # this concern has no markers to strip`
   return [
     `Resolve a code-quality concern on a dedicated branch in this repository.`,
     ``,
@@ -73,15 +77,16 @@ function editPrompt(c) {
     `duplicated construction, ...), find and fix EVERY instance across the codebase,`,
     `not just the first. Likely starting points: ${starts}.`,
     ``,
-    `Do NOT touch any \`# claude:\` / \`// claude:\` comments — leave them exactly in`,
-    `place. They are cleared separately after review; deleting one resolves nothing.`,
-    ``,
     `Steps:`,
     `1. git checkout -b resolve/${c.id}   (branch from ${base})`,
-    `2. Make the changes.`,
-    `3. uv run ruff format . && uv run ruff check . && uv run pyright; run uv run`,
+    `2. ${strip}`,
+    `   This strips THIS concern's \`# claude:\` markers from your worktree so you`,
+    `   fix the issue itself, not the note. Do not re-add markers or leave`,
+    `   explanatory comments in their place — reshape the code so it reads alone.`,
+    `3. Make the changes.`,
+    `4. uv run ruff format . && uv run ruff check . && uv run pyright; run uv run`,
     `   pytest if behavior could change. Fix what you break.`,
-    `4. git add -A && git commit -m "fix(resolve): ${c.title}"`,
+    `5. git add -A && git commit -m "fix(resolve): ${c.title}"`,
     ``,
     `Return the branch name, whether you committed, a concern-level summary, the`,
     `files changed, and any files you swept beyond the declared scope.`,
@@ -104,6 +109,9 @@ function verifyPrompt(c, edit) {
     `  git diff ${base}...${edit.branch}`,
     `Read the changed files at that branch as needed.`,
     ``,
+    `The branch also deletes this concern's \`# claude:\` marker lines — that strip`,
+    `happens at fork and is expected; it is NOT the fix. Judge the code change.`,
+    ``,
     `Judge: does the diff fix what every note points at, across the whole pattern —`,
     `not just the exact noted site? A fix that edits only the noted line, resolves`,
     `nothing, or merely removes a marker is addressed=false. Put anything left in`,
@@ -119,6 +127,7 @@ const results = await pipeline(
       label: `edit:${c.id}`,
       phase: 'Edit',
       isolation: 'worktree',
+      agentType: 'lup:resolve-editor',
       schema: EDIT_SCHEMA,
     }).then((edit) => ({ c, edit })),
   ({ c, edit }) =>
