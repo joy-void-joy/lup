@@ -4,7 +4,9 @@
 Edit decision order:
 1. Protected files (.claude/, pyproject.toml, .env*) and tmp/ scratch paths
    -> ask, always (overriding auto-accept). A `# claude:` marker change shows
-   the review-gate reason; any other change shows a generic reason.
+   the review-gate reason; any other change shows a generic reason. The
+   /lup:resolve editor subagent is allowed into protected files (its branch is
+   reviewed at merge), but a marker-count change still asks.
 2. Anti-patterns scanned over added lines in .py and TS-family files
    (see ANTI_PATTERNS / TS_ANTI_PATTERNS):
    - file has `# claude: ignore` in its first 10 lines on disk -> skip the
@@ -64,6 +66,11 @@ FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*claude\s*:\s*ignore\s*$", re.IGNORECA
 MARKER_REVIEW_REASON = "Edit adds or removes a `# claude:` marker — review before applying"
 PROTECTED_REVIEW_REASON = "Protected file — review before applying"
 TMP_REVIEW_REASON = "Scratch file under tmp/ — review before applying"
+
+# Subagent types the /lup:resolve workflow spawns. They edit on throwaway,
+# independently reviewed worktree branches, so protected files are allowed for
+# them — but a marker-count change still asks (markers are never theirs to drop).
+RESOLVE_EDITOR_AGENTS = {"resolve-editor", "lup:resolve-editor"}
 
 # (pattern, reason) rows checked against every line an edit adds to a .py
 # file. A matching line denies the edit; an inline `# claude: ignore` on the
@@ -429,6 +436,7 @@ class WriteInput(BaseModel):
 
 class HookEnvelope(BaseModel):
     tool_name: str = ""
+    agent_type: str = ""
 
 
 class EditEvent(BaseModel):
@@ -580,30 +588,34 @@ def violation_decision(violation: Violation) -> AllowDecision:
 
 
 def always_ask_decision(
-    file_path: str, old_string: str = "", new_string: str = ""
+    file_path: str, agent_type: str = "", old_string: str = "", new_string: str = ""
 ) -> AllowDecision | None:
     """Paths the hook never auto-allows — Edit and Write both prompt the user.
 
     Protected config and tmp/ scratch files always defer to a prompt rather
     than auto-allowing (Edit) or denying (Write), so the two tools behave
-    identically here. Any other path returns None.
+    identically here. The /lup:resolve editor subagent is the exception: it may
+    edit protected files (reviewed at merge), though a marker-count change still
+    asks. Any other path returns None.
     """
     if is_protected_file(file_path):
         if marker_count(old_string) != marker_count(new_string):
             return ask_decision(MARKER_REVIEW_REASON)
+        if agent_type in RESOLVE_EDITOR_AGENTS:
+            return allow_decision()
         return ask_decision(PROTECTED_REVIEW_REASON)
     if is_tmp_path(file_path):
         return ask_decision(TMP_REVIEW_REASON)
     return None
 
 
-def decide(tool_input: EditInput) -> AllowDecision | None:
+def decide(tool_input: EditInput, agent_type: str = "") -> AllowDecision | None:
     file_path = tool_input.file_path
     old_string = tool_input.old_string
     new_string = tool_input.new_string
     replace_all = tool_input.replace_all
 
-    gate = always_ask_decision(file_path, old_string, new_string)
+    gate = always_ask_decision(file_path, agent_type, old_string, new_string)
     if gate is not None:
         return gate
 
@@ -643,24 +655,29 @@ def decide(tool_input: EditInput) -> AllowDecision | None:
     return None
 
 
-def decide_write(tool_input: WriteInput) -> AllowDecision | None:
+def decide_write(tool_input: WriteInput, agent_type: str = "") -> AllowDecision | None:
     """Gate Write (full-file) operations.
 
     Writes never auto-allow — a whole-file rewrite needs user eyes. Protected
-    and tmp/ paths prompt (identical to Edit); everything else defers to the
-    normal permission flow.
+    and tmp/ paths prompt (identical to Edit), except for the /lup:resolve editor
+    subagent; everything else defers to the normal permission flow.
     """
-    return always_ask_decision(tool_input.file_path)
+    return always_ask_decision(tool_input.file_path, agent_type)
 
 
 def main() -> None:
     try:
         raw = sys.stdin.read()
-        match HookEnvelope.model_validate_json(raw).tool_name:
+        envelope = HookEnvelope.model_validate_json(raw)
+        match envelope.tool_name:
             case "Edit":
-                result = decide(EditEvent.model_validate_json(raw).tool_input)
+                result = decide(
+                    EditEvent.model_validate_json(raw).tool_input, envelope.agent_type
+                )
             case "Write":
-                result = decide_write(WriteEvent.model_validate_json(raw).tool_input)
+                result = decide_write(
+                    WriteEvent.model_validate_json(raw).tool_input, envelope.agent_type
+                )
             case _:
                 sys.exit(0)
     except (ValidationError, OSError):
