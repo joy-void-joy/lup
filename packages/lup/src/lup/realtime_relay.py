@@ -252,7 +252,7 @@ class RealtimeMailbox:
             return RelayState.model_validate_json(
                 self.state_path.read_text(encoding="utf-8")
             )
-        except ValidationError, OSError:
+        except (ValidationError, OSError):
             logger.exception("Unreadable relay state at %s", self.state_path)
             return None
 

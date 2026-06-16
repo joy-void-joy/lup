@@ -273,7 +273,7 @@ def create_reflect_tools(
                 critique = await run_reviewer(
                     validated, outputs_dir, model=reviewer_model
                 )
-            except RuntimeError, OSError, TimeoutError, ValueError:
+            except (RuntimeError, OSError, TimeoutError, ValueError):
                 logger.exception("Reviewer sub-agent failed")
                 critique = "(reviewer error — see logs)"
 

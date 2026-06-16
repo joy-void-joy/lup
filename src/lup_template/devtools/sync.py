@@ -254,7 +254,7 @@ def status_cmd() -> None:
 
         try:
             behind: int | str = commit_count(resolved, synced)
-        except sh.ErrorReturnCode, ValueError:
+        except (sh.ErrorReturnCode, ValueError):
             behind = "?"
         source = f"{resolved} ({branch})" if branch else resolved
         typer.echo(f"{p['name']:<20} {behind!s:<10} {synced_short:<12} {source}")
@@ -280,7 +280,7 @@ def fetch_cmd(
         try:
             resolved = ensure_local(p)
             typer.echo(f"{p['name']}: ready at {resolved}")
-        except typer.Exit, sh.ErrorReturnCode:
+        except (typer.Exit, sh.ErrorReturnCode):
             typer.echo(f"{p['name']}: could not materialize", err=True)
 
 

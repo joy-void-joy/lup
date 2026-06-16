@@ -61,7 +61,7 @@ def read_clipboard_image() -> tuple[str, bytes] | None:
     try:
         xclip = sh.Command("xclip")
         targets = str(xclip("-selection", "clipboard", "-o", "-t", "TARGETS"))
-    except sh.ErrorReturnCode, sh.CommandNotFound:
+    except (sh.ErrorReturnCode, sh.CommandNotFound):
         return None
 
     for mime in CLIPBOARD_IMAGE_MIMES:
@@ -84,7 +84,7 @@ def read_clipboard_text() -> str | None:
         xclip = sh.Command("xclip")
         text = str(xclip("-selection", "clipboard", "-o"))
         return text if text else None
-    except sh.ErrorReturnCode, sh.CommandNotFound:
+    except (sh.ErrorReturnCode, sh.CommandNotFound):
         return None
 
 
@@ -389,7 +389,7 @@ async def repl(
                 while True:
                     try:
                         user_input = await pt_session.prompt_async()
-                    except EOFError, asyncio.CancelledError:
+                    except (EOFError, asyncio.CancelledError):
                         console.print()
                         break
                     except KeyboardInterrupt:

@@ -127,7 +127,7 @@ def open_browser(url: str) -> None:
     console.print(f"  Opening [link={url}]{url}[/link]")
     try:
         webbrowser.open(url)
-    except webbrowser.Error, OSError:
+    except (webbrowser.Error, OSError):
         console.print(f"  [dim]Could not open browser. Go to: {url}[/dim]")
 
 
@@ -471,7 +471,7 @@ def setup_timezone() -> dict[str, str]:
 
             ZoneInfo(tz)
             console.print(f"  [green]Valid[/] — {tz}")
-        except KeyError, ModuleNotFoundError:
+        except (KeyError, ModuleNotFoundError):
             console.print(
                 f"  [yellow]Warning:[/] '{tz}' may not be a valid IANA timezone"
             )

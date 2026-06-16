@@ -85,7 +85,7 @@ def read_output[T: BaseModel](session_dir: Path, output_model: type[T]) -> T | N
         return None
     try:
         return output_model.model_validate_json(path.read_text(encoding="utf-8"))
-    except ValidationError, OSError:
+    except (ValidationError, OSError):
         logger.exception("Submitted output at %s is unreadable or invalid", path)
         return None
 

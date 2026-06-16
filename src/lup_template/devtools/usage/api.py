@@ -164,7 +164,7 @@ def load_stats(config_dir: Path) -> StatsCache | None:
         return None
     try:
         return StatsCache.model_validate_json(path.read_bytes())
-    except ValueError, OSError:
+    except (ValueError, OSError):
         return None
 
 

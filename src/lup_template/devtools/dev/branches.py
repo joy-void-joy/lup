@@ -177,7 +177,7 @@ def count_unique_commits(branch: str, integration: str) -> int:
             )
         ).strip()
         return int(output)
-    except sh.ErrorReturnCode, ValueError:
+    except (sh.ErrorReturnCode, ValueError):
         return -1
 
 
@@ -254,7 +254,7 @@ def get_pr_info(branch: str) -> dict[str, str]:
         items: list[dict[str, str]] = json.loads(output)
         if items:
             return items[0]
-    except sh.ErrorReturnCode, sh.CommandNotFound, json.JSONDecodeError:
+    except (sh.ErrorReturnCode, sh.CommandNotFound, json.JSONDecodeError):
         pass
     return {}
 
@@ -458,7 +458,7 @@ def probe_gh_auth(remote_url: str) -> bool:
     try:
         gh("auth", "status", _ok_code=[0])
         return True
-    except sh.ErrorReturnCode, sh.CommandNotFound:
+    except (sh.ErrorReturnCode, sh.CommandNotFound):
         typer.echo(
             f"gh auth failed for remote '{remote_url}'. Run: gh auth login",
             err=True,

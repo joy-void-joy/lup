@@ -71,7 +71,7 @@ def resolve_object(path: str) -> tuple[object, str]:
             for attr in parts[i:]:
                 obj = getattr(obj, attr)
             return obj, parts[-1]
-        except ImportError, AttributeError:
+        except (ImportError, AttributeError):
             continue
     raise ValueError(f"Could not resolve: {path}")
 
@@ -82,13 +82,13 @@ def find_module_path(module_name: str) -> Path | None:
         spec = importlib.util.find_spec(module_name)
         if spec and spec.origin:
             return Path(spec.origin)
-    except ImportError, ModuleNotFoundError, ValueError:
+    except (ImportError, ModuleNotFoundError, ValueError):
         pass
     try:
         mod = importlib.import_module(module_name)
         if hasattr(mod, "__file__") and mod.__file__:
             return Path(mod.__file__)
-    except ImportError, ModuleNotFoundError:
+    except (ImportError, ModuleNotFoundError):
         pass
     return None
 
@@ -97,7 +97,7 @@ def format_signature(obj: object, name: str) -> str:
     try:
         sig = inspect.signature(cast(Callable[..., object], obj))
         return f"{name}{sig}"
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return name
 
 
@@ -286,7 +286,7 @@ def show_class(cls: type, schema: bool, private: bool) -> None:
             typer.echo("\nAnnotations:")
             try:
                 hints = typing.get_type_hints(cls)
-            except NameError, AttributeError, TypeError, RecursionError:
+            except (NameError, AttributeError, TypeError, RecursionError):
                 hints = dict(cls.__annotations__)
             for name, ann in hints.items():
                 if name.startswith("_") and not private:
@@ -307,7 +307,7 @@ def show_pydantic_fields(cls: type, schema: bool) -> None:
         typer.echo("\nJSON Schema:")
         try:
             typer.echo(json.dumps(model_cls.model_json_schema(), indent=2))
-        except AttributeError, TypeError:
+        except (AttributeError, TypeError):
             typer.echo("  (cannot generate schema for this model)")
         return
 
@@ -335,7 +335,7 @@ def show_typed_dict_fields(cls: type) -> None:
     optional: frozenset[str] = getattr(cls, "__optional_keys__", frozenset())
     try:
         hints = typing.get_type_hints(cls)
-    except NameError, AttributeError, TypeError, RecursionError:
+    except (NameError, AttributeError, TypeError, RecursionError):
         hints = dict(getattr(cls, "__annotations__", {}))
 
     typer.echo(f"\nFields ({len(hints)}):")
@@ -406,7 +406,7 @@ def show_callable_info(obj: object, name: str) -> None:
         source_file = inspect.getfile(callable_obj)
         _, start_lineno = inspect.getsourcelines(callable_obj)
         typer.echo(f"\nDefined at: {source_file}:{start_lineno}")
-    except TypeError, OSError:
+    except (TypeError, OSError):
         pass
 
 
@@ -753,7 +753,7 @@ def format_eval_result(result: object) -> str:
     if isinstance(result, (dict, list, tuple, set, frozenset)):
         try:
             return json.dumps(result, indent=2, default=repr)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return pformat(result, width=100)
     return pformat(result, width=100)
 
@@ -970,7 +970,7 @@ def scan_module_symbols(module_name: str, pattern: str) -> list[SearchMatch]:
     """Import a module and search dir() for matching symbols."""
     try:
         mod = importlib.import_module(module_name)
-    except ImportError, AttributeError, TypeError, RuntimeError, OSError:
+    except (ImportError, AttributeError, TypeError, RuntimeError, OSError):
         return []
 
     pattern_lower = pattern.lower()

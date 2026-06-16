@@ -38,7 +38,7 @@ def scan_feedback() -> list[FoundComment]:
         path = Path(rel)
         try:
             text = path.read_text(encoding="utf-8")
-        except OSError, UnicodeDecodeError:
+        except (OSError, UnicodeDecodeError):
             continue
         is_md = path.suffix.lower() in MARKDOWN_SUFFIXES
         lines = text.splitlines()
@@ -95,7 +95,7 @@ def clear_markers(targets: list[str]) -> None:
         path = Path(rel)
         try:
             text = path.read_text(encoding="utf-8")
-        except OSError, UnicodeDecodeError:
+        except (OSError, UnicodeDecodeError):
             typer.echo(f"Skipping unreadable file: {rel}", err=True)
             continue
         is_md = path.suffix.lower() in MARKDOWN_SUFFIXES
