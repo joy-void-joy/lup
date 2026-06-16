@@ -11,7 +11,7 @@ These notes are how the user queues feedback: they read through files and drop `
 
 The human-judgment steps stay in this conversation; the parallel editing runs in a background **workflow** that cannot pause to ask questions. So the shape is:
 
-**snapshot → triage → decide with you → execute (workflow) → merge & clear → report.**
+**snapshot → triage → decide with you → execute (workflow) → merge & audit → report.**
 
 ## Phase 1 — Snapshot
 
@@ -29,13 +29,13 @@ If the scan is empty, report that and stop.
 
 ## Phase 2 — Triage into concerns
 
-Get the raw notes:
+Get the raw notes — each entry carries a `context` field with the surrounding source, so you rarely need to open the files yourself:
 
 ```
 uv run lup-devtools dev comments --json
 ```
 
-Dispatch a single **triage `Agent`** (the planner). It reads each note's `read_start`–`read_end` window and returns a **plan**: a list of concerns. For each concern:
+Dispatch a single **triage `Agent`** (the planner). It reads each note's `context` window and returns a **plan**: a list of concerns. For each concern:
 
 - `id` — short slug (becomes branch `resolve/<id>`)
 - `title` — one line
@@ -44,10 +44,11 @@ Dispatch a single **triage `Agent`** (the planner). It reads each note's `read_s
 - `notes` — every `{file, line, text}` this concern subsumes
 - `needs_user` — true when resolving it needs a decision only the user can make (taste, architecture direction, ambiguous intent)
 
-Two rules for the planner, because they are what keep the later merge safe:
+The one rule for the planner, because it is what keeps the work coherent:
 
-- **Generalize, don't transcribe.** One concern may subsume many notes across many files. The dominant theme in this repo — *"backend concerns belong behind an ABC in `lup`, not matched or leaked into `core` and the template"* — is **one** concern spanning ~10 files, not eighteen separate ones.
-- **Union overlapping concerns.** Any two concerns whose `files` overlap must be merged into one. Parallel worktrees that touch the same file would collide at merge — so a cross-cutting refactor is *one* concern fixed in *one* worktree, and the concerns that run in parallel have **disjoint file sets**.
+- **Generalize, don't transcribe.** One concern may subsume many notes across many files. The dominant theme in this repo — *"backend concerns belong behind an ABC in `lup`, not matched or leaked into `core` and the template"* — is **one** concern spanning ~10 files, not eighteen separate ones. Cluster notes by the *underlying issue*, not by the file they sit in.
+
+Concerns may freely **overlap in files**. Worktree isolation exists precisely so two editors can touch the same file and have the changes reconciled at merge — so never split or shrink a concern just to keep file sets disjoint. A cross-cutting refactor is *one* concern; two notes that are the same issue are *one* concern.
 
 Write the plan to `tmp/resolve-plan.json` and read it back, so the rest of the run works from a concrete, inspectable artifact.
 
@@ -69,16 +70,18 @@ Workflow(
 )
 ```
 
-It runs one **worktree-isolated editor per concern** (each fixes the whole pattern and is told to leave `# claude:` markers untouched), then an **independent verifier** per concern that judges the diff against the *original* notes. It merges nothing — it returns a **manifest**, one entry per concern: `{ id, title, branch, accepted, generalized, reason, residual, notes }`. Watch it with `/workflows`; you are notified when it finishes.
+It runs one **worktree-isolated editor per concern** as the `resolve-editor` subagent — in `bypassPermissions`, so it works autonomously and can fix notes that live in protected files (`CLAUDE.md`, `pyproject.toml`, `.claude/`). Each editor's **first step strips its own concern's markers** from its worktree (via `dev comments --clear`), so it fixes the generalized spec — never the literal note — and cannot "resolve" anything by deleting a marker. Then an **independent verifier** per concern judges the diff against the *original* notes.
 
-## Phase 5 — Merge accepted branches & clear their markers
+It merges nothing — it returns a **manifest**, one entry per concern: `{ id, title, branch, accepted, generalized, reason, residual, notes }`. Watch it with `/workflows`; you are notified when it finishes.
 
-For each manifest entry with `accepted: true`, **in this conversation** (so the edits run under the permission hooks):
+## Phase 5 — Merge accepted branches & audit
 
-1. Merge its branch: `git merge --no-ff resolve/<id>`. Branches are disjoint by design, so this is clean. If a conflict does arise, resolve it with the `/lup:merge` guidance and **audit for dropped code** — never let a merge silently lose a feature (see CLAUDE.md § Merge Conflict Resolution).
-2. Clear that concern's notes: `Edit` out each marker line listed in its `notes`. Removing a marker trips the marker-count hook — that prompt is the final review checkpoint, and you only reach it for work an independent verifier already accepted.
+For each manifest entry with `accepted: true`, **in this conversation** (so the merge runs under your eyes):
 
-Do **not** touch markers for concerns that were not accepted.
+1. Merge its branch: `git merge --no-ff resolve/<id>`. Because concerns may overlap, **expect conflicts** — resolve them with the `/lup:merge` decision tree and **audit for dropped code**: never let a merge silently lose a feature (see CLAUDE.md § Merge Conflict Resolution). Reviewing each branch's diff before you accept it *is* your audit of the fix.
+2. The merge also carries in that concern's marker removals (the editor stripped them at fork), so **the notes clear as a side effect of merging** — there is no separate delete step. A rejected or deferred concern was never merged, so its notes stay in place.
+
+Do **not** merge branches that were not accepted.
 
 ## Phase 6 — Report
 
@@ -92,7 +95,7 @@ List everything still unresolved with its `file:line` and *why*: rejected by the
 ## Guidelines
 
 - **Concern, not comment, is the unit.** Generalizing up front is what prevents myopic one-line fixes; the planner does it once, before any editing.
-- **Resolution is decoupled from the marker.** Editors never resolve a note by deleting it — they are told hands-off and run on throwaway worktrees. A note is cleared only after an independent verifier accepts the work and you merge it. **Never delete a note to make the scan pass** — that is the one thing you must not do.
+- **The editor never sees its own notes.** Markers are stripped from its worktree at fork, and it is handed only the generalized spec — so it fixes the issue, not the wording, and cannot clear a note by deleting it. Notes clear only when an accepted branch merges. The strip tool (`dev comments --clear`) refuses to run outside a `resolve/*` branch, so notes can never be silently cleared from a real checkout. **Never delete a note to make the scan pass** — that is the one thing you must not do.
 - **Clarity notes are structural.** "unclear why this is here" is fixed by reshaping the code (rename, inline, split, delete) so it reads on its own — not by adding an explanatory comment. Bake that into the concern's `spec`.
 - **A note may be wrong.** If acting on it would break something or contradicts the code, surface that instead of complying.
 - **Small runs use the same flow.** A handful of notes simply yields a handful of concerns; the workflow fans out fewer agents. A single trivial instruction you can also just do inline.
