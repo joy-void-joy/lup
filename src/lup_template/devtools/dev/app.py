@@ -42,12 +42,6 @@ def worktree_create_cmd(
         bool,
         typer.Option("--no-copy-data", help="Skip copying gitignored extras"),
     ] = False,
-    no_plugin_refresh: Annotated[
-        bool,
-        typer.Option(
-            "--no-plugin-refresh", help="Skip plugin cache refresh and install"
-        ),
-    ] = False,
     base_branch: Annotated[
         str | None,
         typer.Option("--base", "-b", help="Base branch (default: current branch)"),
@@ -61,7 +55,7 @@ def worktree_create_cmd(
     ] = False,
 ) -> None:
     """Create or re-attach a git worktree."""
-    worktree.create(name, no_sync, no_copy_data, no_plugin_refresh, base_branch, force)
+    worktree.create(name, no_sync, no_copy_data, base_branch, force)
 
 
 @worktree_app.command("list")
