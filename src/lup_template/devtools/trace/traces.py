@@ -3,6 +3,12 @@
 Provides reusable scanner functions (``scan_for_errors``, ``scan_for_capability_gaps``)
 consumed by both trace CLI commands and ``feedback/analyze.py``.
 
+Analysis reads the machine-readable ``.events.jsonl`` sidecar that
+:class:`lup.trace.TraceLogger` writes beside each ``.md`` trace: typed tool,
+error, and capability events, no regex. The line-scan over markdown remains
+only as the documented fallback for legacy ``.md`` traces that predate the
+sidecar.
+
 Examples::
 
     $ uv run lup-devtools trace list
@@ -23,6 +29,13 @@ import typer
 
 from lup.history import iter_session_dirs, iter_trace_log_files, session_backend
 from lup.paths import parse_timestamp, project_root, traces_path
+from lup.trace import (
+    TraceEvent,
+    capability_request_from_text,
+    read_trace_events,
+    tool_result_ok,
+    truncate_str,
+)
 
 from lup_template.devtools.utils import output_json
 
@@ -56,50 +69,101 @@ class TraceRow(TypedDict):
     size_kb: float
 
 
-# ── shared scanners ───────────────────────────────────────
-
-ERROR_PATTERNS = re.compile(
-    r"error|failed|exception|traceback|couldn't|unable to|not found|timeout",  # claude: Gosh this is extremely bad, this is exactly why re should be on the banned list
-    # claude: Yeah, this seems useless and not principled at all.
-    re.IGNORECASE,
-)
-
-# Trace files are free-form markdown (prose + truncated JSON fragments +
-# code), not parseable JSON documents — a line scan is the right tool here.
-# Successful-result lines often contain "error" as a falsy field
-# (e.g. ``"is_error": false``, ``"status": "reviewed"``); suppress those so
-# the error view shows real failures, not healthy JSON blobs.
-SUCCESS_PATTERNS = re.compile(  # claude: ignore  # keyword scan over markdown, not JSON parsing
-    # claude: Same here. The previous agent decided to "claude: ignore" where it really shouldn't have
-    r'"(is_error|error)"\s*:\s*(false|null|0|""|\[\])'
-    r'|"error_count"\s*:\s*0'
-    r'|"status"\s*:\s*"(ok|success|succeeded|reviewed|passed|complete[d]?)"',
-    re.IGNORECASE,
-)
+# ── event sourcing: structured sidecar, with a legacy-markdown fallback ────
 
 
-def keyword_window(line: str, width: int = 80) -> str:
-    """Return a window of *line* centered on the first error keyword."""
-    line = line.strip()
-    match = ERROR_PATTERNS.search(line)
-    if match is None or len(line) <= width:
-        return line if len(line) <= width else line[:width] + "..."
+def events_for_trace(trace_file: Path) -> list[TraceEvent]:
+    """Return the typed events for one ``.md`` trace.
 
-    start = max(0, match.start() - width // 2)
-    end = min(len(line), start + width)
-    snippet = line[start:end]
-    if start > 0:
-        snippet = "..." + snippet
-    if end < len(line):
-        snippet = snippet + "..."
-    return snippet
+    Primary path: read the ``.events.jsonl`` sidecar written beside the trace
+    — already-typed tool/error/capability records, no parsing of prose. Only
+    when no sidecar exists (a legacy trace predating it) does this fall back
+    to :func:`events_from_legacy_markdown`.
+    """
+    sidecar = trace_file.with_suffix(".events.jsonl")
+    if sidecar.exists():
+        return read_trace_events(sidecar)
+    return events_from_legacy_markdown(trace_file.read_text(encoding="utf-8"))
 
 
-CAPABILITY_PATTERNS = re.compile(
-    r"would be useful|would have helped|would benefit from|wish I had|"
-    r"if I could|tool that|need.* access to|cannot .* because",
-    re.IGNORECASE,
-)  # claude: Again, same. We really need to have the agent output in a more parseable way so we don't have to deal with this.
+def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
+    """Reconstruct :class:`TraceEvent`s from a legacy ``.md`` trace.
+
+    The markdown is structured, not arbitrary prose: ``TraceLogger`` renders
+    each block under a ``## <emoji> <label>`` header (``Tool: <name>``,
+    ``Result`` with a fenced body, ``Response`` text). This parses that
+    structure — pairing each Result with the preceding Tool, and reading
+    ``is_error`` from the Result's JSON via :func:`tool_result_ok` — so error
+    detection matches the structured path instead of keyword-guessing. The
+    one irreducible heuristic, capability phrasing in free-form Response text,
+    is shared with the live logger.
+    """
+    events: list[TraceEvent] = []
+    pending_tool: str | None = None
+    now = ""
+    for label, body in iter_markdown_blocks(content):
+        if label.startswith("Tool:"):
+            pending_tool = label.removeprefix("Tool:").strip() or "unknown"
+        elif label == "Result":
+            name = pending_tool or "unknown"
+            pending_tool = None
+            ok = tool_result_ok(body)
+            brief = truncate_str(body.strip(), 300)
+            events.append(
+                TraceEvent(
+                    kind="tool_call", timestamp=now, tool=name, ok=ok, brief=brief
+                )
+            )
+            if not ok:
+                events.append(
+                    TraceEvent(kind="error", timestamp=now, tool=name, brief=brief)
+                )
+        else:
+            request = capability_request_from_text(body)
+            if request is not None:
+                events.append(
+                    TraceEvent(kind="capability_request", timestamp=now, brief=request)
+                )
+    return events
+
+
+def iter_markdown_blocks(content: str) -> list[tuple[str, str]]:
+    """Split a trace markdown document into ``(label, body)`` blocks.
+
+    A block starts at a ``## <emoji> <label>`` header and runs to the next
+    header. The body has any surrounding ``` ``` fences stripped, so a Result
+    body is the raw JSON the logger fenced — ready to parse.
+    """
+    blocks: list[tuple[str, str]] = []
+    label: str | None = None
+    body_lines: list[str] = []
+
+    def flush() -> None:
+        if label is not None:
+            blocks.append((label, strip_code_fence("\n".join(body_lines))))
+
+    for line in content.split("\n"):
+        if line.startswith("## "):
+            flush()
+            # "## 🔧 Tool: search" -> "Tool: search"; emoji is the first token.
+            heading = line.removeprefix("## ").strip()
+            parts = heading.split(" ", 1)
+            label = parts[1].strip() if len(parts) > 1 else heading
+            body_lines = []
+        elif label is not None:
+            body_lines.append(line)
+    flush()
+    return blocks
+
+
+def strip_code_fence(body: str) -> str:
+    """Drop a leading ``` (or ```json) fence and its closing ``` from *body*."""
+    lines = body.strip().split("\n")
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
 
 def resolve_trace_paths(effective: list[str] | None) -> list[Path]:
@@ -136,24 +200,26 @@ def session_id_from_path(trace_file: Path) -> str:
 def scan_for_errors(
     effective: list[str] | None = None,
 ) -> list[TraceErrorSession]:
-    """Scan trace markdown files for error-like lines, grouped by session."""
+    """Report failing tool calls per session from structured trace events.
+
+    Reads each trace's typed events (sidecar, or legacy-markdown fallback)
+    and keeps the ``error`` ones — real tool failures, distinguished by the
+    logged ``is_error`` flag rather than by keyword-scanning prose.
+    """
     errors_by_session: dict[str, list[str]] = {}
 
     for trace_file in resolve_trace_paths(effective):
         try:
-            content = trace_file.read_text(encoding="utf-8")
-            session_id = session_id_from_path(trace_file)
-
-            for line in content.split("\n"):
-                if not ERROR_PATTERNS.search(line):
-                    continue
-                if SUCCESS_PATTERNS.search(line):
-                    continue
-                if session_id not in errors_by_session:
-                    errors_by_session[session_id] = []
-                errors_by_session[session_id].append(keyword_window(line))
+            events = events_for_trace(trace_file)
         except OSError:
-            pass
+            continue
+        session_id = session_id_from_path(trace_file)
+        for event in events:
+            if event.kind != "error":
+                continue
+            errors_by_session.setdefault(session_id, []).append(
+                f"{event.tool or 'unknown'}: {event.brief}"
+            )
 
     result: list[TraceErrorSession] = []
     for session_id, errors in sorted(
@@ -172,21 +238,23 @@ def scan_for_errors(
 def scan_for_capability_gaps(
     effective: list[str] | None = None,
 ) -> list[CapabilityRequest]:
-    """Scan trace markdown files for capability requests, deduplicated by text."""
+    """Report capability requests across traces, deduplicated by text.
+
+    Reads each trace's typed ``capability_request`` events (sidecar, or
+    legacy-markdown fallback) and groups identical wishes, most-requested
+    first.
+    """
     requests_by_text: dict[str, list[str]] = defaultdict(list)
 
     for trace_file in resolve_trace_paths(effective):
         try:
-            content = trace_file.read_text(encoding="utf-8")
-            session_id = session_id_from_path(trace_file)
-
-            for line in content.split("\n"):
-                if CAPABILITY_PATTERNS.search(line):
-                    text = line.strip()
-                    if text:
-                        requests_by_text[text].append(session_id)
+            events = events_for_trace(trace_file)
         except OSError:
-            pass
+            continue
+        session_id = session_id_from_path(trace_file)
+        for event in events:
+            if event.kind == "capability_request" and event.brief:
+                requests_by_text[event.brief].append(session_id)
 
     result: list[CapabilityRequest] = []
     for text, session_ids in sorted(requests_by_text.items(), key=lambda x: -len(x[1])):
@@ -262,7 +330,7 @@ def load_trace(trace_path: Path) -> str:
 TOOL_CALL_PATTERNS = re.compile(
     r"tool_use|tool_result|^#{2,3}\s+\S+\s+Tool:|^#{2,3}\s+\S+\s+Result\b",
     re.IGNORECASE,
-)  # claude: Yeah, most of this file is just regex matches and should be completely refactored
+)
 
 
 def filter_tool_calls(content: str, context_lines: int = 3) -> str:
