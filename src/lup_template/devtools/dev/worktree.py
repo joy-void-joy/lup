@@ -12,14 +12,14 @@ from lup_template.devtools.utils import (
     format_table,
     git,
     short_sha,
+    uv,
 )
 
 
-PLUGIN_CACHE_DIR = (
-    Path.home() / ".claude" / "plugins" / "cache" / "local" / "lup"
-)  # claude: To reinstall it later I presume?
-
-GITIGNORED_EXTRAS = [  # claude: this need an explanation for what this is and why we need it
+# Gitignored paths that `git worktree add` does not carry over but a working
+# worktree still needs (local secrets/settings, logs, downstream `refs/`
+# symlinks); `create` copies them into the new worktree unless --no-copy-data.
+GITIGNORED_EXTRAS = [
     ".env.local",
     "downstream.json.local",
     ".claude/settings.local.json",
@@ -48,21 +48,20 @@ def worktree_is_registered(path: Path) -> bool:
 
 
 def get_tree_dir() -> Path:
-    """Find the tree/ directory that contains worktrees."""
-    cwd = Path.cwd().resolve()  # claude: Are you sure this works?
+    """Locate the ``tree/`` directory that holds sibling worktrees.
+
+    Two checkout layouts are supported. In the bare-repo layout the current
+    checkout is itself a worktree living inside ``tree/``, so ``tree/`` is the
+    parent. Otherwise ``tree/`` sits at the current directory or an ancestor,
+    so walking upward lets the command run from anywhere inside the checkout.
+    """
+    cwd = Path.cwd().resolve()
 
     if cwd.parent.name == "tree":
         return cwd.parent
 
-    tree = (
-        cwd / "tree"
-    )  # claude: So either I'm in the bare git (in a "worktree" subfolder), and so what I want is to create the folder in ..
-    # claude: Or I'm in the non-bare git, and I want to create the folder in ./worktree/[feature name]
-    if tree.is_dir():
-        return tree
-
-    for parent in cwd.parents:
-        tree = parent / "tree"  # claude: some redundancy there?
+    for directory in (cwd, *cwd.parents):
+        tree = directory / "tree"
         if tree.is_dir():
             return tree
 
@@ -74,12 +73,10 @@ def create(
     name: str,
     no_sync: bool,
     no_copy_data: bool,
-    no_plugin_refresh: bool,
     base_branch: str | None,
     force: bool = False,
 ) -> None:
     """Create or re-attach a git worktree."""
-    uv = sh.Command("uv")  # claude: Just reuse from utils, no?
     current_dir = Path.cwd()
 
     tree_dir = get_tree_dir()
@@ -140,26 +137,6 @@ def create(
             uv("sync", _cwd=str(worktree_path))
         except sh.ErrorReturnCode as e:
             typer.echo(f"Warning: uv sync failed: {decode_stderr(e)}")
-
-    if not no_plugin_refresh:
-        if PLUGIN_CACHE_DIR.exists():
-            shutil.rmtree(PLUGIN_CACHE_DIR)
-            typer.echo("Cleared plugin cache (lup)")
-
-        claude = sh.Command("claude")
-        try:
-            claude(
-                "plugin",
-                "install",
-                "lup@local",
-                "--scope",
-                "project",
-                _cwd=str(worktree_path),
-                _tty_out=False,
-            )
-            typer.echo("Installed lup plugin (project scope)")
-        except sh.ErrorReturnCode as e:
-            typer.echo(f"Warning: plugin install failed: {decode_stderr(e)}", err=True)
 
     typer.echo()
     cd_command = f"cd /; cd {worktree_path}; claude"
