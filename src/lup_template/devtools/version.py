@@ -1,5 +1,11 @@
 """Agent version display, changelog, and bump.
 
+The agent version (``[tool.lup] agent_version``) tracks the behavior of the
+agent the feedback loop improves, not the package release. ``changelog``
+answers the question a version bump needs: *what changed in agent behavior
+since the last tag?* — so a reviewer can decide whether the next bump is patch,
+minor, or major, and ``bump`` then writes the new version and tags the commit.
+
 Examples::
 
     $ uv run lup-devtools version
@@ -20,7 +26,7 @@ from lup.paths import agent_version
 from lup_template.devtools.utils import git, output_json
 
 
-ChangelogCategory = Literal["behavior", "data", "infrastructure"] # claude: Why do we need that? This seems very restrictive in terms of what is possible, a very narrow ontology there 
+ChangelogCategory = Literal["behavior", "data", "infrastructure"]
 
 app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
 
@@ -45,7 +51,7 @@ class ChangelogReport(TypedDict):
     infrastructure: list[ChangelogEntry]
 
 
-BEHAVIOR_PREFIXES = ("feat", "fix", "refactor") # claude: I don't know if I feel comfortable parsing the git this way. Why do we do this?
+BEHAVIOR_PREFIXES = ("feat", "fix", "refactor")
 DATA_PREFIXES = ("data",)
 
 
@@ -57,6 +63,20 @@ def get_latest_tag() -> str | None:
 
 
 def classify_commit(message: str) -> ChangelogCategory:
+    """Bucket a commit by the ``type(scope):`` prefix of its message.
+
+    Commits in this repo follow the conventional ``type(scope): description``
+    format (see CLAUDE.md), so the leading type *is* structured metadata, not
+    free prose — reading it is parsing a known field, not guessing intent.
+
+    The three buckets answer the only question a version bump asks of the log:
+    *did the agent's behavior change, did its data change, or neither?*
+    ``feat``/``fix``/``refactor`` change what the agent does (behavior);
+    ``data`` changes generated outputs (data); everything else (``docs``,
+    ``chore``, ``test``, ``meta``) is infrastructure that does not move the
+    agent version. The ontology is deliberately narrow because that is the
+    decision it feeds; a richer taxonomy is `git log` itself.
+    """
     lower = message.lower()
     for prefix in BEHAVIOR_PREFIXES:
         if lower.startswith(prefix):
