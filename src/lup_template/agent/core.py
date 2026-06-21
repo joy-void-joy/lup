@@ -124,11 +124,8 @@ def build_options(
     """
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.claude import (
-        lup_hooks_to_claude,
-        lup_server_to_claude,
-        spec_to_claude,
-    )
+    from lup.adapters.claude import lup_hooks_to_claude, spec_to_claude
+    from lup.adapters.claude_options import server_to_claude
     from lup.hooks import create_permission_hooks
     from lup.mcp import create_mcp_server
     from lup.types import merge_hooks
@@ -192,8 +189,7 @@ def build_options(
     claude_hooks = lup_hooks_to_claude(hooks)
 
     mcp_servers = {
-        name: lup_server_to_claude(server) if hasattr(server, "server") else server
-        for name, server in policy_servers.items()
+        name: server_to_claude(server) for name, server in policy_servers.items()
     }
 
     subagent_specs = get_subagent_specs()
