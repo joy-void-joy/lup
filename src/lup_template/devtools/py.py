@@ -410,11 +410,18 @@ def show_callable_info(obj: object, name: str) -> None:
         pass
 
 
+# A repr can be arbitrarily large (a loaded dataframe, a deep dict); this caps
+# the inline preview so `py info` doesn't flood the terminal, and reports the
+# full length so the truncation is never silent. Use `py source`/`py eval` for
+# the whole value.
+REPR_PREVIEW_CHARS = 2000
+
+
 def show_value_info(obj: object) -> None:
     typer.echo(f"Type: {type(obj).__qualname__}")
     r = repr(obj)
-    if len(r) > 500:
-        r = r[:500] + "..."
+    if len(r) > REPR_PREVIEW_CHARS:
+        r = r[:REPR_PREVIEW_CHARS] + f"… ({len(r)} chars total)"
     typer.echo(f"Value: {r}")
 
     doc = get_docstring(obj)
