@@ -23,7 +23,7 @@ import typer
 from lup.history import parse_semver
 from lup.paths import agent_version
 
-from lup_template.devtools.utils import git, output_json
+from lup_template.devtools.utils import git, output_json, short_sha
 
 
 ChangelogCategory = Literal["behavior", "data", "infrastructure"]
@@ -212,17 +212,17 @@ def changelog_cmd(
     if report["behavior"]:
         typer.echo("Behavior changes:")
         for e in report["behavior"]:
-            typer.echo(f"  {e['sha'][:7]} {e['message']}")
+            typer.echo(f"  {short_sha(e['sha'])} {e['message']}")
 
     if report["data"]:
         typer.echo("\nData changes:")
         for e in report["data"]:
-            typer.echo(f"  {e['sha'][:7]} {e['message']}")
+            typer.echo(f"  {short_sha(e['sha'])} {e['message']}")
 
     if report["infrastructure"]:
         typer.echo("\nInfrastructure changes:")
         for e in report["infrastructure"]:
-            typer.echo(f"  {e['sha'][:7]} {e['message']}")
+            typer.echo(f"  {short_sha(e['sha'])} {e['message']}")
 
     total = (
         len(report["behavior"]) + len(report["data"]) + len(report["infrastructure"])

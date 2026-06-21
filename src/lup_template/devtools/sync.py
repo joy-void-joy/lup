@@ -48,7 +48,7 @@ import sh
 import typer
 
 from lup.paths import project_root
-from lup_template.devtools.utils import git
+from lup_template.devtools.utils import format_table, git, short_sha
 
 app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
@@ -276,38 +276,32 @@ def status_cmd() -> None:
         typer.echo("No projects tracked. Check downstream.json or run 'setup'.")
         raise typer.Exit(1)
 
-    typer.echo(f"\n{'Project':<20} {'Behind':<10} {'Last Synced':<12} {'Source'}")
-    typer.echo("-" * 80)
-
+    rows: list[tuple[str, str, str, str]] = []
     for p in projects:
-        if p.get("ignore"):
-            typer.echo(
-                f"{p['name']:<20} {'—':<10} {'ignored':<12} (skipped)"
-            )  # claude: I don't like those magic numbers here
-            continue
-
         synced = p.get("last_synced_commit", "")
-        synced_short = (
-            synced[:8] if synced else "never"
-        )  # claude: Wait what is this truncation? Please don't truncate with fixed numbers like that. We should ensure there's no such general truncation in the codebase
-        branch = p.get("branch", "")
+        synced_short = short_sha(synced) if synced else "never"
+
+        if p.get("ignore"):
+            rows.append((p["name"], "—", "ignored", "(skipped)"))
+            continue
 
         resolved = resolve_existing_path(p)
         if resolved is None:
             has_url = bool(p.get("url"))
             note = "not cloned (run: sync fetch)" if has_url else "no path/url"
-            typer.echo(
-                f"{p['name']:<20} {'—':<10} {synced_short:<12} {note}"
-            )  # claude: same here
+            rows.append((p["name"], "—", synced_short, note))
             continue
 
         try:
             behind: int | str = commit_count(resolved, synced)
         except (sh.ErrorReturnCode, ValueError):
             behind = "?"
+        branch = p.get("branch", "")
         source = f"{resolved} ({branch})" if branch else resolved
-        typer.echo(f"{p['name']:<20} {behind!s:<10} {synced_short:<12} {source}")
+        rows.append((p["name"], str(behind), synced_short, source))
 
+    typer.echo()
+    typer.echo(format_table(("Project", "Behind", "Last Synced", "Source"), rows))
     typer.echo()
 
 
@@ -361,7 +355,7 @@ def show_log(
     if output:
         typer.echo(output)
     else:
-        typer.echo(f"No new commits since {synced[:8]}.")
+        typer.echo(f"No new commits since {short_sha(synced)}.")
 
 
 @app.command("diff")
@@ -409,7 +403,7 @@ def mark_synced(
         local_data["projects"] = local_projects
 
     save_local(local_data)
-    typer.echo(f"Marked '{project}' as synced at {head[:8]}.")
+    typer.echo(f"Marked '{project}' as synced at {short_sha(head)}.")
 
 
 @app.command("setup")
@@ -458,4 +452,4 @@ def setup_project(
     if branch:
         typer.echo(f"  Tracking branch: {branch}")
     if synced:
-        typer.echo(f"  Marked as synced at {head[:8]}")
+        typer.echo(f"  Marked as synced at {short_sha(head)}")

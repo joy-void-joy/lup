@@ -89,7 +89,9 @@ class CreateResult(BaseModel):
     url: str
 
 
-def output_result(result: BaseModel, as_json: bool) -> None: #claude: why is the type so extremely generic? Probably BaseModel should be a #claude: ignore as well
+def output_result(
+    result: BaseModel, as_json: bool
+) -> None:  # claude: why is the type so extremely generic? Probably BaseModel should be a #claude: ignore as well
     if as_json:
         output_json(result)
         return
@@ -128,8 +130,9 @@ def format_pr_status(result: PRStatusResult) -> None:
 
     if pr.reviews:
         typer.echo(f"\n  Reviews ({len(pr.reviews)}):")
+        author_width = max(len(r.author) for r in pr.reviews)
         for r in pr.reviews:
-            typer.echo(f"    {r.author:<20} {r.state}")
+            typer.echo(f"    {r.author:<{author_width}} {r.state}")
 
     if pr.checks:
         typer.echo(f"\n  Checks ({len(pr.checks)}):")

@@ -6,12 +6,20 @@ from pathlib import Path
 import sh
 import typer
 
-from lup_template.devtools.utils import copy_to_clipboard, decode_stderr, git
+from lup_template.devtools.utils import (
+    copy_to_clipboard,
+    decode_stderr,
+    format_table,
+    git,
+    short_sha,
+)
 
 
-PLUGIN_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache" / "local" / "lup" # claude: To reinstall it later I presume?
+PLUGIN_CACHE_DIR = (
+    Path.home() / ".claude" / "plugins" / "cache" / "local" / "lup"
+)  # claude: To reinstall it later I presume?
 
-GITIGNORED_EXTRAS = [ # claude: this need an explanation for what this is and why we need it
+GITIGNORED_EXTRAS = [  # claude: this need an explanation for what this is and why we need it
     ".env.local",
     "downstream.json.local",
     ".claude/settings.local.json",
@@ -41,18 +49,20 @@ def worktree_is_registered(path: Path) -> bool:
 
 def get_tree_dir() -> Path:
     """Find the tree/ directory that contains worktrees."""
-    cwd = Path.cwd().resolve() # claude: Are you sure this works? 
+    cwd = Path.cwd().resolve()  # claude: Are you sure this works?
 
     if cwd.parent.name == "tree":
         return cwd.parent
 
-    tree = cwd / "tree" # claude: So either I'm in the bare git (in a "worktree" subfolder), and so what I want is to create the folder in ..
+    tree = (
+        cwd / "tree"
+    )  # claude: So either I'm in the bare git (in a "worktree" subfolder), and so what I want is to create the folder in ..
     # claude: Or I'm in the non-bare git, and I want to create the folder in ./worktree/[feature name]
     if tree.is_dir():
         return tree
 
     for parent in cwd.parents:
-        tree = parent / "tree" # claude: some redundancy there?
+        tree = parent / "tree"  # claude: some redundancy there?
         if tree.is_dir():
             return tree
 
@@ -69,7 +79,7 @@ def create(
     force: bool = False,
 ) -> None:
     """Create or re-attach a git worktree."""
-    uv = sh.Command("uv") # claude: Just reuse from utils, no?
+    uv = sh.Command("uv")  # claude: Just reuse from utils, no?
     current_dir = Path.cwd()
 
     tree_dir = get_tree_dir()
@@ -186,7 +196,7 @@ def list_worktrees() -> None:
         if line.startswith("worktree "):
             current["path"] = line.split(" ", 1)[1]
         elif line.startswith("HEAD "):
-            current["head"] = line.split(" ", 1)[1][:10]
+            current["head"] = short_sha(line.split(" ", 1)[1])
         elif line.startswith("branch "):
             current["branch"] = line.split(" ", 1)[1].replace("refs/heads/", "")
         elif line == "bare":
@@ -204,27 +214,22 @@ def list_worktrees() -> None:
     cwd = str(Path.cwd().resolve())
 
     typer.echo(f"\n=== Worktrees ({len(entries)}) ===\n")
-    typer.echo(f"  {'Branch':<28} {'HEAD':<12} {'Status':<8} {'Path'}")
-    typer.echo("-" * 90)
-
+    rows: list[tuple[str, str, str, str]] = []
     for entry in entries:
         branch = entry.get("branch", "(bare)" if entry.get("bare") else "(detached)")
         head = entry.get("head", "")
         path = entry.get("path", "")
-        is_current = path == cwd
-        marker = "* " if is_current else "  "
-
-        flags: list[str] = []
-        if entry.get("prunable"):
-            flags.append("prunable")
+        marker = "* " if path == cwd else "  "
 
         if not entry.get("bare") and Path(path).is_dir():
             status = worktree_status(path)
         else:
             status = ""
 
-        flag_str = f" [{', '.join(flags)}]" if flags else ""
-        typer.echo(f"{marker}{branch:<28} {head:<12} {status:<8} {path}{flag_str}")
+        flag_str = " [prunable]" if entry.get("prunable") else ""
+        rows.append((f"{marker}{branch}", head, status, f"{path}{flag_str}"))
+
+    typer.echo(format_table(("Branch", "HEAD", "Status", "Path"), rows))
 
 
 def remove(name: str, force: bool) -> None:
