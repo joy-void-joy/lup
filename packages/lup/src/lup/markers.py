@@ -13,9 +13,21 @@ the same note reads naturally in Python, shell, TypeScript, JSON, or Markdown.
 A colon is required so prose like a `## Claude` heading does not match. A marker
 is a feedback note unless its keyword is `ignore`, which stays the anti-pattern
 escape hatch.
+
+How a file is scanned depends on its language, because where a note can live
+does. Python source is parsed so a marker counts only where prose belongs — in a
+comment or a docstring. A ``# claude:`` inside an ordinary string literal (such
+as a tool's own "no notes" message) is code, not a note, and must not be
+reported. Other text has no Python parser to lean on, so it is line-scanned;
+Markdown additionally skips fenced and inline code so notes quoted in
+documentation examples are not flagged.
 """
 
+import ast
 import re
+import tokenize
+from io import StringIO
+from pathlib import Path
 
 from pydantic import BaseModel
 
@@ -25,8 +37,34 @@ FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*claude\s*:\s*ignore\s*$", re.IGNORECA
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
 
+PYTHON_SUFFIXES = {".py", ".pyi"}
+MARKDOWN_SUFFIXES = {".md", ".markdown"}
+
 CONTEXT_BEFORE = 2
 CONTEXT_AFTER = 25
+
+
+class ScanMode:
+    """How a file's text is searched for markers, chosen by its language."""
+
+    PYTHON = "python"
+    MARKDOWN = "markdown"
+    TEXT = "text"
+
+
+def scan_mode_for(path: Path) -> str:
+    """Pick the scan mode for a path from its suffix.
+
+    The single source of truth for routing each tracked file: Python source is
+    parsed (comments and docstrings only), Markdown is line-scanned with code
+    skipped, everything else is plain line-scanned.
+    """
+    suffix = path.suffix.lower()
+    if suffix in PYTHON_SUFFIXES:
+        return ScanMode.PYTHON
+    if suffix in MARKDOWN_SUFFIXES:
+        return ScanMode.MARKDOWN
+    return ScanMode.TEXT
 
 
 class FeedbackComment(BaseModel):
@@ -59,15 +97,79 @@ def inside_inline_code(line: str, pos: int) -> bool:
     return line[:pos].count("`") % 2 == 1
 
 
-def find_feedback(text: str, is_markdown: bool = False) -> list[FeedbackComment]:
-    """Extract feedback notes from a file's text.
+def python_comment_columns(text: str) -> dict[int, int] | None:
+    """Map each 1-based line to the column where its real `#` comment starts.
+
+    Tokenizing tells apart a `#` that opens a comment from one inside a string
+    literal, so the scanner can reject markers that are actually code. Returns
+    ``None`` when the source cannot be tokenized (a syntax error in some tracked
+    file), signalling the caller to fall back to line scanning rather than miss
+    a note.
+    """
+    columns: dict[int, int] = {}
+    try:
+        for token in tokenize.generate_tokens(StringIO(text).readline):
+            if token.type == tokenize.COMMENT:
+                line_no, col = token.start
+                columns[line_no] = col
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return None
+    return columns
+
+
+def python_docstring_lines(text: str) -> set[int]:
+    """Lines (1-based) covered by a module, class, or function docstring.
+
+    Docstrings are the one string literal where prose — and so a real note —
+    belongs, unlike an ordinary string such as an echoed message. Returns an
+    empty set when the source cannot be parsed; the comment scan still runs.
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return set()
+
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+        ):
+            continue
+        body = node.body
+        if not body:
+            continue
+        first = body[0]
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+            and first.end_lineno is not None
+        ):
+            lines.update(range(first.lineno, first.end_lineno + 1))
+    return lines
+
+
+def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[FeedbackComment]:
+    """Extract feedback notes from a file's text under a given `ScanMode`.
 
     A note is a marker line plus the contiguous same-style comment lines below
     it, merged into one item. Ignore directives, fenced code, and backtick spans
-    are skipped; a file-level ignore opts the whole file out.
+    are skipped; a file-level ignore opts the whole file out. In Python mode a
+    marker counts only inside a comment or docstring, so a `# claude:` in an
+    ordinary string literal is left alone.
     """
     if has_file_level_ignore(text):
         return []
+
+    is_python = mode == ScanMode.PYTHON
+    is_markdown = mode == ScanMode.MARKDOWN
+    comment_columns = python_comment_columns(text) if is_python else None
+    docstring_lines = python_docstring_lines(text) if is_python else set()
+
+    def in_note_context(line_no: int, col: int) -> bool:
+        if comment_columns is None:
+            return True
+        return comment_columns.get(line_no) == col or line_no in docstring_lines
 
     lines = text.splitlines()
     total = len(lines)
@@ -91,6 +193,7 @@ def find_feedback(text: str, is_markdown: bool = False) -> list[FeedbackComment]
             or in_fence
             or IGNORE_RE.search(line) is not None
             or inside_inline_code(line, match.start())
+            or not in_note_context(i + 1, match.start())
         ):
             i += 1
             continue
@@ -104,6 +207,8 @@ def find_feedback(text: str, is_markdown: bool = False) -> list[FeedbackComment]
             while j < total:
                 prefix = COMMENT_PREFIX_RE.match(lines[j])
                 if prefix is None or prefix.group(1) != intro:
+                    break
+                if not in_note_context(j + 1, prefix.start(1)):
                     break
                 if MARKER_RE.search(lines[j]) is not None:
                     break
