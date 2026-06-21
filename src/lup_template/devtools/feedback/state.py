@@ -29,7 +29,7 @@ from lup.history import (
 )
 from lup.metrics import MetricsSummary, ToolMetricsDict
 from lup.paths import agent_version, feedback_path, project_root, traces_path
-from lup_template.devtools.utils import git, output_json
+from lup_template.devtools.utils import format_table, git, output_json
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,7 @@ class SessionData(TypedDict, total=False):
 # =============================================================================
 
 # claude: Sounds like something where we should have a todo
+
 
 class SessionResult(BaseModel):
     """A session matched with its outcome/feedback.
@@ -346,18 +347,32 @@ def costs(version: str | None, all_versions: bool, as_json: bool) -> None:
 
     scope = ", ".join(effective) if effective else "all versions"
     typer.echo(f"=== Cost/token rollup by backend ({scope}) ===\n")
-    typer.echo(
-        f"{'backend':<10} {'sessions':>8} {'cost_usd':>10} {'no-cost':>8} "
-        f"{'input':>12} {'output':>12} {'cached':>12}"
+    headers = (
+        "backend",
+        "sessions",
+        "cost_usd",
+        "no-cost",
+        "input",
+        "output",
+        "cached",
     )
+    table_rows: list[tuple[str, ...]] = []
     for name in sorted(rows):
         row = rows[name]
         cost_display = f"${row['cost_usd']:.2f}" if row["cost_usd"] else "—"
-        typer.echo(
-            f"{name:<10} {row['sessions']:>8} {cost_display:>10} "
-            f"{row['without_cost']:>8} {row['input_tokens']:>12,} "
-            f"{row['output_tokens']:>12,} {row['cache_read_input_tokens']:>12,}"
+        table_rows.append(
+            (
+                name,
+                str(row["sessions"]),
+                cost_display,
+                str(row["without_cost"]),
+                f"{row['input_tokens']:,}",
+                f"{row['output_tokens']:,}",
+                f"{row['cache_read_input_tokens']:,}",
+            )
         )
+    aligns = ("left", "right", "right", "right", "right", "right", "right")
+    typer.echo(format_table(headers, table_rows, aligns=aligns))
     total_cost = sum(row["cost_usd"] for row in rows.values())
     no_cost = sum(row["without_cost"] for row in rows.values())
     typer.echo(f"\nTotal: ${total_cost:.2f} across {len(sessions)} sessions")
@@ -753,16 +768,22 @@ def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
         return
 
     typer.echo("\n=== Tool Usage Summary ===\n")
-    typer.echo(f"{'Tool':<35} {'Calls':>8} {'Errors':>8} {'Err%':>8} {'Avg ms':>10}")
-    typer.echo("-" * 75)
-
+    rows: list[tuple[str, str, str, str, str]] = []
     for e in entries:
         err_pct = e["error_rate"] * 100
         err_indicator = " !" if err_pct > 10 else ""
-        typer.echo(
-            f"{e['name']:<35} {e['calls']:>8} {e['errors']:>8} "
-            f"{err_pct:>7.1f}%{err_indicator} {e['avg_ms']:>9.0f}"
+        rows.append(
+            (
+                e["name"],
+                str(e["calls"]),
+                str(e["errors"]),
+                f"{err_pct:.1f}%{err_indicator}",
+                f"{e['avg_ms']:.0f}",
+            )
         )
+    headers = ("Tool", "Calls", "Errors", "Err%", "Avg ms")
+    aligns = ("left", "right", "right", "right", "right")
+    typer.echo(format_table(headers, rows, aligns=aligns))
 
 
 def errors(
@@ -978,10 +999,15 @@ def prompt_health(as_json: bool) -> None:
     typer.echo(f"Rendered: {char_count:,} chars (~{estimated_tokens:,} tokens)")
     typer.echo(f"Sections: {len(section_reports)}")
 
-    typer.echo(f"\n{'Section':<50} {'Lines':>6} {'Chars':>8}")
-    typer.echo("-" * 68)
-    for s in section_reports:
-        typer.echo(f"{s['name']:<50} {s['lines']:>6} {s['characters']:>8}")
+    typer.echo()
+    rows = [(s["name"], str(s["lines"]), str(s["characters"])) for s in section_reports]
+    typer.echo(
+        format_table(
+            ("Section", "Lines", "Chars"),
+            rows,
+            aligns=("left", "right", "right"),
+        )
+    )
 
 
 def unanalyzed(version: str | None, all_versions: bool) -> None:

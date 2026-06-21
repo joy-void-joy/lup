@@ -1,12 +1,17 @@
 """Pre-configured shell commands and output helpers for devtools scripts."""
 
 import json
-from collections.abc import Mapping, Sequence
-from typing import Annotated
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Annotated, Literal
 
 import sh
 import typer
 from pydantic import BaseModel
+
+# Git abbreviates object names to this many hex characters by default
+# (`core.abbrev`), the same width as `git log --oneline`. Short shas are for
+# human-readable display only; never parse or compare against them.
+SHORT_SHA_LENGTH = 7
 
 
 class LazyCommand:
@@ -17,6 +22,7 @@ class LazyCommand:
     every CLI invocation at import — including ``--help``. Resolution is
     deferred to the first call or sub-command attribute access instead.
     """
+
     # claude: Didn't get that. Why do we need LazyCommand? As in, when is it used? Is it just to construct the command at top-level without crashing the import?
 
     def __init__(self, name: str, *bake_args: str, tty_out: bool = True) -> None:
@@ -47,7 +53,7 @@ uv = LazyCommand("uv")
 
 
 def decode_stderr(e: sh.ErrorReturnCode) -> str:
-    """Decode the stderr of a failed ``sh`` command to a string.""" # claude: Huh? There's no sh builtin for this?
+    """Decode the stderr of a failed ``sh`` command to a string."""  # claude: Huh? There's no sh builtin for this?
     return e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
 
 
@@ -72,13 +78,60 @@ def copy_to_clipboard(text: str) -> bool:
 
 
 def output_json(
-    data: BaseModel | Mapping[str, object] | Sequence[object], # claude: ignore
+    data: BaseModel | Mapping[str, object] | Sequence[object],  # claude: ignore
     # claude: Inputting this #claude: ignore makes me realize that in the devtool check, we probably want something that rechecks the whole codebase and verifies if there should be claude: ignore when there isn't any
 ) -> None:
     if isinstance(data, BaseModel):
         typer.echo(data.model_dump_json(indent=2))
     else:
         typer.echo(json.dumps(data, indent=2))
+
+
+def short_sha(sha: str) -> str:
+    """Abbreviate a git object name for human-readable display.
+
+    The single source of truth for how shas are shortened across devtools so
+    every table and message uses one consistent width. Returns shorter input
+    unchanged so already-abbreviated shas pass through.
+    """
+    return sha[:SHORT_SHA_LENGTH]
+
+
+def format_table(
+    headers: Sequence[str],
+    rows: Iterable[Sequence[str]],
+    aligns: Sequence[Literal["left", "right"]] | None = None,
+) -> str:
+    """Render rows as a column-aligned table sized to its own contents.
+
+    Column widths come from the widest cell in each column, so no caller has
+    to guess a fixed width that later clips real data. ``aligns`` picks left
+    (default) or right justification per column; a trailing column gets no
+    padding so variable-length tails (paths, messages) aren't padded out.
+    """
+    materialized = [list(row) for row in rows]
+    widths = [len(h) for h in headers]
+    for row in materialized:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+
+    def render(cells: Sequence[str]) -> str:
+        last = len(cells) - 1
+        parts: list[str] = []
+        for i, cell in enumerate(cells):
+            align = aligns[i] if aligns else "left"
+            if i == last:
+                parts.append(cell if align == "left" else f"{cell:>{widths[i]}}")
+            elif align == "right":
+                parts.append(f"{cell:>{widths[i]}}")
+            else:
+                parts.append(f"{cell:<{widths[i]}}")
+        return " ".join(parts)
+
+    header_line = render(headers)
+    lines = [header_line, "-" * len(header_line)]
+    lines.extend(render(row) for row in materialized)
+    return "\n".join(lines)
 
 
 VERSION_OPT = Annotated[

@@ -10,7 +10,14 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup_template.devtools.utils import git, gh, decode_stderr, output_json
+from lup_template.devtools.utils import (
+    format_table,
+    git,
+    gh,
+    decode_stderr,
+    output_json,
+    short_sha,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -516,20 +523,20 @@ def branch_status(branch: str | None, as_json: bool) -> None:
 
     typer.echo(f"\nIntegration branch: {integration}")
     typer.echo(f"Current branch: {current}\n")
-    typer.echo(f"{'Branch':<30} {'Status':<10} {'Reason'}")
-    typer.echo("-" * 80)
-
+    status_markers = {
+        "DELETE": "x",
+        "STALE": "~",
+        "KEEP": " ",
+        "CURRENT": "*",
+        "NOT_FOUND": "?",
+    }
+    rows: list[tuple[str, str, str]] = []
     for r in results:
         status = r["status"]
-        marker = {
-            "DELETE": "x",
-            "STALE": "~",
-            "KEEP": " ",
-            "CURRENT": "*",
-            "NOT_FOUND": "?",
-        }.get(str(status), " ")
+        marker = status_markers.get(str(status), " ")
         wt = " [worktree]" if r.get("worktree") else ""
-        typer.echo(f"[{marker}] {r['branch']:<27} {status:<10} {r['reason']}{wt}")
+        rows.append((f"[{marker}] {r['branch']}", status, f"{r['reason']}{wt}"))
+    typer.echo(format_table(("Branch", "Status", "Reason"), rows))
 
     typer.echo()
     deletable = [r for r in results if r["status"] in ("DELETE", "STALE")]
@@ -554,7 +561,7 @@ def base_branch(branch: str | None, as_json: bool) -> None:
     else:
         typer.echo(f"Branch: {effective}")
         typer.echo(f"Base: {base}")
-        typer.echo(f"Merge base: {merge_base[:10]}")
+        typer.echo(f"Merge base: {short_sha(merge_base)}")
         typer.echo(f"Commits ahead: {ahead}")
 
 
@@ -679,18 +686,23 @@ def survey(as_json: bool) -> None:
         output_json(result)
     else:
         typer.echo(f"\nIntegration: {integration} | Current: {cur}\n")
-        typer.echo(
-            f"{'Branch':<25} {'Commit':<10} {'Contained In':<25} {'PR':<20} {'Unique':<8} {'Diff'}"
-        )
-        typer.echo("-" * 100)
+        rows: list[tuple[str, str, str, str, str, str]] = []
         for bi in branches_list:
-            contained = ", ".join(bi.contained_in[:3]) if bi.contained_in else "-"
+            contained = ", ".join(bi.contained_in) if bi.contained_in else "-"
             pr_str = f"#{bi.pr.number} {bi.pr.state}" if bi.pr else "-"
             marker = "* " if bi.is_current else "  "
-            typer.echo(
-                f"{marker}{bi.name:<23} {bi.commit:<10} {contained:<25} "
-                f"{pr_str:<20} {bi.unique_commits:<8} {bi.source_diff_lines}"
+            rows.append(
+                (
+                    f"{marker}{bi.name}",
+                    bi.commit,
+                    contained,
+                    pr_str,
+                    str(bi.unique_commits),
+                    str(bi.source_diff_lines),
+                )
             )
+        headers = ("Branch", "Commit", "Contained In", "PR", "Unique", "Diff")
+        typer.echo(format_table(headers, rows))
 
 
 def delete_branch(
