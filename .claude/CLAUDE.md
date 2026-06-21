@@ -83,15 +83,14 @@ packages/
     └── src/lup/
         ├── __init__.py         # Public API re-exports (__all__); imports no SDK
         ├── py.typed            # PEP 561 typing marker
-        ├── adapters/           # ALL SDK-specific code lives here
-        │   ├── common.py       # AgentAdapter/Conversation ABCs, query() dispatcher
-        │   ├── claude.py       # Claude Agent SDK adapter + type converters
-        │   ├── claude_client.py# Claude client/ResponseCollector, claude_query
-        │   ├── claude_background.py # Claude background agent
-        │   ├── codex.py        # Codex SDK adapter, config-override builders
-        │   ├── codex_background.py  # Codex background agent (no tools)
-        │   ├── codex_hooks.py  # Quarantined: Codex hook-script generation
-        │   └── openai_compat.py# OpenAI-compatible endpoints via Codex runtime
+        ├── adapters/           # ALL SDK-specific code, one engine per subpackage behind an ABC
+        │   ├── common.py       # AgentAdapter/Conversation ABCs, AdapterCapabilities, query()
+        │   ├── registry.py     # BACKEND_BUILDERS: backend id -> build_adapter(opts)
+        │   ├── claude/         # Claude engine: adapter, client, background, options, tools
+        │   └── codex/          # Codex/OpenAI engine: adapter, background, hooks, options, openai_compat
+        ├── antipatterns.py     # Single source of anti-pattern rules (edit hook + `dev check` share it)
+        ├── options.py          # LupAgentOptions — backend-agnostic options crossing template -> lib
+        ├── markers.py          # `# claude:` / `// claude:` review-marker scanning (dev comments)
         ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
         ├── background.py       # Background agent base + SDK-aware factory
         ├── history.py          # Session storage/retrieval
@@ -152,6 +151,8 @@ Code in `packages/lup/` must be **complete-as-is and configurable through functi
 - Use `configure()`-style functions for module-level state that needs overriding
 - **No imports from `lup_template`** in `lup` code — the dependency arrow points one way
 - **Placement test:** Can this module be used as-is in a different project without modification? If yes → `packages/lup/`. Does it import from `lup_template`? If yes → `src/lup_template/`.
+
+**Backend dispatch lives only in the adapter layer.** Consumer code — `core.py`, template tools, devtools — never branches on the backend (no `match settings.agent_sdk` / `match model_backend`). It builds one backend-agnostic `LupAgentOptions`, maps its SDK setting to a `Backend` id once (`backend_for_settings`), and calls `adapters.build_adapter(backend, opts)`; each engine (`adapters/claude/`, `adapters/codex/`) constructs its own native options behind the `AgentAdapter` ABC. A new cross-backend capability adds a field to `AdapterCapabilities` — which forces every engine to take a position — rather than a new `match`. `dev check --antipatterns` regression-guards this: a reintroduced backend `match` or `ServerConfig = Any` surfaces as a finding.
 
 ---
 
