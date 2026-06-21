@@ -1,18 +1,23 @@
-"""Adapter capability declarations and the query() budget guard.
+"""Adapter capability declarations and the query() option degradation.
 
 The capability contract only has value if the declarations stay truthful:
 these tests pin the entries that other code branches on (stop_event for
 the completion guard, cost_reporting for budget wiring) and the
-instance-dependent Codex cost entry.
+instance-dependent Codex cost entry. They also pin that a one-shot query
+degrades — rather than raises — when asked for options a weak backend cannot
+honor, so a caller can express full intent and let the adapter layer keep what
+it can.
 """
 
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions
 
-from lup.adapters.claude import ClaudeAdapter
-from lup.adapters.codex import CodexAdapter, per_mtok_usage_cost
-from lup.adapters.common import query
-from lup.adapters.openai_compat import OpenAICompatibleAdapter
+from lup.adapters import common
+from lup.adapters.claude.adapter import ClaudeAdapter
+from lup.adapters.codex.adapter import CodexAdapter, per_mtok_usage_cost
+from lup.adapters.common import OneShotRequest, query
+from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
+from lup.types import LupResponse, LupTextBlock
 
 
 def test_claude_capabilities_full_tier() -> None:
@@ -59,11 +64,38 @@ def test_openai_compat_inherits_codex_capabilities() -> None:
     assert caps.streaming == "post_hoc"
 
 
-async def test_query_budget_guard_explains_oneshot_limit() -> None:
-    with pytest.raises(ValueError, match="one-shot"):
-        await query("hi", model="gpt-5.5", max_budget_usd=1.0)
+class RequestRecorder:
+    def __init__(self) -> None:
+        self.request: OneShotRequest | None = None
+
+    async def __call__(self, request: OneShotRequest) -> LupResponse:
+        self.request = request
+        return LupResponse(blocks=[LupTextBlock(text="ok")])
 
 
-async def test_query_claude_only_options_still_rejected() -> None:
-    with pytest.raises(ValueError, match="max_turns"):
-        await query("hi", model="gpt-5.5", max_turns=3)
+async def test_query_drops_oneshot_budget_on_weak_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A one-shot budget the Codex runtime can't enforce is dropped, not raised."""
+    recorder = RequestRecorder()
+    monkeypatch.setitem(common.QUERY_RUNNERS, "openai", recorder)
+
+    response = await query("hi", model="gpt-5.5", max_budget_usd=1.0)
+
+    assert response.text == "ok"
+    assert recorder.request is not None
+    assert recorder.request.max_budget_usd is None
+
+
+async def test_query_drops_claude_only_options_on_weak_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude-only options degrade away on a backend without hooks/turn caps."""
+    recorder = RequestRecorder()
+    monkeypatch.setitem(common.QUERY_RUNNERS, "openai", recorder)
+
+    await query("hi", model="gpt-5.5", max_turns=3, tools=["Read"])
+
+    assert recorder.request is not None
+    assert recorder.request.options.max_turns is None
+    assert recorder.request.options.tools is None

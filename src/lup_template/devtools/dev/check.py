@@ -3,6 +3,7 @@
 import sh
 import typer
 
+from lup_template.devtools.dev.antipatterns import scan_antipatterns
 from lup_template.devtools.dev.comments import scan_feedback
 from lup_template.devtools.utils import git, uv
 
@@ -84,6 +85,16 @@ def run_checks(fix: bool, no_test: bool) -> None:
     else:
         typer.echo("claude comments: ok")
         results.append(("claude comments", True))
+
+    findings = scan_antipatterns()
+    if findings:
+        typer.echo(f"antipatterns: FAIL ({len(findings)} finding(s))")
+        for finding in findings:
+            typer.echo(f"  {finding.file}:{finding.line} [{finding.kind}]")
+        results.append(("antipatterns", False))
+    else:
+        typer.echo("antipatterns: ok")
+        results.append(("antipatterns", True))
 
     # summary
     passed = sum(1 for _, ok in results if ok)

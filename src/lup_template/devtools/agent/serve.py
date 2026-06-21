@@ -47,7 +47,6 @@ def collect_tools_by_server(
         sandbox=sandbox,
         realtime_dir=context.realtime_dir,
     )
-    # claude: this seems to duplicate the creation of the server in core. This should be unified instead. serve should just reuse the same server from core
     return toolset["groups"]
 
 
@@ -69,9 +68,7 @@ def collect_dynamic_tool_names() -> dict[str, list[str]]:
             continue
 
         tool_names: list[str] = []
-        for node in ast.walk(
-            tree
-        ):  # claude: Eh, is that necessary? This seems to be a bit wtf here, using glob + ast walking
+        for node in ast.walk(tree):
             if not isinstance(node, ast.AsyncFunctionDef):
                 continue
             for decorator in node.decorator_list:
@@ -112,11 +109,7 @@ def serve_tools(list_only: bool, server_group: str | None) -> None:
             lup_tools = [
                 t for key, tools in by_server.items() if key != "example" for t in tools
             ]
-        case (
-            "sandbox" | "session" | "example"
-        ):  # claude: What? This is extremely hard-coded. Do you think match ... with should be a Claude ask in the edit hook?
-            # claude: Like, the whole point of serve is that it serve the server without having to redo everything. This here seems to deduplicate a lot
-            # claude: Also type str is wrong, should have been litteral. Maybe that's a deny hook or an instruction in Claude.md that could have brought this point or something. What do you think?
+        case "sandbox" | "session" | "example":
             lup_tools = list(by_server.get(server_group, []))
         case "notes":
             lup_tools = [

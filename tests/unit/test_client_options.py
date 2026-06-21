@@ -16,11 +16,8 @@ from pydantic import BaseModel
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
 
-from lup.adapters.claude_client import (
-    ResponseCollector,
-    build_client,
-    prepare_output_format,
-)
+from lup.adapters.claude.adapter import ResponseCollector
+from lup.adapters.claude.client import build_client, prepare_output_format
 from lup.trace import TraceLogger
 
 

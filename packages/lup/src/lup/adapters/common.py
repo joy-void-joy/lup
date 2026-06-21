@@ -10,7 +10,7 @@ based on model name — consumer code never imports from SDK packages.
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 
 from typing import Literal
@@ -88,9 +88,9 @@ def canonical_capability_matrix() -> dict[str, AdapterCapabilities]:
     """
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.claude import ClaudeAdapter
-    from lup.adapters.codex import CodexAdapter, per_mtok_usage_cost
-    from lup.adapters.openai_compat import OpenAICompatibleAdapter
+    from lup.adapters.claude.adapter import ClaudeAdapter
+    from lup.adapters.codex.adapter import CodexAdapter, per_mtok_usage_cost
+    from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
 
     rates = per_mtok_usage_cost(input_usd=1.0, output_usd=1.0)
     return {
@@ -125,6 +125,63 @@ def capability_matrix_markdown(adapters: Mapping[str, AdapterCapabilities]) -> s
                     cells.append(str(value))
         lines.append(f"| {field} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
+
+
+class OneShotOptions(BaseModel):
+    """The capability-gated options of a one-shot :func:`query`.
+
+    Carries only the knobs a weak backend may not honor. ``tools``,
+    ``allowed_tools``, and ``permission_mode`` need the in-process hook/permission
+    machinery (``capabilities.hooks``); ``max_turns`` and ``max_thinking_tokens``
+    map to their own capability flags. :func:`degrade_unsupported` returns a copy
+    with the unsupported ones cleared.
+    """
+
+    tools: list[str] | None = None
+    allowed_tools: list[str] | None = None
+    permission_mode: PermissionMode | None = None
+    max_turns: int | None = None
+    max_thinking_tokens: int | None = None
+
+
+def degrade_unsupported(
+    options: OneShotOptions,
+    capabilities: AdapterCapabilities,
+    *,
+    backend: Backend,
+    model: str,
+) -> OneShotOptions:
+    """Drop one-shot options the backend cannot honor, logging each.
+
+    The one-shot counterpart of ``core.check_settings_supported``: a single
+    ``query()`` has no session the caller manages, so over-asking degrades to
+    what the backend supports (with a log line) rather than raising. A tool can
+    therefore express its full intent — file tools, a turn cap — and let the
+    adapter layer honor what it can. Tool-using options need ``hooks`` (the
+    permission machinery); the turn and thinking caps need their own flags.
+    """
+    kept = options.model_copy()
+    dropped: list[str] = []
+    if not capabilities.hooks:
+        for field in ("tools", "allowed_tools", "permission_mode"):
+            if getattr(kept, field) is not None:
+                setattr(kept, field, None)
+                dropped.append(field)
+    if not capabilities.max_turns and kept.max_turns is not None:
+        kept.max_turns = None
+        dropped.append("max_turns")
+    if not capabilities.max_thinking_tokens and kept.max_thinking_tokens is not None:
+        kept.max_thinking_tokens = None
+        dropped.append("max_thinking_tokens")
+    if dropped:
+        logger.info(
+            "query() options %s are not supported on the %s backend "
+            "(model=%r); proceeding without them.",
+            sorted(dropped),
+            backend,
+            model,
+        )
+    return kept
 
 
 class TurnTimeoutError(RuntimeError):
@@ -239,6 +296,106 @@ class AgentAdapter(ABC):
 # ---------------------------------------------------------------------------
 
 
+class OneShotRequest(BaseModel):
+    """A resolved one-shot :func:`query`, after capability degradation.
+
+    Carries the prompt and every option a backend runner needs. Its
+    capability-gated knobs (``tools``/``permission_mode``/``max_turns``/…) have
+    already been cleared by :func:`degrade_unsupported` for the chosen backend,
+    so each runner can pass them through without re-checking support.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    prompt: str
+    model: str
+    system_prompt: str | None = None
+    output_schema: dict[str, object] | None = None
+    trace_logger: TraceLogger | None = None
+    prefix: str = ""
+    options: OneShotOptions = OneShotOptions()
+    max_budget_usd: float | None = None
+
+
+async def run_claude_query(request: OneShotRequest) -> LupResponse:
+    """Run a one-shot query on the Claude Agent SDK."""
+    from lup.adapters.claude.client import claude_query
+
+    return await claude_query(
+        request.prompt,
+        model=request.model,
+        system_prompt=request.system_prompt,
+        output_schema=request.output_schema,
+        trace_logger=request.trace_logger,
+        prefix=request.prefix,
+        max_turns=request.options.max_turns,
+        max_thinking_tokens=request.options.max_thinking_tokens,
+        tools=request.options.tools,
+        allowed_tools=request.options.allowed_tools,
+        permission_mode=request.options.permission_mode,
+        max_budget_usd=request.max_budget_usd,
+    )
+
+
+async def run_codex_query(request: OneShotRequest) -> LupResponse:
+    """Run a one-shot query on the Codex runtime (no MCP tools)."""
+    from lup.adapters.codex.adapter import CodexAdapter
+
+    adapter = CodexAdapter(
+        model=request.model,
+        system_prompt=request.system_prompt or "",
+        output_schema=request.output_schema,
+        mcp_tools=False,
+    )
+    return await adapter.run(
+        request.prompt, trace_logger=request.trace_logger, prefix=request.prefix
+    )
+
+
+async def run_openai_query(request: OneShotRequest) -> LupResponse:
+    """Run a one-shot query on an OpenAI-compatible endpoint (no MCP tools)."""
+    from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
+
+    adapter = OpenAICompatibleAdapter(
+        model=request.model,
+        system_prompt=request.system_prompt or "",
+        output_schema=request.output_schema,
+        mcp_tools=False,
+    )
+    return await adapter.run(
+        request.prompt, trace_logger=request.trace_logger, prefix=request.prefix
+    )
+
+
+type OneShotRunner = Callable[[OneShotRequest], Awaitable[LupResponse]]
+
+QUERY_RUNNERS: dict[Backend, OneShotRunner] = {
+    "anthropic": run_claude_query,
+    "openai": run_codex_query,
+    "openai-compatible": run_openai_query,
+}
+
+
+def query_capabilities(backend: Backend) -> AdapterCapabilities:
+    """The capabilities that gate a one-shot query on *backend*.
+
+    Built lazily (SDK imports stay deferred) and used only for the
+    option-degrade decision, so the rate-dependent ``cost_reporting`` field is
+    irrelevant — the static support flags are what matter here.
+    """
+    match backend:
+        case "anthropic":
+            from claude_agent_sdk import ClaudeAgentOptions
+
+            from lup.adapters.claude.adapter import ClaudeAdapter
+
+            return ClaudeAdapter(ClaudeAgentOptions()).capabilities
+        case _:
+            from lup.adapters.codex.adapter import CodexAdapter
+
+            return CodexAdapter(model="", system_prompt="").capabilities
+
+
 async def query(
     prompt: str,
     *,
@@ -263,79 +420,54 @@ async def query(
     An explicit ``backend`` bypasses the prefix inference — use it for
     aliased or gateway model ids the tables in ``lup.types`` can't know.
 
+    Options a one-shot has no way to honor on the chosen backend (file tools
+    or a turn cap on a runtime with no in-process hooks) are dropped with a log
+    line rather than raising — a caller can express full intent and let the
+    adapter layer keep what it can. Session-level enforcement that needs a
+    managed conversation is the multi-turn adapters' job, not this path's.
+
     Returns a ``LupResponse`` — use ``.text`` for text or
     ``.output(MyModel)`` for structured output.
     """
     effective_model = model or "claude-opus-4-6"
     backend = backend or model_backend(effective_model)
+    runner = QUERY_RUNNERS[backend]
+    capabilities = query_capabilities(backend)
 
-    output_schema = output_type.model_json_schema() if output_type else None
+    kept = degrade_unsupported(
+        OneShotOptions(
+            tools=tools,
+            allowed_tools=allowed_tools,
+            permission_mode=permission_mode,
+            max_turns=max_turns,
+            max_thinking_tokens=max_thinking_tokens,
+        ),
+        capabilities,
+        backend=backend,
+        model=effective_model,
+    )
 
-    if backend != "anthropic":
-        claude_only = {
-            "max_turns": max_turns,
-            "max_thinking_tokens": max_thinking_tokens,
-            "tools": tools,
-            "allowed_tools": allowed_tools,
-            "permission_mode": permission_mode,
-        }
-        requested = sorted(k for k, v in claude_only.items() if v is not None)
-        if requested:
-            raise ValueError(
-                f"query() options {requested} are not supported on the "
-                f"{backend} backend (model={effective_model!r}); use a "
-                "Claude model or drop these options."
-            )
-        if max_budget_usd is not None:
-            raise ValueError(
-                "max_budget_usd cannot be enforced by a one-shot query() on "
-                f"the {backend} backend: the Codex runtime enforces budgets "
-                "between turns from caller-supplied rates, and a one-shot "
-                "query has no next turn to refuse. Use "
-                "CodexAdapter(max_budget_usd=..., usage_cost=...) for "
-                "multi-turn enforcement."
-            )
+    budget = max_budget_usd
+    if budget is not None and capabilities.cost_reporting != "native":
+        logger.info(
+            "query() max_budget_usd cannot be enforced on the %s backend "
+            "(model=%r): a one-shot query has no next turn to refuse, and the "
+            "runtime reports tokens, not cost. Proceeding without a budget; use "
+            "a multi-turn CodexAdapter(max_budget_usd=..., usage_cost=...) to "
+            "enforce one.",
+            backend,
+            effective_model,
+        )
+        budget = None
 
-    match backend:  # claude: No. THis is the wrong way to do it. Right way to do it is there's an ABC for calling "run" or "query" or something
-        # claude: Never match on backend this way, it just doesn't scale
-        case "anthropic":
-            from lup.adapters.claude_client import claude_query
-
-            return await claude_query(
-                prompt,
-                model=effective_model,
-                system_prompt=system_prompt,
-                output_schema=output_schema,
-                trace_logger=trace_logger,
-                prefix=prefix,
-                max_turns=max_turns,
-                max_thinking_tokens=max_thinking_tokens,
-                tools=tools,
-                allowed_tools=allowed_tools,
-                permission_mode=permission_mode,
-                max_budget_usd=max_budget_usd,
-            )
-        case "openai":
-            from lup.adapters.codex import CodexAdapter
-
-            codex_adapter: AgentAdapter = CodexAdapter(
-                model=effective_model,
-                system_prompt=system_prompt or "",
-                output_schema=output_schema,
-                mcp_tools=False,
-            )
-            return await codex_adapter.run(
-                prompt, trace_logger=trace_logger, prefix=prefix
-            )
-        case _:
-            from lup.adapters.openai_compat import OpenAICompatibleAdapter
-
-            compat_adapter: AgentAdapter = OpenAICompatibleAdapter(
-                model=effective_model,
-                system_prompt=system_prompt or "",
-                output_schema=output_schema,
-                mcp_tools=False,
-            )
-            return await compat_adapter.run(
-                prompt, trace_logger=trace_logger, prefix=prefix
-            )
+    request = OneShotRequest(
+        prompt=prompt,
+        model=effective_model,
+        system_prompt=system_prompt,
+        output_schema=output_type.model_json_schema() if output_type else None,
+        trace_logger=trace_logger,
+        prefix=prefix,
+        options=kept,
+        max_budget_usd=budget,
+    )
+    return await runner(request)

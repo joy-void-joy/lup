@@ -130,6 +130,15 @@ class Usage(BaseModel):
     cache_creation_input_tokens: int = 0
 
 
+type UsageCost = Callable[[Usage], float]
+"""Estimates the USD cost of accumulated token usage.
+
+Backends that report token counts but no cost (Codex/OpenAI) take one of these
+to enforce a budget; build it from per-token rates with
+``lup.adapters.codex.adapter.per_mtok_usage_cost``.
+"""
+
+
 class LupResultMessage(BaseModel):
     """Final result metadata from a completed agent run."""
 

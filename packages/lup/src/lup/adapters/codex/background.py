@@ -9,7 +9,6 @@ from lup.background import BaseBackgroundAgent
 logger = logging.getLogger(__name__)
 
 
-# claude: same comment as for claude, structure seems very over the place
 class CodexBackgroundAgent(BaseBackgroundAgent):
     """Background agent running via an independent Codex thread.
 

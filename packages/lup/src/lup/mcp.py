@@ -31,7 +31,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any, TypedDict, cast, get_type_hints
+from typing import Any, Literal, NotRequired, TypedDict, cast, get_type_hints
 
 from mcp.server import Server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
@@ -88,6 +88,43 @@ class LupMcpServerConfig(BaseModel):
     name: str
     server: Server
     tool_names: list[str] = []
+
+
+class RawStdioServerConfig(TypedDict):
+    """An external MCP server launched as a stdio subprocess."""
+
+    type: NotRequired[Literal["stdio"]]
+    command: str
+    args: NotRequired[list[str]]
+    env: NotRequired[dict[str, str]]
+
+
+class RawSseServerConfig(TypedDict):
+    """An external MCP server reached over Server-Sent Events."""
+
+    type: Literal["sse"]
+    url: str
+    headers: NotRequired[dict[str, str]]
+
+
+class RawHttpServerConfig(TypedDict):
+    """An external MCP server reached over streamable HTTP."""
+
+    type: Literal["http"]
+    url: str
+    headers: NotRequired[dict[str, str]]
+
+
+type RawMcpServerConfig = (
+    RawStdioServerConfig | RawSseServerConfig | RawHttpServerConfig
+)
+"""An MCP server the framework does not host: a transport config, no instance."""
+
+type McpServerEntry = LupMcpServerConfig | RawMcpServerConfig
+"""One MCP server in a session: an in-process ``LupMcpServerConfig`` carrying a
+live ``Server`` instance, or a transport config for an external one. An adapter
+narrows by ``isinstance(entry, LupMcpServerConfig)`` — the in-process case has a
+``.server`` to register, the external case is passed to the SDK as-is."""
 
 
 def create_mcp_server(
