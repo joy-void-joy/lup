@@ -305,7 +305,7 @@ def codex_budget_options() -> tuple[float | None, "UsageCost | None"]:
     model (``CODEX_USD_PER_MTOK_INPUT`` / ``_OUTPUT``, optional
     ``_CACHED_INPUT``). A budget without rates fails loudly.
     """
-    from lup.adapters.codex import per_mtok_usage_cost
+    from lup.adapters.codex.adapter import per_mtok_usage_cost
 
     usage_cost: UsageCost | None = None
     if (
@@ -331,7 +331,7 @@ def build_codex_adapter(
 ) -> "AgentAdapter":
     """Build a CodexAdapter for the agent session."""
 
-    from lup.adapters.codex import CodexAdapter
+    from lup.adapters.codex.adapter import CodexAdapter
 
     from lup_template.agent.tool_policy import ToolPolicy
     from lup_template.agent.toolsets import tool_group_names
@@ -384,7 +384,7 @@ def build_codex_realtime_adapter(
     adapter: AgentAdapter
     match settings.agent_sdk:
         case "openai":
-            from lup.adapters.openai_compat import OpenAICompatibleAdapter
+            from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
 
             adapter = OpenAICompatibleAdapter(
                 model=settings.model,
@@ -404,7 +404,7 @@ def build_codex_realtime_adapter(
                 turn_timeout_seconds=settings.turn_timeout_seconds,
             )
         case _:
-            from lup.adapters.codex import CodexAdapter
+            from lup.adapters.codex.adapter import CodexAdapter
 
             adapter = CodexAdapter(
                 model=settings.model,
@@ -428,7 +428,7 @@ def build_openai_adapter(
     notes: "NotesConfig",
 ) -> "AgentAdapter":
     """Build an OpenAICompatibleAdapter with full tools and enforcement."""
-    from lup.adapters.openai_compat import OpenAICompatibleAdapter
+    from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
 
     from lup_template.agent.tool_policy import ToolPolicy
     from lup_template.agent.toolsets import tool_group_names

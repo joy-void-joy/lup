@@ -13,7 +13,11 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
-from lup.adapters.codex import CodexAdapter, CodexConversation, per_mtok_usage_cost
+from lup.adapters.codex.adapter import (
+    CodexAdapter,
+    CodexConversation,
+    per_mtok_usage_cost,
+)
 from lup.adapters.common import BudgetExceededError, TurnTimeoutError
 from lup.types import Usage
 

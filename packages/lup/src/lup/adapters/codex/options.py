@@ -10,8 +10,8 @@ the bundle's ``lifecycle``. The template hands over an assembled
 
 from contextlib import AbstractContextManager, nullcontext
 
-from lup.adapters.codex import CodexAdapter
-from lup.adapters.openai_compat import OpenAICompatibleAdapter
+from lup.adapters.codex.adapter import CodexAdapter
+from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
 from lup.options import BuiltAdapter, LupAgentOptions
 from lup.realtime_relay import RealtimeMailbox
 
@@ -36,7 +36,7 @@ def subprocess_sandbox_cleanup(
 
 
 def build_codex_adapter(opts: LupAgentOptions) -> BuiltAdapter:
-    """Build a :class:`~lup.adapters.codex.CodexAdapter` from neutral options."""
+    """Build a :class:`~lup.adapters.codex.adapter.CodexAdapter` from neutral options."""
     codex = opts.codex
     adapter = CodexAdapter(
         model=opts.model,
@@ -65,7 +65,7 @@ def build_codex_adapter(opts: LupAgentOptions) -> BuiltAdapter:
 
 
 def build_openai_adapter(opts: LupAgentOptions) -> BuiltAdapter:
-    """Build an :class:`~lup.adapters.openai_compat.OpenAICompatibleAdapter`."""
+    """Build an :class:`~lup.adapters.codex.openai_compat.OpenAICompatibleAdapter`."""
     codex = opts.codex
     adapter = OpenAICompatibleAdapter(
         model=opts.model,

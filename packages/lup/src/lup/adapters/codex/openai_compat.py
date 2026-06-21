@@ -19,7 +19,7 @@ from pathlib import Path
 
 from collections.abc import Sequence
 
-from lup.adapters.codex import (
+from lup.adapters.codex.adapter import (
     CodexAdapter,
     CodexHookConfig,
     CodexUsageNormalizer,
