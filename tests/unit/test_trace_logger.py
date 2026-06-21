@@ -14,6 +14,7 @@ from lup.trace import (
     TraceLogger,
     format_block_markdown,
     format_tool_result,
+    read_trace_events,
     resolve_color_tag,
     truncate_str_fields,
 )
@@ -168,3 +169,57 @@ def test_truncate_shortens_nested_strings() -> None:
     b = a["b"]
     assert isinstance(b, list)
     assert b[0] == "y" * 10 + "..."
+
+
+# ── structured JSONL sidecar ──────────────────────────────────────────────
+#
+# Analysis reads this sidecar instead of regex-scanning markdown, so the
+# write→read-back round-trip is the contract that must hold: events appended
+# live must parse back to the same typed objects, with tool name/ok and
+# capability requests preserved.
+
+
+def test_sidecar_roundtrips_events(tmp_path: Path) -> None:
+    trace = TraceLogger(trace_path=tmp_path / "logs" / "t.md", title="S")
+
+    trace.log_block(LupToolUseBlock(id="a", name="search", input={"q": "x"}))
+    trace.log_block(LupToolResultBlock(tool_use_id="a", content='{"ok": true}'))
+    trace.log_block(LupToolUseBlock(id="b", name="fetch", input={}))
+    trace.log_block(LupToolResultBlock(tool_use_id="b", content='{"is_error": true}'))
+    trace.log_block(LupTextBlock(text="A tool that lints would be useful."))
+
+    # Round-trip: read the sidecar back into typed events.
+    events = read_trace_events(trace.events_path)
+    assert events == trace.events
+
+    by_kind = {e.kind for e in events}
+    assert by_kind == {"tool_call", "error", "capability_request"}
+
+    ok_call = next(e for e in events if e.kind == "tool_call" and e.tool == "search")
+    assert ok_call.ok is True
+    error = next(e for e in events if e.kind == "error")
+    assert error.tool == "fetch"
+    request = next(e for e in events if e.kind == "capability_request")
+    assert "lints" in request.brief
+
+
+def test_sidecar_appends_live_before_save(tmp_path: Path) -> None:
+    """A crash before save() still leaves the flushed events readable."""
+    trace = TraceLogger(trace_path=tmp_path / "t.md", title="S")
+    trace.log_block(LupToolUseBlock(id="a", name="search", input={}))
+    trace.log_block(LupToolResultBlock(tool_use_id="a", content="done"))
+
+    # No save() called — sidecar already has the line.
+    events = read_trace_events(trace.events_path)
+    assert [e.kind for e in events] == ["tool_call"]
+
+
+def test_save_touches_empty_sidecar(tmp_path: Path) -> None:
+    """A run with no tool calls still gets a sidecar, so analysis treats it
+    as structured rather than falling back to line-scanning its markdown."""
+    trace = TraceLogger(trace_path=tmp_path / "t.md", title="S")
+    trace.log_text("just prose, nothing to record")
+    trace.save()
+
+    assert trace.events_path.exists()
+    assert read_trace_events(trace.events_path) == []

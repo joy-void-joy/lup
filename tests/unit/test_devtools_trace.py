@@ -12,7 +12,18 @@ import pytest
 from typer.testing import CliRunner
 
 from lup.history import iter_trace_log_files
+from lup.trace import TraceLogger
+from lup.types import (
+    LupContentBlock,
+    LupTextBlock,
+    LupToolResultBlock,
+    LupToolUseBlock,
+)
 from lup_template.devtools.main import app
+from lup_template.devtools.trace.traces import (
+    scan_for_capability_gaps,
+    scan_for_errors,
+)
 
 from tests.unit.conftest import LUP_PROJECT_VERSION
 
@@ -114,3 +125,67 @@ def test_show_prints_trace_content(populated_project: Path) -> None:
 def test_show_missing_session_exits_nonzero(populated_project: Path) -> None:
     result = runner.invoke(app, ["trace", "show", "does-not-exist"])
     assert result.exit_code == 1
+
+
+# ── analysis reads the structured sidecar, not the markdown ───────────────
+
+
+def write_trace_with_sidecar(
+    root: Path, session_id: str, blocks: list[LupContentBlock]
+) -> None:
+    """Write a real .md trace plus its .events.jsonl sidecar for a session."""
+    log_dir = root / "notes" / "traces" / LUP_PROJECT_VERSION / "logs" / session_id
+    log_dir.mkdir(parents=True, exist_ok=True)
+    trace = TraceLogger(trace_path=log_dir / "20260101_120000.md", title=session_id)
+    for block in blocks:
+        trace.log_block(block)
+    trace.save()
+
+
+def test_scan_for_errors_reads_sidecar(tmp_lup_project: Path) -> None:
+    write_trace_with_sidecar(
+        tmp_lup_project,
+        "sess-fail",
+        [
+            LupToolUseBlock(id="a", name="fetch", input={}),
+            LupToolResultBlock(tool_use_id="a", content='{"is_error": true}'),
+        ],
+    )
+
+    results = scan_for_errors([LUP_PROJECT_VERSION])
+
+    assert [r["session_id"] for r in results] == ["sess-fail"]
+    assert results[0]["error_count"] == 1
+    assert "fetch" in results[0]["errors"][0]
+
+
+def test_sidecar_is_preferred_over_markdown_keywords(tmp_lup_project: Path) -> None:
+    """A healthy result whose prose contains "error" must not be flagged: the
+    structured sidecar says is_error=false, so the markdown keyword is moot."""
+    write_trace_with_sidecar(
+        tmp_lup_project,
+        "sess-ok",
+        [
+            LupToolUseBlock(id="a", name="search", input={}),
+            LupToolResultBlock(
+                tool_use_id="a",
+                content='{"is_error": false, "note": "no error occurred"}',
+            ),
+        ],
+    )
+
+    assert scan_for_errors([LUP_PROJECT_VERSION]) == []
+
+
+def test_scan_for_capability_gaps_reads_sidecar(tmp_lup_project: Path) -> None:
+    write_trace_with_sidecar(
+        tmp_lup_project,
+        "sess-wish",
+        [LupTextBlock(text="A tool that queries PyPI would be useful here.")],
+    )
+
+    results = scan_for_capability_gaps([LUP_PROJECT_VERSION])
+
+    assert len(results) == 1
+    assert "PyPI" in results[0]["text"]
+    assert results[0]["session_ids"] == ["sess-wish"]
