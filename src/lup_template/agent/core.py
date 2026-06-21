@@ -109,10 +109,16 @@ def build_options(
     # claude: Probably should return a generic option instead that transmit the same info, and can be passed to something like build_claude or something?
     # I don't like seeing the backend be so tightly integrated there. Would be okay if it were more minimal
 
-    """Build ClaudeAgentOptions for the agent session.
+    """Assemble everything one Claude session needs into its options object.
 
-    Composes system prompt, MCP servers, hooks, subagents, and
-    model settings into a single options object.
+    The Claude adapter takes a single ``ClaudeAgentOptions``, so the
+    session's parts have to be gathered into one value before the run can
+    start: the tools it may use, the prompt that briefs it, the hooks that
+    police it, the subagents it may spawn, and the model settings. The
+    parts depend on each other in order — the toolset names the MCP
+    servers, the policy decides which of those the agent is allowed, and
+    the hooks are layered so the last word on availability is the
+    allowlist that the policy produces.
 
     Args:
         notes: Session notes config.
@@ -121,8 +127,6 @@ def build_options(
     Returns:
         Configured ClaudeAgentOptions.
     """
-    # claude: This function is a bit hard to read. I get what it does conceptually, but not really why it's there or whats' the workflow there.
-
     from claude_agent_sdk import ClaudeAgentOptions
 
     from lup.adapters.claude import (
@@ -213,12 +217,13 @@ def build_options(
         },
         # ThinkingConfigEnabled(budget_tokens=N) is the newer alternative, but
         # max_thinking_tokens is simpler and avoids adaptive mode's variable allocation.
-
         # claude: we might want to allow both. In particular, we probably should auto switch for models newer than 4.6 since this is disallowed (verify with the doc)
         # claude: Another reason not to merge backend concerns here, and have build_claude or something construct the max_thinking_tokens params itself
         max_thinking_tokens=settings.max_thinking_tokens,
         permission_mode=settings.permission_mode,
-        extra_args={"no-session-persistence": None}, # claude: A pattern I would like you to import from inkwell is that we often want to resume conversations later down the line. no-session-persistence was there in order to ensure claudeagentsdk session did not clutter claude code
+        extra_args={
+            "no-session-persistence": None
+        },  # claude: A pattern I would like you to import from inkwell is that we often want to resume conversations later down the line. no-session-persistence was there in order to ensure claudeagentsdk session did not clutter claude code
         # claude: To this end, can you port from it the pattern where it always save to a different cache folder (running with cwd tuned differently to a cache folder probably? Would be cool if the agent's cwd was the same, just it stores the session separately @claude-code-agent
         # claude: And another thing: Can you add to the lup library resume capabilities that would enable one to resume such sessions properly?
         hooks=claude_hooks,
@@ -229,11 +234,13 @@ def build_options(
         },
         mcp_servers=mcp_servers,
         agents=subagents,
-        add_dirs=[str(d) for d in notes.all_dirs], # claude: this feels a bit obtuse
+        add_dirs=[str(d) for d in notes.all_dirs],  # claude: this feels a bit obtuse
         allowed_tools=allowed_tools,
         max_turns=settings.max_turns,
         max_budget_usd=settings.max_budget_usd,
-        effort=cast("EffortLevel | None", settings.reasoning_effort), # claude: Cast is code smell. Can you add it to the .claude hooks anti-patterns (/lup:hooks ?). And then see why you're using cast here and removing it?
+        effort=cast(
+            "EffortLevel | None", settings.reasoning_effort
+        ),  # claude: Cast is code smell. Can you add it to the .claude hooks anti-patterns (/lup:hooks ?). And then see why you're using cast here and removing it?
     )
 
 
@@ -270,13 +277,12 @@ def build_codex_session(
     *,
     realtime_dir: Path | None = None,
 ) -> tuple[str, dict[str, str], list[Path]]:
-     # claude: Oof, several things here.
-     
-     # claude: 1. tuple[] is code smell. Please add it to the hooks
-     # claude: 2. The return type is impossible to read. Please either use pydantic, typeddict, or last resort type = 
-     # claude: 3. Again. Why do we need both build_claude_options and build_codex_sessions. Why is this in core? Everything should pass through a unified option object, backend management should only appear in lup's backend management (please add this to Claude.md and other documentations)
-     # claude: This is really not unified. We have build_codex_session, build_claude_options, ...
-     
+    # claude: Oof, several things here.
+
+    # claude: 1. tuple[] is code smell. Please add it to the hooks
+    # claude: 2. The return type is impossible to read. Please either use pydantic, typeddict, or last resort type =
+    # claude: 3. Again. Why do we need both build_claude_options and build_codex_sessions. Why is this in core? Everything should pass through a unified option object, backend management should only appear in lup's backend management (please add this to Claude.md and other documentations)
+    # claude: This is really not unified. We have build_codex_session, build_claude_options, ...
 
     """Shared scaffolding for Codex-runtime adapters.
 
@@ -409,7 +415,7 @@ def build_codex_realtime_adapter(
 
     adapter: AgentAdapter
     match settings.agent_sdk:
-        case "openai": # claude: no. Do not match backend in core
+        case "openai":  # claude: no. Do not match backend in core
             from lup.adapters.openai_compat import OpenAICompatibleAdapter
 
             adapter = OpenAICompatibleAdapter(
@@ -518,7 +524,7 @@ def build_adapter(
     notes = setup_notes(session_id, task_id or "0")
 
     adapter: AgentAdapter
-    ctx: AbstractContextManager[object] # claude: really?
+    ctx: AbstractContextManager[object]  # claude: really?
     match settings.agent_sdk:
         case "claude":
             from lup.adapters.claude import ClaudeAdapter
@@ -543,7 +549,9 @@ def build_adapter(
                 subprocess_sandbox_cleanup(notes),
             )
 
-        case "openai": #claude: Wait, how is openai different from codex? Why does this exist?
+        case (
+            "openai"
+        ):  # claude: Wait, how is openai different from codex? Why does this exist?
             adapter, ctx = (
                 build_openai_adapter(notes),
                 subprocess_sandbox_cleanup(notes),

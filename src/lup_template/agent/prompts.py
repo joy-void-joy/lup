@@ -1,17 +1,19 @@
-"""System prompts for the agent.
+"""The standing prose the agent is told: its task, its guidelines, and how to
+deliver a result.
 
 This is a TEMPLATE. Customize for your domain.
 
-Key patterns:
-1. Named sections composed at render time — add, remove, or reorder #claude: What does that mean? This feels very obtuse.
-2. Use {date} placeholder in a section to get the current date; only the
-   section declaring it is substituted, so literal braces (a JSON output
-   example, say) in other sections are passed through verbatim
-3. The output-format section is derived from the ``AgentOutput`` model, so
-   customizing models.py keeps the prompt in sync — no hand-listed fields #claude: ??? What?
-4. Tools self-document via their descriptions — listing them here
-   creates a second source of truth that drifts as tools change
-   (see Tool Design Philosophy in CLAUDE.md) #claude: Then why do we need this file at all? What does it do that lup_tool does not do?
+This is the agent's brief, not its toolbox. How to use any one tool lives in
+that tool's own description, which the agent reads directly — repeating tool
+names here would only create a second list to keep in sync (see Tool Design
+Philosophy in CLAUDE.md). What stays here is everything no single tool can
+say: the job to do, how to approach it, and what a finished result looks like.
+
+The brief is assembled from named sections (:data:`SECTIONS`) so you can add,
+drop, or reorder one piece without touching the rest. Two pieces stay correct
+on their own: today's date is filled in from a ``{date}`` placeholder, and the
+output-format section is generated from :class:`~lup_template.agent.models.AgentOutput`,
+so editing that model is what changes the result the agent is asked to submit.
 """
 
 from datetime import datetime
