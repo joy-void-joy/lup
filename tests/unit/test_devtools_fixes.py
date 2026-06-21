@@ -53,41 +53,55 @@ class TestToolCallPattern:
         assert filter_tool_calls(prose) == "(no tool call lines found)"
 
 
-# ── fix 5: error scan windows the keyword and suppresses healthy JSON ─────
+# ── fix 5: legacy-markdown error scan reads is_error, not keywords ─────────
 
 
-class TestErrorScan:
-    def test_success_json_is_not_flagged(self) -> None:
-        from lup_template.devtools.trace.traces import (
-            ERROR_PATTERNS,
-            SUCCESS_PATTERNS,
+def legacy_trace(result_content: str) -> str:
+    """A legacy .md trace (no sidecar) with one tool call and result."""
+    trace = TraceLogger(trace_path=Path("/tmp/unused.md"), title="t")
+    trace.log_block(LupToolUseBlock(id="a", name="search", input={"q": "x"}))
+    trace.log_block(LupToolResultBlock(tool_use_id="a", content=result_content))
+    return "\n".join(entry.content for entry in trace.entries)
+
+
+class TestLegacyMarkdownErrorScan:
+    """The structured path is primary; this pins the legacy-.md fallback.
+
+    A healthy result and a failing result both contain the word "error"
+    (``"is_error": false`` vs ``true``); only parsing the JSON tells them
+    apart, which a keyword scan could not.
+    """
+
+    def test_healthy_result_is_not_an_error(self) -> None:
+        from lup_template.devtools.trace.traces import events_from_legacy_markdown
+
+        events = events_from_legacy_markdown(
+            legacy_trace('{"status": "reviewed", "is_error": false}')
         )
 
-        line = '{"status": "reviewed", "is_error": false, "error_count": 0}'
-        # The naive error scan matches (contains "error")...
-        assert ERROR_PATTERNS.search(line)
-        # ...but the success guard suppresses it.
-        assert SUCCESS_PATTERNS.search(line)
+        assert [e.kind for e in events if e.kind == "error"] == []
+        call = next(e for e in events if e.kind == "tool_call")
+        assert call.tool == "search" and call.ok is True
 
-    def test_real_failure_is_flagged(self) -> None:
-        from lup_template.devtools.trace.traces import (
-            ERROR_PATTERNS,
-            SUCCESS_PATTERNS,
+    def test_failing_result_emits_error_paired_to_its_tool(self) -> None:
+        from lup_template.devtools.trace.traces import events_from_legacy_markdown
+
+        events = events_from_legacy_markdown(
+            legacy_trace('{"is_error": true, "content": "boom"}')
         )
 
-        line = 'Traceback: tool failed with "is_error": true'
-        assert ERROR_PATTERNS.search(line)
-        assert not SUCCESS_PATTERNS.search(line)
+        error = next(e for e in events if e.kind == "error")
+        assert error.tool == "search"
 
-    def test_window_keeps_the_keyword_visible(self) -> None:
-        from lup_template.devtools.trace.traces import keyword_window
+    def test_capability_phrasing_in_response_text(self) -> None:
+        from lup_template.devtools.trace.traces import events_from_legacy_markdown
 
-        prefix = "x" * 300
-        line = f"{prefix} the operation failed here {prefix}"
-        window = keyword_window(line, width=40)
+        trace = TraceLogger(trace_path=Path("/tmp/unused.md"), title="t")
+        trace.log_block(LupTextBlock(text="A tool that searches PyPI would be useful."))
+        content = "\n".join(e.content for e in trace.entries)
 
-        assert "failed" in window
-        assert len(window) <= 46  # width + ellipses
+        events = events_from_legacy_markdown(content)
+        assert any(e.kind == "capability_request" for e in events)
 
 
 # ── fix 14: decode_stderr helper ──────────────────────────────────────────

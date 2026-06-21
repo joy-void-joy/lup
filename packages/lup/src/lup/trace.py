@@ -32,9 +32,11 @@ Examples:
 import itertools
 import json
 import logging
+import re
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from rich.console import Console
 
@@ -325,6 +327,91 @@ def format_block_markdown(block: LupContentBlock) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Structured events (machine-readable sidecar)
+# ---------------------------------------------------------------------------
+
+# Capability-request phrasing. Applied to one already-isolated string at the
+# moment it is logged (an assistant text or meta thought), not swept across a
+# markdown document — so the persisted signal is structured, not regex-derived.
+CAPABILITY_PHRASES: re.Pattern[str] = re.compile(
+    r"would be useful|would have helped|would benefit from|wish I (had|could)|"
+    r"if (only )?I could|need(s|ed)? access to|cannot .* because|"
+    r"a tool that|missing (a )?tool",
+    re.IGNORECASE,
+)
+
+
+class TraceEvent(BaseModel):
+    """A typed, machine-readable record of one thing analysis cares about.
+
+    Written one-per-line to the ``.events.jsonl`` sidecar beside the human
+    ``.md`` trace as the trace is built. ``kind`` discriminates the three
+    signals the feedback loop reads — tool outcomes, errors/exceptions, and
+    capability requests — so analysis loads validated objects instead of
+    re-deriving them with regex over free-form markdown.
+    """
+
+    kind: Literal["tool_call", "error", "capability_request"]
+    timestamp: str = Field(description="ISO timestamp when the event was recorded")
+    tool: str | None = Field(
+        default=None, description="Tool name (for tool_call events)"
+    )
+    ok: bool | None = Field(
+        default=None, description="Whether the tool call succeeded (for tool_call)"
+    )
+    brief: str = Field(
+        default="", description="Short human summary: tool result, error, or request"
+    )
+
+
+def tool_result_ok(content: str | Sequence[object] | None) -> bool:
+    """Decide whether a tool result reports success.
+
+    MCP errors are carried inside the result content as ``is_error``; absent
+    that flag a result is treated as successful. Reads the structured payload
+    instead of keyword-scanning the rendered text.
+    """
+    text = normalize_content(content)
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return True
+    if isinstance(parsed, dict):
+        return not bool(parsed.get("is_error"))
+    return True
+
+
+def capability_request_from_text(text: str) -> str | None:
+    """Return the first capability-request sentence in *text*, or None.
+
+    Splits on sentence boundaries and returns the matching fragment so the
+    event's ``brief`` is the specific wish, not the whole block.
+    """
+    for fragment in re.split(r"(?<=[.!?\n])\s+", text):
+        stripped = fragment.strip()
+        if stripped and CAPABILITY_PHRASES.search(stripped):
+            return truncate_str(stripped, 300)
+    return None
+
+
+def read_trace_events(events_path: Path) -> list[TraceEvent]:
+    """Read a ``.events.jsonl`` sidecar into validated :class:`TraceEvent`s.
+
+    Skips blank or malformed lines so a truncated tail (a crash mid-write)
+    never loses the events that were flushed before it.
+    """
+    events: list[TraceEvent] = []
+    for line in events_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            events.append(TraceEvent.model_validate_json(line))
+        except ValueError:
+            logger.warning("Skipping malformed trace event line in %s", events_path)
+    return events
+
+
+# ---------------------------------------------------------------------------
 # Trace logger
 # ---------------------------------------------------------------------------
 
@@ -345,6 +432,12 @@ class TraceLogger(BaseModel):
     single store: ``save()`` renders the markdown stream from it, and
     ``read_entries()`` slices it for in-session replay.
 
+    Alongside the human ``.md`` trace it appends a machine-readable
+    ``.events.jsonl`` sidecar — one :class:`TraceEvent` per line, flushed as
+    each block is logged — so analysis reads typed tool/error/capability
+    records instead of regex-scanning the markdown. The ``.md`` trace is the
+    human view and is never weakened by the sidecar.
+
     Typically passed to ``print_message(message, trace=trace)`` for
     combined display and tracing. Methods like ``log_message`` and
     ``log_text`` support trace-only logging without console output.
@@ -355,12 +448,19 @@ class TraceLogger(BaseModel):
     trace_path: Path = Field(description="Path to save the trace file")
     title: str = Field(description="Title for the trace")
     entries: list[TraceEntry] = Field(default_factory=list)
+    events: list[TraceEvent] = Field(default_factory=list)
+    tool_names: dict[str, str] = Field(default_factory=dict, exclude=True)
 
     def model_post_init(self, _context: object) -> None:
         """Initialize the trace with header."""
         if not self.entries:
             self.append_entry(f"# Trace: {self.title}\n")
             self.append_entry(f"*Generated: {datetime.now().isoformat()}*\n\n")
+
+    @property
+    def events_path(self) -> Path:
+        """Path to the machine-readable JSONL sidecar beside the .md trace."""
+        return self.trace_path.with_suffix(".events.jsonl")
 
     def append_entry(self, content: str) -> None:
         """Create and append a new trace entry."""
@@ -372,9 +472,60 @@ class TraceLogger(BaseModel):
             )
         )
 
+    def emit_event(self, event: TraceEvent) -> None:
+        """Record a structured event and append it to the JSONL sidecar.
+
+        Appended immediately so the sidecar stays usable even if the run
+        crashes before :meth:`save`. A write failure is logged, never raised:
+        the sidecar is diagnostic and must not break a live agent.
+        """
+        self.events.append(event)
+        try:
+            self.events_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.events_path.open("a", encoding="utf-8") as fh:
+                fh.write(event.model_dump_json() + "\n")
+        except OSError:
+            logger.exception("Failed to append trace event to %s", self.events_path)
+
     def log_block(self, block: LupContentBlock) -> None:
-        """Add a formatted block to the trace."""
+        """Add a formatted block to the trace and emit its structured event."""
         self.append_entry(format_block_markdown(block))
+        self.emit_block_event(block)
+
+    def emit_block_event(self, block: LupContentBlock) -> None:
+        """Derive and emit the structured event(s) for a content block.
+
+        Tool-use blocks record their name keyed by id; the paired tool-result
+        block emits the ``tool_call`` event with name + ok/error + brief.
+        Assistant text that voices a capability request emits one too.
+        """
+        now = datetime.now().isoformat()
+        match block:
+            case LupToolUseBlock():
+                self.tool_names[block.id] = block.name
+            case LupToolResultBlock():
+                name = self.tool_names.pop(block.tool_use_id, "unknown")
+                ok = tool_result_ok(block.content)
+                brief = truncate_str(normalize_content(block.content), 300)
+                self.emit_event(
+                    TraceEvent(
+                        kind="tool_call", timestamp=now, tool=name, ok=ok, brief=brief
+                    )
+                )
+                if not ok:
+                    self.emit_event(
+                        TraceEvent(kind="error", timestamp=now, tool=name, brief=brief)
+                    )
+            case LupTextBlock():
+                request = capability_request_from_text(block.text)
+                if request is not None:
+                    self.emit_event(
+                        TraceEvent(
+                            kind="capability_request", timestamp=now, brief=request
+                        )
+                    )
+            case _:
+                pass
 
     def log_message(self, message: LupMessage) -> None:
         """Log all content blocks in a message.
@@ -389,11 +540,24 @@ class TraceLogger(BaseModel):
                     self.log_block(block)
 
     def log_text(self, text: str, heading: str | None = None) -> None:
-        """Add raw text to the trace."""
+        """Add raw text to the trace, emitting a capability event if voiced.
+
+        Meta assessments and reflections flow through here; when one names a
+        missing tool or access, that wish is captured as a structured event.
+        """
         if heading:
             self.append_entry(f"## {heading}\n\n{text}\n")
         else:
             self.append_entry(f"{text}\n")
+        request = capability_request_from_text(text)
+        if request is not None:
+            self.emit_event(
+                TraceEvent(
+                    kind="capability_request",
+                    timestamp=datetime.now().isoformat(),
+                    brief=request,
+                )
+            )
 
     def read_entries(
         self,
@@ -408,10 +572,17 @@ class TraceLogger(BaseModel):
         return self.entries[after_n:before_n]
 
     def save(self) -> Path:
-        """Write the accumulated trace to file, rendered from entries."""
+        """Write the accumulated trace to file, rendered from entries.
+
+        Events are appended to the sidecar live by :meth:`emit_event`; here we
+        only ensure the sidecar exists so a completed run is always recognized
+        as structured (and analysis never falls back to line-scanning it),
+        even when it produced no tool calls.
+        """
         self.trace_path.parent.mkdir(parents=True, exist_ok=True)
         self.trace_path.write_text(
             "\n".join(entry.content for entry in self.entries), encoding="utf-8"
         )
+        self.events_path.touch()
         logger.info("Saved trace to %s", self.trace_path)
         return self.trace_path
