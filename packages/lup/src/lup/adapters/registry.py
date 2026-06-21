@@ -20,14 +20,14 @@ def build_claude_adapter(opts: LupAgentOptions) -> BuiltAdapter:
 
 def build_codex_adapter(opts: LupAgentOptions) -> BuiltAdapter:
     """Construct the Codex adapter from neutral options."""
-    from lup.adapters.codex_options import build_codex_adapter as build
+    from lup.adapters.codex.options import build_codex_adapter as build
 
     return build(opts)
 
 
 def build_openai_adapter(opts: LupAgentOptions) -> BuiltAdapter:
     """Construct the OpenAI-compatible adapter from neutral options."""
-    from lup.adapters.codex_options import build_openai_adapter as build
+    from lup.adapters.codex.options import build_openai_adapter as build
 
     return build(opts)
 

@@ -143,7 +143,7 @@ def apply_repl_overrides(
         return
 
     from lup.adapters.claude.adapter import ClaudeAdapter
-    from lup.adapters.codex import CodexAdapter
+    from lup.adapters.codex.adapter import CodexAdapter
 
     match adapter:
         case ClaudeAdapter():

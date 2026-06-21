@@ -13,7 +13,7 @@ from typing import cast
 
 import pytest
 
-from lup.adapters.openai_compat import (
+from lup.adapters.codex.openai_compat import (
     OPENAI_COMPAT_API_KEY_ENV,
     OPENAI_COMPAT_PROVIDER_ID,
     OpenAICompatibleAdapter,
@@ -40,7 +40,7 @@ class TestCodexItemCoverage:
     def test_unknown_variant_is_not_dropped(self) -> None:
         from openai_codex.generated.v2_all import PlanThreadItem, ThreadItem
 
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex.adapter import codex_items_to_lup
 
         item = ThreadItem(
             root=PlanThreadItem(id="plan_1", text="step one\nstep two", type="plan")
@@ -59,7 +59,7 @@ class TestCodexItemCoverage:
             WebSearchThreadItem,
         )
 
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex.adapter import codex_items_to_lup
 
         item = ThreadItem(
             root=WebSearchThreadItem(
@@ -90,7 +90,7 @@ class TestCodexItemCoverage:
             WebSearchThreadItem,
         )
 
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.codex.adapter import codex_items_to_lup
         from lup_template.agent.core import extract_sources
 
         item = ThreadItem(

@@ -26,7 +26,7 @@ def claude_caps() -> AdapterCapabilities:
 
 
 def weak_caps() -> AdapterCapabilities:
-    from lup.adapters.codex import CodexAdapter
+    from lup.adapters.codex.adapter import CodexAdapter
 
     return CodexAdapter(model="gpt-5.5", system_prompt="").capabilities
 
@@ -89,7 +89,7 @@ def test_claude_builder_keeps_session_when_persisting() -> None:
 
 
 def test_codex_builder_carries_budget_and_groups() -> None:
-    from lup.adapters.codex import CodexAdapter, per_mtok_usage_cost
+    from lup.adapters.codex.adapter import CodexAdapter, per_mtok_usage_cost
 
     opts = LupAgentOptions(
         model="gpt-5.5",
@@ -105,7 +105,7 @@ def test_codex_builder_carries_budget_and_groups() -> None:
 
 
 def test_openai_builder_sets_provider() -> None:
-    from lup.adapters.openai_compat import OpenAICompatibleAdapter
+    from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
 
     opts = LupAgentOptions(
         model="glm-4",

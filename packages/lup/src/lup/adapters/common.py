@@ -89,8 +89,8 @@ def canonical_capability_matrix() -> dict[str, AdapterCapabilities]:
     from claude_agent_sdk import ClaudeAgentOptions
 
     from lup.adapters.claude.adapter import ClaudeAdapter
-    from lup.adapters.codex import CodexAdapter, per_mtok_usage_cost
-    from lup.adapters.openai_compat import OpenAICompatibleAdapter
+    from lup.adapters.codex.adapter import CodexAdapter, per_mtok_usage_cost
+    from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
 
     rates = per_mtok_usage_cost(input_usd=1.0, output_usd=1.0)
     return {
@@ -339,7 +339,7 @@ async def run_claude_query(request: OneShotRequest) -> LupResponse:
 
 async def run_codex_query(request: OneShotRequest) -> LupResponse:
     """Run a one-shot query on the Codex runtime (no MCP tools)."""
-    from lup.adapters.codex import CodexAdapter
+    from lup.adapters.codex.adapter import CodexAdapter
 
     adapter = CodexAdapter(
         model=request.model,
@@ -354,7 +354,7 @@ async def run_codex_query(request: OneShotRequest) -> LupResponse:
 
 async def run_openai_query(request: OneShotRequest) -> LupResponse:
     """Run a one-shot query on an OpenAI-compatible endpoint (no MCP tools)."""
-    from lup.adapters.openai_compat import OpenAICompatibleAdapter
+    from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
 
     adapter = OpenAICompatibleAdapter(
         model=request.model,
@@ -391,7 +391,7 @@ def query_capabilities(backend: Backend) -> AdapterCapabilities:
 
             return ClaudeAdapter(ClaudeAgentOptions()).capabilities
         case _:
-            from lup.adapters.codex import CodexAdapter
+            from lup.adapters.codex.adapter import CodexAdapter
 
             return CodexAdapter(model="", system_prompt="").capabilities
 

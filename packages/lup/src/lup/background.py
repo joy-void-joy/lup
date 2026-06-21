@@ -185,7 +185,7 @@ def build_codex_background(params: BackgroundAgentParams) -> BaseBackgroundAgent
             "accounts accept only their own model list (e.g. "
             "gpt-5.5), so there is no safe default."
         )
-    from lup.adapters.codex_background import CodexBackgroundAgent
+    from lup.adapters.codex.background import CodexBackgroundAgent
 
     return CodexBackgroundAgent(
         name=params.name,
