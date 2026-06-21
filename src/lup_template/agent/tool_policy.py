@@ -26,18 +26,12 @@ Usage:
 """
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any  # claude: ignore — for the ServerConfig alias
+from typing import TYPE_CHECKING
 
-from lup.mcp import LupMcpServerConfig, LupMcpTool, server_tool_names
+from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_names
 
 if TYPE_CHECKING:
     from lup_template.agent.config import Settings
-
-# An MCP server entry is either an in-process LupMcpServerConfig or a raw SDK
-# McpServerConfig (stdio/http/sse). core.py narrows each by hasattr(server,
-# "server"), which pyright can't follow through that union — so the dict is
-# typed Any here and resolved at the conversion site.
-type ServerConfig = Any  # claude: ignore — runtime-narrowed union, see above
 
 
 # =============================================================================
@@ -116,7 +110,7 @@ class ToolPolicy:
 
     def get_mcp_servers(
         self, *additional_servers: LupMcpServerConfig
-    ) -> dict[str, ServerConfig]:
+    ) -> dict[str, McpServerEntry]:
         """Get MCP server configuration based on policy.
 
         Args:
@@ -124,15 +118,15 @@ class ToolPolicy:
                 (``LupMcpServerConfig`` from ``create_mcp_server``).
 
         Returns:
-            Dict mapping server name to server config. Values are in-process
-            ``LupMcpServerConfig`` or a raw SDK ``McpServerConfig``
-            (stdio/http/sse); core.py converts the former to the SDK type at
-            build time, narrowing each value by whether it has a ``server``
-            attribute.
+            Dict mapping server name to an in-process ``LupMcpServerConfig`` or
+            an external transport config (stdio/http/sse). The Claude adapter
+            narrows each value by ``isinstance``: the in-process case has a
+            ``Server`` instance to register, the external case is passed
+            through as-is.
 
         Customize this to return your domain's MCP servers.
         """
-        servers: dict[str, ServerConfig] = {}
+        servers: dict[str, McpServerEntry] = {}
 
         # Add any additional servers passed in
         for server in additional_servers:
@@ -170,7 +164,7 @@ class ToolPolicy:
         """Filter tool-group names by policy (subprocess-served backends)."""
         return tuple(name for name in names if self.group_enabled(name))
 
-    def get_allowed_tools(self, servers: dict[str, ServerConfig]) -> list[str]:
+    def get_allowed_tools(self, servers: dict[str, McpServerEntry]) -> list[str]:
         """Compute every tool name the agent may call (Claude path only —
         Codex/OpenAI tool availability is the served MCP groups).
 
