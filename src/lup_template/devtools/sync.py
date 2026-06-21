@@ -1,7 +1,22 @@
 """Track upstream repos and review commits since last sync.
 
-Mechanical helper for /lup:update. Two config files:
-# claude: need more context about what /lup: update is, and what the mechanical helper does
+These commands are the read/fetch half of ``/lup:update`` — the workflow that
+pulls improvements *from* the lup template (and other tracked upstreams) *into*
+this repo. ``/lup:update`` reviews every upstream commit since the last sync,
+generalizes the domain-specific ones back into reusable scaffold, and applies
+them; this module is what gives it the diffs to review and remembers how far it
+got. ``status`` shows which upstreams have new commits, ``log``/``diff`` feed
+the commit-by-commit review, and ``mark-synced`` advances the per-project
+checkpoint once a review is done so the next run starts where this one stopped.
+
+Reviewing a diff means reading the upstream's *current* code, so commits are
+fetched into a local working copy before comparison (see ``ensure_local``):
+``status`` stays read-only and never touches the network, while ``log``/``diff``
+clone-or-fetch on demand. Each materialized upstream also gets a stable
+``refs/<name>`` symlink so other commands (e.g. ``/lup:import``) can browse it
+by name without re-resolving cache paths.
+
+Two config files declare what to track:
 
 - downstream.json (committed): declares upstream repos with URLs.
   Ships with the lup template GitHub URL by default.
@@ -39,8 +54,15 @@ app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
 
 
-class ProjectEntry(TypedDict, total=False): # claude: Why is this a TypedDict and not a BaseModel? Do you have a comprehensive reason for when you're using one or the other?
-    """One tracked upstream project, merged from downstream.json(.local)."""
+class ProjectEntry(TypedDict, total=False):
+    """One tracked upstream project, merged from downstream.json(.local).
+
+    A ``TypedDict``, not a ``BaseModel``: per CLAUDE.md, ``TypedDict`` types
+    the JSON-shaped config we read from and write back to disk verbatim, while
+    ``BaseModel`` is for values we validate and construct. These entries are
+    hand-edited config that round-trips through ``json.load``/``json.dump``
+    unchanged, so the dict *is* the data — no validation layer to add.
+    """
 
     name: Required[str]
     path: str
@@ -50,8 +72,12 @@ class ProjectEntry(TypedDict, total=False): # claude: Why is this a TypedDict an
     ignore: bool
 
 
-class DownstreamConfig(TypedDict): #claude: Same here
-    """Top-level shape of downstream.json and downstream.json.local."""
+class DownstreamConfig(TypedDict):
+    """Top-level shape of downstream.json and downstream.json.local.
+
+    Same rationale as :class:`ProjectEntry`: a ``TypedDict`` because it mirrors
+    the on-disk JSON document, not a validated model.
+    """
 
     projects: list[ProjectEntry]
 
@@ -83,8 +109,17 @@ def save_local(data: DownstreamConfig) -> None:
 
 
 def ensure_ref_symlink(name: str, target: str) -> None:
-    """Create or update refs/<name> symlink pointing to a resolved project path."""
-    # claude: this is a bit terse, this assumes the reader knows what refs/ do and why they exist
+    """Point the stable ``refs/<name>`` symlink at a project's working copy.
+
+    ``refs/`` (gitignored) is a directory of by-name shortcuts into the
+    upstream repos this project tracks, wherever each one actually lives —
+    a user-configured path, or a clone under ``.cache/downstream/``. It exists
+    so commands and humans can reach an upstream as ``refs/<name>`` without
+    knowing or re-deriving its real location (e.g. ``/lup:import`` does
+    ``cd refs/<project> && git log``). Every time a project is materialized the
+    link is re-pointed at its current path; a pre-existing non-symlink at that
+    name is left untouched so we never clobber real files.
+    """
     refs_dir().mkdir(exist_ok=True)
     link = refs_dir() / name
     target_path = Path(target).resolve()
@@ -148,14 +183,22 @@ def ensure_local(
     proj: ProjectEntry,
     report: Callable[[str], None] = typer.echo,
 ) -> str:
-    """Ensure a project has a usable local path.
+    """Materialize an upstream so its commits can be read, return its path.
+
+    Reviewing upstream commits (``log``/``diff``) means reading the upstream's
+    actual git history, which only exists in a local checkout — so before any
+    such command can run, the project must be present and current on disk. This
+    is that guarantee: it clones a project that has only a URL, fetches and
+    hard-resets one already cached so the review sees the latest commits rather
+    than a stale snapshot, and leaves a user-provided local path as-is. In
+    every case it (re)points ``refs/<name>`` at the result and hands back the
+    path the caller runs git in. ``status`` deliberately does *not* call this
+    (it uses :func:`resolve_existing_path` instead) so a status check never
+    clones, fetches, or writes.
 
     Progress and error text goes through ``report`` so callers rendering
     tables can defer the messages instead of interleaving them mid-table.
     """
-    # claude: It's very hard to understand why this function exist. The typeddict makes the get and access of the object shakey.
-    # claude: I'm assuming this is because we want to download the remote project before comparing them to update the current project?
-    # claude: General comment here, we kind of need an explanation in general (put this in Claude.md) about _why_ we do stuff. Not patch, but like: Why is this function there, where does it inscribe itself in the general pipeline, why can't we do it the normal and quick way
     path = proj.get("path", "")
     name = proj["name"]
     branch = proj.get("branch", "")
@@ -238,18 +281,24 @@ def status_cmd() -> None:
 
     for p in projects:
         if p.get("ignore"):
-            typer.echo(f"{p['name']:<20} {'—':<10} {'ignored':<12} (skipped)") # claude: I don't like those magic numbers here
+            typer.echo(
+                f"{p['name']:<20} {'—':<10} {'ignored':<12} (skipped)"
+            )  # claude: I don't like those magic numbers here
             continue
 
         synced = p.get("last_synced_commit", "")
-        synced_short = synced[:8] if synced else "never" #claude: Wait what is this truncation? Please don't truncate with fixed numbers like that. We should ensure there's no such general truncation in the codebase
+        synced_short = (
+            synced[:8] if synced else "never"
+        )  # claude: Wait what is this truncation? Please don't truncate with fixed numbers like that. We should ensure there's no such general truncation in the codebase
         branch = p.get("branch", "")
 
         resolved = resolve_existing_path(p)
         if resolved is None:
             has_url = bool(p.get("url"))
             note = "not cloned (run: sync fetch)" if has_url else "no path/url"
-            typer.echo(f"{p['name']:<20} {'—':<10} {synced_short:<12} {note}") # claude: same here
+            typer.echo(
+                f"{p['name']:<20} {'—':<10} {synced_short:<12} {note}"
+            )  # claude: same here
             continue
 
         try:
@@ -291,7 +340,12 @@ def show_log(
         bool, typer.Option("--stat/--no-stat", help="Show file stats")
     ] = True,
 ) -> None:
-    """Show commits since last sync for a project."""
+    """List commits to review: everything upstream added since the last sync.
+
+    This is the inventory ``/lup:update`` walks — the commits whose diffs get
+    read (via ``sync diff``) and considered for porting. Fetches the upstream
+    first so the list reflects its current HEAD.
+    """
     proj = find_project(project)
     path = ensure_local(proj)
 
@@ -326,7 +380,13 @@ def show_diff(
 def mark_synced(
     project: Annotated[str, typer.Argument(help="Project name")],
 ) -> None:
-    """Update last_synced_commit to the project's current HEAD."""
+    """Advance the sync checkpoint to the upstream's current HEAD.
+
+    Run once a review is finished: it records that every commit up to the
+    upstream's HEAD has been considered, so the next ``sync log`` / ``status``
+    only surfaces commits that land afterward. Marking synced even when nothing
+    was ported is correct — it means "reviewed, decided to port none."
+    """
     proj = find_project(project)
     path = ensure_local(proj)
 
@@ -399,5 +459,3 @@ def setup_project(
         typer.echo(f"  Tracking branch: {branch}")
     if synced:
         typer.echo(f"  Marked as synced at {head[:8]}")
-
-# claude: Overall this is kinda missing motivation/help text for why this command exist, and what the different commands are useful for
