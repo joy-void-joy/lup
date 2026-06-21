@@ -88,7 +88,7 @@ def canonical_capability_matrix() -> dict[str, AdapterCapabilities]:
     """
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.claude import ClaudeAdapter
+    from lup.adapters.claude.adapter import ClaudeAdapter
     from lup.adapters.codex import CodexAdapter, per_mtok_usage_cost
     from lup.adapters.openai_compat import OpenAICompatibleAdapter
 
@@ -319,7 +319,7 @@ class OneShotRequest(BaseModel):
 
 async def run_claude_query(request: OneShotRequest) -> LupResponse:
     """Run a one-shot query on the Claude Agent SDK."""
-    from lup.adapters.claude_client import claude_query
+    from lup.adapters.claude.client import claude_query
 
     return await claude_query(
         request.prompt,
@@ -387,7 +387,7 @@ def query_capabilities(backend: Backend) -> AdapterCapabilities:
         case "anthropic":
             from claude_agent_sdk import ClaudeAgentOptions
 
-            from lup.adapters.claude import ClaudeAdapter
+            from lup.adapters.claude.adapter import ClaudeAdapter
 
             return ClaudeAdapter(ClaudeAgentOptions()).capabilities
         case _:

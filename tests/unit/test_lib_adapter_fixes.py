@@ -110,7 +110,7 @@ class TestCodexItemCoverage:
 
 class TestSpecToClaudeModel:
     def test_full_model_id_passes_through(self) -> None:
-        from lup.adapters.claude import spec_to_claude
+        from lup.adapters.claude.adapter import spec_to_claude
 
         spec = SubagentSpec(
             name="deep",
@@ -122,7 +122,7 @@ class TestSpecToClaudeModel:
         assert agent_def.model == "claude-opus-4-6"
 
     def test_alias_still_passes_through(self) -> None:
-        from lup.adapters.claude import spec_to_claude
+        from lup.adapters.claude.adapter import spec_to_claude
 
         spec = SubagentSpec(
             name="quick",
@@ -142,7 +142,7 @@ class TestToolResultRelay:
     async def test_post_tool_use_response_populates_tool_result(self) -> None:
         from claude_agent_sdk.types import HookContext, PostToolUseHookInput
 
-        from lup.adapters.claude import build_claude_hook_handler
+        from lup.adapters.claude.adapter import build_claude_hook_handler
         from lup.types import LupHookInput, LupHookMatcher, LupHookOutput
 
         seen: dict[str, str] = {}

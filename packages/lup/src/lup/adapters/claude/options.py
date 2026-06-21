@@ -11,7 +11,7 @@ names ``ClaudeAgentOptions``.
 from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.types import EffortLevel, McpSdkServerConfig
 
-from lup.adapters.claude import (
+from lup.adapters.claude.adapter import (
     ClaudeAdapter,
     lup_hooks_to_claude,
     lup_server_to_claude,

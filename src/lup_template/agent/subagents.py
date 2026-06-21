@@ -13,7 +13,7 @@ Definitions use SubagentSpec (SDK-agnostic). Each backend interprets
 the same spec list:
 
 - Claude: converted to native ``AgentDefinition`` via
-  :func:`~lup.adapters.claude.spec_to_claude`
+  :func:`~lup.adapters.claude.adapter.spec_to_claude`
 - Codex/OpenAI: served as the ``run_subagent`` tool via
   :func:`~lup.subagents.create_run_subagent_tool`, which dispatches a
   one-shot query to the backend serving the spec's model

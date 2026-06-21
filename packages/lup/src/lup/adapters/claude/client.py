@@ -88,7 +88,7 @@ from claude_agent_sdk.types import (
 )
 from pydantic import BaseModel
 
-from lup.adapters.claude import claude_message_to_lup, collect_lup_response
+from lup.adapters.claude.adapter import claude_message_to_lup, collect_lup_response
 from lup.adapters.common import PermissionMode
 from lup.trace import TraceLogger, print_message
 from lup.types import LupResponse

@@ -142,7 +142,7 @@ def apply_repl_overrides(
     if not no_tools and not no_prompt:
         return
 
-    from lup.adapters.claude import ClaudeAdapter
+    from lup.adapters.claude.adapter import ClaudeAdapter
     from lup.adapters.codex import CodexAdapter
 
     match adapter:
