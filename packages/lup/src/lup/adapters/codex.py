@@ -47,6 +47,7 @@ from lup.types import (
     LupToolUseEvent,
     LupUserMessage,
     Usage,
+    UsageCost,
     safe_normalize_usage,
 )
 
@@ -275,9 +276,6 @@ def build_hook_config_overrides(
 
 type CodexUsageNormalizer = Callable[[ThreadTokenUsage], Usage | None]
 """Transforms the Codex SDK usage object into a (subclass of) Usage."""
-
-type UsageCost = Callable[[Usage], float]
-"""Estimates the USD cost of accumulated token usage."""
 
 
 def per_mtok_usage_cost(
