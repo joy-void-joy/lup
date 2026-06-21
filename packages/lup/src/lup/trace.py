@@ -29,8 +29,6 @@ Examples:
         PosixPath('/tmp/trace.md')
 """
 
-from __future__ import annotations
-
 import itertools
 import json
 import logging
@@ -236,7 +234,7 @@ def resolve_color_tag(
 def print_block(
     block: LupContentBlock,
     prefix: str = "",
-    trace: TraceLogger | None = None,
+    trace: "TraceLogger | None" = None,
     colors: ColorAssigner | None = None,
 ) -> None:
     """Print a content block with color-coded tool use/result pairing.
@@ -292,7 +290,7 @@ def print_block(
 def print_message(
     message: LupMessage,
     prefix: str = "",
-    trace: TraceLogger | None = None,
+    trace: "TraceLogger | None" = None,
     colors: ColorAssigner | None = None,
 ) -> None:
     """Print all content blocks in a message.

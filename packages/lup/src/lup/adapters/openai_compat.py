@@ -12,8 +12,6 @@ Uses the same ``openai_codex`` SDK as the standard Codex adapter —
 no additional dependencies needed.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
