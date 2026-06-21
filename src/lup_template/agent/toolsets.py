@@ -1,15 +1,16 @@
-# claude: It's unclear to me what a toolset is, how does it differ from a set of tools?
-
 """Single source of truth for the agent's MCP tool groups.
 
-Both backend paths consume this module: the Claude path registers the
-groups in-process (``core.build_options``), and the Codex/OpenAI path
-serves them over stdio (``lup-devtools agent serve-tools``) and selects
-them by name (``core.build_codex_adapter``). Adding a group or tool here
-reaches every backend — there is deliberately nowhere else to add one.
+A *toolset* is the session's tools sorted into named groups, not one flat
+list. The grouping is what MCP needs: each group becomes one MCP server, the
+group name becomes the server name, and a tool ``foo`` in group ``notes`` is
+addressed as ``mcp__notes__foo`` on every backend. Grouping also lets the
+policy enable or withhold a whole capability (a server) at once.
 
-Group names double as MCP server names, so a tool ``foo`` in group
-``notes`` is ``mcp__notes__foo`` on every backend.
+Both backend paths consume this module — the Claude path registers the groups
+in-process (``core.build_options``), the Codex/OpenAI path serves them over
+stdio (``lup-devtools agent serve-tools``) and selects them by name
+(``core.build_codex_adapter``) — so adding a group or tool here reaches every
+backend, and there is deliberately nowhere else to add one.
 
 This is a TEMPLATE. Register domain tool groups in
 :func:`build_session_toolset` (and their names in :func:`tool_group_names`
@@ -21,7 +22,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
-if TYPE_CHECKING: # claude: I'm wondering if we should just drop all if TYPE_CHECKING here
+if (
+    TYPE_CHECKING
+):  # claude: I'm wondering if we should just drop all if TYPE_CHECKING here
     from lup.mcp import LupMcpTool
     from lup.reflect import ReflectionGate
     from lup.sandbox import Sandbox
