@@ -17,6 +17,7 @@ class LazyCommand:
     every CLI invocation at import — including ``--help``. Resolution is
     deferred to the first call or sub-command attribute access instead.
     """
+
     # claude: Didn't get that. Why do we need LazyCommand? As in, when is it used? Is it just to construct the command at top-level without crashing the import?
 
     def __init__(self, name: str, *bake_args: str, tty_out: bool = True) -> None:
@@ -47,21 +48,28 @@ uv = LazyCommand("uv")
 
 
 def decode_stderr(e: sh.ErrorReturnCode) -> str:
-    """Decode the stderr of a failed ``sh`` command to a string.""" # claude: Huh? There's no sh builtin for this?
+    """Decode a failed ``sh`` command's stderr to text.
+
+    ``sh`` captures stderr as raw ``bytes`` and exposes no decoded
+    accessor, so callers that want a readable message decode it here.
+    """
     return e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
 
 
 def copy_to_clipboard(text: str) -> bool:
     """Copy text to the system clipboard. Returns True on success.
 
-    Tries xclip, xsel, then pbcopy; returns False when none is available
-    so callers can fall back to printing the text for manual copying.
+    Best-effort and cross-platform: tries each platform's clipboard tool
+    in turn (Linux ``xclip``/``xsel``, macOS ``pbcopy``, Windows ``clip``)
+    and stops at the first one that is installed and succeeds. Returns
+    False when none is available so callers can fall back to printing the
+    text for manual copying.
     """
-    # claude: Would that work on windows or mac os?
     for command, args in (
         ("xclip", ["-selection", "clipboard"]),
         ("xsel", ["--clipboard", "--input"]),
         ("pbcopy", []),
+        ("clip", []),
     ):
         try:
             sh.Command(command)(*args, _in=text)
@@ -72,7 +80,7 @@ def copy_to_clipboard(text: str) -> bool:
 
 
 def output_json(
-    data: BaseModel | Mapping[str, object] | Sequence[object], # claude: ignore
+    data: BaseModel | Mapping[str, object] | Sequence[object],  # claude: ignore
     # claude: Inputting this #claude: ignore makes me realize that in the devtool check, we probably want something that rechecks the whole codebase and verifies if there should be claude: ignore when there isn't any
 ) -> None:
     if isinstance(data, BaseModel):

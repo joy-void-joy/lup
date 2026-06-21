@@ -15,9 +15,13 @@ Usage::
     $ uv run lup-devtools setup slack    # Just one integration
 
 Customization:
-    1. Define ``setup_<name>()`` functions that return ``dict[str, str]``
-    2. Register them in ``INTEGRATIONS`` with a name and status checker
-    3. Optionally add individual subcommands via ``@app.command``
+    1. Append an ``Integration`` to ``INTEGRATIONS``. A token-based one is
+       pure data: name, command slug, env keys, intro text, and the
+       ``PromptField`` list to ask for. Its subcommand is generated for you.
+    2. For a bespoke flow (OAuth files, detection, validation), pass a
+       ``setup_func`` returning ``EnvValues`` instead of declarative fields.
+    3. Override status display with ``status_func`` when env-key presence
+       isn't the whole story.
     4. Shell helpers live in ``lup_template.devtools.utils`` (e.g.
        ``copy_to_clipboard`` for wizard steps that hand the user a value)
 """
@@ -27,15 +31,16 @@ from __future__ import annotations  # claude: Again, annotations kinda feel redu
 import shutil
 import webbrowser
 from collections.abc import Callable
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
+from zoneinfo import ZoneInfoNotFoundError
 
 import typer
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from tzlocal import get_localzone_name
 
 import lup.profiles as profiles
 from lup.paths import project_root
@@ -47,6 +52,9 @@ app = typer.Typer(
 )
 
 console = Console()
+
+# Env vars an integration wants written to .env.local, keyed by name.
+type EnvValues = dict[str, str]
 
 PROJECT_ROOT = project_root()
 ENV_LOCAL = PROJECT_ROOT / ".env.local"
@@ -61,9 +69,15 @@ app.add_typer(profile_app, name="profile")
 # =====================================================================
 
 
-def read_env_local() -> dict[str, str]:
-    # claude: this seems extremely hacky. Why do we need it when we already have config? Seems like reinventing the wheel there
-    """Parse .env.local into a dict. Returns empty dict if file missing."""
+def read_env_local() -> EnvValues:
+    """Parse .env.local into a dict. Returns empty dict if file missing.
+
+    The wizard owns the file as editable text, not just values: it reads
+    the raw entries here so it can round-trip them through
+    :func:`write_env_local` while preserving comments and ordering.
+    pydantic-settings only *reads* config into the running process, so it
+    cannot serve a tool whose job is to *write* .env.local back out.
+    """
     if not ENV_LOCAL.exists():
         return {}
     values: dict[str, str] = {}
@@ -78,14 +92,13 @@ def read_env_local() -> dict[str, str]:
     return values
 
 
-def write_env_local(values: dict[str, str]) -> None:
+def write_env_local(values: EnvValues) -> None:
     """Update keys in .env.local, preserving existing lines, comments, order.
 
     Existing ``KEY=...`` lines are rewritten in place; new keys are appended.
-    Comments, blank lines, and ordering are left untouched.
+    Comments, blank lines, and ordering are left untouched. This is the
+    write half that pydantic-settings does not provide.
     """
-    # claude: I'm unsure we should do it like that this seems brittle maybe?
-    # claude: But at least this one is straightforward to understand
     if not values:
         return
 
@@ -108,7 +121,7 @@ def write_env_local(values: dict[str, str]) -> None:
     ENV_LOCAL.write_text("\n".join(out) + "\n")
 
 
-def save_and_confirm(values: dict[str, str]) -> None:
+def save_and_confirm(values: EnvValues) -> None:
     """Write values to .env.local and print confirmation."""
     if values:
         write_env_local(values)
@@ -116,7 +129,14 @@ def save_and_confirm(values: dict[str, str]) -> None:
 
 
 def mask(value: str, show: int = 6) -> str:
-    """Mask a secret string, showing only the first few characters."""  # claude: this seems a bit superfluous when we could use pydantic-setting's SecretStr instead?
+    """Partially reveal a secret for recognition in the status table.
+
+    Shows the first ``show`` characters so a human can tell *which* token
+    is configured at a glance, then hides the rest. This is deliberately
+    not :class:`pydantic.SecretStr`, which masks every character — that
+    prevents leakage but also makes two different tokens indistinguishable
+    in the status display.
+    """
     if len(value) <= show:
         return value
     return value[:show] + "..." + "*" * min(8, len(value) - show)
@@ -131,20 +151,16 @@ def open_browser(url: str) -> None:
         console.print(f"  [dim]Could not open browser. Go to: {url}[/dim]")
 
 
-def detect_system_timezone() -> (
-    str
-):  # claude: Yes okay, but like, using str manipulation for that seems brittle? Likewise parsing /etc/localtime, what if I'm on windows? Surely there's an actual builtin or a package for that
-    """Detect the system's IANA timezone name."""
+def detect_system_timezone() -> str:
+    """Detect the system's IANA timezone name, or "" if undetermined.
+
+    Delegates to ``tzlocal``, which reads the right source for each
+    platform (``/etc/localtime`` on Linux, the registry on Windows,
+    system preferences on macOS) instead of string-munging just one.
+    """
     try:
-        local_now = datetime.now(timezone.utc).astimezone()
-        tz_name = local_now.tzname()
-        localtime = Path("/etc/localtime")
-        if localtime.is_symlink():
-            target = str(localtime.resolve())
-            if "zoneinfo/" in target:
-                return target.split("zoneinfo/", 1)[1]
-        return tz_name or ""
-    except OSError:
+        return get_localzone_name()
+    except ZoneInfoNotFoundError:
         return ""
 
 
@@ -153,20 +169,101 @@ def detect_system_timezone() -> (
 # =====================================================================
 
 
+class PromptField(BaseModel):
+    """One env var the wizard prompts for inside a token-based setup."""
+
+    key: str = Field(description="Env var name, e.g. 'SLACK_BOT_TOKEN'")
+    prompt: str = Field(description="Prompt label shown to the user")
+    secret: bool = Field(
+        default=True,
+        description="Hide the current value as the prompt default (true for tokens)",
+    )
+    parse: Callable[[str], object] | None = Field(
+        default=None,
+        description="Validator called on the entered value; rejects on raise",
+    )
+
+
 class Integration(BaseModel):
-    """A single integration that the setup wizard can configure."""
+    """A single integration the setup wizard can configure.
+
+    Most integrations are *token-based*: they print instructions, maybe
+    open a browser, then prompt for a handful of env vars. Those are
+    described declaratively via ``intro``/``browser_url``/``fields`` and
+    run by :meth:`run` — adding one is filling in this shape, not copying
+    a function. Integrations with bespoke flows (OAuth file handling,
+    timezone detection) instead supply ``setup_func``.
+    """
 
     name: str = Field(description="Display name (e.g., 'Slack', 'Google')")
+    command: str = Field(description="Subcommand slug, e.g. 'slack' or 'api-key'")
+    help: str = Field(description="One-line help for the subcommand")
     env_keys: list[str] = Field(description="Env vars to check for status display")
-    setup_func: Callable[[], dict[str, str]] = Field(
-        description="Interactive function that returns env vars to write"
+    intro: str | None = Field(
+        default=None, description="Instructions printed before prompting"
     )
-    status_func: Callable[[dict[str, str]], tuple[bool, str]] | None = Field(
+    browser_url: str | None = Field(
+        default=None, description="URL to open while the user follows the intro"
+    )
+    fields: list[PromptField] = Field(
+        default_factory=list, description="Env vars to prompt for, in order"
+    )
+    setup_func: Callable[[], EnvValues] | None = Field(
+        default=None,
+        description="Bespoke interactive flow, used instead of the declarative fields",
+    )
+    status_func: Callable[[EnvValues], tuple[bool, str]] | None = Field(
         default=None,
         description="Custom status checker (default: checks env_keys)",
     )
 
-    def check_status(self, env: dict[str, str]) -> tuple[bool, str]:
+    def run(self) -> EnvValues:
+        """Run the setup flow and return env vars to write."""
+        if self.setup_func is not None:
+            return self.setup_func()
+        return self.run_prompts()
+
+    def run_prompts(self) -> EnvValues:
+        """Standard token flow: header, reconfigure check, intro, prompts."""
+        console.print()
+        console.rule(f"[bold]{self.name}[/]")
+        console.print()
+
+        env = read_env_local()
+        # Gate re-entry only for secrets, which can't be shown as defaults;
+        # non-secret fields echo their current value, so re-walking is cheap.
+        guards_secret = any(f.secret for f in self.fields)
+        if guards_secret and all(env.get(k) for k in self.env_keys):
+            console.print("[green]Already configured.[/]")
+            if not typer.confirm("Reconfigure?", default=False):
+                return {}
+
+        if self.intro:
+            console.print(self.intro)
+        if self.browser_url:
+            open_browser(self.browser_url)
+        console.print()
+
+        values: EnvValues = {}
+        for field in self.fields:
+            current = env.get(field.key, "")
+            raw = typer.prompt(
+                field.prompt,
+                default=current,
+                show_default=bool(current) and not field.secret,
+            ).strip()
+            if not raw:
+                continue
+            if field.parse is not None:
+                try:
+                    field.parse(raw)
+                except ValueError:
+                    console.print(f"  [yellow]Skipping {field.key}: invalid value[/]")
+                    continue
+            values[field.key] = raw
+        return values
+
+    def check_status(self, env: EnvValues) -> tuple[bool, str]:
         """Return (is_configured, detail_string)."""
         if self.status_func:
             return self.status_func(env)
@@ -183,65 +280,7 @@ class Integration(BaseModel):
 # claude: Probably need some todos here. I'd like /init to have a step where it explicitely gathers (like dev currently gathers the "# claude:" comments) all TODOs and places where it has to make a decision
 
 
-def setup_slack() -> dict[str, str]:
-    # claude: the type is extreme code smell. You defined an integration basemodel, so probably you can make a decorator, or at least have the return type be uniform
-    """Walk through Slack bot token configuration.
-
-    TEMPLATE: Replace with your Slack app's manifest and scopes.
-    """
-    console.print()
-    console.rule("[bold]Slack[/]")
-    console.print()
-
-    env = read_env_local()
-
-    if env.get("SLACK_BOT_TOKEN") and env.get("SLACK_APP_TOKEN"):
-        console.print("[green]Already configured.[/]")
-        if not typer.confirm("Reconfigure?", default=False):
-            return {}
-
-    console.print(
-        "  [bold]Create a Slack app:[/]\n"
-        '  1. Go to api.slack.com/apps > "Create New App" > "From a manifest"\n'
-        "  2. Pick your workspace, paste your app manifest (JSON tab)\n"
-        "  3. Install to workspace\n"
-        "  4. Copy the Bot User OAuth Token and App-Level Token\n"
-    )
-    open_browser("https://api.slack.com/apps?new_app=1")
-    console.print()
-
-    values: dict[str, str] = {}
-
-    app_token = typer.prompt(
-        "SLACK_APP_TOKEN (xapp-...)",
-        default=env.get("SLACK_APP_TOKEN", ""),
-        show_default=False,
-    ).strip()
-    if app_token:
-        values["SLACK_APP_TOKEN"] = app_token
-
-    bot_token = typer.prompt(
-        "SLACK_BOT_TOKEN (xoxb-...)",
-        default=env.get("SLACK_BOT_TOKEN", ""),
-        show_default=False,
-    ).strip()
-    if bot_token:
-        values["SLACK_BOT_TOKEN"] = bot_token
-
-    # claude: Yeah, this all feels very hacky and copy-pasty where we could have something more general
-
-    user_id = typer.prompt(
-        "SLACK_USER_ID (your Slack user ID, or email for lookup)",
-        default=env.get("SLACK_USER_ID", ""),
-        show_default=False,
-    ).strip()
-    if user_id:
-        values["SLACK_USER_ID"] = user_id
-
-    return values
-
-
-def slack_status(env: dict[str, str]) -> tuple[bool, str]:
+def slack_status(env: EnvValues) -> tuple[bool, str]:
     """Custom status check for Slack."""
     ok = bool(env.get("SLACK_BOT_TOKEN") and env.get("SLACK_APP_TOKEN"))
     if ok:
@@ -249,7 +288,7 @@ def slack_status(env: dict[str, str]) -> tuple[bool, str]:
     return False, "not configured"
 
 
-def setup_google() -> dict[str, str]:
+def setup_google() -> EnvValues:
     """Walk through Google OAuth setup (Gmail, Calendar, etc).
 
     TEMPLATE: Replace with your Google API scopes and services.
@@ -299,7 +338,7 @@ def setup_google() -> dict[str, str]:
     return {"GMAIL_CREDENTIALS_PATH": str(creds_path)}
 
 
-def google_status(_env: dict[str, str]) -> tuple[bool, str]:
+def google_status(_env: EnvValues) -> tuple[bool, str]:
     """Custom status check for Google OAuth."""
     token_path = CREDENTIALS_DIR / "token.json"
     creds_path = CREDENTIALS_DIR / "google.json"
@@ -310,131 +349,8 @@ def google_status(_env: dict[str, str]) -> tuple[bool, str]:
     return False, "not configured"
 
 
-def setup_notion() -> dict[str, str]:
-    """Walk through Notion integration token setup.
-
-    TEMPLATE: Replace with your Notion integration's specific setup.
-    """
-    console.print()
-    console.rule("[bold]Notion[/]")
-    console.print()
-
-    env = read_env_local()
-
-    if env.get("NOTION_TOKEN"):
-        console.print("[green]Already configured.[/]")
-        if not typer.confirm("Reconfigure?", default=False):
-            return {}
-
-    console.print(
-        "  Create an [bold]Internal[/] Notion integration:\n"
-        "  1. Go to notion.so/profile/integrations/internal\n"
-        "  2. Enter a name, keep type as Internal, submit\n"
-        "  3. Copy the Internal Integration Secret\n"
-        "  4. Share pages: open page > ... > Connections > add your integration\n"
-    )
-    open_browser("https://www.notion.so/profile/integrations/internal")
-    console.print()
-
-    values: dict[str, str] = {}
-
-    token = typer.prompt(
-        "NOTION_TOKEN (secret_...)",
-        default=env.get("NOTION_TOKEN", ""),
-        show_default=False,
-    ).strip()
-    if token:
-        values["NOTION_TOKEN"] = token
-
-    parent_id = typer.prompt(
-        "NOTION_ALLOWED_PARENT_ID (page/DB ID for writes, optional)",
-        default=env.get("NOTION_ALLOWED_PARENT_ID", ""),
-        show_default=False,
-    ).strip()
-    if parent_id:
-        values["NOTION_ALLOWED_PARENT_ID"] = parent_id
-
-    return values
-
-
-def setup_api_key() -> dict[str, str]:
-    """Walk through a generic API key configuration.
-
-    TEMPLATE: Replace with your domain's specific API service.
-    This example shows a simple key-based service (like AskNews, Exa, etc).
-    """
-    console.print()
-    console.rule("[bold]Example API Service[/]")
-    console.print()
-
-    env = read_env_local()
-
-    if env.get("EXAMPLE_API_KEY"):
-        console.print("[green]Already configured.[/]")
-        if not typer.confirm("Reconfigure?", default=False):
-            return {}
-
-    console.print("  Sign up and get an API key from the service provider.\n")
-
-    key = typer.prompt(
-        "EXAMPLE_API_KEY",
-        default=env.get("EXAMPLE_API_KEY", ""),
-        show_default=False,
-    ).strip()
-
-    if key:
-        return {"EXAMPLE_API_KEY": key}
-    return {}
-
-
-def setup_codex_backend() -> dict[str, str]:
-    """Walk through Codex/OpenAI backend pricing configuration.
-
-    The Codex runtime reports token counts, never cost — budget caps
-    (``AGENT_MAX_BUDGET_USD``) on ``AGENT_SDK=codex``/``openai`` need
-    per-MTok USD rates for the configured model. Claude-only projects
-    can skip this entirely.
-    """
-    # claude: Why do we need this?
-    console.print()
-    console.rule("[bold]Codex/OpenAI backend pricing[/]")
-    console.print()
-
-    env = read_env_local()
-
-    console.print(
-        "  Budget caps on AGENT_SDK=codex/openai need per-MTok USD rates\n"
-        "  (the Codex SDK reports tokens, not cost). Leave blank to skip —\n"
-        "  a budget without rates fails loudly at session start.\n"
-    )
-
-    values: dict[str, str] = {}
-    for key in (
-        "CODEX_USD_PER_MTOK_INPUT",
-        "CODEX_USD_PER_MTOK_OUTPUT",
-        "CODEX_USD_PER_MTOK_CACHED_INPUT",
-    ):
-        raw = typer.prompt(
-            key,
-            default=env.get(key, ""),
-            show_default=bool(env.get(key)),
-        ).strip()
-        if not raw:
-            continue
-        try:
-            float(raw)
-        except ValueError:
-            console.print(f"  [yellow]Skipping {key}: not a number[/]")
-            continue
-        values[key] = raw
-    return values
-
-
-def codex_backend_status(env: dict[str, str]) -> tuple[bool, str]:
+def codex_backend_status(env: EnvValues) -> tuple[bool, str]:
     """Rates present = budget caps enforceable on codex/openai."""
-    # claude: Same question here, this feels like just a continuation of the last function?
-    # claude: Also, we need a generate setup function for claude/codex login, see how we do it in https://github.com/joy-void-joy/inkwell/tree/dev
-
     rates = [
         key
         for key in ("CODEX_USD_PER_MTOK_INPUT", "CODEX_USD_PER_MTOK_OUTPUT")
@@ -445,7 +361,7 @@ def codex_backend_status(env: dict[str, str]) -> tuple[bool, str]:
     return False, "no rates (budget caps unavailable on codex/openai)"
 
 
-def setup_timezone() -> dict[str, str]:
+def setup_timezone() -> EnvValues:
     """Walk through timezone configuration."""
     console.print()
     console.rule("[bold]Timezone[/]")
@@ -480,7 +396,7 @@ def setup_timezone() -> dict[str, str]:
     return {}
 
 
-def timezone_status(env: dict[str, str]) -> tuple[bool, str]:
+def timezone_status(env: EnvValues) -> tuple[bool, str]:
     """Custom status check for timezone (not-configured is OK, just shows system default)."""
     tz = env.get("AGENT_TIMEZONE", "")
     if tz:
@@ -491,37 +407,109 @@ def timezone_status(env: dict[str, str]) -> tuple[bool, str]:
 # =====================================================================
 # Integration registry — order matters (services first, timezone last)
 #
-# TEMPLATE: Replace these with your domain's actual integrations.
-# Each entry needs: display name, env keys to check, setup function,
-# and optionally a custom status checker.
+# TEMPLATE: Replace these with your domain's actual integrations. A
+# token-based one is just data: name, env keys, intro, browser URL, and
+# the fields to prompt for. Bespoke flows pass ``setup_func`` instead.
 # =====================================================================
 
 # claude: Yeah, I really like this part
 INTEGRATIONS: list[Integration] = [
     Integration(
         name="Slack",
+        command="slack",
+        help="Set up Slack tokens.",
         env_keys=["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
-        setup_func=setup_slack,
+        intro=(
+            "  [bold]Create a Slack app:[/]\n"
+            '  1. Go to api.slack.com/apps > "Create New App" > "From a manifest"\n'
+            "  2. Pick your workspace, paste your app manifest (JSON tab)\n"
+            "  3. Install to workspace\n"
+            "  4. Copy the Bot User OAuth Token and App-Level Token\n"
+        ),
+        browser_url="https://api.slack.com/apps?new_app=1",
+        fields=[
+            PromptField(key="SLACK_APP_TOKEN", prompt="SLACK_APP_TOKEN (xapp-...)"),
+            PromptField(key="SLACK_BOT_TOKEN", prompt="SLACK_BOT_TOKEN (xoxb-...)"),
+            PromptField(
+                key="SLACK_USER_ID",
+                prompt="SLACK_USER_ID (your Slack user ID, or email for lookup)",
+            ),
+        ],
         status_func=slack_status,
     ),
     Integration(
         name="Google (OAuth)",
+        command="google",
+        help="Set up Google OAuth.",
         env_keys=["GMAIL_CREDENTIALS_PATH"],
         setup_func=setup_google,
         status_func=google_status,
     ),
-    Integration(name="Notion", env_keys=["NOTION_TOKEN"], setup_func=setup_notion),
     Integration(
-        name="Example API", env_keys=["EXAMPLE_API_KEY"], setup_func=setup_api_key
+        name="Notion",
+        command="notion",
+        help="Set up Notion integration.",
+        env_keys=["NOTION_TOKEN"],
+        intro=(
+            "  Create an [bold]Internal[/] Notion integration:\n"
+            "  1. Go to notion.so/profile/integrations/internal\n"
+            "  2. Enter a name, keep type as Internal, submit\n"
+            "  3. Copy the Internal Integration Secret\n"
+            "  4. Share pages: open page > ... > Connections > add your integration\n"
+        ),
+        browser_url="https://www.notion.so/profile/integrations/internal",
+        fields=[
+            PromptField(key="NOTION_TOKEN", prompt="NOTION_TOKEN (secret_...)"),
+            PromptField(
+                key="NOTION_ALLOWED_PARENT_ID",
+                prompt="NOTION_ALLOWED_PARENT_ID (page/DB ID for writes, optional)",
+            ),
+        ],
+    ),
+    Integration(
+        name="Example API",
+        command="api-key",
+        help="Set up Example API key.",
+        env_keys=["EXAMPLE_API_KEY"],
+        intro="  Sign up and get an API key from the service provider.\n",
+        fields=[PromptField(key="EXAMPLE_API_KEY", prompt="EXAMPLE_API_KEY")],
     ),
     Integration(
         name="Codex/OpenAI pricing",
+        command="codex",
+        help="Set Codex/OpenAI per-MTok pricing (enables budget caps).",
         env_keys=["CODEX_USD_PER_MTOK_INPUT", "CODEX_USD_PER_MTOK_OUTPUT"],
-        setup_func=setup_codex_backend,
+        intro=(
+            "  Budget caps on AGENT_SDK=codex/openai need per-MTok USD rates\n"
+            "  (the Codex SDK reports tokens, not cost). Leave blank to skip —\n"
+            "  a budget without rates fails loudly at session start.\n"
+        ),
+        fields=[
+            PromptField(
+                key="CODEX_USD_PER_MTOK_INPUT",
+                prompt="CODEX_USD_PER_MTOK_INPUT",
+                secret=False,
+                parse=float,
+            ),
+            PromptField(
+                key="CODEX_USD_PER_MTOK_OUTPUT",
+                prompt="CODEX_USD_PER_MTOK_OUTPUT",
+                secret=False,
+                parse=float,
+            ),
+            PromptField(
+                key="CODEX_USD_PER_MTOK_CACHED_INPUT",
+                prompt="CODEX_USD_PER_MTOK_CACHED_INPUT",
+                secret=False,
+                parse=float,
+            ),
+        ],
         status_func=codex_backend_status,
     ),
     Integration(
         name="Timezone",
+        command="timezone",
+        help="Set timezone.",
         env_keys=["AGENT_TIMEZONE"],
         setup_func=setup_timezone,
         status_func=timezone_status,
@@ -565,45 +553,24 @@ def status() -> None:
 # =====================================================================
 # Individual subcommands
 #
-# TEMPLATE: Add @app.command() for each integration so users can
-# run them individually (e.g., `lup-devtools setup slack`).
+# One per registered integration (e.g. `lup-devtools setup slack`),
+# generated from INTEGRATIONS so a new entry gets its subcommand for free.
 # =====================================================================
 
 
-@app.command("slack")
-def slack_cmd() -> None:
-    """Set up Slack tokens."""
-    save_and_confirm(setup_slack())
+def make_setup_command(integration: Integration) -> Callable[[], None]:
+    """Build a zero-arg Typer command that runs one integration's setup."""
+
+    def run_one() -> None:
+        save_and_confirm(integration.run())
+
+    return run_one
 
 
-@app.command("google")
-def google_cmd() -> None:
-    """Set up Google OAuth."""
-    save_and_confirm(setup_google())
-
-
-@app.command("notion")
-def notion_cmd() -> None:
-    """Set up Notion integration."""
-    save_and_confirm(setup_notion())
-
-
-@app.command("api-key")
-def api_key_cmd() -> None:
-    """Set up Example API key."""
-    save_and_confirm(setup_api_key())
-
-
-@app.command("codex")
-def codex_cmd() -> None:
-    """Set Codex/OpenAI per-MTok pricing (enables budget caps)."""
-    save_and_confirm(setup_codex_backend())
-
-
-@app.command("timezone")
-def timezone_cmd() -> None:
-    """Set timezone."""
-    save_and_confirm(setup_timezone())
+for _integration in INTEGRATIONS:
+    app.command(_integration.command, help=_integration.help)(
+        make_setup_command(_integration)
+    )
 
 
 # =====================================================================
@@ -703,7 +670,7 @@ def main(ctx: typer.Context) -> None:
     console.print(build_status_table())
 
     for integration in INTEGRATIONS:
-        values = integration.setup_func()
+        values = integration.run()
         if values:
             write_env_local(values)
 
