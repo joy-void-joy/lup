@@ -256,13 +256,13 @@ settings = Settings.model_validate({})
 def aux_model() -> str:
     """Backend-coherent model for auxiliary agents (reviewer, backgrounds).
 
-    Explicit ``AGENT_AUX_MODEL`` wins. Otherwise Claude sessions get a
-    sonnet-class reviewer and Codex/OpenAI sessions reuse the session
-    model — the one model the account is known to accept.
+    Explicit ``AGENT_AUX_MODEL`` wins. Otherwise Claude sessions get an
+    opus-class reviewer (best results on a subscription) and Codex/OpenAI
+    sessions reuse the session model — the one model the account accepts.
     """
     if settings.aux_model:
         return settings.aux_model
-    return "claude-sonnet-4-6" if settings.agent_sdk == "claude" else settings.model
+    return "claude-opus-4-6" if settings.agent_sdk == "claude" else settings.model
 
 
 # Route notes/logs paths into lup.paths so every consumer (history,

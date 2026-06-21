@@ -178,12 +178,12 @@ def test_aux_model_explicit_override_wins(monkeypatch: pytest.MonkeyPatch) -> No
     assert aux_model() == "my-reviewer"
 
 
-def test_aux_model_claude_defaults_to_sonnet(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Claude sessions get a sonnet-class auxiliary model."""
+def test_aux_model_claude_defaults_to_opus(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Claude sessions get an opus-class auxiliary model (best results on subscription)."""
     monkeypatch.setattr(settings, "aux_model", None)
     monkeypatch.setattr(settings, "agent_sdk", "claude")
 
-    assert aux_model() == "claude-sonnet-4-6"
+    assert aux_model() == "claude-opus-4-6"
 
 
 def test_aux_model_codex_reuses_session_model(monkeypatch: pytest.MonkeyPatch) -> None:

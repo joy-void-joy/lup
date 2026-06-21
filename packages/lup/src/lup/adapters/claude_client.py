@@ -476,7 +476,7 @@ async def query(
 async def claude_query(
     prompt: str,
     *,
-    model: str = "claude-sonnet-4-6",
+    model: str = "claude-opus-4-6",
     system_prompt: str | None = None,
     output_schema: dict[str, object] | None = None,
     trace_logger: TraceLogger | None = None,

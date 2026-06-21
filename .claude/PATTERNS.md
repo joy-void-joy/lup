@@ -3,6 +3,8 @@
 
 Architectural patterns used in this project. For daily development guidance, see [CLAUDE.md](CLAUDE.md).
 
+**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 4.6 (`claude-opus-4-6`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see CLAUDE.md § Model Selection).
+
 ---
 
 ## Persistent Agent Pattern
@@ -63,7 +65,7 @@ Distinct from **subagents** (SDK-native `Task()` dispatch, defined upfront in `g
 async def review(params: ReviewInput) -> ReviewOutput:
     response = await query(
         build_review_prompt(params),
-        model="sonnet",
+        model="claude-opus-4-6",
         system_prompt=REVIEWER_PROMPT,
         tools=["Read", "Grep"],
         permission_mode="bypassPermissions",
