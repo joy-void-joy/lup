@@ -63,7 +63,9 @@ MARKER_RE = re.compile(r"(#|//)\s*claude\s*:", re.IGNORECASE)
 IGNORE_RE = re.compile(r"(#|//)\s*claude\s*:\s*ignore\b", re.IGNORECASE)
 FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*claude\s*:\s*ignore\s*$", re.IGNORECASE)
 
-MARKER_REVIEW_REASON = "Edit adds or removes a `# claude:` marker — review before applying"
+MARKER_REVIEW_REASON = (
+    "Edit adds or removes a `# claude:` marker — review before applying"
+)
 PROTECTED_REVIEW_REASON = "Protected file — review before applying"
 TMP_REVIEW_REASON = "Scratch file under tmp/ — review before applying"
 
@@ -101,29 +103,46 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "No __all__ — import directly from the defining module",
     ),
     (
-        re.compile(r"\bdict\[\s*str\s*,\s*object\s*\]"), #claude: seems a bit overspecific. Shouldn't it be about object?
-        # claude: In fact, the model frequently uses Mapping[str, object] instead. Can't say if it's to avoid being detected, or if there are legitimate reasonsn there
-        "Never use dict[str, object] — use TypedDict or BaseModel",
+        re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
+        "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",
+    ),
+    (
+        re.compile(r"\btuple\["),
+        "`tuple[...]` as a return shape is a code smell — name the fields with a "
+        "TypedDict or BaseModel, or a `type Alias = ...` if it is a reused shape",
+    ),
+    (
+        re.compile(r"\bcast\s*\("),
+        "`cast(...)` is a code smell — narrow with isinstance or a type guard, "
+        "or fix the annotation so the cast is unnecessary",
     ),
     (
         re.compile(r"\bimport\s+re\b"),
-        "`import re` is a code smell — use structured APIs (json, pathlib, urllib.parse, etc.)", #claude: I notice the agent often tries to push through anyway. Maybe we're missing better explanation about what to do instead, or something?
+        "`import re` is a code smell — parse structured data with its own API instead: "
+        "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
+        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     (
         re.compile(r"\bfrom\s+re\s+import\b"),
-        "`from re import` is a code smell — use structured APIs instead", #claude: We might want something like a anti-pattern library
+        "`from re import` is a code smell — parse structured data with its own API instead: "
+        "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
+        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",  # claude: We might want something like a anti-pattern library
     ),
     (
         re.compile(r"\bre\.(compile|search|match|fullmatch|sub|findall|split)\s*\("),
-        "Avoid regex for structured data — use proper parsers (json, pathlib, urllib.parse, xml, etc.)",
+        "Avoid regex for structured data — reach for its parser instead: "
+        "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
+        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     (
         re.compile(r"\.replace\s*\("),
-        "Avoid .replace() for structured data — use proper parsers",
+        "Avoid .replace() for structured data — edit it through its parser instead "
+        "(pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
     ),
     (
         re.compile(r"\.split\s*\("),
-        "Avoid .split() for structured data — use proper parsers",
+        "Avoid .split() for structured data — parse it instead "
+        "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     (
         re.compile(r"\bexcept\s*:"),
@@ -142,8 +161,10 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "contextlib.suppress silently swallows exceptions — log, handle, or re-raise",
     ),
     (
-        re.compile(r"@dataclass|\bfrom\s+dataclasses\s+import\b"),
-        "Use Pydantic BaseModel (or TypedDict) instead of dataclasses", #claude: Do we have good instructions about when to use which, BaseModel or TypedDict? Also you don't capture import dataclass (see my comment about needing an anti-pattern library)
+        re.compile(
+            r"@dataclass|\bimport\s+dataclasses\b|\bfrom\s+dataclasses\s+import\b"
+        ),
+        "Use Pydantic BaseModel (or TypedDict) instead of dataclasses",
     ),
     (
         re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
@@ -221,7 +242,6 @@ TS_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"//\s*tslint:disable"),
         "Never use tslint:disable — migrate to eslint and fix the issue",
     ),
-
     # claude: Same here, would like a bit more
 ]
 

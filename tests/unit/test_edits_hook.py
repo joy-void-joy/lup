@@ -79,6 +79,30 @@ def test_inline_marker_downgrades_to_ask() -> None:
     assert edit_decision("src/module.py", "", new) == "ask"
 
 
+def test_mapping_str_object_is_denied_like_dict() -> None:
+    new = "x = 1\ndef f() -> Mapping[str, object]:\n    return {}\n"
+    assert edit_decision("src/module.py", "x = 1\n", new) == "deny"
+
+
+def test_bare_dataclasses_import_is_denied() -> None:
+    assert edit_decision("src/module.py", "", "import dataclasses\n") == "deny"
+
+
+def test_tuple_return_shape_is_denied() -> None:
+    new = "x = 1\ndef f() -> tuple[str, int]:\n    return ('a', 1)\n"
+    assert edit_decision("src/module.py", "x = 1\n", new) == "deny"
+
+
+def test_cast_call_is_denied() -> None:
+    new = "x = 1\ny = cast(int, raw)\n"
+    assert edit_decision("src/module.py", "x = 1\n", new) == "deny"
+
+
+def test_cast_call_with_inline_marker_asks() -> None:
+    new = "x = 1\ny = cast(int, raw)  # claude: ignore\n"
+    assert edit_decision("src/module.py", "x = 1\n", new) == "ask"
+
+
 def test_ts_anti_pattern_is_denied() -> None:
     assert edit_decision("src/app.ts", "", "const v = data as any\n") == "deny"
 
