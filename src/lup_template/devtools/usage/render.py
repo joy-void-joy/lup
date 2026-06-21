@@ -38,6 +38,17 @@ MODEL_COLORS: dict[str, str] = {
 
 DAY_NAMES = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 
+# Bucket key in the API response → (display label, window length in hours).
+# One source for both the pacing bars and the --json snapshot.
+BUCKET_SPECS: list[tuple[str, str, float]] = [
+    ("seven_day", "weekly", 7 * 24),
+    ("five_hour", "5-hour", 5),
+    ("seven_day_opus", "opus 7d", 7 * 24),
+    ("seven_day_sonnet", "sonnet 7d", 7 * 24),
+    ("seven_day_cowork", "cowork 7d", 7 * 24),
+    ("seven_day_oauth_apps", "oauth 7d", 7 * 24),
+]
+
 
 # ── display models ─────────────────────────────────────────
 
@@ -45,6 +56,43 @@ DAY_NAMES = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 class PaceLabel(BaseModel):
     word: str
     style: str
+
+
+# ── machine-readable snapshot ──────────────────────────────
+
+
+class BucketSnapshot(BaseModel):
+    """One rate-limit window as counts and limits an agent can act on."""
+
+    name: str
+    utilization_pct: float
+    pace: str
+    resets_at: str
+    resets_in_seconds: int
+
+
+class OverageSnapshot(BaseModel):
+    enabled: bool
+    used_usd: float
+    limit_usd: float
+    utilization_pct: float
+
+
+class DaySnapshot(BaseModel):
+    date: str
+    total_tokens: int
+    tokens_by_model: dict[str, int]
+    message_count: int
+
+
+class UsageSnapshot(BaseModel):
+    """Full machine-readable usage state for ``--json`` consumers."""
+
+    buckets: list[BucketSnapshot]
+    overage: OverageSnapshot | None
+    daily: list[DaySnapshot]
+    tokens_by_model: dict[str, int]
+    stats_cache_date: str | None
 
 
 # ── pacing thresholds ──────────────────────────────────────
@@ -101,6 +149,37 @@ def pace_label(ratio: float) -> PaceLabel:
     return PACE_LABEL_DEFAULT
 
 
+def get_bucket(usage: UsageResponse, key: str) -> UsageBucket | None:
+    """Look up a rate-limit bucket by its API key, ignoring missing windows."""
+    match key:
+        case "seven_day":
+            return usage.get("seven_day")
+        case "five_hour":
+            return usage.get("five_hour")
+        case "seven_day_opus":
+            return usage.get("seven_day_opus")
+        case "seven_day_sonnet":
+            return usage.get("seven_day_sonnet")
+        case "seven_day_cowork":
+            return usage.get("seven_day_cowork")
+        case "seven_day_oauth_apps":
+            return usage.get("seven_day_oauth_apps")
+        case _:
+            return None
+
+
+def bucket_pace(bucket: UsageBucket, window_hours: float) -> tuple[float, float]:
+    """Even-pace percent and the utilization-to-pace ratio for a bucket."""
+    resets_at = datetime.fromisoformat(bucket["resets_at"])
+    window_start = resets_at - timedelta(hours=window_hours)
+    now = datetime.now(resets_at.tzinfo)
+    elapsed = (now - window_start).total_seconds()
+    total = window_hours * 3600
+    linear_pct = min((elapsed / total) * 100, 100) if total > 0 else 0
+    ratio = (bucket["utilization"] / linear_pct) if linear_pct > 0 else 0
+    return linear_pct, ratio
+
+
 def place_label(text: str, position: int, line_width: int) -> str:
     """Place a text label at a horizontal position in a fixed-width line."""
     line = [" "] * line_width
@@ -152,13 +231,7 @@ def render_bucket(
     """Render a usage bucket: label, pacing bar, annotations."""
     utilization = bucket["utilization"]
     resets_at = datetime.fromisoformat(bucket["resets_at"])
-    window_start = resets_at - timedelta(hours=window_hours)
-    now = datetime.now(resets_at.tzinfo)
-
-    elapsed = (now - window_start).total_seconds()
-    total = window_hours * 3600
-    linear_pct = min((elapsed / total) * 100, 100) if total > 0 else 0
-    ratio = (utilization / linear_pct) if linear_pct > 0 else 0
+    linear_pct, ratio = bucket_pace(bucket, window_hours)
 
     pace = pace_label(ratio)
 
@@ -207,23 +280,36 @@ def render_overage(out: Text, extra: ExtraUsage, bar_width: int) -> None:
     out.append("\n\n")
 
 
+def trailing_week(stats: StatsCache, window_end: datetime) -> list[DailyBreakdown]:
+    """The 7 most recent days of the breakdown window ending at ``window_end``."""
+    daily = get_daily_breakdown(stats, window_end - timedelta(days=7), window_end)
+    # The 168-hour window can span 8 calendar dates; keep the 7 most recent
+    if len(daily) > 7:
+        daily = daily[1:]
+    return daily
+
+
 def render_daily_breakdown(
     out: Text,
-    seven_day: UsageBucket,
+    window_end: datetime,
+    weekly_util: float,
     stats: StatsCache,
     bar_width: int,
 ) -> None:
-    """Render the per-day cost-weighted breakdown within the 7-day window."""
-    resets_at = datetime.fromisoformat(seven_day["resets_at"])
+    """Render the per-day cost-weighted breakdown over the trailing 7 days.
+
+    The breakdown is built from the local stats cache, so it renders even
+    when the live API exposes no weekly bucket. ``window_end`` anchors the
+    7-day window (the weekly reset when known, otherwise now) and
+    ``weekly_util`` scales the budget (0 falls back to raw token weighting).
+    """
+    resets_at = window_end
     window_start = resets_at - timedelta(days=7)
     now = datetime.now(resets_at.tzinfo)
     today = now.date()
     today_str = today.isoformat()
 
-    daily = get_daily_breakdown(stats, window_start, resets_at)
-    # The 168-hour window can span 8 calendar dates; keep the 7 most recent
-    if len(daily) > 7:
-        daily = daily[1:]
+    daily = trailing_week(stats, resets_at)
 
     if not any(d.total_tokens > 0 for d in daily):
         return
@@ -263,8 +349,6 @@ def render_daily_breakdown(
     if not (cost_rates and week_weight > 0):
         daily_weights = [float(d.total_tokens) for d in daily]
         week_weight = sum(daily_weights)
-
-    weekly_util = seven_day["utilization"]
 
     # Find today's index and estimate its weight when cache is stale
     today_idx: int | None = None
@@ -389,6 +473,19 @@ def render_daily_breakdown(
 # ── display assembly ───────────────────────────────────────
 
 
+def breakdown_window(usage: UsageResponse) -> tuple[datetime, float]:
+    """Anchor the 7-day breakdown window and its budget-scaling utilization.
+
+    The weekly API bucket gives the reset time and utilization when present;
+    otherwise the window ends now and utilization is 0, so the breakdown
+    still renders from the local stats cache with raw token weighting.
+    """
+    seven_day = get_bucket(usage, "seven_day")
+    if seven_day and seven_day.get("resets_at"):
+        return datetime.fromisoformat(seven_day["resets_at"]), seven_day["utilization"]
+    return datetime.now(), 0.0
+
+
 def build_display(
     usage: UsageResponse,
     stats: StatsCache | None,
@@ -400,38 +497,88 @@ def build_display(
     bar_w = bar_width - 14
     out = Text()
 
-    seven_day = usage.get("seven_day")
-    if seven_day and seven_day.get("resets_at"):
-        render_bucket(out, "weekly", seven_day, 7 * 24, bar_w)
-        out.append("\n")
-
-    five_hour = usage.get("five_hour")
-    if five_hour and five_hour.get("resets_at"):
-        render_bucket(out, "5-hour", five_hour, 5, bar_w)
-        out.append("\n")
-
-    for label, bucket in [
-        ("opus 7d", usage.get("seven_day_opus")),
-        ("sonnet 7d", usage.get("seven_day_sonnet")),
-        ("cowork 7d", usage.get("seven_day_cowork")),
-        ("oauth 7d", usage.get("seven_day_oauth_apps")),
-    ]:
+    for key, label, window_hours in BUCKET_SPECS:
+        bucket = get_bucket(usage, key)
         if bucket and bucket.get("resets_at"):
-            render_bucket(out, label, bucket, 7 * 24, bar_w)
+            render_bucket(out, label, bucket, window_hours, bar_w)
             out.append("\n")
 
     extra = usage.get("extra_usage")
     if extra and extra["is_enabled"]:
         render_overage(out, extra, bar_w)
 
-    if show_detail and stats and seven_day and seven_day.get("resets_at"):
-        render_daily_breakdown(out, seven_day, stats, bar_w)
+    if show_detail and stats:
+        window_end, weekly_util = breakdown_window(usage)
+        render_daily_breakdown(out, window_end, weekly_util, stats, bar_w)
 
     return Panel(
         out,
         title="[bold bright_white]Claude Code Usage[/bold bright_white]",
         border_style="bright_cyan",
         padding=(1, 1),
+    )
+
+
+def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnapshot:
+    """Assemble the machine-readable usage state for ``--json`` consumers.
+
+    Mirrors the display: the same buckets, overage, and trailing-week
+    breakdown, but as plain counts and limits an agent can read instead of
+    the human pacing bars.
+    """
+    buckets: list[BucketSnapshot] = []
+    for key, label, window_hours in BUCKET_SPECS:
+        bucket = get_bucket(usage, key)
+        if not (bucket and bucket.get("resets_at")):
+            continue
+        resets_at = datetime.fromisoformat(bucket["resets_at"])
+        _, ratio = bucket_pace(bucket, window_hours)
+        buckets.append(
+            BucketSnapshot(
+                name=label,
+                utilization_pct=bucket["utilization"],
+                pace=pace_label(ratio).word,
+                resets_at=bucket["resets_at"],
+                resets_in_seconds=max(
+                    int((resets_at - datetime.now(resets_at.tzinfo)).total_seconds()), 0
+                ),
+            )
+        )
+
+    extra = usage.get("extra_usage")
+    overage = (
+        OverageSnapshot(
+            enabled=extra["is_enabled"],
+            used_usd=(extra["used_credits"] or 0) / 100,
+            limit_usd=(extra["monthly_limit"] or 0) / 100,
+            utilization_pct=extra["utilization"] or 0,
+        )
+        if extra
+        else None
+    )
+
+    daily: list[DaySnapshot] = []
+    tokens_by_model: dict[str, int] = {}
+    if stats:
+        window_end, _ = breakdown_window(usage)
+        for day in trailing_week(stats, window_end):
+            daily.append(
+                DaySnapshot(
+                    date=day.date,
+                    total_tokens=day.total_tokens,
+                    tokens_by_model=day.tokens_by_model,
+                    message_count=day.activity.message_count if day.activity else 0,
+                )
+            )
+            for model, tokens in day.tokens_by_model.items():
+                tokens_by_model[model] = tokens_by_model.get(model, 0) + tokens
+
+    return UsageSnapshot(
+        buckets=buckets,
+        overage=overage,
+        daily=daily,
+        tokens_by_model=tokens_by_model,
+        stats_cache_date=stats.last_computed_date if stats else None,
     )
 
 

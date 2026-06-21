@@ -1,5 +1,6 @@
 """Typer app for the usage display: one-shot output and the watch loop."""
 
+import json
 import time
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +15,11 @@ from rich.text import Text
 
 import lup.profiles as profiles
 from lup_template.devtools.usage.api import creds_path, fetch_usage, load_stats
-from lup_template.devtools.usage.render import build_display, build_error_panel
+from lup_template.devtools.usage.render import (
+    build_display,
+    build_error_panel,
+    build_snapshot,
+)
 
 app = typer.Typer(
     help="Claude Code live usage display",
@@ -28,6 +33,22 @@ def fetch_and_build(config_dir: Path, detail: bool, bar_width: int) -> Panel:
     usage = fetch_usage(config_dir)
     stats = load_stats(config_dir) if detail else None
     return build_display(usage, stats, detail, bar_width)
+
+
+def emit_json(config_dir: Path, detail: bool) -> None:
+    """Print the usage snapshot as JSON so an agent can read counts and limits.
+
+    stdout stays valid JSON on failure too: API errors are reported as an
+    ``{"error": ...}`` object with a non-zero exit, never human-formatted text.
+    """
+    try:
+        usage = fetch_usage(config_dir)
+    except (httpx.HTTPStatusError, httpx.ConnectError) as e:
+        print(json.dumps({"error": str(e)}))
+        raise typer.Exit(1) from e
+    stats = load_stats(config_dir) if detail else None
+    snapshot = build_snapshot(usage, stats)
+    print(snapshot.model_dump_json(indent=2))
 
 
 # ── CLI ────────────────────────────────────────────────────
@@ -49,8 +70,14 @@ def main(
             "--detail/--no-detail",
             help="Show daily breakdown from stats cache.",
         ),
-    ] = True,  # claude: I'm not seeing any daily breakdown when calling the devtool directly
-    # claude: Seems like it's missing a --json option or similar, that would allow an agent to know how much usage is currently used
+    ] = True,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Emit machine-readable usage (counts and limits) instead of bars.",
+        ),
+    ] = False,
     watch: Annotated[
         bool,
         typer.Option(
@@ -80,6 +107,10 @@ def main(
             "JSON (trace list shows the backend).[/dim]"
         )
         raise typer.Exit(1)
+
+    if json_output:
+        emit_json(config_dir, detail)
+        return
 
     bar_width = min(console.width - 10, 58)
 
