@@ -7,8 +7,6 @@ SDK-specific imports are deferred (inline or TYPE_CHECKING) so the
 module loads without requiring any particular SDK to be installed.
 """
 
-from __future__ import annotations
-
 import logging
 from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime
@@ -141,7 +139,7 @@ def build_options(
     from lup_template.agent.tool_policy import ToolPolicy
     from lup_template.agent.toolsets import EXAMPLE_GROUP, build_session_toolset
 
-    session_sandbox: Sandbox | None = None
+    session_sandbox: "Sandbox | None" = None
     if sandbox is not None:
         from lup.sandbox import Sandbox
 
@@ -527,7 +525,7 @@ def build_adapter(
 
             # Sandbox is optional: AGENT_SANDBOX_ENABLED=false runs the
             # agent without code execution tools (no Docker required).
-            sb: Sandbox | None = None
+            sb: "Sandbox | None" = None
             if settings.sandbox_enabled:
                 from lup.sandbox import Sandbox
 

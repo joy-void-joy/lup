@@ -16,12 +16,10 @@ This is a TEMPLATE. Register domain tool groups in
 when they should be served to subprocess backends).
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
-if TYPE_CHECKING: # claude: I'm wondering if we should just drop all if TYPE_CHECKING here
+if TYPE_CHECKING:
     from lup.mcp import LupMcpTool
     from lup.reflect import ReflectionGate
     from lup.sandbox import Sandbox

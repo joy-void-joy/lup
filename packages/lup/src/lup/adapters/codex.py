@@ -7,8 +7,6 @@ stdio server (serve-tools), permission hooks via config.toml
 command hooks, and the reflection gate via a file-backed flag.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging

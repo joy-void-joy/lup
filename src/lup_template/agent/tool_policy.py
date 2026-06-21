@@ -18,15 +18,12 @@ Usage:
     hooks = create_tool_allowlist_hook(policy.get_allowed_tools(mcp_servers))
 """
 
-from __future__ import annotations #claude: we're on python3.14, doesn't seem to make a difference (please check)
-
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any  # claude: ignore — for the ServerConfig alias
 
-from lup.mcp import LupMcpTool, server_tool_names
+from lup.mcp import LupMcpServerConfig, LupMcpTool, server_tool_names
 
-if TYPE_CHECKING: #Icl
-    from lup.mcp import LupMcpServerConfig
+if TYPE_CHECKING:
     from lup_template.agent.config import Settings
 
 # An MCP server entry is either an in-process LupMcpServerConfig or a raw SDK

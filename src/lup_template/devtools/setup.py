@@ -22,8 +22,6 @@ Customization:
        ``copy_to_clipboard`` for wizard steps that hand the user a value)
 """
 
-from __future__ import annotations  # claude: Again, annotations kinda feel redundant
-
 import shutil
 import webbrowser
 from collections.abc import Callable
