@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
 
-from lup.adapters.claude_client import (
+from lup.adapters.claude.client import (
     ResponseCollector,
     build_client,
     prepare_output_format,

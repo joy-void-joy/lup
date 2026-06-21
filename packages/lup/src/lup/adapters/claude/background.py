@@ -15,7 +15,7 @@ from claude_agent_sdk.types import (
     ResultMessage,
 )
 
-from lup.adapters.claude import lup_tools_to_sdk
+from lup.adapters.claude.adapter import lup_tools_to_sdk
 from lup.background import BaseBackgroundAgent, LupUserTurn
 from lup.mcp import LupMcpTool
 

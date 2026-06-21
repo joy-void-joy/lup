@@ -13,7 +13,7 @@ from lup.types import Backend
 
 def build_claude_adapter(opts: LupAgentOptions) -> BuiltAdapter:
     """Construct the Claude adapter from neutral options."""
-    from lup.adapters.claude_options import build_claude_adapter as build
+    from lup.adapters.claude.options import build_claude_adapter as build
 
     return build(opts)
 

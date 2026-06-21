@@ -23,8 +23,8 @@ from claude_agent_sdk.types import (
     UserMessage,
 )
 
-import lup.adapters.claude
-from lup.adapters.claude import ClaudeConversation, ClaudeUsageNormalizer
+import lup.adapters.claude.adapter
+from lup.adapters.claude.adapter import ClaudeConversation, ClaudeUsageNormalizer
 from lup.types import (
     LupDoneEvent,
     LupTextEvent,
@@ -152,7 +152,7 @@ async def test_broken_usage_normalizer_degrades_to_none() -> None:
 async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None:
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.claude import ClaudeAdapter
+    from lup.adapters.claude.adapter import ClaudeAdapter
 
     script: list[Message] = [
         AssistantMessage(
@@ -167,7 +167,9 @@ async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None
         result_message(),
     ]
     fake = FakeClient(script)
-    monkeypatch.setattr(lup.adapters.claude, "ClaudeSDKClient", lambda options: fake)
+    monkeypatch.setattr(
+        lup.adapters.claude.adapter, "ClaudeSDKClient", lambda options: fake
+    )
 
     adapter = ClaudeAdapter(ClaudeAgentOptions())
     events = [event async for event in adapter.run_streamed("go")]
@@ -181,7 +183,7 @@ async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 async def test_collector_state_after_collect() -> None:
-    from lup.adapters.claude_client import ResponseCollector
+    from lup.adapters.claude.client import ResponseCollector
 
     fake = FakeClient(SCRIPT)
     collector = ResponseCollector(cast(ClaudeSDKClient, fake))
@@ -196,7 +198,7 @@ async def test_collector_state_after_collect() -> None:
 
 
 async def test_collector_raises_mid_iteration_on_error() -> None:
-    from lup.adapters.claude_client import ResponseCollector
+    from lup.adapters.claude.client import ResponseCollector
 
     fake = FakeClient([result_message(is_error=True, result="boom")])
     collector = ResponseCollector(cast(ClaudeSDKClient, fake))

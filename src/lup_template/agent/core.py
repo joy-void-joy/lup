@@ -124,8 +124,8 @@ def build_options(
     """
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.claude import lup_hooks_to_claude, spec_to_claude
-    from lup.adapters.claude_options import server_to_claude
+    from lup.adapters.claude.adapter import lup_hooks_to_claude, spec_to_claude
+    from lup.adapters.claude.options import server_to_claude
     from lup.hooks import create_permission_hooks
     from lup.mcp import create_mcp_server
     from lup.types import merge_hooks
@@ -491,7 +491,7 @@ def build_adapter(
     ctx: AbstractContextManager[object]
     match settings.agent_sdk:
         case "claude":
-            from lup.adapters.claude import ClaudeAdapter
+            from lup.adapters.claude.adapter import ClaudeAdapter
 
             # Sandbox is optional: AGENT_SANDBOX_ENABLED=false runs the
             # agent without code execution tools (no Docker required).

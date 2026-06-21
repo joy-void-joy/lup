@@ -19,7 +19,7 @@ from lup.types import SubagentSpec
 
 
 def claude_caps() -> AdapterCapabilities:
-    from lup.adapters.claude import ClaudeAdapter
+    from lup.adapters.claude.adapter import ClaudeAdapter
     from claude_agent_sdk import ClaudeAgentOptions
 
     return ClaudeAdapter(ClaudeAgentOptions()).capabilities
@@ -41,7 +41,7 @@ def test_registry_covers_every_backend() -> None:
 
 
 def test_build_adapter_dispatches_to_claude() -> None:
-    from lup.adapters.claude import ClaudeAdapter
+    from lup.adapters.claude.adapter import ClaudeAdapter
 
     built = build_adapter("anthropic", LupAgentOptions(model="claude-opus-4-6"))
     assert isinstance(built.adapter, ClaudeAdapter)
@@ -62,7 +62,7 @@ def test_claude_builder_translates_neutral_options() -> None:
     )
 
     built = build_adapter("anthropic", opts)
-    from lup.adapters.claude import ClaudeAdapter
+    from lup.adapters.claude.adapter import ClaudeAdapter
 
     assert isinstance(built.adapter, ClaudeAdapter)
     native = built.adapter.options
@@ -82,7 +82,7 @@ def test_claude_builder_keeps_session_when_persisting() -> None:
     built = build_adapter(
         "anthropic", LupAgentOptions(model="claude-opus-4-6", persist_session=True)
     )
-    from lup.adapters.claude import ClaudeAdapter
+    from lup.adapters.claude.adapter import ClaudeAdapter
 
     assert isinstance(built.adapter, ClaudeAdapter)
     assert "no-session-persistence" not in built.adapter.options.extra_args
@@ -137,7 +137,7 @@ def test_degrade_keeps_everything_on_claude() -> None:
 
 def test_lup_server_config_narrows_by_isinstance() -> None:
     """The Claude server conversion narrows by type, not a hasattr probe."""
-    from lup.adapters.claude_options import server_to_claude
+    from lup.adapters.claude.options import server_to_claude
 
     entry = create_mcp_server("notes", tools=[])
     converted = server_to_claude(entry)

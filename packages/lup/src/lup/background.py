@@ -148,7 +148,7 @@ def build_claude_background(params: BackgroundAgentParams) -> BaseBackgroundAgen
     Claude backgrounds can act through tools, so they default to an opus-class
     model when none is given.
     """
-    from lup.adapters.claude_background import ClaudeBackgroundAgent
+    from lup.adapters.claude.background import ClaudeBackgroundAgent
 
     return ClaudeBackgroundAgent(
         name=params.name,
