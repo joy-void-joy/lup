@@ -1,10 +1,3 @@
-# claude: So by far, my biggest problem/observation is that agent will either try to plug in the reflection gate where it doesn't make sense or will leave it as dead code (this is true for most files in the template, it leaves a lot of dead code)
-# In general, it seems to often not understand that deleting a file/not using something is completely okay, and doesn't seem to understand when reflection is meaningful
-# Can you:
-# - Explain better to the agent where reflection is useful or not (ask me to validate your understanding first)
-# - Review the init/install commands to have them audit for useless files, and really drill down what they need or not (e.g. realtime is not always useful, same here)
-# My main point is that reflection is not always important, and can be skipped. Same for the feedback-loop capabilities
-
 """Reflection tool — forced self-assessment before output finalization.
 
 This is a TEMPLATE. Customize the input model and reviewer prompt

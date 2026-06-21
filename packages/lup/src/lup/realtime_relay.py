@@ -1,5 +1,9 @@
-# claude: Also, what's the difference between realtime_relay and realtime?
 """Realtime relay for backends whose tools run in a subprocess.
+
+Companion to :mod:`lup.realtime`: that module is the in-process ``Scheduler``
+(and Stop-hook guards) a Claude persistent agent drives directly; this one is
+the subprocess transport that gives Codex/OpenAI the same sleep/wake behavior
+when tools cannot share process state. Same pattern, two wirings.
 
 On Claude, a persistent agent holds one never-ending SDK turn: its tools
 share process state with the :class:`~lup.realtime.Scheduler`, ``sleep``

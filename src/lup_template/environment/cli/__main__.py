@@ -1,4 +1,3 @@
-# claude: Can you review this? I get why there's the commit loop, but I feel like it should be marked way more about when to use the commit loop and that this _can_ be removed
 """Environment CLI for running agent sessions.
 
 This is a TEMPLATE. Customize for your domain.
@@ -6,8 +5,14 @@ This is a TEMPLATE. Customize for your domain.
 The CLI is the domain-specific harness that:
 1. Handles user interaction or game logic
 2. Runs agent sessions with inputs
-3. Auto-commits results after each session
-4. Manages application flow and lifecycle
+3. Manages application flow and lifecycle
+
+**The commit loop is optional** (see CLAUDE.md § Scaffolding Is a Menu, Not a
+Mandate): ``loop`` can auto-commit each session's outputs so a batch run leaves
+a per-session audit trail. Keep it when every run yields a data artifact worth
+versioning (forecasts, game records, generated files); for interactive or
+no-artifact domains it is just noise — pass ``--no-commit`` or remove the
+auto-commit wiring entirely.
 
 The feedback loop focuses on improving lup_template.agent.
 This code evolves with application requirements.
