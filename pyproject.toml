@@ -1,4 +1,3 @@
-# claude: any problems here?
 [project]
 name = "lup-template"
 version = "0.1.0"
@@ -78,6 +77,10 @@ addopts = "-m 'not integration'"
 markers = ["integration: tests requiring external services (Docker, APIs)"]
 
 [tool.pyright]
+# Workspace-wide check, run from the repo root: the template (src), the
+# vendored lup library (packages/lup/src), and tests. Pyright reads only this
+# root config when invoked here — it does not discover the member config in
+# packages/lup/pyproject.toml — so every include the workspace needs is listed.
 include = ["src", "packages/lup/src", "tests"]
 pythonVersion = "3.14"
 venvPath = "."

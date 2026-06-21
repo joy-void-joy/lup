@@ -45,7 +45,10 @@ where = ["src"]
 lup = ["py.typed"]
 
 [tool.pyright]
+# Independent of the workspace-root config: this lets the standalone library
+# type-check on its own (pyright run from this directory), where `src` resolves
+# to packages/lup/src. The root config re-lists this path under its own include
+# for the workspace-wide run; the two configs do not merge or conflict.
 include = ["src"]
 pythonVersion = "3.14"
 
-# claude: hmm, maybe this collides with @/pyproject.toml? Also, is it normal that for packages/lup, we're getting the file in packages/lup/src/lup?
