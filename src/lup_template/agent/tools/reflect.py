@@ -146,7 +146,6 @@ class ReviewOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-# claude: this is not very clear what this means. Maybe this should be a nested agent? The fact I cannot tell what this is for is maybe a sign that we're lacking some background unfication
 async def run_reviewer(
     validated: ReflectInput,
     outputs_dir: Path | None,
@@ -177,7 +176,7 @@ async def run_reviewer(
     reviewer_prompt = "\n\n".join(prompt_sections)
 
     match model_backend(model):
-        case "anthropic":  # claude: NO. If you need to match model and care about background at this level, it means the abstraction is wrong. Backend concerns should only appear in the designated lib sections, all the rest should be unified.
+        case "anthropic":
             response = await query(
                 reviewer_prompt,
                 prefix="  ↳ [reviewer] ",

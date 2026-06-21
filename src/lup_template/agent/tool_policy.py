@@ -37,7 +37,6 @@ if TYPE_CHECKING:
 # McpServerConfig (stdio/http/sse). core.py narrows each by hasattr(server,
 # "server"), which pyright can't follow through that union — so the dict is
 # typed Any here and resolved at the conversion site.
-# claude: What? This is extremely confusing. Why do you type alias any? Seems like something that should stay purely in the backend?
 type ServerConfig = Any  # claude: ignore — runtime-narrowed union, see above
 
 
@@ -49,7 +48,6 @@ type ServerConfig = Any  # claude: ignore — runtime-narrowed union, see above
 # on the Claude path. Codex/OpenAI agents get tools from the served MCP
 # groups (toolsets.py) plus the Codex runtime's native shell/file/web tools.
 
-# claude: I feel like this could be unified? Also, this feels fundamental enough thaat I don't understand why this is in the template
 CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(
     {
         "Bash",
@@ -73,7 +71,6 @@ FRAMEWORK_TOOLS: frozenset[str] = frozenset({"StructuredOutput"})
 
 
 class ToolPolicy:
-    # claude: Are you sure this should be in template? Seems like the construct itself should be universal and go in lib?
     """Centralized policy for tool availability.
 
     Determines which tools are available based on:
@@ -104,10 +101,6 @@ class ToolPolicy:
             tags.add("requires:example-api")
 
         # TODO: Add your name-set exclusion logic
-        # claude: Yes. TODOs are great. I think we should have more TODOs for the agent in the template, there's not enough of those
-        # Example:
-        # if self.restricted_mode:
-        #     excluded.update(LIVE_DATA_TOOLS)
 
         self.excluded_tools: frozenset[str] = frozenset(excluded)
         self.excluded_tags: frozenset[str] = frozenset(tags)
