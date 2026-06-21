@@ -296,7 +296,7 @@ async def query(
                 "multi-turn enforcement."
             )
 
-    match backend: # claude: No. THis is the wrong way to do it. Right way to do it is there's an ABC for calling "run" or "query" or something
+    match backend:  # claude: No. THis is the wrong way to do it. Right way to do it is there's an ABC for calling "run" or "query" or something
         # claude: Never match on backend this way, it just doesn't scale
         case "anthropic":
             from lup.adapters.claude_client import claude_query

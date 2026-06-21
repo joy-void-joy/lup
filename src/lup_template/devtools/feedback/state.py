@@ -68,7 +68,6 @@ class SessionData(TypedDict, total=False):
 # =============================================================================
 
 
-
 class SessionResult(BaseModel):
     """A session matched with its outcome/feedback.
 
