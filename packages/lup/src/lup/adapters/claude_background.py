@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator, Callable
+from typing import Any  # claude: ignore — SDK connect() takes dict[str, Any] turns
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -15,7 +16,7 @@ from claude_agent_sdk.types import (
 )
 
 from lup.adapters.claude import lup_tools_to_sdk
-from lup.background import BaseBackgroundAgent
+from lup.background import BaseBackgroundAgent, LupUserTurn
 from lup.mcp import LupMcpTool
 
 logger = logging.getLogger(__name__)
@@ -62,12 +63,9 @@ class ClaudeBackgroundAgent(BaseBackgroundAgent):
 
     async def message_generator(
         self,
-    ) -> AsyncGenerator[dict[str, object], None]:
+    ) -> AsyncGenerator[LupUserTurn, None]:
         """Yield user turns: start message, then build_message on each wake."""
-        yield {
-            "type": "user",
-            "message": {"role": "user", "content": self.start_message},
-        }
+        yield LupUserTurn(content=self.start_message)
 
         while self.running:
             await self.wake_event.wait()
@@ -86,9 +84,19 @@ class ClaudeBackgroundAgent(BaseBackgroundAgent):
             if content is None:
                 continue
 
+            yield LupUserTurn(content=content)
+
+    async def sdk_message_stream(self) -> AsyncGenerator[dict[str, Any], None]:
+        """Adapt the typed turn stream into the SDK's streaming-input dicts.
+
+        The one place a ``LupUserTurn`` becomes the SDK's ``connect`` wire shape
+        (``dict[str, Any]``), so :meth:`message_generator` stays typed end to
+        end and only this boundary line speaks the untyped SDK format.
+        """
+        async for turn in self.message_generator():
             yield {
                 "type": "user",
-                "message": {"role": "user", "content": content},
+                "message": {"role": "user", "content": turn.content},
             }
 
     async def run_loop(self) -> None:
@@ -113,7 +121,7 @@ class ClaudeBackgroundAgent(BaseBackgroundAgent):
 
         try:
             client = ClaudeSDKClient(options=options)
-            await client.connect(self.message_generator())
+            await client.connect(self.sdk_message_stream())
             try:
                 async for msg in client.receive_messages():
                     self.handle_response(msg)
