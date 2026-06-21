@@ -39,6 +39,10 @@ COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
 
 PYTHON_SUFFIXES = {".py", ".pyi"}
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
+# Languages where `#` does not open a comment (`//` does), so a `# claude:` is
+# always string content (e.g. a Python marker quoted inside a JS template) —
+# only `//` markers count as notes there.
+JS_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
 
 CONTEXT_BEFORE = 2
 CONTEXT_AFTER = 25
@@ -49,6 +53,7 @@ class ScanMode:
 
     PYTHON = "python"
     MARKDOWN = "markdown"
+    JS = "js"
     TEXT = "text"
 
 
@@ -64,6 +69,8 @@ def scan_mode_for(path: Path) -> str:
         return ScanMode.PYTHON
     if suffix in MARKDOWN_SUFFIXES:
         return ScanMode.MARKDOWN
+    if suffix in JS_SUFFIXES:
+        return ScanMode.JS
     return ScanMode.TEXT
 
 
@@ -192,6 +199,7 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[FeedbackComment]
             match is None
             or in_fence
             or IGNORE_RE.search(line) is not None
+            or (mode == ScanMode.JS and match.group(1) == "#")
             or inside_inline_code(line, match.start())
             or not in_note_context(i + 1, match.start())
         ):

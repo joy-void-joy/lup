@@ -182,7 +182,7 @@ def scan_for_capability_gaps(
 
             for line in content.split("\n"):
                 if CAPABILITY_PATTERNS.search(line):
-                    text = line.strip()[:120]
+                    text = line.strip()
                     if text:
                         requests_by_text[text].append(session_id)
         except OSError:
