@@ -14,5 +14,6 @@ Examples::
     $ uv run lup-devtools claude usage
     $ uv run lup-devtools claude usage --no-watch
     $ uv run lup-devtools claude usage --no-detail
+    $ uv run lup-devtools claude usage --json
     $ uv run lup-devtools claude usage --watch --interval 300
 """
