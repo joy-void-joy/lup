@@ -45,10 +45,44 @@ def test_python_after_separator_is_denied() -> None:
     assert decision("echo hi | python -") == "deny"
 
 
+def test_other_interpreters_are_denied() -> None:
+    assert decision("perl -e 'print 1'") == "deny"
+    assert decision("ruby script.rb") == "deny"
+    assert decision("node app.js") == "deny"
+    assert decision("php -r 'echo 1;'") == "deny"
+    assert decision("deno run x.ts") == "deny"
+    assert decision("bun run x.ts") == "deny"
+
+
+def test_interpreter_behind_a_passthrough_wrapper_is_denied() -> None:
+    assert decision("sudo python x.py") == "deny"
+    assert decision("env python x.py") == "deny"
+    assert decision("command python x.py") == "deny"
+    assert decision("exec python evil.py") == "deny"
+    assert decision("time python x.py") == "deny"
+    assert decision("ENV=1 python x.py") == "deny"
+
+
+def test_uv_inline_code_is_denied() -> None:
+    # `uv run` executing python without naming it.
+    assert decision("uv run -c 'import os'") == "deny"
+    assert decision("uv run -m http.server") == "deny"
+    assert decision("uv run --script foo.py") == "deny"
+    assert decision("uvx python -c 'x'") == "deny"
+    assert decision("uv run --with requests python -c 'x'") == "deny"
+
+
 def test_python_as_argument_text_is_not_denied() -> None:
     assert decision("git commit -m 'add python script'") == "allow"
     assert decision("grep python README.md") == "allow"
     assert decision("ls python_stuff/") == "allow"
+
+
+def test_python_in_a_path_or_filename_is_not_denied() -> None:
+    # "python" as a directory component or part of a longer name is not an
+    # interpreter invocation, so it must not be denied.
+    assert decision("ls some/python3/dir") == "allow"
+    assert decision("find . -name '*.python'") == "allow"
 
 
 def test_tmp_scripts_are_allowed() -> None:

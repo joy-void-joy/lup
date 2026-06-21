@@ -1,10 +1,14 @@
 #!/bin/bash
 # File suggestion provider for Claude Code @ completion.
-# Uses git ls-files + fzf for fuzzy matching. Includes refs/ entries.
-# Dependencies: jq (parses the {"query": ...} payload on stdin), fzf, git.
-# A missing refs/ directory or zero fzf matches yields empty output, exit 0.
+#
+# Wired by .claude/settings.json (`fileSuggestion.command`), so Claude Code
+# runs it automatically — no install step. It just needs jq, fzf, and git on
+# PATH; Claude Code pipes a {"query": ...} JSON payload on stdin.
+#
+# Suggestions are git-tracked files (git ls-files) plus any symlinked refs/
+# entries, fuzzy-matched by fzf. A missing refs/ directory or zero matches
+# yields empty output and exit 0.
 
-# claude: Do I need to do anything for this to work? Does it work out of the blue?
 set -euo pipefail
 
 QUERY=$(jq -r '.query // ""')
