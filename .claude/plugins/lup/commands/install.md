@@ -117,6 +117,8 @@ If the target repo uses (or will use) the Claude Agent SDK, the **self-improveme
 
 When the target has Agent SDK code, adapt the scaffolding to wrap their existing agent — don't replace it. The lup patterns (trace logging, scoring, feedback collection) layer on top of whatever agent they already have.
 
+These patterns are **opt-in, not a bundle**: reflection, realtime/persistent mode, the feedback loop, and the commit loop each port only if the target actually needs them (see CLAUDE.md § Scaffolding Is a Menu, Not a Mandate). Don't install a pattern the target won't use — dead scaffolding is worse than a capability you can add later.
+
 ### Skip (never port)
 
 - Domain-specific tool implementations (example.py contents)

@@ -82,6 +82,17 @@ Use AskUserQuestion extensively -- don't make assumptions about the domain. Ask 
 
 Let the conversation flow naturally. The goal is to understand the domain well enough to customize the template files below.
 
+## Phase 1.5: Prune Scaffolding
+
+Before customizing, decide which optional patterns this domain actually needs. The template ships them all wired; most domains use a subset, and **deleting the rest is the goal, not a failure** (see CLAUDE.md § Scaffolding Is a Menu, Not a Mandate). From the interview answers, classify each as KEEP-and-customize or DELETE-the-files:
+
+- **Reflection** (`agent/tools/reflect.py` + the gate wiring in `core.py`) — keep only if the agent commits a consequential, judgment-bearing output where self-critique helps.
+- **Realtime / persistent mode** (`agent/tools/realtime.py`, `lup.realtime*`, the Stop-hook/sleep-wake wiring) — keep only for agents that live over time (chat, monitoring, games); delete for one-shot agents.
+- **Feedback loop** (`devtools/feedback/`, the feedback-loop command) — keep only if ground truth or a feedback signal resolves over time.
+- **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning.
+
+Use AskUserQuestion to confirm the keep/delete set, then **delete the files and their wiring** for everything not kept before proceeding. The customization steps below apply only to what you kept.
+
 ## Phase 2: Rename Package
 
 Run the devtool to rename the package. Preview first with `--dry-run`, then execute:
@@ -149,16 +160,13 @@ Customize the CLI for the domain's task format:
 
 Set `agent_version` under `[tool.lup]` in `pyproject.toml` and explain bump rules for this domain.
 
-### 6. Configure Reflection
+### 6. Reflection (only if kept in Phase 1.5)
 
-Customize `src/<project>/agent/tools/reflect.py`:
+If this domain has no consequential, judgment-bearing output, you already deleted `reflect.py` and its gate — skip this step. Otherwise customize `src/<project>/agent/tools/reflect.py`:
 
-Ask the user:
-
-- Should the agent self-review before producing output? (default: yes -- already wired in core.py)
-- Should there be a reviewer sub-agent? (default: yes, runs on Sonnet -- adds latency but catches errors)
-- What domain-specific fields should reflection capture? (extend `ReflectInput` with fields like factor analysis, move evaluation, etc.)
+- Extend `ReflectInput` with domain-specific fields (factor analysis, move evaluation, etc.)
 - Customize the reviewer prompt for the domain's common failure modes
+- The reviewer runs on the Opus-class aux model (see CLAUDE.md § Model Selection); pass `skip_reviewer=True` per call for speed-sensitive or trivial tasks
 
 The reflection gate (`lup.reflect`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
 
