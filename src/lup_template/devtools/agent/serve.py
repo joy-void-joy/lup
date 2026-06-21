@@ -91,6 +91,10 @@ def collect_all_tools(context: SessionContext | None = None) -> list[LupMcpTool]
     return tools
 
 
+# claude: backend-abc migration step 9 (serve-tools reuse) is not done: this still
+# discovers tools via glob+ast (collect_dynamic_tool_names) and dispatches on a
+# string `match server_group` rather than reusing lup.mcp's shared server builder
+# with a typed selector; server_group should be a Literal, not str.
 def serve_tools(list_only: bool, server_group: str | None) -> None:
     """Serve the collected tools over MCP stdio (see the ``serve-tools`` command)."""
     from lup.metrics import configure_metrics, metrics_path
