@@ -48,6 +48,27 @@ class Ask(BaseModel):
 # Configuration: rules evaluated per segment, top-to-bottom, last match wins
 # ---------------------------------------------------------------------------
 
+# Interpreters that run arbitrary code. The deny below matches these only as a
+# segment's command word — a bare name (`python`) or the basename of a path
+# (`/usr/bin/python`) — never as a substring of an argument, filename, or
+# directory (so `grep python`, `ls some/python3/dir`, `./py-helper.sh` are fine).
+CODE_INTERPRETERS = ("python3?", "perl", "ruby", "node", "deno", "bun", "php")
+
+# Command-position wrappers that change nothing about what runs next: an
+# environment assignment (`VAR=val`) or a pass-through builtin. Skipping them
+# keeps `sudo python x`, `env python x`, and `exec python x` denied.
+COMMAND_PREFIX = (
+    r"(?:[A-Za-z_]\w*=\S*\s+|(?:sudo|env|command|exec|time|nohup|setsid|stdbuf)\s+)*"
+)
+
+# `uv run [flags] <cmd>` and `uvx <cmd>` launch a command inside the project
+# env; the interpreter deny looks through the flags to the command they run.
+UV_LAUNCHER = r"(?:uv\s+run\s+(?:-\S+\s+|--\S+(?:[= ]\S+)?\s+)*|uvx\s+)"
+
+INTERPRETER_DENY_REASON = (
+    "Denied: use lup-devtools or `uv run lup` instead, or create a script in ./tmp/."
+)
+
 RULES: list[Allow | Deny | Ask] = [
     # Safe read-only / common commands
     Allow(pattern=r"^ls\b"),
@@ -61,7 +82,7 @@ RULES: list[Allow | Deny | Ask] = [
     Allow(pattern=r"^find\b(?!.*(-exec|-ok|-delete))"),
     # Navigation: a plain `cd <path>` segment, so compounds like
     # `cd <worktree> && uv run pytest` auto-allow when every part is safe
-    Allow(pattern=r"^cd(\s+\S+)?$"), # CLAUDE: How does it check recursively that all sub segments are safe here?
+    Allow(pattern=r"^cd(\s+\S+)?$"),
     # GitHub CLI (read-only)
     Allow(pattern=r"^gh (pr|issue) (list|view|diff|status)\b"),
     # Git (safe subset)
@@ -79,14 +100,20 @@ RULES: list[Allow | Deny | Ask] = [
     Allow(pattern=r"^uv run \S+ --help$"),
     # lup-devtools CLI
     Allow(pattern=r"^uv run lup-devtools\b"),
-    # Block python invocations (at command position: start of segment or after
-    # a separator, including via `uv run`). Mentions of "python" in arguments,
-    # messages, or grep patterns are unaffected.
+    # Block code interpreters run as a segment's command word (directly, via a
+    # pass-through wrapper, or via `uv run`/`uvx`). Segments are already split
+    # on separators, so anchoring at `^` is enough.
     Deny(
-        pattern=r"(^|;|&&|\|\||\|)\s*(\S*/)?(uv\s+run\s+)?python3?\b", #CLAUDE: When I use claude, I often see block on files or otherwise that contains the word "python", even if the invocation doesn't contain the word "Python". Also, sometimes, the agent tries to cheat with e.g. perl or with uv run -c or stuff like that (verify this)
-        reason="Denied: use lup-devtools or `uv run lup` instead, or create a script in ./tmp/.",
+        pattern=rf"^{COMMAND_PREFIX}(?:{UV_LAUNCHER})?(?:\S*/)?(?:{'|'.join(CODE_INTERPRETERS)})(?![\w./-])",
+        reason=INTERPRETER_DENY_REASON,
     ),
-    # ...except tmp scripts (overrides the deny above)
+    # ...and `uv run` executing inline code or a module/script, which runs
+    # python without naming it (`uv run -c ...`, `-m ...`, `--script ...`).
+    Deny(
+        pattern=rf"^{COMMAND_PREFIX}{UV_LAUNCHER}(?:\S+\s+)*(?:-c|-m|--script)(?=[=\s])",
+        reason=INTERPRETER_DENY_REASON,
+    ),
+    # ...except tmp scripts (overrides the denies above)
     Allow(pattern=r"^uv run (python )?(\./)?tmp/\S+\.py\b"),
 ]
 
@@ -96,8 +123,9 @@ RULES: list[Allow | Deny | Ask] = [
 
 HookOutput = dict[str, dict[str, str]]
 
-# claude: Not super clear what this section is for? I'm missing a bit of context when reading it
-TWO_CHAR_SEPARATORS = ("&&", "||")
+# Process/command substitution opens with `$(`, `<(`, or `>(`; has_substitution
+# treats any of these (or a backtick) as "could run anything" and blocks
+# auto-allow. Backticks are handled separately since they have no prefix char.
 SUBSTITUTION_PREFIXES = ("$", "<", ">")
 
 
@@ -145,59 +173,44 @@ def ask_decision(reason: str) -> HookOutput:
     }
 
 
-# Claude: I'm assuming those split segments are how we're recursing, and so  RULES is about segments and subsegments? That work I suppose. Not hyper elegant, and somewhat fixed
-def split_segments(command: str) -> list[str]:
-    """Split a shell command on unquoted separators into trimmed segments.
+# One left-to-right scan of a shell command, as an ordered alternation of the
+# pieces that segment-splitting must respect. Quoting and escapes are handled
+# by consuming whole spans, so a separator inside quotes is never seen as one:
+#   sep      a separator that ends a segment: `;` `|` newline, `&&` `||`, or a
+#            bare `&` (job control) that is not part of a `>&`/`&>` redirection
+#   '...'    single-quoted span (no escapes inside)
+#   "..."    double-quoted span (`\"` keeps the quote)
+#   \x       a backslash escape
+#   text     a run of ordinary characters
+#   .        any leftover (e.g. an unterminated quote)
+SEGMENT_TOKEN = re.compile(
+    r"""
+      (?P<sep> ;|\|\||\||&&|\n|(?<![>&])&(?!>) )
+    | '[^']*'
+    | "(?:\\.|[^"\\])*"
+    | \\.
+    | [^;|&\n'"\\]+
+    | .
+    """,
+    re.VERBOSE | re.DOTALL,
+)
 
-    Tracks single/double quotes and backslash escapes so separators inside
-    quoted strings stay in their segment. `&&` and `||` are single
-    separators; a lone `&` separates (background job), but `>&` and `&>`
-    redirections stay in the segment text.
-    """
+
+def split_segments(command: str) -> list[str]:
+    """Split a shell command on unquoted separators into trimmed segments."""
     segments: list[str] = []
     current: list[str] = []
-    in_single = False
-    in_double = False
-    escaped = False
-    i = 0
-    while i < len(command): # claude: Huh, really? Why do you need so many modifier. Can't you just for i in range or something. This is extremely not dry and very hacky here
-        ch = command[i]
-        pair = command[i : i + 2]
-        step = 1
-        match ch:
-            case _ if escaped:
-                current.append(ch)
-                escaped = False
-            case "\\" if not in_single:
-                current.append(ch)
-                escaped = True
-            case "'" if not in_double:
-                in_single = not in_single
-                current.append(ch)
-            case '"' if not in_single:
-                in_double = not in_double
-                current.append(ch)
-            case _ if in_single or in_double:
-                current.append(ch)
-            case _ if pair in TWO_CHAR_SEPARATORS:
-                segments.append("".join(current))
-                current = []
-                step = 2
-            case ";" | "|" | "\n":
-                segments.append("".join(current))
-                current = []
-            case "&" if pair != "&>" and (not current or current[-1] != ">"):
-                segments.append("".join(current))
-                current = []
-            case _:
-                current.append(ch)
-        i += step
+    for token in SEGMENT_TOKEN.finditer(command):
+        if token.lastgroup == "sep":
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(token.group())
     segments.append("".join(current))
     return [stripped for s in segments if (stripped := s.strip())]
 
 
 def has_substitution(segment: str) -> bool:
-    # claude: Why is this needed?
     """True when the segment contains command or process substitution.
 
     `$(`, backticks, `<(`, and `>(` can execute arbitrary commands, so a
@@ -222,7 +235,6 @@ def has_substitution(segment: str) -> bool:
 
 
 def evaluate_segment(segment: str) -> Allow | Deny | Ask | None:
-    # claude: Same here
     """Apply RULES to a single segment; the last matching rule wins."""
     matched: Allow | Deny | Ask | None = None
     for rule in RULES:
@@ -232,6 +244,14 @@ def evaluate_segment(segment: str) -> Allow | Deny | Ask | None:
 
 
 def decide(command: str) -> HookOutput | None:
+    """Combine the per-segment verdicts into one decision for the command.
+
+    A compound command is only as safe as its least-safe part, so the verdicts
+    combine conservatively: any denied segment denies the whole command; any
+    segment no rule recognizes (or any auto-allow that hides a substitution)
+    forces a fall-through to the user; an explicit ask outranks allow; and the
+    command auto-allows only when every segment does.
+    """
     segments = split_segments(command)
     if not segments:
         return None
