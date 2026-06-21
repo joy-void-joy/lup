@@ -142,8 +142,8 @@ def apply_repl_overrides(
     if not no_tools and not no_prompt:
         return
 
-    from lup.adapters.claude import ClaudeAdapter
-    from lup.adapters.codex import CodexAdapter
+    from lup.adapters.claude.adapter import ClaudeAdapter
+    from lup.adapters.codex.adapter import CodexAdapter
 
     match adapter:
         case ClaudeAdapter():
@@ -186,11 +186,11 @@ def build_repl_adapter(
     if model:
         settings.model = model
     try:
-        adapter, adapter_ctx, _notes = build_adapter("repl")
+        built, _notes = build_adapter("repl")
     finally:
         settings.model = original_model
-    apply_repl_overrides(adapter, no_tools=no_tools, no_prompt=no_prompt)
-    return adapter, adapter_ctx
+    apply_repl_overrides(built.adapter, no_tools=no_tools, no_prompt=no_prompt)
+    return built.adapter, built.lifecycle
 
 
 def print_response_stats(response: LupResponse, console: "Console") -> float:

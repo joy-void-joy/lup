@@ -6,7 +6,8 @@
     confirmed that config.toml command hooks never fire on the Codex builds
     this project targets, so production code deliberately does **not** use
     this module: permission enforcement is native instead (the
-    workspace-write sandbox in :func:`lup.adapters.codex.build_sandbox_config_overrides`).
+    workspace-write sandbox in
+    :func:`lup.adapters.codex.adapter.build_sandbox_config_overrides`).
     This module is imported only by tests and kept as a reference for the
     hook-config wire format should Codex hooks start firing. Do not wire it
     into a live adapter without re-verifying that the runtime honors the
@@ -39,7 +40,7 @@ import sys
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from lup.adapters.codex import CodexHookConfig
+from lup.adapters.codex.adapter import CodexHookConfig
 from lup.types import LupHooksConfig
 
 

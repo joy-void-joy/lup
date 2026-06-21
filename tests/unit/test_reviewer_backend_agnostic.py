@@ -1,9 +1,10 @@
-"""Reviewer option narrowing by model backend (reflect.run_reviewer).
+"""The reviewer never inspects the backend (reflect.run_reviewer).
 
-The config docs say "override the reviewer model to stay single-provider".
-That only holds if run_reviewer stops passing Claude-only options to
-non-Anthropic backends — query() rejects tools/max_turns/permission_mode
-there. These tests pin the narrowed call shape on both routes.
+Backend concerns live only in the adapter layer: ``run_reviewer`` asks for the
+full reviewer setup — file tools, a thinking budget, a turn cap — on every
+backend, and ``query`` (not the template tool) decides what the chosen backend
+can honor. These tests pin that the call shape is identical regardless of the
+reviewer's model, so the tool carries no ``match`` on the backend.
 """
 
 import pytest
@@ -30,7 +31,7 @@ class QueryRecorder:
         return LupResponse(blocks=[LupTextBlock(text="critique")])
 
 
-async def test_anthropic_reviewer_keeps_full_options(
+async def test_reviewer_asks_for_full_options_on_claude(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     recorder = QueryRecorder()
@@ -43,14 +44,18 @@ async def test_anthropic_reviewer_keeps_full_options(
     assert recorder.kwargs["max_turns"] == 5
 
 
-async def test_non_claude_reviewer_drops_claude_only_options(
+async def test_reviewer_call_shape_is_backend_agnostic(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    recorder = QueryRecorder()
-    monkeypatch.setattr(reflect, "query", recorder)
+    """A non-Claude reviewer gets the same full option set — query() degrades it."""
+    claude = QueryRecorder()
+    monkeypatch.setattr(reflect, "query", claude)
+    await reflect.run_reviewer(make_input(), None, model="claude-sonnet-4-6")
 
-    critique = await reflect.run_reviewer(make_input(), None, model="gpt-5.5")
+    gpt = QueryRecorder()
+    monkeypatch.setattr(reflect, "query", gpt)
+    await reflect.run_reviewer(make_input(), None, model="gpt-5.5")
 
-    assert critique == "critique"
+    assert set(claude.kwargs) == set(gpt.kwargs)
     for claude_only in ("tools", "max_turns", "permission_mode", "max_thinking_tokens"):
-        assert claude_only not in recorder.kwargs
+        assert gpt.kwargs[claude_only] == claude.kwargs[claude_only]

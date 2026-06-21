@@ -26,54 +26,16 @@ Usage:
 """
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any  # claude: ignore — for the ServerConfig alias
+from typing import TYPE_CHECKING
 
-from lup.mcp import LupMcpServerConfig, LupMcpTool, server_tool_names
+from lup.adapters.claude.tools import CLAUDE_BUILTIN_TOOLS, FRAMEWORK_TOOLS
+from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_names
 
 if TYPE_CHECKING:
     from lup_template.agent.config import Settings
 
-# An MCP server entry is either an in-process LupMcpServerConfig or a raw SDK
-# McpServerConfig (stdio/http/sse). core.py narrows each by hasattr(server,
-# "server"), which pyright can't follow through that union — so the dict is
-# typed Any here and resolved at the conversion site.
-# claude: What? This is extremely confusing. Why do you type alias any? Seems like something that should stay purely in the backend?
-type ServerConfig = Any  # claude: ignore — runtime-narrowed union, see above
-
-
-# =============================================================================
-# TOOL SETS - Define tools that require specific API keys
-# =============================================================================
-
-# Claude Agent SDK builtin tool names — consumed only by build_options()
-# on the Claude path. Codex/OpenAI agents get tools from the served MCP
-# groups (toolsets.py) plus the Codex runtime's native shell/file/web tools.
-
-# claude: I feel like this could be unified? Also, this feels fundamental enough thaat I don't understand why this is in the template
-CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(
-    {
-        "Bash",
-        "Edit",
-        "Glob",
-        "Grep",
-        "NotebookEdit",
-        "Read",
-        "Task",
-        "TodoWrite",
-        "WebFetch",
-        "WebSearch",
-        "Write",
-    }
-)
-
-# Tools the agent always needs, regardless of any dependency. StructuredOutput
-# is how the agent emits its final result under ClaudeAgentOptions.output_format,
-# so the allowlist must carry it even though no template tool defines it.
-FRAMEWORK_TOOLS: frozenset[str] = frozenset({"StructuredOutput"})
-
 
 class ToolPolicy:
-    # claude: Are you sure this should be in template? Seems like the construct itself should be universal and go in lib?
     """Centralized policy for tool availability.
 
     Determines which tools are available based on:
@@ -104,10 +66,6 @@ class ToolPolicy:
             tags.add("requires:example-api")
 
         # TODO: Add your name-set exclusion logic
-        # claude: Yes. TODOs are great. I think we should have more TODOs for the agent in the template, there's not enough of those
-        # Example:
-        # if self.restricted_mode:
-        #     excluded.update(LIVE_DATA_TOOLS)
 
         self.excluded_tools: frozenset[str] = frozenset(excluded)
         self.excluded_tags: frozenset[str] = frozenset(tags)
@@ -123,7 +81,7 @@ class ToolPolicy:
 
     def get_mcp_servers(
         self, *additional_servers: LupMcpServerConfig
-    ) -> dict[str, ServerConfig]:
+    ) -> dict[str, McpServerEntry]:
         """Get MCP server configuration based on policy.
 
         Args:
@@ -131,15 +89,15 @@ class ToolPolicy:
                 (``LupMcpServerConfig`` from ``create_mcp_server``).
 
         Returns:
-            Dict mapping server name to server config. Values are in-process
-            ``LupMcpServerConfig`` or a raw SDK ``McpServerConfig``
-            (stdio/http/sse); core.py converts the former to the SDK type at
-            build time, narrowing each value by whether it has a ``server``
-            attribute.
+            Dict mapping server name to an in-process ``LupMcpServerConfig`` or
+            an external transport config (stdio/http/sse). The Claude adapter
+            narrows each value by ``isinstance``: the in-process case has a
+            ``Server`` instance to register, the external case is passed
+            through as-is.
 
         Customize this to return your domain's MCP servers.
         """
-        servers: dict[str, ServerConfig] = {}
+        servers: dict[str, McpServerEntry] = {}
 
         # Add any additional servers passed in
         for server in additional_servers:
@@ -177,7 +135,7 @@ class ToolPolicy:
         """Filter tool-group names by policy (subprocess-served backends)."""
         return tuple(name for name in names if self.group_enabled(name))
 
-    def get_allowed_tools(self, servers: dict[str, ServerConfig]) -> list[str]:
+    def get_allowed_tools(self, servers: dict[str, McpServerEntry]) -> list[str]:
         """Compute every tool name the agent may call (Claude path only —
         Codex/OpenAI tool availability is the served MCP groups).
 
