@@ -90,7 +90,7 @@ researcher = SubagentSpec(
     ),
     prompt=RESEARCHER_PROMPT,
     tools=research_tools(),
-    model="haiku",
+    model="claude-opus-4-6",
 )
 
 
@@ -126,9 +126,8 @@ analyzer = SubagentSpec(
     ),
     prompt=ANALYZER_PROMPT,
     tools=analysis_tools(),
-    model="haiku",
+    model="claude-opus-4-6",
 )
-# claude: Okay this make sense. Please ensure (in claude.md and in the doc and everywhere to advise to always use opus4.6 at least (or Fable) for everything. There are often little reason to use cheaper models like Sonnet and almost never to use Haiku. We are on subscription and want the best result )
 
 
 # =============================================================================

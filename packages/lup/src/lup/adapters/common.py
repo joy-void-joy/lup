@@ -266,7 +266,7 @@ async def query(
     Returns a ``LupResponse`` — use ``.text`` for text or
     ``.output(MyModel)`` for structured output.
     """
-    effective_model = model or "claude-sonnet-4-6"
+    effective_model = model or "claude-opus-4-6"
     backend = backend or model_backend(effective_model)
 
     output_schema = output_type.model_json_schema() if output_type else None

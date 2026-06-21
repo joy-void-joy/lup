@@ -340,6 +340,10 @@ Use `/lup:merge` (with no argument) for guided conflict resolution. See the comm
 - **pydantic**: For data validation and settings
 - **pydantic-settings**: For configuration (not dotenv)
 
+### Model Selection
+
+Default to **Opus 4.6** (`claude-opus-4-6`) — or **Fable** (`claude-fable-5`) — for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for Sonnet only when latency or cost provably dominates and quality is non-critical, and for Haiku almost never. A role that genuinely warrants a cheaper model declares it explicitly with a reason; otherwise it inherits the Opus-class default.
+
 ### Type Safety
 
 - **Never silently swallow exceptions** — no `except ...: pass`, no `contextlib.suppress`; log with `logger.exception()`, handle meaningfully, or re-raise. Catch-all `except Exception` is fine at boundaries (task loops, subagent delegation) that do so; bare `except:` and `except BaseException` are never fine

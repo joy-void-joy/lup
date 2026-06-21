@@ -160,7 +160,7 @@ def create_background_agent(
                 tools=tools or [],
                 build_message=build_message,
                 start_message=start_message,
-                model=model or "claude-sonnet-4-6",
+                model=model or "claude-opus-4-6",
                 debounce_seconds=debounce_seconds,
                 builtin_tools=builtin_tools,
                 allowed_tools=allowed_tools,
