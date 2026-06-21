@@ -18,8 +18,6 @@ class LazyCommand:
     deferred to the first call or sub-command attribute access instead.
     """
 
-    # claude: Didn't get that. Why do we need LazyCommand? As in, when is it used? Is it just to construct the command at top-level without crashing the import?
-
     def __init__(self, name: str, *bake_args: str, tty_out: bool = True) -> None:
         self.name = name
         self.bake_args = bake_args

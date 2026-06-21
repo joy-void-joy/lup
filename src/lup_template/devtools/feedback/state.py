@@ -67,10 +67,14 @@ class SessionData(TypedDict, total=False):
 # CUSTOMIZE THESE MODELS FOR YOUR DOMAIN
 # =============================================================================
 
-# claude: Sounds like something where we should have a todo
 
 class SessionResult(BaseModel):
     """A session matched with its outcome/feedback.
+
+    TODO(customize): replace ``outcome``/``metrics`` with the fields your
+    domain scores on. This is the per-domain shape the whole feedback loop
+    aggregates over (``/lup:init`` customization step 9); the generic fields
+    below only carry sessions through unscored until you do.
 
     Customize this for your domain. Examples:
 
