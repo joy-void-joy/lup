@@ -32,7 +32,6 @@ from pydantic import BaseModel, Field
 from lup.adapters.common import query
 from lup.mcp import LupMcpTool, lup_tool
 from lup.reflect import ReflectionGate
-from lup.types import model_backend
 
 logger = logging.getLogger(__name__)
 
@@ -154,12 +153,13 @@ async def run_reviewer(
 ) -> str | None:
     """Run the reviewer sub-agent and return its critique text.
 
-    Cross-backend note: ``query`` routes by model name. The template
-    wires ``reviewer_model=aux_model()`` (config.py), so the reviewer
-    follows the session's backend by default — no Anthropic credentials
-    needed on ``AGENT_SDK=codex``/``openai``. A non-Anthropic reviewer
-    narrows to what that backend's one-shot queries support — a text
-    critique without file tools or historical calibration.
+    The tool never inspects the backend: it asks for the full reviewer setup —
+    file tools over past outputs, a thinking budget, a turn cap — and ``query``
+    keeps what the chosen backend can honor, dropping the rest with a log line.
+    ``query`` routes by model name, and the template wires
+    ``reviewer_model=aux_model()`` (config.py), so the reviewer follows the
+    session's backend without Anthropic credentials on ``AGENT_SDK=codex``/
+    ``openai`` — where it degrades to a one-shot text critique.
 
     Args:
         validated: The reflection input from the main agent.
@@ -175,34 +175,16 @@ async def run_reviewer(
 
     reviewer_prompt = "\n\n".join(prompt_sections)
 
-    match model_backend(model):
-        case "anthropic":
-            response = await query(
-                reviewer_prompt,
-                prefix="  ↳ [reviewer] ",
-                model=model,
-                system_prompt=REVIEWER_SYSTEM_PROMPT.format(
-                    outputs_dir=outputs_dir or "N/A",
-                ),
-                max_thinking_tokens=8000,
-                permission_mode="bypassPermissions",
-                tools=["Read", "Glob", "Grep", "WebFetch"],
-                max_turns=5,
-            )
-        case backend:
-            logger.info(
-                "Reviewer on %s backend: one-shot text critique "
-                "(no file tools, no historical calibration)",
-                backend,
-            )
-            response = await query(
-                reviewer_prompt,
-                prefix="  ↳ [reviewer] ",
-                model=model,
-                system_prompt=REVIEWER_SYSTEM_PROMPT.format(
-                    outputs_dir="N/A (no file access on this backend)",
-                ),
-            )
+    response = await query(
+        reviewer_prompt,
+        prefix="  ↳ [reviewer] ",
+        model=model,
+        system_prompt=REVIEWER_SYSTEM_PROMPT.format(outputs_dir=outputs_dir or "N/A"),
+        max_thinking_tokens=8000,
+        permission_mode="bypassPermissions",
+        tools=["Read", "Glob", "Grep", "WebFetch"],
+        max_turns=5,
+    )
 
     return response.text
 
