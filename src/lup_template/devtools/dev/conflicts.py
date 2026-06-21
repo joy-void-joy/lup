@@ -3,6 +3,10 @@
 After a failed merge or rebase, classifies conflicted files as in-scope
 (touched by this branch) or out-of-scope (only changed on the other side).
 
+The `conflicts`, `conflict_status`, `conflict_audit`, and `conflict_complete`
+entry points back the `lup-devtools dev conflict` subcommands wired in
+`lup_template.devtools.dev.app`.
+
 Examples::
 
     $ uv run lup-devtools dev conflict list
@@ -428,5 +432,3 @@ def conflict_complete(dry_run: bool) -> None:
     except sh.ErrorReturnCode as e:
         typer.echo(f"Failed to complete {operation}: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)
-
-# claude: this also doesn't seem wired in?

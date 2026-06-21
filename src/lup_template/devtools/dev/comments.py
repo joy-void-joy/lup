@@ -1,9 +1,15 @@
 """Scan tracked files for unresolved `# claude:` / `// claude:` feedback notes.
 
+Reached through the `lup-devtools dev comments` command (wired in
+`lup_template.devtools.dev.app`); `report`, `commit_prompts`, and
+`clear_markers` back its default listing and its `--commit` / `--clear` modes.
+
 Examples::
 
     $ uv run lup-devtools dev comments
     $ uv run lup-devtools dev comments --json
+    $ uv run lup-devtools dev comments --commit
+    $ uv run lup-devtools dev comments --clear path/to/file.py:42
 """
 
 from pathlib import Path
@@ -12,13 +18,8 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.markers import MARKER_RE, FeedbackComment, find_feedback
+from lup.markers import MARKER_RE, FeedbackComment, find_feedback, scan_mode_for
 from lup_template.devtools.utils import decode_stderr, git, output_json
-
-MARKDOWN_SUFFIXES = {
-    ".md",
-    ".markdown",
-}  # claude: Huh? Why is this needed? We can just always scan for # claude, // claude, etc... in all files
 
 
 class FoundComment(BaseModel):
@@ -40,9 +41,8 @@ def scan_feedback() -> list[FoundComment]:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        is_md = path.suffix.lower() in MARKDOWN_SUFFIXES
         lines = text.splitlines()
-        for comment in find_feedback(text, is_markdown=is_md):
+        for comment in find_feedback(text, scan_mode_for(path)):
             context = "\n".join(lines[comment.read_start - 1 : comment.read_end])
             results.append(
                 FoundComment(file=rel, context=context, **comment.model_dump())
@@ -98,9 +98,8 @@ def clear_markers(targets: list[str]) -> None:
         except (OSError, UnicodeDecodeError):
             typer.echo(f"Skipping unreadable file: {rel}", err=True)
             continue
-        is_md = path.suffix.lower() in MARKDOWN_SUFFIXES
         lines = text.splitlines()
-        spans = {c.start_line: c for c in find_feedback(text, is_markdown=is_md)}
+        spans = {c.start_line: c for c in find_feedback(text, scan_mode_for(path))}
         removed = 0
         for line_no in sorted(wanted, reverse=True):
             comment = spans.get(line_no)
@@ -154,6 +153,3 @@ def report(as_json: bool, commit: bool) -> None:
         typer.echo(f"    {comment.text}")
     files = {comment.file for comment in found}
     typer.echo(f"\n{len(found)} comment(s) in {len(files)} file(s)")
-
-
-# claude: This does not seem wired in? The docstring say we can call lup-devtools run comments, but I don't see how that works here
