@@ -127,6 +127,63 @@ def capability_matrix_markdown(adapters: Mapping[str, AdapterCapabilities]) -> s
     return "\n".join(lines)
 
 
+class OneShotOptions(BaseModel):
+    """The capability-gated options of a one-shot :func:`query`.
+
+    Carries only the knobs a weak backend may not honor. ``tools``,
+    ``allowed_tools``, and ``permission_mode`` need the in-process hook/permission
+    machinery (``capabilities.hooks``); ``max_turns`` and ``max_thinking_tokens``
+    map to their own capability flags. :func:`degrade_unsupported` returns a copy
+    with the unsupported ones cleared.
+    """
+
+    tools: list[str] | None = None
+    allowed_tools: list[str] | None = None
+    permission_mode: PermissionMode | None = None
+    max_turns: int | None = None
+    max_thinking_tokens: int | None = None
+
+
+def degrade_unsupported(
+    options: OneShotOptions,
+    capabilities: AdapterCapabilities,
+    *,
+    backend: Backend,
+    model: str,
+) -> OneShotOptions:
+    """Drop one-shot options the backend cannot honor, logging each.
+
+    The one-shot counterpart of ``core.check_settings_supported``: a single
+    ``query()`` has no session the caller manages, so over-asking degrades to
+    what the backend supports (with a log line) rather than raising. A tool can
+    therefore express its full intent — file tools, a turn cap — and let the
+    adapter layer honor what it can. Tool-using options need ``hooks`` (the
+    permission machinery); the turn and thinking caps need their own flags.
+    """
+    kept = options.model_copy()
+    dropped: list[str] = []
+    if not capabilities.hooks:
+        for field in ("tools", "allowed_tools", "permission_mode"):
+            if getattr(kept, field) is not None:
+                setattr(kept, field, None)
+                dropped.append(field)
+    if not capabilities.max_turns and kept.max_turns is not None:
+        kept.max_turns = None
+        dropped.append("max_turns")
+    if not capabilities.max_thinking_tokens and kept.max_thinking_tokens is not None:
+        kept.max_thinking_tokens = None
+        dropped.append("max_thinking_tokens")
+    if dropped:
+        logger.info(
+            "query() options %s are not supported on the %s backend "
+            "(model=%r); proceeding without them.",
+            sorted(dropped),
+            backend,
+            model,
+        )
+    return kept
+
+
 class TurnTimeoutError(RuntimeError):
     """A turn exceeded its wall-clock timeout and was cancelled client-side.
 

@@ -19,11 +19,11 @@ if TYPE_CHECKING:
     from claude_agent_sdk import ClaudeAgentOptions
     from claude_agent_sdk.types import EffortLevel
 
-    from lup.adapters.codex import UsageCost
     from lup.adapters.common import AgentAdapter
     from lup.notes import NotesConfig
     from lup.realtime_relay import RealtimeMailbox
     from lup.sandbox import Sandbox
+    from lup.types import UsageCost
 
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult

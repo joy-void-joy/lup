@@ -23,12 +23,11 @@ from lup.adapters.codex import (
     CodexAdapter,
     CodexHookConfig,
     CodexUsageNormalizer,
-    UsageCost,
     require_codex_sdk,
 )
 from lup.adapters.common import Conversation
 from lup.trace import TraceLogger
-from lup.types import LupResponse
+from lup.types import LupResponse, UsageCost
 
 logger = logging.getLogger(__name__)
 
