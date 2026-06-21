@@ -28,40 +28,11 @@ Usage:
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from lup.adapters.claude.tools import CLAUDE_BUILTIN_TOOLS, FRAMEWORK_TOOLS
 from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_names
 
 if TYPE_CHECKING:
     from lup_template.agent.config import Settings
-
-
-# =============================================================================
-# TOOL SETS - Define tools that require specific API keys
-# =============================================================================
-
-# Claude Agent SDK builtin tool names — consumed only by build_options()
-# on the Claude path. Codex/OpenAI agents get tools from the served MCP
-# groups (toolsets.py) plus the Codex runtime's native shell/file/web tools.
-
-CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(
-    {
-        "Bash",
-        "Edit",
-        "Glob",
-        "Grep",
-        "NotebookEdit",
-        "Read",
-        "Task",
-        "TodoWrite",
-        "WebFetch",
-        "WebSearch",
-        "Write",
-    }
-)
-
-# Tools the agent always needs, regardless of any dependency. StructuredOutput
-# is how the agent emits its final result under ClaudeAgentOptions.output_format,
-# so the allowlist must carry it even though no template tool defines it.
-FRAMEWORK_TOOLS: frozenset[str] = frozenset({"StructuredOutput"})
 
 
 class ToolPolicy:

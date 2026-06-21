@@ -70,27 +70,20 @@ from typing import Literal, overload
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKClient,
-    ContentBlock,
-    Message,
-    TextBlock,
 )
 from claude_agent_sdk.types import (
     AgentDefinition,
-    AssistantMessage,
     HookEvent,
     HookMatcher,
     McpServerConfig,
-    ResultMessage,
-    SystemMessage,
     SystemPromptPreset,
     ToolsPreset,
-    UserMessage,
 )
 from pydantic import BaseModel
 
-from lup.adapters.claude.adapter import claude_message_to_lup, collect_lup_response
+from lup.adapters.claude.adapter import ResponseCollector, collect_lup_response
 from lup.adapters.common import PermissionMode
-from lup.trace import TraceLogger, print_message
+from lup.trace import TraceLogger
 from lup.types import LupResponse
 
 logger = logging.getLogger(__name__)
@@ -105,118 +98,6 @@ JsonSchema = dict[str, object]  # claude: ignore — JSON Schema is an open docu
 
 OutputFormat = dict[str, str | JsonSchema]
 """SDK output format dict (e.g. ``{"type": "json_schema", "schema": ...}``)."""
-
-
-# ---------------------------------------------------------------------------
-# Response collector
-# ---------------------------------------------------------------------------
-
-
-class ResponseCollector:
-    """Collects, displays, and logs agent response messages.
-
-    Supports two usage patterns:
-
-    **async for** — iterate messages yourself, no automatic display::
-
-        collector = ResponseCollector(client, trace_logger=trace_logger)
-        async for message in collector:
-            print_message(message)
-
-    **collect()** — drain all messages with automatic display and tracing::
-
-        collector = ResponseCollector(client, trace_logger=trace_logger)
-        result = await collector.collect()
-
-    After iteration, access accumulated state:
-    ``collector.blocks``, ``collector.tool_results``,
-    ``collector.messages``, ``collector.result``.
-    """
-
-    def __init__(
-        self,
-        client: ClaudeSDKClient,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> None:
-        self.client = client
-        self.blocks: list[ContentBlock] = []
-        self.tool_results: list[ContentBlock] = []
-        self.messages: list[AssistantMessage | UserMessage] = []
-        self.result: ResultMessage | None = None
-        self.trace_logger = trace_logger
-        self.prefix = prefix
-
-    @property
-    def text(self) -> str | None:
-        """Concatenated text from all assistant text blocks.
-
-        Returns ``None`` when no text blocks were produced.  Access
-        after ``collect()`` (called automatically by ``query()``).
-        """
-        texts = [b.text for b in self.blocks if isinstance(b, TextBlock)]
-        return "\n\n".join(texts) if texts else None
-
-    def output[T: BaseModel](self, output_type: type[T]) -> T | None:
-        """Extract structured output as a validated Pydantic model.
-
-        Returns ``None`` when the agent produced no structured output.
-        """
-        if self.result is not None and self.result.structured_output:
-            return output_type.model_validate(self.result.structured_output)
-        return None
-
-    async def __aiter__(self) -> AsyncIterator[Message]:
-        """Yield messages, accumulating state but not displaying.
-
-        Raises RuntimeError on agent error results — after logging,
-        tracing, and yielding the failing ResultMessage, so consumers
-        see it and the trace records what went wrong.
-        """
-        async for message in self.client.receive_response():
-            match message:
-                case AssistantMessage():
-                    self.messages.append(message)
-                    for block in message.content:
-                        self.blocks.append(block)
-
-                case ResultMessage():
-                    self.result = message
-                    if message.is_error:
-                        logger.error("Agent error result: %s", message.result)
-                        if self.trace_logger:
-                            self.trace_logger.log_text(
-                                str(message.result), heading="Agent error result"
-                            )
-
-                case SystemMessage():
-                    logger.info("System [%s]: %s", message.subtype, message.data)
-
-                case UserMessage():
-                    self.messages.append(message)
-                    if isinstance(message.content, list):
-                        for block in message.content:
-                            self.tool_results.append(block)
-
-            yield message
-
-            if isinstance(message, ResultMessage) and message.is_error:
-                raise RuntimeError(f"Agent error: {message.result}")
-
-    async def collect(self) -> ResultMessage:
-        """Drain all messages, displaying and tracing each one.
-
-        Raises:
-            RuntimeError: If the agent returns an error or no result.
-        """
-        async for message in self:
-            lup_msg = claude_message_to_lup(message)
-            if lup_msg is not None:
-                print_message(lup_msg, prefix=self.prefix, trace=self.trace_logger)
-
-        if self.result is None:
-            raise RuntimeError("No result received from agent")
-        return self.result
 
 
 # ---------------------------------------------------------------------------
