@@ -21,9 +21,6 @@ from lup.mcp import LupMcpTool
 logger = logging.getLogger(__name__)
 
 
-# claude: Huh? Reading this it's unclear what this is and in particular, how it differs with claude.py, what its main purpose is, etc
-
-
 class ClaudeBackgroundAgent(BaseBackgroundAgent):
     """Background agent running via the Claude Agent SDK.
 
@@ -65,9 +62,7 @@ class ClaudeBackgroundAgent(BaseBackgroundAgent):
 
     async def message_generator(
         self,
-    ) -> AsyncGenerator[
-        dict[str, object], None
-    ]:  # claude: two things here. 1. the edit hook should have seen "dict[str, object]" as an anti-pattern and disallowed it, it didn't. What happened? 2. Please don't yield generic object, yield well-typed pydantic objects or something
+    ) -> AsyncGenerator[dict[str, object], None]:
         """Yield user turns: start message, then build_message on each wake."""
         yield {
             "type": "user",

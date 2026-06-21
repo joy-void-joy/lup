@@ -1,6 +1,3 @@
-# claude: This really screams "we're implementing an ABC", but there's no ABC to be seen. This seems dangerous.
-# claude: query and collector should be interfaces already specified, that it just satisfies one way or another
-
 """Centralized Agent SDK client creation and response collection.
 
 All Agent SDK client construction goes through this module to ensure

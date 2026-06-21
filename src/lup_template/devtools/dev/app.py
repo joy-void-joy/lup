@@ -4,6 +4,7 @@ from typing import Annotated
 
 import typer
 
+import lup_template.devtools.dev.antipatterns as antipatterns_mod
 import lup_template.devtools.dev.branches as branches
 import lup_template.devtools.dev.check as check
 import lup_template.devtools.dev.comments as comments
@@ -217,8 +218,22 @@ def check_cmd(
         bool,
         typer.Option("--no-test", help="Skip pytest"),
     ] = False,
+    antipatterns: Annotated[
+        bool,
+        typer.Option(
+            "--antipatterns",
+            help="Audit tracked files for missing/spurious `# claude: ignore` markers only",
+        ),
+    ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output findings as JSON (with --antipatterns)"),
+    ] = False,
 ) -> None:
     """Run ruff format, ruff check, pyright, and pytest. Read-only by default."""
+    if antipatterns:
+        antipatterns_mod.report(as_json)
+        return
     check.run_checks(fix, no_test)
 
 

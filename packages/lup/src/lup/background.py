@@ -150,7 +150,7 @@ def create_background_agent(
         allowed_tools: Tool allowlist (Claude only).
         on_response: Callback for responses.
     """
-    match sdk:  # claude: Please don't, this is really not the right way to make a scallable architecture
+    match sdk:
         case "claude":
             from lup.adapters.claude_background import ClaudeBackgroundAgent
 
