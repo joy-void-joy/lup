@@ -1,9 +1,15 @@
-# claude: Shouldn't it be __main__.py instead ?
-# claude: Or app.py, following your own convention
 """Root CLI app composing all devtools sub-apps.
 
 All development tooling is exposed as the ``lup-devtools`` entry point.
 Each sub-app groups related commands.
+
+The module is ``main.py`` rather than ``__main__.py`` or ``app.py`` because
+``lup-devtools`` is launched through the ``[project.scripts]`` console entry
+point (``lup_template.devtools.main:app``), never as ``python -m
+lup_template.devtools``. A ``__main__.py`` would imply the latter and add a
+second launch path to keep in sync; ``app.py`` is reserved for the per-sub-app
+modules (``dev/app.py``, ``trace/app.py``, ...) so the root composer keeps a
+distinct name.
 
 Examples::
 
