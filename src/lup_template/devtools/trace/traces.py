@@ -506,9 +506,5 @@ def capabilities(as_json: bool) -> None:
 
     typer.echo(f"\n=== Capability Requests ({len(results)} found) ===\n")
 
-    for req in results[:30]:  # claude: Please don't arbitrarily truncate
-        text = req["text"]
-        text_short = (
-            text[:80] + "..." if len(text) > 80 else text
-        )  # claude: Same here. 30 and 80 comes out of nowhere
-        typer.echo(f"- {text_short}")
+    for req in results:
+        typer.echo(f"- {req['text']}")

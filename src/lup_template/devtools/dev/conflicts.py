@@ -25,7 +25,13 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup_template.devtools.utils import git, decode_stderr, output_json
+from lup_template.devtools.utils import (
+    format_table,
+    git,
+    decode_stderr,
+    output_json,
+    short_sha,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -194,12 +200,16 @@ def conflicts(as_json: bool) -> None:
         return
 
     typer.echo(f"\nConflict state: {report['state']}")
-    typer.echo(f"Merge base: {report['base'][:10]}")
-    typer.echo(f"\n{'File':<50} {'Conflicts':>10} {'Scope':>15}")
-    typer.echo("-" * 78)
-
-    for f in report["files"]:
-        typer.echo(f"{f['path']:<50} {f['conflict_count']:>10} {f['scope']:>15}")
+    typer.echo(f"Merge base: {short_sha(report['base'])}")
+    rows = [(f["path"], str(f["conflict_count"]), f["scope"]) for f in report["files"]]
+    typer.echo()
+    typer.echo(
+        format_table(
+            ("File", "Conflicts", "Scope"),
+            rows,
+            aligns=("left", "right", "right"),
+        )
+    )
 
     typer.echo(
         f"\nIn-scope: {report['in_scope_count']}, "
@@ -294,12 +304,12 @@ def conflict_status(as_json: bool) -> None:
         ours_raw = str(
             git("log", "--oneline", f"{merge_base}..HEAD", _ok_code=[0])
         ).strip()
-        ours_commits = [line for line in ours_raw.splitlines() if line][:10]
+        ours_commits = [line for line in ours_raw.splitlines() if line]
 
         theirs_raw = str(
             git("log", "--oneline", f"{merge_base}..{theirs_ref}", _ok_code=[0])
         ).strip()
-        theirs_commits = [line for line in theirs_raw.splitlines() if line][:10]
+        theirs_commits = [line for line in theirs_raw.splitlines() if line]
     except sh.ErrorReturnCode:
         pass
 

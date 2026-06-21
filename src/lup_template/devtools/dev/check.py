@@ -47,9 +47,9 @@ def run_checks(fix: bool, no_test: bool) -> None:
     if fix:
         modified = str(git("diff", "--name-only", _ok_code=[0])).strip()
         if modified:
-            count = len(modified.splitlines())
-            typer.echo(f"  auto-fixed {count} file(s)")
-            for f in modified.splitlines()[:10]:
+            changed = modified.splitlines()
+            typer.echo(f"  auto-fixed {len(changed)} file(s)")
+            for f in changed:
                 typer.echo(f"    {f}")
 
     # pyright
@@ -78,7 +78,7 @@ def run_checks(fix: bool, no_test: bool) -> None:
     found = scan_feedback()
     if found:
         typer.echo(f"claude comments: FAIL ({len(found)} unresolved)")
-        for comment in found[:10]:
+        for comment in found:
             typer.echo(f"  {comment.file}:{comment.start_line}-{comment.end_line}")
         results.append(("claude comments", False))
     else:
