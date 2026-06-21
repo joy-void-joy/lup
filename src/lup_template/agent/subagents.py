@@ -28,25 +28,16 @@ from lup.types import SubagentSpec
 # =============================================================================
 # TOOL LISTS (customize for your domain)
 # =============================================================================
-#
-# Tool lists are functions so the selection logic (which tools depend on
-# which API keys, etc.) lives in one place. The specs below are module
-# claude: Really not understandable what this mean. What should I care? is it just a list of str that subagents will have access to?
-# constants, so these functions run once at import. To pick tools per
-# session instead, build the specs inside get_subagent_specs() so the
-# functions run at session-build time (when settings are loaded).
-#
-# Example with conditional inclusion:
-#   def research_tools() -> list[str]:
-#       from lup_template.agent.config import settings
-#       tools = ["WebSearch", "WebFetch", "Read", "Glob"]
-#       if settings.exa_api_key:
-#           tools.append("mcp__search__search_exa")
-#       return tools
 
 
 def research_tools() -> list[str]:
-    """Tools for research subagents."""
+    """Names of the tools a research subagent is allowed to call.
+
+    A function rather than a constant so that a tool which depends on a
+    configured API key can be added conditionally, keeping that choice
+    beside the rest of the selection. Resolved at import here; to vary it
+    per session, call it from :func:`get_subagent_specs` instead.
+    """
     return [
         "WebSearch",
         "WebFetch",
@@ -56,7 +47,7 @@ def research_tools() -> list[str]:
 
 
 def analysis_tools() -> list[str]:
-    """Tools for analysis subagents."""
+    """Names of the tools an analysis subagent is allowed to call."""
     return [
         "Read",
         "Glob",

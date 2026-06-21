@@ -1,12 +1,19 @@
-"""Conditional tool availability based on configuration.
+"""Decide which tools the agent is allowed to use this session.
 
 This is a TEMPLATE. Customize for your domain.
 
-Key patterns:
-1. Define tool sets as frozensets for fast membership testing #claude: This is bad writing. I do not care about why you re using frozensets. I care about what you're doing in this file and why. Why is it useful for. Why should I care?
-2. ToolPolicy class computes excluded tools and tags at construction
-3. get_mcp_servers() registers servers; get_allowed_tools() feeds the
-   allowlist hook that enforces availability at call time
+A tool may be unavailable because its dependency is unmet — an API key the
+settings don't carry, a mode that forbids it. :class:`ToolPolicy` is the one
+place that decision lives, so a tool that needs a key you haven't configured
+simply never reaches the agent (it can't call a tool that would only fail).
+
+Express each rule whichever way is cheaper to maintain:
+
+- by tag, when you own the tool — annotate it ``tags=["requires:<dep>"]`` at
+  its definition and let the policy drop it; the requirement travels with the
+  tool, so this file never changes as tools come and go.
+- by name, when you don't — group the full names of built-ins or external
+  server tools per dependency and subtract them.
 
 Usage:
     from lup.hooks import create_tool_allowlist_hook
@@ -18,14 +25,16 @@ Usage:
     hooks = create_tool_allowlist_hook(policy.get_allowed_tools(mcp_servers))
 """
 
-from __future__ import annotations #claude: we're on python3.14, doesn't seem to make a difference (please check)
+from __future__ import (
+    annotations,
+)  # claude: we're on python3.14, doesn't seem to make a difference (please check)
 
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any  # claude: ignore — for the ServerConfig alias
 
 from lup.mcp import LupMcpTool, server_tool_names
 
-if TYPE_CHECKING: #Icl
+if TYPE_CHECKING:  # Icl
     from lup.mcp import LupMcpServerConfig
     from lup_template.agent.config import Settings
 
@@ -62,35 +71,10 @@ CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-# Tools the SDK injects for the session itself, outside the builtin
-# toolset: StructuredOutput emits the final structured output when
-# ClaudeAgentOptions.output_format is set, so denying it would leave the
-# agent unable to finish.
-# claude: What? You're saying "we shouldn't deny it", but I don't even know why I would have denied it in the first place
+# Tools the agent always needs, regardless of any dependency. StructuredOutput
+# is how the agent emits its final result under ClaudeAgentOptions.output_format,
+# so the allowlist must carry it even though no template tool defines it.
 FRAMEWORK_TOOLS: frozenset[str] = frozenset({"StructuredOutput"})
-
-# Two complementary mechanisms control which tools the agent gets:
-#
-# 1. Tags (primary) — declare the requirement on the tool itself:
-# claude: What? What are tags? How are they defined?
-#
-#        @lup_tool("...", tags=["requires:example-api"])
-#
-#    ``__init__`` maps missing settings to excluded tags, and
-#    ``filter_tools()`` drops tagged tools before server registration.
-#    The requirement lives next to the tool definition, so adding or
-#    renaming a tool never means editing this file.
-#
-# 2. Name sets — for tools you don't define (built-ins, external
-#    servers), group full tool names per dependency and subtract them
-#    via ``excluded_tools``:
-#
-#        LIVE_DATA_TOOLS: frozenset[str] = frozenset({
-#            "WebSearch",
-#            "mcp__external__live_quote",
-#        })
-#
-#    Name exclusions are enforced by the allowlist hook at call time.
 
 
 class ToolPolicy:
@@ -121,7 +105,6 @@ class ToolPolicy:
 
         # Tags: map each unmet requirement to its tag (TEMPLATE example —
         # replace with your domain's keys).
-        #claude: I really don't know if I buy this whole tag logic
         if not settings.example_api_key:
             tags.add("requires:example-api")
 
