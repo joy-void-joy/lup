@@ -1,4 +1,10 @@
-"""build_options wiring: limits from settings and optional sandbox server."""
+"""build_inprocess_options wiring: limits from settings and the served tool servers.
+
+The in-process assembly produces a backend-agnostic ``LupAgentOptions``; the
+Claude builder turns it into native options later. These pin that session
+limits reach the neutral object and that the example group never ships as a
+session tool server.
+"""
 
 from pathlib import Path
 
@@ -7,7 +13,7 @@ import pytest
 from lup.notes import NotesConfig
 
 from lup_template.agent.config import settings
-from lup_template.agent.core import build_options
+from lup_template.agent.core import build_inprocess_options
 
 
 @pytest.fixture
@@ -27,7 +33,7 @@ def test_limits_from_settings_reach_options(
     monkeypatch.setattr(settings, "max_turns", 7)
     monkeypatch.setattr(settings, "max_budget_usd", 2.5)
 
-    options = build_options(notes, sandbox=None)
+    options = build_inprocess_options(notes, sandbox=None)
 
     assert options.max_turns == 7
     assert options.max_budget_usd == 2.5
@@ -39,7 +45,7 @@ def test_limits_default_to_unlimited(
     monkeypatch.setattr(settings, "max_turns", None)
     monkeypatch.setattr(settings, "max_budget_usd", None)
 
-    options = build_options(notes, sandbox=None)
+    options = build_inprocess_options(notes, sandbox=None)
 
     assert options.max_turns is None
     assert options.max_budget_usd is None
@@ -56,9 +62,8 @@ def test_sandbox_enabled_parses_from_env(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_no_sandbox_registers_no_sandbox_server(notes: NotesConfig) -> None:
-    options = build_options(notes, sandbox=None)
+    options = build_inprocess_options(notes, sandbox=None)
 
-    servers = options.mcp_servers
-    assert isinstance(servers, dict)
     # The example group is template sample code, not a session tool group.
-    assert set(servers) == {"notes"}
+    assert set(options.tool_servers) == {"notes"}
+    assert options.persist_session is False

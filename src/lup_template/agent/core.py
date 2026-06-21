@@ -8,22 +8,19 @@ module loads without requiring any particular SDK to be installed.
 """
 
 import logging
-from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from claude_agent_sdk import ClaudeAgentOptions
-    from claude_agent_sdk.types import EffortLevel
-
-    from lup.adapters.common import AgentAdapter
     from lup.notes import NotesConfig
-    from lup.realtime_relay import RealtimeMailbox
+    from lup.options import BuiltAdapter, LupAgentOptions
     from lup.sandbox import Sandbox
-    from lup.types import UsageCost
+    from lup.types import Backend, UsageCost
 
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
@@ -37,6 +34,16 @@ from lup.types import LupContentBlock, LupResponse, LupTextBlock, LupToolUseBloc
 from lup.paths import agent_version
 
 logger = logging.getLogger(__name__)
+
+
+class PersistentSessionResult(BaseModel):
+    """Outcome of a persistent (sleep/wake) session.
+
+    A persistent session produces no submitted output to assemble, so its
+    result is the relay bookkeeping — the number of wake-driven turns it ran.
+    """
+
+    turns: int
 
 
 def extract_sources(blocks: list[LupContentBlock]) -> list[str]:
@@ -99,35 +106,37 @@ def build_result(
     )
 
 
-def build_options(
+def build_inprocess_options(
     notes: "NotesConfig",
     *,
-    sandbox: object | None = None,
-) -> "ClaudeAgentOptions":
-    """Assemble everything one Claude session needs into its options object.
+    sandbox: "Sandbox | None" = None,
+) -> "LupAgentOptions":
+    """Assemble the neutral options for an in-process (hook-enforced) session.
 
-    The Claude adapter takes a single ``ClaudeAgentOptions``, so the
-    session's parts have to be gathered into one value before the run can
-    start: the tools it may use, the prompt that briefs it, the hooks that
-    police it, the subagents it may spawn, and the model settings. The
-    parts depend on each other in order — the toolset names the MCP
-    servers, the policy decides which of those the agent is allowed, and
-    the hooks are layered so the last word on availability is the
-    allowlist that the policy produces.
+    Gathers the session's parts into one backend-agnostic value before the run
+    can start: the MCP servers the tools live on, the prompt that briefs the
+    agent, the hooks that police it, the subagents it may spawn, and the model
+    settings. The parts depend on each other in order — the toolset names the
+    MCP servers, the policy decides which of those the agent is allowed, and
+    the hooks are layered so the last word on availability is the allowlist the
+    policy produces. The adapter's builder translates this into its native
+    option object; this function names no backend.
 
     Args:
         notes: Session notes config.
         sandbox: Optional Sandbox instance for sandboxed execution.
 
     Returns:
-        Configured ClaudeAgentOptions.
+        Backend-agnostic ``LupAgentOptions``.
     """
-    from claude_agent_sdk import ClaudeAgentOptions
-
-    from lup.adapters.claude.adapter import lup_hooks_to_claude, spec_to_claude
-    from lup.adapters.claude.options import server_to_claude
-    from lup.hooks import create_permission_hooks
+    from lup.hooks import (
+        create_completion_guard,
+        create_permission_hooks,
+        create_tool_allowlist_hook,
+    )
     from lup.mcp import create_mcp_server
+    from lup.options import LupAgentOptions
+    from lup.reflect import create_reflection_gate
     from lup.types import merge_hooks
 
     from lup_template.agent.prompts import get_system_prompt
@@ -135,18 +144,11 @@ def build_options(
     from lup_template.agent.tool_policy import ToolPolicy
     from lup_template.agent.toolsets import EXAMPLE_GROUP, build_session_toolset
 
-    session_sandbox: "Sandbox | None" = None
-    if sandbox is not None:
-        from lup.sandbox import Sandbox
-
-        if isinstance(sandbox, Sandbox):
-            session_sandbox = sandbox
-
     toolset = build_session_toolset(
         session_dir=notes.session,
         outputs_dir=notes.output.parent,
         include_subagent_tool=False,
-        sandbox=session_sandbox,
+        sandbox=sandbox,
     )
 
     policy = ToolPolicy(settings)
@@ -159,15 +161,7 @@ def build_options(
 
     policy_servers = policy.get_mcp_servers(*all_servers)
 
-    system_prompt = get_system_prompt()
-
-    hooks = create_permission_hooks(
-        rw_dirs=notes.rw,
-        ro_dirs=notes.ro,
-    )
-
-    from lup.hooks import create_completion_guard
-    from lup.reflect import create_reflection_gate
+    hooks = create_permission_hooks(rw_dirs=notes.rw, ro_dirs=notes.ro)
 
     reflection_hooks = create_reflection_gate(
         gate=toolset["gate"],
@@ -181,45 +175,23 @@ def build_options(
 
     # Tool allowlist: allowed_tools in options is ignored under
     # bypassPermissions, so availability is enforced by a PreToolUse hook.
-    from lup.hooks import create_tool_allowlist_hook
-
     allowed_tools = policy.get_allowed_tools(policy_servers)
     hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
 
-    claude_hooks = lup_hooks_to_claude(hooks)
-
-    mcp_servers = {
-        name: server_to_claude(server) for name, server in policy_servers.items()
-    }
-
-    subagent_specs = get_subagent_specs()
-    subagents = {spec.name: spec_to_claude(spec) for spec in subagent_specs}
-
-    return ClaudeAgentOptions(
+    return LupAgentOptions(
         model=settings.model,
-        system_prompt={
-            "type": "preset",
-            "preset": "claude_code",
-            "append": system_prompt,
-        },
-        # ThinkingConfigEnabled(budget_tokens=N) is the newer alternative, but
-        # max_thinking_tokens is simpler and avoids adaptive mode's variable allocation.
+        system_prompt=get_system_prompt(),
+        tool_servers=policy_servers,
+        subagents=get_subagent_specs(),
+        hooks=hooks,
+        allowed_tools=allowed_tools,
+        add_dirs=list(notes.all_dirs),
         max_thinking_tokens=settings.max_thinking_tokens,
         permission_mode=settings.permission_mode,
-        extra_args={"no-session-persistence": None},
-        hooks=claude_hooks,
-        sandbox={
-            "enabled": True,
-            "autoAllowBashIfSandboxed": True,
-            "allowUnsandboxedCommands": False,
-        },
-        mcp_servers=mcp_servers,
-        agents=subagents,
-        add_dirs=[str(d) for d in notes.all_dirs],
-        allowed_tools=allowed_tools,
+        reasoning_effort=settings.reasoning_effort,
         max_turns=settings.max_turns,
         max_budget_usd=settings.max_budget_usd,
-        effort=cast("EffortLevel | None", settings.reasoning_effort),
+        persist_session=False,
     )
 
 
@@ -326,201 +298,147 @@ def codex_budget_options() -> tuple[float | None, "UsageCost | None"]:
     return settings.max_budget_usd, usage_cost
 
 
-def build_codex_adapter(
+def build_subprocess_options(
     notes: "NotesConfig",
-) -> "AgentAdapter":
-    """Build a CodexAdapter for the agent session."""
+    *,
+    realtime: bool = False,
+) -> "LupAgentOptions":
+    """Assemble the neutral options for a subprocess (natively-sandboxed) session.
 
-    from lup.adapters.codex.adapter import CodexAdapter
-
-    from lup_template.agent.tool_policy import ToolPolicy
-    from lup_template.agent.toolsets import tool_group_names
-
-    system_prompt, mcp_env, writable_roots = build_codex_session(notes)
-    max_budget_usd, usage_cost = codex_budget_options()
-    policy = ToolPolicy(settings)
-
-    return CodexAdapter(
-        model=settings.model,
-        system_prompt=system_prompt,
-        sandbox=settings.codex_sandbox,
-        effort=settings.codex_effort or settings.reasoning_effort,
-        approval_policy=settings.codex_approval_policy,
-        mcp_tools=True,
-        mcp_env=mcp_env,
-        writable_roots=writable_roots,
-        mcp_servers=policy.filter_group_names(tool_group_names(realtime=False)),
-        max_budget_usd=max_budget_usd,
-        usage_cost=usage_cost,
-        turn_timeout_seconds=settings.turn_timeout_seconds,
-    )
-
-
-def build_codex_realtime_adapter(
-    notes: "NotesConfig",
-) -> tuple["AgentAdapter", "RealtimeMailbox"]:
-    """Build a Codex-runtime adapter (codex or openai) wired for persistent mode.
-
-    Adds the ``session`` tool group (reply, sleep, context, meta, …) to
-    the served servers and relays the realtime directory so the tool
-    subprocess and the parent share one mailbox. The returned mailbox is
-    the parent-side endpoint: :func:`run_persistent_agent` is the
-    minimal wiring (Scheduler + ``run_relay_session``); customize it for
-    your environment (customization step 8 — see PATTERNS.md,
-    Persistent Agent).
+    Enforcement on these backends is native and in-tool: the runtime's
+    workspace-write sandbox confines writes to the writable roots, and the
+    reflection gate is checked inside submit_output (the serve-tools subprocess
+    reads the flag path from the relayed env). The served tool groups gain the
+    ``session`` group in realtime mode, and the realtime directory is relayed
+    so the tool subprocess and the parent share one mailbox. This function
+    names no backend; the adapter's builder reads ``opts.realtime`` to wire the
+    mailbox.
     """
-    from lup.realtime_relay import REALTIME_DIRNAME, RealtimeMailbox
+    from lup.options import CodexOptions, LupAgentOptions
+    from lup.realtime_relay import REALTIME_DIRNAME
 
     from lup_template.agent.tool_policy import ToolPolicy
     from lup_template.agent.toolsets import tool_group_names
 
-    realtime_dir = notes.session / REALTIME_DIRNAME
+    realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
     system_prompt, mcp_env, writable_roots = build_codex_session(
         notes, realtime_dir=realtime_dir
     )
     max_budget_usd, usage_cost = codex_budget_options()
     policy = ToolPolicy(settings)
 
-    adapter: AgentAdapter
-    match settings.agent_sdk:
-        case "openai":
-            from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
-
-            adapter = OpenAICompatibleAdapter(
-                model=settings.model,
-                system_prompt=system_prompt,
-                base_url=settings.openai_base_url,
-                api_key=settings.openai_api_key,
-                model_provider=settings.openai_model_provider,
-                sandbox=settings.codex_sandbox,
-                effort=settings.codex_effort or settings.reasoning_effort,
-                approval_policy=settings.codex_approval_policy,
-                mcp_tools=True,
-                mcp_env=mcp_env,
-                writable_roots=writable_roots,
-                mcp_servers=policy.filter_group_names(tool_group_names(realtime=True)),
-                max_budget_usd=max_budget_usd,
-                usage_cost=usage_cost,
-                turn_timeout_seconds=settings.turn_timeout_seconds,
-            )
-        case _:
-            from lup.adapters.codex.adapter import CodexAdapter
-
-            adapter = CodexAdapter(
-                model=settings.model,
-                system_prompt=system_prompt,
-                sandbox=settings.codex_sandbox,
-                effort=settings.codex_effort or settings.reasoning_effort,
-                approval_policy=settings.codex_approval_policy,
-                mcp_tools=True,
-                mcp_env=mcp_env,
-                writable_roots=writable_roots,
-                mcp_servers=policy.filter_group_names(tool_group_names(realtime=True)),
-                max_budget_usd=max_budget_usd,
-                usage_cost=usage_cost,
-                turn_timeout_seconds=settings.turn_timeout_seconds,
-            )
-    check_settings_supported(adapter.capabilities)
-    return adapter, RealtimeMailbox(realtime_dir)
-
-
-def build_openai_adapter(
-    notes: "NotesConfig",
-) -> "AgentAdapter":
-    """Build an OpenAICompatibleAdapter with full tools and enforcement."""
-    from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
-
-    from lup_template.agent.tool_policy import ToolPolicy
-    from lup_template.agent.toolsets import tool_group_names
-
-    system_prompt, mcp_env, writable_roots = build_codex_session(notes)
-    max_budget_usd, usage_cost = codex_budget_options()
-    policy = ToolPolicy(settings)
-
-    return OpenAICompatibleAdapter(
+    return LupAgentOptions(
         model=settings.model,
         system_prompt=system_prompt,
-        base_url=settings.openai_base_url,
-        api_key=settings.openai_api_key,
-        model_provider=settings.openai_model_provider,
-        sandbox=settings.codex_sandbox,
-        effort=settings.codex_effort or settings.reasoning_effort,
-        approval_policy=settings.codex_approval_policy,
-        mcp_tools=True,
-        mcp_env=mcp_env,
-        writable_roots=writable_roots,
-        mcp_servers=policy.filter_group_names(tool_group_names(realtime=False)),
+        served_tool_groups=policy.filter_group_names(
+            tool_group_names(realtime=realtime)
+        ),
+        reasoning_effort=settings.codex_effort or settings.reasoning_effort,
         max_budget_usd=max_budget_usd,
-        usage_cost=usage_cost,
         turn_timeout_seconds=settings.turn_timeout_seconds,
+        usage_cost=usage_cost,
+        realtime=realtime,
+        codex=CodexOptions(
+            sandbox=settings.codex_sandbox,
+            approval_policy=settings.codex_approval_policy,
+            mcp_env=mcp_env,
+            writable_roots=writable_roots,
+            session_id=notes.session.name,
+            shared_dir=notes.session / "sandbox_shared",
+            realtime_dir=realtime_dir,
+            openai_base_url=settings.openai_base_url,
+            openai_api_key=settings.openai_api_key,
+            openai_model_provider=settings.openai_model_provider,
+        ),
     )
 
 
-def subprocess_sandbox_cleanup(
-    notes: "NotesConfig",
-) -> AbstractContextManager[object]:
-    """Session context guaranteeing subprocess sandbox containers die.
+def backend_for_settings() -> "Backend":
+    """Map ``settings.agent_sdk`` to the adapter registry's backend id.
 
-    The Codex/OpenAI tool subprocess may be killed without running its
-    own cleanup; the parent removes the session's container on exit.
-    No-op when the docker extra is not installed.
+    The one place the application's SDK names meet the library's backend ids;
+    everything downstream speaks ``Backend`` and routes through the registry.
     """
-    try:
-        from lup.sandbox import sandbox_cleanup
-    except ImportError:
-        return nullcontext()
-    return sandbox_cleanup(
+    match settings.agent_sdk:
+        case "claude":
+            return "anthropic"
+        case "codex":
+            return "openai"
+        case "openai":
+            return "openai-compatible"
+
+
+def build_session_options(
+    notes: "NotesConfig",
+    capabilities: AdapterCapabilities,
+    *,
+    realtime: bool = False,
+) -> "LupAgentOptions":
+    """Assemble neutral options for a session, picking the assembly by capability.
+
+    A backend with in-process hooks gets the hook-enforced assembly (in-process
+    MCP servers, permission/reflection/allowlist hooks); one without gets the
+    natively-sandboxed assembly (served tool groups, env relay). The choice is
+    driven by ``capabilities.hooks``, never the backend name — adding a backend
+    is choosing which assembly its capabilities select, not editing this code.
+    """
+    if capabilities.hooks:
+        sandbox = build_session_sandbox(notes)
+        return build_inprocess_options(notes, sandbox=sandbox)
+    return build_subprocess_options(notes, realtime=realtime)
+
+
+def build_session_sandbox(notes: "NotesConfig") -> "Sandbox | None":
+    """The code-execution sandbox for a hook-enforced session, if enabled.
+
+    Optional: ``AGENT_SANDBOX_ENABLED=false`` runs the agent without code
+    execution tools (no Docker required).
+    """
+    if not settings.sandbox_enabled:
+        return None
+    from lup.sandbox import Sandbox
+
+    return Sandbox(
         session_id=notes.session.name,
         shared_dir=notes.session / "sandbox_shared",
+        timeout_seconds=settings.sandbox_timeout_seconds,
     )
 
 
 def build_adapter(
     session_id: str,
     task_id: str | None = None,
-) -> tuple[AgentAdapter, AbstractContextManager[object], NotesConfig]:
-    """Build the appropriate adapter for ``settings.agent_sdk``.
+    *,
+    realtime: bool = False,
+) -> tuple["BuiltAdapter", NotesConfig]:
+    """Build the session adapter for ``settings.agent_sdk`` through the registry.
 
-    Returns (adapter, context_manager, notes) — the caller enters the
-    context (e.g. sandbox lifecycle) around the adapter run and reads
-    session artifacts from the notes config.
+    Resolves the backend, assembles neutral :class:`~lup.options.LupAgentOptions`
+    keyed off the backend's capabilities, and hands them to
+    ``lup.adapters.build_adapter`` — no ``match`` on the backend, no native
+    option type. Returns the built adapter bundle (adapter, lifecycle, optional
+    mailbox) and the notes config; the caller enters ``built.lifecycle`` around
+    the run and reads session artifacts from the notes.
     """
+    from lup.adapters.registry import build_adapter as registry_build_adapter
+
     notes = setup_notes(session_id, task_id or "0")
+    backend = backend_for_settings()
+    capabilities = build_backend_capabilities(backend)
+    check_settings_supported(capabilities)
+    opts = build_session_options(notes, capabilities, realtime=realtime)
+    return registry_build_adapter(backend, opts), notes
 
-    adapter: AgentAdapter
-    ctx: AbstractContextManager[object]
-    match settings.agent_sdk:
-        case "claude":
-            from lup.adapters.claude.adapter import ClaudeAdapter
 
-            # Sandbox is optional: AGENT_SANDBOX_ENABLED=false runs the
-            # agent without code execution tools (no Docker required).
-            sb: "Sandbox | None" = None
-            if settings.sandbox_enabled:
-                from lup.sandbox import Sandbox
+def build_backend_capabilities(backend: "Backend") -> AdapterCapabilities:
+    """The capabilities of *backend*, used to gate settings and pick the assembly.
 
-                sb = Sandbox(
-                    session_id=session_id,
-                    shared_dir=notes.session / "sandbox_shared",
-                    timeout_seconds=settings.sandbox_timeout_seconds,
-                )
-            adapter = ClaudeAdapter(build_options(notes, sandbox=sb))
-            ctx = sb if sb is not None else nullcontext()
+    Built without standing up a full session — the static support flags are
+    what the assembly choice and the settings guard read.
+    """
+    from lup.adapters.common import query_capabilities
 
-        case "codex":
-            adapter, ctx = (
-                build_codex_adapter(notes),
-                subprocess_sandbox_cleanup(notes),
-            )
-
-        case "openai":
-            adapter, ctx = (
-                build_openai_adapter(notes),
-                subprocess_sandbox_cleanup(notes),
-            )
-
-    check_settings_supported(adapter.capabilities)
-    return adapter, ctx, notes
+    return query_capabilities(backend)
 
 
 async def run_agent(
@@ -540,13 +458,14 @@ async def run_agent(
     logger.info("Starting session %s (sdk=%s)", session_id, settings.agent_sdk)
     reset_metrics()
 
-    adapter, ctx, notes = build_adapter(session_id, task_id)
+    built, notes = build_adapter(session_id, task_id)
+    adapter = built.adapter
 
     trace_logger = TraceLogger(
         trace_path=notes.trace_log, title=f"Session {session_id}"
     )
 
-    with ctx:
+    with built.lifecycle:
         async with adapter.conversation() as conv:
             response = await conv.send(task, trace_logger=trace_logger)
             if not adapter.capabilities.stop_event:
@@ -578,35 +497,28 @@ async def run_persistent_agent(
     *,
     session_id: str | None = None,
     on_reply: "Callable[[str], Awaitable[None]] | None" = None,
-) -> int:
+) -> PersistentSessionResult:
     """Run a persistent (sleep/wake) session through the file relay.
 
-    The minimal wiring of the Persistent Agent pattern on the Codex
-    runtime (codex/openai): the parent owns the Scheduler, each wake is
-    one SDK turn, and the served ``session`` tools relay through the
-    mailbox. Replies surface through ``on_reply`` (stdout by default) —
-    replace it with your environment's delivery callback, and call
-    ``scheduler.wake(...)`` from your event sources (customization
-    step 8). Artifacts are the trace log and the relay directory; a
-    persistent session has no ``submit_output`` finalization, so no
-    session JSON is saved.
+    The minimal wiring of the Persistent Agent pattern on the relay backends:
+    the parent owns the Scheduler, each wake is one SDK turn, and the served
+    ``session`` tools relay through the mailbox. Replies surface through
+    ``on_reply`` (stdout by default) — replace it with your environment's
+    delivery callback, and call ``scheduler.wake(...)`` from your event sources
+    (customization step 8). Artifacts are the trace log and the relay
+    directory; a persistent session has no ``submit_output`` finalization, so
+    no session JSON is saved.
 
-    On Claude, persistent mode is in-process (one never-ending turn with
-    a Stop hook — see PATTERNS.md, Persistent Agent) and this relay
-    entry point raises.
+    The relay transport is for backends whose ``capabilities.realtime`` is
+    ``"relay"`` (codex/openai). An in-process backend (Claude — one never-ending
+    turn with a Stop hook, see PATTERNS.md, Persistent Agent) has no relay
+    mailbox, so this entry point raises rather than running there.
 
     Returns:
-        The number of completed turns.
+        The completed-turn count.
     """
     from lup.realtime import Scheduler
     from lup.realtime_relay import run_relay_session
-
-    if settings.agent_sdk == "claude":
-        raise ValueError(
-            "Persistent mode on claude runs in-process (customization "
-            "step 8; PATTERNS.md 'Persistent Agent'); the relay entry "
-            "point needs AGENT_SDK=codex or openai."
-        )
 
     if session_id is None:
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -615,27 +527,33 @@ async def run_persistent_agent(
         "Starting persistent session %s (sdk=%s)", session_id, settings.agent_sdk
     )
     reset_metrics()
-    notes = setup_notes(session_id, "0")
+
+    built, notes = build_adapter(session_id, realtime=True)
+    if built.mailbox is None:
+        raise ValueError(
+            "Persistent mode on this backend runs in-process (customization "
+            "step 8; PATTERNS.md 'Persistent Agent'); the relay entry point "
+            "needs AGENT_SDK=codex or openai."
+        )
 
     async def echo_reply(message: str) -> None:
         print(f"[lup] {message}")
 
     scheduler = Scheduler(on_action=on_reply or echo_reply)
-    adapter, mailbox = build_codex_realtime_adapter(notes)
     trace_logger = TraceLogger(
         trace_path=notes.trace_log, title=f"Session {session_id}"
     )
 
-    with subprocess_sandbox_cleanup(notes):
-        async with adapter.conversation() as conv:
+    with built.lifecycle:
+        async with built.adapter.conversation() as conv:
             turns = await run_relay_session(
                 conv,
                 scheduler=scheduler,
-                mailbox=mailbox,
+                mailbox=built.mailbox,
                 initial_prompt=task,
                 trace_logger=trace_logger,
             )
 
     trace_logger.save()
     log_metrics_summary()
-    return turns
+    return PersistentSessionResult(turns=turns)
