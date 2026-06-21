@@ -183,7 +183,7 @@ async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 async def test_collector_state_after_collect() -> None:
-    from lup.adapters.claude.client import ResponseCollector
+    from lup.adapters.claude.adapter import ResponseCollector
 
     fake = FakeClient(SCRIPT)
     collector = ResponseCollector(cast(ClaudeSDKClient, fake))
@@ -198,7 +198,7 @@ async def test_collector_state_after_collect() -> None:
 
 
 async def test_collector_raises_mid_iteration_on_error() -> None:
-    from lup.adapters.claude.client import ResponseCollector
+    from lup.adapters.claude.adapter import ResponseCollector
 
     fake = FakeClient([result_message(is_error=True, result="boom")])
     collector = ResponseCollector(cast(ClaudeSDKClient, fake))

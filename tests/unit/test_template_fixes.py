@@ -19,7 +19,8 @@ from lup_template.agent import prompts
 from lup_template.agent.config import aux_model, settings
 from lup_template.agent.core import build_result
 from lup_template.agent.models import AgentOutput
-from lup_template.agent.tool_policy import CLAUDE_BUILTIN_TOOLS, ToolPolicy
+from lup.adapters.claude.tools import CLAUDE_BUILTIN_TOOLS
+from lup_template.agent.tool_policy import ToolPolicy
 from lup.types import LupResponse, LupResultMessage
 
 

@@ -10,9 +10,11 @@ functions — never ``claude_agent_sdk`` directly.
 
 import json
 import logging
-from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, cast  # claude: ignore
+
+from pydantic import BaseModel
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -304,6 +306,130 @@ type ClaudeUsageNormalizer = Callable[[Mapping[str, object]], Usage | None]
 """Transforms the raw Claude SDK usage payload into a (subclass of) Usage."""
 
 
+class ResponseCollector:
+    """Drains a queried client's response stream, accumulating once.
+
+    The single collector for the Claude path: ``async for`` over it yields
+    each SDK message while accumulating state, ``collect()`` drains the rest
+    with display/tracing, and ``to_lup_response()`` projects the accumulated
+    SDK state into lup types. ``ClaudeConversation.send``, ``claude_query``,
+    and the rich devtools ``query`` all run through it, so there is one
+    message-draining loop rather than two that can drift.
+
+    After iteration, access the accumulated SDK state: ``blocks``,
+    ``tool_results``, ``messages``, ``result``.
+    """
+
+    def __init__(
+        self,
+        client: ClaudeSDKClient,
+        trace_logger: TraceLogger | None = None,
+        prefix: str = "",
+    ) -> None:
+        self.client = client
+        self.blocks: list[ContentBlock] = []
+        self.tool_results: list[ContentBlock] = []
+        self.messages: list[AssistantMessage | UserMessage] = []
+        self.result: ResultMessage | None = None
+        self.trace_logger = trace_logger
+        self.prefix = prefix
+
+    @property
+    def text(self) -> str | None:
+        """Concatenated text from all assistant text blocks, or ``None``."""
+        texts = [b.text for b in self.blocks if isinstance(b, TextBlock)]
+        return "\n\n".join(texts) if texts else None
+
+    def output[T: BaseModel](self, output_type: type[T]) -> T | None:
+        """Extract structured output as a validated Pydantic model, or ``None``."""
+        if self.result is not None and self.result.structured_output:
+            return output_type.model_validate(self.result.structured_output)
+        return None
+
+    async def __aiter__(self) -> AsyncIterator[Message]:
+        """Yield messages, accumulating state but not displaying.
+
+        Raises RuntimeError on agent error results — after logging,
+        tracing, and yielding the failing ResultMessage, so consumers
+        see it and the trace records what went wrong.
+        """
+        async for message in self.client.receive_response():
+            match message:
+                case AssistantMessage():
+                    self.messages.append(message)
+                    for block in message.content:
+                        self.blocks.append(block)
+
+                case ResultMessage():
+                    self.result = message
+                    if message.is_error:
+                        logger.error("Agent error result: %s", message.result)
+                        if self.trace_logger:
+                            self.trace_logger.log_text(
+                                str(message.result), heading="Agent error result"
+                            )
+
+                case SystemMessage():
+                    logger.info("System [%s]: %s", message.subtype, message.data)
+
+                case UserMessage():
+                    self.messages.append(message)
+                    if isinstance(message.content, list):
+                        for block in message.content:
+                            self.tool_results.append(block)
+
+            yield message
+
+            if isinstance(message, ResultMessage) and message.is_error:
+                raise RuntimeError(f"Agent error: {message.result}")
+
+    async def collect(self) -> ResultMessage:
+        """Drain all messages, displaying and tracing each one.
+
+        Raises:
+            RuntimeError: If the agent returns an error or no result.
+        """
+        async for message in self:
+            lup_msg = claude_message_to_lup(message)
+            if lup_msg is not None:
+                print_message(lup_msg, prefix=self.prefix, trace=self.trace_logger)
+
+        if self.result is None:
+            raise RuntimeError("No result received from agent")
+        return self.result
+
+    def to_lup_response(
+        self, usage_normalizer: "ClaudeUsageNormalizer" = extract_token_usage
+    ) -> LupResponse:
+        """Project the accumulated SDK state into a ``LupResponse``.
+
+        Call after ``collect()``. ``usage_normalizer`` shapes the raw SDK usage
+        payload — a subclass may carry vendor-specific fields.
+        """
+        response = LupResponse()
+        for message in self.messages:
+            match message:
+                case AssistantMessage():
+                    blocks = [claude_block_to_lup(b) for b in message.content]
+                    response.messages.append(LupAssistantMessage(content=blocks))
+                    response.blocks.extend(blocks)
+                case UserMessage() if isinstance(message.content, list):
+                    blocks = [claude_block_to_lup(b) for b in message.content]
+                    response.messages.append(LupUserMessage(content=blocks))
+                    response.tool_results.extend(blocks)
+        if self.result is not None:
+            response.session_id = self.result.session_id
+            response.result = LupResultMessage(
+                structured_output=self.result.structured_output,
+                is_error=self.result.is_error,
+                result=self.result.result,
+                duration_ms=self.result.duration_ms,
+                total_cost_usd=self.result.total_cost_usd,
+                usage=safe_normalize_usage(usage_normalizer, self.result.usage),
+            )
+        return response
+
+
 async def collect_lup_response(
     client: ClaudeSDKClient,
     *,
@@ -313,56 +439,14 @@ async def collect_lup_response(
 ) -> LupResponse:
     """Drain a queried client's response stream into a LupResponse.
 
-    The single conversion path from a live SDK client to lup types —
-    ``ClaudeConversation.send`` and ``claude_query`` both collect
-    through it. Displays and traces each message as it arrives, raises
-    on agent errors and on streams that end without a result.
+    The lup-typed projection of :class:`ResponseCollector` —
+    ``ClaudeConversation.send`` and ``claude_query`` both collect through it.
+    Displays and traces each message as it arrives, raises on agent errors and
+    on streams that end without a result.
     """
-    response = LupResponse()
-
-    async for message in client.receive_response():
-        lup_msg = claude_message_to_lup(message)
-        if lup_msg is not None:
-            print_message(lup_msg, prefix=prefix, trace=trace_logger)
-
-        match message:
-            case AssistantMessage():
-                lup_assistant = LupAssistantMessage(
-                    content=[claude_block_to_lup(b) for b in message.content]
-                )
-                response.messages.append(lup_assistant)
-                for block in message.content:
-                    response.blocks.append(claude_block_to_lup(block))
-
-            case ResultMessage():
-                response.session_id = message.session_id
-                response.result = LupResultMessage(
-                    structured_output=message.structured_output,
-                    is_error=message.is_error,
-                    result=message.result,
-                    duration_ms=message.duration_ms,
-                    total_cost_usd=message.total_cost_usd,
-                    usage=safe_normalize_usage(usage_normalizer, message.usage),
-                )
-                if message.is_error:
-                    raise RuntimeError(f"Agent error: {message.result}")
-
-            case SystemMessage():
-                logger.info("System [%s]: %s", message.subtype, message.data)
-
-            case UserMessage():
-                if isinstance(message.content, list):
-                    lup_user = LupUserMessage(
-                        content=[claude_block_to_lup(b) for b in message.content]
-                    )
-                    response.messages.append(lup_user)
-                    for block in message.content:
-                        response.tool_results.append(claude_block_to_lup(block))
-
-    if response.result is None:
-        raise RuntimeError("No result received from agent")
-
-    return response
+    collector = ResponseCollector(client, trace_logger=trace_logger, prefix=prefix)
+    await collector.collect()
+    return collector.to_lup_response(usage_normalizer)
 
 
 class ClaudeConversation(Conversation):
