@@ -765,3 +765,26 @@ def delete_branch(
             typer.echo(f"Deleted remote branch: origin/{name}")
         except sh.ErrorReturnCode as e:
             typer.echo(f"Warning: remote deletion failed: {decode_stderr(e)}", err=True)
+
+
+def create_resolve_branch(concern_id: str) -> None:
+    """Create and switch to the `resolve/<id>` branch for a /lup:resolve editor.
+
+    The execute workflow's editor calls this as its first step, through the
+    allowlisted `uv run lup-devtools` path, instead of a raw `git checkout -b` —
+    so the bash hook needs no editor special-case. The name is fixed to the
+    `resolve/<slug>` convention the workflow's merge and cleanup rely on.
+    """
+    slug = concern_id.strip().strip("/")
+    ok = bool(slug) and slug[0].isalnum()
+    ok = ok and all(c.isalnum() or c in "._-" for c in slug)
+    if not ok:
+        typer.echo(f"Invalid concern id: {concern_id!r}", err=True)
+        raise typer.Exit(1)
+    branch = f"resolve/{slug}"
+    try:
+        git("checkout", "-b", branch)
+    except sh.ErrorReturnCode as e:
+        typer.echo(f"Could not create {branch}: {decode_stderr(e).strip()}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Created and switched to {branch}")
