@@ -49,9 +49,7 @@ def resolve_object(path: str) -> tuple[object, str]:
     """
     if ":" in path:
         module_path, _, attr_path = path.partition(":")
-        attrs = [
-            a for a in attr_path.split(".") if a
-        ]  # claude: ignore — dotted attr path
+        attrs = [a for a in attr_path.split(".") if a]  # lup: ignore — dotted attr path
         try:
             obj: object = importlib.import_module(module_path)
         except ImportError as e:

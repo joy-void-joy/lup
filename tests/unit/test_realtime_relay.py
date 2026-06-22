@@ -45,7 +45,7 @@ async def call(
     tools: dict[str, LupMcpTool], name: str, args: dict[str, Any]
 ) -> dict[
     str, Any
-]:  # claude: ignore — MCP handler boundary returns a ToolResponse-shaped dict
+]:  # lup: ignore — MCP handler boundary returns a ToolResponse-shaped dict
     return await tools[name].handler(args)
 
 

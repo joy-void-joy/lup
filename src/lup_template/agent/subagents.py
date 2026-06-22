@@ -3,7 +3,7 @@
 This is a TEMPLATE. Define subagents for specialized tasks in your domain.
 
 Subagents are spawned by the main agent to perform focused work.
-# claude: Do we have a similar file dedicated to nested agents? We should. Please review all of the different ontologies for agent in the doc file (nested, background, etc...) and ensure each one has a python file corresponding to those common patterns.
+# lup: Do we have a similar file dedicated to nested agents? We should. Please review all of the different ontologies for agent in the doc file (nested, background, etc...) and ensure each one has a python file corresponding to those common patterns.
 Each subagent has:
 - A specialized prompt (focused on one job)
 - A subset of tools (only what it needs)

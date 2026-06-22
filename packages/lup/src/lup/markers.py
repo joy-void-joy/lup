@@ -1,7 +1,6 @@
-# claude: ignore
-# claude: I do not feel comfortable with a generic # claude: ignore like that. I think this should have types, like pyright does, for instance # claude: ignore[regex]
-# claude: Also, while on that topic, we may want to pivot away from # claude to # lup (both in markers and in the edit_hooks)
-"""Inline review-comment markers (`# claude:` / `// claude:`).
+# lup: ignore
+# lup: I do not feel comfortable with a generic # lup: ignore like that. I think this should have types, like pyright does, for instance # lup: ignore[regex]
+"""Inline review-comment markers (`# lup:` / `// lup:`).
 
 Single source of truth for what counts as an actionable feedback note, an
 `ignore` directive, and a file-level opt-out. The `lup-devtools dev comments`
@@ -16,7 +15,7 @@ escape hatch.
 
 How a file is scanned depends on its language, because where a note can live
 does. Python source is parsed so a marker counts only where prose belongs — in a
-comment or a docstring. A ``# claude:`` inside an ordinary string literal (such
+comment or a docstring. A ``# lup:`` inside an ordinary string literal (such
 as a tool's own "no notes" message) is code, not a note, and must not be
 reported. Other text has no Python parser to lean on, so it is line-scanned;
 Markdown additionally skips fenced and inline code so notes quoted in
@@ -31,15 +30,15 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-MARKER_RE = re.compile(r"(#|//)\s*claude\s*:", re.IGNORECASE)
-IGNORE_RE = re.compile(r"(#|//)\s*claude\s*:\s*ignore\b", re.IGNORECASE)
-FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*claude\s*:\s*ignore\s*$", re.IGNORECASE)
+MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
+IGNORE_RE = re.compile(r"(#|//)\s*lup\s*:\s*ignore\b", re.IGNORECASE)
+FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*lup\s*:\s*ignore\s*$", re.IGNORECASE)
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
 
 PYTHON_SUFFIXES = {".py", ".pyi"}
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
-# Languages where `#` does not open a comment (`//` does), so a `# claude:` is
+# Languages where `#` does not open a comment (`//` does), so a `# lup:` is
 # always string content (e.g. a Python marker quoted inside a JS template) —
 # only `//` markers count as notes there.
 JS_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
@@ -90,7 +89,7 @@ def marker_count(text: str) -> int:
 
 
 def has_file_level_ignore(text: str, max_lines: int = 10) -> bool:
-    """Whether a standalone `# claude: ignore` sits in the first `max_lines`."""
+    """Whether a standalone `# lup: ignore` sits in the first `max_lines`."""
     for i, line in enumerate(text.splitlines()):
         if i >= max_lines:
             break
@@ -162,7 +161,7 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[FeedbackComment]
     A note is a marker line plus the contiguous same-style comment lines below
     it, merged into one item. Ignore directives, fenced code, and backtick spans
     are skipped; a file-level ignore opts the whole file out. In Python mode a
-    marker counts only inside a comment or docstring, so a `# claude:` in an
+    marker counts only inside a comment or docstring, so a `# lup:` in an
     ordinary string literal is left alone.
     """
     if has_file_level_ignore(text):
@@ -184,8 +183,8 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[FeedbackComment]
     in_fence = False
     i = 0
 
-    # claude: Why do it this way? This seems a bit ugly
-    # claude: Maybe we're lacking a directive in claude.md about using for, not while
+    # lup: Why do it this way? This seems a bit ugly
+    # lup: Maybe we're lacking a directive in claude.md about using for, not while
     while i < total:
         line = lines[i]
 

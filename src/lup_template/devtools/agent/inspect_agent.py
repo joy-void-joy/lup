@@ -89,12 +89,10 @@ def print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
 class ToolDict(TypedDict):
     name: str
     description: str
-    input_schema: dict[
-        str, object
-    ]  # claude: ignore  # JSON Schema is arbitrary nesting
+    input_schema: dict[str, object]  # lup: ignore  # JSON Schema is arbitrary nesting
     output_schema: (
         dict[str, object] | None
-    )  # claude: ignore  # JSON Schema is arbitrary nesting
+    )  # lup: ignore  # JSON Schema is arbitrary nesting
 
 
 def tool_to_dict(t: LupMcpTool) -> ToolDict:
@@ -133,9 +131,7 @@ def run_inspect(as_json: bool, full: bool) -> None:
     prompt = get_system_prompt()
 
     if as_json:
-        data: dict[
-            str, object
-        ] = {  # claude: ignore  # heterogeneous JSON inspect payload
+        data: dict[str, object] = {  # lup: ignore  # heterogeneous JSON inspect payload
             "model": settings.model,
             "max_thinking_tokens": settings.max_thinking_tokens,
             "tools": [tool_to_dict(t) for t in all_tools],

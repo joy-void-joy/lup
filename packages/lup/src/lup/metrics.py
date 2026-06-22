@@ -162,7 +162,7 @@ class MetricsCollector:
             )
             os.replace(
                 tmp_path, self.flush_path
-            )  # claude: ignore — atomic file rename, not str.replace
+            )  # lup: ignore — atomic file rename, not str.replace
         except OSError:
             logger.exception("Failed to flush metrics to %s", self.flush_path)
 

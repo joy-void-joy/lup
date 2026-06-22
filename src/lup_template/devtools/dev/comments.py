@@ -1,4 +1,4 @@
-"""Scan tracked files for unresolved `# claude:` / `// claude:` feedback notes.
+"""Scan tracked files for unresolved `# lup:` / `// lup:` feedback notes.
 
 Reached through the `lup-devtools dev comments` command (wired in
 `lup_template.devtools.dev.app`); `report`, `commit_prompts`, and
@@ -117,7 +117,7 @@ def commit_prompts() -> None:
     """Snapshot the current feedback prompts into one commit before resolving them."""
     found = scan_feedback()
     if not found:
-        typer.echo("No # claude: comments to commit.")
+        typer.echo("No # lup: comments to commit.")
         return
     files = sorted({comment.file for comment in found})
     git("add", "--", *files)
@@ -143,7 +143,7 @@ def report(as_json: bool, commit: bool) -> None:
         output_json([comment.model_dump() for comment in found])
         return
     if not found:
-        typer.echo("No unresolved # claude: comments.")
+        typer.echo("No unresolved # lup: comments.")
         return
     for comment in found:
         typer.echo(

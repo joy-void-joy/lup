@@ -89,9 +89,7 @@ class TestRunSubagentTool:
     async def test_modelless_spec_inherits_default_model(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        captured: dict[
-            str, object
-        ] = {}  # claude: ignore — heterogeneous kwargs capture
+        captured: dict[str, object] = {}  # lup: ignore — heterogeneous kwargs capture
 
         async def fake_query(prompt: str, **kwargs: object) -> LupResponse:
             captured["prompt"] = prompt

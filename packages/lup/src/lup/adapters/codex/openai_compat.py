@@ -1,10 +1,10 @@
-# claude: ignore
+# lup: ignore
 """OpenAI-compatible API adapter via the Codex SDK.
 
 Routes open-source models (GLM-4, Llama, DeepSeek, etc.) through the
 Codex runtime by setting the ``model_provider`` parameter on thread
-# claude: What? No, GLM should be rooted through the claude scaffolding, not through codex
-# claude: See the aio3 folder
+# lup: What? No, GLM should be rooted through the claude scaffolding, not through codex
+# lup: See the aio3 folder
 start. The Codex CLI handles the actual OpenAI-compatible API calls,
 sandboxing, and tool execution.
 

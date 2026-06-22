@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator, Callable
-from typing import Any  # claude: ignore — SDK connect() takes dict[str, Any] turns
+from typing import Any  # lup: ignore — SDK connect() takes dict[str, Any] turns
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
