@@ -57,6 +57,23 @@ const VERDICT_SCHEMA = {
     },
     reason: { type: 'string' },
     residual: { type: 'string', description: 'What remains unaddressed, if anything' },
+    note_findings: {
+      type: 'array',
+      description: 'One entry per ORIGINAL review note: whether and how the diff addresses it',
+      items: {
+        type: 'object',
+        required: ['file', 'line', 'addressed', 'how'],
+        properties: {
+          file: { type: 'string' },
+          line: { type: 'integer' },
+          addressed: { type: 'boolean' },
+          how: {
+            type: 'string',
+            description: 'The concrete change that resolves this note, or why it is unaddressed',
+          },
+        },
+      },
+    },
   },
 }
 
@@ -116,6 +133,11 @@ function verifyPrompt(c, edit) {
     `not just the exact noted site? A fix that edits only the noted line, resolves`,
     `nothing, or merely removes a marker is addressed=false. Put anything left in`,
     `'residual'.`,
+    ``,
+    `Also produce 'note_findings': one entry for EACH original note above — its`,
+    `file and line, whether the diff addresses it, and HOW (the concrete change`,
+    `that resolves it, or why it remains). This is shown to a human reviewer, so`,
+    `make 'how' specific and readable.`,
   ].join('\n')
 }
 
@@ -143,12 +165,17 @@ const results = await pipeline(
 const manifest = results.filter(Boolean).map((r) => ({
   id: r.c.id,
   title: r.c.title,
+  spec: r.c.spec || '',
   branch: r.edit ? r.edit.branch : null,
   committed: !!(r.edit && r.edit.committed),
   accepted: !!(r.verdict && r.verdict.addressed),
   generalized: !!(r.verdict && r.verdict.generalized),
   reason: r.verdict ? r.verdict.reason : 'no edit committed',
   residual: r.verdict ? r.verdict.residual || '' : '',
+  summary: r.edit ? r.edit.summary || '' : '',
+  files_changed: r.edit ? r.edit.files_changed || [] : [],
+  swept_beyond_scope: r.edit ? r.edit.swept_beyond_scope || [] : [],
+  note_findings: r.verdict ? r.verdict.note_findings || [] : [],
   notes: r.c.notes || [],
 }))
 
