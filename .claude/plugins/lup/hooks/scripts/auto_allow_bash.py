@@ -117,6 +117,13 @@ RULES: list[Allow | Deny | Ask] = [
     Allow(pattern=r"^uv run (python )?(\./)?tmp/\S+\.py\b"),
 ]
 
+# Subagent types the /lup:resolve workflow spawns. They edit and commit on
+# throwaway, independently reviewed worktree branches, so for them every verdict
+# that would prompt becomes an auto-allow — only denials (the interpreter guards
+# above) still bite. Mirrors RESOLVE_EDITOR_AGENTS in auto_allow_edits.py; keep
+# the two in sync (the hooks stay hermetic — no shared import on the hot path).
+RESOLVE_EDITOR_AGENTS = {"resolve-editor", "lup:resolve-editor"}
+
 # ---------------------------------------------------------------------------
 # Hook implementation
 # ---------------------------------------------------------------------------
@@ -139,6 +146,7 @@ class BashInput(BaseModel):
 class HookEvent(BaseModel):
     tool_name: str = ""
     tool_input: BashInput = BashInput()
+    agent_type: str = ""
 
 
 def allow_decision(
@@ -171,6 +179,19 @@ def ask_decision(reason: str) -> HookOutput:
             "permissionDecisionReason": reason,
         }
     }
+
+
+def editor_decision(result: HookOutput | None) -> HookOutput:
+    """Collapse a verdict to the resolve editor's autonomous policy.
+
+    Denials (the code-interpreter guards) are kept so the editor still cannot run
+    bare Python; every other verdict — ask, allow, or an unrecognized
+    fall-through — becomes an auto-allow so it never prompts the user.
+    """
+    if result is not None:
+        if result["hookSpecificOutput"]["permissionDecision"] == "deny":
+            return result
+    return allow_decision("Auto-allowed: resolve editor runs autonomously")
 
 
 # One left-to-right scan of a shell command, as an ordered alternation of the
@@ -287,6 +308,8 @@ def main() -> None:
         sys.exit(0)
 
     result = decide(event.tool_input.command)
+    if event.agent_type in RESOLVE_EDITOR_AGENTS:
+        result = editor_decision(result)
     if result:
         json.dump(result, sys.stdout)
 

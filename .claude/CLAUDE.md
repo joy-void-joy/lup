@@ -503,6 +503,8 @@ Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/lup/h
 
 To add a new allowed URL or command, edit the pattern list in the corresponding hook. Non-matching inputs fall through to user prompt.
 
+Both `auto_allow_bash.py` and `auto_allow_edits.py` read the payload's `agent_type` and grant the `/lup:resolve` editor (`lup:resolve-editor`) **autonomous** access on its disposable, reviewed worktree branch: every verdict that would prompt becomes an auto-allow. Denials still bite (anti-patterns, bare interpreters), and two prompts are kept even for the editor — **`Edit(tmp/…)`** and any **`# claude:` marker-count change** — so it can neither smuggle logic into throwaway scripts nor clear a note by editing. The main session is never affected (workflow-spawned agents ignore an agent's frontmatter `permissionMode`, so this autonomy lives in the hooks, keyed on `agent_type`).
+
 `settings.json` only contains rules that don't need regex: `WebSearch` (allow) and the `Read(**/*.local*)` deny (with allow exceptions for `settings.json.local*` and `downstream.json.local`). Permission decisions that overlap a hook live in the hook, not here: the bash hook **asks** before `uv add`/`uv sync` (they fetch and run dependency code) while auto-allowing `uv remove`/`uv lock`, and the edits hook treats `pyproject.toml` — with all of `.claude/` and `.env*` — as protected, so it never auto-allows.
 
 ### Pyright LSP

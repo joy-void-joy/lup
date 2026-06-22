@@ -607,6 +607,38 @@ def violation_decision(violation: Violation) -> AllowDecision:
             return deny_decision(reason)
 
 
+def anti_pattern_decision(
+    file_path: str, old_string: str, new_string: str
+) -> AllowDecision | None:
+    """Scan added lines for anti-patterns in .py and TS-family files.
+
+    Shared by Edit and Write so an autonomous editor's full-file writes face the
+    same denials as its edits. Returns a deny/ask decision, or None when clean.
+    """
+    if file_path.endswith(".py") and new_string:
+        violation = find_anti_pattern_violations(
+            old_string,
+            new_string,
+            file_path,
+            line_violations=find_swallowed_excepts(new_string.splitlines()),
+        )
+        if violation:
+            return violation_decision(violation)
+
+    if file_path.endswith(TS_FILE_EXTENSIONS) and new_string:
+        violation = find_anti_pattern_violations(
+            old_string,
+            new_string,
+            file_path,
+            patterns=TS_ANTI_PATTERNS,
+            ignore_marker=TS_CLAUDE_IGNORE_MARKER,
+        )
+        if violation:
+            return violation_decision(violation)
+
+    return None
+
+
 def always_ask_decision(
     file_path: str, agent_type: str = "", old_string: str = "", new_string: str = ""
 ) -> AllowDecision | None:
@@ -639,26 +671,9 @@ def decide(tool_input: EditInput, agent_type: str = "") -> AllowDecision | None:
     if gate is not None:
         return gate
 
-    if file_path.endswith(".py") and new_string:
-        violation = find_anti_pattern_violations(
-            old_string,
-            new_string,
-            file_path,
-            line_violations=find_swallowed_excepts(new_string.splitlines()),
-        )
-        if violation:
-            return violation_decision(violation)
-
-    if file_path.endswith(TS_FILE_EXTENSIONS) and new_string:
-        violation = find_anti_pattern_violations(
-            old_string,
-            new_string,
-            file_path,
-            patterns=TS_ANTI_PATTERNS,
-            ignore_marker=TS_CLAUDE_IGNORE_MARKER,
-        )
-        if violation:
-            return violation_decision(violation)
+    anti_pattern = anti_pattern_decision(file_path, old_string, new_string)
+    if anti_pattern is not None:
+        return anti_pattern
 
     if marker_count(old_string) != marker_count(new_string):
         return ask_decision(MARKER_REVIEW_REASON)
@@ -672,6 +687,12 @@ def decide(tool_input: EditInput, agent_type: str = "") -> AllowDecision | None:
     if count_real_additions(old_string, new_string) <= MAX_REAL_CHANGES:
         return allow_decision()
 
+    # The resolve editor writes autonomously on a disposable, reviewed branch:
+    # past the tmp/, marker, and anti-pattern guardrails above, a larger edit
+    # that would otherwise prompt is auto-allowed for it (never the main session).
+    if agent_type in RESOLVE_EDITOR_AGENTS:
+        return allow_decision()
+
     return None
 
 
@@ -679,10 +700,21 @@ def decide_write(tool_input: WriteInput, agent_type: str = "") -> AllowDecision 
     """Gate Write (full-file) operations.
 
     Writes never auto-allow — a whole-file rewrite needs user eyes. Protected
-    and tmp/ paths prompt (identical to Edit), except for the /lup:resolve editor
-    subagent; everything else defers to the normal permission flow.
+    and tmp/ paths prompt (identical to Edit). The /lup:resolve editor subagent
+    writes autonomously on its disposable, reviewed branch, but tmp/ still
+    prompts and anti-pattern denials still bite; everything else defers to the
+    normal permission flow.
     """
-    return always_ask_decision(tool_input.file_path, agent_type)
+    file_path = tool_input.file_path
+    gate = always_ask_decision(file_path, agent_type)
+    if gate is not None:
+        return gate
+    if agent_type in RESOLVE_EDITOR_AGENTS:
+        anti_pattern = anti_pattern_decision(file_path, "", tool_input.content)
+        if anti_pattern is not None:
+            return anti_pattern
+        return allow_decision()
+    return None
 
 
 def main() -> None:
