@@ -3,17 +3,17 @@
 
 Edit decision order:
 1. Protected files (.claude/, pyproject.toml, .env*) and tmp/ scratch paths
-   -> ask, always (overriding auto-accept). A `# claude:` marker change shows
+   -> ask, always (overriding auto-accept). A `# lup:` marker change shows
    the review-gate reason; any other change shows a generic reason. The
    /lup:resolve editor subagent is allowed into protected files (its branch is
    reviewed at merge), but a marker-count change still asks.
 2. Anti-patterns scanned over added lines in .py and TS-family files
    (see ANTI_PATTERNS / TS_ANTI_PATTERNS):
-   - file has `# claude: ignore` in its first 10 lines on disk -> skip the
+   - file has `# lup: ignore` in its first 10 lines on disk -> skip the
      anti-pattern scan (the size gate below still applies)
-   - violating line carries an inline `# claude: ignore` -> ask (user prompt)
-   - no marker -> deny with hint about `# claude: ignore`
-3. Edit adds or removes any `# claude:` marker (count differs) -> ask
+   - violating line carries an inline `# lup: ignore` -> ask (user prompt)
+   - no marker -> deny with hint about `# lup: ignore`
+3. Edit adds or removes any `# lup:` marker (count differs) -> ask
 4. Pure deletion (new_string is empty) -> allow
 5. replace_all that is a single-line identifier rename -> allow
    (any other replace_all falls through to the size gate)
@@ -53,19 +53,17 @@ PROTECTED_PATTERNS = [
 # (/tmp/..., used by pytest fixtures) is deliberately excluded — see is_tmp_path.
 TMP_DIR = "tmp"
 
-CLAUDE_IGNORE_MARKER = "# claude: ignore"
+LUP_IGNORE_MARKER = "# lup: ignore"
 
 # Inline review-comment markers, mirroring lup.markers. Inlined so this safety
 # hook stays hermetic — no package import on the per-edit hot path; keep both in
-# sync. A marker is `#`/`//` + `claude:` (any case, optional spaces); the
+# sync. A marker is `#`/`//` + `lup:` (any case, optional spaces); the
 # `ignore` keyword is the escape hatch, any other note is actionable feedback.
-MARKER_RE = re.compile(r"(#|//)\s*claude\s*:", re.IGNORECASE)
-IGNORE_RE = re.compile(r"(#|//)\s*claude\s*:\s*ignore\b", re.IGNORECASE)
-FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*claude\s*:\s*ignore\s*$", re.IGNORECASE)
+MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
+IGNORE_RE = re.compile(r"(#|//)\s*lup\s*:\s*ignore\b", re.IGNORECASE)
+FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*lup\s*:\s*ignore\s*$", re.IGNORECASE)
 
-MARKER_REVIEW_REASON = (
-    "Edit adds or removes a `# claude:` marker — review before applying"
-)
+MARKER_REVIEW_REASON = "Edit adds or removes a `# lup:` marker — review before applying"
 PROTECTED_REVIEW_REASON = "Protected file — review before applying"
 TMP_REVIEW_REASON = "Scratch file under tmp/ — review before applying"
 
@@ -75,11 +73,11 @@ TMP_REVIEW_REASON = "Scratch file under tmp/ — review before applying"
 RESOLVE_EDITOR_AGENTS = {"resolve-editor", "lup:resolve-editor"}
 
 # (pattern, reason) rows checked against every line an edit adds to a .py
-# file. A matching line denies the edit; an inline `# claude: ignore` on the
+# file. A matching line denies the edit; an inline `# lup: ignore` on the
 # line downgrades to a user prompt, and a file-level marker (first 10 lines
 # on disk) skips this table entirely.
 
-# claude: I am wondering whether this is something we can do with a linter actually? Is there a way to specify custome rules this way? Might be the best way to unify this?
+# lup: I am wondering whether this is something we can do with a linter actually? Is there a way to specify custome rules this way? Might be the best way to unify this?
 ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\bAny\b"),
@@ -126,7 +124,7 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"\bfrom\s+re\s+import\b"),
         "`from re import` is a code smell — parse structured data with its own API instead: "
         "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
-        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",  # claude: We might want something like a anti-pattern library
+        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",  # lup: We might want something like a anti-pattern library
     ),
     (
         re.compile(r"\bre\.(compile|search|match|fullmatch|sub|findall|split)\s*\("),
@@ -193,14 +191,14 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "No `_` prefix on variables/constants — nothing is private "
         "(unused `_` function parameters are exempt)",
     ),
-    # claude: Can you brainstorm more anti-patterns, or things we might want? Let's brainstorm about them
+    # lup: Can you brainstorm more anti-patterns, or things we might want? Let's brainstorm about them
 ]
 
 TS_FILE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
-TS_CLAUDE_IGNORE_MARKER = "// claude: ignore"
+TS_LUP_IGNORE_MARKER = "// lup: ignore"
 
 # Same contract as ANTI_PATTERNS, for TypeScript/JavaScript-family files,
-# using the `// claude: ignore` marker.
+# using the `// lup: ignore` marker.
 TS_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\bas\s+any\b"),
@@ -242,7 +240,7 @@ TS_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"//\s*tslint:disable"),
         "Never use tslint:disable — migrate to eslint and fix the issue",
     ),
-    # claude: Same here, would like a bit more
+    # lup: Same here, would like a bit more
 ]
 
 
@@ -263,12 +261,12 @@ def is_tmp_path(file_path: str) -> bool:
 
 
 def marker_count(text: str) -> int:
-    """Count `# claude:` markers (feedback or ignore) for add/remove detection."""
+    """Count `# lup:` markers (feedback or ignore) for add/remove detection."""
     return len(MARKER_RE.findall(text))
 
 
 def has_file_level_ignore(file_path: str) -> bool:
-    """Check if the file on disk has a `# claude: ignore` marker in the first 10 lines."""
+    """Check if the file on disk has a `# lup: ignore` marker in the first 10 lines."""
     try:
         with open(file_path) as f:
             for i, line in enumerate(f):
@@ -543,7 +541,7 @@ def find_anti_pattern_violations(
     new_string: str,
     file_path: str = "",
     patterns: list[tuple[re.Pattern[str], str]] | None = None,
-    ignore_marker: str = CLAUDE_IGNORE_MARKER,
+    ignore_marker: str = LUP_IGNORE_MARKER,
     line_violations: dict[int, str] | None = None,
 ) -> Violation | None:
     """Check newly added lines for anti-patterns.
@@ -631,7 +629,7 @@ def anti_pattern_decision(
             new_string,
             file_path,
             patterns=TS_ANTI_PATTERNS,
-            ignore_marker=TS_CLAUDE_IGNORE_MARKER,
+            ignore_marker=TS_LUP_IGNORE_MARKER,
         )
         if violation:
             return violation_decision(violation)

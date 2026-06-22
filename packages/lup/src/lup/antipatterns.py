@@ -1,17 +1,17 @@
-# claude: ignore
+# lup: ignore
 """Single importable source of truth for the codebase's anti-pattern set.
 
 The edit-permission hook (`.claude/plugins/lup/hooks/scripts/auto_allow_edits.py`)
 denies an edit whose added lines match one of these patterns unless the line
-carries a `# claude: ignore`. The hook cannot import a package on its per-edit
+carries a `# lup: ignore`. The hook cannot import a package on its per-edit
 hot path, so it mirrors these tables; a test asserts the two stay identical, and
 the `lup-devtools dev check --antipatterns` auditor consumes them to scan the
 whole tree after the fact (catching lines that slipped in past the hook and
-`# claude: ignore` markers that no longer guard anything).
+`# lup: ignore` markers that no longer guard anything).
 
 Each entry pairs a compiled regex with the message the hook and auditor show.
 This module imports only the standard library and `pydantic` so the hook and the
-auditor can load it cheaply; `# claude:` marker detection itself stays in
+auditor can load it cheaply; `# lup:` marker detection itself stays in
 `lup.markers`, which both this set's consumers and the auditor import directly.
 """
 
@@ -231,7 +231,7 @@ class AntiPatternFinding(BaseModel):
     """One auditor result: a line that should carry a marker, or one that shouldn't.
 
     `kind` is "missing" when the line trips an anti-pattern with no inline
-    `# claude: ignore` guarding it, or "spurious" when an inline ignore guards
+    `# lup: ignore` guarding it, or "spurious" when an inline ignore guards
     a line that trips nothing (a dead marker to delete). `line` is 1-based.
     """
 
@@ -244,7 +244,7 @@ class AntiPatternFinding(BaseModel):
 def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFinding]:
     """Audit one file's current text for missing and spurious ignore markers.
 
-    A file-level `# claude: ignore` opts the whole file out (matching the
+    A file-level `# lup: ignore` opts the whole file out (matching the
     hook), so it yields no findings. Otherwise each line is checked against
     *patterns*: an unguarded match is a "missing" finding, and an inline
     ignore on a line that matches nothing is a "spurious" finding.
@@ -273,7 +273,7 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
                     kind="spurious",
                     line=index,
                     text=line.strip()[:80],
-                    message="`# claude: ignore` guards a line that matches no anti-pattern — remove it",
+                    message="`# lup: ignore` guards a line that matches no anti-pattern — remove it",
                 )
             )
     return findings

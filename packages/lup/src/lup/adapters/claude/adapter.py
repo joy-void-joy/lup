@@ -12,7 +12,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
-from typing import Any, cast  # claude: ignore
+from typing import Any, cast  # lup: ignore
 
 from pydantic import BaseModel
 
@@ -284,7 +284,7 @@ def lup_server_to_claude(config: LupMcpServerConfig) -> McpSdkServerConfig:
 
 def lup_tools_to_sdk(
     tools: list[LupMcpTool],
-) -> list[SdkMcpTool[dict[str, Any]]]:  # claude: ignore
+) -> list[SdkMcpTool[dict[str, Any]]]:  # lup: ignore
     """Convert LupMcpTool list to Claude SDK SdkMcpTool list."""
     return [
         SdkMcpTool(

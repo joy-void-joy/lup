@@ -76,7 +76,7 @@ class CodexBackgroundAgent(BaseBackgroundAgent):
 
         except asyncio.CancelledError:
             logger.debug("Codex background agent '%s' cancelled", self.name)
-        # claude: ignore — task supervisor: a background crash must be
+        # lup: ignore — task supervisor: a background crash must be
         # logged but never propagate into (or kill) the main session.
         except Exception:
             logger.exception("Codex background agent '%s' crashed", self.name)

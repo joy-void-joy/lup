@@ -91,7 +91,7 @@ def collect_all_tools(context: SessionContext | None = None) -> list[LupMcpTool]
     return tools
 
 
-# claude: backend-abc migration step 9 (serve-tools reuse) is not done: this still
+# lup: backend-abc migration step 9 (serve-tools reuse) is not done: this still
 # discovers tools via glob+ast (collect_dynamic_tool_names) and dispatches on a
 # string `match server_group` rather than reusing lup.mcp's shared server builder
 # with a typed selector; server_group should be a Literal, not str.
@@ -155,7 +155,7 @@ def serve_tools(list_only: bool, server_group: str | None) -> None:
     @server.call_tool()
     async def call_tool(
         name: str, arguments: dict[str, object]
-    ) -> CallToolResult:  # claude: ignore  # MCP protocol boundary: arbitrary tool args
+    ) -> CallToolResult:  # lup: ignore  # MCP protocol boundary: arbitrary tool args
         if name not in tool_map:
             raise ValueError(f"Tool '{name}' not found")
         result = await tool_map[name].handler(arguments)

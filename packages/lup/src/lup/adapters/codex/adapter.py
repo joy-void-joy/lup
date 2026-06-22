@@ -1,4 +1,4 @@
-# claude: ignore
+# lup: ignore
 """OpenAI Codex SDK adapter.
 
 Wraps the Codex Python SDK (``openai_codex``) behind the

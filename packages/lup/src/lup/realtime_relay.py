@@ -326,7 +326,7 @@ class RealtimeMailbox:
         tmp_path.write_text(state.model_dump_json(), encoding="utf-8")
         os.replace(
             tmp_path, self.state_path
-        )  # claude: ignore — atomic file rename, not str.replace
+        )  # lup: ignore — atomic file rename, not str.replace
 
     def reset_for_new_run(self) -> None:
         """Clear leftover protocol files so a fresh run starts clean.

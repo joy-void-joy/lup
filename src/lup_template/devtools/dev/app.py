@@ -236,7 +236,7 @@ def check_cmd(
         bool,
         typer.Option(
             "--antipatterns",
-            help="Audit tracked files for missing/spurious `# claude: ignore` markers only",
+            help="Audit tracked files for missing/spurious `# lup: ignore` markers only",
         ),
     ] = False,
     as_json: Annotated[
@@ -278,7 +278,7 @@ def comments_cmd(
         ),
     ] = False,
 ) -> None:
-    """List unresolved `# claude:` feedback comments, or clear specific ones.
+    """List unresolved `# lup:` feedback comments, or clear specific ones.
 
     With --clear, removes each `file:line` marker named as an argument; used at
     fork time to strip a concern's own notes from an editor's worktree.

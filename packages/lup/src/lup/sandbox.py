@@ -166,7 +166,7 @@ def process_start_token(pid: int) -> str | None:
     # i.e. index 19 of the post-comm remainder (which begins at field 3).
     rest = raw.rpartition(")")[
         2
-    ].split()  # claude: ignore — /proc stat is whitespace-delimited, no stdlib parser
+    ].split()  # lup: ignore — /proc stat is whitespace-delimited, no stdlib parser
     if len(rest) < 20:
         return None
     return rest[19]
@@ -327,9 +327,7 @@ class ReplSession:
         self.client = client
         self.container = container
         self.environment = environment
-        self.sock: Any = (
-            None  # claude: ignore — Docker exec socket, no typed API exported
-        )
+        self.sock: Any = None  # lup: ignore — Docker exec socket, no typed API exported
         self.exec_id: str | None = None
 
     def start(self) -> None:

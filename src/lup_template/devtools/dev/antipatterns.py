@@ -1,13 +1,13 @@
-"""Audit tracked source for missing and spurious `# claude: ignore` markers.
+"""Audit tracked source for missing and spurious `# lup: ignore` markers.
 
 Backs `lup-devtools dev check --antipatterns` (and the standalone
 `dev check`-row). Walks every git-tracked `.py`/TS-family file and runs the
 single `lup.antipatterns` set over it — the same set the edit hook enforces —
 reporting two classes the hook cannot catch after the fact:
 
-- **missing**: a line trips an anti-pattern but carries no `# claude: ignore`
+- **missing**: a line trips an anti-pattern but carries no `# lup: ignore`
   (it slipped in past the hook, or predates the pattern).
-- **spurious**: an inline `# claude: ignore` guards a line that trips nothing
+- **spurious**: an inline `# lup: ignore` guards a line that trips nothing
   (a dead marker to delete).
 """
 

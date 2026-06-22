@@ -219,7 +219,7 @@ def loop(
         except RuntimeError as e:
             typer.echo(f"Error: {e}", err=True)
             continue
-        # claude: ignore — batch isolation: one failed task must not
+        # lup: ignore — batch isolation: one failed task must not
         # abort the remaining tasks; the error is logged with traceback.
         except Exception as e:
             typer.echo(f"Unexpected error: {e}", err=True)

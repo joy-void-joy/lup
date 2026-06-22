@@ -1,5 +1,5 @@
-# claude: Same comment as in TEMPLATE_CLAUDE.md 
-# claude: I think that in general, in this codebase, we should remove all the # claude: ignore
+# lup: Same comment as in TEMPLATE_CLAUDE.md 
+# lup: I think that in general, in this codebase, we should remove all the # lup: ignore
 # CLAUDE.md
 
 This file provides guidance to Claude Code when working with code in this repository.
@@ -90,7 +90,7 @@ packages/
         │   └── codex/          # Codex/OpenAI engine: adapter, background, hooks, options, openai_compat
         ├── antipatterns.py     # Single source of anti-pattern rules (edit hook + `dev check` share it)
         ├── options.py          # LupAgentOptions — backend-agnostic options crossing template -> lib
-        ├── markers.py          # `# claude:` / `// claude:` review-marker scanning (dev comments)
+        ├── markers.py          # `# lup:` / `// lup:` review-marker scanning (dev comments)
         ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
         ├── background.py       # Background agent base + SDK-aware factory
         ├── history.py          # Session storage/retrieval
@@ -371,7 +371,7 @@ Default to **Opus 4.6** (`claude-opus-4-6`) — or **Fable** (`claude-fable-5`) 
 - Use `TypedDict` and Pydantic models for structured data
 - Never manually parse agent output — use structured outputs via Pydantic
 - **Never use `# type: ignore`** — Ask the user how to properly fix type errors
-- **`# claude: ignore` escape hatch** — When `Any` or other anti-patterns are genuinely needed (untyped library boundaries, MCP), add `# claude: ignore` inline to request user approval. A standalone `# claude: ignore` in the first 10 lines of a file disables anti-pattern checks for the whole file (like `# pyright: ignore` for files).
+- **`# lup: ignore` escape hatch** — When `Any` or other anti-patterns are genuinely needed (untyped library boundaries, MCP), add `# lup: ignore` inline to request user approval. A standalone `# lup: ignore` in the first 10 lines of a file disables anti-pattern checks for the whole file (like `# pyright: ignore` for files).
 - **Use Pydantic BaseModel instead of dataclasses**
 - **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
 
@@ -421,11 +421,11 @@ The codebase should read as a **monolithic source of truth** — understandable 
 - Never use "now", "new", "updated", "fixed", or "changed" in comments
 - Use commit messages for change history, not code comments
 
-### Inline `# claude:` Notes
+### Inline `# lup:` Notes
 
-A `# claude:` (or `// claude:`) comment is **actionable review feedback** left in the code for the agent to address — distinct from the `# claude: ignore` escape hatch under [Type Safety](#type-safety). The edits hook prompts whenever an edit changes a file's `# claude:` marker count, and `lup-devtools` scans for unresolved notes.
+A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — distinct from the `# lup: ignore` escape hatch under [Type Safety](#type-safety). The edits hook prompts whenever an edit changes a file's `# lup:` marker count, and `lup-devtools` scans for unresolved notes.
 
-**Never delete a `# claude:` note until its concern is actually resolved.** Making a file parse, tidying up, or editing past it does not count. Resolve a note by fixing the code or structure it points at, or — for a question — by answering it definitively and reflecting that answer in the code, the docs, or an explicit user decision. Only then does the note come out (use `/lup:resolve`).
+**Never delete a `# lup:` note until its concern is actually resolved.** Making a file parse, tidying up, or editing past it does not count. Resolve a note by fixing the code or structure it points at, or — for a question — by answering it definitively and reflecting that answer in the code, the docs, or an explicit user decision. Only then does the note come out (use `/lup:resolve`).
 
 A note in a comment-less format (e.g. JSON) is the trap: you can't keep it there, but you still can't silently drop it to satisfy the parser. Resolve its concern first, or relocate it to a file that can hold it (the code it refers to, a tracking doc). If a note raises several concerns, remove it only once every one is resolved; otherwise keep the unresolved parts.
 
@@ -499,11 +499,11 @@ Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/lup/h
 | --------------------- | --------------- | ---------------------------------------------------------------------- |
 | `auto_allow_fetch.py` | WebFetch        | `ALLOW_PATTERNS` / `DENY_PATTERNS` (regex anchored to the URL origin)  |
 | `auto_allow_bash.py`  | Bash            | `RULES` list of `Allow`/`Deny`, evaluated per shell segment (last-match-wins, like .gitignore; deny if any segment denies, allow only if all allow) |
-| `auto_allow_edits.py` | Edit, Write     | Anti-pattern detection, trivial-line counting, `# claude:` marker review; protected files always prompt on Edit and are denied on Write; other Writes always prompt |
+| `auto_allow_edits.py` | Edit, Write     | Anti-pattern detection, trivial-line counting, `# lup:` marker review; protected files always prompt on Edit and are denied on Write; other Writes always prompt |
 
 To add a new allowed URL or command, edit the pattern list in the corresponding hook. Non-matching inputs fall through to user prompt.
 
-`auto_allow_edits.py` reads the payload's `agent_type` and grants the `/lup:resolve` editor (`lup:resolve-editor`) **autonomous edits** on its disposable, reviewed worktree branch: any Edit/Write that would prompt becomes an auto-allow. Two guardrails stay even for it — **`Edit(tmp/…)`** and any **`# claude:` marker-count change** still prompt — and **anti-pattern violations still deny**, so it can neither smuggle logic into throwaway scripts nor clear a note by editing. `auto_allow_bash.py` gives the editor **no** special access: it uses the standard allowlist (`uv run lup-devtools`, `git add`/`commit`, ruff/pyright/pytest), and its one extra need — creating its `resolve/<id>` branch — goes through the allowlisted `uv run lup-devtools dev resolve-branch`. The main session is never affected. (Workflow-spawned agents ignore an agent's frontmatter `permissionMode`, so the edit autonomy lives in the hook, keyed on `agent_type`.)
+`auto_allow_edits.py` reads the payload's `agent_type` and grants the `/lup:resolve` editor (`lup:resolve-editor`) **autonomous edits** on its disposable, reviewed worktree branch: any Edit/Write that would prompt becomes an auto-allow. Two guardrails stay even for it — **`Edit(tmp/…)`** and any **`# lup:` marker-count change** still prompt — and **anti-pattern violations still deny**, so it can neither smuggle logic into throwaway scripts nor clear a note by editing. `auto_allow_bash.py` gives the editor **no** special access: it uses the standard allowlist (`uv run lup-devtools`, `git add`/`commit`, ruff/pyright/pytest), and its one extra need — creating its `resolve/<id>` branch — goes through the allowlisted `uv run lup-devtools dev resolve-branch`. The main session is never affected. (Workflow-spawned agents ignore an agent's frontmatter `permissionMode`, so the edit autonomy lives in the hook, keyed on `agent_type`.)
 
 `settings.json` only contains rules that don't need regex: `WebSearch` (allow) and the `Read(**/*.local*)` deny (with allow exceptions for `settings.json.local*` and `downstream.json.local`). Permission decisions that overlap a hook live in the hook, not here: the bash hook **asks** before `uv add`/`uv sync` (they fetch and run dependency code) while auto-allowing `uv remove`/`uv lock`, and the edits hook treats `pyproject.toml` — with all of `.claude/` and `.env*` — as protected, so it never auto-allows.
 

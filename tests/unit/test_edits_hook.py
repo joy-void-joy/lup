@@ -75,7 +75,7 @@ def test_anti_pattern_is_denied() -> None:
 
 
 def test_inline_marker_downgrades_to_ask() -> None:
-    new = "result: Any = f()  # claude: ignore\n"
+    new = "result: Any = f()  # lup: ignore\n"
     assert edit_decision("src/module.py", "", new) == "ask"
 
 
@@ -99,7 +99,7 @@ def test_cast_call_is_denied() -> None:
 
 
 def test_cast_call_with_inline_marker_asks() -> None:
-    new = "x = 1\ny = cast(int, raw)  # claude: ignore\n"
+    new = "x = 1\ny = cast(int, raw)  # lup: ignore\n"
     assert edit_decision("src/module.py", "x = 1\n", new) == "ask"
 
 
@@ -109,7 +109,7 @@ def test_ts_anti_pattern_is_denied() -> None:
 
 def test_file_level_marker_skips_anti_patterns_only(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
-    target.write_text("# claude: ignore\nx = 1\n", encoding="utf-8")
+    target.write_text("# lup: ignore\nx = 1\n", encoding="utf-8")
 
     with_pattern = "x = 1\ndata = raw.split(',')\n"
     assert edit_decision(str(target), "x = 1\n", with_pattern) == "allow"
@@ -119,13 +119,13 @@ def test_file_level_marker_skips_anti_patterns_only(tmp_path: Path) -> None:
 
 
 def test_introducing_a_marker_asks() -> None:
-    new = "x = 1  # claude: ignore\n"
+    new = "x = 1  # lup: ignore\n"
     assert edit_decision("src/module.py", "x = 1\n", new) == "ask"
 
 
 def test_editing_near_an_existing_marker_does_not_ask() -> None:
-    old = "x = 1  # claude: ignore\ny = 2\n"
-    new = "x = 1  # claude: ignore\ny = 3\n"
+    old = "x = 1  # lup: ignore\ny = 2\n"
+    new = "x = 1  # lup: ignore\ny = 3\n"
     assert edit_decision("src/module.py", old, new) == "allow"
 
 

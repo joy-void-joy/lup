@@ -454,7 +454,7 @@ def session_ids_from_status(status: str, traces_rel: Path) -> set[str]:
     entries contribute their target path and their source is discarded.
     """
     session_ids: set[str] = set()
-    chunks = iter(status.split("\0"))  # claude: ignore — NUL is porcelain -z framing
+    chunks = iter(status.split("\0"))  # lup: ignore — NUL is porcelain -z framing
     for chunk in chunks:
         if len(chunk) < 4:
             continue

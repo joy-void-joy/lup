@@ -5,9 +5,9 @@ description: Cluster inline review notes into concerns, fan out isolated fixes, 
 
 # Resolve Inline Feedback
 
-Turn every `# claude:` / `// claude:` note in the codebase into a fix, verify each one independently, and clear only the notes that are genuinely resolved.
+Turn every `# lup:` / `// lup:` note in the codebase into a fix, verify each one independently, and clear only the notes that are genuinely resolved.
 
-These notes are how the user queues feedback: they read through files and drop `# claude: <note>` anywhere (any language — `ignore` is reserved for the anti-pattern escape hatch, everything else is for you). At scale, working note-by-note is both slow and **myopic**: many notes are the *same* concern seen from different files, and a note about one line ("why is this an `int`?") usually implies a codebase-wide change ("give domain primitives named type aliases"). So this command works at the level of **concerns**, not comments: it clusters the notes, fans the editing out to isolated worktrees in parallel, verifies each diff independently, surfaces them for your review, and integrates only what you approve — onto a dedicated branch you merge when it's ready.
+These notes are how the user queues feedback: they read through files and drop `# lup: <note>` anywhere (any language — `ignore` is reserved for the anti-pattern escape hatch, everything else is for you). At scale, working note-by-note is both slow and **myopic**: many notes are the *same* concern seen from different files, and a note about one line ("why is this an `int`?") usually implies a codebase-wide change ("give domain primitives named type aliases"). So this command works at the level of **concerns**, not comments: it clusters the notes, fans the editing out to isolated worktrees in parallel, verifies each diff independently, surfaces them for your review, and integrates only what you approve — onto a dedicated branch you merge when it's ready.
 
 The human-judgment steps stay in this conversation; the parallel editing runs in a background **workflow** that cannot pause to ask questions. So the shape is:
 
@@ -138,7 +138,7 @@ uv run lup-devtools dev comments
 uv run lup-devtools dev check
 ```
 
-Your working branch is untouched apart from the Phase-1 snapshot commit, so you can keep adding `# claude:` notes and re-run (point at the integration branch — Phase 6 reuses it). `dev check`'s `claude comments` gate will list the still-open notes; that is expected, not a reason to delete them.
+Your working branch is untouched apart from the Phase-1 snapshot commit, so you can keep adding `# lup:` notes and re-run (point at the integration branch — Phase 6 reuses it). `dev check`'s `claude comments` gate will list the still-open notes; that is expected, not a reason to delete them.
 
 ## Guidelines
 

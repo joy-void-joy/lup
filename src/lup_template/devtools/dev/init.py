@@ -66,7 +66,7 @@ def rename_imports_in_file(path: Path, new_name: str) -> list[str]:
         if is_framework_reference(line):
             return full_match
 
-        replaced = full_match.replace("lup_template", new_name, 1)  # claude: ignore
+        replaced = full_match.replace("lup_template", new_name, 1)  # lup: ignore
         changes.append(f"  {path}: {full_match!r} -> {replaced!r}")
         return replaced
 
@@ -166,7 +166,7 @@ def rename_package(
                 line = text[line_start : line_end if line_end != -1 else len(text)]
                 if not is_framework_reference(line):
                     changes.append(
-                        f"  {py_file}: {m.group(0)!r} -> {m.group(0).replace('lup_template', new_name, 1)!r}"  # claude: ignore
+                        f"  {py_file}: {m.group(0)!r} -> {m.group(0).replace('lup_template', new_name, 1)!r}"  # lup: ignore
                     )
         all_changes.extend(changes)
 

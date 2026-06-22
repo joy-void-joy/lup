@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from lup_template.agent.config import Settings
 
 
-# claude: backend-abc migration step 10 (move the ToolPolicy mechanism into
+# lup: backend-abc migration step 10 (move the ToolPolicy mechanism into
 # lup.tool_policy, with template subclasses for domain exclusions) is not done —
 # ToolPolicy still lives in the template.
 class ToolPolicy:

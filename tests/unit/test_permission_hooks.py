@@ -16,7 +16,7 @@ from lup.types import LupHookInput, LupHooksConfig
 async def decision_for(
     config: LupHooksConfig,
     tool_name: str,
-    tool_input: dict[str, object],  # claude: ignore — mirrors LupHookInput.tool_input
+    tool_input: dict[str, object],  # lup: ignore — mirrors LupHookInput.tool_input
 ) -> str | None:
     input_data = LupHookInput(
         hook_event_name="PreToolUse",

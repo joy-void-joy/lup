@@ -1,4 +1,4 @@
-# claude: ignore
+# lup: ignore
 """The anti-pattern set is single-sourced, and the auditor agrees with the hook.
 
 `lup.antipatterns` is the importable source of truth; the edit hook mirrors it
@@ -62,17 +62,17 @@ def test_audit_flags_unguarded_match() -> None:
 
 
 def test_audit_accepts_guarded_match() -> None:
-    findings = audit_text("x: Any = 1  # claude: ignore\n", PYTHON_ANTI_PATTERNS)
+    findings = audit_text("x: Any = 1  # lup: ignore\n", PYTHON_ANTI_PATTERNS)
     assert findings == []
 
 
 def test_audit_flags_spurious_marker() -> None:
-    findings = audit_text("x: int = 1  # claude: ignore\n", PYTHON_ANTI_PATTERNS)
+    findings = audit_text("x: int = 1  # lup: ignore\n", PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["spurious"]
 
 
 def test_audit_skips_file_level_ignore() -> None:
-    findings = audit_text("# claude: ignore\nx: Any = 1\n", PYTHON_ANTI_PATTERNS)
+    findings = audit_text("# lup: ignore\nx: Any = 1\n", PYTHON_ANTI_PATTERNS)
     assert findings == []
 
 

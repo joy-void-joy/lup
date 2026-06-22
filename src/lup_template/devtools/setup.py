@@ -275,7 +275,7 @@ class Integration(BaseModel):
 # TEMPLATE integrations — replace these with your domain's services
 # =====================================================================
 
-# claude: Probably need some todos here. I'd like /init to have a step where it explicitely gathers (like dev currently gathers the "# claude:" comments) all TODOs and places where it has to make a decision
+# lup: Probably need some todos here. I'd like /init to have a step where it explicitely gathers (like dev currently gathers the "# lup:" comments) all TODOs and places where it has to make a decision
 
 
 def slack_status(env: EnvValues) -> tuple[bool, str]:
@@ -410,7 +410,7 @@ def timezone_status(env: EnvValues) -> tuple[bool, str]:
 # the fields to prompt for. Bespoke flows pass ``setup_func`` instead.
 # =====================================================================
 
-# claude: Yeah, I really like this part
+# lup: Yeah, I really like this part
 INTEGRATIONS: list[Integration] = [
     Integration(
         name="Slack",

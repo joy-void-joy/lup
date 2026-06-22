@@ -73,7 +73,7 @@ class CallToolResultWithAlias(CallToolResult):
 # the handler returns a ToolResponse-shaped dict the SDK consumes as a plain dict.
 type LupToolHandler = Callable[
     [dict[str, Any]], Awaitable[dict[str, Any]]
-]  # claude: ignore
+]  # lup: ignore
 
 
 class LupMcpServerConfig(BaseModel):
@@ -322,7 +322,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
             args: dict[str, Any],
         ) -> (
             ToolResponse
-        ):  # claude: ignore — raw MCP JSON args, validated below by final_input
+        ):  # lup: ignore — raw MCP JSON args, validated below by final_input
             start = time.perf_counter()
             is_error = False
             try:
@@ -349,7 +349,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
                         f"got {type(result).__name__}"
                     )
                 return mcp_response(json.dumps(result.model_dump(), default=str))
-            except Exception:  # claude: ignore — flag metrics, then re-raise
+            except Exception:  # lup: ignore — flag metrics, then re-raise
                 is_error = True
                 raise
             finally:

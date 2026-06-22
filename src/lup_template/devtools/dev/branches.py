@@ -449,9 +449,9 @@ def probe_ssh_auth(destination: str, remote_url: str) -> bool:
     except sh.ErrorReturnCode:
         identity = ""
         lines = str(ssh("-G", destination, _ok_code=[0])).splitlines()
-        for line in lines:  # claude: ignore
+        for line in lines:  # lup: ignore
             if line.startswith("identityfile "):
-                identity = line.split(" ", 1)[1]  # claude: ignore
+                identity = line.split(" ", 1)[1]  # lup: ignore
                 break
         msg = f"SSH authentication failed for remote '{remote_url}'."
         if identity:

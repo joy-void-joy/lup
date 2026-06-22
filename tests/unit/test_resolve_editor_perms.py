@@ -1,15 +1,15 @@
-# claude: ignore
+# lup: ignore
 """Resolve-editor autonomy in the edit permission hook.
 
 The /lup:resolve editor (agent_type ``lup:resolve-editor``) writes unattended on
 a disposable, reviewed worktree branch: in the edit hook every verdict that would
 prompt collapses to an auto-allow, while two guardrails stay — ``Edit(tmp/…)`` and
-any ``# claude:`` marker-count change still prompt, and anti-pattern violations
+any ``# lup:`` marker-count change still prompt, and anti-pattern violations
 still deny. The main session is never affected. The bash hook grants the editor
 no special access: it relies on the standard allowlist plus the allowlisted
 ``lup-devtools`` commands (branch setup goes through ``dev resolve-branch``).
 
-Fixtures here deliberately embed anti-pattern tokens and ``# claude:`` markers as
+Fixtures here deliberately embed anti-pattern tokens and ``# lup:`` markers as
 test data; the file-level ignore above keeps the edit hook off this file's own
 fixtures.
 """
@@ -91,7 +91,7 @@ def test_editor_tmp_writes_still_prompt() -> None:
 
 
 def test_editor_marker_count_change_still_prompts() -> None:
-    new = "x = 1  # claude: ignore\n"
+    new = "x = 1  # lup: ignore\n"
     assert edit_dec("src/module.py", "x = 1\n", new, EDITOR) == "ask"
 
 

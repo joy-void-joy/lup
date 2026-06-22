@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, SerializeAsAny, ValidationError
 logger = logging.getLogger(__name__)
 
 
-# claude: Yeah, this file is excellent, exactly what I wanted in terms of having a unified codex, claude, ..., backend
+# lup: Yeah, this file is excellent, exactly what I wanted in terms of having a unified codex, claude, ..., backend
 
 # ---------------------------------------------------------------------------
 # Content blocks
@@ -247,7 +247,7 @@ class LupHookInput(TypedDict, total=False):
 
     hook_event_name: str
     tool_name: str
-    tool_input: dict[str, object]  # claude: ignore
+    tool_input: dict[str, object]  # lup: ignore
     tool_result: str
     stop_hook_active: bool
 
