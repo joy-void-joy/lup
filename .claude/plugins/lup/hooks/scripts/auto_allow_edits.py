@@ -102,7 +102,7 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
-        "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",
+        "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel", # lup: I think we should just have dict as a disallowed type, and likewise for object?
     ),
     (
         re.compile(r"\btuple\["),
@@ -141,6 +141,7 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"\.split\s*\("),
         "Avoid .split() for structured data — parse it instead "
         "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
+        # lup: We should also add .strip to anti-patterns
     ),
     (
         re.compile(r"\bexcept\s*:"),
