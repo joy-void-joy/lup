@@ -95,7 +95,7 @@ function editPrompt(c) {
     `not just the first. Likely starting points: ${starts}.`,
     ``,
     `Steps:`,
-    `1. git checkout -b resolve/${c.id}   (branch from ${base})`,
+    `1. uv run lup-devtools dev resolve-branch ${c.id}   (makes resolve/${c.id} from ${base})`,
     `2. ${strip}`,
     `   This strips THIS concern's \`# claude:\` markers from your worktree so you`,
     `   fix the issue itself, not the note. Do not re-add markers or leave`,

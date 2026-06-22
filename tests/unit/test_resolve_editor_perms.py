@@ -1,12 +1,13 @@
 # claude: ignore
-"""Resolve-editor autonomy across both permission hooks.
+"""Resolve-editor autonomy in the edit permission hook.
 
-The /lup:resolve editor (agent_type ``lup:resolve-editor``) runs unattended on a
-disposable, reviewed worktree branch: in both hooks every verdict that would
-prompt collapses to an auto-allow, while denials (anti-patterns, bare
-interpreters) still bite. Two prompts are kept even for the editor —
-``Edit(tmp/…)`` and any ``# claude:`` marker-count change — and the main session
-is never affected.
+The /lup:resolve editor (agent_type ``lup:resolve-editor``) writes unattended on
+a disposable, reviewed worktree branch: in the edit hook every verdict that would
+prompt collapses to an auto-allow, while two guardrails stay — ``Edit(tmp/…)`` and
+any ``# claude:`` marker-count change still prompt, and anti-pattern violations
+still deny. The main session is never affected. The bash hook grants the editor
+no special access: it relies on the standard allowlist plus the allowlisted
+``lup-devtools`` commands (branch setup goes through ``dev resolve-branch``).
 
 Fixtures here deliberately embed anti-pattern tokens and ``# claude:`` markers as
 test data; the file-level ignore above keeps the edit hook off this file's own
@@ -26,13 +27,6 @@ edits_spec = importlib.util.spec_from_file_location(
 assert edits_spec is not None and edits_spec.loader is not None
 edits_hook = importlib.util.module_from_spec(edits_spec)
 edits_spec.loader.exec_module(edits_hook)
-
-bash_spec = importlib.util.spec_from_file_location(
-    "auto_allow_bash", SCRIPTS / "auto_allow_bash.py"
-)
-assert bash_spec is not None and bash_spec.loader is not None
-bash_hook = importlib.util.module_from_spec(bash_spec)
-bash_spec.loader.exec_module(bash_hook)
 
 EDITOR = "lup:resolve-editor"
 
@@ -62,15 +56,6 @@ def write_dec(file_path: str, content: str, agent_type: str = "") -> str | None:
     result = edits_hook.decide_write(
         edits_hook.WriteInput(file_path=file_path, content=content), agent_type
     )
-    if result is None:
-        return None
-    return result["hookSpecificOutput"]["permissionDecision"]
-
-
-def bash_dec(command: str, agent_type: str = "") -> str | None:
-    result = bash_hook.decide(command)
-    if agent_type in bash_hook.RESOLVE_EDITOR_AGENTS:
-        result = bash_hook.editor_decision(result)
     if result is None:
         return None
     return result["hookSpecificOutput"]["permissionDecision"]
@@ -113,21 +98,3 @@ def test_editor_marker_count_change_still_prompts() -> None:
 def test_editor_anti_patterns_still_deny() -> None:
     assert edit_dec("src/module.py", "", "from typing import Any\n", EDITOR) == "deny"
     assert write_dec("src/module.py", "import dataclasses\n", EDITOR) == "deny"
-
-
-# --- bash hook: the editor runs its commands without prompting ---
-
-
-def test_editor_bash_collapses_prompts_to_allow() -> None:
-    assert bash_dec("git checkout -b resolve/x") is None
-    assert bash_dec("git checkout -b resolve/x", EDITOR) == "allow"
-    assert bash_dec("curl https://example.com") is None
-    assert bash_dec("curl https://example.com", EDITOR) == "allow"
-    assert bash_dec("uv add httpx") == "ask"
-    assert bash_dec("uv add httpx", EDITOR) == "allow"
-
-
-def test_editor_bash_keeps_interpreter_denials() -> None:
-    assert bash_dec("python evil.py", EDITOR) == "deny"
-    assert bash_dec("uv run python -c 'x'", EDITOR) == "deny"
-    assert bash_dec("ls; python evil.py", EDITOR) == "deny"
