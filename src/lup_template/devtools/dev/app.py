@@ -154,6 +154,20 @@ def delete_cmd(
     branches.delete_branch(name, dry_run, force)
 
 
+@app.command("resolve-branch")
+def resolve_branch_cmd(
+    concern_id: Annotated[
+        str, typer.Argument(help="Concern slug; becomes the resolve/<id> branch")
+    ],
+) -> None:
+    """Create + switch to the resolve/<id> branch (a /lup:resolve editor's first step).
+
+    Runs through the allowlisted `uv run lup-devtools` path so the bash hook needs
+    no special case for the editor — autonomy for the editor lives in the edit hook.
+    """
+    branches.create_resolve_branch(concern_id)
+
+
 # -- conflict commands --
 
 
