@@ -55,6 +55,22 @@ def test_markdown_skips_fenced_code() -> None:
     assert find_feedback(source, ScanMode.MARKDOWN) == []
 
 
+def test_note_mentioning_the_ignore_hatch_in_prose_is_still_a_note() -> None:
+    # The ignore check is anchored to the marker that opens the line, not a
+    # substring search — so a note whose prose talks about `# lup: ignore`
+    # is feedback, not an ignore directive, and must surface.
+    source = "# lup: real note\n# lup: we should remove every # lup: ignore\n"
+    assert texts(source, ScanMode.MARKDOWN) == [
+        "real note",
+        "we should remove every # lup: ignore",
+    ]
+
+
+def test_inline_ignore_directive_is_still_skipped() -> None:
+    source = "x = 1  # lup: ignore\ny = 2  # lup: real note\n"
+    assert texts(source, ScanMode.PYTHON) == ["real note"]
+
+
 def test_scan_mode_for_routes_by_suffix() -> None:
     assert scan_mode_for(Path("a.py")) == ScanMode.PYTHON
     assert scan_mode_for(Path("a.pyi")) == ScanMode.PYTHON

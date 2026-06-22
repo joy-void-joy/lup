@@ -197,7 +197,7 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[FeedbackComment]
         if (
             match is None
             or in_fence
-            or IGNORE_RE.search(line) is not None
+            or IGNORE_RE.match(line, match.start()) is not None
             or (mode == ScanMode.JS and match.group(1) == "#")
             or inside_inline_code(line, match.start())
             or not in_note_context(i + 1, match.start())
