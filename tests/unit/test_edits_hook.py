@@ -136,6 +136,23 @@ def test_single_line_replace_all_is_allowed() -> None:
     )
 
 
+def test_dotted_attribute_replace_all_is_allowed() -> None:
+    assert (
+        edit_decision("src/module.py", "mod.Old", "mod.New", replace_all=True)
+        == "allow"
+    )
+
+
+def test_is_identifier_rename_accepts_only_symbol_paths() -> None:
+    assert hook.is_identifier_rename("old_name", "new_name")
+    assert hook.is_identifier_rename("mod.Old", "mod.New")
+    # An expression is not a symbol rename; it must not ride the fast path.
+    assert not hook.is_identifier_rename("a = 1 + 2", "a = 3 + 4")
+    # Multi-line replace_all rewrites logic; never a rename.
+    assert not hook.is_identifier_rename("foo\nbar", "baz\nqux")
+    assert not hook.is_identifier_rename("", "name")
+
+
 def test_multi_line_replace_all_uses_size_gate() -> None:
     old = "def f():\n    return 1\n"
     big = "def f():\n" + "".join(f"    step{i} = run{i}()\n" for i in range(6))
