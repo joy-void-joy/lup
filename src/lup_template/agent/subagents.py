@@ -3,7 +3,6 @@
 This is a TEMPLATE. Define subagents for specialized tasks in your domain.
 
 Subagents are spawned by the main agent to perform focused work.
-# lup: Do we have a similar file dedicated to nested agents? We should. Please review all of the different ontologies for agent in the doc file (nested, background, etc...) and ensure each one has a python file corresponding to those common patterns.
 Each subagent has:
 - A specialized prompt (focused on one job)
 - A subset of tools (only what it needs)
@@ -21,6 +20,19 @@ the same spec list:
 A spec without a ``model`` inherits the session's main model on every
 backend; pinning one (as the specs below do) is a deliberate cost/skill
 choice that holds regardless of ``AGENT_SDK``.
+
+Subagents are one of several agent shapes — ``.claude/PATTERNS.md`` is
+the full catalog. Where the siblings live:
+
+- Nested agents: a one-shot :func:`lup.adapters.common.query` inside a
+  tool handler; the reviewer in ``agent/tools/reflect.py`` is the
+  exemplar
+- Background agents: ``lup.background`` (``create_background_agent``),
+  with the observer example in ``agent/tools/realtime.py``
+- Persistent agents: ``lup.realtime`` and ``lup.realtime_relay``, with
+  example tools in ``agent/tools/realtime.py``
+- Data augmentation: ``agent/tools/example.py`` (domain dispatch,
+  null-filling, extraction)
 """
 
 from lup.types import SubagentSpec

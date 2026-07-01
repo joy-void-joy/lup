@@ -141,7 +141,7 @@ src/
 
 ### Design Patterns
 
-See [PATTERNS.md](PATTERNS.md) for detailed architecture patterns: Persistent Agent, Reflection, Nested Agent, Background Agent, and Data Augmentation.
+See [PATTERNS.md](PATTERNS.md) for detailed architecture patterns: Persistent Agent, Reflection, Subagent, Nested Agent, Background Agent, and Data Augmentation.
 
 ### lup (library) vs lup_template (application) Boundary
 
