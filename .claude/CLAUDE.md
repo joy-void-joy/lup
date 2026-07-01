@@ -489,7 +489,7 @@ Sub-apps: `agent`, `claude`, `dev`, `feedback`, `py`, `setup`, `sync`, `trace`, 
 
 `lup-devtools claude` runs Claude Code wired for this project: the local lup plugin loaded live from disk (`--plugin-dir`, so plugin edits show up without reinstalling), the agent's MCP tools attached, and — when set — the active **profile**'s account (`CLAUDE_CONFIG_DIR`). `claude usage` reports usage for the chosen profile. Profiles (named Claude config dirs) are managed with `lup-devtools setup profile`.
 
-Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `/lup:*` is identical everywhere. Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name like `lup`/`local` collides across repos and an install from one shadows the others; `lup-devtools dev plugin name` (run by `/lup:init` and `/lup:install`) wires the per-project name.
+Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `/lup:*` is identical everywhere. The two loading paths divide the work: `--plugin-dir` covers only live in-repo `lup-devtools claude` sessions, while the marketplace (`.claude/plugins/.claude-plugin/marketplace.json`) is the registered-install path — plain `claude` sessions and downstream targets (`/lup:install` writes a project-named copy into each) load the plugin through it. Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name like `lup`/`local` collides across repos and an install from one shadows the others; `lup-devtools dev plugin name` (run by `/lup:init` and `/lup:install`) wires the per-project name.
 
 ### Permission Hooks
 
