@@ -76,8 +76,15 @@ RESOLVE_EDITOR_AGENTS = {"resolve-editor", "lup:resolve-editor"}
 # file. A matching line denies the edit; an inline `# lup: ignore` on the
 # line downgrades to a user prompt, and a file-level marker (first 10 lines
 # on disk) skips this table entirely.
+#
+# The importable source of truth is lup.antipatterns.PYTHON_ANTI_PATTERNS,
+# which `lup-devtools dev check --antipatterns` audits the whole tree with;
+# this hook mirrors it because a safety hook must stay hermetic (no package
+# import on the per-edit hot path), and test_python_table_matches_hook in
+# tests/unit/test_antipatterns.py pins the mirror equal. The rules are not
+# custom linter rules: ruff has no plugin API, and engines that have one
+# would break the hook's hermeticity.
 
-# lup: I am wondering whether this is something we can do with a linter actually? Is there a way to specify custome rules this way? Might be the best way to unify this?
 ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\bAny\b"),
@@ -102,7 +109,7 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
-        "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel", # lup: I think we should just have dict as a disallowed type, and likewise for object?
+        "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",  # lup: I think we should just have dict as a disallowed type, and likewise for object?
     ),
     (
         re.compile(r"\btuple\["),
@@ -124,7 +131,7 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"\bfrom\s+re\s+import\b"),
         "`from re import` is a code smell — parse structured data with its own API instead: "
         "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
-        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",  # lup: We might want something like a anti-pattern library
+        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     (
         re.compile(r"\bre\.(compile|search|match|fullmatch|sub|findall|split)\s*\("),
@@ -199,7 +206,8 @@ TS_FILE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 TS_LUP_IGNORE_MARKER = "// lup: ignore"
 
 # Same contract as ANTI_PATTERNS, for TypeScript/JavaScript-family files,
-# using the `// lup: ignore` marker.
+# using the `// lup: ignore` marker. Mirrors lup.antipatterns.TS_ANTI_PATTERNS;
+# test_ts_table_matches_hook pins the mirror equal.
 TS_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"\bas\s+any\b"),

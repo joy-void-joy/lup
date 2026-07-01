@@ -43,6 +43,10 @@ def test_python_after_separator_is_denied() -> None:
     assert decision("ls; python evil.py") == "deny"
     assert decision("git status && python evil.py") == "deny"
     assert decision("echo hi | python -") == "deny"
+    assert (
+        decision("cat data.json | python3 -c 'import json,sys; json.load(sys.stdin)'")
+        == "deny"
+    )
 
 
 def test_other_interpreters_are_denied() -> None:

@@ -236,7 +236,8 @@ def check_cmd(
         bool,
         typer.Option(
             "--antipatterns",
-            help="Audit tracked files for missing/spurious `# lup: ignore` markers only",
+            help="Audit tracked files for missing/spurious `# lup: ignore` markers "
+            "only — the same lup.antipatterns rules the edit hook enforces",
         ),
     ] = False,
     as_json: Annotated[
