@@ -77,11 +77,16 @@ class SyncBaseResult(BaseModel):
     conflicts: list[str]
 
 
+class ExistingPR(BaseModel):
+    number: int
+    url: str
+
+
 class PushResult(BaseModel):
     branch: str
     pushed: bool
     force: bool
-    existing_pr: dict[str, str | int] | None
+    existing_pr: ExistingPR | None
 
 
 class CreateResult(BaseModel):
@@ -89,32 +94,35 @@ class CreateResult(BaseModel):
     url: str
 
 
-def output_result(
-    result: BaseModel, as_json: bool
-) -> None:  # lup: why is the type so extremely generic? Probably BaseModel should be a #lup: ignore as well
+type PRResult = (
+    PRStatusResult | MergeResult | SyncBaseResult | PushResult | CreateResult
+)
+
+
+def output_result(result: PRResult, as_json: bool) -> None:
     if as_json:
         output_json(result)
         return
 
-    if isinstance(result, PRStatusResult):
-        if result.pr:
+    match result:
+        case PRStatusResult(pr=PRInfo()):
             format_pr_status(result)
-        else:
+        case PRStatusResult():
             typer.echo(f"branch: {result.branch}")
             typer.echo("pr: no open PR")
-        return
-
-    for key, value in result.model_dump().items():
-        if isinstance(value, list):
-            typer.echo(f"{key}:")
-            for item in value:
-                typer.echo(f"  - {item}")
-        elif isinstance(value, dict):
-            typer.echo(f"{key}:")
-            for k, v in value.items():
-                typer.echo(f"  {k}: {v}")
-        else:
-            typer.echo(f"{key}: {value}")
+        case _:
+            for key, value in result.model_dump().items():
+                match value:
+                    case list():
+                        typer.echo(f"{key}:")
+                        for item in value:
+                            typer.echo(f"  - {item}")
+                    case dict():
+                        typer.echo(f"{key}:")
+                        for k, v in value.items():
+                            typer.echo(f"  {k}: {v}")
+                    case _:
+                        typer.echo(f"{key}: {value}")
 
 
 def format_pr_status(result: PRStatusResult) -> None:
@@ -395,7 +403,7 @@ def push(
         ).strip()
         prs = json.loads(pr_raw) if pr_raw else []
         if prs:
-            existing_pr = {"number": prs[0]["number"], "url": prs[0]["url"]}
+            existing_pr = ExistingPR(number=prs[0]["number"], url=prs[0]["url"])
     except sh.ErrorReturnCode:
         pass
 

@@ -279,7 +279,7 @@ class TestReflectionGateReset:
 class TestNotesReadOnlyExcludesLogs:
     def test_logs_dir_not_in_ro_grant(self, tmp_path: Path) -> None:
         """The agent's RO grant must not cover the feedback-loop logs dir."""
-        saved_state = paths.state
+        saved_config = paths.state.config
         try:
             paths.configure(notes_dir=tmp_path / "notes", version="test")
             notes = setup_notes(session_id="s1", task_id="t1")
@@ -292,7 +292,7 @@ class TestNotesReadOnlyExcludesLogs:
             assert path_is_under(sessions_dir() / "other" / "x.json", notes.ro)
             assert path_is_under(trace_logs_dir(), [trace_logs_dir()])
         finally:
-            paths.state = saved_state
+            paths.state.config = saved_config
 
 
 def make_sandbox() -> Sandbox:

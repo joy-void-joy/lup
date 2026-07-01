@@ -44,6 +44,7 @@ import time
 from collections.abc import Generator, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from types import TracebackType
 from typing import Any, Literal, Self, TypedDict
 
 try:
@@ -735,7 +736,7 @@ class Sandbox:
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: object,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit context manager, stopping the sandbox."""
         self.stop()

@@ -175,6 +175,66 @@ def test_underscore_module_assignments_are_still_denied() -> None:
     assert edit_decision("src/module.py", "", "_LIMIT: int = 5\n") == "deny"
 
 
+def test_strip_call_is_denied() -> None:
+    assert (
+        edit_decision("src/module.py", "x = 1\n", "x = 1\ny = raw.strip()\n") == "deny"
+    )
+
+
+def test_string_keyed_dict_annotation_is_denied() -> None:
+    assert edit_decision("src/module.py", "", "env: dict[str, str] = {}\n") == "deny"
+
+
+def test_bare_object_annotation_is_denied() -> None:
+    new = "def probe(value: object) -> None:\n    return None\n"
+    assert edit_decision("src/module.py", "", new) == "deny"
+
+
+def test_bare_basemodel_param_is_denied() -> None:
+    new = "def show(result: BaseModel) -> None:\n    return None\n"
+    assert edit_decision("src/module.py", "", new) == "deny"
+
+
+def test_basemodel_generic_bound_is_allowed() -> None:
+    new = "def read[T: BaseModel](model: type[T]) -> T | None:\n    return None\n"
+    assert edit_decision("src/module.py", "", new) == "allow"
+
+
+def test_typing_modernization_is_denied() -> None:
+    assert edit_decision("src/module.py", "", "x: Optional[int] = None\n") == "deny"
+    assert edit_decision("src/module.py", "", "items: List[str] = []\n") == "deny"
+
+
+def test_os_path_and_eval_are_denied() -> None:
+    assert edit_decision("src/module.py", "", "base = os.path.dirname(p)\n") == "deny"
+    assert edit_decision("src/module.py", "", "value = eval(expr)\n") == "deny"
+
+
+def test_literal_eval_is_allowed() -> None:
+    new = "value = ast.literal_eval(expr)\n"
+    assert edit_decision("src/module.py", "", new) == "allow"
+
+
+def test_global_statement_is_denied() -> None:
+    new = "def bump() -> None:\n    global counter\n"
+    assert edit_decision("src/module.py", "", new) == "deny"
+
+
+def test_utcnow_is_denied() -> None:
+    assert edit_decision("src/module.py", "", "now = datetime.utcnow()\n") == "deny"
+
+
+def test_new_ts_rules_are_denied() -> None:
+    assert edit_decision("src/app.ts", "", "const n = user!.name;\n") == "deny"
+    assert edit_decision("src/app.ts", "", "var total = 0;\n") == "deny"
+    assert edit_decision("src/app.ts", "", "let cb: Function;\n") == "deny"
+    assert edit_decision("src/app.ts", "", "console.log('x');\n") == "deny"
+
+
+def test_strict_equality_ts_line_is_allowed() -> None:
+    assert edit_decision("src/app.ts", "", "const ok = a !== b;\n") == "allow"
+
+
 def write_decision(file_path: str, content: str) -> str | None:
     """Return 'ask' or None (fall through to user prompt)."""
     result = hook.decide_write(hook.WriteInput(file_path=file_path, content=content))
