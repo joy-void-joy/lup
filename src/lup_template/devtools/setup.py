@@ -410,7 +410,6 @@ def timezone_status(env: EnvValues) -> tuple[bool, str]:
 # the fields to prompt for. Bespoke flows pass ``setup_func`` instead.
 # =====================================================================
 
-# lup: Yeah, I really like this part
 INTEGRATIONS: list[Integration] = [
     Integration(
         name="Slack",
