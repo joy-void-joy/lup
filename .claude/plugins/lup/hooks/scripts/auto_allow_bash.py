@@ -104,7 +104,7 @@ RULES: list[Allow | Deny | Ask] = [
     # pass-through wrapper, or via `uv run`/`uvx`). Segments are already split
     # on separators, so anchoring at `^` is enough.
     Deny(
-        pattern=rf"^{COMMAND_PREFIX}(?:{UV_LAUNCHER})?(?:\S*/)?(?:{'|'.join(CODE_INTERPRETERS)})(?![\w./-])", # lup: Will this block "command | python3 -c "?
+        pattern=rf"^{COMMAND_PREFIX}(?:{UV_LAUNCHER})?(?:\S*/)?(?:{'|'.join(CODE_INTERPRETERS)})(?![\w./-])",  # lup: Will this block "command | python3 -c "?
         reason=INTERPRETER_DENY_REASON,
     ),
     # ...and `uv run` executing inline code or a module/script, which runs
