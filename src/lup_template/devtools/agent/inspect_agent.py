@@ -19,11 +19,7 @@ from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput
 from lup_template.agent.prompts import get_system_prompt
 from lup_template.agent.subagents import get_subagent_specs
-from lup_template.devtools.agent.serve import (
-    collect_all_tools,
-    collect_dynamic_tool_names,
-    collect_tools_by_server,
-)
+from lup_template.devtools.agent.serve import collect_registry_tools
 from lup.mcp import LupMcpTool
 
 
@@ -124,9 +120,8 @@ def page_output(text: str) -> None:
 
 def run_inspect(as_json: bool, full: bool) -> None:
     """Render the full agent configuration as JSON or paged pretty-print."""
-    tools_by_server = collect_tools_by_server()
-    dynamic_tools = collect_dynamic_tool_names()
-    all_tools = collect_all_tools()
+    tools_by_server = collect_registry_tools()
+    all_tools = [t for server_tools in tools_by_server.values() for t in server_tools]
     subagents = {s.name: s for s in get_subagent_specs()}
     prompt = get_system_prompt()
 
@@ -135,7 +130,6 @@ def run_inspect(as_json: bool, full: bool) -> None:
             "model": settings.model,
             "max_thinking_tokens": settings.max_thinking_tokens,
             "tools": [tool_to_dict(t) for t in all_tools],
-            "dynamic_tools": dynamic_tools,
             "output_schema": AgentOutput.model_json_schema(),
             "subagents": {
                 name: {
@@ -162,10 +156,8 @@ def run_inspect(as_json: bool, full: bool) -> None:
     out.write(f"Max thinking tokens: {settings.max_thinking_tokens}\n")
 
     # Tools grouped by server
-    total_static = sum(len(ts) for ts in tools_by_server.values())
-    total_dynamic = sum(len(ts) for ts in dynamic_tools.values())
     out.write(f"\n{'─' * 60}\n")
-    out.write(f"  MCP Tools ({total_static + total_dynamic})\n")
+    out.write(f"  MCP Tools ({len(all_tools)})\n")
     out.write(f"{'─' * 60}\n")
     for server_name, server_tools in tools_by_server.items():
         out.write(f"\n  {server_name} ({len(server_tools)} tools)\n")
@@ -174,13 +166,6 @@ def run_inspect(as_json: bool, full: bool) -> None:
                 print_tool_full(out, t)
             else:
                 print_tool_compact(out, t)
-    if dynamic_tools:
-        for module_name, tool_names in dynamic_tools.items():
-            out.write(
-                f"\n  {module_name} ({len(tool_names)} tools, created at runtime)\n"
-            )
-            for name in tool_names:
-                out.write(f"    {name}\n")
 
     # Agent output schema
     out.write(f"\n{'─' * 60}\n")

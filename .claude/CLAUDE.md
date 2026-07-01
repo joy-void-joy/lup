@@ -107,6 +107,7 @@ packages/
         ├── sandbox.py          # Docker-based Python sandbox (lazy start, orphan sweep)
         ├── subagents.py        # run_subagent delegation tool from SubagentSpec
         ├── throttle.py         # Rate limiting (concurrency + interval)
+        ├── tool_policy.py      # Tool-availability machinery (BaseToolPolicy)
         └── trace.py            # Trace logging, color-coded console display
 src/
 └── lup_template/               # Template application (depends on lup)
@@ -116,7 +117,7 @@ src/
     │   ├── models.py           # Output models (customize for your domain)
     │   ├── prompts.py          # System prompt templates
     │   ├── subagents.py        # Subagent definitions
-    │   ├── tool_policy.py      # Conditional tool availability
+    │   ├── tool_policy.py      # Maps Settings to exclusions (BaseToolPolicy subclass)
     │   ├── toolsets.py         # Tool-group registry (one source for every backend)
     │   └── tools/
     │       ├── example.py      # Example MCP tools (customize)
