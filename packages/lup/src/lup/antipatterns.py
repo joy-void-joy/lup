@@ -51,12 +51,36 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Use Python 3.12+ class[T] syntax instead of Generic[T]",
     ),
     AntiPattern(
+        pattern=re.compile(r"\b(?:Optional|Union)\["),
+        message="Use PEP 604 unions — X | None instead of Optional, X | Y instead of Union",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"\b(?:List|Dict|Tuple|Set)\["),
+        message="Use lowercase builtin generics — list, dict, tuple, set — "
+        "instead of the capitalized typing aliases",
+    ),
+    AntiPattern(
         pattern=re.compile(r"__all__\s*[=:]"),
         message="No __all__ — import directly from the defining module",
     ),
     AntiPattern(
         pattern=re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
         message="Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"\bdict\[\s*str\s*,"),
+        message="String-keyed dict[str, ...] hides the value shape — name the fields "
+        "with a TypedDict or BaseModel",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"(?:(?<!\w)(?!_)\w+\s*:|->)\s*object\b"),
+        message="Bare `object` says nothing about the value — use a concrete type, "
+        "TypedDict, or BaseModel, and narrow at untyped boundaries",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"(?:(?<!\[)\b\w+\s*:|->)\s*BaseModel\b(?!\s*[\]|])"),
+        message="A parameter or return annotated exactly BaseModel accepts any model — "
+        "name the concrete union of models or make the function generic",
     ),
     AntiPattern(
         pattern=re.compile(r"\btuple\["),
@@ -99,6 +123,11 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     AntiPattern(
+        pattern=re.compile(r"\.strip\s*\("),
+        message="Avoid .strip() for structured data — parse it instead "
+        "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
+    ),
+    AntiPattern(
         pattern=re.compile(r"\bexcept\s*:"),
         message="Bare `except:` catches SystemExit/KeyboardInterrupt — name the exception",
     ),
@@ -125,12 +154,34 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Use the `sh` library instead of subprocess",
     ),
     AntiPattern(
+        pattern=re.compile(r"\bos\.(?:system|popen)\s*\("),
+        message="Use the `sh` library instead of os.system()/os.popen()",
+    ),
+    AntiPattern(
         pattern=re.compile(r"\bimport\s+argparse\b|\bfrom\s+argparse\s+import\b"),
         message="Use `typer` instead of argparse",
     ),
     AntiPattern(
         pattern=re.compile(r"\brich\.progress\b|\bfrom\s+rich\.progress\s+import\b"),
         message="Use `tqdm` instead of rich progress bars",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"\bos\.path\b"),
+        message="Use pathlib.Path instead of os.path",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"(?<![.\w])(?:eval|exec)\s*\("),
+        message="Never use eval()/exec() — parse the data (ast.literal_eval for "
+        "literals) or dispatch explicitly",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"\butcnow\s*\("),
+        message="datetime.utcnow() is naive and deprecated — use datetime.now(timezone.utc)",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"^global\s+\w"),
+        message="No `global` statements — mutate a module-level holder object or pass "
+        "state explicitly",
     ),
     AntiPattern(
         pattern=re.compile(r"\bdef\s+_[a-zA-Z]"),
@@ -189,6 +240,24 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         pattern=re.compile(r"//\s*tslint:disable"),
         message="Never use tslint:disable — migrate to eslint and fix the issue",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"[\w\)\]]!\."),
+        message="Postfix `!.` non-null assertion hides a possible null/undefined — "
+        "narrow the type or handle the missing case",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"\bvar\s+[A-Za-z_$]"),
+        message="Use `const` or `let` instead of `var` — var is function-scoped and hoisted",
+    ),
+    AntiPattern(
+        pattern=re.compile(r":\s*(?:Function|Object)\b"),
+        message="Never use `Function` or `Object` as a type — declare the call "
+        "signature or the object shape",
+    ),
+    AntiPattern(
+        pattern=re.compile(r"\bconsole\.log\s*\("),
+        message="console.log is a debug leftover — remove it or route through a logger",
     ),
 ]
 """Anti-patterns checked against added lines of TypeScript/JavaScript files."""

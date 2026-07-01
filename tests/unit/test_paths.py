@@ -21,7 +21,7 @@ def isolated_state(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail_autodetect() -> Path:
         raise AssertionError("find_project_root must not run — configure() came first")
 
-    monkeypatch.setattr(paths, "state", None)
+    monkeypatch.setattr(paths.state, "config", None)
     monkeypatch.setattr(paths, "find_project_root", fail_autodetect)
 
 
