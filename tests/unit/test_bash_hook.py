@@ -102,6 +102,12 @@ def test_uv_run_lup_falls_through_to_prompt() -> None:
 
 def test_no_blanket_xargs_allow() -> None:
     assert decision("echo x | xargs rm -rf") is None
+    assert decision("ls | xargs chmod -R 777 /") is None
+
+
+def test_xargs_with_readonly_payload_allows() -> None:
+    assert decision("find . -name '*.py' | xargs grep TODO") == "allow"
+    assert decision("ls | xargs cat") == "allow"
 
 
 def test_find_allowed_only_without_execution() -> None:

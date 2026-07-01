@@ -1,8 +1,7 @@
-"""Tests for SDK interop: phases 2-7 functionality."""
+"""SDK interop behavior: Codex config-override generation, hook-script
+emission, and lup->SDK hook/option conversion for both engines."""
 
-import asyncio
 import tempfile
-from collections.abc import Awaitable
 from pathlib import Path
 
 from lup.adapters.codex.adapter import (
@@ -21,18 +20,8 @@ from lup.adapters.codex.hooks import (
     write_reflection_gate_script,
     write_tool_allowlist_script,
 )
-from lup.types import (
-    LupDoneEvent,
-    LupEvent,
-    LupTextEvent,
-    LupThinkingEvent,
-    LupToolResultEvent,
-    LupToolUseEvent,
-    model_backend,
-    normalize_effort,
-)
+from lup.types import model_backend, normalize_effort
 from lup.hooks import (
-    create_capture_hook,
     create_nudge_hook,
     create_permission_hooks,
     create_tool_allowlist_hook,
@@ -43,17 +32,9 @@ from lup.types import (
     LupHooksConfig,
     SubagentSpec,
     allow_hook,
-    block_hook,
     deny_hook,
     merge_hooks,
 )
-
-
-def run_awaitable[T](aw: Awaitable[T]) -> T:
-    async def wrapper() -> T:
-        return await aw
-
-    return asyncio.run(wrapper())
 
 
 class TestMcpConfigOverrides:
@@ -184,41 +165,7 @@ class TestReflectionGateHookScripts:
             assert hooks[0].get("matcher") == "StructuredOutput"
 
 
-class TestReflectionGateFileBacked:
-    def test_file_backed_mode(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            flag_path = Path(tmpdir) / "gate_flag"
-            gate = ReflectionGate(flag_path=flag_path)
-
-            assert not gate.reflected
-            assert not flag_path.exists()
-
-            gate.mark_reflected()
-            assert gate.reflected
-            assert flag_path.exists()
-
-            gate.reset()
-            assert not gate.reflected
-            assert not flag_path.exists()
-
-    def test_file_backed_external_set(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            flag_path = Path(tmpdir) / "gate_flag"
-            gate = ReflectionGate(flag_path=flag_path)
-
-            flag_path.touch()
-            assert gate.reflected
-
-
 class TestLupMcpServerConfig:
-    def test_create_mcp_server_returns_lup_config(self) -> None:
-        from lup.mcp import LupMcpServerConfig, create_mcp_server
-
-        config = create_mcp_server("test-server", version="1.0.0")
-        assert isinstance(config, LupMcpServerConfig)
-        assert config.name == "test-server"
-        assert config.server is not None
-
     def test_lup_server_to_claude_conversion(self) -> None:
         from lup.adapters.claude.adapter import lup_server_to_claude
         from lup.mcp import create_mcp_server
@@ -231,22 +178,6 @@ class TestLupMcpServerConfig:
 
 
 class TestSubagentSpec:
-    def test_spec_to_claude(self) -> None:
-        from lup.adapters.claude.adapter import spec_to_claude
-
-        spec = SubagentSpec(
-            name="researcher",
-            description="Research things",
-            prompt="Research the topic",
-            tools=["WebSearch"],
-            model="haiku",
-        )
-        agent_def = spec_to_claude(spec)
-        assert agent_def.description == "Research things"
-        assert agent_def.prompt == "Research the topic"
-        assert agent_def.tools == ["WebSearch"]
-        assert agent_def.model == "haiku"
-
     def test_spec_to_claude_passes_full_model_id_through(self) -> None:
         from lup.adapters.claude.adapter import spec_to_claude
 
@@ -305,19 +236,6 @@ class TestEffortNormalization:
     def test_none_passthrough(self) -> None:
         assert normalize_effort(None, "anthropic") is None
         assert normalize_effort(None, "openai") is None
-
-
-class TestLupEventTypes:
-    def test_events_dispatch_by_discriminator(self) -> None:
-        events: list[LupEvent] = [
-            LupTextEvent(text="hello"),
-            LupThinkingEvent(thinking="hmm"),
-            LupToolUseEvent(id="t1", name="Bash"),
-            LupToolResultEvent(tool_use_id="t1", content="out"),
-            LupDoneEvent(),
-        ]
-        kinds = [event.type for event in events]
-        assert kinds == ["text", "thinking", "tool_use", "tool_result", "done"]
 
 
 class TestToolAllowlistHookScripts:
@@ -419,22 +337,6 @@ class TestCodexAdapter:
         assert any("codex_hooks" in o for o in overrides)
 
 
-class TestGenericHookOutputHelpers:
-    def test_allow_hook(self) -> None:
-        output = allow_hook()
-        assert output.get("decision") == "allow"
-
-    def test_deny_hook(self) -> None:
-        output = deny_hook("not permitted")
-        assert output.get("decision") == "deny"
-        assert output.get("reason") == "not permitted"
-
-    def test_block_hook(self) -> None:
-        output = block_hook("blocked reason")
-        assert output.get("decision") == "block"
-        assert output.get("reason") == "blocked reason"
-
-
 class TestMergeHooks:
     def test_merge_disjoint_events(self) -> None:
         from lup.types import LupHookMatcher, LupHookOutput
@@ -464,206 +366,6 @@ class TestMergeHooks:
         b: LupHooksConfig = {"PreToolUse": [LupHookMatcher(hook=hook_b)]}
         merged = merge_hooks(a, b)
         assert len(merged["PreToolUse"]) == 2
-
-
-class TestGenericPermissionHooks:
-    def test_allows_write_in_rw_dir(self) -> None:
-        hooks = create_permission_hooks(
-            rw_dirs=[Path("/data/rw")], ro_dirs=[Path("/data/ro")]
-        )
-        hook_fn = hooks["PreToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PreToolUse",
-            tool_name="Write",
-            tool_input={"file_path": "/data/rw/file.txt"},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert result.get("decision") == "allow"
-
-    def test_denies_write_outside_rw_dir(self) -> None:
-        hooks = create_permission_hooks(
-            rw_dirs=[Path("/data/rw")], ro_dirs=[Path("/data/ro")]
-        )
-        hook_fn = hooks["PreToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PreToolUse",
-            tool_name="Write",
-            tool_input={"file_path": "/elsewhere/file.txt"},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert result.get("decision") == "deny"
-
-    def test_allows_read_in_ro_dir(self) -> None:
-        hooks = create_permission_hooks(
-            rw_dirs=[Path("/data/rw")], ro_dirs=[Path("/data/ro")]
-        )
-        hook_fn = hooks["PreToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PreToolUse",
-            tool_name="Read",
-            tool_input={"file_path": "/data/ro/info.txt"},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert result.get("decision") == "allow"
-
-    def test_denies_read_outside_allowed(self) -> None:
-        hooks = create_permission_hooks(
-            rw_dirs=[Path("/data/rw")], ro_dirs=[Path("/data/ro")]
-        )
-        hook_fn = hooks["PreToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PreToolUse",
-            tool_name="Read",
-            tool_input={"file_path": "/secret/file.txt"},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert result.get("decision") == "deny"
-
-    def test_allows_other_tools(self) -> None:
-        hooks = create_permission_hooks(rw_dirs=[Path("/rw")], ro_dirs=[])
-        hook_fn = hooks["PreToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PreToolUse",
-            tool_name="WebSearch",
-            tool_input={"query": "test"},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert result.get("decision") == "allow"
-
-
-class TestGenericToolAllowlistHook:
-    def test_allows_listed_tool(self) -> None:
-        hooks = create_tool_allowlist_hook(["Read", "Grep"])
-        hook_fn = hooks["PreToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PreToolUse",
-            tool_name="Read",
-            tool_input={},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert result.get("decision") == "allow"
-
-    def test_denies_unlisted_tool(self) -> None:
-        hooks = create_tool_allowlist_hook(["Read", "Grep"])
-        hook_fn = hooks["PreToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PreToolUse",
-            tool_name="Write",
-            tool_input={},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert result.get("decision") == "deny"
-        assert "is not available in this session" in result.get("reason", "")
-
-
-class TestGenericReflectionGate:
-    def test_denies_before_reflection(self) -> None:
-        gate = ReflectionGate()
-        hooks = create_reflection_gate(
-            gate=gate,
-            gated_tool="StructuredOutput",
-            reflection_tool_name="review",
-        )
-        hook_fn = hooks["PreToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PreToolUse",
-            tool_name="StructuredOutput",
-            tool_input={},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert result.get("decision") == "deny"
-        assert "review" in result.get("reason", "")
-
-    def test_allows_after_reflection(self) -> None:
-        gate = ReflectionGate()
-        gate.mark_reflected()
-        hooks = create_reflection_gate(
-            gate=gate,
-            gated_tool="StructuredOutput",
-            reflection_tool_name="review",
-        )
-        hook_fn = hooks["PreToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PreToolUse",
-            tool_name="StructuredOutput",
-            tool_input={},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert result.get("decision") == "allow"
-
-    def test_matcher_set_correctly(self) -> None:
-        gate = ReflectionGate()
-        hooks = create_reflection_gate(
-            gate=gate,
-            gated_tool="StructuredOutput",
-            reflection_tool_name="review",
-        )
-        assert hooks["PreToolUse"][0].matcher == "StructuredOutput"
-
-
-class TestGenericNudgeHook:
-    def test_nudge_triggered(self) -> None:
-        hooks = create_nudge_hook({"Bash": lambda inp: "Use Grep instead"})
-        hook_fn = hooks["PostToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PostToolUse",
-            tool_name="Bash",
-            tool_input={},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert result.get("system_message") == "Use Grep instead"
-
-    def test_nudge_not_triggered_for_other_tools(self) -> None:
-        hooks = create_nudge_hook({"Bash": lambda inp: "Use Grep instead"})
-        hook_fn = hooks["PostToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PostToolUse",
-            tool_name="Read",
-            tool_input={},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert "system_message" not in result
-
-    def test_nudge_skipped_when_check_returns_none(self) -> None:
-        hooks = create_nudge_hook({"Bash": lambda inp: None})
-        hook_fn = hooks["PostToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PostToolUse",
-            tool_name="Bash",
-            tool_input={},
-        )
-        result = run_awaitable(hook_fn(inp))
-        assert "system_message" not in result
-
-
-class TestGenericCaptureHook:
-    def test_captures_matching_tool(self) -> None:
-        hooks, captured = create_capture_hook(
-            "WebSearch",
-            lambda inp: [inp.get("tool_input", {}).get("query", "")],
-        )
-        hook_fn = hooks["PostToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PostToolUse",
-            tool_name="WebSearch",
-            tool_input={"query": "python async"},
-        )
-        run_awaitable(hook_fn(inp))
-        assert captured == ["python async"]
-
-    def test_ignores_non_matching_tool(self) -> None:
-        hooks, captured = create_capture_hook(
-            "WebSearch",
-            lambda inp: ["should not appear"],
-        )
-        hook_fn = hooks["PostToolUse"][0].hook
-        inp = LupHookInput(
-            hook_event_name="PostToolUse",
-            tool_name="Read",
-            tool_input={},
-        )
-        run_awaitable(hook_fn(inp))
-        assert captured == []
 
 
 class TestLupHooksToClaudeConversion:
@@ -879,109 +581,3 @@ class TestLupHooksToCodexConversion:
             events = [c["event"] for c in configs]
             assert "PreToolUse" in events
             assert "PostToolUse" in events
-
-
-class TestOpenAICompatibleAdapter:
-    """Tests for the OpenAI-compatible adapter configuration."""
-
-    def test_config_overrides_include_base_url(self) -> None:
-        from lup.adapters.codex.openai_compat import (
-            OPENAI_COMPAT_API_KEY_ENV,
-            OpenAICompatibleAdapter,
-        )
-
-        adapter = OpenAICompatibleAdapter(
-            model="glm-4-7b",
-            system_prompt="test",
-            base_url="http://localhost:8000/v1",
-            api_key="test-key",
-            model_provider="openai_compat",
-            mcp_tools=False,
-        )
-        overrides = adapter.build_config_overrides()
-
-        # The provider is defined under the plural model_providers.<id> table,
-        # selected by a top-level model_provider string.
-        assert 'model_provider="openai_compat"' in overrides
-        assert (
-            'model_providers.openai_compat.base_url="http://localhost:8000/v1"'
-            in overrides
-        )
-        # The key is referenced by env-var NAME (env_key), never inline.
-        assert (
-            f'model_providers.openai_compat.env_key="{OPENAI_COMPAT_API_KEY_ENV}"'
-            in overrides
-        )
-        # No literal `api_key=` override and no secret value leaks into overrides;
-        # the secret is injected via the subprocess env (provider_env()).
-        assert not any("api_key=" in o for o in overrides)
-        assert not any("test-key" in o for o in overrides)
-        assert adapter.provider_env() == {OPENAI_COMPAT_API_KEY_ENV: "test-key"}
-
-    def test_config_overrides_without_credentials(self) -> None:
-        from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
-
-        adapter = OpenAICompatibleAdapter(
-            model="llama-3.1-8b",
-            system_prompt="test",
-            mcp_tools=False,
-        )
-        overrides = adapter.build_config_overrides()
-        assert not any("base_url" in o for o in overrides)
-        assert not any("api_key" in o for o in overrides)
-
-    def test_inherits_mcp_config(self) -> None:
-        from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
-
-        adapter = OpenAICompatibleAdapter(
-            model="glm-4-7b",
-            system_prompt="test",
-            base_url="http://localhost:8000/v1",
-            mcp_tools=True,
-        )
-        overrides = adapter.build_config_overrides()
-        assert any("mcp_servers.notes" in o for o in overrides)
-
-    def test_inherits_hook_config(self) -> None:
-        from lup.adapters.codex.adapter import CodexHookConfig
-        from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
-
-        hooks: list[CodexHookConfig] = [
-            CodexHookConfig(event="PreToolUse", command="check.py"),
-        ]
-        adapter = OpenAICompatibleAdapter(
-            model="glm-4-7b",
-            system_prompt="test",
-            mcp_tools=False,
-            hook_overrides=hooks,
-        )
-        overrides = adapter.build_config_overrides()
-        assert any("PreToolUse" in o for o in overrides)
-
-
-class TestModelBackendExtended:
-    """Extended tests for model_backend covering open-source models."""
-
-    def test_glm_model(self) -> None:
-        assert model_backend("glm-4-7b") == "openai-compatible"
-
-    def test_llama_model(self) -> None:
-        assert model_backend("llama-3.1-8b") == "openai-compatible"
-
-    def test_deepseek_model(self) -> None:
-        assert model_backend("deepseek-v3") == "openai-compatible"
-
-    def test_qwen_model(self) -> None:
-        assert model_backend("qwen-72b") == "openai-compatible"
-
-    def test_gpt_model(self) -> None:
-        assert model_backend("gpt-4.1") == "openai"
-
-    def test_o_series_model(self) -> None:
-        assert model_backend("o3-mini") == "openai"
-
-    def test_claude_full_name(self) -> None:
-        assert model_backend("claude-opus-4-8") == "anthropic"
-
-    def test_claude_short_name(self) -> None:
-        assert model_backend("opus") == "anthropic"

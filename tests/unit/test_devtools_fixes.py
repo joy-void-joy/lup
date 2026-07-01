@@ -183,10 +183,10 @@ class TestPrCreate:
     ) -> None:
         import lup_template.devtools.dev.pr as pr
 
-        captured: list[str] = []
+        calls: list[tuple[str, ...]] = []
 
         def fake_gh(*args: str) -> str:
-            captured.extend(str(a) for a in args)
+            calls.append(tuple(str(a) for a in args))
             return "https://github.com/org/repo/pull/42\n"
 
         monkeypatch.setattr(pr, "gh", fake_gh)
@@ -196,7 +196,8 @@ class TestPrCreate:
 
         pr.create(base="dev", title="feat: x", body="body", as_json=False)
 
-        assert "--json" not in captured
+        assert len(calls) == 1, "URL parsing must not need a second gh call"
+        assert "--json" not in calls[0]
         assert results[0].number == 42
         assert results[0].url == "https://github.com/org/repo/pull/42"
 
