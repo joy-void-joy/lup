@@ -1,4 +1,3 @@
-# lup: Same comment as in TEMPLATE_CLAUDE.md 
 # lup: I think that in general, in this codebase, we should remove all the # lup: ignore
 # CLAUDE.md
 
@@ -88,7 +87,7 @@ packages/
         │   ├── registry.py     # BACKEND_BUILDERS: backend id -> build_adapter(opts)
         │   ├── claude/         # Claude engine: adapter, client, background, options, tools
         │   └── codex/          # Codex/OpenAI engine: adapter, background, hooks, options, openai_compat
-        ├── antipatterns.py     # Single source of anti-pattern rules (edit hook + `dev check` share it)
+        ├── antipatterns.py     # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
         ├── options.py          # LupAgentOptions — backend-agnostic options crossing template -> lib
         ├── markers.py          # `# lup:` / `// lup:` review-marker scanning (dev comments)
         ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
@@ -100,6 +99,7 @@ packages/
         ├── notes.py            # RO/RW directory structure
         ├── output.py           # submit_output finalization + missing-output guard (all backends)
         ├── paths.py            # Version-aware paths + SessionContext env relay
+        ├── profiles.py         # Named Claude config-dir profiles (accounts), machine-wide
         ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
         ├── realtime_relay.py   # Persistent mode for subprocess backends (file mailbox)
         ├── reflect.py          # Reflection gate (in-memory or file-backed)
@@ -124,7 +124,8 @@ src/
     │       └── reflect.py      # Forced self-review tool (reviewer sub-agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
-    │   ├── agent/              # Agent introspection (inspect, serve-tools, chat, repl)
+    │   ├── agent/              # Agent introspection (inspect, capabilities, serve-tools, repl)
+    │   ├── claude/             # Claude Code runner wired for this project (+ usage)
     │   ├── py.py               # Python module introspection (info, source, eval, ...)
     │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
