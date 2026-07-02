@@ -45,9 +45,17 @@ Agents produce better output when forced to self-assess before committing. Three
 
 ---
 
+## Subagent Pattern
+
+SDK-native delegation: the main agent dispatches a focused task to a named role defined upfront, sharing the session's trace and metrics. A subagent extends the main agent's thinking — a specialized lobe with its own prompt, tool subset, and model — where a nested agent (below) isolates work in a separate context.
+
+**Library support:** definitions are SDK-agnostic `SubagentSpec`s (`lup.types`), held in `src/lup_template/agent/subagents.py` (`get_subagent_specs()`). On Claude the adapter converts each spec to a native `AgentDefinition` dispatched via `Task()`; on backends without native subagents, `packages/lup/src/lup/subagents.py` serves the same list as a `run_subagent` tool (`create_run_subagent_tool`) that dispatches a one-shot `query()` — so the available roles never diverge between backends.
+
+---
+
 ## Nested Agent Pattern
 
-Distinct from **subagents** (SDK-native `Task()` dispatch, defined upfront in `get_subagent_specs()`, same session). A nested agent is a tool that internally creates an independent SDK client, runs it, and folds the result back into its tool response.
+Distinct from **subagents** (SDK-native `Task()` dispatch, defined upfront in `get_subagent_specs()`, same session — see [Subagent Pattern](#subagent-pattern)). A nested agent is a tool that internally creates an independent SDK client, runs it, and folds the result back into its tool response.
 
 | Aspect     | Subagent                          | Nested Agent                        |
 | ---------- | --------------------------------- | ----------------------------------- |
@@ -75,6 +83,8 @@ async def review(params: ReviewInput) -> ReviewOutput:
 ```
 
 **Library support:** `query()` in `lup.adapters.common` handles the full pipeline and routes by model name — Claude models via the Claude Agent SDK, GPT/o-series via the Codex runtime, everything else via OpenAI-compatible endpoints. Session persistence is automatically disabled. It returns a `LupResponse`: use `.text` for text or `.output(T)` for structured output. Options a backend cannot honor (`tools`, `max_turns`, `max_budget_usd`, …) are dropped by `degrade_unsupported()` with a log line — the caller expresses full intent and the adapter layer keeps what it can, instead of raising or silently ignoring.
+
+**Example:** the reviewer inside `src/lup_template/agent/tools/reflect.py` (`run_reviewer`, called from the `review` tool) is the in-repo exemplar — an independent one-shot `query()` whose critique the tool folds into its structured output. The `extract` path of `fetch_example` in `agent/tools/example.py` (`extract_answer`) is the same shape applied to data augmentation.
 
 **When to use each:** The axis is **context separation**. **Subagents** extend the main agent's thinking — same session, shared context, like a specialized lobe that makes reasoning more efficient. **Nested agents** are for truly separable work — the two contexts shouldn't pollute each other. The main agent doesn't need the nested agent's reasoning chain, just its conclusion. The tool handler acts as a context boundary.
 
@@ -126,5 +136,7 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 1. **Domain dispatch** — URL patterns route to specialized API handlers (e.g., a wiki URL → structured article text via the wiki's API, instead of scraping HTML). Hints redirect the agent to a better tool when no direct handler exists.
 2. **Null-filling** — Multi-source fallback pipelines that recover missing fields from alternative endpoints or sibling records (e.g., primary API withholds fields → fallback endpoint fills the gaps).
 3. **Extraction** — Nested agent calls that distill large text blocks into focused answers (see [Nested Agent Pattern](#nested-agent-pattern)).
+
+**Example:** `src/lup_template/agent/tools/example.py` is the template for all three forms — `fetch_example` routes known hosts to a specialized handler (`fetch_wiki_article`, domain dispatch) and distills fetched pages through a nested `query()` call (`extract_answer`, extraction); `search_example` recovers missing snippet fields from a fallback source (`fill_missing_snippets`, null-filling).
 
 **Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API client wrappers. Extraction uses `query()` from `lup.adapters.common` (see [Nested Agent Pattern](#nested-agent-pattern)).
