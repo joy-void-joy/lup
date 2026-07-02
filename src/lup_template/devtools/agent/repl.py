@@ -20,10 +20,7 @@ import sh
 import typer
 
 from lup_template.agent.config import settings
-from lup_template.devtools.agent.serve import (
-    collect_dynamic_tool_names,
-    collect_tools_by_server,
-)
+from lup_template.devtools.agent.serve import collect_registry_tools
 
 MIME_TO_EXT: dict[str, str] = {
     "image/png": ".png",
@@ -281,11 +278,10 @@ async def repl(
         f"[dim]model:[/dim] {effective_model}",
     ]
     if not no_tools:
-        servers = collect_tools_by_server()
-        dynamic = collect_dynamic_tool_names()
+        servers = collect_registry_tools()
         group_names: list[tuple[str, list[str]]] = [
             (name, [t.name for t in stools]) for name, stools in servers.items()
-        ] + list(dynamic.items())
+        ]
         for i, (name, tool_names_list) in enumerate(group_names):
             is_last_server = i == len(group_names) - 1
             panel_lines.append(f"[dim]{'└' if is_last_server else '├'} {name}[/dim]")
