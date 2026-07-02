@@ -17,7 +17,7 @@ import pytest
 
 
 from lup.adapters.common import Conversation
-from lup.mcp import LupMcpTool
+from lup.mcp import LupMcpTool, ToolResponse
 from lup.realtime import Scheduler
 from lup.realtime_relay import (
     MISSING_SLEEP_MESSAGE,
@@ -34,7 +34,7 @@ from lup.realtime_relay import (
     run_relay_session,
 )
 from lup.trace import TraceLogger
-from lup.types import LupResponse
+from lup.types import JsonObject, LupResponse
 
 
 def tool_map(realtime_dir: Path) -> dict[str, LupMcpTool]:
@@ -42,10 +42,8 @@ def tool_map(realtime_dir: Path) -> dict[str, LupMcpTool]:
 
 
 async def call(
-    tools: dict[str, LupMcpTool], name: str, args: dict[str, Any]
-) -> dict[
-    str, Any
-]:  # lup: ignore — MCP handler boundary returns a ToolResponse-shaped dict
+    tools: dict[str, LupMcpTool], name: str, args: JsonObject
+) -> ToolResponse:
     return await tools[name].handler(args)
 
 
@@ -222,7 +220,7 @@ class TestRelayTools:
         assert denied.get("is_error") is True
 
         context = await call(tools, "context", {})
-        payload = json.loads(context["content"][0]["text"])
+        payload = json.loads(context.get("content", [])[0]["text"])
         assert payload["unread_events"] == 3
 
         allowed = await call(tools, "sleep", {"seconds": 60})
@@ -253,7 +251,7 @@ class TestRelayTools:
                 ]
             },
         )
-        payload = json.loads(result["content"][0]["text"])
+        payload = json.loads(result.get("content", [])[0]["text"])
         assert payload == {"sent": 1, "scheduled": 1}
 
         events = parent.read_new_events()

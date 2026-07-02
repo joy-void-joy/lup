@@ -15,12 +15,16 @@ from lup.realtime import (
     create_stop_guard,
 )
 from lup.reflect import ReflectionGate, create_reflection_gate
-from lup.types import LupHookEvent, LupHookInput, LupHookOutput, LupHooksConfig
+from lup.types import (
+    JsonObject,
+    LupHookEvent,
+    LupHookInput,
+    LupHookOutput,
+    LupHooksConfig,
+)
 
 
-def pre_tool_use(
-    tool_name: str, tool_input: dict[str, object] | None = None
-) -> LupHookInput:
+def pre_tool_use(tool_name: str, tool_input: JsonObject | None = None) -> LupHookInput:
     return LupHookInput(
         hook_event_name="PreToolUse",
         tool_name=tool_name,

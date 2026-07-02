@@ -33,12 +33,14 @@ import logging
 import signal
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any, Literal, NotRequired, TypedDict, cast, get_type_hints
+from typing import Literal, NotRequired, TypedDict, cast, get_type_hints
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
 from pydantic import BaseModel, ValidationError
+
+from lup.types import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +74,8 @@ class CallToolResultWithAlias(CallToolResult):
         return self.isError
 
 
-# MCP hands an arbitrary JSON args object validated by the per-tool BaseModel;
-# the handler returns a ToolResponse-shaped dict the SDK consumes as a plain dict.
-type LupToolHandler = Callable[
-    [dict[str, Any]], Awaitable[dict[str, Any]]
-]  # lup: ignore
+# MCP hands an arbitrary JSON args object validated by the per-tool BaseModel.
+type LupToolHandler = Callable[[JsonObject], Awaitable[ToolResponse]]
 
 
 class LupMcpServerConfig(BaseModel):
@@ -168,13 +167,13 @@ def create_mcp_server(
         return tool_list
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict[str, object]) -> CallToolResult:
+    async def call_tool(name: str, arguments: JsonObject) -> CallToolResult:
         """Execute a tool by name with given arguments."""
         if name not in tool_map:
             raise ValueError(f"Tool '{name}' not found")
 
         tool_def = tool_map[name]
-        result = cast(ToolResponse, await tool_def.handler(arguments))
+        result = await tool_def.handler(arguments)
 
         is_error = result.get("is_error", False)
 
@@ -264,7 +263,7 @@ class LupMcpTool[I: BaseModel, O: BaseModel]:
         self,
         name: str,
         description: str,
-        input_schema: dict[str, object],
+        input_schema: JsonObject,
         handler: LupToolHandler,
         call_handler: Callable[[I], Awaitable[O]],
         input_model: type[I],
@@ -350,11 +349,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
 
         final_input = cast(type[I], resolved_input)
 
-        async def wrapper(
-            args: dict[str, Any],
-        ) -> (
-            ToolResponse
-        ):  # lup: ignore — raw MCP JSON args, validated below by final_input
+        async def wrapper(args: JsonObject) -> ToolResponse:
             start = time.perf_counter()
             is_error = False
             try:
@@ -381,7 +376,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
                         f"got {type(result).__name__}"
                     )
                 return mcp_response(json.dumps(result.model_dump(), default=str))
-            except Exception:  # lup: ignore — flag metrics, then re-raise
+            except Exception:
                 is_error = True
                 raise
             finally:
@@ -391,8 +386,8 @@ def lup_tool[I: BaseModel, O: BaseModel](
         return LupMcpTool(
             name=tool_name,
             description=description,
-            input_schema=cast(dict[str, object], final_input.model_json_schema()),
-            handler=cast(LupToolHandler, wrapper),
+            input_schema=final_input.model_json_schema(),
+            handler=wrapper,
             call_handler=handler,
             input_model=final_input,
             output_model=cast(type[O] | None, resolved_output),

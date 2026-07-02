@@ -9,7 +9,7 @@ reviewer's model, so the tool carries no ``match`` on the backend.
 
 import pytest
 
-from lup.types import LupResponse, LupTextBlock
+from lup.types import JsonValue, LupResponse, LupTextBlock
 from lup_template.agent.tools import reflect
 
 
@@ -24,9 +24,9 @@ def make_input() -> reflect.ReflectInput:
 
 class QueryRecorder:
     def __init__(self) -> None:
-        self.kwargs: dict[str, object] = {}
+        self.kwargs: dict[str, JsonValue] = {}
 
-    async def __call__(self, prompt: str, **kwargs: object) -> LupResponse:
+    async def __call__(self, prompt: str, **kwargs: JsonValue) -> LupResponse:
         self.kwargs = {"prompt": prompt, **kwargs}
         return LupResponse(blocks=[LupTextBlock(text="critique")])
 

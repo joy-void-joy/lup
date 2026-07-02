@@ -26,6 +26,7 @@ from claude_agent_sdk.types import (
 import lup.adapters.claude.adapter
 from lup.adapters.claude.adapter import ClaudeConversation, ClaudeUsageNormalizer
 from lup.types import (
+    JsonValue,
     LupDoneEvent,
     LupTextEvent,
     LupThinkingEvent,
@@ -60,7 +61,7 @@ def result_message(
     *,
     is_error: bool = False,
     result: str | None = "done",
-    usage: Mapping[str, object] | None = None,
+    usage: Mapping[str, JsonValue] | None = None,
 ) -> ResultMessage:
     return ResultMessage(
         subtype="success",
@@ -136,7 +137,7 @@ async def test_send_raises_when_no_result_arrives() -> None:
 
 
 async def test_broken_usage_normalizer_degrades_to_none() -> None:
-    def broken(raw: Mapping[str, object]) -> Usage | None:
+    def broken(raw: Mapping[str, JsonValue]) -> Usage | None:
         _ = raw
         raise KeyError("nope")
 

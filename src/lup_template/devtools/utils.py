@@ -1,7 +1,7 @@
 """Pre-configured shell commands and output helpers for devtools scripts."""
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from typing import Annotated, Literal
 
 import sh
@@ -81,9 +81,7 @@ def copy_to_clipboard(text: str) -> bool:
     return False
 
 
-def output_json(
-    data: BaseModel | Mapping[str, object] | Sequence[object],  # lup: ignore
-) -> None:
+def output_json(data: object) -> None:  # lup: ignore — pretty-printer boundary: any JSON-serializable payload; BaseModel is special-cased
     if isinstance(data, BaseModel):
         typer.echo(data.model_dump_json(indent=2))
     else:

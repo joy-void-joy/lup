@@ -31,7 +31,6 @@ Examples:
 
 import json
 import logging
-import os
 import time
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
@@ -150,7 +149,7 @@ class MetricsCollector:
 
         A kill mid-write must not corrupt the snapshot the parent reads,
         so the summary lands on a temp file in the same directory and is
-        renamed onto the target (``os.replace`` is atomic on POSIX).
+        renamed onto the target (``Path.replace`` is atomic on POSIX).
         """
         if self.flush_path is None:
             return
@@ -160,9 +159,7 @@ class MetricsCollector:
             tmp_path.write_text(
                 json.dumps(self.get_summary(), indent=2), encoding="utf-8"
             )
-            os.replace(
-                tmp_path, self.flush_path
-            )  # lup: ignore — atomic file rename, not str.replace
+            tmp_path.replace(self.flush_path)
         except OSError:
             logger.exception("Failed to flush metrics to %s", self.flush_path)
 
@@ -247,10 +244,9 @@ def tracked[**P, T](
 
             try:
                 result = await func(*args, **kwargs)
-                if isinstance(result, dict) and cast(dict[str, object], result).get(
-                    "is_error"
-                ):
-                    is_error = True
+                match result:
+                    case {"is_error": flag} if flag:
+                        is_error = True
                 return result
             except BaseException:
                 is_error = True

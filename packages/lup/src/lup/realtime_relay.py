@@ -54,7 +54,6 @@ Examples:
 
 import asyncio
 import logging
-import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Annotated, Literal
@@ -324,9 +323,7 @@ class RealtimeMailbox:
         self.root.mkdir(parents=True, exist_ok=True)
         tmp_path = self.state_path.with_suffix(".tmp")
         tmp_path.write_text(state.model_dump_json(), encoding="utf-8")
-        os.replace(
-            tmp_path, self.state_path
-        )  # lup: ignore — atomic file rename, not str.replace
+        tmp_path.replace(self.state_path)
 
     def reset_for_new_run(self) -> None:
         """Clear leftover protocol files so a fresh run starts clean.

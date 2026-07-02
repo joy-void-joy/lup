@@ -219,8 +219,8 @@ def loop(
         except RuntimeError as e:
             typer.echo(f"Error: {e}", err=True)
             continue
-        # lup: ignore — batch isolation: one failed task must not
-        # abort the remaining tasks; the error is logged with traceback.
+        # Batch isolation: one failed task must not abort the remaining
+        # tasks; the error is logged with traceback.
         except Exception as e:
             typer.echo(f"Unexpected error: {e}", err=True)
             logger.exception("Unexpected error on task %d/%d", i, len(tasks))

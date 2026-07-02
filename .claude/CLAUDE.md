@@ -1,4 +1,3 @@
-# lup: I think that in general, in this codebase, we should remove all the # lup: ignore
 # CLAUDE.md
 
 This file provides guidance to Claude Code when working with code in this repository.
@@ -365,6 +364,7 @@ Default to **Opus 4.6** (`claude-opus-4-6`) — or **Fable** (`claude-fable-5`) 
 - **Never silently swallow exceptions** — no `except ...: pass`, no `contextlib.suppress`; log with `logger.exception()`, handle meaningfully, or re-raise. Catch-all `except Exception` is fine at boundaries (task loops, subagent delegation) that do so; bare `except:` and `except BaseException` are never fine
 - **Every function must specify input and output types**
 - **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** — Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types
+  - **JSON-shaped data**: use `JsonValue` / `JsonObject` from `lup.types` for data whose schema lives elsewhere (tool arguments, JSON Schemas, structured outputs, vendor payloads)
   - **MCP tool inputs**: `BaseModel.model_validate(args)` immediately — don't pass around raw dicts
   - **MCP tool outputs**: Define a `TypedDict` for the return dict
   - **SDK hooks**: Return `SyncHookJSONOutput` from `claude_agent_sdk.types`. Use typed hook inputs (`PreToolUseHookInput`, etc.) and specific output types (`PreToolUseHookSpecificOutput`, etc.)
