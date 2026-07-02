@@ -86,7 +86,7 @@ async def search_example(params: SearchInput) -> SearchOutput:
     if not params.query:
         raise ToolError("Query is required")
 
-    # TODO: Implement actual search logic
+    # TEMPLATE: implement real search here, or delete this example tool
     # Example with a real search API:
     #
     # try:
@@ -121,7 +121,7 @@ async def fetch_example(params: FetchInput) -> FetchOutput:
     if not params.url:
         raise ToolError("URL is required")
 
-    # TODO: Implement actual fetch logic
+    # TEMPLATE: implement real fetching here, or delete this example tool
     # Example with httpx:
     #
     # try:

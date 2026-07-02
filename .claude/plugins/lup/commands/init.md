@@ -131,6 +131,14 @@ This handles directory rename (`src/lup_template/` -> `src/<project>/`), import 
 
 ## Phase 3: Generate Scaffolding
 
+**Start by gathering every customization point.** Each decision the template leaves to a domain carries a `TEMPLATE:` marker (`# TEMPLATE:` in comments, `TEMPLATE:` in docstrings) with a one-line description of the decision. Collect them all:
+
+```bash
+uv run lup-devtools dev todos --json
+```
+
+Walk the collected decision points one by one — each entry gives the file, line, decision text, and surrounding context. For every marker, either customize the code it points at and remove the marker, or delete it along with scaffolding pruned in Phase 1.5. The numbered steps below give domain guidance for the major ones, but the gathered list is the source of truth: a marker you never reach is a decision silently defaulted.
+
 Based on the answers from Phase 1, generate or modify:
 
 ### 1. `src/<project>/agent/models.py`
@@ -222,11 +230,12 @@ Customize the feedback loop command for the domain's specific:
 
 After generating files:
 
-1. Run `uv run pyright` to check types
-2. Run `uv run ruff check .` to check lint
-3. Run `uv run lup --help` to verify CLI
-4. Verify the feedback loop command references the right scripts
-5. Check that CLAUDE.md accurately describes the domain
+1. Run `uv run lup-devtools dev todos` -- any remaining `TEMPLATE:` marker is a decision not yet made; resolve or consciously defer each one
+2. Run `uv run pyright` to check types
+3. Run `uv run ruff check .` to check lint
+4. Run `uv run lup --help` to verify CLI
+5. Verify the feedback loop command references the right scripts
+6. Check that CLAUDE.md accurately describes the domain
 
 ## After Initialization
 

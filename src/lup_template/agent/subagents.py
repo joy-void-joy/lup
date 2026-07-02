@@ -26,7 +26,7 @@ choice that holds regardless of ``AGENT_SDK``.
 from lup.types import SubagentSpec
 
 # =============================================================================
-# TOOL LISTS (customize for your domain)
+# TEMPLATE: tool lists — grant each subagent only the tools its job needs
 # =============================================================================
 
 
@@ -55,7 +55,8 @@ def analysis_tools() -> list[str]:
 
 
 # =============================================================================
-# SUBAGENT DEFINITIONS (customize for your domain)
+# TEMPLATE: subagent definitions — replace researcher/analyzer with your
+# domain's specialists (each spec: prompt, tool subset, pinned model)
 # =============================================================================
 
 

@@ -104,11 +104,11 @@ async def run_session(
 def commit_results() -> None:
     """Commit any uncommitted session results.
 
-    TEMPLATE NOTE: This auto-commits session outputs (notes/traces/)
-    after each run. For domains like
-    forecasting, game playing, or batch processing, this keeps data
-    commits atomic and automatic. Customize or remove if your domain
-    doesn't need auto-commit (e.g., interactive coaching).
+    TEMPLATE: customize the commit message/scope, or remove auto-commit.
+    This commits session outputs (notes/traces/) after each run. For
+    domains like forecasting, game playing, or batch processing, it keeps
+    data commits atomic and automatic; interactive domains (e.g. coaching)
+    usually drop it.
     """
     git = sh.Command("git").bake("--no-pager", "-c", "color.ui=never")
     status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0])).strip()
@@ -190,10 +190,10 @@ def loop(
 ) -> None:
     """Run multiple agent sessions and auto-commit results.
 
-    TEMPLATE NOTE: This is the primary entry point for batch processing.
-    For a forecasting bot, tasks might be question IDs. For a game-playing
-    agent, tasks might be game configs. Customize the task format and
-    post-processing for your domain.
+    TEMPLATE: adapt the task format and post-processing for your domain.
+    This is the primary entry point for batch processing: for a
+    forecasting bot, tasks might be question IDs; for a game-playing
+    agent, game configs.
 
     Example:
         uv run lup loop "task1" "task2" "task3"

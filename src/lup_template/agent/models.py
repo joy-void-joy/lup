@@ -14,14 +14,14 @@ from lup.history import SessionResult
 
 
 # =============================================================================
-# CUSTOMIZE THESE FOR YOUR DOMAIN
+# DOMAIN OUTPUT MODELS
 # =============================================================================
 
 
 class Factor(BaseModel):
     """A single factor influencing the output.
 
-    Customize this for your domain. Examples:
+    TEMPLATE: redefine the factor fields for your domain. Examples:
     - For forecasting: text, direction (pro/con), weight
     - For coaching: insight, relevance, actionability
     - For game playing: consideration, evaluation, confidence
@@ -67,7 +67,7 @@ class AgentOutput(BaseModel):
         description="Confidence in the output (0-1)",
     )
 
-    # TODO: Add domain-specific fields
+    # TEMPLATE: add your domain's output fields; keep empty() below in sync
     # probability: float  # For forecasting
     # move: str           # For game playing
     # response: str       # For coaching

@@ -63,12 +63,12 @@ class ToolPolicy:
         excluded: set[str] = set(excluded_tools)
         tags: set[str] = set(excluded_tags)
 
-        # Tags: map each unmet requirement to its tag (TEMPLATE example —
-        # replace with your domain's keys).
+        # TEMPLATE: map each unmet requirement to its tag — replace the
+        # example-api check with your domain's keys, one tag per service
         if not settings.example_api_key:
             tags.add("requires:example-api")
 
-        # TODO: Add your name-set exclusion logic
+        # TEMPLATE: add name-set exclusions for tools you don't own here
 
         self.excluded_tools: frozenset[str] = frozenset(excluded)
         self.excluded_tags: frozenset[str] = frozenset(tags)
@@ -107,7 +107,7 @@ class ToolPolicy:
             if self.group_enabled(server.name):
                 servers[server.name] = server
 
-        # TODO: Add your MCP servers
+        # TEMPLATE: register your domain's MCP servers
         # Example:
         # servers["search"] = search_server
         # servers["financial"] = financial_server
@@ -126,7 +126,7 @@ class ToolPolicy:
         Codex/OpenAI path filters the group names it serves
         (:meth:`filter_group_names`).
 
-        Customize with your domain's conditions, e.g.::
+        TEMPLATE: gate groups on your domain's conditions, e.g.::
 
             if name == "live_data":
                 return not self.restricted_mode

@@ -3,8 +3,10 @@
 import sh
 import typer
 
+from lup.markers import find_feedback
+
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
-from lup_template.devtools.dev.comments import scan_feedback
+from lup_template.devtools.dev.comments import scan_tracked
 from lup_template.devtools.utils import git, uv
 
 
@@ -76,7 +78,7 @@ def run_checks(fix: bool, no_test: bool) -> None:
                 typer.echo(e.stdout.decode().rstrip())
             results.append(("pytest", False))
 
-    found = scan_feedback()
+    found = scan_tracked(find_feedback)
     if found:
         typer.echo(f"claude comments: FAIL ({len(found)} unresolved)")
         for comment in found:

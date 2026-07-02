@@ -1,18 +1,30 @@
-"""Behavior tests for the feedback-marker scanner (`lup.markers`).
+"""Behavior tests for the marker scanner (`lup.markers`).
 
 Pins the load-bearing rule that distinguishes a real note from code: in
 Python a `# lup:` counts only inside a comment or docstring, never inside
 an ordinary string literal. The scanner's own "no notes" echo strings are the
-canonical false positive that line-scanning used to report.
+canonical false positive that line-scanning used to report. The same scan,
+parameterized over the marker regex, backs the `TEMPLATE:` customization
+todos that `dev todos` gathers for `/lup:init`.
 """
 
 from pathlib import Path
 
-from lup.markers import ScanMode, find_feedback, scan_mode_for
+from lup.markers import (
+    TEMPLATE_MARKER_RE,
+    ScanMode,
+    find_feedback,
+    find_markers,
+    scan_mode_for,
+)
 
 
 def texts(source: str, mode: str) -> list[str]:
     return [c.text for c in find_feedback(source, mode)]
+
+
+def todo_texts(source: str, mode: str) -> list[str]:
+    return [c.text for c in find_markers(source, mode, marker=TEMPLATE_MARKER_RE)]
 
 
 def test_python_ignores_marker_inside_ordinary_string() -> None:
@@ -76,3 +88,58 @@ def test_scan_mode_for_routes_by_suffix() -> None:
     assert scan_mode_for(Path("a.pyi")) == ScanMode.PYTHON
     assert scan_mode_for(Path("README.md")) == ScanMode.MARKDOWN
     assert scan_mode_for(Path("notes.txt")) == ScanMode.TEXT
+
+
+def test_template_comment_marker_is_a_todo() -> None:
+    source = "# TEMPLATE: replace these fields for your domain\nx = 1\n"
+    assert todo_texts(source, ScanMode.PYTHON) == [
+        "replace these fields for your domain"
+    ]
+
+
+def test_template_docstring_marker_needs_no_comment_prefix() -> None:
+    source = '"""Setup flow.\n\nTEMPLATE: Replace with your API scopes.\n"""\n'
+    assert todo_texts(source, ScanMode.PYTHON) == ["Replace with your API scopes."]
+
+
+def test_template_marker_inside_ordinary_string_is_code() -> None:
+    source = 'MESSAGE = "TEMPLATE: not a decision point"\n'
+    assert todo_texts(source, ScanMode.PYTHON) == []
+
+
+def test_lowercase_template_prose_is_not_a_todo() -> None:
+    source = "# the template: a scaffold downstream projects customize\n"
+    assert todo_texts(source, ScanMode.PYTHON) == []
+
+
+def test_template_mention_mid_comment_is_not_a_todo() -> None:
+    # A marker opens its comment; prose mentioning the convention mid-way
+    # through one is not a decision point.
+    source = "# gathered via the TEMPLATE: convention\n"
+    assert todo_texts(source, ScanMode.PYTHON) == []
+
+
+def test_template_todos_ignore_the_lup_file_optout() -> None:
+    # A file-level `# lup: ignore` opts out of *feedback* scanning only;
+    # the file's customization todos still surface.
+    source = "# lup: ignore\n# TEMPLATE: still a decision point\n"
+    assert todo_texts(source, ScanMode.PYTHON) == ["still a decision point"]
+    assert find_feedback(source, ScanMode.PYTHON) == []
+
+
+def test_template_continuation_merges_and_stops_at_decoration() -> None:
+    source = (
+        "# =========================================\n"
+        "# TEMPLATE: pick your integrations —\n"
+        "# one entry per service\n"
+        "# =========================================\n"
+        "X = 1\n"
+    )
+    assert todo_texts(source, ScanMode.PYTHON) == [
+        "pick your integrations — one entry per service"
+    ]
+
+
+def test_decoration_line_ends_a_feedback_note_too() -> None:
+    source = "# lup: note inside a banner\n# ----\nx = 1\n"
+    assert texts(source, ScanMode.PYTHON) == ["note inside a banner"]

@@ -289,6 +289,24 @@ def comments_cmd(
     comments.report(as_json, commit)
 
 
+@app.command("todos")
+def todos_cmd(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """List `TEMPLATE:` customization markers — the template's open decision points.
+
+    Every place the template needs a domain decision carries a `# TEMPLATE:`
+    comment (or a `TEMPLATE:` docstring line). `/lup:init` runs this to gather
+    them all and walk them one by one, so no customization point depends on
+    someone remembering to mention it. Same file/line/text/context shape as
+    `dev comments`.
+    """
+    comments.todos(as_json)
+
+
 # -- init commands --
 
 
