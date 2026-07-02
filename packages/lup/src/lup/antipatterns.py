@@ -9,6 +9,11 @@ the `lup-devtools dev check --antipatterns` auditor consumes them to scan the
 whole tree after the fact (catching lines that slipped in past the hook and
 `# lup: ignore` markers that no longer guard anything).
 
+The rules live here as plain regexes rather than as custom linter rules: ruff
+has no plugin API, and engines that do (flake8, pylint, semgrep) could not run
+inside the hermetic hook — the shared table, mirrored hook, equality test, and
+tree auditor together are the unification a linter would have provided.
+
 Each entry pairs a compiled regex with the message the hook and auditor show.
 This module imports only the standard library and `pydantic` so the hook and the
 auditor can load it cheaply; `# lup:` marker detection itself stays in
