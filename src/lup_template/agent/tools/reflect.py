@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Reviewer system prompt (customize for your domain)
+# TEMPLATE: reviewer system prompt — target your domain's failure modes
 # ---------------------------------------------------------------------------
 
 REVIEWER_SYSTEM_PROMPT = """\
@@ -86,7 +86,7 @@ the exact claim, factor, or number you're questioning.
 
 
 # ---------------------------------------------------------------------------
-# Input model (customize for your domain)
+# TEMPLATE: reflection input — add your domain's self-assessment fields
 # ---------------------------------------------------------------------------
 
 

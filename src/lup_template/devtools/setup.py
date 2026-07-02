@@ -272,10 +272,9 @@ class Integration(BaseModel):
 
 
 # =====================================================================
-# TEMPLATE integrations — replace these with your domain's services
+# TEMPLATE: example integration flows below (Slack, Google, timezone) —
+# replace these setup/status functions with your domain's services
 # =====================================================================
-
-# lup: Probably need some todos here. I'd like /init to have a step where it explicitely gathers (like dev currently gathers the "# lup:" comments) all TODOs and places where it has to make a decision
 
 
 def slack_status(env: EnvValues) -> tuple[bool, str]:

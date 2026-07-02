@@ -21,7 +21,8 @@ from datetime import datetime
 from lup_template.agent.models import AgentOutput
 
 # ---------------------------------------------------------------------------
-# Prompt sections — customize for your domain
+# TEMPLATE: prompt sections — fill in PURPOSE and GUIDELINES for your
+# domain; output_format() already follows AgentOutput automatically
 # ---------------------------------------------------------------------------
 
 INTRO = """\

@@ -64,17 +64,17 @@ class SessionData(TypedDict, total=False):
 
 
 # =============================================================================
-# CUSTOMIZE THESE MODELS FOR YOUR DOMAIN
+# TEMPLATE: replace these models' fields with what your domain scores on
 # =============================================================================
 
 
 class SessionResult(BaseModel):
     """A session matched with its outcome/feedback.
 
-    TODO(customize): replace ``outcome``/``metrics`` with the fields your
-    domain scores on. This is the per-domain shape the whole feedback loop
-    aggregates over (``/lup:init`` customization step 9); the generic fields
-    below only carry sessions through unscored until you do.
+    Replace ``outcome``/``metrics`` with the fields your domain scores on.
+    This is the per-domain shape the whole feedback loop aggregates over
+    (``/lup:init`` customization step 9); the generic fields below only
+    carry sessions through unscored until you do.
 
     Customize this for your domain. Examples:
 
@@ -119,7 +119,7 @@ class FeedbackMetrics(BaseModel):
 
 
 # =============================================================================
-# CUSTOMIZE THESE FUNCTIONS FOR YOUR DOMAIN
+# OUTCOME LOADING, MATCHING, AND METRICS
 # =============================================================================
 
 
@@ -155,8 +155,8 @@ def load_sessions(
 def load_outcomes() -> dict[str, object]:
     """Load outcome data for sessions.
 
-    TEMPLATE STUB — customize for your domain (customization step 9).
-    Raises until customized so callers can tell "not implemented" from
+    TEMPLATE: implement your domain's outcome loading (customization step 9).
+    This stub raises so callers can tell "not implemented" from
     "implemented, no outcomes yet" instead of silently aggregating
     nothing.
     """
@@ -201,6 +201,9 @@ def match_outcomes(
 
 def compute_metrics(results: list[SessionResult]) -> FeedbackMetrics:
     """Compute aggregate metrics from session results.
+
+    TEMPLATE: aggregate the outcome fields your domain scores on.
+    Examples: a mean Brier score, win rate, or rating average.
 
     Sessions are counted per backend (``sessions_by_sdk``) so mixed
     Claude/Codex collections never pool silently into one trend.
