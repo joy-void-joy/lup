@@ -168,7 +168,6 @@ To speed up development, many claude commands and meta-commands are built in thi
 - commit
 - rebase
 - merge
-- merge-conflict
 - clean-gone
 - close
 
