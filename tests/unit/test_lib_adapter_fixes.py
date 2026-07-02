@@ -339,3 +339,25 @@ class TestOpenAICompatProviderConfig:
         )
         overrides = adapter.build_config_overrides()
         assert not any("model_provider" in o for o in overrides)
+
+    def test_inherits_mcp_config_from_codex_base(self) -> None:
+        adapter = OpenAICompatibleAdapter(
+            model="glm-4-7b",
+            system_prompt="test",
+            base_url="http://localhost:8000/v1",
+            mcp_tools=True,
+        )
+        overrides = adapter.build_config_overrides()
+        assert any("mcp_servers.notes" in o for o in overrides)
+
+    def test_inherits_hook_config_from_codex_base(self) -> None:
+        from lup.adapters.codex.adapter import CodexHookConfig
+
+        adapter = OpenAICompatibleAdapter(
+            model="glm-4-7b",
+            system_prompt="test",
+            mcp_tools=False,
+            hook_overrides=[CodexHookConfig(event="PreToolUse", command="check.py")],
+        )
+        overrides = adapter.build_config_overrides()
+        assert any("PreToolUse" in o for o in overrides)

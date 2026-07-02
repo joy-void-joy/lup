@@ -275,6 +275,14 @@ class TestReflectionGateReset:
         gate.reset()  # must tolerate the missing file
         assert gate.reflected is False
 
+    def test_externally_created_flag_unlocks_the_gate(self, tmp_path: Path) -> None:
+        """A hook subprocess touching the flag file must unlock this gate."""
+        flag = tmp_path / "meta_flag"
+        gate = ReflectionGate(flag_path=flag)
+        assert gate.reflected is False
+        flag.touch()
+        assert gate.reflected is True
+
 
 class TestNotesReadOnlyExcludesLogs:
     def test_logs_dir_not_in_ro_grant(self, tmp_path: Path) -> None:
