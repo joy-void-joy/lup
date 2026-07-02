@@ -91,7 +91,7 @@ These work in any repo:
 - **Plugin infrastructure**: The `.claude/plugins/lup/` directory structure itself
 - **Permission hooks**: auto_allow_bash (adapt patterns), auto_allow_edits (adapt for target's file types), auto_allow_fetch (adapt URL patterns)
 - **Pre-push quality gates**: Adapt to target's linter/type-checker/test runner
-- **Generic commands**: commit, rebase, close, clean-gone, meta, debug, refactor, add-command, modify-command, merge, merge-conflict, principle, review, create-investigator
+- **Generic commands**: commit, rebase, close, clean-gone, meta, debug, refactor, add-command, modify-command, merge, principle, review, create-investigator
 - **CLAUDE.md patterns**: Git workflow, editing style, asking questions, debugging philosophy
 - **Settings patterns**: permission structure in settings.json
 
