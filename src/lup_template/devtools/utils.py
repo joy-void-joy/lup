@@ -44,7 +44,6 @@ class LazyCommand:
         return getattr(self.resolve(), attr)
 
 
-# lup: Yeah, okay, this makes sense
 git = LazyCommand("git", "--no-pager", "-c", "color.ui=never", tty_out=False)
 gh = LazyCommand("gh", tty_out=False)
 uv = LazyCommand("uv")
