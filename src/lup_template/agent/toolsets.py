@@ -12,9 +12,9 @@ stdio (``lup-devtools agent serve-tools``) and selects them by name
 (``core.build_codex_adapter``) — so adding a group or tool here reaches every
 backend, and there is deliberately nowhere else to add one.
 
-This is a TEMPLATE. Register domain tool groups in
-:func:`build_session_toolset` (and their names in :func:`tool_group_names`
-when they should be served to subprocess backends).
+TEMPLATE: register tool groups in build_session_toolset + tool_group_names.
+Add each domain group in :func:`build_session_toolset`, and its name in
+:func:`tool_group_names` when it should be served to subprocess backends.
 """
 
 from pathlib import Path

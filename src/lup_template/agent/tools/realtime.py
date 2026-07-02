@@ -115,9 +115,9 @@ def create_realtime_tools(
 ) -> list[LupMcpTool]:
     """Create the standard set of real-time MCP tools.
 
-    This is a TEMPLATE — customize for your domain. The tools are
-    closures bound to the session state via the scheduler and
-    build_context callback.
+    TEMPLATE: customize these tools' wording and context for your domain.
+    The tools are closures bound to the session state via the scheduler
+    and build_context callback.
 
     Args:
         scheduler: The Scheduler instance for this session.
@@ -385,8 +385,7 @@ def create_observer(
 ) -> BaseBackgroundAgent:
     """Create an observer background agent.
 
-    This is a TEMPLATE — customize the system prompt, model, and
-    build_message callback for your domain.
+    TEMPLATE: customize the observer's prompt, model, and build_message.
 
     The observer reads new transcript entries on each wake, formats
     them, and produces a summary note. The main agent includes
