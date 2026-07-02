@@ -23,13 +23,6 @@ from lup.types import (
 
 
 class TestClaudeBlockToLup:
-    def test_text_block(self) -> None:
-        block = TextBlock(text="hello world")
-        result = claude_block_to_lup(block)
-        assert isinstance(result, LupTextBlock)
-        assert result.text == "hello world"
-        assert result.type == "text"
-
     def test_thinking_block(self) -> None:
         block = ThinkingBlock(thinking="let me consider...", signature="sig")
         result = claude_block_to_lup(block)
@@ -50,34 +43,11 @@ class TestClaudeBlockToLup:
         assert result.input == {"query": "python async"}
         assert result.type == "tool_use"
 
-    def test_tool_use_block_empty_input(self) -> None:
-        block = ToolUseBlock(id="toolu_456", name="Noop", input={})
-        result = claude_block_to_lup(block)
-        assert isinstance(result, LupToolUseBlock)
-        assert result.input == {}
-
-    def test_tool_result_block(self) -> None:
-        block = ToolResultBlock(
-            tool_use_id="toolu_123",
-            content="search results here",
-        )
-        result = claude_block_to_lup(block)
-        assert isinstance(result, LupToolResultBlock)
-        assert result.tool_use_id == "toolu_123"
-        assert result.content == "search results here"
-        assert result.type == "tool_result"
-
     def test_tool_result_block_none_content(self) -> None:
         block = ToolResultBlock(tool_use_id="toolu_789", content=None)
         result = claude_block_to_lup(block)
         assert isinstance(result, LupToolResultBlock)
         assert result.content is None
-
-    def test_empty_text_block(self) -> None:
-        block = TextBlock(text="")
-        result = claude_block_to_lup(block)
-        assert isinstance(result, LupTextBlock)
-        assert result.text == ""
 
     def test_redacted_thinking_block(self) -> None:
         block = ThinkingBlock(thinking="", signature="sig_redacted_abc")

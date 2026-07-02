@@ -60,6 +60,25 @@ def test_help_succeeds_for_every_command(path: tuple[str, ...]) -> None:
     assert result.exit_code == 0, result.output
 
 
+READONLY_COMMANDS: list[list[str]] = [
+    ["version"],
+    ["version", "changelog"],
+    ["trace", "list"],
+    ["feedback", "status"],
+    ["setup", "status"],
+    ["setup", "profile", "list"],
+    ["sync", "status"],
+]
+
+
+@pytest.mark.parametrize("args", READONLY_COMMANDS, ids=lambda args: " ".join(args))
+def test_readonly_command_exits_cleanly(args: list[str]) -> None:
+    """--help only proves wiring; a runtime crash in a callback (the version
+    sub-app once crashed on every real invocation) needs a real run."""
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+
+
 class FakeGh:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
