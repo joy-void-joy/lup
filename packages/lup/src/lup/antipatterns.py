@@ -89,12 +89,17 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     AntiPattern(
-        pattern=re.compile(r"\.replace\s*\("),
+        # `.replace` on `os`, `Path`, or a `*path` receiver is pathlib/os's
+        # atomic file rename, not string surgery — the lookbehinds keep the
+        # codebase's path-named receivers out of the net.
+        pattern=re.compile(r"(?<!\bos)(?<![Pp]ath)\.replace\s*\("),
         message="Avoid .replace() for structured data — edit it through its parser instead "
         "(pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
     ),
     AntiPattern(
-        pattern=re.compile(r"\.split\s*\("),
+        # Argument-less `.split()` is whitespace tokenization, which has no
+        # parser alternative — only splitting on an explicit separator matches.
+        pattern=re.compile(r"\.split\s*\((?!\s*\))"),
         message="Avoid .split() for structured data — parse it instead "
         "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
@@ -248,15 +253,31 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
     hook), so it yields no findings. Otherwise each line is checked against
     *patterns*: an unguarded match is a "missing" finding, and an inline
     ignore on a line that matches nothing is a "spurious" finding.
+
+    An ignore counts as a guard only where a comment actually starts (per
+    the tokenizer), so a docstring or string literal that merely *mentions*
+    `# lup: ignore` — and a note whose prose quotes it — guards nothing.
+    Text that does not tokenize as Python falls back to a plain substring
+    check.
     """
-    from lup.markers import IGNORE_RE, has_file_level_ignore
+    from lup.markers import IGNORE_RE, has_file_level_ignore, python_comment_columns
 
     if has_file_level_ignore(text):
         return []
 
+    comment_columns = python_comment_columns(text)
+
+    def inline_ignore(line_no: int, line: str) -> bool:
+        match = IGNORE_RE.search(line)
+        if match is None:
+            return False
+        if comment_columns is None:
+            return True
+        return comment_columns.get(line_no) == match.start()
+
     findings: list[AntiPatternFinding] = []
     for index, line in enumerate(text.splitlines(), start=1):
-        guarded = IGNORE_RE.search(line) is not None
+        guarded = inline_ignore(index, line)
         hits = line_matches(line, patterns)
         if hits and not guarded:
             findings.append(

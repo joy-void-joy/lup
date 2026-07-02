@@ -18,6 +18,7 @@ from lup.adapters.codex.adapter import (
 )
 from lup.trace import TraceLogger
 from lup.types import (
+    JsonObject,
     LupDoneEvent,
     LupResponse,
     LupTextBlock,
@@ -72,7 +73,7 @@ class FakeThread:
         return FakeTurnResult(self.final_response)
 
 
-SCHEMA: dict[str, object] = {"type": "object"}
+SCHEMA: JsonObject = {"type": "object"}
 
 
 def test_structured_output_parses_valid_json() -> None:

@@ -647,7 +647,7 @@ DANGEROUS_MODULES = frozenset(
     }
 )
 
-SAFE_BUILTINS: dict[str, object] = {
+SAFE_BUILTINS: dict[str, object] = {  # lup: ignore — a namespace of live objects
     "True": True,
     "False": False,
     "None": None,
@@ -709,7 +709,9 @@ def check_eval_safety(tree: ast.Expression) -> str | None:
     return None
 
 
-def auto_import_namespace(tree: ast.Expression) -> dict[str, object]:
+def auto_import_namespace(
+    tree: ast.Expression,
+) -> dict[str, object]:  # lup: ignore — a namespace of live objects
     """Build a namespace by importing modules referenced in the expression."""
     namespace = dict(SAFE_BUILTINS)
 

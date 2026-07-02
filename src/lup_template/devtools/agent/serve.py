@@ -9,6 +9,7 @@ import typer
 from lup_template.agent.tools.example import EXAMPLE_TOOLS
 from lup.mcp import LupMcpTool
 from lup.paths import SessionContext
+from lup.types import JsonObject
 
 
 def collect_tools_by_server(
@@ -153,9 +154,7 @@ def serve_tools(list_only: bool, server_group: str | None) -> None:
         return tool_list
 
     @server.call_tool()
-    async def call_tool(
-        name: str, arguments: dict[str, object]
-    ) -> CallToolResult:  # lup: ignore  # MCP protocol boundary: arbitrary tool args
+    async def call_tool(name: str, arguments: JsonObject) -> CallToolResult:
         if name not in tool_map:
             raise ValueError(f"Tool '{name}' not found")
         result = await tool_map[name].handler(arguments)

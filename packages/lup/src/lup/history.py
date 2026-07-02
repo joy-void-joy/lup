@@ -56,7 +56,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, SerializeAsAny
 
-from lup.types import Usage
+from lup.types import JsonValue, Usage
 from lup.metrics import MetricsSummary
 from lup.paths import (
     TIMESTAMP_FMT,
@@ -69,7 +69,7 @@ from lup.paths import (
 logger = logging.getLogger(__name__)
 
 # Type alias for raw session JSON — schema varies by domain
-type SessionData = dict[str, object]  # lup: ignore — domain-defined JSON shape
+type SessionData = dict[str, JsonValue]
 
 
 class SessionResult[OutputT: BaseModel](BaseModel):

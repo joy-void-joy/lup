@@ -1,5 +1,8 @@
+# lup: ignore
 """Behavior tests for the auto_allow_edits permission hook.
 
+Fixture strings here are deliberately made of anti-patterns (that is
+what the hook detects), so the file opts out of the scan wholesale.
 Loads the hook script by path (it lives outside the package tree) and
 exercises decide() / decide_write() — the pure decision cores —
 table-driven.
