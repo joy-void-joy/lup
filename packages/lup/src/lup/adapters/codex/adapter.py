@@ -1,4 +1,3 @@
-# lup: ignore
 """OpenAI Codex SDK adapter.
 
 Wraps the Codex Python SDK (``openai_codex``) behind the
@@ -8,17 +7,17 @@ command hooks, and the reflection gate via a file-backed flag.
 """
 
 import asyncio
+import importlib.util
 import json
 import logging
 import time
 from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
     from openai_codex import AsyncThread, TurnResult
-    from openai_codex.models import JsonObject
 
     from openai_codex.generated.v2_all import ThreadItem, ThreadTokenUsage
 
@@ -31,6 +30,7 @@ from lup.adapters.common import (
 )
 from lup.trace import TraceLogger, print_message
 from lup.types import (
+    JsonObject,
     LupAssistantMessage,
     LupContentBlock,
     LupDoneEvent,
@@ -56,12 +56,8 @@ logger = logging.getLogger(__name__)
 
 def require_codex_sdk() -> None:
     """Raise a clear error if the Codex SDK is not installed."""
-    try:
-        import openai_codex as _  # noqa: F401
-    except ImportError as exc:
-        raise ImportError(
-            "Codex SDK not installed. Install with: uv add openai-codex"
-        ) from exc
+    if importlib.util.find_spec("openai_codex") is None:
+        raise ImportError("Codex SDK not installed. Install with: uv add openai-codex")
 
 
 def codex_items_to_lup(items: Sequence[ThreadItem]) -> list[LupContentBlock]:
@@ -189,7 +185,7 @@ def build_mcp_config_overrides(
     serve_tools_args: list[str] | None = None,
     env: dict[str, str] | None = None,
     servers: Sequence[str] = ("notes", "sandbox"),
-) -> tuple[str, ...]:
+) -> list[str]:
     """Build config_overrides for lup MCP tools via serve-tools.
 
     The Codex app-server is a Rust subprocess with no in-process tool
@@ -218,10 +214,10 @@ def build_mcp_config_overrides(
         overrides.append(f"mcp_servers.{name}.args={json.dumps(args)}")
         for key, value in (env or {}).items():
             overrides.append(f'mcp_servers.{name}.env.{key}="{value}"')
-    return tuple(overrides)
+    return overrides
 
 
-def build_sandbox_config_overrides(writable_roots: Sequence[Path]) -> tuple[str, ...]:
+def build_sandbox_config_overrides(writable_roots: Sequence[Path]) -> list[str]:
     """Native Codex filesystem enforcement via workspace-write sandbox.
 
     Replaces hook-script permission enforcement on Codex: the runtime's
@@ -230,10 +226,10 @@ def build_sandbox_config_overrides(writable_roots: Sequence[Path]) -> tuple[str,
     codex builds, so enforcement must be native or in-tool.)
     """
     roots_json = json.dumps([str(p) for p in writable_roots])
-    return (
+    return [
         'sandbox_mode="workspace-write"',
         f"sandbox_workspace_write.writable_roots={roots_json}",
-    )
+    ]
 
 
 class CodexHookConfigRequired(TypedDict):
@@ -251,7 +247,7 @@ class CodexHookConfig(CodexHookConfigRequired, total=False):
 
 def build_hook_config_overrides(
     hooks: list[CodexHookConfig],
-) -> tuple[str, ...]:
+) -> list[str]:
     """Build config_overrides for Codex command hooks.
 
     Each hook dict has: event, matcher (optional), command.
@@ -271,7 +267,7 @@ def build_hook_config_overrides(
         overrides.append(f'hooks.{event}[{idx}].hooks[0].type="command"')
         overrides.append(f'hooks.{event}[{idx}].hooks[0].command="{hook["command"]}"')
 
-    return tuple(overrides)
+    return overrides
 
 
 type CodexUsageNormalizer = Callable[[ThreadTokenUsage], Usage | None]
@@ -319,7 +315,7 @@ def codex_usage_to_lup(usage: ThreadTokenUsage) -> Usage | None:
 def build_lup_response(
     result: "TurnResult",
     *,
-    output_schema: dict[str, object] | None = None,
+    output_schema: JsonObject | None = None,
     session_id: str | None = None,
     trace_logger: TraceLogger | None = None,
     prefix: str = "",
@@ -351,7 +347,7 @@ def build_lup_response(
         lup_msg = LupAssistantMessage(content=blocks)
         print_message(lup_msg, prefix=prefix)
 
-    structured_output: dict[str, object] | None = None
+    structured_output: JsonObject | None = None
     if result.final_response and output_schema:
         try:
             structured_output = json.loads(result.final_response)
@@ -382,7 +378,7 @@ class CodexConversation(Conversation):
         self,
         thread: "AsyncThread",
         *,
-        output_schema: dict[str, object] | None = None,
+        output_schema: JsonObject | None = None,
         effort: str | None = None,
         usage_normalizer: CodexUsageNormalizer | None = None,
         max_budget_usd: float | None = None,
@@ -446,7 +442,7 @@ class CodexConversation(Conversation):
                 result = await self.thread.run(
                     prompt,
                     effort=effort,
-                    output_schema=cast("JsonObject | None", self.output_schema),
+                    output_schema=self.output_schema,
                 )
         except TimeoutError as exc:
             raise TurnTimeoutError(
@@ -481,7 +477,7 @@ class CodexAdapter(AgentAdapter):
         *,
         model: str,
         system_prompt: str,
-        output_schema: dict[str, object] | None = None,
+        output_schema: JsonObject | None = None,
         sandbox: str | None = None,
         effort: str | None = None,
         approval_policy: str | None = None,
@@ -537,7 +533,7 @@ class CodexAdapter(AgentAdapter):
             turn_timeout=True,
         )
 
-    def build_config_overrides(self) -> tuple[str, ...]:
+    def build_config_overrides(self) -> list[str]:
         """Assemble all config_overrides for this adapter run."""
         overrides: list[str] = []
         if self.mcp_tools:
@@ -548,7 +544,7 @@ class CodexAdapter(AgentAdapter):
             overrides.extend(build_sandbox_config_overrides(self.writable_roots))
         if self.hook_overrides:
             overrides.extend(build_hook_config_overrides(self.hook_overrides))
-        return tuple(overrides)
+        return overrides
 
     def make_conversation(self, thread: "AsyncThread") -> CodexConversation:
         """Wrap a thread in a conversation carrying this adapter's settings.
@@ -573,8 +569,7 @@ class CodexAdapter(AgentAdapter):
 
         from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
-        config_overrides = self.build_config_overrides()
-        config = CodexConfig(config_overrides=config_overrides)
+        config = CodexConfig(config_overrides=tuple(self.build_config_overrides()))
 
         async with AsyncCodex(config=config) as codex:
             thread = await codex.thread_start(

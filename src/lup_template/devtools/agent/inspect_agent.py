@@ -25,6 +25,7 @@ from lup_template.devtools.agent.serve import (
     collect_tools_by_server,
 )
 from lup.mcp import LupMcpTool
+from lup.types import JsonObject
 
 
 def print_model_source(
@@ -89,10 +90,8 @@ def print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
 class ToolDict(TypedDict):
     name: str
     description: str
-    input_schema: dict[str, object]  # lup: ignore  # JSON Schema is arbitrary nesting
-    output_schema: (
-        dict[str, object] | None
-    )  # lup: ignore  # JSON Schema is arbitrary nesting
+    input_schema: JsonObject
+    output_schema: JsonObject | None
 
 
 def tool_to_dict(t: LupMcpTool) -> ToolDict:
@@ -103,6 +102,24 @@ def tool_to_dict(t: LupMcpTool) -> ToolDict:
         "input_schema": t.input_model.model_json_schema(),
         "output_schema": t.output_model.model_json_schema() if t.output_model else None,
     }
+
+
+class SubagentDict(TypedDict):
+    description: str
+    model: str | None
+    tools: list[str]
+
+
+class InspectPayload(TypedDict):
+    """The full agent configuration as one JSON-serializable document."""
+
+    model: str
+    max_thinking_tokens: int | None
+    tools: list[ToolDict]
+    dynamic_tools: dict[str, list[str]]
+    output_schema: JsonObject
+    subagents: dict[str, SubagentDict]
+    system_prompt: str
 
 
 def page_output(text: str) -> None:
@@ -131,7 +148,7 @@ def run_inspect(as_json: bool, full: bool) -> None:
     prompt = get_system_prompt()
 
     if as_json:
-        data: dict[str, object] = {  # lup: ignore  # heterogeneous JSON inspect payload
+        data: InspectPayload = {
             "model": settings.model,
             "max_thinking_tokens": settings.max_thinking_tokens,
             "tools": [tool_to_dict(t) for t in all_tools],

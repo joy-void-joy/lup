@@ -102,7 +102,7 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
-        "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel", # lup: I think we should just have dict as a disallowed type, and likewise for object?
+        "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",  # lup: I think we should just have dict as a disallowed type, and likewise for object?
     ),
     (
         re.compile(r"\btuple\["),
@@ -133,12 +133,17 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     (
-        re.compile(r"\.replace\s*\("),
+        # `.replace` on `os`, `Path`, or a `*path` receiver is pathlib/os's
+        # atomic file rename, not string surgery — the lookbehinds keep the
+        # codebase's path-named receivers out of the net.
+        re.compile(r"(?<!\bos)(?<![Pp]ath)\.replace\s*\("),
         "Avoid .replace() for structured data — edit it through its parser instead "
         "(pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
     ),
     (
-        re.compile(r"\.split\s*\("),
+        # Argument-less `.split()` is whitespace tokenization, which has no
+        # parser alternative — only splitting on an explicit separator matches.
+        re.compile(r"\.split\s*\((?!\s*\))"),
         "Avoid .split() for structured data — parse it instead "
         "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
         # lup: We should also add .strip to anti-patterns

@@ -64,6 +64,8 @@ from lup.retry import with_retry
 from lup.throttle import Throttle
 from lup.trace import TraceLogger, print_message
 from lup.types import (
+    JsonObject,
+    JsonValue,
     LupHooksConfig,
     Usage,
     allow_hook,
@@ -79,6 +81,8 @@ __all__ = [
     "TIMESTAMP_FMT",
     "AdapterCapabilities",
     "BaseBackgroundAgent",
+    "JsonObject",
+    "JsonValue",
     "LupHooksConfig",
     "LupMcpTool",
     "MetricsSummary",

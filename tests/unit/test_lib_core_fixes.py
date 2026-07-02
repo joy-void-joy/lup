@@ -132,7 +132,7 @@ class TestMetricsAtomicFlush:
     ) -> None:
         """The target file is mutated only by the rename, never in place.
 
-        If the commit (``os.replace``) fails, the target a reader may be
+        If the commit (``Path.replace``) fails, the target a reader may be
         parsing must still hold the previous complete snapshot — proof the
         new bytes were staged on a temp file, not written into the target.
         A direct write-into-place would truncate the target first.
@@ -148,7 +148,7 @@ class TestMetricsAtomicFlush:
         def failing_replace(src: object, dst: object) -> None:
             raise OSError("rename interrupted")
 
-        monkeypatch.setattr("lup.metrics.os.replace", failing_replace)
+        monkeypatch.setattr(Path, "replace", failing_replace)
         collector.record("doomed", 1.0)  # flush() swallows the OSError
 
         # The target still parses as the last complete snapshot, untouched.

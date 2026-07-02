@@ -17,6 +17,24 @@ logger = logging.getLogger(__name__)
 # lup: Yeah, this file is excellent, exactly what I wanted in terms of having a unified codex, claude, ..., backend
 
 # ---------------------------------------------------------------------------
+# JSON vocabulary
+# ---------------------------------------------------------------------------
+
+type JsonValue = (
+    str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+)
+"""One JSON-decodable value — the shape ``json.loads`` yields.
+
+The shared vocabulary for data whose schema is defined elsewhere (tool
+arguments, JSON Schemas, vendor payloads): unlike ``object`` it stays
+introspectable, and unlike ``Any`` it keeps the type checker honest.
+"""
+
+type JsonObject = dict[str, JsonValue]
+"""A JSON object: tool inputs, JSON Schemas, structured outputs, session data."""
+
+
+# ---------------------------------------------------------------------------
 # Content blocks
 # ---------------------------------------------------------------------------
 
@@ -42,7 +60,7 @@ class LupToolUseBlock(BaseModel):
     type: Literal["tool_use"] = "tool_use"
     id: str
     name: str
-    input: dict[str, object] | None = None
+    input: JsonObject | None = None
 
 
 class LupToolResultBlock(BaseModel):
@@ -142,7 +160,7 @@ to enforce a budget; build it from per-token rates with
 class LupResultMessage(BaseModel):
     """Final result metadata from a completed agent run."""
 
-    structured_output: dict[str, object] | None = None
+    structured_output: JsonObject | None = None
     is_error: bool = False
     result: str | None = None
     duration_ms: float | None = None
@@ -247,7 +265,7 @@ class LupHookInput(TypedDict, total=False):
 
     hook_event_name: str
     tool_name: str
-    tool_input: dict[str, object]  # lup: ignore
+    tool_input: JsonObject
     tool_result: str
     stop_hook_active: bool
 
@@ -298,7 +316,7 @@ def block_hook(reason: str) -> LupHookOutput:
     return LupHookOutput(decision="block", reason=reason)
 
 
-def extract_token_usage(raw: Mapping[str, object] | None) -> Usage | None:
+def extract_token_usage(raw: Mapping[str, JsonValue] | None) -> Usage | None:
     """Extract portable token counts from a raw vendor usage mapping.
 
     Reads only the known count fields and ignores vendor extras, so

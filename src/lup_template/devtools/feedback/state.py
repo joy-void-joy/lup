@@ -29,6 +29,7 @@ from lup.history import (
 )
 from lup.metrics import MetricsSummary, ToolMetricsDict
 from lup.paths import agent_version, feedback_path, project_root, traces_path
+from lup.types import JsonValue
 from lup_template.devtools.utils import format_table, git, output_json
 
 logger = logging.getLogger(__name__)
@@ -152,7 +153,7 @@ def load_sessions(
     return sessions
 
 
-def load_outcomes() -> dict[str, object]:
+def load_outcomes() -> dict[str, JsonValue]:
     """Load outcome data for sessions.
 
     TEMPLATE STUB — customize for your domain (customization step 9).
