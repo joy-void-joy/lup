@@ -1,11 +1,18 @@
 # lup: ignore
 # lup: I do not feel comfortable with a generic # lup: ignore like that. I think this should have types, like pyright does, for instance # lup: ignore[regex]
-"""Inline review-comment markers (`# lup:` / `// lup:`).
+"""Inline marker scanning for the repo's two marker families.
 
-Single source of truth for what counts as an actionable feedback note, an
-`ignore` directive, and a file-level opt-out. The `lup-devtools dev comments`
-scanner uses this to list unresolved feedback; the edit-permission hook mirrors
-`MARKER_RE` to prompt whenever an edit adds or removes a marker.
+- Review notes (`# lup:` / `// lup:`): actionable feedback left in the code,
+  with an `ignore` directive and a file-level opt-out. The
+  `lup-devtools dev comments` scanner uses this to list unresolved feedback;
+  the edit-permission hook mirrors `MARKER_RE` to prompt whenever an edit
+  adds or removes a marker.
+- Customization todos (`# TEMPLATE:` in comments, bare `TEMPLATE:` in
+  docstrings): the template's domain decision points, gathered by
+  `lup-devtools dev todos` so `/lup:init` walks every one.
+
+Both families share one scan (:func:`find_markers`, parameterized over the
+marker regex); :func:`find_feedback` binds it to the review-note rules.
 
 Detection is deliberately liberal — `#` or `//`, any case, optional spaces — so
 the same note reads naturally in Python, shell, TypeScript, JSON, or Markdown.
@@ -33,6 +40,11 @@ from pydantic import BaseModel
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 IGNORE_RE = re.compile(r"(#|//)\s*lup\s*:\s*ignore\b", re.IGNORECASE)
 FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*lup\s*:\s*ignore\s*$", re.IGNORECASE)
+# Customization todos are shouty and case-sensitive (like TODO:/FIXME:), so
+# prose about "the template" never matches. The comment prefix is optional
+# because a docstring todo carries no `#`; group 1 still captures the
+# introducer when present, as the scan expects.
+TEMPLATE_MARKER_RE = re.compile(r"(?:(#|//)\s*)?TEMPLATE\s*:")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
 
@@ -73,7 +85,7 @@ def scan_mode_for(path: Path) -> str:
     return ScanMode.TEXT
 
 
-class FeedbackComment(BaseModel):
+class MarkerComment(BaseModel):
     """One actionable note: the source span plus a window worth reading."""
 
     start_line: int
@@ -155,18 +167,22 @@ def python_docstring_lines(text: str) -> set[int]:
     return lines
 
 
-def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[FeedbackComment]:
-    """Extract feedback notes from a file's text under a given `ScanMode`.
+def find_markers(
+    text: str,
+    mode: str = ScanMode.TEXT,
+    *,
+    marker: re.Pattern[str],
+    ignore: re.Pattern[str] | None = None,
+) -> list[MarkerComment]:
+    """Extract one marker family's notes from a file's text under a `ScanMode`.
 
     A note is a marker line plus the contiguous same-style comment lines below
-    it, merged into one item. Ignore directives, fenced code, and backtick spans
-    are skipped; a file-level ignore opts the whole file out. In Python mode a
-    marker counts only inside a comment or docstring, so a `# lup:` in an
+    it, merged into one item; a decoration line (no letters or digits, e.g. the
+    edge of a `# ====` banner) ends the note. Lines whose marker also matches
+    `ignore`, fenced code, and backtick spans are skipped. In Python mode a
+    marker counts only inside a comment or docstring, so marker text in an
     ordinary string literal is left alone.
     """
-    if has_file_level_ignore(text):
-        return []
-
     is_python = mode == ScanMode.PYTHON
     is_markdown = mode == ScanMode.MARKDOWN
     comment_columns = python_comment_columns(text) if is_python else None
@@ -179,7 +195,7 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[FeedbackComment]
 
     lines = text.splitlines()
     total = len(lines)
-    found: list[FeedbackComment] = []
+    found: list[MarkerComment] = []
     in_fence = False
     i = 0
 
@@ -193,11 +209,11 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[FeedbackComment]
             i += 1
             continue
 
-        match = MARKER_RE.search(line)
+        match = marker.search(line)
         if (
             match is None
             or in_fence
-            or IGNORE_RE.match(line, match.start()) is not None
+            or (ignore is not None and ignore.match(line, match.start()) is not None)
             or (mode == ScanMode.JS and match.group(1) == "#")
             or inside_inline_code(line, match.start())
             or not in_note_context(i + 1, match.start())
@@ -217,16 +233,19 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[FeedbackComment]
                     break
                 if not in_note_context(j + 1, prefix.start(1)):
                     break
-                if MARKER_RE.search(lines[j]) is not None:
+                if marker.search(lines[j]) is not None:
                     break
-                parts.append(lines[j][prefix.end() :].strip())
+                content = lines[j][prefix.end() :].strip()
+                if content and not any(ch.isalnum() for ch in content):
+                    break
+                parts.append(content)
                 j += 1
             end = j - 1
 
         start_line = i + 1
         end_line = end + 1
         found.append(
-            FeedbackComment(
+            MarkerComment(
                 start_line=start_line,
                 end_line=end_line,
                 read_start=max(1, start_line - CONTEXT_BEFORE),
@@ -237,3 +256,15 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[FeedbackComment]
         i = end + 1
 
     return found
+
+
+def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
+    """Extract `# lup:` review notes from a file's text.
+
+    Binds :func:`find_markers` to the review-note rules: `ignore` directives
+    are skipped (they are the anti-pattern escape hatch, not feedback), and a
+    file-level `# lup: ignore` opts the whole file out.
+    """
+    if has_file_level_ignore(text):
+        return []
+    return find_markers(text, mode, marker=MARKER_RE, ignore=IGNORE_RE)

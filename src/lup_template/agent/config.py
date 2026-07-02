@@ -44,7 +44,7 @@ class Settings(BaseSettings):
         """
         missing = []
 
-        # TODO: Add checks for your optional API keys
+        # TEMPLATE: warn about your domain's missing optional API keys
         # if not self.example_api_key:
         #     missing.append("EXAMPLE_API_KEY")
 
@@ -58,9 +58,9 @@ class Settings(BaseSettings):
     # OPTIONAL API KEYS (tools degrade gracefully without these)
     # ==========================================================================
 
-    # TEMPLATE example: tools tagged "requires:example-api" are excluded by
-    # ToolPolicy when this key is missing. Replace with your domain's keys
-    # and add one tag per service.
+    # TEMPLATE: replace with your domain's keys, one "requires:" tag per
+    # service — tools tagged "requires:example-api" are excluded by
+    # ToolPolicy when this key is missing.
     example_api_key: str | None = Field(
         default=None,
         validation_alias="EXAMPLE_API_KEY",

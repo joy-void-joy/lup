@@ -1,8 +1,13 @@
-"""Scan tracked files for unresolved `# lup:` / `// lup:` feedback notes.
+"""Scan tracked files for inline markers.
 
-Reached through the `lup-devtools dev comments` command (wired in
-`lup_template.devtools.dev.app`); `report`, `commit_prompts`, and
-`clear_markers` back its default listing and its `--commit` / `--clear` modes.
+Backs two `lup-devtools dev` commands (wired in
+`lup_template.devtools.dev.app`):
+
+- `dev comments` lists unresolved `# lup:` / `// lup:` feedback notes;
+  `report`, `commit_prompts`, and `clear_markers` back its default listing
+  and its `--commit` / `--clear` modes.
+- `dev todos` lists `TEMPLATE:` customization markers — the template's
+  domain decision points that `/lup:init` walks one by one.
 
 Examples::
 
@@ -10,15 +15,24 @@ Examples::
     $ uv run lup-devtools dev comments --json
     $ uv run lup-devtools dev comments --commit
     $ uv run lup-devtools dev comments --clear path/to/file.py:42
+    $ uv run lup-devtools dev todos --json
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import sh
 import typer
 from pydantic import BaseModel
 
-from lup.markers import MARKER_RE, FeedbackComment, find_feedback, scan_mode_for
+from lup.markers import (
+    MARKER_RE,
+    TEMPLATE_MARKER_RE,
+    MarkerComment,
+    find_feedback,
+    find_markers,
+    scan_mode_for,
+)
 from lup_template.devtools.utils import decode_stderr, git, output_json
 
 
@@ -32,8 +46,15 @@ class FoundComment(BaseModel):
     context: str
 
 
-def scan_feedback() -> list[FoundComment]:
-    """All unresolved feedback notes across tracked text files."""
+def scan_tracked(
+    find: Callable[[str, str], list[MarkerComment]],
+) -> list[FoundComment]:
+    """Run one marker scan across every tracked text file.
+
+    `find` maps a file's text and its scan mode to the markers it holds —
+    :func:`lup.markers.find_feedback` for review notes, or
+    :func:`lup.markers.find_markers` bound to another convention.
+    """
     results: list[FoundComment] = []
     for rel in str(git("ls-files")).splitlines():
         path = Path(rel)
@@ -42,12 +63,17 @@ def scan_feedback() -> list[FoundComment]:
         except (OSError, UnicodeDecodeError):
             continue
         lines = text.splitlines()
-        for comment in find_feedback(text, scan_mode_for(path)):
+        for comment in find(text, scan_mode_for(path)):
             context = "\n".join(lines[comment.read_start - 1 : comment.read_end])
             results.append(
                 FoundComment(file=rel, context=context, **comment.model_dump())
             )
     return results
+
+
+def find_todos(text: str, mode: str) -> list[MarkerComment]:
+    """Customization markers in one file's text (the `TEMPLATE:` convention)."""
+    return find_markers(text, mode, marker=TEMPLATE_MARKER_RE)
 
 
 def clear_markers(targets: list[str]) -> None:
@@ -75,7 +101,7 @@ def clear_markers(targets: list[str]) -> None:
         )
         raise typer.Exit(1)
 
-    def strip_span(lines: list[str], comment: FeedbackComment) -> None:
+    def strip_span(lines: list[str], comment: MarkerComment) -> None:
         head = lines[comment.start_line - 1]
         match = MARKER_RE.search(head)
         if match is not None and head[: match.start()].strip():
@@ -115,7 +141,7 @@ def clear_markers(targets: list[str]) -> None:
 
 def commit_prompts() -> None:
     """Snapshot the current feedback prompts into one commit before resolving them."""
-    found = scan_feedback()
+    found = scan_tracked(find_feedback)
     if not found:
         typer.echo("No # lup: comments to commit.")
         return
@@ -133,17 +159,13 @@ def commit_prompts() -> None:
     typer.echo(f"Committed {len(found)} prompt(s) across {len(files)} file(s).")
 
 
-def report(as_json: bool, commit: bool) -> None:
-    """List unresolved feedback comments; --json for tooling, --commit to snapshot them."""
-    if commit:
-        commit_prompts()
-        return
-    found = scan_feedback()
+def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
+    """Print one scan's results as a listing or JSON (same shape either way)."""
     if as_json:
         output_json([comment.model_dump() for comment in found])
         return
     if not found:
-        typer.echo("No unresolved # lup: comments.")
+        typer.echo(empty)
         return
     for comment in found:
         typer.echo(
@@ -153,3 +175,24 @@ def report(as_json: bool, commit: bool) -> None:
         typer.echo(f"    {comment.text}")
     files = {comment.file for comment in found}
     typer.echo(f"\n{len(found)} comment(s) in {len(files)} file(s)")
+
+
+def report(as_json: bool, commit: bool) -> None:
+    """List unresolved feedback comments; --json for tooling, --commit to snapshot them."""
+    if commit:
+        commit_prompts()
+        return
+    render(
+        scan_tracked(find_feedback),
+        as_json=as_json,
+        empty="No unresolved # lup: comments.",
+    )
+
+
+def todos(as_json: bool) -> None:
+    """List `TEMPLATE:` customization markers across tracked files."""
+    render(
+        scan_tracked(find_todos),
+        as_json=as_json,
+        empty="No TEMPLATE: markers — no customization decisions pending.",
+    )

@@ -38,10 +38,10 @@ class ToolPolicy(BaseToolPolicy):
     - Mode configuration (e.g., restricted mode)
     - Session context (e.g., allow certain tools only in some contexts)
 
-    Customize ``__init__`` to define your exclusion logic; override
-    ``group_enabled`` for conditional groups (e.g. a ``live_data`` group
-    only outside restricted mode) and ``get_mcp_servers`` to register
-    your domain's servers, e.g.::
+    TEMPLATE: customize ``__init__`` to define your exclusion logic; override
+    ``group_enabled`` to gate groups on your domain's conditions (e.g. a
+    ``live_data`` group only outside restricted mode) and ``get_mcp_servers``
+    to register your domain's servers, e.g.::
 
         def get_mcp_servers(self, *additional_servers):
             servers = super().get_mcp_servers(*additional_servers)
@@ -61,12 +61,12 @@ class ToolPolicy(BaseToolPolicy):
     ) -> None:
         tags: set[str] = set(excluded_tags)
 
-        # Tags: map each unmet requirement to its tag (TEMPLATE example —
-        # replace with your domain's keys).
+        # TEMPLATE: map each unmet requirement to its tag — replace the
+        # example-api check with your domain's keys, one tag per service
         if not settings.example_api_key:
             tags.add("requires:example-api")
 
-        # TODO: Add your name-set exclusion logic
+        # TEMPLATE: add name-set exclusions for tools you don't own here
 
         super().__init__(
             restricted_mode=restricted_mode,
