@@ -26,14 +26,17 @@ Examples:
         >>> server = create_mcp_server("my-server", tools=tools)
 """
 
+import asyncio
 import inspect
 import json
 import logging
+import signal
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal, NotRequired, TypedDict, cast, get_type_hints
 
 from mcp.server import Server
+from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
 from pydantic import BaseModel, ValidationError
 
@@ -141,60 +144,63 @@ def create_mcp_server(
 
     Returns:
         LupMcpServerConfig for adapter conversion.
+
+    A server built without tools still registers its handlers and
+    advertises an empty tool list — selecting an unpopulated group is a
+    valid (if useless) session, not a protocol error.
     """
     server = Server(name, version=version)
+    registered = list(tools or [])
+    tool_map = {tool_def.name: tool_def for tool_def in registered}
 
-    if tools:
-        tool_map = {tool_def.name: tool_def for tool_def in tools}
-
-        @server.list_tools()
-        async def list_tools() -> list[Tool]:
-            """Return the list of available tools."""
-            tool_list: list[Tool] = []
-            for tool_def in tools:
-                tool_list.append(
-                    Tool(
-                        name=tool_def.name,
-                        description=tool_def.description,
-                        inputSchema=tool_def.input_schema,
-                    )
+    @server.list_tools()
+    async def list_tools() -> list[Tool]:
+        """Return the list of available tools."""
+        tool_list: list[Tool] = []
+        for tool_def in registered:
+            tool_list.append(
+                Tool(
+                    name=tool_def.name,
+                    description=tool_def.description,
+                    inputSchema=tool_def.input_schema,
                 )
-            return tool_list
-
-        @server.call_tool()
-        async def call_tool(name: str, arguments: dict[str, object]) -> CallToolResult:
-            """Execute a tool by name with given arguments."""
-            if name not in tool_map:
-                raise ValueError(f"Tool '{name}' not found")
-
-            tool_def = tool_map[name]
-            result = cast(ToolResponse, await tool_def.handler(arguments))
-
-            is_error = result.get("is_error", False)
-
-            content: list[TextContent | ImageContent] = []
-            if "content" in result:
-                for item in result["content"]:
-                    match item.get("type"):
-                        case "text":
-                            content.append(TextContent(type="text", text=item["text"]))
-                        case "image":
-                            content.append(
-                                ImageContent(
-                                    type="image",
-                                    data=item["data"],
-                                    mimeType=item["mimeType"],
-                                )
-                            )
-
-            return CallToolResultWithAlias(
-                content=cast(list[ContentBlock], content), isError=is_error
             )
+        return tool_list
+
+    @server.call_tool()
+    async def call_tool(name: str, arguments: dict[str, object]) -> CallToolResult:
+        """Execute a tool by name with given arguments."""
+        if name not in tool_map:
+            raise ValueError(f"Tool '{name}' not found")
+
+        tool_def = tool_map[name]
+        result = cast(ToolResponse, await tool_def.handler(arguments))
+
+        is_error = result.get("is_error", False)
+
+        content: list[TextContent | ImageContent] = []
+        if "content" in result:
+            for item in result["content"]:
+                match item.get("type"):
+                    case "text":
+                        content.append(TextContent(type="text", text=item["text"]))
+                    case "image":
+                        content.append(
+                            ImageContent(
+                                type="image",
+                                data=item["data"],
+                                mimeType=item["mimeType"],
+                            )
+                        )
+
+        return CallToolResultWithAlias(
+            content=cast(list[ContentBlock], content), isError=is_error
+        )
 
     return LupMcpServerConfig(
         name=name,
         server=server,
-        tool_names=[t.name for t in tools or []],
+        tool_names=[t.name for t in registered],
     )
 
 
@@ -213,6 +219,32 @@ def server_tool_names(server: object) -> list[str]:
             return list(server.tool_names)
         case _:
             return []
+
+
+def serve_stdio(config: LupMcpServerConfig) -> None:
+    """Serve an in-process MCP server over stdio (blocking).
+
+    The subprocess half of tool serving: backends that cannot host
+    in-process servers launch a tool-server subprocess (``lup-devtools
+    agent serve-tools``), which builds the same
+    :func:`create_mcp_server` config the in-process path registers and
+    exposes it here over a stdio transport — one server construction for
+    every backend. SIGTERM raises ``SystemExit`` so ``atexit`` cleanup
+    (sandbox teardown, metrics flush) runs when the parent stops the
+    subprocess.
+    """
+
+    def terminate(_signum: int, _frame: object) -> None:
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, terminate)
+
+    async def run() -> None:
+        init_options = config.server.create_initialization_options()
+        async with stdio_server() as (read_stream, write_stream):
+            await config.server.run(read_stream, write_stream, init_options)
+
+    asyncio.run(run())
 
 
 class ToolError(Exception):

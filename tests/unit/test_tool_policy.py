@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from lup.hooks import create_tool_allowlist_hook
 from lup.mcp import create_mcp_server, lup_tool
+from lup.tool_policy import BaseToolPolicy
 from lup.types import LupHookInput, LupHooksConfig
 
 from lup_template.agent.config import settings
@@ -163,6 +164,37 @@ class TestTagFiltering:
 
         assert "requires:example-api" not in policy.excluded_tags
         assert policy.filter_tools(EXAMPLE_TOOLS) == list(EXAMPLE_TOOLS)
+
+
+class TestBaseToolPolicyStandalone:
+    """The library base must be complete from constructor arguments alone —
+    no application settings — so any project can subclass or use it as-is."""
+
+    def test_construction_args_drive_all_filtering(self) -> None:
+        policy = BaseToolPolicy(
+            excluded_tools=frozenset({"WebFetch"}),
+            excluded_tags=frozenset({"requires:demo-api"}),
+        )
+
+        assert policy.filter_tools([ping, gated_ping]) == [ping]
+        assert not policy.is_tool_available("WebFetch")
+        allowed = policy.get_allowed_tools({})
+        assert "WebFetch" not in allowed
+        assert "Bash" in allowed
+
+    def test_group_predicate_gates_both_backend_paths(self) -> None:
+        """One group_enabled override must gate the Claude server registry
+        and the Codex served-group names identically."""
+
+        class RestrictedPolicy(BaseToolPolicy):
+            def group_enabled(self, name: str) -> bool:
+                return not (name == "sandbox" and self.restricted_mode)
+
+        policy = RestrictedPolicy(restricted_mode=True)
+
+        assert policy.filter_group_names(("notes", "sandbox")) == ("notes",)
+        sandbox_server = create_mcp_server(name="sandbox", version="1.0.0", tools=[])
+        assert policy.get_mcp_servers(sandbox_server) == {}
 
 
 class TestAllowlistEnforcement:

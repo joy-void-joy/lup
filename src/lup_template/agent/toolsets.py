@@ -18,17 +18,25 @@ when they should be served to subprocess backends).
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 if TYPE_CHECKING:
     from lup.mcp import LupMcpTool
     from lup.reflect import ReflectionGate
     from lup.sandbox import Sandbox
 
-NOTES_GROUP = "notes"
-SANDBOX_GROUP = "sandbox"
-SESSION_GROUP = "session"
-EXAMPLE_GROUP = "example"
+ServerGroup = Literal["notes", "sandbox", "session", "example"]
+"""A tool-group name this registry can build — the group vocabulary every
+consumer shares: server registration (``core.build_inprocess_options``),
+subprocess serving and CLI selection (``lup-devtools agent serve-tools
+--server``). Extend it together with :func:`build_session_toolset` when
+adding a group. (A plain alias, not a ``type`` statement, so typer can
+read the choices off the annotation.)"""
+
+NOTES_GROUP: ServerGroup = "notes"
+SANDBOX_GROUP: ServerGroup = "sandbox"
+SESSION_GROUP: ServerGroup = "session"
+EXAMPLE_GROUP: ServerGroup = "example"
 """Placeholder tools with fabricated data — never served to a live agent
 by default; select explicitly (``serve-tools --server example``) to test."""
 
@@ -36,12 +44,12 @@ by default; select explicitly (``serve-tools --server example``) to test."""
 class SessionToolset(TypedDict):
     """Return type of :func:`build_session_toolset`."""
 
-    groups: dict[str, list["LupMcpTool"]]
+    groups: dict[ServerGroup, list["LupMcpTool"]]
     gate: "ReflectionGate"
     output_path: Path
 
 
-def tool_group_names(*, realtime: bool) -> tuple[str, ...]:
+def tool_group_names(*, realtime: bool) -> tuple[ServerGroup, ...]:
     """Group names served to subprocess backends (Codex/OpenAI).
 
     Excludes :data:`EXAMPLE_GROUP`. Uses the same name constants as
@@ -110,7 +118,7 @@ def build_session_toolset(
             create_run_subagent_tool(get_subagent_specs(), default_model=settings.model)
         )
 
-    groups: dict[str, list[LupMcpTool]] = {NOTES_GROUP: notes_tools}
+    groups: dict[ServerGroup, list[LupMcpTool]] = {NOTES_GROUP: notes_tools}
 
     if sandbox is not None:
         groups[SANDBOX_GROUP] = sandbox.create_tools()
