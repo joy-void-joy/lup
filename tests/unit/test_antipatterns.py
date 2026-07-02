@@ -79,3 +79,38 @@ def test_audit_skips_file_level_ignore() -> None:
 def test_audit_skips_plain_comment_lines() -> None:
     findings = audit_text("# a comment mentioning Any in prose\n", PYTHON_ANTI_PATTERNS)
     assert findings == []
+
+
+def test_atomic_renames_are_exempt_from_replace_rule() -> None:
+    source = "os.replace(src, dst)\ntmp_path.replace(target)\nPath.replace(a, b)\n"
+    assert audit_text(source, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_string_replace_still_flagged() -> None:
+    findings = audit_text('name.replace("-", "_")\n', PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["missing"]
+
+
+def test_bare_split_is_exempt_from_split_rule() -> None:
+    assert audit_text("fields = raw.split()\n", PYTHON_ANTI_PATTERNS) == []
+
+
+def test_split_on_separator_still_flagged() -> None:
+    findings = audit_text('parts = raw.split(",")\n', PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["missing"]
+
+
+def test_docstring_mention_of_ignore_is_not_a_guard() -> None:
+    source = '"""Audit `# lup: ignore` markers."""\nx = 1\n'
+    assert audit_text(source, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_ignore_inside_string_literal_is_not_a_guard() -> None:
+    source = 'fixture = "x: Any = 1  # lup: ignore"\n'
+    findings = audit_text(source, PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["missing"]
+
+
+def test_note_quoting_ignore_is_not_a_guard() -> None:
+    source = "x = 1  # lup: should we remove every # lup: ignore?\n"
+    assert audit_text(source, PYTHON_ANTI_PATTERNS) == []

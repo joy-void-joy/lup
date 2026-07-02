@@ -10,13 +10,13 @@ from pathlib import Path
 from lup.hooks import create_permission_hooks
 from lup.notes import setup_notes
 from lup.paths import path_is_under
-from lup.types import LupHookInput, LupHooksConfig
+from lup.types import JsonObject, LupHookInput, LupHooksConfig
 
 
 async def decision_for(
     config: LupHooksConfig,
     tool_name: str,
-    tool_input: dict[str, object],  # lup: ignore — mirrors LupHookInput.tool_input
+    tool_input: JsonObject,
 ) -> str | None:
     input_data = LupHookInput(
         hook_event_name="PreToolUse",

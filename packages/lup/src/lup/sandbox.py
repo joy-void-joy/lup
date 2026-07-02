@@ -164,9 +164,7 @@ def process_start_token(pid: int) -> str | None:
     # parentheses, so split on the final ')' — every later field is a
     # plain space-separated token. starttime is field 22 (1-indexed),
     # i.e. index 19 of the post-comm remainder (which begins at field 3).
-    rest = raw.rpartition(")")[
-        2
-    ].split()  # lup: ignore — /proc stat is whitespace-delimited, no stdlib parser
+    rest = raw.rpartition(")")[2].split()
     if len(rest) < 20:
         return None
     return rest[19]

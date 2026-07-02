@@ -1,4 +1,3 @@
-# lup: ignore
 """OpenAI-compatible API adapter via the Codex SDK.
 
 Routes open-source models (GLM-4, Llama, DeepSeek, etc.) through the
@@ -27,7 +26,7 @@ from lup.adapters.codex.adapter import (
 )
 from lup.adapters.common import Conversation
 from lup.trace import TraceLogger
-from lup.types import LupResponse, UsageCost
+from lup.types import JsonObject, LupResponse, UsageCost
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
         base_url: str | None = None,
         api_key: str | None = None,
         model_provider: str | None = None,
-        output_schema: dict[str, object] | None = None,
+        output_schema: JsonObject | None = None,
         sandbox: str | None = None,
         effort: str | None = None,
         approval_policy: str | None = None,
@@ -116,7 +115,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
             return {OPENAI_COMPAT_API_KEY_ENV: self.api_key}
         return {}
 
-    def build_config_overrides(self) -> tuple[str, ...]:
+    def build_config_overrides(self) -> list[str]:
         """Extend parent config with a Codex custom-provider definition.
 
         Provider definitions live in the plural ``model_providers.<id>``
@@ -127,9 +126,9 @@ class OpenAICompatibleAdapter(CodexAdapter):
         provider is assumed to live in the caller's own Codex config and
         is only selected (via ``model_provider`` on thread start).
         """
-        overrides = list(super().build_config_overrides())
+        overrides = super().build_config_overrides()
         if not self.base_url:
-            return tuple(overrides)
+            return overrides
 
         provider = self.provider_id()
         overrides.append(f'model_provider="{provider}"')
@@ -139,7 +138,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
             overrides.append(
                 f'model_providers.{provider}.env_key="{OPENAI_COMPAT_API_KEY_ENV}"'
             )
-        return tuple(overrides)
+        return overrides
 
     @asynccontextmanager
     async def conversation(self) -> AsyncGenerator[Conversation, None]:
@@ -148,7 +147,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
         from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
         config = CodexConfig(
-            config_overrides=self.build_config_overrides(),
+            config_overrides=tuple(self.build_config_overrides()),
             env=self.provider_env() or None,
         )
 
@@ -175,7 +174,7 @@ async def openai_query(
     api_key: str | None = None,
     model_provider: str | None = None,
     system_prompt: str = "",
-    output_schema: dict[str, object] | None = None,
+    output_schema: JsonObject | None = None,
     trace_logger: TraceLogger | None = None,
     prefix: str = "",
 ) -> LupResponse:

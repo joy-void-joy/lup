@@ -21,6 +21,7 @@ from lup.adapters.codex.openai_compat import (
 from lup.mcp import ToolResponse
 from lup.subagents import create_run_subagent_tool
 from lup.types import (
+    JsonValue,
     LupTextBlock,
     LupToolUseBlock,
     SubagentSpec,
@@ -246,9 +247,9 @@ class TestSubagentMaxTurnsGuard:
         import lup.subagents
         from lup.types import LupResponse
 
-        captured: dict[str, object] = {}
+        captured: dict[str, JsonValue] = {}
 
-        async def fake_query(prompt: str, **kwargs: object) -> LupResponse:
+        async def fake_query(prompt: str, **kwargs: JsonValue) -> LupResponse:
             captured.update(kwargs)
             return LupResponse(blocks=[LupTextBlock(text="ok")])
 

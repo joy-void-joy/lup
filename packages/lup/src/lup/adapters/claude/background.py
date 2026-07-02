@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator, Callable
-from typing import Any  # lup: ignore — SDK connect() takes dict[str, Any] turns
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -18,6 +17,7 @@ from claude_agent_sdk.types import (
 from lup.adapters.claude.adapter import lup_tools_to_sdk
 from lup.background import BaseBackgroundAgent, LupUserTurn
 from lup.mcp import LupMcpTool
+from lup.types import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +86,12 @@ class ClaudeBackgroundAgent(BaseBackgroundAgent):
 
             yield LupUserTurn(content=content)
 
-    async def sdk_message_stream(self) -> AsyncGenerator[dict[str, Any], None]:
+    async def sdk_message_stream(self) -> AsyncGenerator[JsonObject, None]:
         """Adapt the typed turn stream into the SDK's streaming-input dicts.
 
-        The one place a ``LupUserTurn`` becomes the SDK's ``connect`` wire shape
-        (``dict[str, Any]``), so :meth:`message_generator` stays typed end to
-        end and only this boundary line speaks the untyped SDK format.
+        The one place a ``LupUserTurn`` becomes the SDK's ``connect`` wire
+        shape (a JSON object), so :meth:`message_generator` stays typed end
+        to end and only this boundary speaks the SDK's dict format.
         """
         async for turn in self.message_generator():
             yield {

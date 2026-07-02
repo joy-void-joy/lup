@@ -49,6 +49,11 @@ def is_framework_reference(line: str) -> bool:
     return any(marker in line for marker in FRAMEWORK_MARKERS)
 
 
+def rename_match(matched: str, new_name: str) -> str:
+    """Rewrite the package name inside one matched piece of source text."""
+    return matched.replace("lup_template", new_name, 1)  # lup: ignore — text surgery
+
+
 def rename_imports_in_file(path: Path, new_name: str) -> list[str]:
     """Rename ``from lup_template.`` / ``import lup_template`` imports in a single file.
 
@@ -66,7 +71,7 @@ def rename_imports_in_file(path: Path, new_name: str) -> list[str]:
         if is_framework_reference(line):
             return full_match
 
-        replaced = full_match.replace("lup_template", new_name, 1)  # lup: ignore
+        replaced = rename_match(full_match, new_name)
         changes.append(f"  {path}: {full_match!r} -> {replaced!r}")
         return replaced
 
@@ -166,7 +171,8 @@ def rename_package(
                 line = text[line_start : line_end if line_end != -1 else len(text)]
                 if not is_framework_reference(line):
                     changes.append(
-                        f"  {py_file}: {m.group(0)!r} -> {m.group(0).replace('lup_template', new_name, 1)!r}"  # lup: ignore
+                        f"  {py_file}: {m.group(0)!r} -> "
+                        f"{rename_match(m.group(0), new_name)!r}"
                     )
         all_changes.extend(changes)
 

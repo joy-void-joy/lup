@@ -18,7 +18,14 @@ from typing import Literal
 from pydantic import BaseModel
 
 from lup.trace import TraceLogger
-from lup.types import Backend, LupDoneEvent, LupEvent, LupResponse, model_backend
+from lup.types import (
+    Backend,
+    JsonObject,
+    LupDoneEvent,
+    LupEvent,
+    LupResponse,
+    model_backend,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -310,7 +317,7 @@ class OneShotRequest(BaseModel):
     prompt: str
     model: str
     system_prompt: str | None = None
-    output_schema: dict[str, object] | None = None
+    output_schema: JsonObject | None = None
     trace_logger: TraceLogger | None = None
     prefix: str = ""
     options: OneShotOptions = OneShotOptions()

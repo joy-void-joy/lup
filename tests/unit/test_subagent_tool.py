@@ -7,8 +7,6 @@ provide (the tool fails loudly), and query() degrading Claude-only options
 to what the backend supports rather than raising.
 """
 
-from typing import cast
-
 import pytest
 
 import lup.subagents
@@ -16,7 +14,7 @@ from lup.adapters import common
 from lup.adapters.common import OneShotRequest, query
 from lup.mcp import ToolResponse
 from lup.subagents import create_run_subagent_tool
-from lup.types import LupResponse, LupTextBlock, SubagentSpec
+from lup.types import JsonValue, LupResponse, LupTextBlock, SubagentSpec
 
 RESEARCHER = SubagentSpec(
     name="researcher",
@@ -49,25 +47,23 @@ class TestRunSubagentTool:
     async def test_unknown_role_lists_available(self) -> None:
         tool = create_run_subagent_tool([RESEARCHER], default_model="haiku")
 
-        result = cast(ToolResponse, await tool.handler({"name": "ghost", "task": "x"}))
+        result = await tool.handler({"name": "ghost", "task": "x"})
         assert result.get("is_error") is True
         assert "researcher" in response_text(result)
 
     async def test_tools_on_non_claude_backend_fail_loudly(self) -> None:
         tool = create_run_subagent_tool([GPT_ANALYST], default_model="haiku")
 
-        result = cast(
-            ToolResponse, await tool.handler({"name": "gpt-analyst", "task": "x"})
-        )
+        result = await tool.handler({"name": "gpt-analyst", "task": "x"})
         assert result.get("is_error") is True
         assert "tools" in response_text(result)
 
     async def test_dispatches_query_with_spec(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        captured: dict[str, object] = {}
+        captured: dict[str, JsonValue] = {}
 
-        async def fake_query(prompt: str, **kwargs: object) -> LupResponse:
+        async def fake_query(prompt: str, **kwargs: JsonValue) -> LupResponse:
             captured["prompt"] = prompt
             captured.update(kwargs)
             return LupResponse(blocks=[LupTextBlock(text="findings")])
@@ -75,10 +71,7 @@ class TestRunSubagentTool:
         monkeypatch.setattr(lup.subagents, "query", fake_query)
         tool = create_run_subagent_tool([RESEARCHER], default_model="opus")
 
-        result = cast(
-            ToolResponse,
-            await tool.handler({"name": "researcher", "task": "look this up"}),
-        )
+        result = await tool.handler({"name": "researcher", "task": "look this up"})
         assert result.get("is_error", False) is False
         assert "findings" in response_text(result)
         assert captured["prompt"] == "look this up"
@@ -89,9 +82,9 @@ class TestRunSubagentTool:
     async def test_modelless_spec_inherits_default_model(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        captured: dict[str, object] = {}  # lup: ignore — heterogeneous kwargs capture
+        captured: dict[str, JsonValue] = {}
 
-        async def fake_query(prompt: str, **kwargs: object) -> LupResponse:
+        async def fake_query(prompt: str, **kwargs: JsonValue) -> LupResponse:
             captured["prompt"] = prompt
             captured.update(kwargs)
             return LupResponse(blocks=[LupTextBlock(text="adapted")])
@@ -99,9 +92,7 @@ class TestRunSubagentTool:
         monkeypatch.setattr(lup.subagents, "query", fake_query)
         tool = create_run_subagent_tool([INHERITOR], default_model="gpt-5.5")
 
-        result = cast(
-            ToolResponse, await tool.handler({"name": "inheritor", "task": "go"})
-        )
+        result = await tool.handler({"name": "inheritor", "task": "go"})
         assert result.get("is_error", False) is False
         assert captured["model"] == "gpt-5.5"
 

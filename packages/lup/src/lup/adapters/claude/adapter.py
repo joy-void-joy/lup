@@ -12,7 +12,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
-from typing import Any, cast  # lup: ignore
+from typing import Any  # lup: ignore — confined to SdkDict, the SDK's payload type
 
 from pydantic import BaseModel
 
@@ -49,9 +49,11 @@ from lup.adapters.common import (
     AgentAdapter,
     Conversation,
 )
-from lup.mcp import LupMcpServerConfig, LupMcpTool
+from lup.mcp import LupMcpServerConfig, LupMcpTool, LupToolHandler
 from lup.trace import TraceLogger, print_message
 from lup.types import (
+    JsonObject,
+    JsonValue,
     LupAssistantMessage,
     LupContentBlock,
     LupDoneEvent,
@@ -144,7 +146,7 @@ def lup_hooks_to_claude(hooks: LupHooksConfig) -> ClaudeHooksConfig:
             else:
                 claude_matchers.append(HookMatcher(hooks=[handler]))
 
-        result[cast(HookEvent, event_name)] = claude_matchers
+        result[event_name] = claude_matchers
 
     return result
 
@@ -282,16 +284,31 @@ def lup_server_to_claude(config: LupMcpServerConfig) -> McpSdkServerConfig:
     return McpSdkServerConfig(type="sdk", name=config.name, instance=config.server)
 
 
+type SdkDict = dict[str, Any]  # lup: ignore — the SDK's tool-handler payload type
+
+
 def lup_tools_to_sdk(
     tools: list[LupMcpTool],
-) -> list[SdkMcpTool[dict[str, Any]]]:  # lup: ignore
-    """Convert LupMcpTool list to Claude SDK SdkMcpTool list."""
+) -> list[SdkMcpTool[JsonObject]]:
+    """Convert LupMcpTool list to Claude SDK SdkMcpTool list.
+
+    ``SdkMcpTool.handler`` must return the SDK's untyped dict. A
+    ``ToolResponse`` is a dict at runtime, so each handler is adapted
+    with a shallow copy instead of widening ``LupToolHandler`` itself.
+    """
+
+    def as_sdk(handler: LupToolHandler) -> Callable[[JsonObject], Awaitable[SdkDict]]:
+        async def call(args: JsonObject) -> SdkDict:
+            return dict(await handler(args))
+
+        return call
+
     return [
         SdkMcpTool(
             name=t.name,
             description=t.description,
             input_schema=t.input_schema,
-            handler=t.handler,
+            handler=as_sdk(t.handler),
         )
         for t in tools
     ]
@@ -302,7 +319,7 @@ def lup_tools_to_sdk(
 # ---------------------------------------------------------------------------
 
 
-type ClaudeUsageNormalizer = Callable[[Mapping[str, object]], Usage | None]
+type ClaudeUsageNormalizer = Callable[[Mapping[str, JsonValue]], Usage | None]
 """Transforms the raw Claude SDK usage payload into a (subclass of) Usage."""
 
 

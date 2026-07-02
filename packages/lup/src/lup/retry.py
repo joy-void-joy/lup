@@ -4,7 +4,7 @@ Examples:
     Retry an HTTP call with exponential backoff::
 
         >>> @with_retry(max_attempts=3)
-        ... async def fetch_data(url: str) -> dict[str, object]:
+        ... async def fetch_data(url: str) -> dict[str, JsonValue]:
         ...     async with httpx.AsyncClient() as client:
         ...         response = await client.get(url)
         ...         response.raise_for_status()

@@ -84,7 +84,7 @@ from pydantic import BaseModel
 from lup.adapters.claude.adapter import ResponseCollector, collect_lup_response
 from lup.adapters.common import PermissionMode
 from lup.trace import TraceLogger
-from lup.types import LupResponse
+from lup.types import JsonObject, LupResponse
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +93,10 @@ logger = logging.getLogger(__name__)
 # Output format types
 # ---------------------------------------------------------------------------
 
-JsonSchema = dict[str, object]  # lup: ignore — JSON Schema is an open document
+type JsonSchema = JsonObject
 """Type alias for JSON Schema payloads (from ``BaseModel.model_json_schema()``)."""
 
-OutputFormat = dict[str, str | JsonSchema]
+type OutputFormat = dict[str, str | JsonSchema]
 """SDK output format dict (e.g. ``{"type": "json_schema", "schema": ...}``)."""
 
 
@@ -356,7 +356,7 @@ async def claude_query(
     *,
     model: str = "claude-opus-4-6",
     system_prompt: str | None = None,
-    output_schema: dict[str, object] | None = None,
+    output_schema: JsonObject | None = None,
     trace_logger: TraceLogger | None = None,
     prefix: str = "",
     max_turns: int | None = None,

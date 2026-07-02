@@ -13,6 +13,7 @@ from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
 from lup.adapters.codex.adapter import codex_usage_to_lup
 from lup.types import (
+    JsonValue,
     LupResultMessage,
     Usage,
     extract_token_usage,
@@ -21,7 +22,7 @@ from lup.types import (
 
 # The shape that broke a live run: nested dicts, strings, and lists
 # alongside the token counts.
-CLAUDE_VENDOR_PAYLOAD: dict[str, object] = {
+CLAUDE_VENDOR_PAYLOAD: dict[str, JsonValue] = {
     "input_tokens": 12,
     "output_tokens": 941,
     "cache_read_input_tokens": 18200,
@@ -63,7 +64,7 @@ class TestCustomNormalizer:
         class RichUsage(Usage):
             service_tier: str = ""
 
-        def rich_normalizer(raw: Mapping[str, object]) -> Usage | None:
+        def rich_normalizer(raw: Mapping[str, JsonValue]) -> Usage | None:
             base = extract_token_usage(raw)
             assert base is not None
             tier = raw.get("service_tier")
@@ -81,7 +82,7 @@ class TestCustomNormalizer:
         assert dumped["input_tokens"] == 12
 
     def test_failing_normalizer_degrades_to_none(self) -> None:
-        def broken(raw: Mapping[str, object]) -> Usage | None:
+        def broken(raw: Mapping[str, JsonValue]) -> Usage | None:
             raise KeyError("schema changed under us")
 
         assert safe_normalize_usage(broken, CLAUDE_VENDOR_PAYLOAD) is None
