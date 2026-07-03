@@ -14,6 +14,8 @@ resume) have no row here; they are documented in prose and raise
 use.
 """
 
+#lup: The whole file isn't very clear. What does it do, why does it need to be in matrix.py
+
 from pydantic import BaseModel
 
 from lup.adapters.common import Client, UnsupportedOptionsError
@@ -21,7 +23,7 @@ from lup.adapters.engine import Engine, engine_for_id
 from lup.background import BackgroundAgentParams
 from lup.options import CompatOptions, LupAgentOptions
 
-CANONICAL_ENGINES: tuple[str, ...] = (
+CANONICAL_ENGINES: tuple[str, ...] = ( #lup: Why do we have engine name here? That doesn't seem very principle to have it in matrix.py
     "claude",
     "codex",
     "openai-compat",

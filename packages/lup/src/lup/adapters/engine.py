@@ -40,12 +40,12 @@ type EngineId = Literal["claude", "codex", "openai-compat", "claude-compat"]
 """Ids of the shipped engines. Custom engines are passed as instances, so
 their ids live outside this literal."""
 
-CLAUDE_MODEL_PREFIXES: tuple[str, ...] = ("claude-",)
+CLAUDE_MODEL_PREFIXES: tuple[str, ...] = ("claude-",) # lup: I think this structure is wrong. There shouldn't be any reference to claude in non-claude folder.
 CLAUDE_MODEL_ALIASES: frozenset[str] = frozenset({"haiku", "sonnet", "opus"})
 CODEX_MODEL_PREFIXES: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-", "o5-", "codex-")
 
 
-class Engine(ABC):
+class Engine(ABC): #lup: Very unclear. How is that different from client? Why isn't this in common.py?
     """One backend, complete: client construction and background agents.
 
     Engines are stateless and cheap — configuration arrives per call as
@@ -62,7 +62,7 @@ class Engine(ABC):
     def client(self, opts: LupAgentOptions) -> Client:
         """Construct a configured :class:`Client`. Nothing connects yet."""
 
-    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent:
+    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent: #lup: Same remark: Why an UnsupportedOperationError instead of making an abstractmethod
         """Build a background agent for this engine.
 
         Engines without background support inherit this raising default.
@@ -75,6 +75,7 @@ class Engine(ABC):
 def enforce_supported(
     opts: LupAgentOptions, *, engine: str, unsupported: tuple[str, ...]
 ) -> LupAgentOptions:
+    #lup: Unclear what this is and why this is needed. Smell like poor design
     """Apply the options' ``on_unsupported`` policy to an engine's blind spots.
 
     ``unsupported`` names the intent-knob fields this engine cannot honor;
@@ -99,6 +100,7 @@ def enforce_supported(
 
 
 def engine_id_for_model(model: str) -> EngineId:
+    #lup: Same here.
     """Infer the engine for a model name by prefix.
 
     Claude models (``claude-*`` and the short aliases) run on the Claude
@@ -114,7 +116,7 @@ def engine_id_for_model(model: str) -> EngineId:
     return "openai-compat"
 
 
-def engine_for_id(engine_id: str) -> Engine:
+def engine_for_id(engine_id: str) -> Engine: #lup: Like if the whole idea is "Having default constructors", better to just have default constructor in the claude and codex folder. And just have one big router relating model name to their respective engine
     """Instantiate a shipped engine by id — the one sanctioned dispatch.
 
     One lazy import per engine keeps SDK imports deferred: ``import lup``
@@ -173,7 +175,7 @@ def create_client(
     max_thinking_tokens: int | None = None,
     max_budget_usd: float | None = None,
     on_unsupported: Literal["raise", "drop"] = "raise",
-) -> Client:
+) -> Client: #lup: same, why is this needed?
     """Build a configured :class:`Client` — the one door to every engine.
 
     The keyword form is the nested-call tier: raw system prompt, nothing
@@ -245,7 +247,7 @@ async def query(
     max_turns: int | None = None,
     max_thinking_tokens: int | None = None,
     max_budget_usd: float | None = None,
-) -> LupResponse:
+) -> LupResponse: #lup: Yeah, good
     """One-shot query — the one-liner for nested LLM calls inside tools.
 
     Sugar over :func:`create_client`: builds a call-tier client for the

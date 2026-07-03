@@ -114,7 +114,7 @@ class Session(ABC):
         prefix: str = "",
     ) -> LupResponse: ...
 
-    async def interrupt(self) -> None:
+    async def interrupt(self) -> None: #lup: Why is this an UnsupportedOperationError, and not an abstractmethod? That seems inconsistent?
         """Signal the backend to stop the current response.
 
         Engines without interruption support inherit this default, which
@@ -134,7 +134,7 @@ class Client(ABC):
     (SDK client, container cleanup) live inside that context manager.
     """
 
-    mailbox: "RealtimeMailbox | None" = None
+    mailbox: "RealtimeMailbox | None" = None #lup: This is not clear to me what this is. When would I set it?
     """Parent-side endpoint of the realtime file relay — set by subprocess
     engines when the options ask for persistent (sleep/wake) mode."""
 
@@ -151,7 +151,7 @@ class Client(ABC):
         :class:`UnsupportedOperationError`.
         """
 
-    async def query(
+    async def query( #lup: Isn't this lacking a lot of kwargs compared to engine.py's query?
         self,
         prompt: str,
         *,
