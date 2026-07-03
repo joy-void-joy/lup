@@ -37,6 +37,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+#lup: This feels like a duplicate of antipattern? Probably both files should be in a common folder (like markers/ or something) and dedup the commonalities
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 IGNORE_RE = re.compile(r"(#|//)\s*lup\s*:\s*ignore\b", re.IGNORECASE)
 FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*lup\s*:\s*ignore\s*$", re.IGNORECASE)
@@ -76,7 +77,7 @@ def scan_mode_for(path: Path) -> str:
     skipped, everything else is plain line-scanned.
     """
     suffix = path.suffix.lower()
-    if suffix in PYTHON_SUFFIXES:
+    if suffix in PYTHON_SUFFIXES: # lup: Should be a match
         return ScanMode.PYTHON
     if suffix in MARKDOWN_SUFFIXES:
         return ScanMode.MARKDOWN
@@ -173,7 +174,7 @@ def find_markers(
     *,
     marker: re.Pattern[str],
     ignore: re.Pattern[str] | None = None,
-) -> list[MarkerComment]:
+) -> list[MarkerComment]: #lup: Yeah, this feels very duplicated from antipatterns.py
     """Extract one marker family's notes from a file's text under a `ScanMode`.
 
     A note is a marker line plus the contiguous same-style comment lines below
