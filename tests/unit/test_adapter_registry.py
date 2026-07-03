@@ -10,9 +10,16 @@ one-shot options a weak backend cannot honor instead of raising.
 from lup.adapters.common import (
     AdapterCapabilities,
     OneShotOptions,
+    OneShotRequest,
     degrade_unsupported,
 )
-from lup.adapters.registry import BACKEND_BUILDERS, build_adapter
+from lup.adapters.registry import (
+    BACKEND_BUILDERS,
+    ONE_SHOT_BUILDERS,
+    backend_capabilities,
+    build_adapter,
+    one_shot_adapter,
+)
 from lup.mcp import LupMcpServerConfig, create_mcp_server
 from lup.options import CodexOptions, LupAgentOptions
 from lup.types import SubagentSpec
@@ -38,6 +45,47 @@ def test_registry_covers_every_backend() -> None:
     from lup.types import Backend
 
     assert set(BACKEND_BUILDERS) == set(get_args(Backend.__value__))
+    assert set(ONE_SHOT_BUILDERS) == set(get_args(Backend.__value__))
+
+
+def test_claude_one_shot_builder_translates_request() -> None:
+    """One-shot claude construction: raw prompt, no persistence, request knobs."""
+    from lup.adapters.claude.adapter import ClaudeAdapter
+
+    request = OneShotRequest(
+        model="claude-opus-4-6",
+        system_prompt="be brief",
+        output_schema={"type": "object"},
+        options=OneShotOptions(tools=["Read"], max_turns=3),
+        max_budget_usd=2.0,
+    )
+    adapter = one_shot_adapter("anthropic", request)
+    assert isinstance(adapter, ClaudeAdapter)
+    native = adapter.options
+    # A nested LLM call, not a session: the prompt replaces (not appends to)
+    # the harness preset, and nothing persists.
+    assert native.system_prompt == "be brief"
+    assert native.extra_args == {"no-session-persistence": None}
+    assert native.tools == ["Read"]
+    assert native.max_turns == 3
+    assert native.max_budget_usd == 2.0
+    assert native.output_format == {"type": "json_schema", "schema": {"type": "object"}}
+
+
+def test_codex_one_shot_builder_keeps_mcp_off() -> None:
+    """A one-shot has no session context to serve tools from."""
+    from lup.adapters.codex.adapter import CodexAdapter
+
+    adapter = one_shot_adapter("openai", OneShotRequest(model="gpt-5.5"))
+    assert isinstance(adapter, CodexAdapter)
+    assert adapter.mcp_tools is False
+
+
+def test_backend_capabilities_reads_probe_adapter() -> None:
+    """Capability lookup works per backend without standing up a session."""
+    assert backend_capabilities("anthropic").hooks
+    assert not backend_capabilities("openai").hooks
+    assert backend_capabilities("openai-compatible").streaming == "post_hoc"
 
 
 def test_build_adapter_dispatches_to_claude() -> None:
