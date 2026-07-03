@@ -1,9 +1,9 @@
 """Agent adapter interface and unified ``query()`` frontend.
 
-Each SDK engine implements this interface (``AgentAdapter`` +
-``Conversation``) and declares what it supports (``AdapterCapabilities``).
+Each SDK engine implements this interface (``Client`` +
+``Session``) and declares what it supports (``AdapterCapabilities``).
 Consumer code (core.py) obtains adapters through the registry and calls
-``run()`` (one-shot) or ``conversation()`` (multi-turn).
+``run()`` (one-shot) or ``session()`` (multi-turn).
 
 The module-level ``query()`` routes by model name through the registry's
 one-shot builders. This module defines the seam and never imports an
@@ -63,7 +63,7 @@ class AdapterCapabilities(BaseModel):
     """run_streamed yields events during the turn, or replays them after."""
 
     interrupt: bool
-    """Conversation.interrupt() actually stops the current response."""
+    """Session.interrupt() actually stops the current response."""
 
     stop_event: bool
     """Backend emits a stop event, so Stop hooks (completion guard) fire."""
@@ -202,11 +202,11 @@ class BudgetExceededError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# Conversation (multi-turn session)
+# Session (multi-turn session)
 # ---------------------------------------------------------------------------
 
 
-class Conversation(ABC):
+class Session(ABC):
     """Multi-turn conversation session.
 
     Wraps a persistent SDK client or thread. ``send()`` sends a message
@@ -238,20 +238,20 @@ class Conversation(ABC):
 # ---------------------------------------------------------------------------
 
 
-class AgentAdapter(ABC):
+class Client(ABC):
     """Run prompts against an SDK backend.
 
-    The single abstract method is ``conversation()``, which yields a
-    multi-turn ``Conversation``. ``run()`` is a convenience that opens
+    The single abstract method is ``session()``, which yields a
+    multi-turn ``Session``. ``run()`` is a convenience that opens
     a conversation, sends one prompt, and closes it.
     """
 
     @abstractmethod
-    def conversation(self) -> AbstractAsyncContextManager[Conversation]:
+    def session(self) -> AbstractAsyncContextManager[Session]:
         """Create a multi-turn conversation session.
 
         Implementations are ``@asynccontextmanager`` async generators
-        yielding a ``Conversation`` that maintains state across turns.
+        yielding a ``Session`` that maintains state across turns.
         The SDK client/thread is created on entry and cleaned up on exit.
         """
 
@@ -273,7 +273,7 @@ class AgentAdapter(ABC):
         prefix: str = "",
     ) -> LupResponse:
         """One-shot convenience: open conversation, send one prompt, close."""
-        async with self.conversation() as conv:
+        async with self.session() as conv:
             return await conv.send(prompt, trace_logger=trace_logger, prefix=prefix)
 
     async def run_streamed(
@@ -327,7 +327,7 @@ class OneShotRequest(BaseModel):
     max_budget_usd: float | None = None
 
 
-type OneShotBuilder = Callable[[OneShotRequest], AgentAdapter]
+type OneShotBuilder = Callable[[OneShotRequest], Client]
 """An engine's one-shot construction entry point: resolved request in, adapter out."""
 
 

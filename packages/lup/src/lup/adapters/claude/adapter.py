@@ -46,8 +46,8 @@ from claude_agent_sdk.types import (
 
 from lup.adapters.common import (
     AdapterCapabilities,
-    AgentAdapter,
-    Conversation,
+    Client,
+    Session,
 )
 from lup.mcp import LupMcpServerConfig, LupMcpTool, LupToolHandler
 from lup.trace import TraceLogger, print_message
@@ -330,7 +330,7 @@ class ResponseCollector:
     each SDK message while accumulating state, ``collect()`` drains the rest
     with display/tracing, and ``to_lup_response()`` projects the accumulated
     SDK state into lup types. Every Claude run — session or one-shot —
-    drains through it via ``ClaudeConversation.send``, so there is one
+    drains through it via ``ClaudeSession.send``, so there is one
     message-draining loop rather than two that can drift.
 
     After iteration, access the accumulated SDK state: ``blocks``,
@@ -457,7 +457,7 @@ async def collect_lup_response(
     """Drain a queried client's response stream into a LupResponse.
 
     The lup-typed projection of :class:`ResponseCollector` —
-    ``ClaudeConversation.send`` collects through it. Displays and traces
+    ``ClaudeSession.send`` collects through it. Displays and traces
     each message as it arrives, raises on agent errors and on streams that
     end without a result.
     """
@@ -466,7 +466,7 @@ async def collect_lup_response(
     return collector.to_lup_response(usage_normalizer)
 
 
-class ClaudeConversation(Conversation):
+class ClaudeSession(Session):
     """Multi-turn conversation via the Claude Agent SDK."""
 
     def __init__(
@@ -497,7 +497,7 @@ class ClaudeConversation(Conversation):
         await self.client.interrupt()
 
 
-class ClaudeAdapter(AgentAdapter):
+class ClaudeAdapter(Client):
     """Run prompts via the Claude Agent SDK.
 
     Args:
@@ -534,9 +534,9 @@ class ClaudeAdapter(AgentAdapter):
         )
 
     @asynccontextmanager
-    async def conversation(self) -> AsyncGenerator[Conversation, None]:
+    async def session(self) -> AsyncGenerator[Session, None]:
         async with ClaudeSDKClient(options=self.options) as client:
-            yield ClaudeConversation(client, usage_normalizer=self.usage_normalizer)
+            yield ClaudeSession(client, usage_normalizer=self.usage_normalizer)
 
     async def run_streamed(
         self,

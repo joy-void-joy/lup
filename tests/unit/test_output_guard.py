@@ -8,7 +8,7 @@ dry, or the budget cutting the session off.
 
 from pathlib import Path
 
-from lup.adapters.common import BudgetExceededError, Conversation
+from lup.adapters.common import BudgetExceededError, Session
 from lup.output import (
     MISSING_OUTPUT_MESSAGE,
     ensure_output_submitted,
@@ -18,7 +18,7 @@ from lup.trace import TraceLogger
 from lup.types import LupResponse
 
 
-class SubmittingConversation(Conversation):
+class SubmittingConversation(Session):
     """Writes the output file after a configurable number of turns."""
 
     def __init__(self, path: Path, succeed_on: int | None) -> None:
@@ -40,7 +40,7 @@ class SubmittingConversation(Conversation):
         return LupResponse()
 
 
-class BrokeConversation(Conversation):
+class BrokeConversation(Session):
     """Every turn is refused: the session crossed its budget."""
 
     async def send(

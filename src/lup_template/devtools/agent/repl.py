@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     from rich.console import Console
 
-    from lup.adapters.common import AgentAdapter, Conversation
+    from lup.adapters.common import Client, Session
     from lup.types import LupResponse
 
 import sh
@@ -90,7 +90,7 @@ class Interrupted(Exception):
 
 
 async def send_interruptible(
-    conv: "Conversation",
+    conv: "Session",
     prompt: str,
     console: "Console",
 ) -> LupResponse:
@@ -131,7 +131,7 @@ def apply_repl_overrides(
     """Apply ``--no-tools``/``--no-prompt`` to a built adapter.
 
     Claude: realized on the options object. Codex/OpenAI: realized on
-    the adapter attributes, which ``conversation()`` reads at open time
+    the adapter attributes, which ``session()`` reads at open time
     (``mcp_tools`` gates the served-tools config, ``system_prompt``
     becomes the developer instructions). Unknown adapter types warn so
     the flags are never silently ignored.
@@ -168,7 +168,7 @@ def build_repl_adapter(
     *,
     no_tools: bool,
     no_prompt: bool,
-) -> tuple[AgentAdapter, AbstractContextManager[object]]:
+) -> tuple[Client, AbstractContextManager[object]]:
     """Build the agent adapter for a REPL session, overrides applied.
 
     ``build_adapter`` reads ``settings.model`` for every backend, so the
@@ -236,7 +236,7 @@ async def exec_once(
         model, no_tools=no_tools, no_prompt=no_prompt
     )
     with adapter_ctx:
-        async with adapter.conversation() as conv:
+        async with adapter.session() as conv:
             try:
                 response = await send_interruptible(conv, prompt, console)
             except Interrupted:
@@ -370,7 +370,7 @@ async def repl(
         stack.enter_context(adapter_ctx)
 
         async with stack:
-            async with adapter.conversation() as conv:
+            async with adapter.session() as conv:
                 last_input_sigint = 0.0
 
                 while True:

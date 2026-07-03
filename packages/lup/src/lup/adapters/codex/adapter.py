@@ -1,7 +1,7 @@
 """OpenAI Codex SDK adapter.
 
 Wraps the Codex Python SDK (``openai_codex``) behind the
-``AgentAdapter`` interface. Exposes lup MCP tools via external
+``Client`` interface. Exposes lup MCP tools via external
 stdio server (serve-tools), permission hooks via config.toml
 command hooks, and the reflection gate via a file-backed flag.
 """
@@ -23,9 +23,9 @@ if TYPE_CHECKING:
 
 from lup.adapters.common import (
     AdapterCapabilities,
-    AgentAdapter,
+    Client,
     BudgetExceededError,
-    Conversation,
+    Session,
     TurnTimeoutError,
 )
 from lup.trace import TraceLogger, print_message
@@ -365,7 +365,7 @@ def build_lup_response(
     return response
 
 
-class CodexConversation(Conversation):
+class CodexSession(Session):
     """Multi-turn conversation via a Codex thread."""
 
     def __init__(
@@ -463,7 +463,7 @@ class CodexConversation(Conversation):
         return response
 
 
-class CodexAdapter(AgentAdapter):
+class CodexAdapter(Client):
     """Run prompts via the OpenAI Codex SDK."""
 
     def __init__(
@@ -540,14 +540,14 @@ class CodexAdapter(AgentAdapter):
             overrides.extend(build_hook_config_overrides(self.hook_overrides))
         return overrides
 
-    def make_conversation(self, thread: "AsyncThread") -> CodexConversation:
+    def make_session(self, thread: "AsyncThread") -> CodexSession:
         """Wrap a thread in a conversation carrying this adapter's settings.
 
         The single construction point for the send path, shared with the
         OpenAI-compatible subclass so both inherit identical effort,
         output-schema, and budget wiring.
         """
-        return CodexConversation(
+        return CodexSession(
             thread,
             output_schema=self.output_schema,
             effort=self.effort,
@@ -558,7 +558,7 @@ class CodexAdapter(AgentAdapter):
         )
 
     @asynccontextmanager
-    async def conversation(self) -> AsyncGenerator[Conversation, None]:
+    async def session(self) -> AsyncGenerator[Session, None]:
         require_codex_sdk()
 
         from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
@@ -576,4 +576,4 @@ class CodexAdapter(AgentAdapter):
                     else ApprovalMode.auto_review
                 ),
             )
-            yield self.make_conversation(thread)
+            yield self.make_session(thread)

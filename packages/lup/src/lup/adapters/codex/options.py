@@ -12,7 +12,7 @@ from contextlib import AbstractContextManager, nullcontext
 
 from lup.adapters.codex.adapter import CodexAdapter
 from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
-from lup.adapters.common import AgentAdapter, OneShotRequest
+from lup.adapters.common import Client, OneShotRequest
 from lup.options import BuiltAdapter, LupAgentOptions
 from lup.realtime_relay import RealtimeMailbox
 
@@ -36,7 +36,7 @@ def subprocess_sandbox_cleanup(
     return sandbox_cleanup(session_id=codex.session_id, shared_dir=codex.shared_dir)
 
 
-def codex_bundle(adapter: AgentAdapter, opts: LupAgentOptions) -> BuiltAdapter:
+def codex_bundle(adapter: Client, opts: LupAgentOptions) -> BuiltAdapter:
     """Bundle a subprocess-engine adapter with its session-scoped resources.
 
     The tail every Codex-runtime build shares: the parent-side container
