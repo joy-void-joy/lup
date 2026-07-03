@@ -83,8 +83,8 @@ packages/
         ├── py.typed            # PEP 561 typing marker
         ├── adapters/           # ALL SDK-specific code, one engine per subpackage behind an ABC
         │   ├── common.py       # AgentAdapter/Conversation ABCs, AdapterCapabilities, query()
-        │   ├── registry.py     # BACKEND_BUILDERS: backend id -> build_adapter(opts)
-        │   ├── claude/         # Claude engine: adapter, client, background, options, tools
+        │   ├── registry.py     # Backend id -> session + one-shot builders (the only dispatch)
+        │   ├── claude/         # Claude engine: adapter, background, options, tools
         │   └── codex/          # Codex/OpenAI engine: adapter, background, hooks, options, openai_compat
         ├── antipatterns.py     # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
         ├── options.py          # LupAgentOptions — backend-agnostic options crossing template -> lib
