@@ -10,23 +10,18 @@ two forms.
 
 import pytest
 
-from lup.adapters.claude.adapter import ClaudeClient
-from lup.adapters.claude.engine import (
-    HARNESS_THINKING_TOKENS,
-    ClaudeCompatEngine,
-    ClaudeEngine,
-)
-from lup.adapters.codex.adapter import CodexClient, per_mtok_usage_cost
-from lup.adapters.codex.engine import CodexEngine, OpenAICompatEngine
-from lup.adapters.codex.openai_compat import OpenAICompatClient
-from lup.adapters.common import UnsupportedOptionsError
-from lup.adapters.engine import (
+from lup.adapters.claude import HARNESS_THINKING_TOKENS, ClaudeClient, ClaudeEngine
+from lup.adapters.claude_compat import ClaudeCompatEngine
+from lup.adapters.codex import CodexClient, CodexEngine, per_mtok_usage_cost
+from lup.adapters.common import (
+    UnsupportedOptionsError,
     create_client,
     engine_for_id,
     engine_id_for_model,
     query,
     resolve_engine,
 )
+from lup.adapters.openai_compat import OpenAICompatClient, OpenAICompatEngine
 from lup.mcp import create_mcp_server
 from lup.options import CompatOptions, LupAgentOptions
 from lup.types import SubagentSpec

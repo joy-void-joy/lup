@@ -1,12 +1,20 @@
 """Generated capability matrix — probed from the engines, never declared.
 
-Each cell is derived from behavior: option rows construct a probe client
-with exactly one intent knob set and record whether the engine raises
+Each cell is derived from the engines' actual refusal behavior: option
+rows construct a probe client with exactly one intent knob set and
+record whether the engine raises
 :class:`~lup.adapters.common.UnsupportedOptionsError`; the streaming row
 checks whether the engine's client overrides the post-hoc ``stream``
 default; the background row asks the engine for a tool-using background
-agent. Construction never connects, so probing is offline and cheap —
-and the table cannot drift from the code, because it *is* the code.
+agent and catches the refusal. Construction never connects, so probing
+is offline and cheap — and the table embedded in the top-level
+``README.md`` and printed by ``uv run lup-devtools agent capabilities``
+cannot drift from the code, because it *is* the code.
+
+The harness consumes only the public seam surface, and its only
+consumers are this devtools command and the README regression test
+(``tests/unit/test_capability_matrix_docs.py``) — which is why it lives
+in devtools, not the library.
 
 Facts that only surface on a live connection (interrupt support, session
 resume) have no row here; they are documented in prose and raise
@@ -14,22 +22,17 @@ resume) have no row here; they are documented in prose and raise
 use.
 """
 
-#lup: The whole file isn't very clear. What does it do, why does it need to be in matrix.py
-
 from pydantic import BaseModel
 
-from lup.adapters.common import Client, UnsupportedOptionsError
-from lup.adapters.engine import Engine, engine_for_id
+from lup.adapters.common import (
+    SHIPPED_ENGINE_IDS,
+    Client,
+    Engine,
+    UnsupportedOptionsError,
+    engine_for_id,
+)
 from lup.background import BackgroundAgentParams
 from lup.options import CompatOptions, LupAgentOptions
-
-CANONICAL_ENGINES: tuple[str, ...] = ( #lup: Why do we have engine name here? That doesn't seem very principle to have it in matrix.py
-    "claude",
-    "codex",
-    "openai-compat",
-    "claude-compat",
-)
-"""The shipped engines, in display order."""
 
 
 class CapabilityCell(BaseModel):
@@ -134,9 +137,9 @@ def canonical_capability_matrix() -> list[EngineCapabilities]:
 
     The single source for every rendering: the ``lup-devtools agent
     capabilities`` command, the README table, and the regression test
-    that keeps the two identical.
+    that keeps the two identical. Columns follow ``SHIPPED_ENGINE_IDS``.
     """
-    return [engine_capabilities(engine_for_id(name)) for name in CANONICAL_ENGINES]
+    return [engine_capabilities(engine_for_id(name)) for name in SHIPPED_ENGINE_IDS]
 
 
 def capability_matrix_markdown(engines: list[EngineCapabilities]) -> str:

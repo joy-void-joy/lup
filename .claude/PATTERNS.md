@@ -25,7 +25,7 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 **Two wirings, one pattern:** On Claude, tools run in-process — `sleep` blocks on the Scheduler directly and a Stop hook keeps the single turn open forever. On backends whose tools run in a subprocess (Codex, OpenAI-compatible), the loop inverts: **each wake is one SDK turn**. The served tools (`lup.realtime_relay`) relay through files in `session_dir/realtime/`: `reply` and the timing tools append events a parent-side watcher applies mid-turn, `sleep` records a request and the agent ends its turn, and the parent loop (`run_relay_session`) consumes the request, sleeps on the Scheduler, and opens the next turn with a wake message. An agent that ends a turn without sleeping gets bounded corrective turns — the relay counterpart of the Stop hook. Enforcement is in-handler on both wirings (meta-before-sleep, unread-events guard), so no hooks are required.
 
-**Library support:** `packages/lup/src/lup/realtime.py` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`); `packages/lup/src/lup/realtime_relay.py` provides the subprocess wiring (`RealtimeMailbox`, `create_realtime_relay_tools`, `run_relay_session`). Construction goes through the adapter registry: `run_persistent_agent` in `agent/core.py` requests `realtime=True`, the codex engine (`lup/adapters/codex/`) builds the session mailbox, and the parent loop drives it via `run_relay_session`. See example tools in `src/lup_template/agent/tools/realtime.py`.
+**Library support:** `packages/lup/src/lup/realtime.py` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`); `packages/lup/src/lup/realtime_relay.py` provides the subprocess wiring (`RealtimeMailbox`, `create_realtime_relay_tools`, `run_relay_session`). Construction goes through the engine seam: `run_persistent_agent` in `agent/core.py` requests `realtime=True`, the codex engine (`lup/adapters/codex.py`) builds the session mailbox, and the parent loop drives it via `run_relay_session`. See example tools in `src/lup_template/agent/tools/realtime.py`.
 
 ---
 
@@ -82,7 +82,7 @@ async def review(params: ReviewInput) -> ReviewOutput:
     return ReviewOutput(critique=response.text or "", score=compute_score(response))
 ```
 
-**Library support:** `query()` in `lup.adapters.common` handles the full pipeline and routes by model name — Claude models via the Claude Agent SDK, GPT/o-series via the Codex runtime, everything else via OpenAI-compatible endpoints. Session persistence is automatically disabled. It returns a `LupResponse`: use `.text` for text or `.output(T)` for structured output. Options a backend cannot honor (`tools`, `max_turns`, `max_budget_usd`, …) are dropped by `degrade_unsupported()` with a log line — the caller expresses full intent and the adapter layer keeps what it can, instead of raising or silently ignoring.
+**Library support:** `query()` in `lup.adapters.common` handles the full pipeline and routes by model name — Claude models via the Claude Agent SDK, GPT/o-series via the Codex runtime, everything else via OpenAI-compatible endpoints. Session persistence is automatically disabled. It returns a `LupResponse`: use `.text` for text or `.output(T)` for structured output. Options a backend cannot honor (`tools`, `max_turns`, `max_budget_usd`, …) are dropped under its `on_unsupported="drop"` policy with a log line — the caller expresses full intent and the engine keeps what it can, instead of raising or silently ignoring.
 
 **Example:** the reviewer inside `src/lup_template/agent/tools/reflect.py` (`run_reviewer`, called from the `review` tool) is the in-repo exemplar — an independent one-shot `query()` whose critique the tool folds into its structured output. The `extract` path of `fetch_example` in `agent/tools/example.py` (`extract_answer`) is the same shape applied to data augmentation.
 
@@ -111,7 +111,7 @@ For persistent agents that need parallel processing, a **background agent** runs
 
 **Lifecycle:** `start()` spawns an asyncio task. `wake()` signals new data. The message generator debounces rapid wakes and calls `build_message()` to produce the next turn. `stop()` cancels the task.
 
-**Library support:** `packages/lup/src/lup/background.py` provides the `BaseBackgroundAgent` base class and the `create_background_agent` factory, which dispatches to the engine builder registered for the requested SDK id (`"claude"` or `"codex"`); the engine classes live in `lup/adapters/*/background.py`. See observer example in `src/lup_template/agent/tools/realtime.py`.
+**Library support:** `packages/lup/src/lup/background.py` provides the `BaseBackgroundAgent` base class and the `create_background_agent` factory, which asks the requested engine (`"claude"` or `"codex"`) to build the agent; the background classes live in the engine modules (`lup/adapters/claude.py`, `lup/adapters/codex.py`). See observer example in `src/lup_template/agent/tools/realtime.py`.
 
 **Customizing:** The `build_message` callback is the main extension point — it reads shared state, advances its own read pointer, and returns the next user turn content (or `None` to skip). The observer example in `agent/tools/realtime.py` shows the full wiring.
 
