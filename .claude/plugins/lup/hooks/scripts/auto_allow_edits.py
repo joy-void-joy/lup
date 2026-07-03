@@ -104,12 +104,36 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "Use Python 3.12+ class[T] syntax instead of Generic[T]",
     ),
     (
+        re.compile(r"\b(?:Optional|Union)\["),
+        "Use PEP 604 unions — X | None instead of Optional, X | Y instead of Union",
+    ),
+    (
+        re.compile(r"\b(?:List|Dict|Tuple|Set)\["),
+        "Use lowercase builtin generics — list, dict, tuple, set — "
+        "instead of the capitalized typing aliases",
+    ),
+    (
         re.compile(r"__all__\s*[=:]"),
         "No __all__ — import directly from the defining module",
     ),
     (
         re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
-        "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",  # lup: I think we should just have dict as a disallowed type, and likewise for object?
+        "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",
+    ),
+    (
+        re.compile(r"\b(?:dict|Mapping|MutableMapping)\[\s*str\s*,(?!\s*JsonValue\b)"),
+        "String-keyed dict[str, ...] hides the value shape — name the fields "
+        "with a TypedDict or BaseModel, or use JsonValue for arbitrary JSON",
+    ),
+    (
+        re.compile(r"(?:(?<!\w)(?!_)\w+\s*:|->)\s*object\b"),
+        "Bare `object` says nothing about the value — use a concrete type, "
+        "TypedDict, or BaseModel, and narrow at untyped boundaries",
+    ),
+    (
+        re.compile(r"(?:(?<!\[)\b\w+\s*:|->)\s*BaseModel\b(?!\s*[\]|])"),
+        "A parameter or return annotated exactly BaseModel accepts any model — "
+        "name the concrete union of models or make the function generic",
     ),
     (
         re.compile(r"\btuple\["),
@@ -153,7 +177,11 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"\.split\s*\((?!\s*\))"),
         "Avoid .split() for structured data — parse it instead "
         "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
-        # lup: We should also add .strip to anti-patterns
+    ),
+    (
+        re.compile(r"\.strip\s*\("),
+        "Avoid .strip() for structured data — parse it instead "
+        "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     (
         re.compile(r"\bexcept\s*:"),
@@ -182,12 +210,34 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "Use the `sh` library instead of subprocess",
     ),
     (
+        re.compile(r"\bos\.(?:system|popen)\s*\("),
+        "Use the `sh` library instead of os.system()/os.popen()",
+    ),
+    (
         re.compile(r"\bimport\s+argparse\b|\bfrom\s+argparse\s+import\b"),
         "Use `typer` instead of argparse",
     ),
     (
         re.compile(r"\brich\.progress\b|\bfrom\s+rich\.progress\s+import\b"),
         "Use `tqdm` instead of rich progress bars",
+    ),
+    (
+        re.compile(r"\bos\.path\b"),
+        "Use pathlib.Path instead of os.path",
+    ),
+    (
+        re.compile(r"(?<![.\w])(?:eval|exec)\s*\("),
+        "Never use eval()/exec() — parse the data (ast.literal_eval for "
+        "literals) or dispatch explicitly",
+    ),
+    (
+        re.compile(r"\butcnow\s*\("),
+        "datetime.utcnow() is naive and deprecated — use datetime.now(timezone.utc)",
+    ),
+    (
+        re.compile(r"^global\s+\w"),
+        "No `global` statements — mutate a module-level holder object or pass "
+        "state explicitly",
     ),
     (
         re.compile(r"\bdef\s+_[a-zA-Z]"),
@@ -204,7 +254,6 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         "No `_` prefix on variables/constants — nothing is private "
         "(unused `_` function parameters are exempt)",
     ),
-    # lup: Can you brainstorm more anti-patterns, or things we might want? Let's brainstorm about them
 ]
 
 TS_FILE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
@@ -254,7 +303,24 @@ TS_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"//\s*tslint:disable"),
         "Never use tslint:disable — migrate to eslint and fix the issue",
     ),
-    # lup: Same here, would like a bit more
+    (
+        re.compile(r"[\w\)\]]!\."),
+        "Postfix `!.` non-null assertion hides a possible null/undefined — "
+        "narrow the type or handle the missing case",
+    ),
+    (
+        re.compile(r"\bvar\s+[A-Za-z_$]"),
+        "Use `const` or `let` instead of `var` — var is function-scoped and hoisted",
+    ),
+    (
+        re.compile(r":\s*(?:Function|Object)\b"),
+        "Never use `Function` or `Object` as a type — declare the call "
+        "signature or the object shape",
+    ),
+    (
+        re.compile(r"\bconsole\.log\s*\("),
+        "console.log is a debug leftover — remove it or route through a logger",
+    ),
 ]
 
 

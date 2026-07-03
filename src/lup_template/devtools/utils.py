@@ -81,7 +81,9 @@ def copy_to_clipboard(text: str) -> bool:
     return False
 
 
-def output_json(data: object) -> None:  # lup: ignore — pretty-printer boundary: any JSON-serializable payload; BaseModel is special-cased
+def output_json(
+    data: object,  # lup: ignore — pretty-printer boundary: any JSON-serializable payload
+) -> None:
     if isinstance(data, BaseModel):
         typer.echo(data.model_dump_json(indent=2))
     else:

@@ -114,3 +114,100 @@ def test_ignore_inside_string_literal_is_not_a_guard() -> None:
 def test_note_quoting_ignore_is_not_a_guard() -> None:
     source = "x = 1  # lup: should we remove every # lup: ignore?\n"
     assert audit_text(source, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_flags_strip_like_split() -> None:
+    findings = audit_text("name = raw.strip()\n", PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["missing"]
+    assert ".strip()" in findings[0].message
+
+
+def test_audit_flags_string_keyed_dict_annotation() -> None:
+    findings = audit_text("env: dict[str, str] = {}\n", PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["missing"]
+    assert "TypedDict" in findings[0].message
+
+
+def test_audit_accepts_non_string_keyed_dict() -> None:
+    assert audit_text("counts: dict[int, str] = {}\n", PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_flags_bare_object_annotations() -> None:
+    for line in (
+        "def probe(value: object) -> None: ...\n",
+        "def load() -> object: ...\n",
+    ):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert [f.kind for f in findings] == ["missing"], line
+        assert "object" in findings[0].message
+
+
+def test_audit_accepts_underscore_object_params() -> None:
+    line = "def handler(_context: object) -> None: ...\n"
+    assert audit_text(line, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_flags_bare_basemodel_annotations() -> None:
+    for line in (
+        "def show(result: BaseModel, as_json: bool) -> None: ...\n",
+        "def load() -> BaseModel: ...\n",
+    ):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert [f.kind for f in findings] == ["missing"], line
+        assert "concrete union" in findings[0].message
+
+
+def test_audit_accepts_basemodel_bounds_and_unions() -> None:
+    clean = (
+        "def read[T: BaseModel](model: type[T]) -> T | None: ...\n"
+        "class Tool[I: BaseModel, O: BaseModel]: ...\n"
+        "def dump(data: BaseModel | Sequence[int]) -> None: ...\n"
+    )
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_flags_typing_and_stdlib_modernization() -> None:
+    for line, needle in (
+        ("x: Optional[int] = None\n", "PEP 604"),
+        ("pairs: Union[int, str] = 1\n", "PEP 604"),
+        ("items: List[str] = []\n", "lowercase builtin"),
+        ("base = os.path.dirname(p)\n", "pathlib.Path"),
+        ("value = eval(expr)\n", "eval()"),
+        ("os.system('ls')\n", "`sh` library"),
+        ("now = datetime.utcnow()\n", "naive"),
+        ("def bump() -> None:\n    global counter\n", "`global`"),
+    ):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert [f.kind for f in findings] == ["missing"], line
+        assert needle in findings[0].message, line
+
+
+def test_audit_accepts_prefixed_eval_and_method_calls() -> None:
+    clean = "value = ast.literal_eval(expr)\nglobal_config = 1\n"
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_flags_ts_additions() -> None:
+    for line in (
+        "const name = user!.name;\n",
+        "var total = 0;\n",
+        "let cb: Function;\n",
+        "console.log('debug');\n",
+    ):
+        findings = audit_text(line, TS_ANTI_PATTERNS)
+        assert [f.kind for f in findings] == ["missing"], line
+
+
+def test_audit_accepts_strict_equality_and_typed_ts() -> None:
+    clean = "const ok = a !== b;\nconst v: string = name;\n"
+    assert audit_text(clean, TS_ANTI_PATTERNS) == []
+
+
+def test_audit_flags_string_keyed_mapping_annotations() -> None:
+    findings = audit_text("data: Mapping[str, V]\n", PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["missing"]
+
+
+def test_audit_accepts_jsonvalue_dicts() -> None:
+    clean = "payload: dict[str, JsonValue] = {}\nargs: Mapping[str, JsonValue]\n"
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
