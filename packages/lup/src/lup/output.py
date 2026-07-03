@@ -42,7 +42,7 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field, ValidationError
 
-from lup.adapters.common import BudgetExceededError, Conversation
+from lup.adapters.common import BudgetExceededError, Session
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.reflect import ReflectionGate
 from lup.trace import TraceLogger
@@ -91,7 +91,7 @@ def read_output[T: BaseModel](session_dir: Path, output_model: type[T]) -> T | N
 
 
 async def ensure_output_submitted(
-    conv: Conversation,
+    conv: Session,
     *,
     output_exists: Callable[[], bool],
     max_retries: int = 2,

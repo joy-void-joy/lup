@@ -15,7 +15,7 @@ from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
 from lup.adapters.codex.adapter import (
     CodexAdapter,
-    CodexConversation,
+    CodexSession,
     per_mtok_usage_cost,
 )
 from lup.adapters.common import BudgetExceededError, TurnTimeoutError
@@ -84,7 +84,7 @@ class SlowFakeThread:
 
 
 async def test_turn_timeout_cancels_slow_turn() -> None:
-    conv = CodexConversation(
+    conv = CodexSession(
         cast("AsyncThread", SlowFakeThread()),
         turn_timeout_seconds=0.05,
     )
@@ -92,18 +92,18 @@ async def test_turn_timeout_cancels_slow_turn() -> None:
         await conv.send("hi")
 
 
-def conversation(
+def session(
     usages: list[ThreadTokenUsage],
     *,
     max_budget_usd: float | None = None,
     usd_per_input_mtok: float | None = 1.0,
-) -> CodexConversation:
+) -> CodexSession:
     usage_cost = (
         per_mtok_usage_cost(input_usd=usd_per_input_mtok, output_usd=0.0)
         if usd_per_input_mtok is not None
         else None
     )
-    return CodexConversation(
+    return CodexSession(
         cast("AsyncThread", FakeThread(usages)),
         max_budget_usd=max_budget_usd,
         usage_cost=usage_cost,
@@ -129,9 +129,7 @@ class TestPerMtokUsageCost:
 
 class TestConversationAccounting:
     async def test_cost_accumulates_across_turns_and_stamps_result(self) -> None:
-        conv = conversation(
-            [usage_for_turn(1_000_000, 0), usage_for_turn(1_000_000, 0)]
-        )
+        conv = session([usage_for_turn(1_000_000, 0), usage_for_turn(1_000_000, 0)])
 
         first = await conv.send("turn one")
         assert first.result is not None
@@ -143,7 +141,7 @@ class TestConversationAccounting:
         assert conv.turns_usage.input_tokens == 2_000_000
 
     async def test_without_estimator_cost_stays_unknown(self) -> None:
-        conv = conversation([usage_for_turn(1_000_000, 0)], usd_per_input_mtok=None)
+        conv = session([usage_for_turn(1_000_000, 0)], usd_per_input_mtok=None)
 
         response = await conv.send("turn one")
         assert response.result is not None
@@ -151,7 +149,7 @@ class TestConversationAccounting:
         assert conv.cost_usd is None
 
     async def test_budget_refuses_turn_after_crossing(self) -> None:
-        conv = conversation(
+        conv = session(
             [usage_for_turn(1_000_000, 0)] * 3,
             max_budget_usd=1.5,
         )

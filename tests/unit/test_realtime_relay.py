@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 
-from lup.adapters.common import Conversation
+from lup.adapters.common import Session
 from lup.mcp import LupMcpTool, ToolResponse
 from lup.realtime import Scheduler
 from lup.realtime_relay import (
@@ -344,8 +344,8 @@ class AgentTurn:
             await asyncio.sleep(self.pause_seconds)
 
 
-class FakeConversation(Conversation):
-    """Conversation stand-in that plays scripted turns."""
+class FakeConversation(Session):
+    """Session stand-in that plays scripted turns."""
 
     def __init__(self, turns: list[AgentTurn]) -> None:
         self.turns = turns

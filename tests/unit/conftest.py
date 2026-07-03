@@ -9,8 +9,8 @@ import pytest
 from lup import paths
 from lup.adapters.common import (
     AdapterCapabilities,
-    AgentAdapter,
-    Conversation,
+    Client,
+    Session,
     OneShotRequest,
 )
 from lup.trace import TraceLogger
@@ -26,7 +26,7 @@ def weak_capabilities() -> AdapterCapabilities:
     return CodexAdapter(model="probe", system_prompt="").capabilities
 
 
-class RecordingConversation(Conversation):
+class RecordingSession(Session):
     """One canned turn per send; reports the request that produced it."""
 
     def __init__(self, request: OneShotRequest, ran: list[OneShotRequest]) -> None:
@@ -44,7 +44,7 @@ class RecordingConversation(Conversation):
         return LupResponse(blocks=[LupTextBlock(text="ok")])
 
 
-class RecordingAdapter(AgentAdapter):
+class RecordingClient(Client):
     """A fake adapter carrying the one-shot request it was built from."""
 
     def __init__(self, request: OneShotRequest, engine: "RecordingOneShot") -> None:
@@ -56,8 +56,8 @@ class RecordingAdapter(AgentAdapter):
         return self.engine.declared
 
     @asynccontextmanager
-    async def conversation(self) -> AsyncGenerator[Conversation, None]:
-        yield RecordingConversation(self.request, self.engine.ran)
+    async def session(self) -> AsyncGenerator[Session, None]:
+        yield RecordingSession(self.request, self.engine.ran)
 
 
 class RecordingOneShot:
@@ -72,8 +72,8 @@ class RecordingOneShot:
         self.ran: list[OneShotRequest] = []
         self.declared = capabilities or weak_capabilities()
 
-    def __call__(self, request: OneShotRequest) -> AgentAdapter:
-        return RecordingAdapter(request, self)
+    def __call__(self, request: OneShotRequest) -> Client:
+        return RecordingClient(request, self)
 
 
 @pytest.fixture

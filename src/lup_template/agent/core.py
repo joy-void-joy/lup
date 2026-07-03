@@ -466,7 +466,7 @@ async def run_agent(
     )
 
     with built.lifecycle:
-        async with adapter.conversation() as conv:
+        async with adapter.session() as conv:
             response = await conv.send(task, trace_logger=trace_logger)
             if not adapter.capabilities.stop_event:
                 retry = await ensure_output_submitted(
@@ -545,7 +545,7 @@ async def run_persistent_agent(
     )
 
     with built.lifecycle:
-        async with built.adapter.conversation() as conv:
+        async with built.adapter.session() as conv:
             turns = await run_relay_session(
                 conv,
                 scheduler=scheduler,

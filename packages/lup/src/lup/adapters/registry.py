@@ -12,7 +12,7 @@ they never name an engine. A session builder takes the neutral
 
 from lup.adapters.common import (
     AdapterCapabilities,
-    AgentAdapter,
+    Client,
     BackendCapabilities,
     OneShotBuilder,
     OneShotRequest,
@@ -58,21 +58,21 @@ def build_adapter(backend: Backend, opts: LupAgentOptions) -> BuiltAdapter:
     return BACKEND_BUILDERS[backend](opts)
 
 
-def build_claude_one_shot(request: OneShotRequest) -> AgentAdapter:
+def build_claude_one_shot(request: OneShotRequest) -> Client:
     """Construct the Claude one-shot adapter from a resolved request."""
     from lup.adapters.claude.options import build_claude_one_shot as build
 
     return build(request)
 
 
-def build_codex_one_shot(request: OneShotRequest) -> AgentAdapter:
+def build_codex_one_shot(request: OneShotRequest) -> Client:
     """Construct the Codex one-shot adapter from a resolved request."""
     from lup.adapters.codex.options import build_codex_one_shot as build
 
     return build(request)
 
 
-def build_openai_one_shot(request: OneShotRequest) -> AgentAdapter:
+def build_openai_one_shot(request: OneShotRequest) -> Client:
     """Construct the OpenAI-compatible one-shot adapter from a resolved request."""
     from lup.adapters.codex.options import build_openai_one_shot as build
 
@@ -86,7 +86,7 @@ ONE_SHOT_BUILDERS: dict[Backend, OneShotBuilder] = {
 }
 
 
-def one_shot_adapter(backend: Backend, request: OneShotRequest) -> AgentAdapter:
+def one_shot_adapter(backend: Backend, request: OneShotRequest) -> Client:
     """Build the one-shot adapter for *backend* from a resolved request.
 
     The one-shot counterpart of :func:`build_adapter`: ``query()`` resolves

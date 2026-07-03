@@ -1,4 +1,4 @@
-"""ClaudeConversation and ResponseCollector against a scripted fake client.
+"""ClaudeSession and ResponseCollector against a scripted fake client.
 
 The conversation layer owns response assembly and error propagation —
 exactly where backends quietly diverge. These tests script SDK message
@@ -25,7 +25,7 @@ from claude_agent_sdk.types import (
 )
 
 import lup.adapters.claude.adapter
-from lup.adapters.claude.adapter import ClaudeConversation, ClaudeUsageNormalizer
+from lup.adapters.claude.adapter import ClaudeSession, ClaudeUsageNormalizer
 from lup.types import (
     JsonValue,
     LupDoneEvent,
@@ -77,15 +77,15 @@ def result_message(
     )
 
 
-def conversation(
+def session(
     messages: list[Message],
     usage_normalizer: ClaudeUsageNormalizer | None = None,
-) -> tuple[ClaudeConversation, FakeClient]:
+) -> tuple[ClaudeSession, FakeClient]:
     fake = FakeClient(messages)
     client = cast(ClaudeSDKClient, fake)
     if usage_normalizer is None:
-        return ClaudeConversation(client), fake
-    return ClaudeConversation(client, usage_normalizer=usage_normalizer), fake
+        return ClaudeSession(client), fake
+    return ClaudeSession(client, usage_normalizer=usage_normalizer), fake
 
 
 SCRIPT: list[Message] = [
@@ -103,7 +103,7 @@ SCRIPT: list[Message] = [
 
 
 async def test_send_partitions_blocks_and_collects_result() -> None:
-    conv, fake = conversation(SCRIPT)
+    conv, fake = session(SCRIPT)
 
     response = await conv.send("the task")
 
@@ -120,7 +120,7 @@ async def test_send_partitions_blocks_and_collects_result() -> None:
 
 
 async def test_send_raises_on_error_result() -> None:
-    conv, fake = conversation([result_message(is_error=True, result="exploded")])
+    conv, fake = session([result_message(is_error=True, result="exploded")])
     _ = fake
 
     with pytest.raises(RuntimeError, match="exploded"):
@@ -128,9 +128,7 @@ async def test_send_raises_on_error_result() -> None:
 
 
 async def test_send_raises_when_no_result_arrives() -> None:
-    conv, fake = conversation(
-        [AssistantMessage(content=[TextBlock(text="hi")], model="m")]
-    )
+    conv, fake = session([AssistantMessage(content=[TextBlock(text="hi")], model="m")])
     _ = fake
 
     with pytest.raises(RuntimeError, match="No result"):
@@ -142,7 +140,7 @@ async def test_broken_usage_normalizer_degrades_to_none() -> None:
         _ = raw
         raise KeyError("nope")
 
-    conv, fake = conversation(SCRIPT, usage_normalizer=broken)
+    conv, fake = session(SCRIPT, usage_normalizer=broken)
     _ = fake
 
     response = await conv.send("task")
@@ -216,7 +214,7 @@ async def test_error_result_is_traced_and_kept_before_raising(tmp_path: Path) ->
 
     progress = AssistantMessage(content=[TextBlock(text="working...")], model="m")
     error = result_message(is_error=True, result="budget exceeded")
-    conv, fake = conversation([progress, error])
+    conv, fake = session([progress, error])
     _ = fake
     trace = TraceLogger(trace_path=tmp_path / "t.md", title="T")
     collector = ResponseCollector(conv.client, trace_logger=trace)

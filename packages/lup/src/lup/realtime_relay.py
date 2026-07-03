@@ -42,7 +42,7 @@ Examples:
 
         >>> scheduler = Scheduler(on_action=deliver_to_user)
         >>> mailbox = RealtimeMailbox(notes.session / "realtime")
-        >>> async with adapter.conversation() as conv:
+        >>> async with adapter.session() as conv:
         ...     await run_relay_session(
         ...         conv,
         ...         scheduler=scheduler,
@@ -60,7 +60,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from lup.adapters.common import Conversation
+from lup.adapters.common import Session
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime import (
     ContextInput,
@@ -558,7 +558,7 @@ def default_wake_message(result: SleepResult) -> str:
 
 
 async def run_relay_session(
-    conversation: Conversation,
+    conversation: Session,
     *,
     scheduler: Scheduler,
     mailbox: RealtimeMailbox,

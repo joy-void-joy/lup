@@ -22,7 +22,7 @@ from lup.adapters.codex.adapter import (
     CodexUsageNormalizer,
     require_codex_sdk,
 )
-from lup.adapters.common import Conversation
+from lup.adapters.common import Session
 from lup.types import JsonObject, UsageCost
 
 logger = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
         return overrides
 
     @asynccontextmanager
-    async def conversation(self) -> AsyncGenerator[Conversation, None]:
+    async def session(self) -> AsyncGenerator[Session, None]:
         require_codex_sdk()
 
         from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
@@ -160,4 +160,4 @@ class OpenAICompatibleAdapter(CodexAdapter):
                     else ApprovalMode.auto_review
                 ),
             )
-            yield self.make_conversation(thread)
+            yield self.make_session(thread)

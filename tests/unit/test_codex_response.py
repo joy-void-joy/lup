@@ -3,7 +3,7 @@
 build_lup_response is where Codex turns become portable lup responses:
 structured-output parsing must degrade (not raise) on non-JSON text,
 the session id must ride along, and run_streamed must replay blocks as
-events in order with the done event last. CodexConversation.send must
+events in order with the done event last. CodexSession.send must
 stamp wall-clock duration — the SDK reports tokens but no duration.
 """
 
@@ -13,7 +13,7 @@ from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
 from lup.adapters.codex.adapter import (
     CodexAdapter,
-    CodexConversation,
+    CodexSession,
     build_lup_response,
 )
 from lup.trace import TraceLogger
@@ -106,7 +106,7 @@ def test_no_schema_means_no_parse_attempt() -> None:
 
 
 async def test_send_stamps_wall_clock_duration() -> None:
-    conv = CodexConversation(cast("AsyncThread", FakeThread("ok")))
+    conv = CodexSession(cast("AsyncThread", FakeThread("ok")))
 
     response = await conv.send("task")
 

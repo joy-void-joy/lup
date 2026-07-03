@@ -15,7 +15,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.common import AgentAdapter, PermissionMode
+from lup.adapters.common import Client, PermissionMode
 from lup.mcp import McpServerEntry
 from lup.realtime_relay import RealtimeMailbox
 from lup.types import LupHooksConfig, SubagentSpec, UsageCost
@@ -96,7 +96,7 @@ class BuiltAdapter(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    adapter: AgentAdapter
+    adapter: Client
     lifecycle: AbstractContextManager[object] = Field(default_factory=nullcontext)
     mailbox: RealtimeMailbox | None = None
 
