@@ -12,11 +12,9 @@ no additional dependencies needed.
 """
 
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-
-from collections.abc import Sequence
 
 from lup.adapters.codex.adapter import (
     CodexAdapter,
@@ -25,8 +23,7 @@ from lup.adapters.codex.adapter import (
     require_codex_sdk,
 )
 from lup.adapters.common import Conversation
-from lup.trace import TraceLogger
-from lup.types import JsonObject, LupResponse, UsageCost
+from lup.types import JsonObject, UsageCost
 
 logger = logging.getLogger(__name__)
 
@@ -164,42 +161,3 @@ class OpenAICompatibleAdapter(CodexAdapter):
                 ),
             )
             yield self.make_conversation(thread)
-
-
-async def openai_query(
-    prompt: str,
-    *,
-    model: str,
-    base_url: str | None = None,
-    api_key: str | None = None,
-    model_provider: str | None = None,
-    system_prompt: str = "",
-    output_schema: JsonObject | None = None,
-    trace_logger: TraceLogger | None = None,
-    prefix: str = "",
-) -> LupResponse:
-    """One-shot query via an OpenAI-compatible endpoint through Codex.
-
-    Args:
-        prompt: The prompt to send.
-        model: Model name (as known to the inference server).
-        base_url: Base URL of the inference server.
-        api_key: API key (many local servers don't require one).
-        model_provider: Codex model provider identifier.
-        system_prompt: System prompt override.
-        output_schema: JSON schema for structured output.
-        trace_logger: Optional trace logger.
-        prefix: Display prefix for trace output.
-
-    Returns:
-        LupResponse with the result.
-    """
-    adapter = OpenAICompatibleAdapter(
-        model=model,
-        system_prompt=system_prompt,
-        base_url=base_url,
-        api_key=api_key,
-        model_provider=model_provider,
-        output_schema=output_schema,
-    )
-    return await adapter.run(prompt, trace_logger=trace_logger, prefix=prefix)
