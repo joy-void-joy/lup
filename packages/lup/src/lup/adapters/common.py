@@ -222,7 +222,7 @@ class Client(ABC):
         yield LupDoneEvent(blocks=response.blocks)
 
 
-type EngineId = Literal["claude", "codex", "openai-compat", "claude-compat"]
+type EngineId = Literal["claude", "codex", "openai-compat", "claude-compat"] #lup: It feels wrong to have this in common.py. If I want to just add an engine, I should be able to. I think the right way to do it is probably just have a router which is a dict[str, Engine] if we really need to?
 """Ids of the shipped engines. Custom engines are passed as instances, so
 their ids live outside this literal."""
 
@@ -240,7 +240,8 @@ class Engine(ABC):
 
     id: str
 
-    unsupported: tuple[str, ...] = ()
+    unsupported: tuple[str, ...] = () #lup: This type seems very ugly and not like something that makes sense? Either we should have capabilities be a Literal, and unsupported is a dict[Capabilities, bool]. Initially the idea was to have unsupported be detected by whether is was implemented as a method, no?
+    #lup: Or is the idea that unpported is keyof LupAgentOptions?
     """Intent-knob field names this engine has no lever for.
 
     ``client()`` implementations route their options through
@@ -254,7 +255,7 @@ class Engine(ABC):
         Nothing connects yet — construction is offline and cheap.
         """
 
-    def unsupported_in(self, opts: LupAgentOptions) -> list[str]:
+    def unsupported_in(self, opts: LupAgentOptions) -> list[str]: #lup: Same comment here
         """The declared blind spots that *opts* actually sets.
 
         Override for conditional blind spots — the Codex engine refuses
@@ -275,7 +276,7 @@ class Engine(ABC):
         offenders = self.unsupported_in(opts)
         if not offenders:
             return opts
-        if opts.on_unsupported == "raise":
+        if opts.on_unsupported == "raise": # lup: Better to be explicit and match raise and drop instead
             raise UnsupportedOptionsError(self.id, offenders)
         logger.info(
             "options %s are not supported on the %s engine (model=%r); "
@@ -286,7 +287,7 @@ class Engine(ABC):
         )
         return opts.model_copy(update=dict.fromkeys(offenders, None))
 
-    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent:
+    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent: #lup: Again, it's really not clear why sometimes we're returning UnsupportedOperationError, and other times we're using @abstractmethod
         """Build a background agent for this engine.
 
         Engines without background support inherit this raising default.
@@ -329,15 +330,15 @@ class EngineRoute(BaseModel):
     """
 
     id: EngineId
-    prefixes: tuple[str, ...] = ()
-    aliases: frozenset[str] = frozenset()
+    prefixes: tuple[str, ...] = () #lup: Why? There are so many tuples, why don't they trigger the antipattern detector?
+    aliases: frozenset[str] = frozenset() #lup: Same here
     load: Callable[[], Engine]
 
-    def claims(self, model: str) -> bool:
+    def claims(self, model: str) -> bool: #lup: What? This seems quite ugly
         return model.startswith(self.prefixes) or model in self.aliases
 
 
-ENGINE_ROUTER: tuple[EngineRoute, ...] = (
+ENGINE_ROUTER: tuple[EngineRoute, ...] = ( #lup: Probably should be a dict? No aliases or prefix, but instead a router from "haiku" to its model? I don't know, I'm not sold on this design
     EngineRoute(
         id="claude",
         prefixes=("claude-",),
@@ -357,12 +358,12 @@ lazily-imported constructor. Model names fall through the rows in order
 and land on ``openai-compat`` when nothing claims them; ``claude-compat``
 claims no names and is only ever chosen explicitly."""
 
-SHIPPED_ENGINE_IDS: tuple[EngineId, ...] = tuple(route.id for route in ENGINE_ROUTER)
+SHIPPED_ENGINE_IDS: tuple[EngineId, ...] = tuple(route.id for route in ENGINE_ROUTER) #lup: I really think tuple should be an antipattern, period. dict[str, Type] often make sense, tuple almost never.
 """The shipped engine ids, in display order — the capability table
 renders one column per entry."""
 
 
-def engine_id_for_model(model: str) -> EngineId:
+def engine_id_for_model(model: str) -> EngineId: # lup: Yeah, this is extreme code smell here.
     """Infer the engine for a model name — the router's model column.
 
     The first route claiming the name wins; names no route claims run on
@@ -376,7 +377,7 @@ def engine_id_for_model(model: str) -> EngineId:
     return "openai-compat"
 
 
-def engine_for_id(engine_id: str) -> Engine:
+def engine_for_id(engine_id: str) -> Engine: #lup: Again with the redundant functions
     """Instantiate a shipped engine by id — the one sanctioned dispatch.
 
     Reads the router; each route imports only its own engine module, so
@@ -392,7 +393,7 @@ def engine_for_id(engine_id: str) -> Engine:
     )
 
 
-def resolve_engine(
+def resolve_engine( #lup: Why? This has a wrong shape, where we're destroying an union to make it uniform, rather than constructing it well to begin with
     engine: Engine | str | None = None, *, model: str | None = None
 ) -> Engine:
     """Resolve an engine: explicit instance > id > model-name inference."""
@@ -405,7 +406,7 @@ def resolve_engine(
             return engine_for_id(engine_id_for_model(model or ""))
 
 
-def create_client(
+def create_client( #lup: This feels very weird. Why are we doing it this way, plus the LupAgentOptions etc? Most likely we should just let claude.py and codex.py have their own create_claude and create_codex, they return a Client and we can use it. This seems like trying to force uniformity
     *,
     model: str | None = None,
     engine: Engine | str | None = None,
@@ -508,7 +509,7 @@ async def query(
     ``.output(MyModel)`` for structured output.
     """
     client = create_client(
-        model=model or "claude-opus-4-6",
+        model=model or "claude-opus-4-6", #lup: Why? Shouldn't this be model="claude-opus-4-6" if you insist?
         engine=engine,
         system_prompt=system_prompt,
         output_type=output_type,

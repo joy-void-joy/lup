@@ -52,6 +52,10 @@ Examples:
         ...     )
 """
 
+#lup: It's really not clear to me why there is both realtime.py and realtime_relay.py
+#lup: Probably should refactor into a realtime/ folder
+#lup: Also this file seems claude specific. Can you check what files are claude specific in packages/lup? There seems to be a lot of them
+
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
@@ -98,7 +102,7 @@ MISSING_SLEEP_MESSAGE = (
     "you yield control with the sleep tool, and the environment wakes you "
     "when something happens. Finish any pending replies, record a meta "
     "assessment, then call sleep."
-)
+) #lup: This seems too specific. Also, we don't always want to record a meta before sleeping, this seems a bit too specific. This kind of things should go to template
 
 
 # =====================================================================

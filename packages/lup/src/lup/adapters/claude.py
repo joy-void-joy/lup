@@ -115,7 +115,7 @@ under ``harness_prompt`` — a nested call keeps the SDK default."""
 
 def server_to_claude(
     entry: McpServerEntry,
-) -> McpSdkServerConfig | RawMcpServerConfig:
+) -> McpSdkServerConfig | RawMcpServerConfig: #lup: This feels patchy?
     """Narrow one neutral MCP entry to its Claude SDK form.
 
     An in-process ``LupMcpServerConfig`` becomes an SDK ``sdk`` server wrapping
@@ -134,14 +134,14 @@ def claude_effort(reasoning_effort: str | None) -> EffortLevel | None:
     The normalized value is matched against the literal's members, so an
     unrecognized effort is dropped rather than smuggled through with a cast.
     """
-    match normalize_effort(reasoning_effort, "claude"):
+    match normalize_effort(reasoning_effort, "claude"): # lup: I really feel like there are too many functions everywhere. Same thing with the server_to_claude and lup_server_to_claude.
         case "low" | "medium" | "high" | "xhigh" | "max" as level:
             return level
         case _:
             return None
 
 
-def build_claude_options(opts: LupAgentOptions) -> ClaudeAgentOptions:
+def build_claude_options(opts: LupAgentOptions) -> ClaudeAgentOptions: #lup: It wasn't clear to me that ClaudeAgentOptions was a claude SDK type. Probably we shouldn't use from claude import and instead use scoped type (e.g. claude.ClaudeAgentOptions instead)
     """Assemble the native ``ClaudeAgentOptions`` from neutral options.
 
     ``harness_prompt`` selects the session-grade shape: the ``claude_code``
@@ -216,7 +216,7 @@ class ClaudeEngine(Engine):
 
     id = "claude"
 
-    unsupported = ("turn_timeout_seconds",)
+    unsupported = ("turn_timeout_seconds",) # lup: Why is this unsupported? Are you sure?
     """The one intent knob the SDK has no lever for: a client-side turn
     timeout."""
 

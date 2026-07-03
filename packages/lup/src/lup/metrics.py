@@ -29,6 +29,7 @@ Examples:
         >>> reset_metrics()
 """
 
+#lup: Yeah, I think packages/lup is way too flat. A lot of files occupy the same general concern. We should revamp it with nested folders
 import json
 import logging
 import time

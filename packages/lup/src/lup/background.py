@@ -62,7 +62,8 @@ from lup.mcp import LupMcpTool
 logger = logging.getLogger(__name__)
 
 
-class BaseBackgroundAgent(ABC):
+class BaseBackgroundAgent(ABC): #lup: If this is an abc, shouldn't it be in adapters/common? See how we do it in tacocast, if this is starting to bloat common, we should split in many different ABC classes that each have one concern they're handling, in folders that each have their common.py along with implementaion
+    #lup: Also, we're really lacking any kind of consistency here. Why are we sometimes using sometimes ABC, sometimes abstractmethod, sometimes UnsupportedOperation?
     """Base class for background agents running alongside a main session."""
 
     def __init__(
@@ -93,7 +94,7 @@ class BaseBackgroundAgent(ABC):
         self.running = True
         self.runner = asyncio.create_task(self.run_loop())
 
-    def wake(self) -> None:
+    def wake(self) -> None: #lup: Yeah, I really don't like the mix of sometimes concrete and sometimes abstract methods. Again, see how we do it in tacocast. Classes should either be purely abstract or purely concrete
         """Signal that new data is available for processing."""
         self.wake_event.set()
 

@@ -35,5 +35,5 @@ class ClaudeCompatEngine(ClaudeEngine):
         native = super().native_options(opts)
         native.env["ANTHROPIC_BASE_URL"] = opts.compat.base_url
         if opts.compat.api_key:
-            native.env["ANTHROPIC_AUTH_TOKEN"] = opts.compat.api_key
+            native.env["ANTHROPIC_AUTH_TOKEN"] = opts.compat.api_key #lup: Are you sure this is enough? Please look at aimo3 and all the different options and things we had to change, I'm sure it was more
         return native
