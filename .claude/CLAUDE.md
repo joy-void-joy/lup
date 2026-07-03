@@ -81,12 +81,12 @@ packages/
     └── src/lup/
         ├── __init__.py         # Public API re-exports (__all__); imports no SDK
         ├── py.typed            # PEP 561 typing marker
-        ├── adapters/           # ALL SDK-specific code, one Engine per backend
-        │   ├── common.py       # Client/Session run interface + unsupported-behavior errors
-        │   ├── engine.py       # Engine ABC and the only doors in: create_client(), query()
-        │   ├── matrix.py       # Capability table probed from the engines (never declared)
-        │   ├── claude/         # claude + claude-compat engines: engine, adapter, background, tools
-        │   └── codex/          # codex + openai-compat engines: engine, adapter, background, hooks, openai_compat
+        ├── adapters/           # ALL SDK-specific code, one module per engine
+        │   ├── common.py       # The whole SDK-free seam: Client/Session/Engine ABCs, errors, model router, create_client(), query()
+        │   ├── claude.py       # claude engine: option translation, SDK adaptation, sessions, background
+        │   ├── claude_compat.py# claude-compat engine: Claude scaffolding on Anthropic-compatible endpoints
+        │   ├── codex.py        # codex engine: runtime config, SDK adaptation, sessions, hook codegen (quarantined), background
+        │   └── openai_compat.py# openai-compat engine: OpenAI-protocol endpoints through the Codex runtime
         ├── antipatterns.py     # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
         ├── options.py          # LupAgentOptions — backend-agnostic options crossing template -> lib
         ├── markers.py          # `# lup:` / `// lup:` review-marker scanning (dev comments)
@@ -154,7 +154,7 @@ Code in `packages/lup/` must be **complete-as-is and configurable through functi
 - **No imports from `lup_template`** in `lup` code — the dependency arrow points one way
 - **Placement test:** Can this module be used as-is in a different project without modification? If yes → `packages/lup/`. Does it import from `lup_template`? If yes → `src/lup_template/`.
 
-**Backend dispatch lives only in the adapter layer.** Consumer code — `core.py`, template tools, devtools — never branches on the backend. It assembles one backend-agnostic `LupAgentOptions` and calls `create_client(options=..., engine=...)` (or the one-shot `query()`); `engine_for_id` in `lup.adapters.engine` is the one sanctioned dispatch, and each `Engine` (claude, claude-compat, codex, openai-compat) constructs its own native options behind the `Client`/`Session` interface. There are no capability declarations to branch on: an engine refuses intent knobs it cannot honor (`UnsupportedOptionsError`; `query()` drops them with a log line), raises `UnsupportedOperationError` at the point of use, and the README capability matrix is probed from that behavior rather than declared. A custom backend is an `Engine` subclass passed as `engine=` — no registry to edit. `dev check --antipatterns` regression-guards this: a reintroduced backend `match` outside the sanctioned dispatch or `ServerConfig = Any` surfaces as a finding.
+**Backend dispatch lives only in the adapter layer.** Consumer code — `core.py`, template tools, devtools — never branches on the backend. It assembles one backend-agnostic `LupAgentOptions` and calls `create_client(options=..., engine=...)` (or the one-shot `query()`); `engine_for_id` in `lup.adapters.common` (reading the `ENGINE_ROUTER` table) is the one sanctioned dispatch, and each `Engine` (claude, claude-compat, codex, openai-compat) constructs its own native options behind the `Client`/`Session` interface. There are no capability declarations to branch on: an engine refuses intent knobs it cannot honor (`UnsupportedOptionsError`; `query()` drops them with a log line), raises `UnsupportedOperationError` at the point of use, and the README capability matrix is probed from that behavior rather than declared (the probe harness lives in `devtools/agent/capabilities.py`). A custom backend is an `Engine` subclass passed as `engine=` — no registry to edit. `dev check --antipatterns` regression-guards this: a reintroduced backend `match` outside the sanctioned dispatch or `ServerConfig = Any` surfaces as a finding.
 
 ---
 

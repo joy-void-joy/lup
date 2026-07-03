@@ -4,7 +4,7 @@ Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/
 
 ## Modules
 
-- `lup.adapters` — ALL SDK-specific code, one `Engine` per backend: `adapters.common` holds the run-side interface (`Client`/`Session`, the unsupported-behavior errors); `adapters.engine` holds the `Engine` ABC and the only doors in — `create_client()` and the one-shot `query()` with structured output; `adapters.matrix` probes the engines into the capability table; `adapters.claude` and `adapters.codex` are the engines (`claude`, `claude-compat`, `codex`, `openai-compat`).
+- `lup.adapters` — ALL SDK-specific code, one module per engine: `adapters.common` is the whole SDK-free seam (the `Client`/`Session`/`Engine` ABCs, the unsupported-behavior errors, the model-name router, and the only doors in — `create_client()` and the one-shot `query()` with structured output); `adapters.claude` and `adapters.codex` are the primary engines, and `adapters.claude_compat` / `adapters.openai_compat` subclass them to front Anthropic- and OpenAI-protocol-compatible endpoints. The capability table is probed from the engines by devtools, never declared here.
 - `lup.options` / `lup.types` — backend-agnostic `LupAgentOptions` and the shared vocabulary (blocks, messages, events, `Usage`, `SubagentSpec`, `LupResponse`).
 - `lup.mcp` — `@lup_tool` decorator for MCP tools with typed Pydantic input/output, plus a patched `create_mcp_server` that preserves `is_error`.
 - `lup.hooks` — composable hook primitives: directory-based permissions, tool allowlists, tool gates (deny until a condition unlocks), nudges, capture hooks.
@@ -25,7 +25,7 @@ Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/
 ```python
 from pydantic import BaseModel, Field
 
-from lup.adapters.engine import query
+from lup.adapters.common import query
 from lup.mcp import lup_tool
 
 

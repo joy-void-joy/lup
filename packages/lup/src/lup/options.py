@@ -2,7 +2,7 @@
 
 A caller assembles a :class:`LupAgentOptions` (its domain work: which
 tools, which hooks, which subagents, the model knobs) and hands it to
-``lup.adapters.engine.create_client``; the engine translates it into its
+``lup.adapters.common.create_client``; the engine translates it into its
 native option object. No consumer names a backend or touches a native
 option type. Each engine consumes the mechanism payloads that belong to
 it and ignores the others'; intent knobs it cannot honor follow the
@@ -14,9 +14,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.common import PermissionMode
 from lup.mcp import McpServerEntry
-from lup.types import JsonObject, LupHooksConfig, SubagentSpec, UsageCost
+from lup.types import (
+    JsonObject,
+    LupHooksConfig,
+    PermissionMode,
+    SubagentSpec,
+    UsageCost,
+)
 
 
 class CompatOptions(BaseModel):

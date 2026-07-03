@@ -3,7 +3,7 @@
 Claude runs subagents natively (``AgentDefinition`` from a
 ``SubagentSpec``). Engines without native subagents get this served
 MCP tool instead: the agent calls ``run_subagent(name, task)`` and the
-tool dispatches a one-shot :func:`lup.adapters.engine.query` to the
+tool dispatches a one-shot :func:`lup.adapters.common.query` to the
 engine that serves the spec's model. The same spec list drives both
 paths, so the available roles never diverge between engines.
 
@@ -16,7 +16,7 @@ import logging
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.engine import engine_id_for_model, query
+from lup.adapters.common import engine_id_for_model, query
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.types import SubagentSpec
 

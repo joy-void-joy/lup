@@ -1,11 +1,11 @@
-"""OpenAI-protocol endpoints through the Codex runtime.
+"""The ``openai-compat`` engine: OpenAI-protocol endpoints through Codex.
 
 One of two homes for open models, chosen by API protocol: an endpoint
 speaking the OpenAI protocol runs here on the Codex runtime (custom
 ``model_providers`` definition, native sandboxing, served tools), while
 an Anthropic-protocol endpoint runs on ``claude-compat``
-(:class:`~lup.adapters.claude.engine.ClaudeCompatEngine`) and keeps the
-full Claude scaffolding — hooks, permission modes, native subagents.
+(:mod:`lup.adapters.claude_compat`) and keeps the full Claude
+scaffolding — hooks, permission modes, native subagents.
 
 Uses the same ``openai_codex`` SDK as the standard Codex client —
 no additional dependencies needed.
@@ -17,11 +17,14 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup.adapters.codex.adapter import (
+from lup.adapters.codex import (
     CodexClient,
+    CodexEngine,
     CodexHookConfig,
     CodexUsageNormalizer,
+    subprocess_sandbox_cleanup,
 )
+from lup.options import LupAgentOptions
 from lup.types import JsonObject, UsageCost
 
 if TYPE_CHECKING:
@@ -43,6 +46,41 @@ Codex providers reference the API key by environment-variable *name*
 (``env_key``), never an inline literal — the supplied ``api_key`` is
 injected into the Codex subprocess env under this name.
 """
+
+
+class OpenAICompatEngine(CodexEngine):
+    """Any OpenAI-protocol endpoint through the Codex runtime.
+
+    Identical to :class:`~lup.adapters.codex.CodexEngine` except
+    construction: the client carries ``opts.compat`` (base URL, key,
+    provider id) and defines a custom Codex provider from it.
+    Anthropic-protocol endpoints belong on ``claude-compat`` instead,
+    which keeps the Claude scaffolding.
+    """
+
+    id = "openai-compat"
+
+    def build(self, opts: LupAgentOptions) -> CodexClient:
+        codex = opts.codex
+        return OpenAICompatClient(
+            model=opts.model,
+            system_prompt=opts.system_prompt,
+            base_url=opts.compat.base_url,
+            api_key=opts.compat.api_key,
+            model_provider=opts.compat.model_provider,
+            output_schema=opts.output_schema,
+            sandbox=codex.sandbox,
+            effort=opts.reasoning_effort,
+            approval_policy=codex.approval_policy,
+            mcp_tools=bool(opts.served_tool_groups),
+            mcp_env=dict(codex.mcp_env),
+            writable_roots=list(codex.writable_roots),
+            mcp_servers=opts.served_tool_groups,
+            max_budget_usd=opts.max_budget_usd,
+            usage_cost=opts.usage_cost,
+            turn_timeout_seconds=opts.turn_timeout_seconds,
+            cleanup=subprocess_sandbox_cleanup(opts),
+        )
 
 
 class OpenAICompatClient(CodexClient):

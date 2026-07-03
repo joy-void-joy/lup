@@ -11,7 +11,7 @@ from collections.abc import Mapping
 
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
-from lup.adapters.codex.adapter import codex_usage_to_lup
+from lup.adapters.codex import codex_usage_to_lup
 from lup.types import (
     JsonValue,
     LupResultMessage,
