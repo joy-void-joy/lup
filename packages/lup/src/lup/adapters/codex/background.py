@@ -49,27 +49,7 @@ class CodexBackgroundAgent(BaseBackgroundAgent):
                     developer_instructions=self.system_prompt,
                 )
 
-                result = await thread.run(self.start_message)
-                if self.on_response and result.final_response:
-                    self.on_response(result.final_response)
-
-                while self.running:
-                    await self.wake_event.wait()
-                    self.wake_event.clear()
-
-                    while True:
-                        try:
-                            await asyncio.wait_for(
-                                self.wake_event.wait(), timeout=self.debounce_seconds
-                            )
-                            self.wake_event.clear()
-                        except TimeoutError:
-                            break
-
-                    content = self.build_message()
-                    if content is None:
-                        continue
-
+                async for content in self.message_stream():
                     result = await thread.run(content)
                     if self.on_response and result.final_response:
                         self.on_response(result.final_response)
