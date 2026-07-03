@@ -91,8 +91,13 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     )
     agent_sdk: str | None = Field(
         default=None,
-        description="Backend that ran the session (claude/codex/openai); "
+        description="Engine that ran the session (claude/codex/...); "
         "None on results predating the stamp",
+    )
+    sdk_session_id: str | None = Field(
+        default=None,
+        description="Engine-native session id — the resume token for "
+        "Client.session(resume=...); None when the engine reported none",
     )
     timestamp: str
     output: OutputT

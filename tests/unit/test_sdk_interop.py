@@ -20,7 +20,8 @@ from lup.adapters.codex.hooks import (
     write_reflection_gate_script,
     write_tool_allowlist_script,
 )
-from lup.types import model_backend, normalize_effort
+from lup.adapters.engine import engine_id_for_model
+from lup.types import normalize_effort
 from lup.hooks import (
     create_nudge_hook,
     create_permission_hooks,
@@ -202,30 +203,30 @@ class TestSubagentSpec:
 
 class TestModelBackend:
     def test_claude_models(self) -> None:
-        assert model_backend("claude-opus-4-6") == "anthropic"
-        assert model_backend("claude-sonnet-4-6") == "anthropic"
-        assert model_backend("haiku") == "anthropic"
-        assert model_backend("sonnet") == "anthropic"
+        assert engine_id_for_model("claude-opus-4-6") == "claude"
+        assert engine_id_for_model("claude-sonnet-4-6") == "claude"
+        assert engine_id_for_model("haiku") == "claude"
+        assert engine_id_for_model("sonnet") == "claude"
 
     def test_openai_models(self) -> None:
-        assert model_backend("gpt-4.1") == "openai"
-        assert model_backend("gpt-4.1-mini") == "openai"
-        assert model_backend("o1-preview") == "openai"
-        assert model_backend("o3-mini") == "openai"
-        assert model_backend("o4-mini") == "openai"
-        assert model_backend("o5-preview") == "openai"
-        assert model_backend("codex-mini-latest") == "openai"
+        assert engine_id_for_model("gpt-4.1") == "codex"
+        assert engine_id_for_model("gpt-4.1-mini") == "codex"
+        assert engine_id_for_model("o1-preview") == "codex"
+        assert engine_id_for_model("o3-mini") == "codex"
+        assert engine_id_for_model("o4-mini") == "codex"
+        assert engine_id_for_model("o5-preview") == "codex"
+        assert engine_id_for_model("codex-mini-latest") == "codex"
 
     def test_default_openai_compatible(self) -> None:
-        assert model_backend("unknown-model") == "openai-compatible"
+        assert engine_id_for_model("unknown-model") == "openai-compat"
 
 
 class TestEffortNormalization:
     def test_claude_effort(self) -> None:
-        assert normalize_effort("low", "anthropic") == "low"
-        assert normalize_effort("high", "anthropic") == "high"
-        assert normalize_effort("xhigh", "anthropic") == "max"
-        assert normalize_effort("max", "anthropic") == "max"
+        assert normalize_effort("low", "claude") == "low"
+        assert normalize_effort("high", "claude") == "high"
+        assert normalize_effort("xhigh", "claude") == "max"
+        assert normalize_effort("max", "claude") == "max"
 
     def test_codex_effort(self) -> None:
         assert normalize_effort("low", "openai") == "low"
@@ -301,9 +302,9 @@ class TestNudgeHookScripts:
 
 class TestCodexAdapter:
     def test_adapter_builds_config_overrides_with_mcp(self) -> None:
-        from lup.adapters.codex.adapter import CodexAdapter
+        from lup.adapters.codex.adapter import CodexClient
 
-        adapter = CodexAdapter(
+        adapter = CodexClient(
             model="o4-mini",
             system_prompt="test",
             mcp_tools=True,
@@ -312,9 +313,9 @@ class TestCodexAdapter:
         assert any("mcp_servers" in o for o in overrides)
 
     def test_adapter_builds_config_overrides_without_mcp(self) -> None:
-        from lup.adapters.codex.adapter import CodexAdapter
+        from lup.adapters.codex.adapter import CodexClient
 
-        adapter = CodexAdapter(
+        adapter = CodexClient(
             model="o4-mini",
             system_prompt="test",
             mcp_tools=False,
@@ -323,9 +324,9 @@ class TestCodexAdapter:
         assert not any("mcp_servers" in o for o in overrides)
 
     def test_adapter_builds_config_overrides_with_hooks(self) -> None:
-        from lup.adapters.codex.adapter import CodexAdapter
+        from lup.adapters.codex.adapter import CodexClient
 
-        adapter = CodexAdapter(
+        adapter = CodexClient(
             model="o4-mini",
             system_prompt="test",
             mcp_tools=False,

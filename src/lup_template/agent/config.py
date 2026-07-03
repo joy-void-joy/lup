@@ -81,15 +81,20 @@ class Settings(BaseSettings):
     # SDK SELECTION
     # ==========================================================================
 
-    agent_sdk: Literal["claude", "codex", "openai"] = Field(
+    agent_sdk: Literal[
+        "claude", "codex", "openai", "openai-compat", "claude-compat"
+    ] = Field(
         default="claude",
         validation_alias="AGENT_SDK",
         description=(
-            "Which agent SDK backend to use (claude, codex, openai). The "
-            "reviewer and background agents follow AGENT_AUX_MODEL, which "
-            "defaults to a backend-native model. Subagent specs pin their "
-            "own models — the template's pin Anthropic ones, so they need "
-            "Anthropic credentials on codex/openai unless overridden."
+            "Which engine runs the agent (claude, codex, openai-compat, "
+            "claude-compat; openai is a legacy alias of openai-compat). "
+            "claude-compat keeps the Claude scaffolding on an Anthropic-"
+            "protocol endpoint (OPENAI_BASE_URL). The reviewer and "
+            "background agents follow AGENT_AUX_MODEL, which defaults to an "
+            "engine-native model. Subagent specs pin their own models — the "
+            "template's pin Anthropic ones, so they need Anthropic "
+            "credentials on codex/openai unless overridden."
         ),
     )
 
@@ -158,12 +163,16 @@ class Settings(BaseSettings):
         ),
     )
 
-    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"] = (
-        Field(
-            default="bypassPermissions",
-            validation_alias="AGENT_PERMISSION_MODE",
-            description="Claude SDK permission mode for the main agent session",
-        )
+    permission_mode: (
+        Literal["default", "acceptEdits", "plan", "bypassPermissions"] | None
+    ) = Field(
+        default=None,
+        validation_alias="AGENT_PERMISSION_MODE",
+        description=(
+            "Claude SDK permission mode for the main agent session "
+            "(None = engine default: bypassPermissions on claude, where "
+            "enforcement is the hook layer)"
+        ),
     )
 
     # ==========================================================================
@@ -177,9 +186,12 @@ class Settings(BaseSettings):
     )
 
     max_thinking_tokens: int | None = Field(
-        default=128_000 - 1,
+        default=None,
         validation_alias="AGENT_MAX_THINKING_TOKENS",
-        description="Max thinking tokens (None = model default)",
+        description=(
+            "Max thinking tokens (None = engine default: the API maximum "
+            "on claude sessions)"
+        ),
     )
 
     aux_model: str | None = Field(

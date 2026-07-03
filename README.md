@@ -55,33 +55,28 @@ uv run lup loop "task1" "task2"            # batch with auto-commit
 AGENT_SDK=codex AGENT_MODEL=gpt-5.5 uv run lup run "same task, Codex backend"
 ```
 
-The agent runs on the Claude Agent SDK by default; setting `AGENT_SDK=codex` (or `openai` for any OpenAI-compatible endpoint) runs the same agent — same tools, reflection gate, structured output — on the Codex runtime. Budget caps and persistent (sleep/wake) mode work on every backend too: `AGENT_MAX_BUDGET_USD` on codex/openai needs `CODEX_USD_PER_MTOK_*` rates in `.env` (the Codex SDK reports tokens, not cost), and persistent mode runs in-process on Claude or through the file relay (`lup.realtime_relay`) on the Codex runtime.
+The agent runs on the Claude engine by default; `AGENT_SDK=codex` runs the same agent — same tools, reflection gate, structured output — on the Codex runtime, and open models pick their engine by API protocol: `AGENT_SDK=openai-compat` fronts an OpenAI-protocol endpoint through the Codex runtime, while `AGENT_SDK=claude-compat` keeps the full Claude scaffolding (hooks, permission modes, native subagents) on an Anthropic-protocol endpoint (`OPENAI_BASE_URL`). Budget caps and persistent (sleep/wake) mode work on every engine too: `AGENT_MAX_BUDGET_USD` on the Codex runtime needs `CODEX_USD_PER_MTOK_*` rates in `.env` (the Codex SDK reports tokens, not cost), and persistent mode runs in-process on Claude engines or through the file relay (`lup.realtime_relay`) on the Codex runtime. Sessions persist and resume: `uv run lup run --resume <session>` continues a saved run's conversation.
 
-### Backend support
+### Engine support
 
-The portable contract is **tiered**, deliberately. Tier 1 — the core loop every backend gets — is: run → MCP tools → reflection gate → `submit_output` finalization → session JSON, traces, and metrics, plus subagents (native on Claude, the `run_subagent` tool elsewhere), budget caps, and persistent mode. Tier 2 is Claude-native and intentionally unported: in-process hooks, parallel native subagents, permission modes, live streaming, and SDK-reported cost. Don't generalize Tier 2 features into the adapter abstraction — pass native options to `ClaudeAdapter` instead.
+The portable contract is **tiered**, deliberately. Tier 1 — the core loop every engine gets — is: run → MCP tools → reflection gate → `submit_output` finalization → session JSON, traces, metrics, and resumable sessions, plus subagents (native on Claude engines, the `run_subagent` tool elsewhere), budget caps, and persistent mode. Tier 2 is Claude-native and intentionally unported: in-process hooks, parallel native subagents, permission modes, live streaming, interrupt, and SDK-reported cost. Don't generalize Tier 2 features into the engine abstraction — pass native options to `ClaudeClient` instead.
 
-Each adapter declares what it supports (`adapter.capabilities`); the matrix below is generated from those declarations (`uv run lup-devtools agent capabilities --markdown`) and a regression test keeps it current:
+Nothing below is declared: the matrix is **probed from the engines** (`uv run lup-devtools agent capabilities --markdown`) — option rows construct a client with exactly that knob and record whether the engine refuses it, the streaming row checks whether the engine overrides the post-hoc default, and a regression test keeps this copy current:
 
-| Capability | claude | codex | openai |
-|---|---|---|---|
-| hooks | ✅ | — | — |
-| native_subagents | ✅ | — | — |
-| streaming | live | post_hoc | post_hoc |
-| interrupt | ✅ | — | — |
-| stop_event | ✅ | — | — |
-| cost_reporting | native | rates | rates |
-| duration_reporting | ✅ | ✅ | ✅ |
-| permission_modes | ✅ | — | — |
-| max_turns | ✅ | — | — |
-| max_thinking_tokens | ✅ | — | — |
-| background_tools | ✅ | — | — |
-| realtime | in_process | relay | relay |
-| turn_timeout | — | ✅ | ✅ |
+| Capability | claude | codex | openai-compat | claude-compat |
+|---|---|---|---|---|
+| streaming | live | post_hoc | post_hoc | live |
+| tools | ✅ | — | — | ✅ |
+| permission_mode | ✅ | — | — | ✅ |
+| max_turns | ✅ | — | — | ✅ |
+| max_thinking_tokens | ✅ | — | — | ✅ |
+| turn_timeout_seconds | — | ✅ | ✅ | — |
+| max_budget_usd | ✅ | — | — | ✅ |
+| background_tools | ✅ | — | — | ✅ |
 
-(`rates` = cost is estimated from `CODEX_USD_PER_MTOK_*`; without them it degrades to `none`. Codex `duration` is wall-clock, not API-reported. Where there's no `stop_event`, the completion guard runs as corrective turns instead of a Stop hook. `turn_timeout` is the Codex-side substitute for `max_turns`/`interrupt`: `AGENT_TURN_TIMEOUT_SECONDS` cancels a runaway turn client-side after a wall-clock cap.)
+(`max_budget_usd` on the Codex runtime flips to ✅ once `CODEX_USD_PER_MTOK_*` rates are configured — the probe shows the rate-less case. `turn_timeout_seconds` is the Codex-side substitute for `max_turns`/interrupt: it cancels a runaway turn client-side after a wall-clock cap. Facts that only surface on a live connection — interrupt and session resume — have no probe row: Claude engines interrupt, both runtimes resume, and an engine that can't raises `UnsupportedOperationError` at the point of use.)
 
-**Security model per backend.** On Claude, enforcement is layered: PreToolUse permission hooks (per-tool, per-path), permission modes, and the SDK sandbox. On Codex/OpenAI there are **no hooks** (config.toml command hooks never fire — live-probed) and no permission modes: enforcement is the runtime's `workspace-write` filesystem sandbox plus in-tool checks (reflection gate, output validation). A Codex agent may run any command the sandbox permits — there is no command-policy or tool-allowlist layer. Domains that depend on fine-grained tool gating are Claude-only until Codex ships working hooks; `packages/lup/src/lup/adapters/codex_hooks.py` keeps the hook wire format quarantined, ready to re-verify.
+**Security model per engine.** On Claude engines, enforcement is layered: PreToolUse permission hooks (per-tool, per-path), permission modes, and the SDK sandbox — and `claude-compat` carries all of it to open models. On the Codex runtime there are **no hooks** (config.toml command hooks never fire — live-probed) and no permission modes: enforcement is the runtime's `workspace-write` filesystem sandbox plus in-tool checks (reflection gate, output validation). A Codex agent may run any command the sandbox permits — there is no command-policy or tool-allowlist layer. Domains that depend on fine-grained tool gating belong on the Claude engines until Codex ships working hooks; `packages/lup/src/lup/adapters/codex/hooks.py` keeps the hook wire format quarantined, ready to re-verify.
 
 The intended workflow while using this repository is to:
 

@@ -152,7 +152,7 @@ async def test_broken_usage_normalizer_degrades_to_none() -> None:
 async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None:
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.claude.adapter import ClaudeAdapter
+    from lup.adapters.claude.adapter import ClaudeClient
 
     script: list[Message] = [
         AssistantMessage(
@@ -171,8 +171,8 @@ async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None
         lup.adapters.claude.adapter, "ClaudeSDKClient", lambda options: fake
     )
 
-    adapter = ClaudeAdapter(ClaudeAgentOptions())
-    events = [event async for event in adapter.run_streamed("go")]
+    adapter = ClaudeClient(ClaudeAgentOptions())
+    events = [event async for event in adapter.stream("go")]
 
     assert isinstance(events[0], LupThinkingEvent)
     assert isinstance(events[1], LupTextEvent)
@@ -180,6 +180,40 @@ async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None
     assert isinstance(events[3], LupToolResultEvent)
     assert isinstance(events[4], LupDoneEvent)
     assert len(events[4].blocks) == 3
+
+
+async def test_session_id_tracks_the_result() -> None:
+    conv, fake = session(SCRIPT)
+    _ = fake
+
+    assert conv.id is None
+    await conv.send("task")
+    assert conv.id == "sess-1"
+
+
+async def test_session_resume_threads_the_saved_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """resume= reaches the SDK options and seeds Session.id — without
+    mutating the client's own options."""
+    from claude_agent_sdk import ClaudeAgentOptions
+
+    from lup.adapters.claude.adapter import ClaudeClient
+
+    opened: list[ClaudeAgentOptions] = []
+
+    def fake_sdk_client(options: ClaudeAgentOptions) -> FakeClient:
+        opened.append(options)
+        return FakeClient([result_message()])
+
+    monkeypatch.setattr(lup.adapters.claude.adapter, "ClaudeSDKClient", fake_sdk_client)
+
+    client = ClaudeClient(ClaudeAgentOptions())
+    async with client.session(resume="sess-42") as conv:
+        assert conv.id == "sess-42"
+
+    assert opened[0].resume == "sess-42"
+    assert client.options.resume is None
 
 
 async def test_collector_state_after_collect() -> None:

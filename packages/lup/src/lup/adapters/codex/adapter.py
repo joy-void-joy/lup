@@ -12,19 +12,18 @@ import json
 import logging
 import time
 from collections.abc import AsyncGenerator, Callable, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AbstractContextManager, asynccontextmanager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
-    from openai_codex import AsyncThread, TurnResult
+    from openai_codex import AsyncCodex, AsyncThread, CodexConfig, TurnResult
 
     from openai_codex.generated.v2_all import ThreadItem, ThreadTokenUsage
 
 from lup.adapters.common import (
-    AdapterCapabilities,
-    Client,
     BudgetExceededError,
+    Client,
     Session,
     TurnTimeoutError,
 )
@@ -380,6 +379,7 @@ class CodexSession(Session):
         turn_timeout_seconds: float | None = None,
     ) -> None:
         self.thread = thread
+        self.id = thread.id
         self.output_schema = output_schema
         self.effort = effort
         self.usage_normalizer = usage_normalizer
@@ -463,8 +463,12 @@ class CodexSession(Session):
         return response
 
 
-class CodexAdapter(Client):
+class CodexClient(Client):
     """Run prompts via the OpenAI Codex SDK."""
+
+    model_provider: str | None = None
+    """Codex model-provider selector — set by the OpenAI-compatible
+    subclass; ``None`` runs on the account's default provider."""
 
     def __init__(
         self,
@@ -479,12 +483,12 @@ class CodexAdapter(Client):
         mcp_env: dict[str, str] | None = None,
         writable_roots: list[Path] | None = None,
         hook_overrides: list[CodexHookConfig] | None = None,
-        session_id: str | None = None,
         usage_normalizer: CodexUsageNormalizer | None = None,
         mcp_servers: Sequence[str] = ("notes", "sandbox"),
         max_budget_usd: float | None = None,
         usage_cost: UsageCost | None = None,
         turn_timeout_seconds: float | None = None,
+        cleanup: AbstractContextManager[object] | None = None,
     ) -> None:
         if max_budget_usd is not None and usage_cost is None:
             raise ValueError(
@@ -502,30 +506,12 @@ class CodexAdapter(Client):
         self.mcp_env = mcp_env
         self.writable_roots = writable_roots
         self.hook_overrides = hook_overrides
-        self.session_id = session_id
         self.usage_normalizer = usage_normalizer
         self.mcp_servers = mcp_servers
         self.max_budget_usd = max_budget_usd
         self.usage_cost = usage_cost
         self.turn_timeout_seconds = turn_timeout_seconds
-
-    @property
-    def capabilities(self) -> AdapterCapabilities:
-        return AdapterCapabilities(
-            hooks=False,
-            native_subagents=False,
-            streaming="post_hoc",
-            interrupt=False,
-            stop_event=False,
-            cost_reporting="rates" if self.usage_cost is not None else "none",
-            duration_reporting=True,
-            permission_modes=False,
-            max_turns=False,
-            max_thinking_tokens=False,
-            background_tools=False,
-            realtime="relay",
-            turn_timeout=True,
-        )
+        self.cleanup = cleanup
 
     def build_config_overrides(self) -> list[str]:
         """Assemble all config_overrides for this adapter run."""
@@ -541,7 +527,7 @@ class CodexAdapter(Client):
         return overrides
 
     def make_session(self, thread: "AsyncThread") -> CodexSession:
-        """Wrap a thread in a conversation carrying this adapter's settings.
+        """Wrap a thread in a conversation carrying this client's settings.
 
         The single construction point for the send path, shared with the
         OpenAI-compatible subclass so both inherit identical effort,
@@ -557,23 +543,50 @@ class CodexAdapter(Client):
             turn_timeout_seconds=self.turn_timeout_seconds,
         )
 
+    def codex_config(self) -> "CodexConfig":
+        """Assemble the runtime config — the compat subclass adds provider env."""
+        from openai_codex import CodexConfig
+
+        return CodexConfig(config_overrides=tuple(self.build_config_overrides()))
+
+    async def open_thread(
+        self, codex: "AsyncCodex", *, resume: str | None
+    ) -> "AsyncThread":
+        """Start the session's thread, or restore a saved one."""
+        from openai_codex import ApprovalMode, Sandbox
+
+        sandbox = Sandbox(self.sandbox) if self.sandbox else None
+        approval_mode = (
+            ApprovalMode(self.approval_policy)
+            if self.approval_policy
+            else ApprovalMode.auto_review
+        )
+        if resume is not None:
+            return await codex.thread_resume(
+                resume,
+                model=self.model,
+                model_provider=self.model_provider,
+                developer_instructions=self.system_prompt,
+                sandbox=sandbox,
+                approval_mode=approval_mode,
+            )
+        return await codex.thread_start(
+            model=self.model,
+            model_provider=self.model_provider,
+            developer_instructions=self.system_prompt,
+            sandbox=sandbox,
+            approval_mode=approval_mode,
+        )
+
     @asynccontextmanager
-    async def session(self) -> AsyncGenerator[Session, None]:
+    async def session(
+        self, *, resume: str | None = None
+    ) -> AsyncGenerator[Session, None]:
         require_codex_sdk()
 
-        from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
+        from openai_codex import AsyncCodex
 
-        config = CodexConfig(config_overrides=tuple(self.build_config_overrides()))
-
-        async with AsyncCodex(config=config) as codex:
-            thread = await codex.thread_start(
-                model=self.model,
-                developer_instructions=self.system_prompt,
-                sandbox=Sandbox(self.sandbox) if self.sandbox else None,
-                approval_mode=(
-                    ApprovalMode(self.approval_policy)
-                    if self.approval_policy
-                    else ApprovalMode.auto_review
-                ),
-            )
-            yield self.make_session(thread)
+        with self.cleanup if self.cleanup is not None else nullcontext():
+            async with AsyncCodex(config=self.codex_config()) as codex:
+                thread = await self.open_thread(codex, resume=resume)
+                yield self.make_session(thread)

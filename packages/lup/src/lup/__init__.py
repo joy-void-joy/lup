@@ -11,7 +11,8 @@ package imports no SDK at load time — install the ``claude`` and/or
 
 from typing import TYPE_CHECKING
 
-from lup.adapters.common import AdapterCapabilities, query
+from lup.adapters.common import Client, Session
+from lup.adapters.engine import Engine, create_client, query
 from lup.background import BaseBackgroundAgent, create_background_agent
 from lup.history import (
     SessionResult,
@@ -79,8 +80,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "TIMESTAMP_FMT",
-    "AdapterCapabilities",
     "BaseBackgroundAgent",
+    "Client",
+    "Engine",
     "JsonObject",
     "JsonValue",
     "LupHooksConfig",
@@ -90,6 +92,7 @@ __all__ = [
     "ReflectionGate",
     "Sandbox",
     "Scheduler",
+    "Session",
     "SessionResult",
     "SleepResult",
     "Throttle",
@@ -102,6 +105,7 @@ __all__ = [
     "configure",
     "create_background_agent",
     "create_capture_hook",
+    "create_client",
     "create_mcp_server",
     "create_meta_before_sleep_guard",
     "create_nudge_hook",

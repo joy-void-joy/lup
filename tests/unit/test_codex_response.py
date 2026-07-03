@@ -2,7 +2,7 @@
 
 build_lup_response is where Codex turns become portable lup responses:
 structured-output parsing must degrade (not raise) on non-JSON text,
-the session id must ride along, and run_streamed must replay blocks as
+the session id must ride along, and stream must replay blocks as
 events in order with the done event last. CodexSession.send must
 stamp wall-clock duration — the SDK reports tokens but no duration.
 """
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
 from lup.adapters.codex.adapter import (
-    CodexAdapter,
+    CodexClient,
     CodexSession,
     build_lup_response,
 )
@@ -125,8 +125,8 @@ async def test_run_streamed_replays_blocks_in_order() -> None:
         ]
     )
 
-    class CannedAdapter(CodexAdapter):
-        async def run(
+    class CannedAdapter(CodexClient):
+        async def query(
             self,
             prompt: str,
             *,
@@ -137,7 +137,7 @@ async def test_run_streamed_replays_blocks_in_order() -> None:
             return canned
 
     adapter = CannedAdapter(model="gpt-5.5", system_prompt="")
-    events = [event async for event in adapter.run_streamed("go")]
+    events = [event async for event in adapter.stream("go")]
 
     assert [type(event) for event in events] == [
         LupThinkingEvent,

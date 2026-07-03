@@ -1,21 +1,17 @@
-"""Tests for the run_subagent delegation tool and query() option honesty.
+"""Tests for the run_subagent delegation tool.
 
-The tool exists so non-Claude backends get real subagent delegation
+The tool exists so non-Claude engines get real subagent delegation
 from the same SubagentSpec list Claude uses natively. These tests pin
-the failure modes: unknown roles, specs whose tools the backend cannot
-provide (the tool fails loudly), and query() degrading Claude-only options
-to what the backend supports rather than raising.
+the failure modes: unknown roles, and specs whose tools the engine
+cannot provide (the tool fails loudly).
 """
 
 import pytest
 
 import lup.subagents
-from lup.adapters import registry
-from lup.adapters.common import query
 from lup.mcp import ToolResponse
 from lup.subagents import create_run_subagent_tool
 from lup.types import JsonValue, LupResponse, LupTextBlock, SubagentSpec
-from tests.unit.conftest import RecordingOneShot
 
 RESEARCHER = SubagentSpec(
     name="researcher",
@@ -96,23 +92,3 @@ class TestRunSubagentTool:
         result = await tool.handler({"name": "inheritor", "task": "go"})
         assert result.get("is_error", False) is False
         assert captured["model"] == "gpt-5.5"
-
-
-class TestQueryOptionHonesty:
-    async def test_budget_degrades_on_other_backends(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        engine = RecordingOneShot()
-        monkeypatch.setitem(registry.ONE_SHOT_BUILDERS, "openai", engine)
-        await query("hi", model="gpt-5.5", max_budget_usd=1.0)
-
-        assert engine.ran[0].max_budget_usd is None
-
-    async def test_tools_degrade_on_openai_compatible_backend(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        engine = RecordingOneShot()
-        monkeypatch.setitem(registry.ONE_SHOT_BUILDERS, "openai-compatible", engine)
-        await query("hi", model="llama-3-70b", tools=["Read"])
-
-        assert engine.ran[0].options.tools is None
