@@ -53,24 +53,13 @@ Examples:
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 
 from pydantic import BaseModel
 
 from lup.mcp import LupMcpTool
 
 logger = logging.getLogger(__name__)
-
-
-class LupUserTurn(BaseModel):
-    """One user turn fed to a background agent's message stream.
-
-    A typed stand-in for the SDK's raw streaming-input dict: the adapter
-    converts it to its wire shape at the ``connect`` boundary, so the loop that
-    produces turns never assembles an untyped dict.
-    """
-
-    content: str
 
 
 class BaseBackgroundAgent(ABC):
@@ -118,6 +107,35 @@ class BaseBackgroundAgent(ABC):
             except asyncio.CancelledError:
                 pass
         self.runner = None
+
+    async def message_stream(self) -> AsyncGenerator[str, None]:
+        """Yield the start message, then one message per debounced wake.
+
+        The shared wake loop: block until :meth:`wake` fires, absorb rapid
+        wakes for ``debounce_seconds``, then ask ``build_message`` for the
+        turn (``None`` means nothing to say — keep waiting). Engine run
+        loops consume this stream and speak their own wire format.
+        """
+        yield self.start_message
+
+        while self.running:
+            await self.wake_event.wait()
+            self.wake_event.clear()
+
+            while True:
+                try:
+                    await asyncio.wait_for(
+                        self.wake_event.wait(), timeout=self.debounce_seconds
+                    )
+                    self.wake_event.clear()
+                except TimeoutError:
+                    break
+
+            content = self.build_message()
+            if content is None:
+                continue
+
+            yield content
 
     @abstractmethod
     async def run_loop(self) -> None:

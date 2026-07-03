@@ -15,7 +15,7 @@ from claude_agent_sdk.types import (
 )
 
 from lup.adapters.claude.adapter import lup_tools_to_sdk
-from lup.background import BaseBackgroundAgent, LupUserTurn
+from lup.background import BaseBackgroundAgent
 from lup.mcp import LupMcpTool
 from lup.types import JsonObject
 
@@ -61,42 +61,17 @@ class ClaudeBackgroundAgent(BaseBackgroundAgent):
         self.allowed_tools = allowed_tools
         self.on_response = on_response
 
-    async def message_generator(
-        self,
-    ) -> AsyncGenerator[LupUserTurn, None]:
-        """Yield user turns: start message, then build_message on each wake."""
-        yield LupUserTurn(content=self.start_message)
-
-        while self.running:
-            await self.wake_event.wait()
-            self.wake_event.clear()
-
-            while True:
-                try:
-                    await asyncio.wait_for(
-                        self.wake_event.wait(), timeout=self.debounce_seconds
-                    )
-                    self.wake_event.clear()
-                except TimeoutError:
-                    break
-
-            content = self.build_message()
-            if content is None:
-                continue
-
-            yield LupUserTurn(content=content)
-
     async def sdk_message_stream(self) -> AsyncGenerator[JsonObject, None]:
-        """Adapt the typed turn stream into the SDK's streaming-input dicts.
+        """Adapt the shared turn stream into the SDK's streaming-input dicts.
 
-        The one place a ``LupUserTurn`` becomes the SDK's ``connect`` wire
-        shape (a JSON object), so :meth:`message_generator` stays typed end
-        to end and only this boundary speaks the SDK's dict format.
+        The one place a turn becomes the SDK's ``connect`` wire shape (a
+        JSON object) — the debounced loop lives on the base class, and only
+        this boundary speaks the SDK's dict format.
         """
-        async for turn in self.message_generator():
+        async for content in self.message_stream():
             yield {
                 "type": "user",
-                "message": {"role": "user", "content": turn.content},
+                "message": {"role": "user", "content": content},
             }
 
     async def run_loop(self) -> None:
