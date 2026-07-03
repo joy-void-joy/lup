@@ -1,11 +1,11 @@
-"""The README capability matrix must match the adapter declarations.
+"""The README capability matrix must match the probed engine behavior.
 
 This is what turns the parity matrix from prose into a contract: change
-a capability declaration and this test fails until the README table is
-regenerated, so documentation cannot drift from code.
+what an engine refuses or supports and this test fails until the README
+table is regenerated, so documentation cannot drift from code.
 """
 
-from lup.adapters.matrix import (
+from lup_template.devtools.agent.capabilities import (
     canonical_capability_matrix,
     capability_matrix_markdown,
 )

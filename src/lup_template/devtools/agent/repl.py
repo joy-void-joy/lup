@@ -137,8 +137,8 @@ def apply_repl_overrides(
     if not no_tools and not no_prompt:
         return
 
-    from lup.adapters.claude.adapter import ClaudeClient
-    from lup.adapters.codex.adapter import CodexClient
+    from lup.adapters.claude import ClaudeClient
+    from lup.adapters.codex import CodexClient
 
     match adapter:
         case ClaudeClient():

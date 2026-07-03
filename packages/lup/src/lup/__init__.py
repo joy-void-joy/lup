@@ -11,8 +11,7 @@ package imports no SDK at load time — install the ``claude`` and/or
 
 from typing import TYPE_CHECKING
 
-from lup.adapters.common import Client, Session
-from lup.adapters.engine import Engine, create_client, query
+from lup.adapters.common import Client, Engine, Session, create_client, query
 from lup.background import BaseBackgroundAgent, create_background_agent
 from lup.history import (
     SessionResult,

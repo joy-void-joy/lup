@@ -194,7 +194,7 @@ def create_background_agent(
         allowed_tools: Tool allowlist (tool-capable engines only).
         on_response: Callback for responses.
     """
-    from lup.adapters.engine import resolve_engine
+    from lup.adapters.common import resolve_engine
 
     return resolve_engine(engine).background(
         BackgroundAgentParams(

@@ -129,7 +129,7 @@ Agents produce better output when forced to self-assess before committing. The r
 
 **Library (`packages/lup` — the reusable `lup` package, never renamed):**
 
-- **lup/adapters/**: ALL SDK-specific code, one engine per subpackage behind the `AgentAdapter` ABC — `common.py` holds the ABCs, `AdapterCapabilities`, and one-shot `query()`; `registry.py` maps a backend id to `build_adapter(opts)`
+- **lup/adapters/**: ALL SDK-specific code, one module per engine — `common.py` is the whole SDK-free seam (`Client`/`Session`/`Engine` ABCs, the model-name router, `create_client()`, and one-shot `query()`); `claude.py`/`codex.py` are the primary engines, `claude_compat.py`/`openai_compat.py` front compatible endpoints
 - **lup/options.py**: `LupAgentOptions` — backend-agnostic options crossing application -> lib
 - **lup/output.py**: `submit_output` finalization + missing-output guard (all backends)
 - **lup/hooks.py**: Hook utilities, composition, and `create_tool_gate` (deny-until-unlocked primitive)
@@ -434,11 +434,12 @@ packages/
     └── src/lup/
         ├── __init__.py         # Public API re-exports (__all__); imports no SDK
         ├── py.typed            # PEP 561 typing marker
-        ├── adapters/           # ALL SDK-specific code, one engine per subpackage behind an ABC
-        │   ├── common.py       # AgentAdapter/Conversation ABCs, AdapterCapabilities, query()
-        │   ├── registry.py     # BACKEND_BUILDERS: backend id -> build_adapter(opts)
-        │   ├── claude/         # Claude engine: adapter, client, background, options, tools
-        │   └── codex/          # Codex/OpenAI engine: adapter, background, hooks, options, openai_compat
+        ├── adapters/           # ALL SDK-specific code, one module per engine
+        │   ├── common.py       # The whole SDK-free seam: Client/Session/Engine ABCs, errors, model router, create_client(), query()
+        │   ├── claude.py       # claude engine: option translation, SDK adaptation, sessions, background
+        │   ├── claude_compat.py# claude-compat engine: Claude scaffolding on Anthropic-compatible endpoints
+        │   ├── codex.py        # codex engine: runtime config, SDK adaptation, sessions, hook codegen (quarantined), background
+        │   └── openai_compat.py# openai-compat engine: OpenAI-protocol endpoints through the Codex runtime
         ├── antipatterns.py     # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
         ├── options.py          # LupAgentOptions — backend-agnostic options crossing application -> lib
         ├── markers.py          # `# lup:` / `// lup:` review-marker scanning (dev comments)

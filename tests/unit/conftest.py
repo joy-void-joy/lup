@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 
 from lup import paths
-from lup.adapters.common import Client, Session
-from lup.adapters.engine import Engine
+from lup.adapters.common import Client, Engine, Session
 from lup.options import LupAgentOptions
 from lup.trace import TraceLogger
 from lup.types import LupResponse, LupTextBlock
