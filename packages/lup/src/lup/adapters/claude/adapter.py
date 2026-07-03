@@ -329,8 +329,8 @@ class ResponseCollector:
     The single collector for the Claude path: ``async for`` over it yields
     each SDK message while accumulating state, ``collect()`` drains the rest
     with display/tracing, and ``to_lup_response()`` projects the accumulated
-    SDK state into lup types. ``ClaudeConversation.send``, ``claude_query``,
-    and the rich devtools ``query`` all run through it, so there is one
+    SDK state into lup types. Every Claude run — session or one-shot —
+    drains through it via ``ClaudeConversation.send``, so there is one
     message-draining loop rather than two that can drift.
 
     After iteration, access the accumulated SDK state: ``blocks``,
@@ -457,9 +457,9 @@ async def collect_lup_response(
     """Drain a queried client's response stream into a LupResponse.
 
     The lup-typed projection of :class:`ResponseCollector` —
-    ``ClaudeConversation.send`` and ``claude_query`` both collect through it.
-    Displays and traces each message as it arrives, raises on agent errors and
-    on streams that end without a result.
+    ``ClaudeConversation.send`` collects through it. Displays and traces
+    each message as it arrives, raises on agent errors and on streams that
+    end without a result.
     """
     collector = ResponseCollector(client, trace_logger=trace_logger, prefix=prefix)
     await collector.collect()
