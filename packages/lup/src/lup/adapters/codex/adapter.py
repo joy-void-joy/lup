@@ -33,18 +33,12 @@ from lup.types import (
     JsonObject,
     LupAssistantMessage,
     LupContentBlock,
-    LupDoneEvent,
-    LupEvent,
     LupResponse,
     LupResultMessage,
     LupTextBlock,
-    LupTextEvent,
     LupThinkingBlock,
-    LupThinkingEvent,
     LupToolResultBlock,
-    LupToolResultEvent,
     LupToolUseBlock,
-    LupToolUseEvent,
     LupUserMessage,
     Usage,
     UsageCost,
@@ -583,32 +577,3 @@ class CodexAdapter(AgentAdapter):
                 ),
             )
             yield self.make_conversation(thread)
-
-    async def run_streamed(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> AsyncGenerator[LupEvent, None]:
-        """Yield streaming events from a Codex turn.
-
-        Codex returns completed items (not a real token stream), so this
-        converts each item into the corresponding LupEvent after the
-        turn finishes.
-        """
-        response = await self.run(prompt, trace_logger=trace_logger, prefix=prefix)
-        for block in response.blocks:
-            match block:
-                case LupThinkingBlock():
-                    yield LupThinkingEvent(thinking=block.thinking)
-                case LupTextBlock():
-                    yield LupTextEvent(text=block.text)
-                case LupToolUseBlock():
-                    yield LupToolUseEvent(id=block.id, name=block.name)
-                case LupToolResultBlock():
-                    yield LupToolResultEvent(
-                        tool_use_id=block.tool_use_id,
-                        content=str(block.content),
-                    )
-        yield LupDoneEvent(blocks=response.blocks)
