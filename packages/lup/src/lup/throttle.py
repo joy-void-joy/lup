@@ -22,6 +22,8 @@ Examples:
         ...     return await do_request()
 """
 
+#lup: Feels like this should go in its dedicated subfolder
+
 import asyncio
 import time
 import weakref
@@ -65,7 +67,7 @@ class Throttle:
             self.loop_states[loop] = state
         return state
 
-    async def __aenter__(self) -> None:
+    async def __aenter__(self) -> None: #lup: Couldn't we use a contextlib.context_manager instead?
         state = self.get_state()
         await state.semaphore.acquire()
         if self.min_interval <= 0:

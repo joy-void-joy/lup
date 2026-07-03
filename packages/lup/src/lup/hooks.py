@@ -92,15 +92,15 @@ def create_permission_hooks(
     """
     all_readable = rw_dirs + ro_dirs
 
-    async def permission_hook(input_data: LupHookInput) -> LupHookOutput:
+    async def permission_hook(input_data: LupHookInput) -> LupHookOutput: #lup: Sounds LupHookInput is very low level. But hooks.py is higher level, and should interface with a high-level normalized BaseModel
         if input_data.get("hook_event_name") != "PreToolUse":
             return LupHookOutput()
 
-        tool_name = input_data.get("tool_name", "")
+        tool_name = input_data.get("tool_name", "") #lup: .get should be an antipattern as well
         tool_input = input_data.get("tool_input", {})
 
         match tool_name:
-            case "Write" | "Edit":
+            case "Write" | "Edit": #lup: Yeah, no this is very untyped here. Doesnt' generalize to Codex, etc.
                 file_path = str(tool_input.get("file_path", ""))
                 if not file_path:
                     return LupHookOutput()
@@ -139,7 +139,7 @@ def create_permission_hooks(
                 return allow_hook()
 
     return {
-        "PreToolUse": [LupHookMatcher(hook=permission_hook, tag="permission")],
+        "PreToolUse": [LupHookMatcher(hook=permission_hook, tag="permission")], #lup: Same comment here
     }
 
 
@@ -165,7 +165,7 @@ def create_tool_allowlist_hook(
     available = ", ".join(sorted(allowed))
 
     async def allowlist_hook(input_data: LupHookInput) -> LupHookOutput:
-        if input_data.get("hook_event_name") != "PreToolUse":
+        if input_data.get("hook_event_name") != "PreToolUse": #lup: Same, this file really needs thorough refactoring
             return LupHookOutput()
 
         tool_name = input_data.get("tool_name", "")

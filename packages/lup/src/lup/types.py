@@ -262,7 +262,7 @@ type LupEvent = (
 # ---------------------------------------------------------------------------
 
 
-class LupHookInput(TypedDict, total=False):
+class LupHookInput(TypedDict, total=False): #lup: Why is this a TypedDict?
     """SDK-agnostic hook input. Adapters populate from their native format."""
 
     hook_event_name: str
@@ -303,7 +303,7 @@ type LupHooksConfig = dict[LupHookEvent, list[LupHookMatcher]]
 """SDK-agnostic hook configuration. Each adapter converts to native format."""
 
 
-def allow_hook() -> LupHookOutput:
+def allow_hook() -> LupHookOutput: #lup: Same, I don't think all of this belongs to type.py
     """Create a generic allow decision."""
     return LupHookOutput(decision="allow")
 
@@ -343,7 +343,7 @@ def extract_token_usage(raw: Mapping[str, JsonValue] | None) -> Usage | None:
 def safe_normalize_usage[T](
     normalizer: Callable[[T], Usage | None],
     raw: T | None,
-) -> Usage | None:
+) -> Usage | None: #lup: Why is this here?
     """Run a usage normalizer, degrading to None on failure.
 
     Usage is diagnostic — a broken normalizer must never fail a run that
@@ -374,6 +374,7 @@ def merge_hooks(base: LupHooksConfig, additional: LupHooksConfig) -> LupHooksCon
 # Effort normalization
 # ---------------------------------------------------------------------------
 
+#lup: This shouldn't live here. This should live in the adapters folders instead
 EFFORT_MAP_CLAUDE: dict[str, str] = {
     "low": "low",
     "medium": "medium",
