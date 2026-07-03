@@ -7,9 +7,9 @@ shadows the stdlib ``inspect`` (imported here as ``inspect_mod``).
 import inspect as inspect_mod
 import io
 import json
-import os
 import sys
 import tempfile
+from pathlib import Path
 from typing import TypedDict
 
 import sh
@@ -42,7 +42,7 @@ def tool_location(tool: LupMcpTool) -> str:
     handler = inspect_mod.unwrap(tool.handler)
     try:
         filepath = inspect_mod.getfile(handler)
-        filename = os.path.basename(filepath)
+        filename = Path(filepath).name
         _, lineno = inspect_mod.getsourcelines(handler)
         return f"{filename}:{lineno}"
     except (OSError, TypeError):
@@ -132,7 +132,7 @@ def page_output(text: str) -> None:
     except (sh.CommandNotFound, sh.ErrorReturnCode):
         sys.stdout.write(text)
     finally:
-        os.unlink(tmp.name)
+        Path(tmp.name).unlink()
 
 
 def run_inspect(as_json: bool, full: bool) -> None:
@@ -147,6 +147,10 @@ def run_inspect(as_json: bool, full: bool) -> None:
             "model": settings.model,
             "max_thinking_tokens": settings.max_thinking_tokens,
             "tools": [tool_to_dict(t) for t in all_tools],
+            "dynamic_tools": {
+                server: [t.name for t in server_tools]
+                for server, server_tools in tools_by_server.items()
+            },
             "output_schema": AgentOutput.model_json_schema(),
             "subagents": {
                 name: {

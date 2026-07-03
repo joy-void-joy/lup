@@ -261,7 +261,7 @@ async def repl(
     from prompt_toolkit.completion import WordCompleter
     from prompt_toolkit.formatted_text import FormattedText
     from prompt_toolkit.history import FileHistory
-    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
     from prompt_toolkit.styles import Style as PTStyle
     from rich.console import Console
     from rich.panel import Panel
@@ -322,24 +322,15 @@ async def repl(
     kb = KeyBindings()
 
     @kb.add("escape", "enter")  # Alt+Enter or Esc then Enter
-    def newline_binding(event: object) -> None:
-        from prompt_toolkit.key_binding import KeyPressEvent
-
-        assert isinstance(event, KeyPressEvent)
+    def newline_binding(event: KeyPressEvent) -> None:
         event.current_buffer.newline()
 
     @kb.add("enter")
-    def submit_binding(event: object) -> None:
-        from prompt_toolkit.key_binding import KeyPressEvent
-
-        assert isinstance(event, KeyPressEvent)
+    def submit_binding(event: KeyPressEvent) -> None:
         event.current_buffer.validate_and_handle()
 
     @kb.add("c-v")
-    def paste_binding(event: object) -> None:
-        from prompt_toolkit.key_binding import KeyPressEvent
-
-        assert isinstance(event, KeyPressEvent)
+    def paste_binding(event: KeyPressEvent) -> None:
         result = read_clipboard_image()
         if result is not None:
             pending_images.append(result)

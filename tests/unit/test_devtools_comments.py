@@ -1,7 +1,7 @@
 """Behavior tests for `lup-devtools dev comments` scanning and clearing.
 
-Runs against a throwaway git repo: `scan_feedback` must report tracked
-notes with their read-context window, and `clear_markers` must strip
+Runs against a throwaway git repo: `scan_tracked(find_feedback)` must report
+tracked notes with their read-context window, and `clear_markers` must strip
 exactly the targeted spans — inline markers keep their code, standalone
 blocks vanish whole — and only ever on a `resolve/*` branch.
 """
@@ -50,7 +50,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_scan_reports_notes_with_read_context(repo: Path) -> None:
-    found = comments.scan_feedback()
+    found = comments.scan_tracked(comments.find_feedback)
 
     assert [(c.file, c.start_line, c.end_line) for c in found] == [
         ("code.py", 3, 4),
@@ -68,7 +68,7 @@ def test_scan_reports_notes_with_read_context(repo: Path) -> None:
 
 def test_scan_ignores_untracked_files(repo: Path) -> None:
     (repo / "scratch.py").write_text("# lup: never committed\n", encoding="utf-8")
-    found = comments.scan_feedback()
+    found = comments.scan_tracked(comments.find_feedback)
     assert all(c.file != "scratch.py" for c in found)
 
 

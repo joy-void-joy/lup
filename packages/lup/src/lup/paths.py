@@ -100,21 +100,32 @@ class PathConfig(BaseModel):
     logs_dir: Path
 
 
-state: PathConfig | None = None
+class PathState(BaseModel):
+    """Holder for the resolved path configuration, mutated in place.
+
+    Accessors and :func:`configure` share this one instance and assign
+    its ``config`` attribute instead of rebinding a module global.
+    """
+
+    config: PathConfig | None = None
+
+
+state = PathState()
 
 
 def resolve_state() -> PathConfig:
     """Return the cached path state, auto-detecting the project root on first use."""
-    global state  # noqa: PLW0603
-    if state is None:
+    config = state.config
+    if config is None:
         root = find_project_root()
-        state = PathConfig(
+        config = PathConfig(
             root=root,
             version=read_agent_version(root),
             notes_dir=root / "notes",
             logs_dir=root / "logs",
         )
-    return state
+        state.config = config
+    return config
 
 
 def configure(
@@ -142,10 +153,8 @@ def configure(
         logs_dir: Override runtime logs directory independently.
         version: Override agent version (read from [tool.lup] by default).
     """
-    global state  # noqa: PLW0603
-
     if root is not None:
-        state = PathConfig(
+        state.config = PathConfig(
             root=root,
             version=version if version is not None else read_agent_version(root),
             notes_dir=notes_dir if notes_dir is not None else root / "notes",
@@ -153,15 +162,16 @@ def configure(
         )
         return
 
-    updates: dict[str, Path | str] = {}
-    if notes_dir is not None:
-        updates["notes_dir"] = notes_dir
-    if logs_dir is not None:
-        updates["logs_dir"] = logs_dir
-    if version is not None:
-        updates["version"] = version
-    if updates:
-        state = resolve_state().model_copy(update=updates)
+    if notes_dir is None and logs_dir is None and version is None:
+        return
+
+    current = resolve_state()
+    state.config = PathConfig(
+        root=current.root,
+        version=version if version is not None else current.version,
+        notes_dir=notes_dir if notes_dir is not None else current.notes_dir,
+        logs_dir=logs_dir if logs_dir is not None else current.logs_dir,
+    )
 
 
 # -- Public path accessors ----------------------------------------------------
