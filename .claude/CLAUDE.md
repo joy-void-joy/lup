@@ -81,11 +81,12 @@ packages/
     └── src/lup/
         ├── __init__.py         # Public API re-exports (__all__); imports no SDK
         ├── py.typed            # PEP 561 typing marker
-        ├── adapters/           # ALL SDK-specific code, one engine per subpackage behind an ABC
-        │   ├── common.py       # AgentAdapter/Conversation ABCs, AdapterCapabilities, query()
-        │   ├── registry.py     # Backend id -> session + one-shot builders (the only dispatch)
-        │   ├── claude/         # Claude engine: adapter, background, options, tools
-        │   └── codex/          # Codex/OpenAI engine: adapter, background, hooks, options, openai_compat
+        ├── adapters/           # ALL SDK-specific code, one Engine per backend
+        │   ├── common.py       # Client/Session run interface + unsupported-behavior errors
+        │   ├── engine.py       # Engine ABC and the only doors in: create_client(), query()
+        │   ├── matrix.py       # Capability table probed from the engines (never declared)
+        │   ├── claude/         # claude + claude-compat engines: engine, adapter, background, tools
+        │   └── codex/          # codex + openai-compat engines: engine, adapter, background, hooks, openai_compat
         ├── antipatterns.py     # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
         ├── options.py          # LupAgentOptions — backend-agnostic options crossing template -> lib
         ├── markers.py          # `# lup:` / `// lup:` review-marker scanning (dev comments)
@@ -153,7 +154,7 @@ Code in `packages/lup/` must be **complete-as-is and configurable through functi
 - **No imports from `lup_template`** in `lup` code — the dependency arrow points one way
 - **Placement test:** Can this module be used as-is in a different project without modification? If yes → `packages/lup/`. Does it import from `lup_template`? If yes → `src/lup_template/`.
 
-**Backend dispatch lives only in the adapter layer.** Consumer code — `core.py`, template tools, devtools — never branches on the backend (no `match settings.agent_sdk` / `match model_backend`). It builds one backend-agnostic `LupAgentOptions`, maps its SDK setting to a `Backend` id once (`backend_for_settings`), and calls `adapters.build_adapter(backend, opts)`; each engine (`adapters/claude/`, `adapters/codex/`) constructs its own native options behind the `AgentAdapter` ABC. A new cross-backend capability adds a field to `AdapterCapabilities` — which forces every engine to take a position — rather than a new `match`. `dev check --antipatterns` regression-guards this: a reintroduced backend `match` or `ServerConfig = Any` surfaces as a finding.
+**Backend dispatch lives only in the adapter layer.** Consumer code — `core.py`, template tools, devtools — never branches on the backend. It assembles one backend-agnostic `LupAgentOptions` and calls `create_client(options=..., engine=...)` (or the one-shot `query()`); `engine_for_id` in `lup.adapters.engine` is the one sanctioned dispatch, and each `Engine` (claude, claude-compat, codex, openai-compat) constructs its own native options behind the `Client`/`Session` interface. There are no capability declarations to branch on: an engine refuses intent knobs it cannot honor (`UnsupportedOptionsError`; `query()` drops them with a log line), raises `UnsupportedOperationError` at the point of use, and the README capability matrix is probed from that behavior rather than declared. A custom backend is an `Engine` subclass passed as `engine=` — no registry to edit. `dev check --antipatterns` regression-guards this: a reintroduced backend `match` outside the sanctioned dispatch or `ServerConfig = Any` surfaces as a finding.
 
 ---
 
