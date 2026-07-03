@@ -4,7 +4,7 @@ Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/
 
 ## Modules
 
-- `lup.adapters` — ALL SDK-specific code, one engine per subpackage behind the `AgentAdapter` ABC: `adapters.common` holds the ABCs, `AdapterCapabilities`, and one-shot `query()` with structured output; `adapters.registry` maps a backend id to a built adapter; `adapters.claude` and `adapters.codex` are the engines.
+- `lup.adapters` — ALL SDK-specific code, one engine per subpackage behind the `AgentAdapter` ABC: `adapters.common` holds the interface (ABCs, `AdapterCapabilities`) and one-shot `query()` with structured output; `adapters.registry` maps a backend id to the engine's session and one-shot builders; `adapters.claude` and `adapters.codex` are the engines.
 - `lup.options` / `lup.types` — backend-agnostic `LupAgentOptions` and the shared vocabulary (blocks, messages, events, `Usage`, `SubagentSpec`, `LupResponse`).
 - `lup.mcp` — `@lup_tool` decorator for MCP tools with typed Pydantic input/output, plus a patched `create_mcp_server` that preserves `is_error`.
 - `lup.hooks` — composable hook primitives: directory-based permissions, tool allowlists, tool gates (deny until a condition unlocks), nudges, capture hooks.
