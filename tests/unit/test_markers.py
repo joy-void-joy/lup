@@ -49,6 +49,13 @@ def test_python_skips_backtick_quoted_syntax_reference() -> None:
     assert find_feedback(source, ScanMode.PYTHON) == []
 
 
+def test_python_skips_double_backtick_quoted_syntax_reference() -> None:
+    # reStructuredText quotes inline code with double backticks, whose even
+    # run length defeats single-backtick parity alone.
+    source = '"""Docs that mention the ``# lup:`` marker syntax rst-style."""\n'
+    assert find_feedback(source, ScanMode.PYTHON) == []
+
+
 def test_syntax_error_does_not_swallow_a_real_note() -> None:
     source = "def broken(:\n# lup: still surfaced despite syntax error\n"
     assert texts(source, ScanMode.PYTHON) == ["still surfaced despite syntax error"]
@@ -119,12 +126,21 @@ def test_template_mention_mid_comment_is_not_a_todo() -> None:
     assert todo_texts(source, ScanMode.PYTHON) == []
 
 
-def test_template_todos_ignore_the_lup_file_optout() -> None:
-    # A file-level `# lup: ignore` opts out of *feedback* scanning only;
-    # the file's customization todos still surface.
+def test_file_level_ignore_is_not_itself_a_note() -> None:
+    # A file-level `# lup: ignore` opts the file out of anti-pattern checks;
+    # it is an ignore directive, so neither the feedback listing nor the
+    # customization todos report the line itself.
     source = "# lup: ignore\n# TEMPLATE: still a decision point\n"
     assert todo_texts(source, ScanMode.PYTHON) == ["still a decision point"]
     assert find_feedback(source, ScanMode.PYTHON) == []
+
+
+def test_feedback_note_surfaces_despite_file_level_ignore() -> None:
+    # The file-level opt-out silences anti-pattern checks, never feedback:
+    # a real note in an opted-out file (e.g. lup.markers itself) must reach
+    # `dev comments`, or review feedback silently disappears.
+    source = "# lup: ignore\nx = 1  # lup: real note\n"
+    assert texts(source, ScanMode.PYTHON) == ["real note"]
 
 
 def test_template_continuation_merges_and_stops_at_decoration() -> None:
