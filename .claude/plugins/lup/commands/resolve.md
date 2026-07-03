@@ -76,24 +76,15 @@ It merges nothing — it returns a **manifest**, one entry per concern: `{ id, t
 
 ## Phase 5 — Review with you
 
-The verifier is **advisory — you are the gate.** Build one **HTML review** so you can see every concern's implementation before anything merges.
-
-For each manifest entry that `committed`, gather its diff against the snapshot base:
+The verifier is **advisory — you are the gate.** Build one **HTML review** so you can see every concern's implementation before anything merges:
 
 ```
-git diff --stat <base>...resolve/<id>
-git diff <base>...resolve/<id>
+uv run lup-devtools dev resolve-review <manifest.json> --base <base> [--intro tmp/resolve-intro.html]
 ```
 
-Write a single self-contained `tmp/resolve-review.html`, then tell the user the path and offer to open it. Give each concern a section showing:
+Point it at the workflow's manifest (the task-output file, or the manifest JSON saved to a file). It writes a self-contained `tmp/resolve-review.html` — per concern: the title and generalized **spec**, the **original notes** each paired with the verifier's matching **`note_findings.how`** (*this* is "how each comment was addressed"), the editor's **summary** / **files_changed** / **swept_beyond_scope**, the diffstat and full colored **diff** against the base, and the verifier's verdict (**accepted**, **generalized**, **reason**, **residual**) — verifier-accepted concerns first, then the doubtful, then the uncommitted.
 
-- the **title** and the generalized **spec**
-- the **original notes** it subsumes, each paired with the verifier's matching **`note_findings.how`** — *this* is "how each comment was addressed"
-- the editor's **summary**, **files_changed**, and any **swept_beyond_scope**
-- the **diffstat** and the full **diff** (in a `<pre>`, lightly colored by leading `+`/`-`)
-- the verifier's verdict: **accepted**, **generalized**, **reason**, and **residual**
-
-Order verifier-accepted concerns first, then the doubtful ones, then any concern that did not commit. Keep it static (inline CSS, no external assets) so it opens straight from disk.
+Write the run-specific context (decisions taken in Phase 3, deferred concerns, anything the user must know before approving) as a short HTML fragment and pass it via `--intro`. Then tell the user the path and offer to open it.
 
 ## Phase 6 — Approve & integrate (per-concern gate)
 
