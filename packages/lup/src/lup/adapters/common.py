@@ -24,6 +24,14 @@ from lup.types import (
     LupDoneEvent,
     LupEvent,
     LupResponse,
+    LupTextBlock,
+    LupTextEvent,
+    LupThinkingBlock,
+    LupThinkingEvent,
+    LupToolResultBlock,
+    LupToolResultEvent,
+    LupToolUseBlock,
+    LupToolUseEvent,
     model_backend,
 )
 
@@ -293,8 +301,26 @@ class AgentAdapter(ABC):
         trace_logger: TraceLogger | None = None,
         prefix: str = "",
     ) -> AsyncGenerator[LupEvent, None]:
-        """Run with streaming events. Default falls back to non-streaming."""
+        """Run with streaming events.
+
+        The default runs the turn to completion and replays its blocks as
+        events — the ``post_hoc`` tier of ``capabilities.streaming``.
+        Engines with a live event stream override this.
+        """
         response = await self.run(prompt, trace_logger=trace_logger, prefix=prefix)
+        for block in response.blocks:
+            match block:
+                case LupThinkingBlock():
+                    yield LupThinkingEvent(thinking=block.thinking)
+                case LupTextBlock():
+                    yield LupTextEvent(text=block.text)
+                case LupToolUseBlock():
+                    yield LupToolUseEvent(id=block.id, name=block.name)
+                case LupToolResultBlock():
+                    yield LupToolResultEvent(
+                        tool_use_id=block.tool_use_id,
+                        content=str(block.content),
+                    )
         yield LupDoneEvent(blocks=response.blocks)
 
 
