@@ -16,7 +16,7 @@ import pytest
 from lup.adapters.codex.openai_compat import (
     OPENAI_COMPAT_API_KEY_ENV,
     OPENAI_COMPAT_PROVIDER_ID,
-    OpenAICompatibleAdapter,
+    OpenAICompatClient,
 )
 from lup.mcp import ToolResponse
 from lup.subagents import create_run_subagent_tool
@@ -276,8 +276,8 @@ class TestSubagentMaxTurnsGuard:
 
 
 class TestOpenAICompatProviderConfig:
-    def make_adapter(self) -> OpenAICompatibleAdapter:
-        return OpenAICompatibleAdapter(
+    def make_adapter(self) -> OpenAICompatClient:
+        return OpenAICompatClient(
             model="glm-4-7b",
             system_prompt="test",
             base_url="http://localhost:8000/v1",
@@ -316,7 +316,7 @@ class TestOpenAICompatProviderConfig:
         assert adapter.provider_env() == {OPENAI_COMPAT_API_KEY_ENV: "secret-key"}
 
     def test_explicit_provider_id_names_the_table(self) -> None:
-        adapter = OpenAICompatibleAdapter(
+        adapter = OpenAICompatClient(
             model="glm-4-7b",
             system_prompt="test",
             base_url="http://localhost:8000/v1",
@@ -335,14 +335,14 @@ class TestOpenAICompatProviderConfig:
         assert adapter.provider_env() == {OPENAI_COMPAT_API_KEY_ENV: "secret-key"}
 
     def test_no_overrides_without_base_url(self) -> None:
-        adapter = OpenAICompatibleAdapter(
+        adapter = OpenAICompatClient(
             model="llama-3.1-8b", system_prompt="test", mcp_tools=False
         )
         overrides = adapter.build_config_overrides()
         assert not any("model_provider" in o for o in overrides)
 
     def test_inherits_mcp_config_from_codex_base(self) -> None:
-        adapter = OpenAICompatibleAdapter(
+        adapter = OpenAICompatClient(
             model="glm-4-7b",
             system_prompt="test",
             base_url="http://localhost:8000/v1",
@@ -354,7 +354,7 @@ class TestOpenAICompatProviderConfig:
     def test_inherits_hook_config_from_codex_base(self) -> None:
         from lup.adapters.codex.adapter import CodexHookConfig
 
-        adapter = OpenAICompatibleAdapter(
+        adapter = OpenAICompatClient(
             model="glm-4-7b",
             system_prompt="test",
             mcp_tools=False,

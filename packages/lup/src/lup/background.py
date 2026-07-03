@@ -160,72 +160,8 @@ class BackgroundAgentParams(BaseModel):
     on_response: Callable[[object], None] | None = None
 
 
-def build_claude_background(params: BackgroundAgentParams) -> BaseBackgroundAgent:
-    """Build a Claude background agent (defaults to an opus-class model).
-
-    Claude backgrounds can act through tools, so they default to an opus-class
-    model when none is given.
-    """
-    from lup.adapters.claude.background import ClaudeBackgroundAgent
-
-    return ClaudeBackgroundAgent(
-        name=params.name,
-        system_prompt=params.system_prompt,
-        tools=params.tools or [],
-        build_message=params.build_message,
-        start_message=params.start_message,
-        model=params.model or "claude-opus-4-6",
-        debounce_seconds=params.debounce_seconds,
-        builtin_tools=params.builtin_tools,
-        allowed_tools=params.allowed_tools,
-        on_response=params.on_response,
-    )
-
-
-def build_codex_background(params: BackgroundAgentParams) -> BaseBackgroundAgent:
-    """Build a Codex background agent (text-only, explicit model required).
-
-    Tool support is a property of this engine: background tools share
-    in-process state with the main session, which cannot cross the Codex
-    subprocess boundary, so a tool request fails loudly. Codex accounts accept
-    only their own model list, so there is no safe default model.
-    """
-    if params.tools or params.builtin_tools or params.allowed_tools:
-        raise ValueError(
-            "Codex background agents cannot use tools: background "
-            "tools share in-process state with the main session, "
-            "which cannot cross the Codex subprocess boundary. "
-            "Use sdk='claude' for tool-using background agents."
-        )
-    if params.model is None:
-        raise ValueError(
-            "Codex background agents need an explicit model: Codex "
-            "accounts accept only their own model list (e.g. "
-            "gpt-5.5), so there is no safe default."
-        )
-    from lup.adapters.codex.background import CodexBackgroundAgent
-
-    return CodexBackgroundAgent(
-        name=params.name,
-        system_prompt=params.system_prompt,
-        build_message=params.build_message,
-        start_message=params.start_message,
-        model=params.model,
-        debounce_seconds=params.debounce_seconds,
-        on_response=params.on_response,
-    )
-
-
-type BackgroundBuilder = Callable[[BackgroundAgentParams], BaseBackgroundAgent]
-
-BACKGROUND_BUILDERS: dict[str, BackgroundBuilder] = {
-    "claude": build_claude_background,
-    "codex": build_codex_background,
-}
-
-
 def create_background_agent(
-    sdk: str,
+    engine: str,
     *,
     name: str,
     system_prompt: str,
@@ -238,30 +174,29 @@ def create_background_agent(
     allowed_tools: list[str] | None = None,
     on_response: Callable[[object], None] | None = None,
 ) -> BaseBackgroundAgent:
-    """Factory for creating SDK-appropriate background agents.
+    """Build the engine's background agent.
 
-    Dispatches to the engine builder registered for *sdk*; each builder owns
-    the validation and defaults that are properties of its backend (Codex
-    rejects tools and requires an explicit model). An unregistered *sdk*
-    raises.
+    Delegates to ``Engine.background`` — each engine owns the validation
+    and defaults that are properties of its backend (Codex rejects tools
+    and requires an explicit model; Claude defaults to an opus-class
+    model and can act through tools).
 
     Args:
-        sdk: "claude" or "codex".
+        engine: A shipped engine id ("claude", "codex", ...).
         name: Agent identifier.
         system_prompt: System prompt for the background agent.
         build_message: Callable that returns the next message or None.
         start_message: Initial message when agent starts.
-        model: Model override (defaults vary by SDK).
+        model: Model override (defaults vary by engine).
         debounce_seconds: Batch rapid wakes.
-        tools: LupMcpTool instances (Claude only).
-        builtin_tools: Built-in SDK tools (Claude only).
-        allowed_tools: Tool allowlist (Claude only).
+        tools: LupMcpTool instances (tool-capable engines only).
+        builtin_tools: Built-in SDK tools (tool-capable engines only).
+        allowed_tools: Tool allowlist (tool-capable engines only).
         on_response: Callback for responses.
     """
-    builder = BACKGROUND_BUILDERS.get(sdk)
-    if builder is None:
-        raise ValueError(f"Unknown SDK: {sdk}")
-    return builder(
+    from lup.adapters.engine import resolve_engine
+
+    return resolve_engine(engine).background(
         BackgroundAgentParams(
             name=name,
             system_prompt=system_prompt,

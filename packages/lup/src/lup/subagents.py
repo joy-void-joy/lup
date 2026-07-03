@@ -1,11 +1,11 @@
 """Spec-driven subagent delegation tool.
 
 Claude runs subagents natively (``AgentDefinition`` from a
-``SubagentSpec``). Backends without native subagents get this served
+``SubagentSpec``). Engines without native subagents get this served
 MCP tool instead: the agent calls ``run_subagent(name, task)`` and the
-tool dispatches a one-shot :func:`lup.adapters.common.query` to the
-backend that serves the spec's model. The same spec list drives both
-paths, so the available roles never diverge between backends.
+tool dispatches a one-shot :func:`lup.adapters.engine.query` to the
+engine that serves the spec's model. The same spec list drives both
+paths, so the available roles never diverge between engines.
 
 Specs that require tools can only run on the Claude backend (one-shot
 queries on other backends have no tool support); the tool fails loudly
@@ -16,9 +16,9 @@ import logging
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.common import query
+from lup.adapters.engine import engine_id_for_model, query
 from lup.mcp import LupMcpTool, ToolError, lup_tool
-from lup.types import SubagentSpec, model_backend
+from lup.types import SubagentSpec
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +73,8 @@ def create_run_subagent_tool(
             )
 
         model = spec.model or default_model
-        backend = model_backend(model)
-        if backend != "anthropic":
+        engine = engine_id_for_model(model)
+        if engine != "claude":
             claude_only: list[str] = []
             if spec.tools:
                 claude_only.append(f"tools={spec.tools}")
@@ -84,15 +84,15 @@ def create_run_subagent_tool(
                 fields = ", ".join(claude_only)
                 raise ToolError(
                     f"Subagent {spec.name!r} sets Claude-only fields ({fields}), "
-                    f"which one-shot queries on the {backend} backend cannot "
+                    f"which one-shot queries on the {engine} engine cannot "
                     "honor. Give the spec a Claude model, or drop these fields."
                 )
 
         logger.info(
-            "Delegating to subagent %r (model=%s, backend=%s)",
+            "Delegating to subagent %r (model=%s, engine=%s)",
             spec.name,
             model,
-            backend,
+            engine,
         )
         response = await query(
             validated.task,

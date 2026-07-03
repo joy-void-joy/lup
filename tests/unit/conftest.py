@@ -7,31 +7,24 @@ from pathlib import Path
 import pytest
 
 from lup import paths
-from lup.adapters.common import (
-    AdapterCapabilities,
-    Client,
-    Session,
-    OneShotRequest,
-)
+from lup.adapters.common import Client, Session
+from lup.adapters.engine import Engine
+from lup.options import LupAgentOptions
 from lup.trace import TraceLogger
 from lup.types import LupResponse, LupTextBlock
 
 LUP_PROJECT_VERSION = "1.2.3"
 
 
-def weak_capabilities() -> AdapterCapabilities:
-    """The Codex tier's declarations — the weakest shipped backend."""
-    from lup.adapters.codex.adapter import CodexAdapter
-
-    return CodexAdapter(model="probe", system_prompt="").capabilities
-
-
 class RecordingSession(Session):
-    """One canned turn per send; reports the request that produced it."""
+    """One canned turn per send; reports the options that produced it."""
 
-    def __init__(self, request: OneShotRequest, ran: list[OneShotRequest]) -> None:
-        self.request = request
+    def __init__(
+        self, opts: LupAgentOptions, ran: list[LupAgentOptions], *, resumed: str | None
+    ) -> None:
+        self.opts = opts
         self.ran = ran
+        self.id = resumed
 
     async def send(
         self,
@@ -40,40 +33,40 @@ class RecordingSession(Session):
         trace_logger: TraceLogger | None = None,
         prefix: str = "",
     ) -> LupResponse:
-        self.ran.append(self.request)
+        self.ran.append(self.opts)
         return LupResponse(blocks=[LupTextBlock(text="ok")])
 
 
 class RecordingClient(Client):
-    """A fake adapter carrying the one-shot request it was built from."""
+    """A fake client carrying the options it was built from."""
 
-    def __init__(self, request: OneShotRequest, engine: "RecordingOneShot") -> None:
-        self.request = request
-        self.engine = engine
-
-    @property
-    def capabilities(self) -> AdapterCapabilities:
-        return self.engine.declared
+    def __init__(self, opts: LupAgentOptions, ran: list[LupAgentOptions]) -> None:
+        self.opts = opts
+        self.ran = ran
 
     @asynccontextmanager
-    async def session(self) -> AsyncGenerator[Session, None]:
-        yield RecordingSession(self.request, self.engine.ran)
+    async def session(
+        self, *, resume: str | None = None
+    ) -> AsyncGenerator[Session, None]:
+        yield RecordingSession(self.opts, self.ran, resumed=resume)
 
 
-class RecordingOneShot:
-    """A fake engine to patch into ``registry.ONE_SHOT_BUILDERS``.
+class RecordingEngine(Engine):
+    """A fake engine passed as ``engine=``: records built and ran options.
 
-    ``backend_capabilities`` probes builders with a throwaway request, so
-    construction alone is not execution — a request lands in ``ran`` only
-    when its adapter's conversation actually sends a turn.
+    Construction alone is not execution — options land in ``ran`` only
+    when a session actually sends a turn.
     """
 
-    def __init__(self, capabilities: AdapterCapabilities | None = None) -> None:
-        self.ran: list[OneShotRequest] = []
-        self.declared = capabilities or weak_capabilities()
+    id = "recording"
 
-    def __call__(self, request: OneShotRequest) -> Client:
-        return RecordingClient(request, self)
+    def __init__(self) -> None:
+        self.built: list[LupAgentOptions] = []
+        self.ran: list[LupAgentOptions] = []
+
+    def client(self, opts: LupAgentOptions) -> Client:
+        self.built.append(opts)
+        return RecordingClient(opts, self.ran)
 
 
 @pytest.fixture

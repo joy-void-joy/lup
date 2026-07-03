@@ -387,34 +387,9 @@ EFFORT_MAP_CODEX: dict[str, str] = {
 }
 
 
-def normalize_effort(effort: str | None, backend: str) -> str | None:
+def normalize_effort(effort: str | None, engine: str) -> str | None:
     """Map a generic effort level to SDK-specific value."""
     if effort is None:
         return None
-    effort_map = EFFORT_MAP_CLAUDE if backend == "anthropic" else EFFORT_MAP_CODEX
+    effort_map = EFFORT_MAP_CLAUDE if engine == "claude" else EFFORT_MAP_CODEX
     return effort_map.get(effort, effort)
-
-
-type Backend = Literal["anthropic", "openai", "openai-compatible"]
-"""Backend identifier — returned by model_backend, accepted by query()."""
-
-ANTHROPIC_MODEL_PREFIXES: tuple[str, ...] = ("claude-",)
-ANTHROPIC_MODEL_ALIASES: frozenset[str] = frozenset({"haiku", "sonnet", "opus"})
-OPENAI_MODEL_PREFIXES: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-", "o5-", "codex-")
-
-
-def model_backend(model: str) -> Backend:
-    """Determine the backend for a model name by prefix inference.
-
-    Returns "anthropic" for Claude models, "openai" for GPT/O-series and
-    Codex models, "openai-compatible" for everything else (open-source
-    models served via vLLM, Ollama, TGI, etc.). The prefix tables above
-    are module-level so downstream projects can extend them; for aliased
-    or gateway model ids, pass ``backend=`` to
-    :func:`lup.adapters.common.query` to bypass inference entirely.
-    """
-    if model.startswith(ANTHROPIC_MODEL_PREFIXES) or model in ANTHROPIC_MODEL_ALIASES:
-        return "anthropic"
-    if model.startswith(OPENAI_MODEL_PREFIXES):
-        return "openai"
-    return "openai-compatible"

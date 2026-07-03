@@ -8,6 +8,7 @@ Consumer code (core.py) imports ``ClaudeAdapter`` and the setup
 functions — never ``claude_agent_sdk`` directly.
 """
 
+import copy
 import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
@@ -44,11 +45,7 @@ from claude_agent_sdk.types import (
     UserMessage,
 )
 
-from lup.adapters.common import (
-    AdapterCapabilities,
-    Client,
-    Session,
-)
+from lup.adapters.common import Client, Session
 from lup.mcp import LupMcpServerConfig, LupMcpTool, LupToolHandler
 from lup.trace import TraceLogger, print_message
 from lup.types import (
@@ -467,16 +464,22 @@ async def collect_lup_response(
 
 
 class ClaudeSession(Session):
-    """Multi-turn conversation via the Claude Agent SDK."""
+    """Multi-turn conversation via the Claude Agent SDK.
+
+    ``id`` carries the SDK session id: seeded when the session was opened
+    with ``resume=``, refreshed from each turn's result otherwise.
+    """
 
     def __init__(
         self,
         client: ClaudeSDKClient,
         *,
         usage_normalizer: ClaudeUsageNormalizer = extract_token_usage,
+        resumed: str | None = None,
     ) -> None:
         self.client = client
         self.usage_normalizer = usage_normalizer
+        self.id = resumed
 
     async def send(
         self,
@@ -486,22 +489,24 @@ class ClaudeSession(Session):
         prefix: str = "",
     ) -> LupResponse:
         await self.client.query(prompt)
-        return await collect_lup_response(
+        response = await collect_lup_response(
             self.client,
             usage_normalizer=self.usage_normalizer,
             trace_logger=trace_logger,
             prefix=prefix,
         )
+        self.id = response.session_id or self.id
+        return response
 
     async def interrupt(self) -> None:
         await self.client.interrupt()
 
 
-class ClaudeAdapter(Client):
+class ClaudeClient(Client):
     """Run prompts via the Claude Agent SDK.
 
     Args:
-        options: Native SDK options built by the consumer.
+        options: Native SDK options built by the engine.
         usage_normalizer: Transforms the raw SDK usage payload into a
             ``Usage`` (or subclass, for vendor-specific fields).
     """
@@ -515,37 +520,27 @@ class ClaudeAdapter(Client):
         self.options = options
         self.usage_normalizer = usage_normalizer
 
-    @property
-    def capabilities(self) -> AdapterCapabilities:
-        return AdapterCapabilities(
-            hooks=True,
-            native_subagents=True,
-            streaming="live",
-            interrupt=True,
-            stop_event=True,
-            cost_reporting="native",
-            duration_reporting=True,
-            permission_modes=True,
-            max_turns=True,
-            max_thinking_tokens=True,
-            background_tools=True,
-            realtime="in_process",
-            turn_timeout=False,
-        )
-
     @asynccontextmanager
-    async def session(self) -> AsyncGenerator[Session, None]:
-        async with ClaudeSDKClient(options=self.options) as client:
-            yield ClaudeSession(client, usage_normalizer=self.usage_normalizer)
+    async def session(
+        self, *, resume: str | None = None
+    ) -> AsyncGenerator[Session, None]:
+        options = self.options
+        if resume:
+            options = copy.copy(self.options)
+            options.resume = resume
+        async with ClaudeSDKClient(options=options) as client:
+            yield ClaudeSession(
+                client, usage_normalizer=self.usage_normalizer, resumed=resume
+            )
 
-    async def run_streamed(
+    async def stream(
         self,
         prompt: str,
         *,
         trace_logger: TraceLogger | None = None,
         prefix: str = "",
     ) -> AsyncGenerator[LupEvent, None]:
-        """Stream events from the Claude SDK."""
+        """Stream events live from the Claude SDK."""
         collected: list[LupContentBlock] = []
         async with ClaudeSDKClient(options=self.options) as client:
             await client.query(prompt)

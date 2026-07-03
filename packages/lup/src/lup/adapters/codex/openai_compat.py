@@ -1,29 +1,31 @@
-"""OpenAI-compatible API adapter via the Codex SDK.
+"""OpenAI-protocol endpoints through the Codex runtime.
 
-Routes open-source models (GLM-4, Llama, DeepSeek, etc.) through the
-Codex runtime by setting the ``model_provider`` parameter on thread
-# lup: What? No, GLM should be rooted through the claude scaffolding, not through codex
-# lup: See the aio3 folder
-start. The Codex CLI handles the actual OpenAI-compatible API calls,
-sandboxing, and tool execution.
+One of two homes for open models, chosen by API protocol: an endpoint
+speaking the OpenAI protocol runs here on the Codex runtime (custom
+``model_providers`` definition, native sandboxing, served tools), while
+an Anthropic-protocol endpoint runs on ``claude-compat``
+(:class:`~lup.adapters.claude.engine.ClaudeCompatEngine`) and keeps the
+full Claude scaffolding — hooks, permission modes, native subagents.
 
-Uses the same ``openai_codex`` SDK as the standard Codex adapter —
+Uses the same ``openai_codex`` SDK as the standard Codex client —
 no additional dependencies needed.
 """
 
 import logging
-from collections.abc import AsyncGenerator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
+from contextlib import AbstractContextManager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lup.adapters.codex.adapter import (
-    CodexAdapter,
+    CodexClient,
     CodexHookConfig,
     CodexUsageNormalizer,
-    require_codex_sdk,
 )
-from lup.adapters.common import Session
 from lup.types import JsonObject, UsageCost
+
+if TYPE_CHECKING:
+    from openai_codex import CodexConfig
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +45,11 @@ injected into the Codex subprocess env under this name.
 """
 
 
-class OpenAICompatibleAdapter(CodexAdapter):
+class OpenAICompatClient(CodexClient):
     """Run prompts via any OpenAI-compatible endpoint through Codex.
 
-    Extends CodexAdapter by passing ``model_provider`` to route
-    requests to a custom OpenAI-compatible API endpoint.
+    Extends CodexClient by defining a custom provider from ``base_url``
+    and selecting it via ``model_provider`` when threads open.
     """
 
     def __init__(
@@ -71,6 +73,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
         max_budget_usd: float | None = None,
         usage_cost: UsageCost | None = None,
         turn_timeout_seconds: float | None = None,
+        cleanup: AbstractContextManager[object] | None = None,
     ) -> None:
         super().__init__(
             model=model,
@@ -88,6 +91,7 @@ class OpenAICompatibleAdapter(CodexAdapter):
             max_budget_usd=max_budget_usd,
             usage_cost=usage_cost,
             turn_timeout_seconds=turn_timeout_seconds,
+            cleanup=cleanup,
         )
         self.base_url = base_url
         self.api_key = api_key
@@ -137,27 +141,11 @@ class OpenAICompatibleAdapter(CodexAdapter):
             )
         return overrides
 
-    @asynccontextmanager
-    async def session(self) -> AsyncGenerator[Session, None]:
-        require_codex_sdk()
+    def codex_config(self) -> "CodexConfig":
+        """Extend the runtime config with the provider's API-key env."""
+        from openai_codex import CodexConfig
 
-        from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
-
-        config = CodexConfig(
+        return CodexConfig(
             config_overrides=tuple(self.build_config_overrides()),
             env=self.provider_env() or None,
         )
-
-        async with AsyncCodex(config=config) as codex:
-            thread = await codex.thread_start(
-                model=self.model,
-                model_provider=self.model_provider,
-                developer_instructions=self.system_prompt,
-                sandbox=Sandbox(self.sandbox) if self.sandbox else None,
-                approval_mode=(
-                    ApprovalMode(self.approval_policy)
-                    if self.approval_policy
-                    else ApprovalMode.auto_review
-                ),
-            )
-            yield self.make_session(thread)

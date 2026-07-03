@@ -34,7 +34,7 @@ class TestCreateBackgroundAgent:
             )
 
     def test_unknown_sdk_raises(self) -> None:
-        with pytest.raises(ValueError, match="Unknown SDK"):
+        with pytest.raises(ValueError, match="Unknown engine"):
             create_background_agent(
                 "gemini",
                 name="observer",

@@ -71,6 +71,7 @@ async def run_session(
     task: str,
     *,
     session_id: str | None = None,
+    resume: str | None = None,
 ) -> AgentSessionResult:
     """Run an agent session with the given task.
 
@@ -80,6 +81,7 @@ async def run_session(
     Args:
         task: The task/prompt for the agent.
         session_id: Optional session identifier.
+        resume: Engine session id to continue (already resolved).
 
     Returns:
         AgentSessionResult with the agent's output and metadata.
@@ -89,6 +91,7 @@ async def run_session(
     result = await run_agent(
         task,
         session_id=session_id,
+        resume=resume,
     )
 
     logger.info(
@@ -143,6 +146,14 @@ def run(
         str | None,
         typer.Option("--session-id", "-s", help="Optional session identifier"),
     ] = None,
+    resume: Annotated[
+        str | None,
+        typer.Option(
+            "--resume",
+            help="Continue a previous run's conversation: a saved session "
+            "name (looked up in history) or a raw engine session id",
+        ),
+    ] = None,
     persistent: Annotated[
         bool,
         typer.Option(
@@ -170,7 +181,13 @@ def run(
         typer.echo(f"\nPersistent session ended after {turns} turn(s).")
         return
 
-    result = asyncio.run(run_session(task, session_id=session_id))
+    resume_token = None
+    if resume is not None:
+        from lup_template.agent.core import resolve_resume_token
+
+        resume_token = resolve_resume_token(resume)
+
+    result = asyncio.run(run_session(task, session_id=session_id, resume=resume_token))
     print_result(result)
 
 

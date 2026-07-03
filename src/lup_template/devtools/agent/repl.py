@@ -9,8 +9,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
-
     from rich.console import Console
 
     from lup.adapters.common import Client, Session
@@ -139,18 +137,18 @@ def apply_repl_overrides(
     if not no_tools and not no_prompt:
         return
 
-    from lup.adapters.claude.adapter import ClaudeAdapter
-    from lup.adapters.codex.adapter import CodexAdapter
+    from lup.adapters.claude.adapter import ClaudeClient
+    from lup.adapters.codex.adapter import CodexClient
 
     match adapter:
-        case ClaudeAdapter():
+        case ClaudeClient():
             options = adapter.options
             if no_tools:
                 options.mcp_servers = {}
                 options.allowed_tools = []
             if no_prompt:
                 options.system_prompt = None
-        case CodexAdapter():
+        case CodexClient():
             if no_tools:
                 adapter.mcp_tools = False
             if no_prompt:
@@ -168,26 +166,26 @@ def build_repl_adapter(
     *,
     no_tools: bool,
     no_prompt: bool,
-) -> tuple[Client, AbstractContextManager[object]]:
-    """Build the agent adapter for a REPL session, overrides applied.
+) -> Client:
+    """Build the agent client for a REPL session, overrides applied.
 
-    ``build_adapter`` reads ``settings.model`` for every backend, so the
-    ``--model`` override is set there for the build and restored after.
-    ``--no-tools``/``--no-prompt`` are realized via
-    :func:`apply_repl_overrides`. The caller enters the returned context
-    (e.g. sandbox lifecycle) around the conversation.
+    ``build_session_client`` reads ``settings.model`` for every engine, so
+    the ``--model`` override is set there for the build and restored
+    after. ``--no-tools``/``--no-prompt`` are realized via
+    :func:`apply_repl_overrides`. Session-scoped resources (sandbox
+    cleanup) live inside ``client.session()``.
     """
-    from lup_template.agent.core import build_adapter
+    from lup_template.agent.core import build_session_client
 
     original_model = settings.model
     if model:
         settings.model = model
     try:
-        built, _notes = build_adapter("repl")
+        build = build_session_client("repl")
     finally:
         settings.model = original_model
-    apply_repl_overrides(built.adapter, no_tools=no_tools, no_prompt=no_prompt)
-    return built.adapter, built.lifecycle
+    apply_repl_overrides(build.client, no_tools=no_tools, no_prompt=no_prompt)
+    return build.client
 
 
 def print_response_stats(response: LupResponse, console: "Console") -> float:
@@ -232,20 +230,17 @@ async def exec_once(
     from rich.console import Console
 
     console = Console(highlight=False)
-    adapter, adapter_ctx = build_repl_adapter(
-        model, no_tools=no_tools, no_prompt=no_prompt
-    )
-    with adapter_ctx:
-        async with adapter.session() as conv:
-            try:
-                response = await send_interruptible(conv, prompt, console)
-            except Interrupted:
-                console.print("  [dim]interrupted[/dim]\n")
-                return
-            except RuntimeError as e:
-                console.print(f"  [red]error:[/red] {e}\n")
-                raise typer.Exit(1) from e
-            print_response_stats(response, console)
+    adapter = build_repl_adapter(model, no_tools=no_tools, no_prompt=no_prompt)
+    async with adapter.session() as conv:
+        try:
+            response = await send_interruptible(conv, prompt, console)
+        except Interrupted:
+            console.print("  [dim]interrupted[/dim]\n")
+            return
+        except RuntimeError as e:
+            console.print(f"  [red]error:[/red] {e}\n")
+            raise typer.Exit(1) from e
+        print_response_stats(response, console)
 
 
 async def repl(
@@ -364,10 +359,7 @@ async def repl(
     )
 
     try:
-        adapter, adapter_ctx = build_repl_adapter(
-            model, no_tools=no_tools, no_prompt=no_prompt
-        )
-        stack.enter_context(adapter_ctx)
+        adapter = build_repl_adapter(model, no_tools=no_tools, no_prompt=no_prompt)
 
         async with stack:
             async with adapter.session() as conv:
