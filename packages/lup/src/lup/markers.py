@@ -2,8 +2,9 @@
 # lup: I do not feel comfortable with a generic # lup: ignore like that. I think this should have types, like pyright does, for instance # lup: ignore[regex]
 """Inline marker scanning for the repo's two marker families.
 
-- Review notes (`# lup:` / `// lup:`): actionable feedback left in the code,
-  with an `ignore` directive and a file-level opt-out. The
+- Review notes (`# lup:` / `// lup:`): actionable feedback left in the code;
+  the `ignore` keyword — inline or standalone file-level — is the
+  anti-pattern escape hatch, never a note and never a reason to hide one. The
   `lup-devtools dev comments` scanner uses this to list unresolved feedback;
   the edit-permission hook mirrors `MARKER_RE` to prompt whenever an edit
   adds or removes a marker.
@@ -37,7 +38,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-#lup: This feels like a duplicate of antipattern? Probably both files should be in a common folder (like markers/ or something) and dedup the commonalities
+# lup: This feels like a duplicate of antipattern? Probably both files should be in a common folder (like markers/ or something) and dedup the commonalities
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 IGNORE_RE = re.compile(r"(#|//)\s*lup\s*:\s*ignore\b", re.IGNORECASE)
 FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*lup\s*:\s*ignore\s*$", re.IGNORECASE)
@@ -77,7 +78,7 @@ def scan_mode_for(path: Path) -> str:
     skipped, everything else is plain line-scanned.
     """
     suffix = path.suffix.lower()
-    if suffix in PYTHON_SUFFIXES: # lup: Should be a match
+    if suffix in PYTHON_SUFFIXES:  # lup: Should be a match
         return ScanMode.PYTHON
     if suffix in MARKDOWN_SUFFIXES:
         return ScanMode.MARKDOWN
@@ -112,8 +113,14 @@ def has_file_level_ignore(text: str, max_lines: int = 10) -> bool:
 
 
 def inside_inline_code(line: str, pos: int) -> bool:
-    """Whether character `pos` falls inside a backtick code span (a doc example)."""
-    return line[:pos].count("`") % 2 == 1
+    """Whether character `pos` falls inside a backtick code span (a doc example).
+
+    Odd single-backtick parity catches a marker mid-span; a backtick run
+    directly before the marker catches rst-style double-backtick quoting,
+    whose even-length run defeats the parity check.
+    """
+    prefix = line[:pos]
+    return prefix.count("`") % 2 == 1 or prefix.endswith("`")
 
 
 def python_comment_columns(text: str) -> dict[int, int] | None:
@@ -174,7 +181,7 @@ def find_markers(
     *,
     marker: re.Pattern[str],
     ignore: re.Pattern[str] | None = None,
-) -> list[MarkerComment]: #lup: Yeah, this feels very duplicated from antipatterns.py
+) -> list[MarkerComment]:  # lup: Yeah, this feels very duplicated from antipatterns.py
     """Extract one marker family's notes from a file's text under a `ScanMode`.
 
     A note is a marker line plus the contiguous same-style comment lines below
@@ -263,9 +270,9 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     """Extract `# lup:` review notes from a file's text.
 
     Binds :func:`find_markers` to the review-note rules: `ignore` directives
-    are skipped (they are the anti-pattern escape hatch, not feedback), and a
-    file-level `# lup: ignore` opts the whole file out.
+    are skipped — they are the anti-pattern escape hatch, not feedback. That
+    covers the standalone file-level `# lup: ignore` too: it disables
+    anti-pattern checks (see `lup.antipatterns`), never note gathering, so
+    feedback in an opted-out file still surfaces.
     """
-    if has_file_level_ignore(text):
-        return []
     return find_markers(text, mode, marker=MARKER_RE, ignore=IGNORE_RE)
