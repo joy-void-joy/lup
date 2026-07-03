@@ -1,5 +1,6 @@
 """Typer command tree for dev operations: worktrees, branches, PRs, checks."""
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -12,6 +13,7 @@ import lup_template.devtools.dev.conflicts as conflicts
 import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.plugin as plugin
 import lup_template.devtools.dev.pr as pr
+import lup_template.devtools.dev.resolve_review as resolve_review
 import lup_template.devtools.dev.worktree as worktree
 
 app = typer.Typer(no_args_is_help=True)
@@ -166,6 +168,39 @@ def resolve_branch_cmd(
     no special case for the editor — autonomy for the editor lives in the edit hook.
     """
     branches.create_resolve_branch(concern_id)
+
+
+@app.command("resolve-review")
+def resolve_review_cmd(
+    manifest: Annotated[
+        Path,
+        typer.Argument(help="Manifest JSON: workflow task output or a bare array"),
+    ],
+    base: Annotated[
+        str,
+        typer.Option(
+            "--base", help="Snapshot base ref the resolve branches diff against"
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option("--out", help="Output HTML path"),
+    ] = Path("tmp/resolve-review.html"),
+    intro: Annotated[
+        Path | None,
+        typer.Option(
+            "--intro", help="HTML fragment prepended as a run-specific header"
+        ),
+    ] = None,
+) -> None:
+    """Render a /lup:resolve manifest and its branch diffs into one static HTML review.
+
+    One section per concern: the generalized spec, each original note paired with
+    the verifier's per-note finding, the editor summary, the verdict, and the full
+    colored diff against the base. The /lup:resolve command runs this in Phase 5
+    so the human gate reviews concrete diffs instead of prose.
+    """
+    resolve_review.build_review(manifest, base, out, intro)
 
 
 # -- conflict commands --
