@@ -10,11 +10,12 @@ to what the backend supports rather than raising.
 import pytest
 
 import lup.subagents
-from lup.adapters import common
-from lup.adapters.common import OneShotRequest, query
+from lup.adapters import registry
+from lup.adapters.common import query
 from lup.mcp import ToolResponse
 from lup.subagents import create_run_subagent_tool
 from lup.types import JsonValue, LupResponse, LupTextBlock, SubagentSpec
+from tests.unit.conftest import RecordingOneShot
 
 RESEARCHER = SubagentSpec(
     name="researcher",
@@ -101,27 +102,17 @@ class TestQueryOptionHonesty:
     async def test_budget_degrades_on_other_backends(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        captured: list[OneShotRequest] = []
-
-        async def runner(request: OneShotRequest) -> LupResponse:
-            captured.append(request)
-            return LupResponse(blocks=[LupTextBlock(text="ok")])
-
-        monkeypatch.setitem(common.QUERY_RUNNERS, "openai", runner)
+        engine = RecordingOneShot()
+        monkeypatch.setitem(registry.ONE_SHOT_BUILDERS, "openai", engine)
         await query("hi", model="gpt-5.5", max_budget_usd=1.0)
 
-        assert captured[0].max_budget_usd is None
+        assert engine.ran[0].max_budget_usd is None
 
     async def test_tools_degrade_on_openai_compatible_backend(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        captured: list[OneShotRequest] = []
-
-        async def runner(request: OneShotRequest) -> LupResponse:
-            captured.append(request)
-            return LupResponse(blocks=[LupTextBlock(text="ok")])
-
-        monkeypatch.setitem(common.QUERY_RUNNERS, "openai-compatible", runner)
+        engine = RecordingOneShot()
+        monkeypatch.setitem(registry.ONE_SHOT_BUILDERS, "openai-compatible", engine)
         await query("hi", model="llama-3-70b", tools=["Read"])
 
-        assert captured[0].options.tools is None
+        assert engine.ran[0].options.tools is None

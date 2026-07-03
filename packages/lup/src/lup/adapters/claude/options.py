@@ -17,6 +17,7 @@ from lup.adapters.claude.adapter import (
     lup_server_to_claude,
     spec_to_claude,
 )
+from lup.adapters.common import OneShotRequest
 from lup.mcp import LupMcpServerConfig, McpServerEntry, RawMcpServerConfig
 from lup.options import BuiltAdapter, LupAgentOptions
 from lup.types import normalize_effort
@@ -94,3 +95,29 @@ def build_claude_options(opts: LupAgentOptions) -> ClaudeAgentOptions:
 def build_claude_adapter(opts: LupAgentOptions) -> BuiltAdapter:
     """Build the Claude adapter; its lifecycle is the caller-supplied sandbox."""
     return BuiltAdapter(adapter=ClaudeAdapter(build_claude_options(opts)))
+
+
+def build_claude_one_shot(request: OneShotRequest) -> ClaudeAdapter:
+    """Build the adapter for a one-shot :func:`lup.adapters.common.query`.
+
+    A nested LLM call, not a session: the system prompt is used raw (no
+    ``claude_code`` preset), nothing persists, no sandbox is enabled, and
+    the only knobs are the capability-gated ones the request carries.
+    """
+    options = ClaudeAgentOptions(
+        model=request.model,
+        system_prompt=request.system_prompt,
+        tools=request.options.tools,
+        allowed_tools=request.options.allowed_tools or [],
+        permission_mode=request.options.permission_mode,
+        max_thinking_tokens=request.options.max_thinking_tokens,
+        max_turns=request.options.max_turns,
+        max_budget_usd=request.max_budget_usd,
+        output_format=(
+            {"type": "json_schema", "schema": request.output_schema}
+            if request.output_schema
+            else None
+        ),
+        extra_args={"no-session-persistence": None},
+    )
+    return ClaudeAdapter(options)

@@ -12,6 +12,7 @@ from contextlib import AbstractContextManager, nullcontext
 
 from lup.adapters.codex.adapter import CodexAdapter
 from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
+from lup.adapters.common import OneShotRequest
 from lup.options import BuiltAdapter, LupAgentOptions
 from lup.realtime_relay import RealtimeMailbox
 
@@ -93,4 +94,32 @@ def build_openai_adapter(opts: LupAgentOptions) -> BuiltAdapter:
         adapter=adapter,
         lifecycle=subprocess_sandbox_cleanup(opts),
         mailbox=mailbox,
+    )
+
+
+def build_codex_one_shot(request: OneShotRequest) -> CodexAdapter:
+    """Build the adapter for a one-shot query on the Codex runtime.
+
+    No tool subprocesses: a one-shot has no session context to serve, so
+    MCP stays off and the runtime's own toolset is what the model gets.
+    """
+    return CodexAdapter(
+        model=request.model,
+        system_prompt=request.system_prompt or "",
+        output_schema=request.output_schema,
+        mcp_tools=False,
+    )
+
+
+def build_openai_one_shot(request: OneShotRequest) -> OpenAICompatibleAdapter:
+    """Build the one-shot adapter for an OpenAI-compatible endpoint.
+
+    Endpoint configuration (base URL, provider) comes from the caller's
+    ambient Codex config — a one-shot request carries none.
+    """
+    return OpenAICompatibleAdapter(
+        model=request.model,
+        system_prompt=request.system_prompt or "",
+        output_schema=request.output_schema,
+        mcp_tools=False,
     )

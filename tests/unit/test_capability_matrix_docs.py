@@ -5,10 +5,8 @@ a capability declaration and this test fails until the README table is
 regenerated, so documentation cannot drift from code.
 """
 
-from lup.adapters.common import (
-    canonical_capability_matrix,
-    capability_matrix_markdown,
-)
+from lup.adapters.common import capability_matrix_markdown
+from lup.adapters.registry import canonical_capability_matrix
 from lup.paths import project_root
 
 

@@ -436,9 +436,9 @@ def build_backend_capabilities(backend: "Backend") -> AdapterCapabilities:
     Built without standing up a full session — the static support flags are
     what the assembly choice and the settings guard read.
     """
-    from lup.adapters.common import query_capabilities
+    from lup.adapters.registry import backend_capabilities
 
-    return query_capabilities(backend)
+    return backend_capabilities(backend)
 
 
 async def run_agent(

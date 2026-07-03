@@ -12,12 +12,12 @@ it can.
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions
 
-from lup.adapters import common
+from lup.adapters import registry
 from lup.adapters.claude.adapter import ClaudeAdapter
 from lup.adapters.codex.adapter import CodexAdapter, per_mtok_usage_cost
-from lup.adapters.common import OneShotRequest, query
+from lup.adapters.common import query
 from lup.adapters.codex.openai_compat import OpenAICompatibleAdapter
-from lup.types import LupResponse, LupTextBlock
+from tests.unit.conftest import RecordingOneShot
 
 
 def test_claude_capabilities_full_tier() -> None:
@@ -64,38 +64,27 @@ def test_openai_compat_inherits_codex_capabilities() -> None:
     assert caps.streaming == "post_hoc"
 
 
-class RequestRecorder:
-    def __init__(self) -> None:
-        self.request: OneShotRequest | None = None
-
-    async def __call__(self, request: OneShotRequest) -> LupResponse:
-        self.request = request
-        return LupResponse(blocks=[LupTextBlock(text="ok")])
-
-
 async def test_query_drops_oneshot_budget_on_weak_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A one-shot budget the Codex runtime can't enforce is dropped, not raised."""
-    recorder = RequestRecorder()
-    monkeypatch.setitem(common.QUERY_RUNNERS, "openai", recorder)
+    engine = RecordingOneShot()
+    monkeypatch.setitem(registry.ONE_SHOT_BUILDERS, "openai", engine)
 
     response = await query("hi", model="gpt-5.5", max_budget_usd=1.0)
 
     assert response.text == "ok"
-    assert recorder.request is not None
-    assert recorder.request.max_budget_usd is None
+    assert engine.ran[0].max_budget_usd is None
 
 
 async def test_query_drops_claude_only_options_on_weak_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Claude-only options degrade away on a backend without hooks/turn caps."""
-    recorder = RequestRecorder()
-    monkeypatch.setitem(common.QUERY_RUNNERS, "openai", recorder)
+    engine = RecordingOneShot()
+    monkeypatch.setitem(registry.ONE_SHOT_BUILDERS, "openai", engine)
 
     await query("hi", model="gpt-5.5", max_turns=3, tools=["Read"])
 
-    assert recorder.request is not None
-    assert recorder.request.options.max_turns is None
-    assert recorder.request.options.tools is None
+    assert engine.ran[0].options.max_turns is None
+    assert engine.ran[0].options.tools is None

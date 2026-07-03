@@ -234,26 +234,24 @@ def run_capabilities(markdown: bool) -> None:
     ``tests/unit/test_capability_matrix_docs.py`` keeps the README copy
     identical to this output.
     """
-    from lup.adapters.common import (
-        AdapterCapabilities,
-        canonical_capability_matrix,
-        capability_matrix_markdown,
-    )
+    from lup.adapters.common import AdapterCapabilities, capability_matrix_markdown
+    from lup.adapters.registry import canonical_capability_matrix
 
     matrix = canonical_capability_matrix()
     if markdown:
         typer.echo(capability_matrix_markdown(matrix))
         return
 
-    names = list(matrix)
     fields = list(AdapterCapabilities.model_fields)
     label_width = max(len(field) for field in fields)
 
-    typer.echo(" " * (label_width + 2) + "".join(f"{name:>10}" for name in names))
+    typer.echo(
+        " " * (label_width + 2) + "".join(f"{entry.name:>10}" for entry in matrix)
+    )
     for field in fields:
         cells: list[str] = []
-        for name in names:
-            match getattr(matrix[name], field):
+        for entry in matrix:
+            match getattr(entry.capabilities, field):
                 case bool() as flag:
                     cells.append(f"{'yes' if flag else '—':>10}")
                 case value:
