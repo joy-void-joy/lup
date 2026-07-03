@@ -13,7 +13,7 @@ from typing import cast
 
 import pytest
 
-from lup.adapters.codex.openai_compat import (
+from lup.adapters.openai_compat import (
     OPENAI_COMPAT_API_KEY_ENV,
     OPENAI_COMPAT_PROVIDER_ID,
     OpenAICompatClient,
@@ -41,7 +41,7 @@ class TestCodexItemCoverage:
     def test_unknown_variant_is_not_dropped(self) -> None:
         from openai_codex.generated.v2_all import PlanThreadItem, ThreadItem
 
-        from lup.adapters.codex.adapter import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=PlanThreadItem(id="plan_1", text="step one\nstep two", type="plan")
@@ -60,7 +60,7 @@ class TestCodexItemCoverage:
             WebSearchThreadItem,
         )
 
-        from lup.adapters.codex.adapter import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=WebSearchThreadItem(
@@ -91,7 +91,7 @@ class TestCodexItemCoverage:
             WebSearchThreadItem,
         )
 
-        from lup.adapters.codex.adapter import codex_items_to_lup
+        from lup.adapters.codex import codex_items_to_lup
         from lup_template.agent.core import extract_sources
 
         item = ThreadItem(
@@ -111,7 +111,7 @@ class TestCodexItemCoverage:
 
 class TestSpecToClaudeModel:
     def test_full_model_id_passes_through(self) -> None:
-        from lup.adapters.claude.adapter import spec_to_claude
+        from lup.adapters.claude import spec_to_claude
 
         spec = SubagentSpec(
             name="deep",
@@ -123,7 +123,7 @@ class TestSpecToClaudeModel:
         assert agent_def.model == "claude-opus-4-6"
 
     def test_alias_still_passes_through(self) -> None:
-        from lup.adapters.claude.adapter import spec_to_claude
+        from lup.adapters.claude import spec_to_claude
 
         spec = SubagentSpec(
             name="quick",
@@ -143,7 +143,7 @@ class TestToolResultRelay:
     async def test_post_tool_use_response_populates_tool_result(self) -> None:
         from claude_agent_sdk.types import HookContext, PostToolUseHookInput
 
-        from lup.adapters.claude.adapter import build_claude_hook_handler
+        from lup.adapters.claude import build_claude_hook_handler
         from lup.types import LupHookInput, LupHookMatcher, LupHookOutput
 
         seen: dict[str, str] = {}
@@ -352,7 +352,7 @@ class TestOpenAICompatProviderConfig:
         assert any("mcp_servers.notes" in o for o in overrides)
 
     def test_inherits_hook_config_from_codex_base(self) -> None:
-        from lup.adapters.codex.adapter import CodexHookConfig
+        from lup.adapters.codex import CodexHookConfig
 
         adapter = OpenAICompatClient(
             model="glm-4-7b",

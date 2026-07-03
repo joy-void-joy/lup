@@ -31,6 +31,10 @@ introspectable, and unlike ``Any`` it keeps the type checker honest.
 type JsonObject = dict[str, JsonValue]
 """A JSON object: tool inputs, JSON Schemas, structured outputs, session data."""
 
+type PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
+"""How a session prompts for tool permission — a neutral intent knob;
+engines without permission modes refuse it at construction."""
+
 
 # ---------------------------------------------------------------------------
 # Content blocks
@@ -151,7 +155,7 @@ type UsageCost = Callable[[Usage], float]
 
 Backends that report token counts but no cost (Codex/OpenAI) take one of these
 to enforce a budget; build it from per-token rates with
-``lup.adapters.codex.adapter.per_mtok_usage_cost``.
+``lup.adapters.codex.per_mtok_usage_cost``.
 """
 
 
