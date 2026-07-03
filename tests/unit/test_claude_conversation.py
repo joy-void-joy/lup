@@ -8,6 +8,7 @@ streamed event ordering.
 """
 
 from collections.abc import AsyncIterator, Mapping
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -206,3 +207,23 @@ async def test_collector_raises_mid_iteration_on_error() -> None:
 
     with pytest.raises(RuntimeError, match="boom"):
         await collector.collect()
+
+
+async def test_error_result_is_traced_and_kept_before_raising(tmp_path: Path) -> None:
+    """An error result must land in the trace and collector state, then raise."""
+    from lup.adapters.claude.adapter import ResponseCollector
+    from lup.trace import TraceLogger
+
+    progress = AssistantMessage(content=[TextBlock(text="working...")], model="m")
+    error = result_message(is_error=True, result="budget exceeded")
+    conv, fake = conversation([progress, error])
+    _ = fake
+    trace = TraceLogger(trace_path=tmp_path / "t.md", title="T")
+    collector = ResponseCollector(conv.client, trace_logger=trace)
+
+    with pytest.raises(RuntimeError, match="budget exceeded"):
+        await collector.collect()
+
+    assert collector.result is error
+    assert collector.text == "working..."
+    assert any("budget exceeded" in entry.content for entry in trace.entries)
