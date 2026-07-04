@@ -260,6 +260,14 @@ class Settings(BaseSettings):
         description="Timeout for sandbox code execution",
     )
 
+    sandbox_allow_shell: bool = Field(
+        default=False,
+        validation_alias="AGENT_SANDBOX_ALLOW_SHELL",
+        description="Grant the raw shell (Bash) builtin alongside the "
+        "code-execution sandbox. Off by default: execute_code is the "
+        "sanctioned code path, so host shell is an explicit opt-in.",
+    )
+
 
 # Singleton instance
 settings = Settings.model_validate({})
