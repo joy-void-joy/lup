@@ -39,6 +39,25 @@ class CompatOptions(BaseModel):
     api_key: str | None = None
     model_provider: str | None = None
 
+    auth_style: Literal["auth_token", "api_key"] = "auth_token"
+    """Which header carries ``api_key`` when the Claude scaffolding fronts
+    the endpoint. ``auth_token`` sends it as a bearer token
+    (``ANTHROPIC_AUTH_TOKEN``) — what hosted gateways (OpenRouter) expect;
+    ``api_key`` sends it as the native ``x-api-key`` (``ANTHROPIC_API_KEY``)
+    that a local server (vLLM) reads. The claude-compat engine blanks the
+    unused header so an ambient Anthropic key never leaks to the endpoint.
+    Ignored by ``openai-compat``, which always sends ``api_key`` as-is."""
+
+    map_model_aliases: bool = True
+    """Point Claude's built-in ``opus``/``sonnet``/``haiku`` aliases at
+    ``LupAgentOptions.model`` (via ``ANTHROPIC_DEFAULT_*_MODEL``), the last
+    being the small/fast model the harness uses for background work. A
+    single-model endpoint (vLLM, GLM) serves only that one model, so an
+    unmapped alias — emitted by a subagent spec or the harness itself —
+    would request a model the endpoint does not have. Set ``False`` for a
+    multi-model gateway that serves the real Claude family. Read only by the
+    claude-compat engine."""
+
 
 class CodexOptions(BaseModel):
     """Codex-runtime construction inputs that have no Claude analogue.
