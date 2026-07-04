@@ -79,7 +79,6 @@ from lup.types import (
     SubagentSpec,
     Usage,
     extract_token_usage,
-    normalize_effort,
     safe_normalize_usage,
 )
 
@@ -133,10 +132,14 @@ def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:
                 mcp_servers[name] = server
     subagents = {spec.name: spec_to_claude(spec) for spec in opts.subagents}
 
+    # Claude's SDK effort levels are low/medium/high/max; the neutral
+    # ``xhigh`` maps onto ``max``, and an unknown value is dropped.
     effort: claude_types.EffortLevel | None = None
-    match normalize_effort(opts.reasoning_effort, "claude"):
-        case "low" | "medium" | "high" | "xhigh" | "max" as level:
+    match opts.reasoning_effort:
+        case "low" | "medium" | "high" | "max" as level:
             effort = level
+        case "xhigh":
+            effort = "max"
 
     return claude.ClaudeAgentOptions(
         model=opts.model,

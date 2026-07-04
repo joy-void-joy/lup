@@ -91,7 +91,7 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     )
     agent_sdk: str | None = Field(
         default=None,
-        description="Engine that ran the session (claude/codex/...); "
+        description="Engine that ran the session (its engine id); "
         "None on results predating the stamp",
     )
     sdk_session_id: str | None = Field(

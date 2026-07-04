@@ -1,23 +1,25 @@
-"""Named Claude config-dir profiles (accounts), shared across repos.
+"""Named config-dir profiles (accounts), shared across repos.
 
-A profile maps a name to a Claude Code config dir — the ``CLAUDE_CONFIG_DIR``
-target, which is a complete Claude home: its own login/credentials,
-settings, history, and plugin registry. Selecting a profile decides which
-account the ``claude`` runner launches as and which account ``usage``
-reports on.
+A profile maps a name to a backend config dir — a complete account home:
+its own login/credentials, settings, history, and plugin registry.
+Selecting a profile decides which account a backend's runner launches as
+and which account usage reporting reads.
 
-The registry is machine-wide (``~/.lup/profiles.json``) because accounts
-are reused across projects; the active selection lives there too.
-``resolve_config_dir`` picks a dir in this order: an explicit profile
-name, else the active profile, else the default ``~/.claude``.
+This module is the neutral half: the registry stores only ``name ->
+config dir`` and the active selection, machine-wide in
+``~/.lup/profiles.json`` because accounts are reused across projects. What
+a config dir *means* — where a backend's home lives by default, and the
+env var that points its runner at a chosen one — is a per-backend
+property supplied by a :class:`ProfileSupport` implementation beside this
+module (e.g. :mod:`lup.adapters.profiles.claude`). A backend without a
+``ProfileSupport`` simply has no profile capability.
 """
 
-# lup: This is naming claude specifically, but things here should be agnostic. We should also transform it into an ABC, this file is claude specific. Profiles should be a general capabilities of clients
 import json
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TypedDict, cast
 
-DEFAULT_CONFIG_DIR = Path.home() / ".claude"
 REGISTRY_PATH = Path.home() / ".lup" / "profiles.json"
 
 
@@ -57,14 +59,6 @@ def config_dir_for(name: str) -> Path:
     return Path(profs[name]["config_dir"]).expanduser()
 
 
-def resolve_config_dir(name: str | None = None) -> Path:
-    """Resolve a Claude config dir: explicit name > active profile > ~/.claude."""
-    chosen = name or active_profile()
-    if chosen is None:
-        return DEFAULT_CONFIG_DIR
-    return config_dir_for(chosen)
-
-
 def add_profile(name: str, config_dir: Path) -> None:
     """Register a profile; the first one added becomes active."""
     registry = load_registry()
@@ -94,3 +88,26 @@ def remove_profile(name: str) -> None:
     if registry.get("active") == name:
         registry["active"] = None
     save_registry(registry)
+
+
+class ProfileSupport(ABC):
+    """A backend's account-profile capability.
+
+    The registry above is neutral; a subclass supplies the one
+    backend-specific piece: where the account home lives when nothing is
+    selected (:attr:`default_config_dir`). The env var that points a
+    runner at a chosen dir is a constant beside the subclass (e.g.
+    ``lup.adapters.profiles.claude.CONFIG_DIR_ENV``).
+    """
+
+    @property
+    @abstractmethod
+    def default_config_dir(self) -> Path:
+        """The account home used when no profile is selected."""
+
+    def resolve_config_dir(self, name: str | None = None) -> Path:
+        """Resolve a config dir: explicit name > active profile > default."""
+        chosen = name or active_profile()
+        if chosen is None:
+            return self.default_config_dir
+        return config_dir_for(chosen)

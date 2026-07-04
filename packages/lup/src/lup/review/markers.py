@@ -19,7 +19,7 @@ auditor.
 
 Detection is deliberately liberal — `#` or `//`, any case, optional spaces — so
 the same note reads naturally in Python, shell, TypeScript, JSON, or Markdown.
-A colon is required so prose like a `## Claude` heading does not match. A marker
+A colon is required so prose like a `## Notes` heading does not match. A marker
 is a feedback note unless its keyword is `ignore`, which stays the anti-pattern
 escape hatch.
 

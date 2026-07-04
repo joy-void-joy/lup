@@ -55,10 +55,14 @@ class ReflectionGate:
     :meth:`reset` when a new cycle begins (e.g., after each agent action
     in persistent mode).
 
-    Supports two modes:
-    - In-memory (default): For adapters where hooks run in-process.
-    - File-backed: For adapters where hooks are external scripts
-      that check for a flag file's existence.
+    Supports two modes, so enforcement does not depend on any one
+    backend's hook support:
+    - In-memory (default): when the gate and the enforcement point share
+      a process (in-process hooks read ``reflected`` directly).
+    - File-backed: when they do not — the flag is a file, marked and
+      read across the process boundary. This is what backends without
+      firing hooks rely on: the enforcement point checks the flag
+      in-tool (inside submit_output) rather than in a hook.
     """
 
     def __init__(self, flag_path: Path | None = None) -> None:
@@ -143,4 +147,4 @@ def create_reflection_gate(
         unlocked=lambda _input: gate.reflected,
         allow_when_unlocked=True,
         tag="reflection_gate",
-    )  # lup: Claude specific?
+    )

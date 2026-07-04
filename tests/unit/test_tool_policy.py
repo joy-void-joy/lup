@@ -3,6 +3,7 @@
 import pytest
 from pydantic import BaseModel
 
+from lup.adapters.tools.claude import CLAUDE_BUILTIN_TOOLS
 from lup.hooks import LupHookInput, LupHooksConfig, create_tool_allowlist_hook
 from lup.mcp import create_mcp_server, lup_tool
 from lup.tool_policy import BaseToolPolicy
@@ -60,7 +61,7 @@ class TestToolPolicyIsToolAvailable:
         policy = ToolPolicy(settings)
         policy.excluded_tools = {"WebSearch"}
 
-        allowed = policy.get_allowed_tools({})
+        allowed = policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
         assert "WebSearch" not in allowed
         assert "Read" in allowed
 
@@ -101,7 +102,9 @@ class TestGetAllowedTools:
         server = create_mcp_server(name="pingsrv", version="1.0.0", tools=[ping])
         policy = ToolPolicy(settings)
 
-        allowed = policy.get_allowed_tools(policy.get_mcp_servers(server))
+        allowed = policy.get_allowed_tools(
+            policy.get_mcp_servers(server), builtin_tools=CLAUDE_BUILTIN_TOOLS
+        )
 
         assert "Bash" in allowed
         assert "StructuredOutput" in allowed
@@ -114,7 +117,9 @@ class TestGetAllowedTools:
             settings, excluded_tools={"WebFetch", "mcp__pingsrv__ping"}
         )
 
-        allowed = policy.get_allowed_tools(policy.get_mcp_servers(server))
+        allowed = policy.get_allowed_tools(
+            policy.get_mcp_servers(server), builtin_tools=CLAUDE_BUILTIN_TOOLS
+        )
 
         assert "WebFetch" not in allowed
         assert "mcp__pingsrv__ping" not in allowed
@@ -132,9 +137,9 @@ class TestShellDefaultWithSandbox:
         monkeypatch.setattr(settings, "sandbox_allow_shell", False)
         policy = ToolPolicy(settings, code_execution=True)
 
-        assert "Bash" not in policy.get_allowed_tools({})
+        assert "Bash" not in policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
         assert not policy.is_tool_available("Bash")
-        assert "Read" in policy.get_allowed_tools({})
+        assert "Read" in policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
 
     def test_allow_shell_opts_bash_back_in(
         self, monkeypatch: pytest.MonkeyPatch
@@ -142,12 +147,12 @@ class TestShellDefaultWithSandbox:
         monkeypatch.setattr(settings, "sandbox_allow_shell", True)
         policy = ToolPolicy(settings, code_execution=True)
 
-        assert "Bash" in policy.get_allowed_tools({})
+        assert "Bash" in policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
 
     def test_no_sandbox_keeps_bash(self) -> None:
         policy = ToolPolicy(settings, code_execution=False)
 
-        assert "Bash" in policy.get_allowed_tools({})
+        assert "Bash" in policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
 
 
 class TestTagFiltering:
@@ -206,7 +211,7 @@ class TestBaseToolPolicyStandalone:
 
         assert policy.filter_tools([ping, gated_ping]) == [ping]
         assert not policy.is_tool_available("WebFetch")
-        allowed = policy.get_allowed_tools({})
+        allowed = policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
         assert "WebFetch" not in allowed
         assert "Bash" in allowed
 
@@ -231,7 +236,9 @@ class TestAllowlistEnforcement:
 
     async def test_builtin_tool_allowed(self) -> None:
         policy = ToolPolicy(settings)
-        config = create_tool_allowlist_hook(policy.get_allowed_tools({}))
+        config = create_tool_allowlist_hook(
+            policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
+        )
 
         decision, _ = await allowlist_decision(config, "Read")
 
@@ -241,7 +248,9 @@ class TestAllowlistEnforcement:
         server = create_mcp_server(name="pingsrv", version="1.0.0", tools=[ping])
         policy = ToolPolicy(settings)
         servers = policy.get_mcp_servers(server)
-        config = create_tool_allowlist_hook(policy.get_allowed_tools(servers))
+        config = create_tool_allowlist_hook(
+            policy.get_allowed_tools(servers, builtin_tools=CLAUDE_BUILTIN_TOOLS)
+        )
 
         decision, _ = await allowlist_decision(config, "mcp__pingsrv__ping")
 
@@ -249,7 +258,9 @@ class TestAllowlistEnforcement:
 
     async def test_excluded_tool_denied_with_available_tools_listed(self) -> None:
         policy = ToolPolicy(settings, excluded_tools={"WebFetch"})
-        config = create_tool_allowlist_hook(policy.get_allowed_tools({}))
+        config = create_tool_allowlist_hook(
+            policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
+        )
 
         decision, reason = await allowlist_decision(config, "WebFetch")
 
