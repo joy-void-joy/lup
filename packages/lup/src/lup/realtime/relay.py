@@ -30,11 +30,13 @@ via ``LUP_REALTIME_DIR`` — see
 - ``state.json`` — parent → agent snapshot (unread event count plus any
   domain fields). The served ``context`` tool returns it; the ``sleep``
   tool refuses to record a sleep while unread events exist.
-- ``meta_flag`` — file-backed :class:`~lup.reflect.ReflectionGate`. The
-  ``meta`` tool marks it, ``reply`` resets it, and ``sleep`` requires it.
-  Gate transitions triggered by the agent's own actions happen inside
-  the tool subprocess so they follow the agent's tool-call order; the
-  parent only resets the gate between turns, when no tool is running.
+- ``meta_flag`` — file-backed :class:`~lup.reflect.ReflectionGate`, used
+  only when the caller supplies a gate (reflection is opt-in). When one
+  is supplied, the ``meta`` tool marks it, ``reply`` resets it, and
+  ``sleep`` requires it. Gate transitions triggered by the agent's own
+  actions happen inside the tool subprocess so they follow the agent's
+  tool-call order; the parent only resets the gate between turns, when
+  no tool is running.
 
 Wire the parent side with :func:`run_relay_session`; the tool side is
 :func:`create_realtime_relay_tools`, served by the tool subprocess when
@@ -55,7 +57,6 @@ Examples:
         ...         build_state=lambda: RelayState(unread_events=inbox.unread()),
         ...     )
 """
-#lup: Not comfortable with the meta reflection-gate being so necessary
 
 import asyncio
 import logging
@@ -355,7 +356,9 @@ class RealtimeMailbox:
 # =====================================================================
 
 
-def create_realtime_relay_tools(realtime_dir: Path) -> list[LupMcpTool]:
+def create_realtime_relay_tools(
+    realtime_dir: Path, *, gate: ReflectionGate | None = None
+) -> list[LupMcpTool]:
     """Create the realtime tool set for subprocess backends.
 
     Same tool names and schemas as the in-process set (see
@@ -364,13 +367,17 @@ def create_realtime_relay_tools(realtime_dir: Path) -> list[LupMcpTool]:
     stream to the parent as events, and ``sleep`` records a request and
     instructs the agent to end its turn — the parent does the waiting.
 
-    Enforcement is in-handler (no hooks required on any backend):
-    ``sleep`` requires a fresh ``meta`` (file-backed gate, reset by
-    ``reply``) and refuses while the state snapshot shows unread events
-    the agent hasn't looked at via ``context``.
+    Enforcement is in-handler (no hooks required on any backend): ``sleep``
+    refuses while the state snapshot shows unread events the agent hasn't
+    looked at via ``context``. Reflection is opt-in: pass ``gate`` (a
+    file-backed :class:`~lup.reflect.ReflectionGate` rooted at
+    ``mailbox.meta_flag_path`` and shared with the parent's
+    :func:`run_relay_session`) to also require a fresh ``meta`` before
+    sleep, reset by ``reply``. With no gate the library imposes no
+    reflection — ``meta`` is still relayed for tracing but never gates
+    sleep.
     """
     mailbox = RealtimeMailbox(realtime_dir)
-    gate = ReflectionGate(flag_path=mailbox.meta_flag_path) #lup: The gate shouldn't necessarily be created. This feels like too imposed design for something that belongs in the template.
     context_read = [False]  # Mutable container for closure
 
     @lup_tool(
@@ -396,7 +403,7 @@ def create_realtime_relay_tools(realtime_dir: Path) -> list[LupMcpTool]:
                 sent += 1
             else:
                 scheduled += 1
-        if sent or scheduled:
+        if (sent or scheduled) and gate is not None:
             gate.reset()
         return ReplyOutput(sent=sent, scheduled=scheduled)
 
@@ -445,7 +452,7 @@ def create_realtime_relay_tools(realtime_dir: Path) -> list[LupMcpTool]:
         name="sleep",
     )
     async def sleep_tool(inp: SleepInput) -> SleepRecordedOutput:
-        if not gate.reflected:
+        if gate is not None and not gate.reflected:
             raise ToolError(
                 "You must call meta with a process assessment before "
                 "sleeping. Reflect first, then sleep."
@@ -502,7 +509,8 @@ def create_realtime_relay_tools(realtime_dir: Path) -> list[LupMcpTool]:
     )
     async def meta_tool(inp: MetaInput) -> MetaOutput:
         mailbox.append_event(MetaEvent(thought=inp.thought))
-        gate.mark_reflected()
+        if gate is not None:
+            gate.mark_reflected()
         return MetaOutput()
 
     return [
@@ -578,6 +586,7 @@ async def run_relay_session(
     poll_interval_seconds: float = 0.3,
     max_missing_sleep_retries: int = 3,
     missing_sleep_message: str = MISSING_SLEEP_MESSAGE,
+    gate: ReflectionGate | None = None,
     trace_logger: TraceLogger | None = None,
 ) -> int:
     """Run the persistent wake loop over a multi-turn conversation.
@@ -614,13 +623,17 @@ async def run_relay_session(
         missing_sleep_message: Prompt for each corrective turn. Defaults
             to the neutral :data:`MISSING_SLEEP_MESSAGE`; pass domain text
             to add workflow steps (e.g. a meta assessment) to the nudge.
+        gate: Opt-in reflection gate, file-backed at
+            ``mailbox.meta_flag_path`` and shared with the tool
+            subprocess's :func:`create_realtime_relay_tools`. When supplied,
+            the parent resets it between turns so each turn requires a fresh
+            ``meta`` before sleep. None (the default) imposes no reflection.
         trace_logger: Receives turn traces and meta assessments.
 
     Returns:
         The number of completed turns.
     """
     mailbox.reset_for_new_run()
-    gate = ReflectionGate(flag_path=mailbox.meta_flag_path)
     builder = build_wake_message or default_wake_message
     message = initial_prompt
     turns = 0
@@ -676,7 +689,8 @@ async def run_relay_session(
             continue
         missing_sleep = 0
 
-        gate.reset()
+        if gate is not None:
+            gate.reset()
         if request.debounce_initial is not None:
             scheduler.start_debounce(
                 request.debounce_initial,

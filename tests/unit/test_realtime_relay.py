@@ -33,12 +33,21 @@ from lup.realtime.relay import (
     run_relay_session,
 )
 from lup.realtime.scheduler import Scheduler
+from lup.reflect import ReflectionGate
 from lup.trace import TraceLogger
 from lup.types import JsonObject, LupResponse
 
 
-def tool_map(realtime_dir: Path) -> dict[str, LupMcpTool]:
-    return {t.name: t for t in create_realtime_relay_tools(realtime_dir)}
+def tool_map(
+    realtime_dir: Path, *, gate: ReflectionGate | None = None
+) -> dict[str, LupMcpTool]:
+    return {t.name: t for t in create_realtime_relay_tools(realtime_dir, gate=gate)}
+
+
+def gated_tool_map(realtime_dir: Path) -> dict[str, LupMcpTool]:
+    """Tools wired with a file-backed gate, as the template opts in."""
+    gate = ReflectionGate(flag_path=RealtimeMailbox(realtime_dir).meta_flag_path)
+    return tool_map(realtime_dir, gate=gate)
 
 
 async def call(
@@ -181,7 +190,7 @@ class TestMailbox:
 
 class TestRelayTools:
     async def test_sleep_requires_meta_then_records(self, tmp_path: Path) -> None:
-        tools = tool_map(tmp_path)
+        tools = gated_tool_map(tmp_path)
 
         denied = await call(tools, "sleep", {"seconds": 60})
         assert denied.get("is_error") is True
@@ -195,8 +204,23 @@ class TestRelayTools:
         assert recorded.get("is_error") is None
         assert (tmp_path / "sleep_request.json").exists()
 
-    async def test_reply_resets_meta_gate(self, tmp_path: Path) -> None:
+    async def test_no_gate_skips_meta_requirement(self, tmp_path: Path) -> None:
+        """The library default imposes no reflection: sleep records without a
+        prior meta, while meta is still relayed for tracing."""
         tools = tool_map(tmp_path)
+
+        recorded = await call(tools, "sleep", {"seconds": 60})
+        assert recorded.get("is_error") is None
+        assert (tmp_path / "sleep_request.json").exists()
+        assert not (tmp_path / "meta_flag").exists()
+
+        await call(tools, "meta", {"thought": "recorded for tracing only"})
+        assert not (tmp_path / "meta_flag").exists()
+        events = RealtimeMailbox(tmp_path).read_new_events()
+        assert any(isinstance(e, MetaEvent) for e in events)
+
+    async def test_reply_resets_meta_gate(self, tmp_path: Path) -> None:
+        tools = gated_tool_map(tmp_path)
 
         await call(tools, "meta", {"thought": "assessed"})
         await call(tools, "reply", {"messages": [{"message": "hello"}]})
@@ -211,7 +235,7 @@ class TestRelayTools:
     async def test_unread_events_block_sleep_until_context(
         self, tmp_path: Path
     ) -> None:
-        tools = tool_map(tmp_path)
+        tools = gated_tool_map(tmp_path)
         parent = RealtimeMailbox(tmp_path)
         parent.write_state(RelayState(unread_events=3))
 
@@ -230,7 +254,7 @@ class TestRelayTools:
         assert any(isinstance(e, ContextReadEvent) for e in events)
 
     async def test_force_bypasses_unread_guard(self, tmp_path: Path) -> None:
-        tools = tool_map(tmp_path)
+        tools = gated_tool_map(tmp_path)
         RealtimeMailbox(tmp_path).write_state(RelayState(unread_events=3))
 
         await call(tools, "meta", {"thought": "assessed"})
@@ -517,3 +541,36 @@ class TestRelaySession:
         scheduler.cancel_delayed_actions()
         assert "thread pull" in scheduler.ideas
         assert delivered == []
+
+    async def test_gate_reset_between_turns_requires_fresh_meta(
+        self, tmp_path: Path
+    ) -> None:
+        """A supplied gate keeps reflection per-turn: the parent resets it
+        after each sleep, so a turn that tries to sleep without a fresh meta
+        is refused and redirected as a missing sleep."""
+        gate = ReflectionGate(flag_path=RealtimeMailbox(tmp_path).meta_flag_path)
+        tools = tool_map(tmp_path, gate=gate)
+
+        async def on_action(_content: str) -> None:
+            pass
+
+        conversation = FakeConversation(
+            [
+                AgentTurn(tools, [META, SLEEP]),
+                AgentTurn(tools, [SLEEP]),  # no fresh meta — sleep is refused
+                AgentTurn(tools, [META, SLEEP]),
+            ]
+        )
+
+        turns = await run_relay_session(
+            conversation,
+            scheduler=Scheduler(on_action=on_action),
+            mailbox=RealtimeMailbox(tmp_path),
+            initial_prompt="[session start]",
+            gate=gate,
+            should_continue=lambda: len(conversation.prompts) < 3,
+            poll_interval_seconds=0.01,
+        )
+
+        assert turns == 3
+        assert conversation.prompts[2] == MISSING_SLEEP_MESSAGE
