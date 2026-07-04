@@ -4,14 +4,13 @@ Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/
 
 ## Modules
 
-- `lup.adapters` — ALL SDK-specific code, one module per engine: `adapters.common` is the whole SDK-free seam (the `Client`/`Session`/`Engine` ABCs, the unsupported-behavior errors, the model-name router, and the only doors in — `create_client()` and the one-shot `query()` with structured output); `adapters.claude` and `adapters.codex` are the primary engines, and `adapters.claude_compat` / `adapters.openai_compat` subclass them to front Anthropic- and OpenAI-protocol-compatible endpoints. The capability table is probed from the engines by devtools, never declared here.
-- `lup.options` / `lup.types` — backend-agnostic `LupAgentOptions` and the shared vocabulary (blocks, messages, events, `Usage`, `SubagentSpec`, `LupResponse`).
+- `lup.adapters` — ALL SDK-specific code, behind one neutral seam. `adapters.common` is the SDK-free door: backend-agnostic `LupAgentOptions`, the unsupported-behavior errors, the `ENGINES` (id → factory) and `MODEL_ROUTES` (model-name regex → factory) routers, and the only doors in — `create_client()` and the one-shot `query()` with structured output. `adapters.clients` holds the purely abstract `Client`/`Session` plus each engine's client, translation, and `create_*` factory (`create_claude`, `create_codex`, `create_claude_compat`, `create_openai_compat`); `adapters.background` holds the shared wake/debounce machinery and each engine's background agent. Backend-committed code can import an engine's factory directly (`from lup.adapters.clients.claude import create_claude`) instead of routing through `create_client`. The capability table is probed from the engines by devtools, never declared here.
+- `lup.types` — the shared vocabulary (blocks, messages, events, `Usage`, `SubagentSpec`, `LupResponse`).
 - `lup.mcp` — `@lup_tool` decorator for MCP tools with typed Pydantic input/output, plus a patched `create_mcp_server` that preserves `is_error`.
 - `lup.hooks` — composable hook primitives: directory-based permissions, tool allowlists, tool gates (deny until a condition unlocks), nudges, capture hooks.
 - `lup.reflect` — reflection gate for reflect-before-output workflows.
 - `lup.output` — `submit_output` finalization and the missing-output guard, shared by every backend.
 - `lup.realtime` / `lup.realtime_relay` — `Scheduler` for persistent agents (sleep/wake, debounce, reminders) with its guard hooks, and the file-mailbox relay for subprocess backends.
-- `lup.background` — background-agent base and `create_background_agent` factory for companions that run alongside a main session.
 - `lup.subagents` — `run_subagent` delegation tool built from `SubagentSpec`s.
 - `lup.sandbox` — Docker-based persistent REPL (`pip install lup[docker]`).
 - `lup.history` / `lup.notes` / `lup.paths` — version-aware session storage, RO/RW notes layout, and lazy path configuration.

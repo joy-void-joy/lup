@@ -11,8 +11,12 @@ package imports no SDK at load time — install the ``claude`` and/or
 
 from typing import TYPE_CHECKING
 
-from lup.adapters.common import Client, Engine, Session, create_client, query
-from lup.background import BaseBackgroundAgent, create_background_agent
+from lup.adapters.background.common import (
+    BaseBackgroundAgent,
+    create_background_agent,
+)
+from lup.adapters.clients.common import Client, Session
+from lup.adapters.common import LupAgentOptions, create_client, query
 from lup.history import (
     SessionResult,
     format_history_for_context,
@@ -81,9 +85,9 @@ __all__ = [
     "TIMESTAMP_FMT",
     "BaseBackgroundAgent",
     "Client",
-    "Engine",
     "JsonObject",
     "JsonValue",
+    "LupAgentOptions",
     "LupHooksConfig",
     "LupMcpTool",
     "MetricsSummary",

@@ -145,4 +145,4 @@ def create_reflection_gate(
         unlocked=lambda _input: gate.reflected,
         allow_when_unlocked=True,
         tag="reflection_gate",
-    ) #lup: Claude specific?
+    )  # lup: Claude specific?

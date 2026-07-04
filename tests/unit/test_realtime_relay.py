@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 
-from lup.adapters.common import Session
+from lup.adapters.clients.common import Session
 from lup.mcp import LupMcpTool, ToolResponse
 from lup.realtime import Scheduler
 from lup.realtime_relay import (
@@ -361,6 +361,9 @@ class FakeConversation(Session):
         self.prompts.append(prompt)
         await self.turns[len(self.prompts) - 1].play()
         return LupResponse()
+
+    async def interrupt(self) -> None:
+        raise NotImplementedError
 
 
 META = ("meta", {"thought": "assessed"})

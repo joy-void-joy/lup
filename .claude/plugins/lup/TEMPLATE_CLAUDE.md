@@ -129,7 +129,7 @@ Agents produce better output when forced to self-assess before committing. The r
 
 **Library (`packages/lup` — the reusable `lup` package, never renamed):**
 
-- **lup/adapters/**: ALL SDK-specific code, one module per engine — `common.py` is the whole SDK-free seam (`Client`/`Session`/`Engine` ABCs, the model-name router, `create_client()`, and one-shot `query()`); `claude.py`/`codex.py` are the primary engines, `claude_compat.py`/`openai_compat.py` front compatible endpoints
+- **lup/adapters/**: ALL SDK-specific code behind one neutral seam — `common.py` is the SDK-free door (`LupAgentOptions`, seam errors, the `ENGINES`/`MODEL_ROUTES` routers, `create_client()`, and one-shot `query()`); `clients/` holds the purely abstract `Client`/`Session` and each engine's client + `create_*` factory; `background/` holds the wake/debounce machinery and per-engine agents
 - **lup/options.py**: `LupAgentOptions` — backend-agnostic options crossing application -> lib
 - **lup/output.py**: `submit_output` finalization + missing-output guard (all backends)
 - **lup/hooks.py**: Hook utilities, composition, and `create_tool_gate` (deny-until-unlocked primitive)
@@ -434,17 +434,13 @@ packages/
     └── src/lup/
         ├── __init__.py         # Public API re-exports (__all__); imports no SDK
         ├── py.typed            # PEP 561 typing marker
-        ├── adapters/           # ALL SDK-specific code, one module per engine
-        │   ├── common.py       # The whole SDK-free seam: Client/Session/Engine ABCs, errors, model router, create_client(), query()
-        │   ├── claude.py       # claude engine: option translation, SDK adaptation, sessions, background
-        │   ├── claude_compat.py# claude-compat engine: Claude scaffolding on Anthropic-compatible endpoints
-        │   ├── codex.py        # codex engine: runtime config, SDK adaptation, sessions, hook codegen (quarantined), background
-        │   └── openai_compat.py# openai-compat engine: OpenAI-protocol endpoints through the Codex runtime
+        ├── adapters/           # ALL SDK-specific code, behind one neutral seam
+        │   ├── common.py       # SDK-free door: LupAgentOptions, seam errors, ENGINES/MODEL_ROUTES routers, create_client(), query()
+        │   ├── clients/        # Client/Session ABCs (pure) + shared helpers; per-engine client, translation, and create_* factory (claude, claude_compat, codex, openai_compat)
+        │   └── background/     # per-engine background: pure contract + wake/debounce machinery (common.py), claude & codex implementations
         ├── antipatterns.py     # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
-        ├── options.py          # LupAgentOptions — backend-agnostic options crossing application -> lib
         ├── markers.py          # `# lup:` / `// lup:` review-marker scanning (dev comments)
         ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
-        ├── background.py       # Background agent base + SDK-aware factory
         ├── history.py          # Session storage/retrieval
         ├── hooks.py            # SDK-agnostic hook factories (permission, gate, completion guard)
         ├── mcp.py              # MCP server creation, @lup_tool decorator

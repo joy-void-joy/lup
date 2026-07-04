@@ -10,7 +10,7 @@ from claude_agent_sdk.types import (
     UserMessage,
 )
 
-from lup.adapters.claude import claude_block_to_lup, claude_message_to_lup
+from lup.adapters.clients.claude import claude_block_to_lup, claude_message_to_lup
 from lup.types import (
     LupAssistantMessage,
     LupSystemMessage,
@@ -174,7 +174,7 @@ class TestCodexItemsToLup:
             AgentMessageThreadItem,
             MessagePhase,
         )
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.clients.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=AgentMessageThreadItem(
@@ -195,7 +195,7 @@ class TestCodexItemsToLup:
             AgentMessageThreadItem,
             MessagePhase,
         )
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.clients.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=AgentMessageThreadItem(
@@ -217,7 +217,7 @@ class TestCodexItemsToLup:
             CommandExecutionStatus,
             CommandExecutionThreadItem,
         )
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.clients.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=CommandExecutionThreadItem(
@@ -246,7 +246,7 @@ class TestCodexItemsToLup:
             McpToolCallStatus,
             McpToolCallThreadItem,
         )
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.clients.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=McpToolCallThreadItem(
@@ -271,7 +271,7 @@ class TestCodexItemsToLup:
     def test_reasoning_item(self) -> None:
         from openai_codex.generated.v2_all import ThreadItem
         from openai_codex.generated.v2_all import ReasoningThreadItem
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.clients.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=ReasoningThreadItem(
@@ -296,7 +296,7 @@ class TestCodexItemsToLup:
             PatchChangeKind,
             UpdatePatchChangeKind,
         )
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.clients.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=FileChangeThreadItem(
@@ -328,7 +328,7 @@ class TestCodexItemsToLup:
             MessagePhase,
             ReasoningThreadItem,
         )
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.clients.codex import codex_items_to_lup
 
         items = [
             ThreadItem(
@@ -354,7 +354,7 @@ class TestCodexItemsToLup:
         assert isinstance(blocks[1], LupTextBlock)
 
     def test_empty_items_list(self) -> None:
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.clients.codex import codex_items_to_lup
 
         blocks = codex_items_to_lup([])
         assert blocks == []
@@ -366,7 +366,7 @@ class TestCodexItemsToLup:
             McpToolCallStatus,
             McpToolCallThreadItem,
         )
-        from lup.adapters.codex import codex_items_to_lup
+        from lup.adapters.clients.codex import codex_items_to_lup
 
         item = ThreadItem(
             root=McpToolCallThreadItem(
