@@ -1,9 +1,15 @@
-"""Scheduler for persistent agents.
+"""In-process scheduler core for persistent agents.
 
 Owns all async timing state: sleep/wake, debounce windows, scheduled
 actions, reminders, and delayed actions. The environment layer (Discord
 bot, game server, CLI) wires callbacks; the agent interacts through
 MCP tools that delegate to this scheduler.
+
+This is the core the whole ``lup.realtime`` package is built on: it runs
+entirely in-process and imports neither the shared tool models nor the
+subprocess relay. On backends whose tools run in a separate process,
+:mod:`lup.realtime.relay` drives an instance of this ``Scheduler`` from the
+parent side — the relay depends on the core, never the reverse.
 
 See also: ``src/lup_template/agent/tools/realtime.py`` for the MCP tool
 implementations that wrap this scheduler.
@@ -31,12 +37,10 @@ Examples:
 
     Create a Stop hook to keep the agent in a persistent loop::
 
-        >>> from lup.realtime import create_stop_guard
+        >>> from lup.realtime.scheduler import create_stop_guard
         >>> from lup.types import merge_hooks
         >>> hooks = merge_hooks(permission_hooks, create_stop_guard())
 """
-
-#lup: The purpose of this file is really not clear, esp compared to realtime_relay
 
 import asyncio
 import logging
@@ -57,180 +61,6 @@ logger = logging.getLogger(__name__)
 
 ActionCallback = Callable[[str], Awaitable[None]]
 """Async callback for delivering actions (messages, commands, etc.)."""
-
-
-# =====================================================================
-# Tool input models
-# =====================================================================
-
-
-class SleepFollowUp(BaseModel):
-    """A message to send at a scheduled interval during sleep.
-
-    Follow-ups fill silence: thread-pulls, different angles, check-ins.
-    Cancelled (saved as ideas) if the user speaks before they fire.
-    """
-
-    message: str = Field(description="Message to send during sleep")
-    delay_seconds: int = Field(
-        ge=1,
-        description="Seconds from sleep start to send this message",
-    )
-
-
-class SleepInput(BaseModel):
-    """Input for the sleep tool."""
-
-    seconds: int = Field(description="How long to sleep (max). Wakes early on events.")
-    debounce_initial: int | None = Field(
-        default=None,
-        description=(
-            "If set, start a debounce window: wait up to this many seconds "
-            "for the first event before waking."
-        ),
-    )
-    debounce_quiet: int | None = Field(
-        default=None,
-        description=(
-            "Quiet period for debounce. Once activity starts, wait this long "
-            "after each event before waking. Defaults to debounce_initial."
-        ),
-    )
-    wake_on_empty: bool = Field(
-        default=True,
-        description=(
-            "Wake immediately if debounce_initial expires with no activity. "
-            "When false, sleep continues for the full seconds duration."
-        ),
-    )
-    follow_ups: list[SleepFollowUp] = Field(
-        default_factory=list,
-        description=(
-            "Messages to send at intervals during sleep. "
-            "Cancelled (saved as ideas) if the user speaks before they fire."
-        ),
-    )
-    force: bool = Field(
-        default=False,
-        description="Bypass the pending-event guard (sleep even with unread events).",
-    )
-
-
-class DebounceInput(BaseModel):
-    """Input for the debounce tool."""
-
-    initial_seconds: int = Field(
-        description="Wait up to this long for the first event."
-    )
-    quiet_seconds: int = Field(
-        description="After first event, wait this long after each subsequent event."
-    )
-
-
-class ReplyMessageItem(BaseModel):
-    """A single message in a reply batch."""
-
-    message: str = Field(description="The message content.")
-    delay_seconds: int = Field(
-        default=0,
-        description="Cumulative delay before sending (0 = immediate).",
-    )
-
-
-class ReplyInput(BaseModel):
-    """Input for the reply tool."""
-
-    messages: list[ReplyMessageItem] = Field(
-        description="Messages to send, with optional staggered delays."
-    )
-
-
-class ContextInput(BaseModel):
-    """Input for the context tool."""
-
-    last_events: int = Field(
-        default=5,
-        description="Number of recent read events to include (0 = unread only).",
-    )
-
-
-class MetaInput(BaseModel):
-    """Input for the meta tool."""
-
-    thought: str = Field(
-        description=(
-            "Process self-assessment: pacing, timing, what worked, "
-            "what you'd change. Required before sleep."
-        )
-    )
-
-
-class RemindInput(BaseModel):
-    """Input for the remind tool."""
-
-    label: str = Field(description="What this reminder is about.")
-    delay_seconds: int = Field(description="Seconds until the reminder fires.")
-
-
-class ScheduleActionInput(BaseModel):
-    """Input for the schedule_action tool."""
-
-    content: str = Field(description="Content to deliver when the action fires.")
-    delay_seconds: int = Field(
-        description="Seconds to wait before firing (cancelled if an event arrives)."
-    )
-
-
-# =====================================================================
-# Tool output models
-# =====================================================================
-
-
-class ReplyOutput(BaseModel):
-    """Output for the reply tool."""
-
-    sent: int
-    scheduled: int
-
-
-class ScheduleActionOutput(BaseModel):
-    """Output for the schedule_action tool."""
-
-    delay_seconds: int
-
-
-class DebounceOutput(BaseModel):
-    """Output for the debounce tool."""
-
-    initial_seconds: int
-    quiet_seconds: int
-
-
-class SleepOutput(BaseModel):
-    """Output for the sleep tool."""
-
-    reason: str = Field(default="timer")
-    time: str = Field(default="")
-    fired_reminders: list[str] = Field(default_factory=list)
-
-
-class RemindOutput(BaseModel):
-    """Output for the remind tool."""
-
-    label: str
-    delay_seconds: int
-
-
-class ContextOutput(BaseModel):
-    """Output for the context tool. Accepts domain-specific fields."""
-
-    model_config = ConfigDict(extra="allow")
-
-
-class MetaOutput(BaseModel):
-    """Output for the meta tool."""
-
-    status: str = Field(default="recorded")
 
 
 # =====================================================================
@@ -327,7 +157,7 @@ class Scheduler:
         self.pending_actions: list[tuple[asyncio.Task[None], str]] = []
 
         # Meta-before-sleep gate. Pass a file-backed gate when the meta
-        # tool runs in a subprocess (see lup.realtime_relay).
+        # tool runs in a subprocess (see lup.realtime.relay).
         self.meta_gate = meta_gate if meta_gate is not None else ReflectionGate()
 
     async def send_action(self, content: str) -> None:
@@ -374,10 +204,7 @@ class Scheduler:
                 self.wake_reason = "timer"
 
         self.wake_event.clear()
-        return self.build_sleep_result()
 
-    def build_sleep_result(self) -> SleepResult:
-        """Build the minimal wake result."""
         result = SleepResult(
             reason=self.wake_reason or "timer",
             time=datetime.now().strftime("%H:%M:%S"),
@@ -386,8 +213,6 @@ class Scheduler:
             result["fired_reminders"] = list(self.fired_reminder_labels)
             self.fired_reminder_labels.clear()
         return result
-
-    #lup: All those @properties and method feels like code smells here
 
     # ------------------------------------------------------------------
     # Debounce
@@ -562,11 +387,6 @@ class Scheduler:
     # Event handlers (called by environment layer)
     # ------------------------------------------------------------------
 
-    def on_external_event(self) -> None:
-        """Cancel scheduled action + pending delayed actions on external event."""
-        self.cancel_scheduled_action()
-        self.cancel_delayed_actions()
-
     def on_agent_action(self) -> None:
         """Cancel scheduled action on agent's own action and require new meta."""
         self.cancel_scheduled_action()
@@ -628,7 +448,7 @@ def create_stop_guard() -> LupHooksConfig:
         LupHooksConfig with a Stop hook.
 
     Usage:
-        from lup.realtime import create_stop_guard
+        from lup.realtime.scheduler import create_stop_guard
         from lup.types import merge_hooks
 
         hooks = merge_hooks(permission_hooks, create_stop_guard())

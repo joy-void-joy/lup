@@ -286,9 +286,9 @@ def create_tool_gate(
     do B: reflect before finalizing output, read pending events before
     sleeping, call sleep instead of ending the turn. Presets built on
     this primitive: :func:`lup.reflect.create_reflection_gate`,
-    :func:`lup.realtime.create_stop_guard`,
-    :func:`lup.realtime.create_pending_event_guard`, and
-    :func:`lup.realtime.create_meta_before_sleep_guard`.
+    :func:`lup.realtime.scheduler.create_stop_guard`,
+    :func:`lup.realtime.scheduler.create_pending_event_guard`, and
+    :func:`lup.realtime.scheduler.create_meta_before_sleep_guard`.
 
     **Why:** The denial message is the one channel that reliably
     redirects the agent mid-turn — it states what to do instead, making

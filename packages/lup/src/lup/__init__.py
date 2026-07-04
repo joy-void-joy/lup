@@ -52,7 +52,7 @@ from lup.paths import (
     parse_timestamp,
     project_root,
 )
-from lup.realtime import (
+from lup.realtime.scheduler import (
     Scheduler,
     SleepResult,
     create_meta_before_sleep_guard,

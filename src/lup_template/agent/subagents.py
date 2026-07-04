@@ -29,8 +29,8 @@ the full catalog. Where the siblings live:
   exemplar
 - Background agents: ``lup.background`` (``create_background_agent``),
   with the observer example in ``agent/tools/realtime.py``
-- Persistent agents: ``lup.realtime`` and ``lup.realtime_relay``, with
-  example tools in ``agent/tools/realtime.py``
+- Persistent agents: ``lup.realtime.scheduler`` and ``lup.realtime.relay``,
+  with example tools in ``agent/tools/realtime.py``
 - Data augmentation: ``agent/tools/example.py`` (domain dispatch,
   null-filling, extraction)
 """

@@ -1,7 +1,7 @@
 """Real-time MCP tools for persistent agents.
 
 This is a TEMPLATE. These tools show how to wire the Scheduler from
-``lup.realtime`` into an agent session. Customize for your domain.
+``lup.realtime.scheduler`` into an agent session. Customize for your domain.
 
 The pattern:
 1. Create a Scheduler with your environment's action callback
@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 
 from lup.background import BaseBackgroundAgent, create_background_agent
 from lup.mcp import LupMcpTool, ToolError, lup_tool
-from lup.realtime import (
+from lup.realtime.models import (
     ContextInput,
     ContextOutput,
     DebounceInput,
@@ -45,13 +45,27 @@ from lup.realtime import (
     ReplyOutput,
     ScheduleActionInput,
     ScheduleActionOutput,
-    Scheduler,
     SleepInput,
     SleepOutput,
 )
+from lup.realtime.scheduler import Scheduler
 from lup.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
+
+
+MISSING_SLEEP_MESSAGE = (
+    "Your turn ended without calling sleep. This is a persistent session: "
+    "you yield control with the sleep tool, and the environment wakes you "
+    "when something happens. Finish any pending replies, record a meta "
+    "assessment, then call sleep."
+)
+"""Corrective nudge for a turn that ended without sleeping.
+
+TEMPLATE: this domain expects a meta assessment before sleep, so the nudge
+names that step. Pass it to ``run_relay_session(missing_sleep_message=...)``;
+drop the meta wording for domains that don't gate sleep on reflection.
+"""
 
 
 # =====================================================================

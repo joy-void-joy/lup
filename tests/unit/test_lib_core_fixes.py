@@ -30,8 +30,8 @@ from lup import paths
 from lup.metrics import MetricsCollector, metrics_path, read_metrics_summary
 from lup.notes import setup_notes
 from lup.paths import path_is_under, sessions_dir, trace_logs_dir
-from lup.realtime import SleepInput
-from lup.realtime_relay import RealtimeMailbox, ReplyEvent, RemindEvent
+from lup.realtime.models import SleepInput
+from lup.realtime.relay import RealtimeMailbox, ReplyEvent, RemindEvent
 from lup.reflect import ReflectionGate
 from lup.sandbox import Sandbox, process_is_alive, process_start_token
 from lup.throttle import Throttle
