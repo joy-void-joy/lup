@@ -54,7 +54,7 @@ from lup.adapters.common import (
     UnsupportedOperationError,
 )
 from lup.hooks import LupHooksConfig
-from lup.realtime_relay import RealtimeMailbox
+from lup.realtime.relay import RealtimeMailbox
 from lup.trace import TraceLogger, print_message
 from lup.types import (
     JsonObject,

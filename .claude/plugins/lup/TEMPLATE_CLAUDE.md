@@ -93,7 +93,7 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 **Why not an event queue?** A queue steers the agent by its inputs — every event forces a reaction. The sleep/wake pattern lets the agent stay centered. It can debounce event bursts, schedule actions, set reminders, and park thoughts for later — all on its own terms. The agent continues thinking across sleep cycles rather than starting fresh on each event.
 
-**Library support:** `lup.realtime` provides the `Scheduler` class (sleep/wake, debounce, scheduled actions, reminders, delayed actions) and gate presets (`create_stop_guard`, `create_pending_event_guard`, `create_meta_before_sleep_guard`), all built on `create_tool_gate` from `lup.hooks`. On backends whose tools run in a subprocess (Codex, OpenAI-compatible), `lup.realtime_relay` inverts the loop — each wake is one SDK turn, relayed through a file mailbox (`RealtimeMailbox`, `run_relay_session`). See the example tools in `src/<project>/agent/tools/realtime.py`.
+**Library support:** `lup.realtime.scheduler` provides the `Scheduler` class (sleep/wake, debounce, scheduled actions, reminders, delayed actions) and gate presets (`create_stop_guard`, `create_pending_event_guard`, `create_meta_before_sleep_guard`), all built on `create_tool_gate` from `lup.hooks`. On backends whose tools run in a subprocess (Codex, OpenAI-compatible), `lup.realtime.relay` inverts the loop — each wake is one SDK turn, relayed through a file mailbox (`RealtimeMailbox`, `run_relay_session`). See the example tools in `src/<project>/agent/tools/realtime.py`.
 
 ### Reflection Pattern
 
@@ -137,7 +137,7 @@ Agents produce better output when forced to self-assess before committing. The r
 - **lup/paths.py**: Centralized version-aware path constants and helpers
 - **lup/trace.py**: Trace logging, output formatting, color-coded console display
 - **lup/metrics.py**: Tool call tracking
-- **lup/realtime.py**: Scheduler for persistent agents (sleep/wake, debounce, reminders)
+- **lup/realtime/**: Persistent-agent machinery — `scheduler` (Scheduler core + guards), `models` (tool I/O), `relay` (subprocess file mailbox)
 - **lup/reflect.py**: Reflection gate (enforce reflect-before-output)
 - **lup/throttle.py**: Rate limiting (concurrency + interval)
 
@@ -313,7 +313,7 @@ agent_version = "0.1.0"
 
 For agents that exist over time (conversations, monitoring, games), use the persistent agent pattern:
 
-- Wire `Scheduler` from `lup.realtime` into your session
+- Wire `Scheduler` from `lup.realtime.scheduler` into your session
 - Add Stop hook to prevent turn ending (`create_stop_guard`)
 - Implement sleep/context/reply tools from `agent/tools/realtime.py`
 - Replace the request-response `run_agent()` in `core.py` with a sleep/wake loop
@@ -451,8 +451,10 @@ packages/
         ├── output.py           # submit_output finalization + missing-output guard (all backends)
         ├── paths.py            # Version-aware paths + SessionContext env relay
         ├── profiles.py         # Named Claude config-dir profiles (accounts), machine-wide
-        ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
-        ├── realtime_relay.py   # Persistent mode for subprocess backends (file mailbox)
+        ├── realtime/           # Persistent-agent machinery (one concern per module)
+        │   ├── scheduler.py    # Scheduler core (sleep/wake, debounce, reminders) + guards
+        │   ├── models.py       # Shared realtime tool I/O models
+        │   └── relay.py        # Subprocess file-mailbox relay (imports the core)
         ├── reflect.py          # Reflection gate (in-memory or file-backed)
         ├── retry.py            # Retry decorator with backoff
         ├── sandbox.py          # Docker-based Python sandbox (lazy start, orphan sweep)

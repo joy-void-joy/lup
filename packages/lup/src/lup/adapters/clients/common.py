@@ -43,7 +43,7 @@ from lup.types import (
 )
 
 if TYPE_CHECKING:
-    from lup.realtime_relay import RealtimeMailbox
+    from lup.realtime.relay import RealtimeMailbox
 
 logger = logging.getLogger(__name__)
 

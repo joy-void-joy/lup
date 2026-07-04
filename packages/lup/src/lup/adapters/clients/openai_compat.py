@@ -86,7 +86,7 @@ def create_openai_compat(options: LupAgentOptions) -> Client:
     """
     client = refuse_unconsumed("openai-compat", options, build_openai_compat_client)
     if options.realtime and options.realtime_dir is not None:
-        from lup.realtime_relay import RealtimeMailbox
+        from lup.realtime.relay import RealtimeMailbox
 
         client.mailbox = RealtimeMailbox(options.realtime_dir)
     return client
