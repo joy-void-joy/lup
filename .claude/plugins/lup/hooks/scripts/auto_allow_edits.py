@@ -55,7 +55,7 @@ TMP_DIR = "tmp"
 
 LUP_IGNORE_MARKER = "# lup: ignore"
 
-# Inline review-comment markers, mirroring lup.markers. Inlined so this safety
+# Inline review-comment markers, mirroring lup.review.markers. Inlined so this safety
 # hook stays hermetic — no package import on the per-edit hot path; keep both in
 # sync. A marker is `#`/`//` + `lup:` (any case, optional spaces); the
 # `ignore` keyword is the escape hatch, any other note is actionable feedback.
@@ -77,7 +77,7 @@ RESOLVE_EDITOR_AGENTS = {"resolve-editor", "lup:resolve-editor"}
 # line downgrades to a user prompt, and a file-level marker (first 10 lines
 # on disk) skips this table entirely.
 #
-# The importable source of truth is lup.antipatterns.PYTHON_ANTI_PATTERNS,
+# The importable source of truth is lup.review.antipatterns.PYTHON_ANTI_PATTERNS,
 # which `lup-devtools dev check --antipatterns` audits the whole tree with;
 # this hook mirrors it because a safety hook must stay hermetic (no package
 # import on the per-edit hot path), and test_python_table_matches_hook in
@@ -260,7 +260,7 @@ TS_FILE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 TS_LUP_IGNORE_MARKER = "// lup: ignore"
 
 # Same contract as ANTI_PATTERNS, for TypeScript/JavaScript-family files,
-# using the `// lup: ignore` marker. Mirrors lup.antipatterns.TS_ANTI_PATTERNS;
+# using the `// lup: ignore` marker. Mirrors lup.review.antipatterns.TS_ANTI_PATTERNS;
 # test_ts_table_matches_hook pins the mirror equal.
 TS_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (

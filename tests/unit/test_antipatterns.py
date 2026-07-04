@@ -1,7 +1,7 @@
 # lup: ignore
 """The anti-pattern set is single-sourced, and the auditor agrees with the hook.
 
-`lup.antipatterns` is the importable source of truth; the edit hook mirrors it
+`lup.review.antipatterns` is the importable source of truth; the edit hook mirrors it
 inline because it cannot import on its hot path. These tests pin that the two
 copies stay byte-identical (so they cannot drift) and that the auditor flags the
 two classes the hook cannot catch after the fact: a match with no marker, and a
@@ -12,7 +12,7 @@ import importlib.util
 import re
 from pathlib import Path
 
-from lup.antipatterns import (
+from lup.review.antipatterns import (
     PYTHON_ANTI_PATTERNS,
     TS_ANTI_PATTERNS,
     AntiPattern,
