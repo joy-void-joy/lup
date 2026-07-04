@@ -36,7 +36,7 @@ CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(
         "WebSearch",
         "Write",
     }
-) #lup: We shouldn't have claude specific mentions here
+)  # lup: We shouldn't have claude specific mentions here
 """The Claude Code built-in tool names a session may call.
 
 A property of the Claude backend, not of any domain: the tools the SDK
@@ -45,10 +45,20 @@ to name every tool a Claude session may call; Codex/OpenAI agents get
 tools from the served MCP groups plus the Codex runtime's own native
 tools instead."""
 
-FRAMEWORK_TOOLS: frozenset[str] = frozenset({"StructuredOutput"}) #lup: Neither frozenset
+FRAMEWORK_TOOLS: frozenset[str] = frozenset(
+    {"StructuredOutput"}
+)  # lup: Neither frozenset
 """Tools the agent always needs: ``StructuredOutput`` emits the final result
 under ``ClaudeAgentOptions.output_format``, so the allowlist must carry it even
 though no template tool defines it."""
+
+SHELL_BUILTIN_TOOLS: frozenset[str] = frozenset({"Bash"})
+"""Built-in tools that grant raw host-shell execution.
+
+Dropped from the allowlist by default when the session carries a
+code-execution sandbox (``code_execution=True``): the sandbox's isolated
+``execute_code`` is the sanctioned code path, so raw shell is defense-in-depth
+opt-in (``allow_shell=True``) rather than granted alongside it."""
 
 
 class BaseToolPolicy:
@@ -60,6 +70,10 @@ class BaseToolPolicy:
     conditional groups or :meth:`get_mcp_servers` to register additional
     servers. The base owns *how* exclusions apply, identically on every
     backend path.
+
+    When the session carries a code-execution sandbox
+    (``code_execution=True``), :data:`SHELL_BUILTIN_TOOLS` (raw shell) is
+    excluded by default; ``allow_shell=True`` opts back in.
     """
 
     def __init__(
@@ -68,9 +82,16 @@ class BaseToolPolicy:
         restricted_mode: bool = False,
         excluded_tools: frozenset[str] = frozenset(),
         excluded_tags: frozenset[str] = frozenset(),
+        code_execution: bool = False,
+        allow_shell: bool = False,
     ) -> None:
         self.restricted_mode = restricted_mode
-        self.excluded_tools: frozenset[str] = frozenset(excluded_tools)
+        self.code_execution = code_execution
+        self.allow_shell = allow_shell
+        exclusions = set(excluded_tools)
+        if code_execution and not allow_shell:
+            exclusions |= SHELL_BUILTIN_TOOLS
+        self.excluded_tools: frozenset[str] = frozenset(exclusions)
         self.excluded_tags: frozenset[str] = frozenset(excluded_tags)
 
     def filter_tools(self, tools: Sequence[LupMcpTool]) -> list[LupMcpTool]:

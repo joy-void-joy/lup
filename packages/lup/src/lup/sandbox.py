@@ -34,9 +34,6 @@ Examples:
         ...     sb.run_install(["scipy"])
         ...     server = sb.create_mcp_server(name="sandbox")
 """
-#lup: There are often errors with this sandbox. For instance, the agent inside often can't access files in the /shared folder. It's not clear what's mounted where, the agent gets lost.
-#lup: Can you verify this all makes sense?
-#lup: Also Bash should be forbidden by default in terms of builtins
 
 import io
 import json
@@ -48,7 +45,7 @@ from collections.abc import Generator, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Literal, Self, TypedDict
+from typing import Literal, Protocol, Self, TypedDict
 
 try:
     import docker
@@ -72,6 +69,7 @@ from lup.mcp import (
 logger = logging.getLogger(__name__)
 
 NetworkMode = Literal["bridge", "none"]
+MountMode = Literal["rw", "ro"]
 
 DEFAULT_PRE_INSTALL: tuple[str, ...] = (
     "requests",
@@ -96,6 +94,23 @@ class InstallPackageInput(BaseModel):
     """Input schema for the install_package tool."""
 
     packages: list[str] = Field(min_length=1)
+
+
+class Mount(BaseModel):
+    """One entry in the sandbox's container filesystem topology.
+
+    Names a container-side path, what backs it (a host directory for a
+    bind, a Docker named volume otherwise), the access mode, and how the
+    in-sandbox agent should use it. This is the single source of truth for
+    both the Docker ``volumes`` mapping and the code-execution tool
+    description, so what the agent is told always matches what is mounted.
+    """
+
+    container_path: str = Field(description="Absolute path inside the container")
+    source: str = Field(description="Host directory (bind) or Docker volume name")
+    kind: Literal["bind", "volume"]
+    mode: MountMode
+    purpose: str = Field(description="What the agent uses this path for")
 
 
 # --- TypedDict definitions for result types ---
@@ -230,6 +245,52 @@ class ReplCrashedError(RuntimeError):
     """Raised when the persistent REPL process has exited unexpectedly."""
 
 
+class ExecSocket(Protocol):
+    """Opaque handle to docker-py's exec stream.
+
+    docker-py hands back a different concrete socket per platform and
+    version (a raw ``socket.socket``, a ``SocketIO`` wrapper, an SSH/npipe
+    socket) with no shared typed surface, so the REPL holds the handle
+    opaquely and reaches close, read, write, and timeout — which differ by
+    variant — dynamically through the module helpers below.
+    """
+
+
+def socket_send(sock: ExecSocket, data: bytes) -> None:
+    """Write bytes to a docker exec socket across its variant shapes.
+
+    A raw socket exposes ``sendall`` (on itself or the wrapped ``_sock``);
+    a ``SocketIO`` wrapper exposes ``write`` instead.
+    """
+    raw = getattr(sock, "_sock", sock)
+    sender = getattr(raw, "sendall", None)
+    if sender is not None:
+        sender(data)
+    else:
+        getattr(sock, "write")(data)
+
+
+def socket_close(sock: ExecSocket) -> None:
+    """Close a docker exec socket and the buffered response behind it."""
+    response = getattr(sock, "_response", None)
+    if response is not None:
+        response.close()
+    getattr(sock, "close")()
+
+
+def socket_set_timeout(sock: ExecSocket, timeout: float | None) -> None:
+    """Set the timeout on whichever variant carries ``settimeout``.
+
+    ``timeout=None`` restores blocking mode. The raw socket may be the
+    handle itself or the wrapped ``_sock``.
+    """
+    for candidate in (sock, getattr(sock, "_sock", None)):
+        setter = getattr(candidate, "settimeout", None)
+        if setter is not None:
+            setter(timeout)
+            return
+
+
 REPL_SERVER_SCRIPT = r"""
 # Persistent Python REPL server — runs inside the Docker container.
 #
@@ -329,7 +390,7 @@ class ReplSession:
         self.client = client
         self.container = container
         self.environment = environment
-        self.sock: Any = None  # lup: ignore — Docker exec socket, no typed API exported
+        self.sock: ExecSocket | None = None
         self.exec_id: str | None = None
 
     def start(self) -> None:
@@ -355,10 +416,7 @@ class ReplSession:
         """Close the socket connection to the REPL."""
         if self.sock is not None:
             try:
-                response = getattr(self.sock, "_response", None)
-                if response is not None:
-                    response.close()
-                self.sock.close()
+                socket_close(self.sock)
             except (OSError, ValueError):
                 # Socket-layer close failures (already closed, broken pipe)
                 # are expected during teardown; anything else propagates.
@@ -399,12 +457,10 @@ class ReplSession:
 
     def send(self, data: bytes) -> None:
         """Write raw bytes to the exec socket stdin."""
+        if self.sock is None:
+            raise ReplCrashedError("REPL not connected")
         try:
-            sock = getattr(self.sock, "_sock", self.sock)
-            if hasattr(sock, "sendall"):
-                sock.sendall(data)
-            else:
-                self.sock.write(data)
+            socket_send(self.sock, data)
         except (BrokenPipeError, OSError) as e:
             raise ReplCrashedError(f"REPL write failed: {e}") from e
 
@@ -447,11 +503,8 @@ class ReplSession:
 
     def set_socket_timeout(self, timeout: float | None) -> None:
         """Set timeout on the underlying socket (None = blocking mode)."""
-        sock = self.sock
-        for candidate in [sock, getattr(sock, "_sock", None)]:
-            if hasattr(candidate, "settimeout"):
-                candidate.settimeout(timeout)
-                return
+        if self.sock is not None:
+            socket_set_timeout(self.sock, timeout)
 
 
 class Sandbox:
@@ -460,9 +513,16 @@ class Sandbox:
     Each session gets a unique container and volume, so concurrent sessions
     cannot interfere with each other.
 
+    Two paths are mounted (see :meth:`mount_topology`): ``/workspace`` is
+    the persistent working directory and process cwd, backed by a private
+    Docker volume that is *not* visible on the host; ``/shared`` is a bind
+    of ``shared_dir`` for exchanging files with the host. Relative paths in
+    executed code resolve under ``/workspace``, so host exchange must use
+    the absolute ``/shared`` path.
+
     Args:
         session_id: Unique identifier for this session (used in container/volume names).
-        shared_dir: Local directory to mount at /shared for host-sandbox file exchange.
+        shared_dir: Host directory bound to /shared for host-sandbox file exchange.
         docker_image: Docker image to use for the sandbox.
         network_mode: Network access level ("bridge" or "none").
         timeout_seconds: Default timeout for code execution.
@@ -501,6 +561,38 @@ class Sandbox:
                 "Sandbox not initialized. Use 'with Sandbox() as sandbox:' first."
             )
         return self.active_container
+
+    def mount_topology(self) -> list[Mount]:
+        """The container's filesystem layout: source, mode, and purpose.
+
+        One source of truth for the Docker ``volumes`` mapping
+        (:meth:`start_container`) and the code-execution tool description
+        (:meth:`create_tools`), so the paths the agent is told about are
+        exactly the paths that exist. Derived from names set in
+        ``__init__``, so it is valid before the container starts.
+        """
+        return [
+            Mount(
+                container_path="/workspace",
+                source=self.volume_name,
+                kind="volume",
+                mode="rw",
+                purpose=(
+                    "Persistent working directory and process cwd; survives "
+                    "across calls but is not visible on the host."
+                ),
+            ),
+            Mount(
+                container_path="/shared",
+                source=str(self.shared_dir),
+                kind="bind",
+                mode="rw",
+                purpose=(
+                    f"File exchange with the host directory {self.shared_dir}; "
+                    "read host inputs and write host outputs here."
+                ),
+            ),
+        ]
 
     @property
     def is_active(self) -> bool:
@@ -662,8 +754,8 @@ class Sandbox:
             command="sleep infinity",
             detach=True,
             volumes={
-                self.volume_name: {"bind": "/workspace", "mode": "rw"},
-                str(self.shared_dir): {"bind": "/shared", "mode": "rw"},
+                mount.source: {"bind": mount.container_path, "mode": mount.mode}
+                for mount in self.mount_topology()
             },
             working_dir="/workspace",
             mem_limit="1g",
@@ -819,12 +911,21 @@ class Sandbox:
             List of MCP tools for code execution and package installation.
         """
         timeout_seconds = self.timeout_seconds
+        filesystem_text = "\n".join(
+            f"  {mount.container_path} ({mount.mode}) — {mount.purpose}"
+            for mount in self.mount_topology()
+        )
+        network_text = (
+            "The container has network access. "
+            if self.network_mode != "none"
+            else "The container has no network access. "
+        )
 
         @lup_tool(
             "Execute Python code in an isolated Docker container with persistent state. "
             "Variables, imports, and data persist between calls — no need to re-define them. "
-            f"The container has network access, a persistent /workspace directory, and a "
-            f"/shared directory for file exchange with the host. Timeout: {timeout_seconds}s.\n\n"
+            f"{network_text}Timeout: {timeout_seconds}s.\n\n"
+            f"Filesystem (use absolute paths; the cwd is /workspace):\n{filesystem_text}\n\n"
             "Examples:\n"
             "  execute_code(code='import numpy as np; data = [1,2,3]; print(np.mean(data))')\n"
             "  execute_code(code='# Monte Carlo simulation\\nimport numpy as np\\n"
