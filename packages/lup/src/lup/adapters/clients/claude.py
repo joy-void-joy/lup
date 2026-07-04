@@ -9,8 +9,8 @@ sections, in order:
   ``claude-compat`` (:mod:`lup.adapters.clients.claude_compat`);
 - SDK adaptation — hook, subagent, block, message, and tool conversion
   between lup types and SDK types;
-- sessions and clients — :class:`ResponseCollector`, :class:`ClaudeSession`,
-  and :class:`ClaudeClient`, the run path.
+- sessions and clients — :class:`ClaudeResponseCollector`,
+  :class:`ClaudeSession`, and :class:`ClaudeClient`, the run path.
 
 The SDK is imported as a qualified namespace (``claude`` for the package,
 ``claude_types`` for its ``types`` submodule) so every SDK type reads with
@@ -33,10 +33,10 @@ from typing import Any  # lup: ignore — confined to SdkDict, the SDK's payload
 
 import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
-from pydantic import BaseModel
 
 from lup.adapters.clients.common import (
     Client,
+    ResponseCollector,
     Session,
     query_via_session,
     refuse_unconsumed,
@@ -432,63 +432,34 @@ type ClaudeUsageNormalizer = Callable[[Mapping[str, JsonValue]], Usage | None]
 """Transforms the raw Claude SDK usage payload into a (subclass of) Usage."""
 
 
-class ResponseCollector: #lup: Feels like this should be an ABC implementation instead
-    #lup: Allso feels like we're deduplicating work from trace.py
-    """Drains a queried client's response stream, accumulating once.
+class ClaudeResponseCollector(ResponseCollector[claude.Message]):
+    """The Claude implementation of the response-collector seam.
 
-    The single collector for the Claude path: ``async for`` over it yields
-    each SDK message while accumulating state, ``collect()`` drains the rest
-    with display/tracing, and ``to_lup_response()`` projects the accumulated
-    SDK state into lup types. Every Claude run — session or one-shot —
-    drains through it via ``ClaudeSession.send``, so there is one
-    message-draining loop rather than two that can drift.
-
-    After iteration, access the accumulated SDK state: ``blocks``,
-    ``tool_results``, ``messages``, ``result``.
+    Drains the live SDK message stream: :meth:`drain` accumulates the
+    terminal ``ResultMessage`` and, on an error result, logs and traces it
+    before raising mid-stream so the failure surfaces. Each SDK message
+    becomes a lup message through :func:`claude_message_to_lup` for display
+    and the shared projection, and :meth:`finalize` shapes the terminal
+    result — ``usage_normalizer`` normalizes the raw SDK usage payload, a
+    subclass of which may carry vendor-specific fields.
     """
 
     def __init__(
         self,
         client: claude.ClaudeSDKClient,
+        *,
+        usage_normalizer: "ClaudeUsageNormalizer" = extract_token_usage,
         trace_logger: TraceLogger | None = None,
         prefix: str = "",
     ) -> None:
+        super().__init__(trace_logger=trace_logger, prefix=prefix)
         self.client = client
-        self.blocks: list[claude.ContentBlock] = []
-        self.tool_results: list[claude.ContentBlock] = []
-        self.messages: list[
-            claude_types.AssistantMessage | claude_types.UserMessage
-        ] = []
+        self.usage_normalizer = usage_normalizer
         self.result: claude_types.ResultMessage | None = None
-        self.trace_logger = trace_logger
-        self.prefix = prefix
 
-    @property
-    def text(self) -> str | None:
-        """Concatenated text from all assistant text blocks, or ``None``."""
-        texts = [b.text for b in self.blocks if isinstance(b, claude.TextBlock)]
-        return "\n\n".join(texts) if texts else None
-
-    def output[T: BaseModel](self, output_type: type[T]) -> T | None:
-        """Extract structured output as a validated Pydantic model, or ``None``."""
-        if self.result is not None and self.result.structured_output:
-            return output_type.model_validate(self.result.structured_output)
-        return None
-
-    async def __aiter__(self) -> AsyncIterator[claude.Message]:
-        """Yield messages, accumulating state but not displaying.
-
-        Raises RuntimeError on agent error results — after logging,
-        tracing, and yielding the failing ResultMessage, so consumers
-        see it and the trace records what went wrong.
-        """
+    async def drain(self) -> AsyncIterator[claude.Message]:
         async for message in self.client.receive_response():
             match message:
-                case claude_types.AssistantMessage():
-                    self.messages.append(message)
-                    for block in message.content:
-                        self.blocks.append(block)
-
                 case claude_types.ResultMessage():
                     self.result = message
                     if message.is_error:
@@ -497,85 +468,29 @@ class ResponseCollector: #lup: Feels like this should be an ABC implementation i
                             self.trace_logger.log_text(
                                 str(message.result), heading="Agent error result"
                             )
-
                 case claude_types.SystemMessage():
                     logger.info("System [%s]: %s", message.subtype, message.data)
-
-                case claude_types.UserMessage():
-                    self.messages.append(message)
-                    if isinstance(message.content, list):
-                        for block in message.content:
-                            self.tool_results.append(block)
 
             yield message
 
             if isinstance(message, claude_types.ResultMessage) and message.is_error:
                 raise RuntimeError(f"Agent error: {message.result}")
 
-    async def collect(self) -> claude_types.ResultMessage:
-        """Drain all messages, displaying and tracing each one.
+    def to_lup_message(self, message: claude.Message) -> LupMessage | None:
+        return claude_message_to_lup(message)
 
-        Raises:
-            RuntimeError: If the agent returns an error or no result.
-        """
-        async for message in self:
-            lup_msg = claude_message_to_lup(message)
-            if lup_msg is not None:
-                print_message(lup_msg, prefix=self.prefix, trace=self.trace_logger)
-
+    def finalize(self, response: LupResponse) -> None:
         if self.result is None:
             raise RuntimeError("No result received from agent")
-        return self.result
-
-    def to_lup_response(
-        self, usage_normalizer: "ClaudeUsageNormalizer" = extract_token_usage
-    ) -> LupResponse:
-        """Project the accumulated SDK state into a ``LupResponse``.
-
-        Call after ``collect()``. ``usage_normalizer`` shapes the raw SDK usage
-        payload — a subclass may carry vendor-specific fields.
-        """
-        response = LupResponse()
-        for message in self.messages:
-            match message:
-                case claude_types.AssistantMessage():
-                    blocks = [claude_block_to_lup(b) for b in message.content]
-                    response.messages.append(LupAssistantMessage(content=blocks))
-                    response.blocks.extend(blocks)
-                case claude_types.UserMessage() if isinstance(message.content, list):
-                    blocks = [claude_block_to_lup(b) for b in message.content]
-                    response.messages.append(LupUserMessage(content=blocks))
-                    response.tool_results.extend(blocks)
-        if self.result is not None:
-            response.session_id = self.result.session_id
-            response.result = LupResultMessage(
-                structured_output=self.result.structured_output,
-                is_error=self.result.is_error,
-                result=self.result.result,
-                duration_ms=self.result.duration_ms,
-                total_cost_usd=self.result.total_cost_usd,
-                usage=safe_normalize_usage(usage_normalizer, self.result.usage),
-            )
-        return response
-
-
-async def collect_lup_response(
-    client: claude.ClaudeSDKClient,
-    *,
-    usage_normalizer: ClaudeUsageNormalizer = extract_token_usage,
-    trace_logger: TraceLogger | None = None,
-    prefix: str = "",
-) -> LupResponse:
-    """Drain a queried client's response stream into a LupResponse.
-
-    The lup-typed projection of :class:`ResponseCollector` —
-    ``ClaudeSession.send`` collects through it. Displays and traces
-    each message as it arrives, raises on agent errors and on streams that
-    end without a result.
-    """
-    collector = ResponseCollector(client, trace_logger=trace_logger, prefix=prefix)
-    await collector.collect()
-    return collector.to_lup_response(usage_normalizer)
+        response.session_id = self.result.session_id
+        response.result = LupResultMessage(
+            structured_output=self.result.structured_output,
+            is_error=self.result.is_error,
+            result=self.result.result,
+            duration_ms=self.result.duration_ms,
+            total_cost_usd=self.result.total_cost_usd,
+            usage=safe_normalize_usage(self.usage_normalizer, self.result.usage),
+        )
 
 
 class ClaudeSession(Session):
@@ -604,12 +519,13 @@ class ClaudeSession(Session):
         prefix: str = "",
     ) -> LupResponse:
         await self.client.query(prompt)
-        response = await collect_lup_response(
+        collector = ClaudeResponseCollector(
             self.client,
             usage_normalizer=self.usage_normalizer,
             trace_logger=trace_logger,
             prefix=prefix,
         )
+        response = await collector.collect()
         self.id = response.session_id or self.id
         return response
 
@@ -666,11 +582,20 @@ class ClaudeClient(Client):
         trace_logger: TraceLogger | None = None,
         prefix: str = "",
     ) -> AsyncGenerator[LupEvent, None]:
-        """Stream events live from the Claude SDK."""
+        """Stream events live from the Claude SDK.
+
+        Drains through :class:`ClaudeResponseCollector` — the same walk the
+        one-shot/session path uses — mapping each SDK block to its live event
+        as it arrives. The collector raises after yielding an error result,
+        so the terminal ``LupDoneEvent`` still reaches the consumer first.
+        """
         collected: list[LupContentBlock] = []
         async with claude.ClaudeSDKClient(options=self.options) as client:
             await client.query(prompt)
-            async for message in client.receive_response():
+            collector = ClaudeResponseCollector(
+                client, trace_logger=trace_logger, prefix=prefix
+            )
+            async for message in collector.drain():
                 lup_msg = claude_message_to_lup(message)
                 if lup_msg is not None and trace_logger:
                     print_message(lup_msg, prefix=prefix, trace=trace_logger)
@@ -697,5 +622,3 @@ class ClaudeClient(Client):
                                     )
                     case claude_types.ResultMessage():
                         yield LupDoneEvent(blocks=collected)
-                        if message.is_error:
-                            raise RuntimeError(f"Agent error: {message.result}")
