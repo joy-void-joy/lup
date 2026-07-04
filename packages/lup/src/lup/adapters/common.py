@@ -33,6 +33,7 @@ capability table is probed from that behavior rather than declared.
 import logging
 import re
 from collections.abc import Callable
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -82,7 +83,7 @@ class LupAgentOptions(BaseModel):
     (Claude's ``claude_code`` preset + append), thinking as hard as the
     API allows and bypassing per-call permission prompts. ``False`` — the
     unmarked default — sends the prompt verbatim under SDK defaults: the
-    shape of a nested LLM call rather than an agent session.""" #lup: What? This seems to conflate several concerns here, whether to enable "think as hard as it allows", whether to embed the claude_code preset, etc...
+    shape of a nested LLM call rather than an agent session."""  # lup: What? This seems to conflate several concerns here, whether to enable "think as hard as it allows", whether to embed the claude_code preset, etc...
 
     tool_servers: dict[str, McpServerEntry] = {}
     subagents: list[SubagentSpec] = []
@@ -231,29 +232,32 @@ factories live in ``lup.adapters.clients.*``; a custom backend is any
 callable of this shape passed as ``engine=``."""
 
 
-# lup: Huh? This just wraps around without doing anything?
-def claude_engine(options: LupAgentOptions) -> "Client":
-    from lup.adapters.clients.claude import create_claude
+def lazy_engine(module: str, factory: str) -> ClientFactory:
+    """Build one engine's factory: the single object both routers key on by identity.
 
-    return create_claude(options)
+    The returned callable imports ``module``'s ``create_*`` only when first
+    invoked, so ``import lup`` needs no SDK installed and each engine pulls in
+    only its own optional dependency. Bind the result to one module-level name
+    and reference that same object from both :data:`ENGINES` and
+    :data:`MODEL_ROUTES`: :func:`engine_id_of` recovers an engine's id by object
+    identity, so a per-engine factory must stay one object, never two lambdas.
+    """
+
+    def create(options: LupAgentOptions) -> "Client":
+        create_native: ClientFactory = getattr(import_module(module), factory)
+        return create_native(options)
+
+    return create
 
 
-def claude_compat_engine(options: LupAgentOptions) -> "Client":
-    from lup.adapters.clients.claude_compat import create_claude_compat
-
-    return create_claude_compat(options)
-
-
-def codex_engine(options: LupAgentOptions) -> "Client":
-    from lup.adapters.clients.codex import create_codex
-
-    return create_codex(options)
-
-
-def openai_compat_engine(options: LupAgentOptions) -> "Client":
-    from lup.adapters.clients.openai_compat import create_openai_compat
-
-    return create_openai_compat(options)
+claude_engine = lazy_engine("lup.adapters.clients.claude", "create_claude")
+claude_compat_engine = lazy_engine(
+    "lup.adapters.clients.claude_compat", "create_claude_compat"
+)
+codex_engine = lazy_engine("lup.adapters.clients.codex", "create_codex")
+openai_compat_engine = lazy_engine(
+    "lup.adapters.clients.openai_compat", "create_openai_compat"
+)
 
 
 ENGINES: dict[str, ClientFactory] = {
