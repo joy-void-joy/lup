@@ -438,8 +438,10 @@ packages/
         │   ├── common.py       # SDK-free door: LupAgentOptions, seam errors, ENGINES/MODEL_ROUTES routers, create_client(), query()
         │   ├── clients/        # Client/Session ABCs (pure) + shared helpers; per-engine client, translation, and create_* factory (claude, claude_compat, codex, openai_compat)
         │   └── background/     # per-engine background: pure contract + wake/debounce machinery (common.py), claude & codex implementations
-        ├── antipatterns.py     # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
-        ├── markers.py          # `# lup:` / `// lup:` review-marker scanning (dev comments)
+        ├── review/             # Marker + anti-pattern scanning for dev tooling
+        │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor
+        │   ├── markers.py      # `# lup:` / `// lup:` review-marker scanning (dev comments)
+        │   └── antipatterns.py # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
         ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
         ├── history.py          # Session storage/retrieval
         ├── hooks.py            # SDK-agnostic hook factories (permission, gate, completion guard)

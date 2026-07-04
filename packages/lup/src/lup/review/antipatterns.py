@@ -15,14 +15,18 @@ inside the hermetic hook — the shared table, mirrored hook, equality test, and
 tree auditor together are the unification a linter would have provided.
 
 Each entry pairs a compiled regex with the message the hook and auditor show.
-This module imports only the standard library and `pydantic` so the hook and the
-auditor can load it cheaply; `# lup:` marker detection itself stays in
-`lup.markers`, which both this set's consumers and the auditor import directly.
+This module imports only the standard library and `pydantic` (directly and
+through `lup.review.common`) so the auditor can load it cheaply; `# lup:` marker
+detection stays in `lup.review.markers`, and the shared scan core — ignore
+matching, comment-column tokenization, the line cursor — in `lup.review.common`,
+which this set's consumers and the auditor import directly.
 """
 
 import re
 
 from pydantic import BaseModel
+
+from lup.review.common import IGNORE_RE, PythonContext, has_file_level_ignore
 
 
 class AntiPattern(BaseModel):
@@ -340,20 +344,16 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
     Text that does not tokenize as Python falls back to a plain substring
     check.
     """
-    from lup.markers import IGNORE_RE, has_file_level_ignore, python_comment_columns
-
     if has_file_level_ignore(text):
         return []
 
-    comment_columns = python_comment_columns(text)
+    context = PythonContext.parse(text)
 
     def inline_ignore(line_no: int, line: str) -> bool:
         match = IGNORE_RE.search(line)
         if match is None:
             return False
-        if comment_columns is None:
-            return True
-        return comment_columns.get(line_no) == match.start()
+        return context.comment_at(line_no, match.start())
 
     findings: list[AntiPatternFinding] = []
     for index, line in enumerate(text.splitlines(), start=1):
