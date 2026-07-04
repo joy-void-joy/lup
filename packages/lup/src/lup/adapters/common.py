@@ -1,68 +1,170 @@
 """The neutral seam: every engine behind ``create_client()`` and ``query()``.
 
-An :class:`Engine` is one backend, complete: it constructs a
-:class:`Client` from neutral options, and the client opens
-:class:`Session`\\ s. ``query()`` is the self-contained one-shot (opens,
-sends, closes — nothing to leak); ``session()`` is the explicit
-multi-turn context, resumable across process runs via
-``session(resume=...)`` and :attr:`Session.id`.
+An engine is one backend, complete: a ``create_*`` factory that turns
+neutral :class:`LupAgentOptions` into a :class:`~lup.adapters.clients.common.Client`,
+and the client opens :class:`~lup.adapters.clients.common.Session`\\ s.
+``query()`` is the self-contained one-shot (opens, sends, closes —
+nothing to leak); ``session()`` is the explicit multi-turn context,
+resumable across process runs via ``session(resume=...)`` and
+``Session.id``.
 
-This module is SDK-free. :data:`ENGINE_ROUTER` — the one routing
-structure — relates model-name patterns to lazily-imported engine
-constructors, so ``import lup`` works with neither SDK installed and
-each engine pulls in only its own. There is no registry to mutate: a
-custom backend is an :class:`Engine` instance passed as ``engine=``.
+This module is SDK-free. Two plain routers relate names to engine
+factories, and both keep their values lazy — thin module-level wrappers
+that import the engine module only when called — so ``import lup`` works
+with neither SDK installed and each engine pulls in only its own:
 
-The ABCs draw one deliberate line. ``@abstractmethod`` members
-(:meth:`Session.send`, :meth:`Client.session`, :meth:`Engine.client`)
-are what every engine must provide. Concrete defaults that raise
-:class:`UnsupportedOperationError` (:meth:`Session.interrupt`,
-:meth:`Engine.background`) or fall back (:meth:`Client.stream` replays a
-finished turn) mark optional capabilities: the *absence* is part of the
-contract — callers catch it at the point of use, and the devtools
-capability table is probed from exactly this behavior (a ``stream``
-override means live streaming, a ``background`` that raises means no
-background support). Abstract members here would force identical
-raising stubs into every engine, blur unsupported-by-design against
-not-yet-implemented, and break the probes' override detection.
+- :data:`ENGINES` maps each shipped engine id to its factory. Insertion
+  order is the capability-table display order; anything needing the
+  shipped ids iterates it.
+- :data:`MODEL_ROUTES` maps a model-name regex to a factory, first match
+  wins. The keys are regexes (not prefixes) so a future route can
+  deconstruct a model name via named groups into subparams — e.g. a
+  ``r"(?P<family>gpt)-(?P<size>\\d+)"`` key could read ``family``/``size``
+  off the match. No route does that today; the shape is ready for it.
 
-What an engine cannot honor likewise surfaces as behavior, not
-declarations: construction applies the options' ``on_unsupported``
-policy to the engine's declared blind spots (:attr:`Engine.unsupported`
-via :meth:`Engine.enforce`), and unsupported operations raise at the
-point of use.
+There is no registry to mutate and no capability declarations to branch
+on: a custom backend is a factory callable passed as ``engine=``, an
+engine refuses intent knobs it cannot honor (``UnsupportedOptionsError``;
+``query()`` drops them with a log line), unsupported operations raise
+``UnsupportedOperationError`` at the point of use, and the devtools
+capability table is probed from that behavior rather than declared.
 """
 
 import logging
-from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator, Callable
-from contextlib import AbstractAsyncContextManager
+import re
+from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
-from lup.background import BackgroundAgentParams, BaseBackgroundAgent
-from lup.options import LupAgentOptions
+from lup.mcp import LupMcpServerConfig, McpServerEntry, server_tool_names
 from lup.trace import TraceLogger
 from lup.types import (
-    LupDoneEvent,
-    LupEvent,
+    JsonObject,
+    LupHooksConfig,
     LupResponse,
-    LupTextBlock,
-    LupTextEvent,
-    LupThinkingBlock,
-    LupThinkingEvent,
-    LupToolResultBlock,
-    LupToolResultEvent,
-    LupToolUseBlock,
-    LupToolUseEvent,
     PermissionMode,
+    SubagentSpec,
+    UsageCost,
 )
 
 if TYPE_CHECKING:
-    from lup.realtime_relay import RealtimeMailbox
+    from lup.adapters.clients.common import Client
 
 logger = logging.getLogger(__name__)
+
+
+class LupAgentOptions(BaseModel):
+    """Everything an engine needs to construct a client, in neutral terms.
+
+    A caller assembles one of these (its domain work: which tools, which
+    hooks, which subagents, the model knobs) and hands it to
+    :func:`create_client`; the engine's factory translates it into its
+    native option object. No consumer names a backend or touches a native
+    option type. Each engine consumes the mechanism payloads that belong
+    to it (in-process hooks and tool servers on Claude; served groups, env
+    relay, and writable roots on Codex) and ignores the others'. Intent
+    knobs an engine cannot honor (thinking tokens on the Codex runtime,
+    turn timeouts on Claude) follow ``on_unsupported``: refused at
+    construction, or cleared with a log line.
+    """
+
+    # ``usage_cost`` is a bare Callable, which pydantic only accepts under
+    # arbitrary types; every other field is a model, TypedDict, or scalar.
+    model_config = {"arbitrary_types_allowed": True}
+
+    model: str
+    system_prompt: str = ""
+    harness_preset: bool = False
+    """Wrap the system prompt in the engine's coding-harness preset
+    (Claude's ``claude_code`` preset + append), thinking as hard as the
+    API allows and bypassing per-call permission prompts. ``False`` — the
+    unmarked default — sends the prompt verbatim under SDK defaults: the
+    shape of a nested LLM call rather than an agent session."""
+
+    tool_servers: dict[str, McpServerEntry] = {}
+    subagents: list[SubagentSpec] = []
+    hooks: LupHooksConfig = {}
+    allowed_tools: list[str] = []
+    """Tool names the agent may call. The ``mcp__{server}__{tool}`` name of
+    every in-process tool server's tools is added automatically — those
+    tools are the agent's own — so this field carries only the extras
+    (builtins like ``Read``, framework tools). Policy exclusions are the
+    caller's to apply before construction; they cannot be derived here."""
+    tools: list[str] | None = None
+    """Base builtin toolset restriction (``None`` = the engine's default set)."""
+    served_tool_groups: list[str] = []
+    """Tool-group names served to subprocess engines out of process. Not
+    derived from ``tool_servers``: the served set is the caller's group
+    registry (it can include groups with no in-process server, e.g. a
+    sandbox served only externally), so the caller names it."""
+    add_dirs: list[Path] = []
+    output_schema: JsonObject | None = None
+    """JSON Schema the final response must satisfy (structured output)."""
+
+    permission_mode: PermissionMode | None = None
+    max_turns: int | None = None
+    max_thinking_tokens: int | None = None
+    reasoning_effort: str | None = None
+    max_budget_usd: float | None = None
+    turn_timeout_seconds: float | None = None
+    usage_cost: UsageCost | None = None
+    """Token→USD estimator that makes ``max_budget_usd`` enforceable on
+    runtimes that report tokens but not cost (Codex). The mechanism behind
+    the budget intent, not itself an intent knob."""
+
+    persist_session: bool = True
+    sdk_sandbox: bool = True
+    """Enable the engine's own OS sandbox where it has one (Claude SDK)."""
+    realtime: bool = False
+    on_unsupported: Literal["raise", "drop"] = "raise"
+    """What an engine does with intent knobs it cannot honor: refuse the
+    construction (sessions fail fast) or clear them with a log line (the
+    one-shot ``query()`` degrades)."""
+
+    base_url: str | None = None
+    """An OpenAI/Anthropic-compatible endpoint, unset for vendor-served
+    models. ``openai-compat`` defines a Codex custom provider from it;
+    ``claude-compat`` points the Claude scaffolding at it via
+    ``ANTHROPIC_BASE_URL``."""
+    api_key: str | None = None
+    model_provider: str | None = None
+
+    codex_sandbox: str | None = None
+    """Codex-runtime sandbox mode (named to avoid colliding with
+    ``sdk_sandbox``, the Claude SDK's OS sandbox flag)."""
+    approval_policy: str | None = None
+    mcp_env: dict[str, str] = {}
+    writable_roots: list[Path] = []
+
+    session_id: str | None = None
+    """Session-wiring trio (``session_id``, ``shared_dir``,
+    ``realtime_dir``) mirroring :class:`lup.paths.SessionContext`. Supplied
+    by the session builder rather than derived: the on-disk session layout
+    (where the shared sandbox dir lives, what the session is named) is the
+    caller's to define, not the adapter's."""
+    shared_dir: Path | None = None
+    realtime_dir: Path | None = None
+
+    @model_validator(mode="after")
+    def add_owned_tools_to_allowlist(self) -> "LupAgentOptions":
+        """Auto-allow every in-process tool server's own tools.
+
+        The ``mcp__{server}__{tool}`` name of each :class:`LupMcpServerConfig`
+        tool joins ``allowed_tools`` (deduped, explicit extras kept first).
+        External transport configs cannot be introspected offline, so they
+        contribute nothing.
+        """
+        owned = [
+            f"mcp__{name}__{tool}"
+            for name, server in self.tool_servers.items()
+            if isinstance(server, LupMcpServerConfig)
+            for tool in server_tool_names(server)
+        ]
+        if owned:
+            self.allowed_tools = list(dict.fromkeys([*self.allowed_tools, *owned]))
+        return self
 
 
 class UnsupportedOperationError(NotImplementedError):
@@ -113,303 +215,103 @@ class BudgetExceededError(RuntimeError):
     """
 
 
-class Session(ABC):
-    """Multi-turn conversation session.
+type ClientFactory = Callable[[LupAgentOptions], "Client"]
+"""One engine, as the seam sees it: neutral options in, a configured
+:class:`~lup.adapters.clients.common.Client` out. The shipped engines'
+factories live in ``lup.adapters.clients.*``; a custom backend is any
+callable of this shape passed as ``engine=``."""
 
-    Wraps a live SDK client or thread. ``send()`` sends a message and
-    collects the full response. :attr:`id` is the engine-native session
-    identifier once known — save it and pass it to
-    ``Client.session(resume=...)`` to continue the conversation in a
-    different process.
+
+def claude_engine(options: LupAgentOptions) -> "Client":
+    from lup.adapters.clients.claude import create_claude
+
+    return create_claude(options)
+
+
+def claude_compat_engine(options: LupAgentOptions) -> "Client":
+    from lup.adapters.clients.claude_compat import create_claude_compat
+
+    return create_claude_compat(options)
+
+
+def codex_engine(options: LupAgentOptions) -> "Client":
+    from lup.adapters.clients.codex import create_codex
+
+    return create_codex(options)
+
+
+def openai_compat_engine(options: LupAgentOptions) -> "Client":
+    from lup.adapters.clients.openai_compat import create_openai_compat
+
+    return create_openai_compat(options)
+
+
+ENGINES: dict[str, ClientFactory] = {
+    "claude": claude_engine,
+    "codex": codex_engine,
+    "openai-compat": openai_compat_engine,
+    "claude-compat": claude_compat_engine,
+}
+"""The id router: every shipped engine's factory, in display order. The
+capability table renders one column per entry, in this order."""
+
+MODEL_ROUTES: dict[str, ClientFactory] = {
+    r"^claude-|^(?:haiku|sonnet|opus)$": claude_engine,
+    r"^gpt-|^o\d+-|^codex-": codex_engine,
+    r"": openai_compat_engine,
+}
+"""The model-name router: a regex per engine, first match wins. A
+``claude-`` prefix and the bare aliases route to ``claude``; a
+``gpt-``/``o<digit>-``/``codex-`` prefix routes to ``codex``; the empty
+pattern matches anything left over, landing unknown models on
+``openai-compat``. ``claude-compat`` is never inferred — open models
+behind an Anthropic-style endpoint name it explicitly."""
+
+
+def factory_for_model(model: str) -> ClientFactory:
+    """The engine factory a model name infers to — first :data:`MODEL_ROUTES` match."""
+    for pattern, factory in MODEL_ROUTES.items():
+        if re.search(pattern, model):
+            return factory
+    return openai_compat_engine
+
+
+def engine_id_of(factory: ClientFactory) -> str:
+    """The :data:`ENGINES` id for a factory, for display and family checks.
+
+    The routers share one factory object per engine, so a factory pulled
+    out of :data:`MODEL_ROUTES` finds its id here by identity.
     """
-
-    id: str | None = None
-    """Engine-native session identifier (Claude session id, Codex thread
-    id). ``None`` until the engine reports it — populated on open for
-    resumed sessions, after the first turn otherwise."""
-
-    @abstractmethod
-    async def send(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> LupResponse: ...
-
-    async def interrupt(self) -> None:
-        """Signal the backend to stop the current response.
-
-        Engines without interruption support inherit this default, which
-        raises — catch :class:`UnsupportedOperationError` (or plain
-        ``NotImplementedError``) where a no-op interrupt is acceptable.
-        """
-        raise UnsupportedOperationError(
-            f"interrupt() is not supported on {type(self).__name__}"
-        )
+    for engine_id, engine_factory in ENGINES.items():
+        if engine_factory is factory:
+            return engine_id
+    raise ValueError(f"factory {factory!r} is not a shipped engine")
 
 
-class Client(ABC):
-    """A configured handle on one engine — cheap to build, nothing connected.
-
-    ``query()`` runs a self-contained one-shot. ``session()`` opens the
-    explicit multi-turn context; the engine's session-scoped resources
-    (SDK client, container cleanup) live inside that context manager.
-    """
-
-    mailbox: "RealtimeMailbox | None" = None
-    """Parent-side endpoint of the realtime file relay — not a caller knob.
-
-    ``None`` unless the engine itself set it at construction: subprocess
-    engines populate it when the options request persistent (sleep/wake)
-    mode. Consumers only read it, to drive the relay loop."""
-
-    @abstractmethod
-    def session(
-        self, *, resume: str | None = None
-    ) -> AbstractAsyncContextManager[Session]:
-        """Open a multi-turn session; ``resume`` continues a saved one.
-
-        Implementations are ``@asynccontextmanager`` async generators
-        yielding a :class:`Session`. The SDK client/thread is created on
-        entry and cleaned up on exit. ``resume`` takes a previously saved
-        :attr:`Session.id`; engines that cannot restore sessions raise
-        :class:`UnsupportedOperationError`.
-        """
-
-    async def query(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> LupResponse:
-        """Self-contained one-shot: open a session, send one prompt, close.
-
-        Carries run-time arguments only — construction knobs (model,
-        tools, budgets) were fixed when :func:`create_client` built this
-        client.
-        """
-        async with self.session() as session:
-            return await session.send(prompt, trace_logger=trace_logger, prefix=prefix)
-
-    async def stream(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> AsyncGenerator[LupEvent, None]:
-        """Run one prompt, yielding streaming events.
-
-        The default runs the turn to completion and replays its blocks as
-        events; engines with a live event stream override this.
-        """
-        response = await self.query(prompt, trace_logger=trace_logger, prefix=prefix)
-        for block in response.blocks:
-            match block:
-                case LupThinkingBlock():
-                    yield LupThinkingEvent(thinking=block.thinking)
-                case LupTextBlock():
-                    yield LupTextEvent(text=block.text)
-                case LupToolUseBlock():
-                    yield LupToolUseEvent(id=block.id, name=block.name)
-                case LupToolResultBlock():
-                    yield LupToolResultEvent(
-                        tool_use_id=block.tool_use_id,
-                        content=str(block.content),
-                    )
-        yield LupDoneEvent(blocks=response.blocks)
-
-
-type EngineId = Literal["claude", "codex", "openai-compat", "claude-compat"] #lup: It feels wrong to have this in common.py. If I want to just add an engine, I should be able to. I think the right way to do it is probably just have a router which is a dict[str, Engine] if we really need to?
-"""Ids of the shipped engines. Custom engines are passed as instances, so
-their ids live outside this literal."""
-
-
-class Engine(ABC):
-    """One backend, complete: client construction and background agents.
-
-    Engines are stateless and cheap — configuration arrives per call as
-    :class:`~lup.options.LupAgentOptions`. An engine consumes the
-    mechanism payloads that belong to it (in-process hooks and tool
-    servers on Claude; served groups, env relay, and writable roots on
-    Codex) and ignores the others'; the intent knobs it cannot honor are
-    declared on :attr:`unsupported` and policed by :meth:`enforce`.
-    """
-
-    id: str
-
-    unsupported: tuple[str, ...] = () #lup: This type seems very ugly and not like something that makes sense? Either we should have capabilities be a Literal, and unsupported is a dict[Capabilities, bool]. Initially the idea was to have unsupported be detected by whether is was implemented as a method, no?
-    #lup: Or is the idea that unpported is keyof LupAgentOptions?
-    """Intent-knob field names this engine has no lever for.
-
-    ``client()`` implementations route their options through
-    :meth:`enforce`, which applies the options' ``on_unsupported`` policy
-    to exactly these fields."""
-
-    @abstractmethod
-    def client(self, opts: LupAgentOptions) -> Client:
-        """Construct a configured :class:`Client` from ``self.enforce(opts)``.
-
-        Nothing connects yet — construction is offline and cheap.
-        """
-
-    def unsupported_in(self, opts: LupAgentOptions) -> list[str]: #lup: Same comment here
-        """The declared blind spots that *opts* actually sets.
-
-        Override for conditional blind spots — the Codex engine refuses
-        ``max_budget_usd`` only when no usage rates accompany it.
-        """
-        return [name for name in self.unsupported if getattr(opts, name) is not None]
-
-    def enforce(self, opts: LupAgentOptions) -> LupAgentOptions:
-        """Apply the options' ``on_unsupported`` policy to this engine's blind spots.
-
-        With ``"raise"`` (the session default) any offending field fails
-        the construction with :class:`UnsupportedOptionsError`; with
-        ``"drop"`` (the one-shot ``query()`` policy) the offenders are
-        cleared with a log line and construction proceeds. Mechanism
-        payloads meant for other engines are not checked here — each
-        engine consumes its own and ignores the rest.
-        """
-        offenders = self.unsupported_in(opts)
-        if not offenders:
-            return opts
-        if opts.on_unsupported == "raise": # lup: Better to be explicit and match raise and drop instead
-            raise UnsupportedOptionsError(self.id, offenders)
-        logger.info(
-            "options %s are not supported on the %s engine (model=%r); "
-            "proceeding without them.",
-            sorted(offenders),
-            self.id,
-            opts.model,
-        )
-        return opts.model_copy(update=dict.fromkeys(offenders, None))
-
-    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent: #lup: Again, it's really not clear why sometimes we're returning UnsupportedOperationError, and other times we're using @abstractmethod
-        """Build a background agent for this engine.
-
-        Engines without background support inherit this raising default.
-        """
-        raise UnsupportedOperationError(
-            f"background agents are not supported on the {self.id} engine"
-        )
-
-
-def claude_engine() -> Engine:
-    from lup.adapters.claude import ClaudeEngine
-
-    return ClaudeEngine()
-
-
-def claude_compat_engine() -> Engine:
-    from lup.adapters.claude_compat import ClaudeCompatEngine
-
-    return ClaudeCompatEngine()
-
-
-def codex_engine() -> Engine:
-    from lup.adapters.codex import CodexEngine
-
-    return CodexEngine()
-
-
-def openai_compat_engine() -> Engine:
-    from lup.adapters.openai_compat import OpenAICompatEngine
-
-    return OpenAICompatEngine()
-
-
-class EngineRoute(BaseModel):
-    """One row of the model-name router.
-
-    ``prefixes`` and ``aliases`` are the model names the engine claims;
-    ``load`` constructs it, importing the engine's module only when the
-    row is chosen. A row with no patterns is reached by explicit id only.
-    """
-
-    id: EngineId
-    prefixes: tuple[str, ...] = () #lup: Why? There are so many tuples, why don't they trigger the antipattern detector?
-    aliases: frozenset[str] = frozenset() #lup: Same here
-    load: Callable[[], Engine]
-
-    def claims(self, model: str) -> bool: #lup: What? This seems quite ugly
-        return model.startswith(self.prefixes) or model in self.aliases
-
-
-ENGINE_ROUTER: tuple[EngineRoute, ...] = ( #lup: Probably should be a dict? No aliases or prefix, but instead a router from "haiku" to its model? I don't know, I'm not sold on this design
-    EngineRoute(
-        id="claude",
-        prefixes=("claude-",),
-        aliases=frozenset({"haiku", "sonnet", "opus"}),
-        load=claude_engine,
-    ),
-    EngineRoute(
-        id="codex",
-        prefixes=("gpt-", "o1-", "o3-", "o4-", "o5-", "codex-"),
-        load=codex_engine,
-    ),
-    EngineRoute(id="openai-compat", load=openai_compat_engine),
-    EngineRoute(id="claude-compat", load=claude_compat_engine),
-)
-"""The router: every shipped engine, its model-name patterns, and its
-lazily-imported constructor. Model names fall through the rows in order
-and land on ``openai-compat`` when nothing claims them; ``claude-compat``
-claims no names and is only ever chosen explicitly."""
-
-SHIPPED_ENGINE_IDS: tuple[EngineId, ...] = tuple(route.id for route in ENGINE_ROUTER) #lup: I really think tuple should be an antipattern, period. dict[str, Type] often make sense, tuple almost never.
-"""The shipped engine ids, in display order — the capability table
-renders one column per entry."""
-
-
-def engine_id_for_model(model: str) -> EngineId: # lup: Yeah, this is extreme code smell here.
-    """Infer the engine for a model name — the router's model column.
-
-    The first route claiming the name wins; names no route claims run on
-    the OpenAI-compatible engine. Models behind a configured compatible
-    endpoint that should get the Claude scaffolding instead (GLM and
-    friends) name their engine explicitly: ``engine="claude-compat"``.
-    """
-    for route in ENGINE_ROUTER:
-        if route.claims(model):
-            return route.id
-    return "openai-compat"
-
-
-def engine_for_id(engine_id: str) -> Engine: #lup: Again with the redundant functions
-    """Instantiate a shipped engine by id — the one sanctioned dispatch.
-
-    Reads the router; each route imports only its own engine module, so
-    SDK imports stay deferred until an engine is actually chosen.
-    """
-    for route in ENGINE_ROUTER:
-        if route.id == engine_id:
-            return route.load()
-    raise ValueError(
-        f"Unknown engine {engine_id!r}. Shipped ids: "
-        f"{', '.join(SHIPPED_ENGINE_IDS)}; pass an Engine instance for a "
-        "custom backend."
-    )
-
-
-def resolve_engine( #lup: Why? This has a wrong shape, where we're destroying an union to make it uniform, rather than constructing it well to begin with
-    engine: Engine | str | None = None, *, model: str | None = None
-) -> Engine:
-    """Resolve an engine: explicit instance > id > model-name inference."""
+def resolve_factory(
+    engine: "str | ClientFactory | None", *, model: str
+) -> ClientFactory:
+    """Pick the engine factory: explicit callable > id in :data:`ENGINES` > model route."""
     match engine:
-        case Engine():
-            return engine
-        case str():
-            return engine_for_id(engine)
         case None:
-            return engine_for_id(engine_id_for_model(model or ""))
+            return factory_for_model(model)
+        case str():
+            try:
+                return ENGINES[engine]
+            except KeyError:
+                raise ValueError(
+                    f"Unknown engine {engine!r}. Shipped ids: "
+                    f"{', '.join(ENGINES)}; pass a factory callable for a "
+                    "custom backend."
+                ) from None
+        case _:
+            return engine
 
 
-def create_client( #lup: This feels very weird. Why are we doing it this way, plus the LupAgentOptions etc? Most likely we should just let claude.py and codex.py have their own create_claude and create_codex, they return a Client and we can use it. This seems like trying to force uniformity
+def create_client(
     *,
     model: str | None = None,
-    engine: Engine | str | None = None,
+    engine: "str | ClientFactory | None" = None,
     options: LupAgentOptions | None = None,
     system_prompt: str | None = None,
     output_type: type[BaseModel] | None = None,
@@ -420,21 +322,21 @@ def create_client( #lup: This feels very weird. Why are we doing it this way, pl
     max_thinking_tokens: int | None = None,
     max_budget_usd: float | None = None,
     on_unsupported: Literal["raise", "drop"] = "raise",
-) -> Client:
-    """Build a configured :class:`Client` — the one door to every engine.
+) -> "Client":
+    """Build a configured :class:`~lup.adapters.clients.common.Client` — the one door to every engine.
 
     The keyword form is the nested-call tier: raw system prompt, nothing
     persists, no SDK sandbox — what a tool that needs an LLM call wants.
-    Session-grade construction (harness prompt, hooks, tool servers,
+    Session-grade construction (harness preset, hooks, tool servers,
     persistence) passes a full ``options`` object instead; combining the
     two forms raises rather than silently ignoring keywords.
 
     Every argument is a construction knob, fixed for the client's
     lifetime; run-time arguments (the prompt, tracing) go to
-    :meth:`Client.query` and :meth:`Session.send`.
+    ``Client.query`` and ``Session.send``.
 
-    ``engine`` accepts a shipped id or a custom :class:`Engine` instance;
-    left ``None``, it is inferred from the model name.
+    ``engine`` accepts a shipped id, a custom factory callable, or ``None``
+    to infer the engine from the model name.
     """
     keyword_form = {
         "model": model,
@@ -466,7 +368,6 @@ def create_client( #lup: This feels very weird. Why are we doing it this way, pl
         opts = LupAgentOptions(
             model=model,
             system_prompt=system_prompt or "",
-            harness_prompt=False,
             persist_session=False,
             sdk_sandbox=False,
             output_schema=output_type.model_json_schema() if output_type else None,
@@ -478,14 +379,14 @@ def create_client( #lup: This feels very weird. Why are we doing it this way, pl
             max_budget_usd=max_budget_usd,
             on_unsupported=on_unsupported,
         )
-    return resolve_engine(engine, model=opts.model).client(opts)
+    return resolve_factory(engine, model=opts.model)(opts)
 
 
 async def query(
     prompt: str,
     *,
-    model: str | None = None,
-    engine: Engine | str | None = None,
+    model: str = "claude-opus-4-6",
+    engine: "str | ClientFactory | None" = None,
     system_prompt: str | None = None,
     output_type: type[BaseModel] | None = None,
     trace_logger: TraceLogger | None = None,
@@ -509,7 +410,7 @@ async def query(
     ``.output(MyModel)`` for structured output.
     """
     client = create_client(
-        model=model or "claude-opus-4-6", #lup: Why? Shouldn't this be model="claude-opus-4-6" if you insist?
+        model=model,
         engine=engine,
         system_prompt=system_prompt,
         output_type=output_type,

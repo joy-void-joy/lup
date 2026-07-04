@@ -4,7 +4,7 @@ emission, and lup->SDK hook/option conversion for both engines."""
 import tempfile
 from pathlib import Path
 
-from lup.adapters.codex import (
+from lup.adapters.clients.codex import (
     CodexHookConfig,
     build_hook_config_overrides,
     build_mcp_config_overrides,
@@ -18,7 +18,7 @@ from lup.adapters.codex import (
     write_reflection_gate_script,
     write_tool_allowlist_script,
 )
-from lup.adapters.common import engine_id_for_model
+from lup.adapters.common import engine_id_of, factory_for_model
 from lup.types import normalize_effort
 from lup.hooks import (
     create_nudge_hook,
@@ -61,7 +61,7 @@ class TestMcpConfigOverrides:
 
 class TestSandboxConfigOverrides:
     def test_workspace_write_with_roots(self) -> None:
-        from lup.adapters.codex import build_sandbox_config_overrides
+        from lup.adapters.clients.codex import build_sandbox_config_overrides
 
         overrides = build_sandbox_config_overrides([Path("/notes/a"), Path("/notes/b")])
         assert 'sandbox_mode="workspace-write"' in overrides
@@ -165,20 +165,24 @@ class TestReflectionGateHookScripts:
 
 
 class TestLupMcpServerConfig:
-    def test_lup_server_to_claude_conversion(self) -> None:
-        from lup.adapters.claude import lup_server_to_claude
+    def test_in_process_server_becomes_sdk_config(self) -> None:
+        from lup.adapters.clients.claude import build_claude_options
+        from lup.adapters.common import LupAgentOptions
         from lup.mcp import create_mcp_server
 
-        lup_config = create_mcp_server("test-server")
-        claude_config = lup_server_to_claude(lup_config)
-        assert claude_config["name"] == "test-server"
-        assert claude_config["type"] == "sdk"
-        assert claude_config["instance"] is not None
+        opts = LupAgentOptions(
+            model="claude-opus-4-6",
+            tool_servers={"test-server": create_mcp_server("test-server")},
+        )
+        servers = build_claude_options(opts).mcp_servers
+        assert isinstance(servers, dict)
+        # The in-process server became an SDK ``sdk`` server, not passed raw.
+        assert servers["test-server"].get("type") == "sdk"
 
 
 class TestSubagentSpec:
     def test_spec_to_claude_passes_full_model_id_through(self) -> None:
-        from lup.adapters.claude import spec_to_claude
+        from lup.adapters.clients.claude import spec_to_claude
 
         spec = SubagentSpec(
             name="test",
@@ -200,23 +204,26 @@ class TestSubagentSpec:
 
 
 class TestModelBackend:
+    def engine_for(self, model: str) -> str:
+        return engine_id_of(factory_for_model(model))
+
     def test_claude_models(self) -> None:
-        assert engine_id_for_model("claude-opus-4-6") == "claude"
-        assert engine_id_for_model("claude-sonnet-4-6") == "claude"
-        assert engine_id_for_model("haiku") == "claude"
-        assert engine_id_for_model("sonnet") == "claude"
+        assert self.engine_for("claude-opus-4-6") == "claude"
+        assert self.engine_for("claude-sonnet-4-6") == "claude"
+        assert self.engine_for("haiku") == "claude"
+        assert self.engine_for("sonnet") == "claude"
 
     def test_openai_models(self) -> None:
-        assert engine_id_for_model("gpt-4.1") == "codex"
-        assert engine_id_for_model("gpt-4.1-mini") == "codex"
-        assert engine_id_for_model("o1-preview") == "codex"
-        assert engine_id_for_model("o3-mini") == "codex"
-        assert engine_id_for_model("o4-mini") == "codex"
-        assert engine_id_for_model("o5-preview") == "codex"
-        assert engine_id_for_model("codex-mini-latest") == "codex"
+        assert self.engine_for("gpt-4.1") == "codex"
+        assert self.engine_for("gpt-4.1-mini") == "codex"
+        assert self.engine_for("o1-preview") == "codex"
+        assert self.engine_for("o3-mini") == "codex"
+        assert self.engine_for("o4-mini") == "codex"
+        assert self.engine_for("o5-preview") == "codex"
+        assert self.engine_for("codex-mini-latest") == "codex"
 
     def test_default_openai_compatible(self) -> None:
-        assert engine_id_for_model("unknown-model") == "openai-compat"
+        assert self.engine_for("unknown-model") == "openai-compat"
 
 
 class TestEffortNormalization:
@@ -300,7 +307,7 @@ class TestNudgeHookScripts:
 
 class TestCodexAdapter:
     def test_adapter_builds_config_overrides_with_mcp(self) -> None:
-        from lup.adapters.codex import CodexClient
+        from lup.adapters.clients.codex import CodexClient
 
         adapter = CodexClient(
             model="o4-mini",
@@ -311,7 +318,7 @@ class TestCodexAdapter:
         assert any("mcp_servers" in o for o in overrides)
 
     def test_adapter_builds_config_overrides_without_mcp(self) -> None:
-        from lup.adapters.codex import CodexClient
+        from lup.adapters.clients.codex import CodexClient
 
         adapter = CodexClient(
             model="o4-mini",
@@ -322,7 +329,7 @@ class TestCodexAdapter:
         assert not any("mcp_servers" in o for o in overrides)
 
     def test_adapter_builds_config_overrides_with_hooks(self) -> None:
-        from lup.adapters.codex import CodexClient
+        from lup.adapters.clients.codex import CodexClient
 
         adapter = CodexClient(
             model="o4-mini",
@@ -369,7 +376,7 @@ class TestMergeHooks:
 
 class TestLupHooksToClaudeConversion:
     def test_converts_allow_decision(self) -> None:
-        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude import lup_hook_output_to_claude
         from lup.types import LupHookOutput
 
         output = LupHookOutput(decision="allow")
@@ -379,7 +386,7 @@ class TestLupHooksToClaudeConversion:
         assert specific.get("permissionDecision") == "allow"
 
     def test_converts_deny_decision(self) -> None:
-        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude import lup_hook_output_to_claude
         from lup.types import LupHookOutput
 
         output = LupHookOutput(decision="deny", reason="test reason")
@@ -390,7 +397,7 @@ class TestLupHooksToClaudeConversion:
         assert specific.get("permissionDecisionReason") == "test reason"
 
     def test_converts_block_decision(self) -> None:
-        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude import lup_hook_output_to_claude
         from lup.types import LupHookOutput
 
         output = LupHookOutput(decision="block", reason="blocked")
@@ -402,7 +409,7 @@ class TestLupHooksToClaudeConversion:
         """Permission decisions exist only on PreToolUse — a denial from a
         Stop/PostToolUse hook must become the generic block decision, not a
         misrouted PreToolUse hookSpecificOutput."""
-        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude import lup_hook_output_to_claude
         from lup.types import LupHookOutput
 
         output = LupHookOutput(decision="deny", reason="not done yet")
@@ -412,7 +419,7 @@ class TestLupHooksToClaudeConversion:
         assert result.get("reason") == "not done yet"
 
     def test_allow_outside_pre_tool_use_is_noop(self) -> None:
-        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude import lup_hook_output_to_claude
         from lup.types import LupHookOutput
 
         output = LupHookOutput(decision="allow")
@@ -421,7 +428,7 @@ class TestLupHooksToClaudeConversion:
         assert result.get("decision") is None
 
     def test_converts_system_message(self) -> None:
-        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude import lup_hook_output_to_claude
         from lup.types import LupHookOutput
 
         output = LupHookOutput(system_message="try another way")
@@ -429,7 +436,7 @@ class TestLupHooksToClaudeConversion:
         assert result.get("systemMessage") == "try another way"
 
     def test_converts_empty_output(self) -> None:
-        from lup.adapters.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude import lup_hook_output_to_claude
         from lup.types import LupHookOutput
 
         output = LupHookOutput()
@@ -438,7 +445,7 @@ class TestLupHooksToClaudeConversion:
         assert result.get("hookSpecificOutput") is None
 
     def test_full_hook_conversion_roundtrip(self) -> None:
-        from lup.adapters.claude import lup_hooks_to_claude
+        from lup.adapters.clients.claude import lup_hooks_to_claude
 
         hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")])
         claude_hooks = lup_hooks_to_claude(hooks)
@@ -446,7 +453,7 @@ class TestLupHooksToClaudeConversion:
         assert len(claude_hooks["PreToolUse"]) == 1
 
     def test_matcher_preserved_in_conversion(self) -> None:
-        from lup.adapters.claude import lup_hooks_to_claude
+        from lup.adapters.clients.claude import lup_hooks_to_claude
 
         gate = ReflectionGate()
         hooks = create_reflection_gate(
@@ -460,7 +467,7 @@ class TestLupHooksToClaudeConversion:
 
 class TestLupHooksToCodexConversion:
     def test_converts_permission_hooks(self) -> None:
-        from lup.adapters.codex import lup_hooks_to_codex
+        from lup.adapters.clients.codex import lup_hooks_to_codex
 
         hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")])
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -476,7 +483,7 @@ class TestLupHooksToCodexConversion:
             assert script_path.exists()
 
     def test_converts_gate_hooks(self) -> None:
-        from lup.adapters.codex import lup_hooks_to_codex
+        from lup.adapters.clients.codex import lup_hooks_to_codex
 
         gate = ReflectionGate()
         hooks = create_reflection_gate(
@@ -496,7 +503,7 @@ class TestLupHooksToCodexConversion:
             assert configs[0].get("matcher") == "StructuredOutput"
 
     def test_converts_merged_hooks(self) -> None:
-        from lup.adapters.codex import lup_hooks_to_codex
+        from lup.adapters.clients.codex import lup_hooks_to_codex
 
         gate = ReflectionGate()
         perm_hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[])
@@ -517,7 +524,7 @@ class TestLupHooksToCodexConversion:
             assert len(configs) == 2
 
     def test_converts_nudge_hooks(self) -> None:
-        from lup.adapters.codex import lup_hooks_to_codex
+        from lup.adapters.clients.codex import lup_hooks_to_codex
 
         hooks = create_nudge_hook({"Bash": lambda inp: "Use Grep instead"})
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -535,7 +542,7 @@ class TestLupHooksToCodexConversion:
             assert "Use Grep instead" in content
 
     def test_converts_allowlist_hooks(self) -> None:
-        from lup.adapters.codex import lup_hooks_to_codex
+        from lup.adapters.clients.codex import lup_hooks_to_codex
 
         hooks = create_tool_allowlist_hook(["Read", "Grep"])
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -553,7 +560,7 @@ class TestLupHooksToCodexConversion:
             assert "Grep" in content
 
     def test_converts_full_hook_set(self) -> None:
-        from lup.adapters.codex import lup_hooks_to_codex
+        from lup.adapters.clients.codex import lup_hooks_to_codex
 
         gate = ReflectionGate()
         perm_hooks = create_permission_hooks(

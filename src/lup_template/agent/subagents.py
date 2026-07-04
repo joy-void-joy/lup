@@ -12,7 +12,7 @@ Definitions use SubagentSpec (SDK-agnostic). Each backend interprets
 the same spec list:
 
 - Claude: converted to native ``AgentDefinition`` via
-  :func:`~lup.adapters.claude.spec_to_claude`
+  :func:`~lup.adapters.clients.claude.spec_to_claude`
 - Codex/OpenAI: served as the ``run_subagent`` tool via
   :func:`~lup.subagents.create_run_subagent_tool`, which dispatches a
   one-shot query to the backend serving the spec's model
@@ -27,8 +27,9 @@ the full catalog. Where the siblings live:
 - Nested agents: a one-shot :func:`lup.adapters.common.query` inside a
   tool handler; the reviewer in ``agent/tools/reflect.py`` is the
   exemplar
-- Background agents: ``lup.background`` (``create_background_agent``),
-  with the observer example in ``agent/tools/realtime.py``
+- Background agents: ``lup.adapters.background.common``
+  (``create_background_agent``), with the observer example in
+  ``agent/tools/realtime.py``
 - Persistent agents: ``lup.realtime`` and ``lup.realtime_relay``, with
   example tools in ``agent/tools/realtime.py``
 - Data augmentation: ``agent/tools/example.py`` (domain dispatch,

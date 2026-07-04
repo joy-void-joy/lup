@@ -7,10 +7,15 @@ from pathlib import Path
 import pytest
 
 from lup import paths
-from lup.adapters.common import Client, Engine, Session
-from lup.options import LupAgentOptions
+from lup.adapters.clients.common import (
+    Client,
+    Session,
+    query_via_session,
+    replay_stream,
+)
+from lup.adapters.common import LupAgentOptions
 from lup.trace import TraceLogger
-from lup.types import LupResponse, LupTextBlock
+from lup.types import LupEvent, LupResponse, LupTextBlock
 
 LUP_PROJECT_VERSION = "1.2.3"
 
@@ -35,6 +40,9 @@ class RecordingSession(Session):
         self.ran.append(self.opts)
         return LupResponse(blocks=[LupTextBlock(text="ok")])
 
+    async def interrupt(self) -> None:
+        raise NotImplementedError("RecordingSession has no interrupt")
+
 
 class RecordingClient(Client):
     """A fake client carrying the options it was built from."""
@@ -49,21 +57,40 @@ class RecordingClient(Client):
     ) -> AsyncGenerator[Session, None]:
         yield RecordingSession(self.opts, self.ran, resumed=resume)
 
+    async def query(
+        self,
+        prompt: str,
+        *,
+        trace_logger: TraceLogger | None = None,
+        prefix: str = "",
+    ) -> LupResponse:
+        return await query_via_session(
+            self, prompt, trace_logger=trace_logger, prefix=prefix
+        )
 
-class RecordingEngine(Engine):
-    """A fake engine passed as ``engine=``: records built and ran options.
+    def stream(
+        self,
+        prompt: str,
+        *,
+        trace_logger: TraceLogger | None = None,
+        prefix: str = "",
+    ) -> AsyncGenerator[LupEvent, None]:
+        return replay_stream(self, prompt, trace_logger=trace_logger, prefix=prefix)
 
-    Construction alone is not execution — options land in ``ran`` only
+
+class RecordingEngine:
+    """A fake engine factory passed as ``engine=``: records built and ran options.
+
+    A plain :data:`~lup.adapters.common.ClientFactory` callable —
+    construction alone is not execution, so options land in ``ran`` only
     when a session actually sends a turn.
     """
-
-    id = "recording"
 
     def __init__(self) -> None:
         self.built: list[LupAgentOptions] = []
         self.ran: list[LupAgentOptions] = []
 
-    def client(self, opts: LupAgentOptions) -> Client:
+    def __call__(self, opts: LupAgentOptions) -> Client:
         self.built.append(opts)
         return RecordingClient(opts, self.ran)
 

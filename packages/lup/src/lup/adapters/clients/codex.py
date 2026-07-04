@@ -5,8 +5,8 @@ so tools are served externally (``served_tool_groups``), writes are
 confined natively (``writable_roots``), and persistent mode rides the
 file-relay mailbox. Five sections, in order:
 
-- engine construction — :class:`CodexEngine` and the session's sandbox
-  cleanup guarantee;
+- construction — :func:`create_codex` and the session's sandbox cleanup
+  guarantee;
 - SDK adaptation — thread-item and usage conversion into lup types, and
   the ``config_overrides`` builders (MCP servers, native sandbox, hooks);
 - sessions and clients — :class:`CodexSession` and :class:`CodexClient`,
@@ -16,11 +16,13 @@ file-relay mailbox. Five sections, in order:
   command hooks never fire on the Codex builds this project targets, so
   no live adapter wires it — enforcement is the native workspace-write
   sandbox (:func:`build_sandbox_config_overrides`) — and the section is
-  kept as the wire-format reference, imported only by tests;
-- background agents — :class:`CodexBackgroundAgent`.
+  kept as the wire-format reference, imported only by tests.
 
-``openai-compat`` (:mod:`lup.adapters.openai_compat`) fronts any
-OpenAI-protocol endpoint through this same runtime.
+``openai-compat`` (:mod:`lup.adapters.clients.openai_compat`) fronts any
+OpenAI-protocol endpoint through this same runtime. The Codex SDK is
+imported as a qualified namespace (``codex`` for the package,
+``codex_items`` for its generated item types) so every SDK type reads
+with its origin visible.
 """
 
 import asyncio
@@ -38,26 +40,26 @@ from contextlib import (
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict
 
-if TYPE_CHECKING:
-    from openai_codex import AsyncCodex, AsyncThread, CodexConfig, TurnResult
-
-    from openai_codex.generated.v2_all import ThreadItem, ThreadTokenUsage
-
+from lup.adapters.clients.common import (
+    Client,
+    Session,
+    query_via_session,
+    refuse_unconsumed,
+    replay_stream,
+)
 from lup.adapters.common import (
     BudgetExceededError,
-    Client,
-    Engine,
-    Session,
+    LupAgentOptions,
     TurnTimeoutError,
+    UnsupportedOperationError,
 )
-from lup.background import BackgroundAgentParams, BaseBackgroundAgent
-from lup.options import LupAgentOptions
 from lup.realtime_relay import RealtimeMailbox
 from lup.trace import TraceLogger, print_message
 from lup.types import (
     JsonObject,
     LupAssistantMessage,
     LupContentBlock,
+    LupEvent,
     LupHooksConfig,
     LupResponse,
     LupResultMessage,
@@ -71,6 +73,10 @@ from lup.types import (
     safe_normalize_usage,
 )
 
+if TYPE_CHECKING:
+    import openai_codex as codex
+    import openai_codex.generated.v2_all as codex_items
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,103 +89,71 @@ def subprocess_sandbox_cleanup(
     own container; the parent removes it. A no-op without the docker extra, or
     when the build names no session.
     """
-    codex = opts.codex
-    if codex.session_id is None or codex.shared_dir is None:
+    if opts.session_id is None or opts.shared_dir is None:
         return nullcontext()
     try:
         from lup.sandbox import sandbox_cleanup
     except ImportError:
         return nullcontext()
-    return sandbox_cleanup(session_id=codex.session_id, shared_dir=codex.shared_dir)
+    return sandbox_cleanup(session_id=opts.session_id, shared_dir=opts.shared_dir)
 
 
-class CodexEngine(Engine):
-    """OpenAI models on the Codex runtime.
+def budget_if_priced(opts: LupAgentOptions) -> float | None:
+    """The budget cap, read only when a ``usage_cost`` makes it enforceable.
+
+    Reading ``max_budget_usd`` solely under a present ``usage_cost`` is what
+    makes the codex engines refuse an unpriced budget: with no estimator the
+    read never happens, so consume-tracking sees the knob unconsumed and
+    flags it. The Codex runtime reports token counts, never cost, so a
+    budget with nothing to price it against cannot be enforced.
+    """
+    if opts.usage_cost is not None:
+        return opts.max_budget_usd
+    return None
+
+
+def build_codex_client(opts: LupAgentOptions) -> "CodexClient":
+    """Translate neutral options into a configured :class:`CodexClient`.
+
+    Reads the knobs the runtime honors — ``reasoning_effort``,
+    ``turn_timeout_seconds``, and ``max_budget_usd`` (only when priced by
+    ``usage_cost``) — and leaves ``max_turns``/``max_thinking_tokens``/
+    ``permission_mode``/``tools`` unread, which is how they come to be
+    refused: the runtime has no per-session turn cap, thinking budget,
+    permission mode, or builtin-toolset restriction.
+    """
+    return CodexClient(
+        model=opts.model,
+        system_prompt=opts.system_prompt,
+        output_schema=opts.output_schema,
+        sandbox=opts.codex_sandbox,
+        effort=opts.reasoning_effort,
+        approval_policy=opts.approval_policy,
+        mcp_tools=bool(opts.served_tool_groups),
+        mcp_env=dict(opts.mcp_env),
+        writable_roots=list(opts.writable_roots),
+        mcp_servers=opts.served_tool_groups,
+        max_budget_usd=budget_if_priced(opts),
+        usage_cost=opts.usage_cost,
+        turn_timeout_seconds=opts.turn_timeout_seconds,
+        cleanup=subprocess_sandbox_cleanup(opts),
+    )
+
+
+def create_codex(options: LupAgentOptions) -> Client:
+    """Build a Codex-runtime client from neutral options.
 
     Consumes the subprocess mechanism payloads (served tool groups, env
-    relay, writable roots, the ``codex`` block); ignores the in-process
-    ones (hooks, tool servers — enforcement here is the runtime's native
-    sandbox) and the Claude-only ``harness_prompt``/``sdk_sandbox`` shape
-    flags (the runtime always applies its own harness and sandbox).
-    Subagent specs are served through the ``run_subagent`` tool group
-    rather than run natively.
+    relay, writable roots) and ignores the in-process ones (hooks, tool
+    servers — enforcement here is the runtime's native sandbox) and the
+    Claude-only ``harness_preset``/``sdk_sandbox`` shape flags. Subagent
+    specs are served through the ``run_subagent`` tool group rather than
+    run natively. Persistent mode surfaces the file-relay mailbox.
     """
-
-    id = "codex"
-
-    unsupported = ("max_turns", "max_thinking_tokens", "permission_mode", "tools")
-    """Intent knobs the Codex runtime has no lever for: no per-session
-    turn cap, no thinking-token budget, no permission modes, no
-    builtin-toolset restriction."""
-
-    def unsupported_in(self, opts: LupAgentOptions) -> list[str]:
-        """A budget without caller-supplied rates joins the blind spots:
-        the runtime reports token counts, never cost, so there is nothing
-        to enforce the budget against.
-        """
-        offenders = super().unsupported_in(opts)
-        if opts.max_budget_usd is not None and opts.usage_cost is None:
-            offenders.append("max_budget_usd")
-        return offenders
-
-    def build(self, opts: LupAgentOptions) -> "CodexClient":
-        """Construct the client — the compat subclass swaps the class."""
-        codex = opts.codex
-        return CodexClient(
-            model=opts.model,
-            system_prompt=opts.system_prompt,
-            output_schema=opts.output_schema,
-            sandbox=codex.sandbox,
-            effort=opts.reasoning_effort,
-            approval_policy=codex.approval_policy,
-            mcp_tools=bool(opts.served_tool_groups),
-            mcp_env=dict(codex.mcp_env),
-            writable_roots=list(codex.writable_roots),
-            mcp_servers=opts.served_tool_groups,
-            max_budget_usd=opts.max_budget_usd,
-            usage_cost=opts.usage_cost,
-            turn_timeout_seconds=opts.turn_timeout_seconds,
-            cleanup=subprocess_sandbox_cleanup(opts),
-        )
-
-    def client(self, opts: LupAgentOptions) -> Client:
-        opts = self.enforce(opts)
-        client = self.build(opts)
-        if opts.realtime and opts.codex.realtime_dir is not None:
-            client.mailbox = RealtimeMailbox(opts.codex.realtime_dir)
-        return client
-
-    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent:
-        """Codex backgrounds are text-only summarizers with explicit models.
-
-        Tool support is a property of this engine: background tools share
-        in-process state with the main session, which cannot cross the
-        Codex subprocess boundary, so a tool request fails loudly. Codex
-        accounts accept only their own model list, so there is no safe
-        default model.
-        """
-        if params.tools or params.builtin_tools or params.allowed_tools:
-            raise ValueError(
-                "Codex background agents cannot use tools: background "
-                "tools share in-process state with the main session, "
-                "which cannot cross the Codex subprocess boundary. "
-                "Use the claude engine for tool-using background agents."
-            )
-        if params.model is None:
-            raise ValueError(
-                "Codex background agents need an explicit model: Codex "
-                "accounts accept only their own model list (e.g. "
-                "gpt-5.5), so there is no safe default."
-            )
-        return CodexBackgroundAgent(
-            name=params.name,
-            system_prompt=params.system_prompt,
-            build_message=params.build_message,
-            start_message=params.start_message,
-            model=params.model,
-            debounce_seconds=params.debounce_seconds,
-            on_response=params.on_response,
-        )
+    client = refuse_unconsumed("codex", options, build_codex_client)
+    if options.realtime and options.realtime_dir is not None:
+        client.mailbox = RealtimeMailbox(options.realtime_dir)
+    return client
 
 
 def require_codex_sdk() -> None:
@@ -188,40 +162,34 @@ def require_codex_sdk() -> None:
         raise ImportError("Codex SDK not installed. Install with: uv add openai-codex")
 
 
-def codex_items_to_lup(items: Sequence["ThreadItem"]) -> list[LupContentBlock]:
+def codex_items_to_lup(
+    items: "Sequence[codex_items.ThreadItem]",
+) -> list[LupContentBlock]:
     """Convert Codex ThreadItem list into lup content blocks.
 
     Each ThreadItem is a RootModel wrapping a discriminated union.
     We extract ``.root`` to get the typed variant, then map by
     ``type`` field.
     """
-    from openai_codex.generated.v2_all import (
-        AgentMessageThreadItem,
-        CommandExecutionThreadItem,
-        FileChangeThreadItem,
-        McpToolCallThreadItem,
-        MessagePhase,
-        ReasoningThreadItem,
-        WebSearchThreadItem,
-    )
+    import openai_codex.generated.v2_all as codex_items
 
     blocks: list[LupContentBlock] = []
     for item in items:
         inner = item.root if hasattr(item, "root") else item
 
         match inner:
-            case AgentMessageThreadItem():
-                if inner.phase == MessagePhase.final_answer:
+            case codex_items.AgentMessageThreadItem():
+                if inner.phase == codex_items.MessagePhase.final_answer:
                     blocks.append(LupTextBlock(text=inner.text))
                 else:
                     blocks.append(LupThinkingBlock(thinking=inner.text))
 
-            case ReasoningThreadItem():
+            case codex_items.ReasoningThreadItem():
                 summary = "\n".join(inner.summary) if inner.summary else ""
                 content = "\n".join(inner.content) if inner.content else ""
                 blocks.append(LupThinkingBlock(thinking=content or summary))
 
-            case CommandExecutionThreadItem():
+            case codex_items.CommandExecutionThreadItem():
                 blocks.append(
                     LupToolUseBlock(
                         id=inner.id,
@@ -237,7 +205,7 @@ def codex_items_to_lup(items: Sequence["ThreadItem"]) -> list[LupContentBlock]:
                         )
                     )
 
-            case McpToolCallThreadItem():
+            case codex_items.McpToolCallThreadItem():
                 blocks.append(
                     LupToolUseBlock(
                         id=inner.id,
@@ -268,7 +236,7 @@ def codex_items_to_lup(items: Sequence["ThreadItem"]) -> list[LupContentBlock]:
                         )
                     )
 
-            case FileChangeThreadItem():
+            case codex_items.FileChangeThreadItem():
                 changes_desc = "; ".join(f"{c.path} ({c.kind})" for c in inner.changes)
                 blocks.append(
                     LupToolUseBlock(
@@ -286,7 +254,7 @@ def codex_items_to_lup(items: Sequence["ThreadItem"]) -> list[LupContentBlock]:
                         )
                     )
 
-            case WebSearchThreadItem():
+            case codex_items.WebSearchThreadItem():
                 blocks.append(
                     LupToolUseBlock(
                         id=inner.id,
@@ -398,7 +366,7 @@ def build_hook_config_overrides(
     return overrides
 
 
-type CodexUsageNormalizer = Callable[["ThreadTokenUsage"], Usage | None]
+type CodexUsageNormalizer = Callable[["codex_items.ThreadTokenUsage"], Usage | None]
 """Transforms the Codex SDK usage object into a (subclass of) Usage."""
 
 
@@ -430,7 +398,7 @@ def per_mtok_usage_cost(
     return cost
 
 
-def codex_usage_to_lup(usage: "ThreadTokenUsage") -> Usage | None:
+def codex_usage_to_lup(usage: "codex_items.ThreadTokenUsage") -> Usage | None:
     """Default Codex usage normalizer — portable token counts only."""
     total = usage.total
     return Usage(
@@ -441,7 +409,7 @@ def codex_usage_to_lup(usage: "ThreadTokenUsage") -> Usage | None:
 
 
 def build_lup_response(
-    result: "TurnResult",
+    result: "codex.TurnResult",
     *,
     output_schema: JsonObject | None = None,
     session_id: str | None = None,
@@ -504,7 +472,7 @@ class CodexSession(Session):
 
     def __init__(
         self,
-        thread: "AsyncThread",
+        thread: "codex.AsyncThread",
         *,
         output_schema: JsonObject | None = None,
         effort: str | None = None,
@@ -539,7 +507,7 @@ class CodexSession(Session):
                 f"${self.max_budget_usd:.2f} budget; refusing to start a turn."
             )
 
-    def record_turn_usage(self, usage: "ThreadTokenUsage | None") -> None:
+    def record_turn_usage(self, usage: "codex_items.ThreadTokenUsage | None") -> None:
         """Accumulate one turn's token usage and re-estimate session cost."""
         if usage is None:
             return
@@ -561,10 +529,10 @@ class CodexSession(Session):
         trace_logger: TraceLogger | None = None,
         prefix: str = "",
     ) -> LupResponse:
-        from openai_codex.generated.v2_all import ReasoningEffort
+        import openai_codex.generated.v2_all as codex_items
 
         self.check_budget()
-        effort = ReasoningEffort(self.effort) if self.effort else None
+        effort = codex_items.ReasoningEffort(self.effort) if self.effort else None
         started = time.perf_counter()
         try:
             async with asyncio.timeout(self.turn_timeout_seconds):
@@ -596,6 +564,12 @@ class CodexSession(Session):
             if self.cost_usd is not None:
                 response.result.total_cost_usd = self.cost_usd
         return response
+
+    async def interrupt(self) -> None:
+        raise UnsupportedOperationError(
+            "the codex runtime has no client-side interrupt; cap a runaway "
+            "turn with turn_timeout_seconds instead."
+        )
 
 
 class CodexClient(Client):
@@ -661,7 +635,7 @@ class CodexClient(Client):
             overrides.extend(build_hook_config_overrides(self.hook_overrides))
         return overrides
 
-    def make_session(self, thread: "AsyncThread") -> CodexSession:
+    def make_session(self, thread: "codex.AsyncThread") -> CodexSession:
         """Wrap a thread in a conversation carrying this client's settings.
 
         The single construction point for the send path, shared with the
@@ -678,26 +652,26 @@ class CodexClient(Client):
             turn_timeout_seconds=self.turn_timeout_seconds,
         )
 
-    def codex_config(self) -> "CodexConfig":
+    def codex_config(self) -> "codex.CodexConfig":
         """Assemble the runtime config — the compat subclass adds provider env."""
-        from openai_codex import CodexConfig
+        import openai_codex as codex
 
-        return CodexConfig(config_overrides=tuple(self.build_config_overrides()))
+        return codex.CodexConfig(config_overrides=tuple(self.build_config_overrides()))
 
     async def open_thread(
-        self, codex: "AsyncCodex", *, resume: str | None
-    ) -> "AsyncThread":
+        self, codex_client: "codex.AsyncCodex", *, resume: str | None
+    ) -> "codex.AsyncThread":
         """Start the session's thread, or restore a saved one."""
-        from openai_codex import ApprovalMode, Sandbox
+        import openai_codex as codex
 
-        sandbox = Sandbox(self.sandbox) if self.sandbox else None
+        sandbox = codex.Sandbox(self.sandbox) if self.sandbox else None
         approval_mode = (
-            ApprovalMode(self.approval_policy)
+            codex.ApprovalMode(self.approval_policy)
             if self.approval_policy
-            else ApprovalMode.auto_review
+            else codex.ApprovalMode.auto_review
         )
         if resume is not None:
-            return await codex.thread_resume(
+            return await codex_client.thread_resume(
                 resume,
                 model=self.model,
                 model_provider=self.model_provider,
@@ -705,7 +679,7 @@ class CodexClient(Client):
                 sandbox=sandbox,
                 approval_mode=approval_mode,
             )
-        return await codex.thread_start(
+        return await codex_client.thread_start(
             model=self.model,
             model_provider=self.model_provider,
             developer_instructions=self.system_prompt,
@@ -719,12 +693,32 @@ class CodexClient(Client):
     ) -> AsyncGenerator[Session, None]:
         require_codex_sdk()
 
-        from openai_codex import AsyncCodex
+        import openai_codex as codex
 
         with self.cleanup if self.cleanup is not None else nullcontext():
-            async with AsyncCodex(config=self.codex_config()) as codex:
-                thread = await self.open_thread(codex, resume=resume)
+            async with codex.AsyncCodex(config=self.codex_config()) as codex_client:
+                thread = await self.open_thread(codex_client, resume=resume)
                 yield self.make_session(thread)
+
+    async def query(
+        self,
+        prompt: str,
+        *,
+        trace_logger: TraceLogger | None = None,
+        prefix: str = "",
+    ) -> LupResponse:
+        return await query_via_session(
+            self, prompt, trace_logger=trace_logger, prefix=prefix
+        )
+
+    def stream(
+        self,
+        prompt: str,
+        *,
+        trace_logger: TraceLogger | None = None,
+        prefix: str = "",
+    ) -> AsyncGenerator[LupEvent, None]:
+        return replay_stream(self, prompt, trace_logger=trace_logger, prefix=prefix)
 
 
 class CodexHookInput(TypedDict, total=False):
@@ -1155,56 +1149,3 @@ def lup_hooks_to_codex(
                         logger.warning("Unknown hook tag %r — skipping", tag)
 
     return configs
-
-
-class CodexBackgroundAgent(BaseBackgroundAgent):
-    """Background agent running via an independent Codex thread.
-
-    Codex threads are inherently persistent and concurrent — each
-    background agent gets its own thread that runs alongside the main
-    agent thread. Communication is through shared Python-level state.
-    """
-
-    def __init__(
-        self,
-        *,
-        name: str,
-        system_prompt: str,
-        build_message: Callable[[], str | None],
-        start_message: str = "",
-        model: str,
-        debounce_seconds: float = 3.0,
-        on_response: Callable[[str], None] | None = None,
-    ) -> None:
-        super().__init__(
-            name=name,
-            system_prompt=system_prompt,
-            build_message=build_message,
-            start_message=start_message,
-            model=model,
-            debounce_seconds=debounce_seconds,
-        )
-        self.on_response = on_response
-
-    async def run_loop(self) -> None:
-        """Run independent Codex thread for background work."""
-        try:
-            from openai_codex import AsyncCodex
-
-            async with AsyncCodex() as codex:
-                thread = await codex.thread_start(
-                    model=self.model,
-                    developer_instructions=self.system_prompt,
-                )
-
-                async for content in self.message_stream():
-                    result = await thread.run(content)
-                    if self.on_response and result.final_response:
-                        self.on_response(result.final_response)
-
-        except asyncio.CancelledError:
-            logger.debug("Codex background agent '%s' cancelled", self.name)
-        # Task supervisor: a background crash must be logged but never
-        # propagate into (or kill) the main session.
-        except Exception:
-            logger.exception("Codex background agent '%s' crashed", self.name)

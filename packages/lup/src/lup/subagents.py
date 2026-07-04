@@ -16,7 +16,7 @@ import logging
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.common import engine_id_for_model, query
+from lup.adapters.common import engine_id_of, factory_for_model, query
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.types import SubagentSpec
 
@@ -73,7 +73,7 @@ def create_run_subagent_tool(
             )
 
         model = spec.model or default_model
-        engine = engine_id_for_model(model)
+        engine = engine_id_of(factory_for_model(model))
         if engine != "claude":
             claude_only: list[str] = []
             if spec.tools:

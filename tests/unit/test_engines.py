@@ -10,52 +10,67 @@ two forms.
 
 import pytest
 
-from lup.adapters.claude import HARNESS_THINKING_TOKENS, ClaudeClient, ClaudeEngine
-from lup.adapters.claude_compat import ClaudeCompatEngine
-from lup.adapters.codex import CodexClient, CodexEngine, per_mtok_usage_cost
+from lup.adapters.clients.claude import (
+    HARNESS_THINKING_TOKENS,
+    ClaudeClient,
+    create_claude,
+)
+from lup.adapters.clients.claude_compat import create_claude_compat
+from lup.adapters.clients.codex import CodexClient, create_codex, per_mtok_usage_cost
+from lup.adapters.clients.openai_compat import (
+    OpenAICompatClient,
+    create_openai_compat,
+)
 from lup.adapters.common import (
+    ENGINES,
+    LupAgentOptions,
     UnsupportedOptionsError,
     create_client,
-    engine_for_id,
-    engine_id_for_model,
+    engine_id_of,
+    factory_for_model,
     query,
-    resolve_engine,
+    resolve_factory,
 )
-from lup.adapters.openai_compat import OpenAICompatClient, OpenAICompatEngine
 from lup.mcp import create_mcp_server
-from lup.options import CompatOptions, LupAgentOptions
 from lup.types import SubagentSpec
 from tests.unit.conftest import RecordingEngine
 
 
+def engine_for(model: str) -> str:
+    """The engine id a model name routes to — through the model router."""
+    return engine_id_of(factory_for_model(model))
+
+
 class TestEngineResolution:
     def test_model_prefixes_route_to_engines(self) -> None:
-        assert engine_id_for_model("claude-opus-4-6") == "claude"
-        assert engine_id_for_model("opus") == "claude"
-        assert engine_id_for_model("gpt-5.5") == "codex"
-        assert engine_id_for_model("codex-mini") == "codex"
-        assert engine_id_for_model("glm-4") == "openai-compat"
-        assert engine_id_for_model("llama-3-70b") == "openai-compat"
+        assert engine_for("claude-opus-4-6") == "claude"
+        assert engine_for("opus") == "claude"
+        assert engine_for("gpt-5.5") == "codex"
+        assert engine_for("codex-mini") == "codex"
+        assert engine_for("glm-4") == "openai-compat"
+        assert engine_for("llama-3-70b") == "openai-compat"
 
     def test_unknown_engine_id_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown engine"):
-            engine_for_id("gemini")
+            resolve_factory("gemini", model="x")
 
-    def test_engine_instance_passes_through(self) -> None:
+    def test_factory_callable_passes_through(self) -> None:
         engine = RecordingEngine()
-        assert resolve_engine(engine) is engine
+        assert resolve_factory(engine, model="x") is engine
 
     def test_every_shipped_id_resolves(self) -> None:
         for engine_id in ("claude", "codex", "openai-compat", "claude-compat"):
-            assert resolve_engine(engine_id).id == engine_id
+            factory = resolve_factory(engine_id, model="x")
+            assert engine_id_of(factory) == engine_id
 
 
 class TestClaudeEngine:
     def test_session_grade_translation(self) -> None:
-        """harness_prompt selects the preset and the harness policy defaults."""
+        """harness_preset selects the preset and the harness policy defaults."""
         opts = LupAgentOptions(
             model="claude-opus-4-6",
             system_prompt="be good",
+            harness_preset=True,
             tool_servers={"notes": create_mcp_server("notes", tools=[])},
             subagents=[SubagentSpec(name="r", description="d", prompt="p")],
             allowed_tools=["Read"],
@@ -63,7 +78,7 @@ class TestClaudeEngine:
             reasoning_effort="high",
             persist_session=False,
         )
-        client = ClaudeEngine().client(opts)
+        client = create_claude(opts)
         assert isinstance(client, ClaudeClient)
         native = client.options
         assert native.system_prompt == {
@@ -87,14 +102,14 @@ class TestClaudeEngine:
         opts = LupAgentOptions(
             model="claude-opus-4-6",
             system_prompt="be brief",
-            harness_prompt=False,
+            harness_preset=False,
             sdk_sandbox=False,
             persist_session=False,
             output_schema={"type": "object"},
             tools=["Read"],
             max_budget_usd=2.0,
         )
-        client = ClaudeEngine().client(opts)
+        client = create_claude(opts)
         assert isinstance(client, ClaudeClient)
         native = client.options
         assert native.system_prompt == "be brief"
@@ -110,15 +125,15 @@ class TestClaudeEngine:
         assert native.extra_args == {"no-session-persistence": None}
 
     def test_empty_raw_prompt_means_sdk_default(self) -> None:
-        opts = LupAgentOptions(model="claude-opus-4-6", harness_prompt=False)
-        client = ClaudeEngine().client(opts)
+        opts = LupAgentOptions(model="claude-opus-4-6", harness_preset=False)
+        client = create_claude(opts)
         assert isinstance(client, ClaudeClient)
         assert client.options.system_prompt is None
 
     def test_turn_timeout_refused_on_sessions(self) -> None:
         opts = LupAgentOptions(model="claude-opus-4-6", turn_timeout_seconds=30.0)
         with pytest.raises(UnsupportedOptionsError) as exc:
-            ClaudeEngine().client(opts)
+            create_claude(opts)
         assert exc.value.fields == ["turn_timeout_seconds"]
 
     def test_turn_timeout_dropped_under_query_policy(self) -> None:
@@ -127,7 +142,7 @@ class TestClaudeEngine:
             turn_timeout_seconds=30.0,
             on_unsupported="drop",
         )
-        client = ClaudeEngine().client(opts)
+        client = create_claude(opts)
         assert isinstance(client, ClaudeClient)
 
 
@@ -135,9 +150,11 @@ class TestClaudeCompatEngine:
     def test_env_points_the_sdk_at_the_endpoint(self) -> None:
         opts = LupAgentOptions(
             model="glm-4",
-            compat=CompatOptions(base_url="http://local:8000", api_key="k"),
+            harness_preset=True,
+            base_url="http://local:8000",
+            api_key="k",
         )
-        client = ClaudeCompatEngine().client(opts)
+        client = create_claude_compat(opts)
         assert isinstance(client, ClaudeClient)
         assert client.options.env["ANTHROPIC_BASE_URL"] == "http://local:8000"
         assert client.options.env["ANTHROPIC_AUTH_TOKEN"] == "k"
@@ -146,7 +163,7 @@ class TestClaudeCompatEngine:
 
     def test_missing_base_url_fails_loudly(self) -> None:
         with pytest.raises(ValueError, match="base_url"):
-            ClaudeCompatEngine().client(LupAgentOptions(model="glm-4"))
+            create_claude_compat(LupAgentOptions(model="glm-4"))
 
 
 class TestCodexEngine:
@@ -154,20 +171,20 @@ class TestCodexEngine:
         opts = LupAgentOptions(
             model="gpt-5.5",
             system_prompt="do it",
-            served_tool_groups=("notes", "sandbox"),
+            served_tool_groups=["notes", "sandbox"],
             reasoning_effort="high",
             turn_timeout_seconds=120.0,
         )
-        client = CodexEngine().client(opts)
+        client = create_codex(opts)
         assert isinstance(client, CodexClient)
-        assert client.mcp_servers == ("notes", "sandbox")
+        assert client.mcp_servers == ["notes", "sandbox"]
         assert client.mcp_tools is True
         assert client.effort == "high"
         assert client.turn_timeout_seconds == 120.0
         assert client.mailbox is None
 
     def test_call_tier_serves_no_tools(self) -> None:
-        client = CodexEngine().client(LupAgentOptions(model="gpt-5.5"))
+        client = create_codex(LupAgentOptions(model="gpt-5.5"))
         assert isinstance(client, CodexClient)
         assert client.mcp_tools is False
 
@@ -180,7 +197,7 @@ class TestCodexEngine:
             tools=["Read"],
         )
         with pytest.raises(UnsupportedOptionsError) as exc:
-            CodexEngine().client(opts)
+            create_codex(opts)
         assert exc.value.fields == [
             "max_thinking_tokens",
             "max_turns",
@@ -191,7 +208,7 @@ class TestCodexEngine:
     def test_budget_without_rates_is_unsupported(self) -> None:
         opts = LupAgentOptions(model="gpt-5.5", max_budget_usd=1.0)
         with pytest.raises(UnsupportedOptionsError) as exc:
-            CodexEngine().client(opts)
+            create_codex(opts)
         assert exc.value.fields == ["max_budget_usd"]
 
     def test_budget_with_rates_is_kept(self) -> None:
@@ -200,7 +217,7 @@ class TestCodexEngine:
             max_budget_usd=1.0,
             usage_cost=per_mtok_usage_cost(input_usd=1.0, output_usd=2.0),
         )
-        client = CodexEngine().client(opts)
+        client = create_codex(opts)
         assert isinstance(client, CodexClient)
         assert client.max_budget_usd == 1.0
 
@@ -211,7 +228,7 @@ class TestCodexEngine:
             max_budget_usd=1.0,
             on_unsupported="drop",
         )
-        client = CodexEngine().client(opts)
+        client = create_codex(opts)
         assert isinstance(client, CodexClient)
         assert client.max_budget_usd is None
 
@@ -220,9 +237,10 @@ class TestOpenAICompatEngine:
     def test_provider_comes_from_compat(self) -> None:
         opts = LupAgentOptions(
             model="glm-4",
-            compat=CompatOptions(base_url="http://local", model_provider="prov"),
+            base_url="http://local",
+            model_provider="prov",
         )
-        client = OpenAICompatEngine().client(opts)
+        client = create_openai_compat(opts)
         assert isinstance(client, OpenAICompatClient)
         assert client.base_url == "http://local"
         assert client.model_provider == "prov"
@@ -233,7 +251,7 @@ class TestCreateClient:
         engine = RecordingEngine()
         create_client(model="gpt-5.5", engine=engine)
         opts = engine.built[0]
-        assert opts.harness_prompt is False
+        assert opts.harness_preset is False
         assert opts.persist_session is False
         assert opts.sdk_sandbox is False
 
@@ -242,7 +260,6 @@ class TestCreateClient:
         session_opts = LupAgentOptions(model="gpt-5.5")
         create_client(options=session_opts, engine=engine)
         assert engine.built[0] is session_opts
-        assert engine.built[0].harness_prompt is True
 
     def test_options_and_kwargs_are_mutually_exclusive(self) -> None:
         with pytest.raises(ValueError, match="max_turns"):
@@ -255,6 +272,13 @@ class TestCreateClient:
         with pytest.raises(ValueError, match="model"):
             create_client()
 
+    def test_id_and_model_route_through_engines(self) -> None:
+        """An engine id looks up ENGINES; ``None`` infers from the model."""
+        engine = RecordingEngine()
+        assert resolve_factory("codex", model="x") is ENGINES["codex"]
+        assert resolve_factory(None, model="gpt-5.5") is ENGINES["codex"]
+        assert resolve_factory(engine, model="x") is engine
+
 
 class TestQuerySugar:
     async def test_query_runs_one_shot_with_drop_policy(self) -> None:
@@ -265,4 +289,4 @@ class TestQuerySugar:
         ran = engine.ran[0]
         assert ran.on_unsupported == "drop"
         assert ran.max_turns == 3
-        assert ran.harness_prompt is False
+        assert ran.harness_preset is False
