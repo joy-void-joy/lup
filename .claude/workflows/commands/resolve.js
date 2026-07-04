@@ -18,8 +18,12 @@ export const meta = {
 //     notes: [{ file, line, text }],  // the original markers this concern subsumes
 //   }],
 // }
-const base = (args && args.base) || 'HEAD'
-const concerns = (args && args.concerns) || []
+// Large args payloads can reach the script as a JSON-encoded string instead
+// of a parsed object; a malformed string then fails loudly here rather than
+// silently running zero concerns.
+const input = typeof args === 'string' ? JSON.parse(args) : args
+const base = (input && input.base) || 'HEAD'
+const concerns = (input && input.concerns) || []
 
 if (!concerns.length) {
   log('No concerns passed; nothing to execute.')
