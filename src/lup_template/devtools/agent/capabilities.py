@@ -37,6 +37,7 @@ from lup.adapters.common import (
     LupAgentOptions,
     UnsupportedOptionsError,
 )
+from lup.adapters.tools.claude import READ
 
 
 class CapabilityCell(BaseModel):
@@ -74,7 +75,7 @@ def option_probes() -> list[tuple[str, LupAgentOptions]]:
     """One probe per intent knob: the baseline plus exactly that knob."""
     base = probe_base_options()
     return [
-        ("tools", base.model_copy(update={"tools": ["Read"]})),
+        ("tools", base.model_copy(update={"tools": [READ]})),
         ("permission_mode", base.model_copy(update={"permission_mode": "plan"})),
         ("max_turns", base.model_copy(update={"max_turns": 3})),
         (
@@ -119,7 +120,7 @@ def probe_background_tools(engine_id: str) -> bool:
             system_prompt="",
             build_message=lambda: None,
             model="capability-probe",
-            builtin_tools=["Read"],
+            builtin_tools=[READ],
         )
     except (ValueError, NotImplementedError):
         return False
