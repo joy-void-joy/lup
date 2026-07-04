@@ -184,17 +184,13 @@ class TestClaudeCompatEngine:
         assert env["ANTHROPIC_AUTH_TOKEN"] == ""
 
     def test_missing_key_still_supplies_a_placeholder_credential(self) -> None:
-        opts = LupAgentOptions(
-            model="glm-4", base_url="http://local:8000"
-        )
+        opts = LupAgentOptions(model="glm-4", base_url="http://local:8000")
         env = compat_env(opts)
         assert env["ANTHROPIC_AUTH_TOKEN"]
         assert env["ANTHROPIC_API_KEY"] == ""
 
     def test_single_model_endpoint_maps_every_claude_alias(self) -> None:
-        opts = LupAgentOptions(
-            model="glm-4", base_url="http://local:8000"
-        )
+        opts = LupAgentOptions(model="glm-4", base_url="http://local:8000")
         env = compat_env(opts)
         assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "glm-4"
         assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "glm-4"
@@ -209,9 +205,7 @@ class TestClaudeCompatEngine:
         assert "ANTHROPIC_DEFAULT_OPUS_MODEL" not in compat_env(opts)
 
     def test_nonessential_traffic_is_silenced(self) -> None:
-        opts = LupAgentOptions(
-            model="glm-4", base_url="http://local:8000"
-        )
+        opts = LupAgentOptions(model="glm-4", base_url="http://local:8000")
         env = compat_env(opts)
         assert env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
         assert env["DISABLE_TELEMETRY"] == "1"
