@@ -98,9 +98,7 @@ def create_permission_hooks(
         if input_data.get("hook_event_name") != "PreToolUse":
             return LupHookOutput()
 
-        tool_name = input_data.get(
-            "tool_name", ""
-        )  # lup: .get should be an antipattern as well
+        tool_name = input_data.get("tool_name", "")
         tool_input = input_data.get("tool_input", {})
 
         match tool_name:

@@ -106,6 +106,64 @@ def test_cast_call_with_inline_marker_asks() -> None:
     assert edit_decision("src/module.py", "x = 1\n", new) == "ask"
 
 
+def test_typed_inline_marker_covering_rule_asks() -> None:
+    new = "result: Any = f()  # lup: ignore[any-type]\n"
+    assert edit_decision("src/module.py", "", new) == "ask"
+
+
+def test_typed_inline_marker_naming_another_rule_denies() -> None:
+    # Names dict-get, but the line trips any-type — the directive does not
+    # cover it, so it still denies.
+    new = "result: Any = f()  # lup: ignore[dict-get]\n"
+    assert edit_decision("src/module.py", "", new) == "deny"
+
+
+def test_deny_reason_hints_the_typed_ignore_for_the_rule() -> None:
+    result = hook.decide(
+        hook.EditInput(
+            file_path="src/module.py", old_string="", new_string="y = cast(int, raw)\n"
+        )
+    )
+    assert result is not None
+    reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "# lup: ignore[cast]" in reason
+
+
+def test_file_level_typed_ignore_disables_only_that_rule(tmp_path: Path) -> None:
+    target = tmp_path / "module.py"
+    target.write_text("# lup: ignore[string-split]\nx = 1\n", encoding="utf-8")
+    split_line = "x = 1\ny = raw.split(',')\n"
+    assert edit_decision(str(target), "x = 1\n", split_line) == "allow"
+    any_line = "x = 1\nz: Any = f()\n"
+    assert edit_decision(str(target), "x = 1\n", any_line) == "deny"
+
+
+def test_every_dict_get_is_denied() -> None:
+    new = "x = 1\nname = payload.get('name')\n"
+    assert edit_decision("src/module.py", "x = 1\n", new) == "deny"
+
+
+def test_dict_get_with_typed_ignore_asks() -> None:
+    new = "x = 1\nname = registry.get(key)  # lup: ignore[dict-get]\n"
+    assert edit_decision("src/module.py", "x = 1\n", new) == "ask"
+
+
+def test_declared_frozenset_is_denied() -> None:
+    new = "TOKENS: frozenset[str] = frozenset({'a'})\n"
+    assert edit_decision("src/module.py", "", new) == "deny"
+
+
+def test_os_file_op_is_denied_but_environ_is_allowed() -> None:
+    assert edit_decision("src/module.py", "", "entries = os.listdir(p)\n") == "deny"
+    assert edit_decision("src/module.py", "", "home = os.environ['HOME']\n") == "allow"
+
+
+def test_concrete_valued_dict_is_allowed() -> None:
+    # The relaxed dict rule permits concrete class value types (a registry).
+    new = "engines: dict[str, Engine] = {}\n"
+    assert edit_decision("src/module.py", "", new) == "allow"
+
+
 def test_ts_anti_pattern_is_denied() -> None:
     assert edit_decision("src/app.ts", "", "const v = data as any\n") == "deny"
 

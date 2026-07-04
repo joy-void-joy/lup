@@ -45,13 +45,6 @@ to name every tool a Claude session may call; Codex/OpenAI agents get
 tools from the served MCP groups plus the Codex runtime's own native
 tools instead."""
 
-FRAMEWORK_TOOLS: frozenset[str] = frozenset(
-    {"StructuredOutput"}
-)  # lup: Neither frozenset
-"""Tools the agent always needs: ``StructuredOutput`` emits the final result
-under ``ClaudeAgentOptions.output_format``, so the allowlist must carry it even
-though no template tool defines it."""
-
 
 class BaseToolPolicy:
     """Centralized machinery for tool availability.
@@ -149,7 +142,10 @@ class BaseToolPolicy:
         Returns:
             Sorted list of allowed tool names.
         """
-        tools: set[str] = set(CLAUDE_BUILTIN_TOOLS) | set(FRAMEWORK_TOOLS)
+        # StructuredOutput is the SDK's own tool for emitting the final result
+        # under output_format; no template tool defines it, so the allowlist
+        # carries it alongside the Claude built-ins.
+        tools: set[str] = set(CLAUDE_BUILTIN_TOOLS) | {"StructuredOutput"}
 
         for server_name, server in servers.items():
             for tool_name in server_tool_names(server):
