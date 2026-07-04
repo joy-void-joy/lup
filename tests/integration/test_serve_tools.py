@@ -22,7 +22,7 @@ from lup.paths import (
     SESSION_DIR_ENV,
     SESSION_ID_ENV,
 )
-from lup.realtime_relay import MetaEvent, RealtimeMailbox, ReplyEvent
+from lup.realtime.relay import MetaEvent, RealtimeMailbox, ReplyEvent
 from lup.sandbox import Sandbox
 
 from lup_template.agent.toolsets import (

@@ -1,13 +1,15 @@
-"""Realtime relay for backends whose tools run in a subprocess.
+"""Subprocess relay for backends whose tools run in a separate process.
 
-Companion to :mod:`lup.realtime`: that module is the in-process ``Scheduler``
-(and Stop-hook guards) a Claude persistent agent drives directly; this one is
-the subprocess transport that gives Codex/OpenAI the same sleep/wake behavior
-when tools cannot share process state. Same pattern, two wirings.
+Layered on the in-process :mod:`lup.realtime.scheduler`: that module is the
+``Scheduler`` (and Stop-hook guards) a Claude persistent agent drives
+directly; this one is the subprocess transport that gives Codex/OpenAI the
+same sleep/wake behavior when tools cannot share process state. Same pattern,
+two wirings — and the dependency runs one way: the relay imports the scheduler
+core and the shared :mod:`lup.realtime.models`, never the reverse.
 
 On Claude, a persistent agent holds one never-ending SDK turn: its tools
-share process state with the :class:`~lup.realtime.Scheduler`, ``sleep``
-blocks in-process, and a Stop hook forbids ending the turn. Backends
+share process state with the :class:`~lup.realtime.scheduler.Scheduler`,
+``sleep`` blocks in-process, and a Stop hook forbids ending the turn. Backends
 without in-process tools (Codex, and OpenAI-compatible endpoints through
 the Codex runtime) invert the loop: **each wake is one SDK turn**, and
 the parent process owns the Scheduler between turns.
@@ -52,9 +54,7 @@ Examples:
         ...     )
 """
 
-#lup: It's really not clear to me why there is both realtime.py and realtime_relay.py
-#lup: Probably should refactor into a realtime/ folder
-#lup: Also this file seems claude specific. Can you check what files are claude specific in packages/lup? There seems to be a lot of them
+# lup: Also this file seems claude specific. Can you check what files are claude specific in packages/lup? There seems to be a lot of them
 
 import asyncio
 import logging
@@ -66,7 +66,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from lup.adapters.common import Session
 from lup.mcp import LupMcpTool, ToolError, lup_tool
-from lup.realtime import (
+from lup.realtime.models import (
     ContextInput,
     ContextOutput,
     DebounceInput,
@@ -79,10 +79,9 @@ from lup.realtime import (
     ReplyOutput,
     ScheduleActionInput,
     ScheduleActionOutput,
-    Scheduler,
     SleepInput,
-    SleepResult,
 )
+from lup.realtime.scheduler import Scheduler, SleepResult
 from lup.reflect import ReflectionGate
 from lup.trace import TraceLogger
 
@@ -100,9 +99,13 @@ MAX_ACTIONS_BYTES = 32 * 1024 * 1024
 MISSING_SLEEP_MESSAGE = (
     "Your turn ended without calling sleep. This is a persistent session: "
     "you yield control with the sleep tool, and the environment wakes you "
-    "when something happens. Finish any pending replies, record a meta "
-    "assessment, then call sleep."
-) #lup: This seems too specific. Also, we don't always want to record a meta before sleeping, this seems a bit too specific. This kind of things should go to template
+    "when something happens. Finish any pending work, then call sleep."
+)
+"""Neutral corrective message for a turn that ended without sleeping.
+
+Describes only the mechanism (sleep to yield, the environment wakes you).
+Domains that want extra workflow steps in the corrective turn pass their own
+text via ``run_relay_session(missing_sleep_message=...)``."""
 
 
 # =====================================================================
@@ -573,6 +576,7 @@ async def run_relay_session(
     should_continue: Callable[[], bool] | None = None,
     poll_interval_seconds: float = 0.3,
     max_missing_sleep_retries: int = 3,
+    missing_sleep_message: str = MISSING_SLEEP_MESSAGE,
     trace_logger: TraceLogger | None = None,
 ) -> int:
     """Run the persistent wake loop over a multi-turn conversation.
@@ -605,6 +609,9 @@ async def run_relay_session(
         poll_interval_seconds: Mailbox poll cadence during a turn.
         max_missing_sleep_retries: Corrective turns granted to an agent
             that ends a turn without sleeping before the session ends.
+        missing_sleep_message: Prompt for each corrective turn. Defaults
+            to the neutral :data:`MISSING_SLEEP_MESSAGE`; pass domain text
+            to add workflow steps (e.g. a meta assessment) to the nudge.
         trace_logger: Receives turn traces and meta assessments.
 
     Returns:
@@ -663,7 +670,7 @@ async def run_relay_session(
                     missing_sleep,
                 )
                 break
-            message = MISSING_SLEEP_MESSAGE
+            message = missing_sleep_message
             continue
         missing_sleep = 0
 

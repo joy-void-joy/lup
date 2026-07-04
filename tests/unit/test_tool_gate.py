@@ -8,7 +8,7 @@ call through once unlocked.
 import pytest
 
 from lup.hooks import create_tool_gate
-from lup.realtime import (
+from lup.realtime.scheduler import (
     Scheduler,
     create_meta_before_sleep_guard,
     create_pending_event_guard,

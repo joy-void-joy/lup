@@ -52,7 +52,7 @@ from lup.adapters.common import (
 )
 from lup.background import BackgroundAgentParams, BaseBackgroundAgent
 from lup.options import LupAgentOptions
-from lup.realtime_relay import RealtimeMailbox
+from lup.realtime.relay import RealtimeMailbox
 from lup.trace import TraceLogger, print_message
 from lup.types import (
     JsonObject,

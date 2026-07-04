@@ -129,7 +129,7 @@ def build_session_options(
     )
     from lup.mcp import create_mcp_server
     from lup.options import CodexOptions, CompatOptions, LupAgentOptions
-    from lup.realtime_relay import REALTIME_DIRNAME
+    from lup.realtime.relay import REALTIME_DIRNAME
     from lup.reflect import create_reflection_gate
     from lup.types import merge_hooks
 
@@ -449,8 +449,10 @@ async def run_persistent_agent(
     Returns:
         The completed-turn count.
     """
-    from lup.realtime import Scheduler
-    from lup.realtime_relay import run_relay_session
+    from lup.realtime.relay import run_relay_session
+    from lup.realtime.scheduler import Scheduler
+
+    from lup_template.agent.tools.realtime import MISSING_SLEEP_MESSAGE
 
     if session_id is None:
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -483,6 +485,7 @@ async def run_persistent_agent(
             scheduler=scheduler,
             mailbox=build.client.mailbox,
             initial_prompt=task,
+            missing_sleep_message=MISSING_SLEEP_MESSAGE,
             trace_logger=trace_logger,
         )
 
