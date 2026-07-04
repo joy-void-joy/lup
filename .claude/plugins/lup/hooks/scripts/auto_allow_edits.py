@@ -34,7 +34,7 @@ import json
 import re
 import sys
 
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, ValidationError
@@ -56,6 +56,12 @@ PROTECTED_PATTERNS = [
 # (/tmp/..., used by pytest fixtures) is deliberately excluded — see is_tmp_path.
 TMP_DIR = "tmp"
 
+# The devtools command tree (src/<pkg>/devtools/...). Creating a file here that
+# does not exist yet is genuinely new tooling worth a checkpoint; the segment
+# between src/ and devtools/ stays open so the match survives the package rename
+# downstream projects perform.
+DEVTOOLS_DIR_RE = re.compile(r"(^|/)src/[^/]+/devtools/")
+
 LUP_IGNORE_MARKER = "# lup: ignore"
 
 # Inline review-comment markers, mirroring lup.review.markers. Inlined so this safety
@@ -76,6 +82,9 @@ FILE_IGNORE_RE = re.compile(
 MARKER_REVIEW_REASON = "Edit adds or removes a `# lup:` marker — review before applying"
 PROTECTED_REVIEW_REASON = "Protected file — review before applying"
 TMP_REVIEW_REASON = "Scratch file under tmp/ — review before applying"
+NEW_DEVTOOLS_REASON = (
+    "New devtools command file — checkpoint this new tooling before applying"
+)
 
 # Subagent types the /lup:resolve workflow spawns. They edit on throwaway,
 # independently reviewed worktree branches, so protected files are allowed for
@@ -95,7 +104,9 @@ RESOLVE_EDITOR_AGENTS = {"resolve-editor", "lup:resolve-editor"}
 # custom linter rules: ruff has no plugin API, and engines that have one
 # would break the hook's hermeticity.
 
-ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [ #lup: Why are we re-declaring antipatterns here? Shouldn't we instead directly import it from lup? Feels wrong to do it this way?
+ANTI_PATTERNS: list[
+    tuple[str, re.Pattern[str], str]
+] = [  # lup: Why are we re-declaring antipatterns here? Shouldn't we instead directly import it from lup? Feels wrong to do it this way?
     (
         "any-type",
         re.compile(r"\bAny\b"),
@@ -447,6 +458,15 @@ def is_tmp_path(file_path: str) -> bool:
     if parts[:2] == ("/", TMP_DIR):
         return False
     return TMP_DIR in parts
+
+
+def is_new_devtools_file(file_path: str) -> bool:
+    """Whether the edit creates a NEW file under the devtools command tree.
+
+    A devtools path with no file on disk yet is brand-new tooling; an edit to a
+    devtools file that already exists is ongoing work and keeps its usual flow.
+    """
+    return bool(DEVTOOLS_DIR_RE.search(file_path)) and not Path(file_path).exists()
 
 
 def marker_count(text: str) -> int:
@@ -882,9 +902,12 @@ def always_ask_decision(
 
     Protected config and tmp/ scratch files always defer to a prompt rather
     than auto-allowing (Edit) or denying (Write), so the two tools behave
-    identically here. The /lup:resolve editor subagent is the exception: it may
-    edit protected files (reviewed at merge), though a marker-count change still
-    asks. Any other path returns None.
+    identically here. Creating a not-yet-existing file under the devtools command
+    tree also prompts — a checkpoint that surfaces genuinely new tooling while
+    leaving edits to existing devtools files untouched. The /lup:resolve editor
+    subagent is the exception throughout: it edits protected files and adds new
+    devtools files unattended on its reviewed branch (a marker-count change still
+    asks). Any other path returns None.
     """
     if is_protected_file(file_path):
         if marker_count(old_string) != marker_count(new_string):
@@ -894,6 +917,8 @@ def always_ask_decision(
         return ask_decision(PROTECTED_REVIEW_REASON)
     if is_tmp_path(file_path):
         return ask_decision(TMP_REVIEW_REASON)
+    if is_new_devtools_file(file_path) and agent_type not in RESOLVE_EDITOR_AGENTS:
+        return ask_decision(NEW_DEVTOOLS_REASON)
     return None
 
 

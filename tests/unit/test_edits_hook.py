@@ -349,3 +349,27 @@ def test_system_tmp_is_not_gated() -> None:
     # The system temp dir (pytest fixtures) is not the repo's ./tmp/.
     assert edit_decision("/tmp/pytest-of-u/module.py", "a = 1\n", "a = 2\n") == "allow"
     assert write_decision("/tmp/pytest-of-u/module.py", "a = 1\n") is None
+
+
+def test_new_devtools_file_asks(tmp_path: Path) -> None:
+    # A devtools path with nothing on disk yet is genuinely new tooling: both
+    # Edit-into-existence and Write surface it for a checkpoint.
+    new_cmd = tmp_path / "src" / "lup_template" / "devtools" / "shiny.py"
+    assert edit_decision(str(new_cmd), "", "value = build()\n") == "ask"
+    assert write_decision(str(new_cmd), "value = build()\n") == "ask"
+
+
+def test_existing_devtools_file_keeps_normal_flow(tmp_path: Path) -> None:
+    # An edit to a devtools file that already exists carries no new friction.
+    existing = tmp_path / "src" / "lup_template" / "devtools" / "main.py"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("x = 1\n", encoding="utf-8")
+    assert edit_decision(str(existing), "x = 1\n", "x = 2\n") == "allow"
+    assert write_decision(str(existing), "x = 1\n") is None
+
+
+def test_non_devtools_new_file_is_not_gated(tmp_path: Path) -> None:
+    # The checkpoint is scoped to the devtools tree, not any new src/ file.
+    other = tmp_path / "src" / "lup_template" / "agent" / "core.py"
+    assert edit_decision(str(other), "x = 1\n", "x = 2\n") == "allow"
+    assert write_decision(str(other), "x = 1\n") is None
