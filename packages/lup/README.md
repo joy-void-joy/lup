@@ -17,7 +17,7 @@ Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/
 - `lup.history` / `lup.notes` / `lup.paths` — version-aware session storage, RO/RW notes layout, and lazy path configuration.
 - `lup.trace` — color-coded console display and markdown trace logging.
 - `lup.metrics` / `lup.retry` / `lup.throttle` — tool-call metrics, retry with backoff, rate limiting.
-- `lup.antipatterns` / `lup.markers` — the anti-pattern rule set and review-marker scanning that development tooling consumes.
+- `lup.review` — review-marker scanning (`markers`) and the anti-pattern rule set (`antipatterns`) that development tooling consumes, over a shared scan core (`common`).
 - `lup.profiles` — named Claude config-dir profiles (accounts), shared machine-wide.
 
 ## Usage

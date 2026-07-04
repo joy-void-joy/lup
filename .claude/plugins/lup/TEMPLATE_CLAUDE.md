@@ -440,9 +440,11 @@ packages/
         │   ├── claude_compat.py# claude-compat engine: Claude scaffolding on Anthropic-compatible endpoints
         │   ├── codex.py        # codex engine: runtime config, SDK adaptation, sessions, hook codegen (quarantined), background
         │   └── openai_compat.py# openai-compat engine: OpenAI-protocol endpoints through the Codex runtime
-        ├── antipatterns.py     # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
         ├── options.py          # LupAgentOptions — backend-agnostic options crossing application -> lib
-        ├── markers.py          # `# lup:` / `// lup:` review-marker scanning (dev comments)
+        ├── review/             # Marker + anti-pattern scanning for dev tooling
+        │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor
+        │   ├── markers.py      # `# lup:` / `// lup:` review-marker scanning (dev comments)
+        │   └── antipatterns.py # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
         ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
         ├── background.py       # Background agent base + SDK-aware factory
         ├── history.py          # Session storage/retrieval

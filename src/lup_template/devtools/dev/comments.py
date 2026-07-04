@@ -25,7 +25,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.markers import (
+from lup.review.markers import (
     MARKER_RE,
     TEMPLATE_MARKER_RE,
     MarkerComment,
@@ -52,8 +52,8 @@ def scan_tracked(
     """Run one marker scan across every tracked text file.
 
     `find` maps a file's text and its scan mode to the markers it holds —
-    :func:`lup.markers.find_feedback` for review notes, or
-    :func:`lup.markers.find_markers` bound to another convention.
+    :func:`lup.review.markers.find_feedback` for review notes, or
+    :func:`lup.review.markers.find_markers` bound to another convention.
     """
     results: list[FoundComment] = []
     for rel in str(git("ls-files")).splitlines():
