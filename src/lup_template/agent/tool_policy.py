@@ -37,6 +37,9 @@ class ToolPolicy(BaseToolPolicy):
     - API key availability (from settings)
     - Mode configuration (e.g., restricted mode)
     - Session context (e.g., allow certain tools only in some contexts)
+    - Code-execution sandbox: pass ``code_execution=True`` when the session
+      has one, and raw shell (Bash) is dropped unless ``AGENT_SANDBOX_ALLOW_SHELL``
+      opts back in — the sandbox's ``execute_code`` is the sanctioned code path.
 
     TEMPLATE: customize ``__init__`` to define your exclusion logic; override
     ``group_enabled`` to gate groups on your domain's conditions (e.g. a
@@ -58,6 +61,7 @@ class ToolPolicy(BaseToolPolicy):
         restricted_mode: bool = False,
         excluded_tools: frozenset[str] = frozenset(),
         excluded_tags: frozenset[str] = frozenset(),
+        code_execution: bool = False,
     ) -> None:
         tags: set[str] = set(excluded_tags)
 
@@ -72,5 +76,7 @@ class ToolPolicy(BaseToolPolicy):
             restricted_mode=restricted_mode,
             excluded_tools=excluded_tools,
             excluded_tags=frozenset(tags),
+            code_execution=code_execution,
+            allow_shell=settings.sandbox_allow_shell,
         )
         self.settings = settings

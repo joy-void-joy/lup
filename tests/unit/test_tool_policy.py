@@ -122,6 +122,40 @@ class TestGetAllowedTools:
         assert "WebSearch" in allowed
 
 
+class TestShellDefaultWithSandbox:
+    """A code-execution sandbox drops raw shell (Bash) from the allowlist by
+    default: execute_code is the sanctioned code path, so host shell is an
+    explicit opt-in rather than granted alongside it."""
+
+    def test_sandbox_drops_bash_by_default(self) -> None:
+        policy = BaseToolPolicy(code_execution=True)
+
+        assert "Bash" not in policy.get_allowed_tools({})
+        assert not policy.is_tool_available("Bash")
+        assert "Read" in policy.get_allowed_tools({})
+
+    def test_allow_shell_opts_bash_back_in(self) -> None:
+        policy = BaseToolPolicy(code_execution=True, allow_shell=True)
+
+        assert "Bash" in policy.get_allowed_tools({})
+
+    def test_no_sandbox_keeps_bash(self) -> None:
+        policy = BaseToolPolicy(code_execution=False)
+
+        assert "Bash" in policy.get_allowed_tools({})
+
+    def test_template_policy_maps_opt_in_setting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "sandbox_allow_shell", False)
+        assert "Bash" not in ToolPolicy(
+            settings, code_execution=True
+        ).get_allowed_tools({})
+
+        monkeypatch.setattr(settings, "sandbox_allow_shell", True)
+        assert "Bash" in ToolPolicy(settings, code_execution=True).get_allowed_tools({})
+
+
 class TestTagFiltering:
     """Tags filter at server construction: tools with unmet requirements
     are never registered instead of failing on their first call."""

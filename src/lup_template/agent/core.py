@@ -141,14 +141,15 @@ def build_session_options(
         tool_group_names,
     )
 
-    policy = ToolPolicy(settings)
+    sandbox = build_session_sandbox(notes)
+    policy = ToolPolicy(settings, code_execution=sandbox is not None)
 
     # In-process assembly — consumed by hook-enforced engines (claude*).
     toolset = build_session_toolset(
         session_dir=notes.session,
         outputs_dir=notes.output.parent,
         include_subagent_tool=False,
-        sandbox=build_session_sandbox(notes),
+        sandbox=sandbox,
     )
     all_servers = [
         create_mcp_server(name, tools=policy.filter_tools(tools))
