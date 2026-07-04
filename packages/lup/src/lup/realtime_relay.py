@@ -1,20 +1,23 @@
 """Realtime relay for backends whose tools run in a subprocess.
 
 Companion to :mod:`lup.realtime`: that module is the in-process ``Scheduler``
-(and Stop-hook guards) a Claude persistent agent drives directly; this one is
-the subprocess transport that gives Codex/OpenAI the same sleep/wake behavior
-when tools cannot share process state. Same pattern, two wirings.
+(and Stop-hook guards) an in-process persistent agent drives directly; this
+one is the subprocess transport that gives subprocess-tool backends the same
+sleep/wake behavior when tools cannot share process state. Same pattern, two
+wirings — the relay exists only for the subprocess shape; in-process backends
+drive the Scheduler directly and never touch it.
 
-On Claude, a persistent agent holds one never-ending SDK turn: its tools
-share process state with the :class:`~lup.realtime.Scheduler`, ``sleep``
-blocks in-process, and a Stop hook forbids ending the turn. Backends
-without in-process tools (Codex, and OpenAI-compatible endpoints through
-the Codex runtime) invert the loop: **each wake is one SDK turn**, and
-the parent process owns the Scheduler between turns.
+With in-process tools, a persistent agent holds one never-ending SDK turn:
+its tools share process state with the :class:`~lup.realtime.Scheduler`,
+``sleep`` blocks in-process, and a Stop hook forbids ending the turn.
+Backends whose tools run in a subprocess cannot share that state, so they
+invert the loop: **each wake is one SDK turn**, and the parent process owns
+the Scheduler between turns.
 
 State crosses the process boundary through files in a realtime directory
 (by convention ``session_dir/realtime/``, relayed to the tool subprocess
-via ``LUP_REALTIME_DIR`` — see :class:`lup.paths.SessionContext`):
+via ``LUP_REALTIME_DIR`` — see
+:class:`lup.adapters.session_relay.SessionContext`):
 
 - ``actions.jsonl`` — agent → parent event stream appended by the served
   tools (reply, schedule_action, debounce, remind, meta, context reads).
@@ -54,7 +57,6 @@ Examples:
 
 #lup: It's really not clear to me why there is both realtime.py and realtime_relay.py
 #lup: Probably should refactor into a realtime/ folder
-#lup: Also this file seems claude specific. Can you check what files are claude specific in packages/lup? There seems to be a lot of them
 
 import asyncio
 import logging
@@ -354,7 +356,7 @@ class RealtimeMailbox:
 def create_realtime_relay_tools(realtime_dir: Path) -> list[LupMcpTool]:
     """Create the realtime tool set for subprocess backends.
 
-    Same tool names and schemas as the in-process Claude set (see
+    Same tool names and schemas as the in-process set (see
     ``create_realtime_tools`` in the template), but instead of touching a
     Scheduler directly the handlers relay through the mailbox: actions
     stream to the parent as events, and ``sleep`` records a request and
@@ -525,7 +527,7 @@ async def apply_relay_event(
 ) -> None:
     """Apply one agent event to the parent's Scheduler.
 
-    Mirrors what the in-process Claude tools do directly, with one
+    Mirrors what the in-process tools do directly, with one
     deliberate exception: meta-gate transitions stay tool-side (the
     reply tool resets the gate in its own process) so the gate always
     follows the agent's tool-call order — a parent-side reset could race
@@ -580,13 +582,14 @@ async def run_relay_session(
     Each cycle: publish state, run one turn (applying mailbox events as
     they appear), consume the sleep request, sleep on the Scheduler,
     wake, and start the next turn with a wake message. The relay
-    counterpart of the Claude Stop-hook loop: an agent that ends its
+    counterpart of the in-process Stop-hook loop: an agent that ends its
     turn without sleeping gets a bounded number of corrective turns
     (mirroring the Stop hook's forced continuation) before the session
     ends.
 
     Args:
-        conversation: An open multi-turn conversation (Codex thread).
+        conversation: An open multi-turn conversation (the subprocess
+            engine's thread).
         scheduler: The parent's Scheduler; the environment layer calls
             ``scheduler.wake(...)`` / ``extend_debounce()`` on events.
         mailbox: The relay mailbox (parent-side copy).

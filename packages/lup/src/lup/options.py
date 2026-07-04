@@ -28,9 +28,9 @@ from lup.types import (
 class CompatOptions(BaseModel):
     """An OpenAI-compatible endpoint, engine-neutral.
 
-    Consumed by whichever engine fronts the endpoint: ``openai-compat``
-    defines a Codex custom provider from it, ``claude-compat`` points the
-    Claude scaffolding at it via ``ANTHROPIC_BASE_URL``. Unset for models
+    Consumed by whichever engine fronts the endpoint: one compat engine
+    defines a custom runtime provider from it, the other points its
+    scaffolding at it via the endpoint's base-URL env. Unset for models
     served by their own vendor.
     """
 
@@ -41,14 +41,14 @@ class CompatOptions(BaseModel):
 
 
 class CodexOptions(BaseModel):
-    """Codex-runtime construction inputs that have no Claude analogue.
+    """Subprocess-runtime construction inputs with no in-process analogue.
 
-    The Codex app-server is a subprocess: it cannot take in-process tools, so
-    tools are served externally (``LupAgentOptions.served_tool_groups`` names
+    The runtime's app-server is a subprocess: it cannot take in-process tools,
+    so tools are served externally (``LupAgentOptions.served_tool_groups`` names
     the groups, and ``mcp_env`` relays the session context the subprocess
     needs), and writes are confined natively to ``writable_roots`` instead of by
     a permission hook. ``session_id``/``shared_dir`` drive the parent-side
-    container cleanup. A Claude session leaves this at its defaults.
+    container cleanup. An in-process session leaves this at its defaults.
     """
 
     # lup: The intent here is really not clear. It should just be merged with LupAgentOptions, no?
@@ -68,11 +68,12 @@ class LupAgentOptions(BaseModel): # lup: Shouldn't this be in common?
     """Everything an engine needs to construct a client, in neutral terms.
 
     Each engine maps these onto its native option object. Mechanism
-    payloads (hooks and tool servers; served groups and the ``codex``
-    block) are consumed by the engine they belong to and ignored by the
-    others. Intent knobs an engine cannot honor (thinking tokens on the
-    Codex runtime, turn timeouts on Claude) follow ``on_unsupported``:
-    refused at construction, or cleared with a log line.
+    payloads (hooks and tool servers; served groups and the
+    subprocess-runtime block) are consumed by the engine they belong to
+    and ignored by the others. Intent knobs an engine cannot honor
+    (thinking tokens on a subprocess runtime, turn timeouts on an
+    in-process backend) follow ``on_unsupported``: refused at
+    construction, or cleared with a log line.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -81,7 +82,7 @@ class LupAgentOptions(BaseModel): # lup: Shouldn't this be in common?
     system_prompt: str = ""
     harness_prompt: bool = True #lup: Even with the comment, it's not clear to me what harness_prompt does? It's like, does it use the default harness prompt (for claude, the claude_code default harness prompt)? If so it should default to false
     """Wrap the system prompt in the engine's coding-harness preset
-    (Claude's ``claude_code`` preset + append). ``False`` uses it raw —
+    (the engine's coding preset + append). ``False`` uses it raw —
     the shape of a nested LLM call rather than an agent session."""
 
     tool_servers: dict[str, McpServerEntry] = Field(default_factory=dict)
@@ -105,7 +106,7 @@ class LupAgentOptions(BaseModel): # lup: Shouldn't this be in common?
 
     persist_session: bool = True
     sdk_sandbox: bool = True
-    """Enable the engine's own OS sandbox where it has one (Claude SDK)."""
+    """Enable the engine's own OS sandbox where it has one."""
     realtime: bool = False
     on_unsupported: Literal["raise", "drop"] = "raise"
     """What an engine does with intent knobs it cannot honor: refuse the

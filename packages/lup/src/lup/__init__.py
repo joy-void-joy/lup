@@ -1,9 +1,10 @@
-"""Lup — agent development library for Claude and Codex agent SDKs.
+"""Lup — an agent development library over multiple agent SDKs.
 
 Core utilities for building agents with hooks, MCP tools, tracing, and
 session management. SDK-specific code lives in ``lup.adapters``; this
-package imports no SDK at load time — install the ``claude`` and/or
-``codex`` extras for the backend you use.
+package imports no SDK at load time — install the optional-dependency
+extra for the backend you use (one per engine module under
+``lup.adapters``).
 
 ``Sandbox`` is imported lazily: it requires the ``docker`` extra
 (``pip install lup[docker]``), and ``import lup`` must work without it.

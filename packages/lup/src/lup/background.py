@@ -26,7 +26,7 @@ Examples:
         >>> from lup.background import create_background_agent
         >>> notes: list[str] = []
         >>> agent = create_background_agent(
-        ...     "claude",
+        ...     engine_id,  # a shipped engine id or an Engine instance
         ...     name="observer",
         ...     system_prompt="Summarize conversations...",
         ...     tools=create_observer_tools(notes=notes),
@@ -39,9 +39,9 @@ Examples:
 
     Run multiple background agents in parallel::
 
-        >>> observer = create_background_agent("claude", name="observer", ...)
+        >>> observer = create_background_agent(engine_id, name="observer", ...)
         >>> researcher = create_background_agent(
-        ...     "claude",
+        ...     engine_id,
         ...     name="researcher",
         ...     builtin_tools=["Read", "Grep", "WebFetch"],
         ...     ...
@@ -178,12 +178,12 @@ def create_background_agent(
     """Build the engine's background agent.
 
     Delegates to ``Engine.background`` — each engine owns the validation
-    and defaults that are properties of its backend (Codex rejects tools
-    and requires an explicit model; Claude defaults to an opus-class
-    model and can act through tools).
+    and defaults that are properties of its backend (a subprocess engine
+    may reject in-process tools and require an explicit model; an
+    in-process engine can act through tools and default its own model).
 
     Args:
-        engine: A shipped engine id ("claude", "codex", ...).
+        engine: A shipped engine id or an ``Engine`` instance.
         name: Agent identifier.
         system_prompt: System prompt for the background agent.
         build_message: Callable that returns the next message or None.

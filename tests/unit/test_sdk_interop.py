@@ -4,6 +4,7 @@ emission, and lup->SDK hook/option conversion for both engines."""
 import tempfile
 from pathlib import Path
 
+from lup.adapters.claude import claude_effort
 from lup.adapters.codex import (
     CodexHookConfig,
     build_hook_config_overrides,
@@ -12,6 +13,7 @@ from lup.adapters.codex import (
     build_permission_hooks,
     build_reflection_gate_hook,
     build_tool_allowlist_hook,
+    codex_effort,
     format_codex_hook_output,
     write_nudge_script,
     write_permission_hook_script,
@@ -19,7 +21,6 @@ from lup.adapters.codex import (
     write_tool_allowlist_script,
 )
 from lup.adapters.common import engine_id_for_model
-from lup.types import normalize_effort
 from lup.hooks import (
     create_nudge_hook,
     create_permission_hooks,
@@ -221,20 +222,20 @@ class TestModelBackend:
 
 class TestEffortNormalization:
     def test_claude_effort(self) -> None:
-        assert normalize_effort("low", "claude") == "low"
-        assert normalize_effort("high", "claude") == "high"
-        assert normalize_effort("xhigh", "claude") == "max"
-        assert normalize_effort("max", "claude") == "max"
+        assert claude_effort("low") == "low"
+        assert claude_effort("high") == "high"
+        assert claude_effort("xhigh") == "max"
+        assert claude_effort("max") == "max"
 
     def test_codex_effort(self) -> None:
-        assert normalize_effort("low", "openai") == "low"
-        assert normalize_effort("high", "openai") == "high"
-        assert normalize_effort("xhigh", "openai") == "xhigh"
-        assert normalize_effort("max", "openai") == "xhigh"
+        assert codex_effort("low") == "low"
+        assert codex_effort("high") == "high"
+        assert codex_effort("xhigh") == "xhigh"
+        assert codex_effort("max") == "xhigh"
 
     def test_none_passthrough(self) -> None:
-        assert normalize_effort(None, "anthropic") is None
-        assert normalize_effort(None, "openai") is None
+        assert claude_effort(None) is None
+        assert codex_effort(None) is None
 
 
 class TestToolAllowlistHookScripts:

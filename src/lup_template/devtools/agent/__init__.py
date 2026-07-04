@@ -73,9 +73,10 @@ def serve_tools_cmd(
 ) -> None:
     """Start SDK tools as an MCP stdio server (the ``notes`` server).
 
-    Launched as a subprocess by the Codex/OpenAI adapters and by the
-    ``claude`` runner. When session-context env vars are present (see
-    ``lup.paths.SessionContext``), session-bound tools — reflect and
+    Launched as a subprocess by the subprocess-served-tool adapters and
+    by the ``claude`` runner. When session-context env vars are present
+    (see ``lup.adapters.session_relay.SessionContext``), session-bound
+    tools — reflect and
     submit_output — are served alongside the static tools, and tool
     metrics are flushed to the session directory for the parent to read.
     """

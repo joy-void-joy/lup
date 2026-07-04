@@ -1,7 +1,7 @@
 """Final-output tool — SDK-agnostic finalization mechanism.
 
 The agent submits its structured output through an MCP tool instead of a
-native SDK output mechanism (Claude ``output_format`` / Codex
+native SDK output mechanism (the engine's ``output_format`` /
 ``output_schema``). One mechanism on every backend means one gate, one
 test surface, and one artifact:
 
@@ -102,9 +102,8 @@ async def ensure_output_submitted(
     """Push a conversation to submit output — the no-stop-event completion guard.
 
     On backends with a stop event, :func:`lup.hooks.create_completion_guard`
-    blocks finishing until the output exists. Backends without one (Codex,
-    OpenAI-compatible through the Codex runtime) end their turn
-    unconditionally, so this guard sends corrective turns afterward
+    blocks finishing until the output exists. Backends without one end their
+    turn unconditionally, so this guard sends corrective turns afterward
     instead — the same invariant, enforced at the only point those
     backends offer. The relay's missing-sleep message is the same pattern
     for persistent sessions.
