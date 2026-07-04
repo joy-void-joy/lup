@@ -95,7 +95,7 @@ RESOLVE_EDITOR_AGENTS = {"resolve-editor", "lup:resolve-editor"}
 # custom linter rules: ruff has no plugin API, and engines that have one
 # would break the hook's hermeticity.
 
-ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
+ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [ #lup: Why are we re-declaring antipatterns here? Shouldn't we instead directly import it from lup? Feels wrong to do it this way?
     (
         "any-type",
         re.compile(r"\bAny\b"),

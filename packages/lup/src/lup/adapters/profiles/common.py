@@ -99,6 +99,7 @@ class ProfileSupport(ABC):
     runner at a chosen dir is a constant beside the subclass (e.g.
     ``lup.adapters.profiles.claude.CONFIG_DIR_ENV``).
     """
+    #lup: This ABC seems too strict. The fact that there isn't any codex.py is a sign that there is a problem, no?
 
     @property
     @abstractmethod

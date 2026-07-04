@@ -182,6 +182,8 @@ async def run_reviewer(
         system_prompt=REVIEWER_SYSTEM_PROMPT.format(outputs_dir=outputs_dir or "N/A"),
         max_thinking_tokens=8000,
         permission_mode="bypassPermissions",
+        # lup: hardcoded Claude builtin tool names; the thinking budget and
+        # max_turns here are magic literals too.
         tools=["Read", "Glob", "Grep", "WebFetch"],
         max_turns=5,
     )

@@ -49,6 +49,7 @@ def extract_sources(blocks: list[LupContentBlock]) -> list[str]:
     """Extract source URLs/queries from tool use blocks."""
     sources: list[str] = []
     for block in blocks:
+        # lup: "WebSearch"/"WebFetch" are Claude tool names hardcoded here.
         if isinstance(block, LupToolUseBlock) and block.name in (
             "WebSearch",
             "WebFetch",

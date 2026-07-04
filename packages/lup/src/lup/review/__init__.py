@@ -5,3 +5,5 @@ tokenization, docstring detection, ignore-directive matching, file-level
 opt-out, and the line cursor. `markers` lists review notes; `antipatterns`
 audits forbidden code shapes.
 """
+
+#lup: The name review seems confusing, I thought this was where trace, metrics.py etc would go (We should also bundle those)

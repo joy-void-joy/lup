@@ -51,6 +51,7 @@ def research_tools() -> list[str]:
     beside the rest of the selection. Resolved at import here; to vary it
     per session, call it from :func:`get_subagent_specs` instead.
     """
+    # lup: hardcoded Claude builtin tool names.
     return [
         "WebSearch",
         "WebFetch",

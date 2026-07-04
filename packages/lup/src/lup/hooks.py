@@ -143,7 +143,7 @@ class LupHooksConfig(BaseModel):
     def by_event(self) -> list[tuple[LupHookEvent, list[LupHookMatcher]]]:
         """Yield ``(event, matchers)`` for each event that has matchers."""
         pairs: list[tuple[LupHookEvent, list[LupHookMatcher]]] = [
-            ("PreToolUse", self.pre_tool_use),
+            ("PreToolUse", self.pre_tool_use), #lup: This seems claude specific, still
             ("PostToolUse", self.post_tool_use),
             ("Stop", self.stop),
         ]
@@ -203,7 +203,7 @@ def create_permission_hooks(
             return LupHookOutput()
 
         match event.tool_name:
-            case "Write" | "Edit":
+            case "Write" | "Edit": #lup: Same here
                 if not event.tool_path:
                     return LupHookOutput()
                 if path_is_under(event.tool_path, rw_dirs):

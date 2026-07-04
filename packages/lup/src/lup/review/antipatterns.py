@@ -102,7 +102,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="dict-str-object",
         pattern=re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
-        message="Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",
+        message="Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel", #lup: We should disallow = {}, = [] and = set() constructions I think
     ),
     AntiPattern(
         # Flags a string-keyed dict/Mapping only when the VALUE is a scalar/
@@ -132,7 +132,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         pattern=re.compile(r"\.get\s*\("),
         message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
         "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache, "
-        "os.environ) add `# lup: ignore[dict-get]`",
+        "os.environ) add `# lup: ignore[dict-get]`", #lup: os.environ or os in general should be banned. For os.environ, we use pydantic-settings
     ),
     AntiPattern(
         id="bare-object",
@@ -147,13 +147,6 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "name the concrete union of models or make the function generic",
     ),
     AntiPattern(
-        # `\btuple\[` catches every declared tuple shape — return, variable, and
-        # attribute annotations alike (the regex never distinguished position;
-        # only the message once said "return"). Existing tuple[...] annotations
-        # never surfaced findings before because the edit hook scans only the
-        # lines an edit ADDS, so shapes that predate the rule slipped through —
-        # the tree auditor, which runs on demand over every line, is what
-        # reports them.
         id="tuple-shape",
         pattern=re.compile(r"\btuple\["),
         message="A declared `tuple[...]` shape hides what each position means — name the "
@@ -166,7 +159,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # a purpose-built structure); an immutable-default-argument use is the
         # one legitimate site — `# lup: ignore[frozenset-shape]` marks it.
         id="frozenset-shape",
-        pattern=re.compile(r"\bfrozenset\b"),
+        pattern=re.compile(r"\bfrozenset\b"), #lup: We should disable set as well, usually dict is better
         message="A declared `frozenset[...]` shape or constant is usually overkill — use "
         "set[str] or a purpose-built structure. For a genuinely immutable default argument "
         "add `# lup: ignore[frozenset-shape]`",
@@ -185,7 +178,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     AntiPattern(
-        id="re-import",
+        id="re-import", #lup: What? this should also be import-re, no?
         pattern=re.compile(r"\bfrom\s+re\s+import\b"),
         message="`from re import` is a code smell — parse structured data with its own API instead: "
         "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
@@ -285,6 +278,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # os.environ/os.getenv (config) and process/exec APIs (os.fork,
         # os.exec*, os.kill, os.getpid) are deliberately absent — they are not
         # file/dir work and pathlib does not cover them.
+        #lup: No, os.environ should be pydantic setting, os.exec etc  is handled by sh
         id="os-file-ops",
         pattern=re.compile(
             r"\bos\.(?:getcwd|chdir|listdir|scandir|walk|mkdir|makedirs|rmdir|"

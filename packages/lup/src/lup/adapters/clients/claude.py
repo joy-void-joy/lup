@@ -16,6 +16,7 @@ The SDK is imported as a qualified namespace (``claude`` for the package,
 ``claude_types`` for its ``types`` submodule) so every SDK type reads with
 its origin visible at the use site.
 """
+#lup: What's not clear here is: Where is background/claude.py, profiles/claude.py, etc... initiated and used. They should all converge somewhere. We should use deeper nested folder
 
 import copy
 import json
@@ -431,7 +432,8 @@ type ClaudeUsageNormalizer = Callable[[Mapping[str, JsonValue]], Usage | None]
 """Transforms the raw Claude SDK usage payload into a (subclass of) Usage."""
 
 
-class ResponseCollector:
+class ResponseCollector: #lup: Feels like this should be an ABC implementation instead
+    #lup: Allso feels like we're deduplicating work from trace.py
     """Drains a queried client's response stream, accumulating once.
 
     The single collector for the Claude path: ``async for`` over it yields
