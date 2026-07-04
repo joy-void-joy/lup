@@ -101,6 +101,32 @@ def load_manifest(path: Path) -> list[ManifestEntry]:
         raise typer.BadParameter(f"Manifest entry does not validate: {e}") from e
 
 
+def summarize(manifest_path: Path) -> None:
+    """Print each concern's verdict as a compact terminal listing.
+
+    The quick pre-review triage: one block per concern with the editor/verifier
+    flags, the verdict reason, and any residual — enough to plan merge order
+    and approval batches before opening the full HTML review.
+    """
+
+    def prose(text: str, width: int) -> str:
+        return " ".join(text.split())[:width]
+
+    entries = load_manifest(manifest_path)
+    for entry in entries:
+        typer.echo(
+            f"{entry.id}: committed={entry.committed} accepted={entry.accepted} "
+            f"generalized={entry.generalized} files={len(entry.files_changed)} "
+            f"swept={len(entry.swept_beyond_scope)}"
+        )
+        if entry.reason:
+            typer.echo(f"  reason: {prose(entry.reason, 300)}")
+        if entry.residual:
+            typer.echo(f"  residual: {prose(entry.residual, 400)}")
+    accepted = sum(1 for entry in entries if entry.accepted)
+    typer.echo(f"\n{accepted}/{len(entries)} concerns verifier-accepted")
+
+
 def render_diff(text: str) -> str:
     rendered: list[str] = []
     for line in text.splitlines():
