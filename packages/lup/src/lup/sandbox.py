@@ -35,6 +35,7 @@ Examples:
         ...     server = sb.create_mcp_server(name="sandbox")
 """
 
+#lup: Probably should be split it into a sandbox/ folder?
 import io
 import json
 import logging

@@ -74,6 +74,9 @@ class ToolPolicy(BaseToolPolicy):
         # A code-execution sandbox provides isolated execute_code; drop raw
         # host shell (Bash, the Claude backend's shell builtin) unless
         # explicitly re-allowed, so the agent cannot bypass the sandbox.
+        # lup: "Bash" is Claude-specific. And why couple disallowing it to the
+        # sandbox? Raw host shell should probably be disallowed generally,
+        # sandbox or not.
         if code_execution and not settings.sandbox_allow_shell:
             names.add("Bash")
 

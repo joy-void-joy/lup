@@ -44,6 +44,7 @@ from lup.types import Decorator, JsonObject
 
 logger = logging.getLogger(__name__)
 
+#lup: This seems claude specific?
 
 class ToolResponse(TypedDict, total=False):
     """Shape of the dict returned by MCP tool handlers."""

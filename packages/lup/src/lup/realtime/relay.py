@@ -38,6 +38,7 @@ via ``LUP_REALTIME_DIR`` — see
 
 Wire the parent side with :func:`run_relay_session`; the tool side is
 :func:`create_realtime_relay_tools`, served by the tool subprocess when
+#lup: Probably should be split it into a sandbox/ folder?
 the realtime directory is relayed.
 
 Examples:
@@ -54,6 +55,7 @@ Examples:
         ...         build_state=lambda: RelayState(unread_events=inbox.unread()),
         ...     )
 """
+#lup: Not comfortable with the meta reflection-gate being so necessary
 
 import asyncio
 import logging
@@ -368,7 +370,7 @@ def create_realtime_relay_tools(realtime_dir: Path) -> list[LupMcpTool]:
     the agent hasn't looked at via ``context``.
     """
     mailbox = RealtimeMailbox(realtime_dir)
-    gate = ReflectionGate(flag_path=mailbox.meta_flag_path)
+    gate = ReflectionGate(flag_path=mailbox.meta_flag_path) #lup: The gate shouldn't necessarily be created. This feels like too imposed design for something that belongs in the template.
     context_read = [False]  # Mutable container for closure
 
     @lup_tool(
