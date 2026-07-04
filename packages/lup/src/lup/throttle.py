@@ -12,13 +12,13 @@ Examples:
     Pure concurrency limiting (up to 3 simultaneous requests)::
 
         >>> api_throttle = Throttle(max_concurrent=3)
-        >>> async with api_throttle:
+        >>> async with api_throttle.slot():
         ...     result = await do_request()
 
     Concurrency + temporal spacing (1 request every 2 seconds)::
 
         >>> rate_limited = Throttle(max_concurrent=1, min_interval=2.0)
-        >>> async with rate_limited:
+        >>> async with rate_limited.slot():
         ...     return await do_request()
 """
 
@@ -27,7 +27,8 @@ Examples:
 import asyncio
 import time
 import weakref
-from types import TracebackType
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 
 class LoopState:
@@ -40,11 +41,18 @@ class LoopState:
 
 
 class Throttle:
-    """Async context manager enforcing concurrency limits and temporal spacing.
+    """Enforces concurrency limits and temporal spacing on async requests.
 
     Combines an asyncio.Semaphore (max concurrent) with a minimum time interval
     between request starts. Creates internal state lazily per-event-loop to
     avoid "bound to a different event loop" errors.
+
+    One Throttle is shared and entered concurrently and repeatedly, so it is not
+    itself a context manager (those are single-use). Call :meth:`slot` for a
+    fresh context manager guarding one request::
+
+        async with throttle.slot():
+            await do_request()
 
     Args:
         max_concurrent: Maximum simultaneous requests allowed.
@@ -67,32 +75,27 @@ class Throttle:
             self.loop_states[loop] = state
         return state
 
-    async def __aenter__(
-        self,
-    ) -> None:  # lup: Couldn't we use a contextlib.context_manager instead?
+    @asynccontextmanager
+    async def slot(self) -> AsyncIterator[None]:
+        """Reserve one request slot for the duration of the ``async with`` body.
+
+        Acquires a concurrency permit, waits out any remaining interval since
+        the last start, then holds the permit until the body exits. The
+        ``finally`` releases the permit on every exit — including a
+        cancellation during the interval wait, which never reaches the body and
+        would otherwise leak the permit.
+        """
         state = self.get_state()
         await state.semaphore.acquire()
-        if self.min_interval <= 0:
-            return
-        # The permit is held; an interval wait can be cancelled at the
-        # sleep below, and a cancelled __aenter__ never reaches __aexit__.
-        # Release here on any propagating exception so the permit can't leak.
         try:
-            async with state.lock:
-                if state.last_request_time > 0:
-                    elapsed = time.monotonic() - state.last_request_time
-                    remaining = self.min_interval - elapsed
-                    if remaining > 0:
-                        await asyncio.sleep(remaining)
-                state.last_request_time = time.monotonic()
-        except BaseException:
+            if self.min_interval > 0:
+                async with state.lock:
+                    if state.last_request_time > 0:
+                        elapsed = time.monotonic() - state.last_request_time
+                        remaining = self.min_interval - elapsed
+                        if remaining > 0:
+                            await asyncio.sleep(remaining)
+                    state.last_request_time = time.monotonic()
+            yield
+        finally:
             state.semaphore.release()
-            raise
-
-    async def __aexit__(
-        self,
-        _exc_type: type[BaseException] | None,
-        _exc_val: BaseException | None,
-        _exc_tb: TracebackType | None,
-    ) -> None:
-        self.get_state().semaphore.release()

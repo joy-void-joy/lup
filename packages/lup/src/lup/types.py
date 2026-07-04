@@ -36,6 +36,12 @@ type PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissio
 """How a session prompts for tool permission — a neutral intent knob;
 engines without permission modes refuse it at construction."""
 
+type Decorator[T, R] = Callable[[T], R]
+"""A decorator: applied with ``@`` to a `T`, yields an `R`. Names the intent
+at a signature (``-> Decorator[Handler, Tool]``) where a bare ``Callable`` of
+a callable reads as noise. ``R`` need not be ``T`` — a decorator may return a
+different type than it wraps (a builder, a registration object)."""
+
 
 # ---------------------------------------------------------------------------
 # Content blocks
