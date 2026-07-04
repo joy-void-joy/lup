@@ -98,8 +98,10 @@ packages/
         ├── output.py           # submit_output finalization + missing-output guard (all backends)
         ├── paths.py            # Version-aware paths + SessionContext env relay
         ├── profiles.py         # Named Claude config-dir profiles (accounts), machine-wide
-        ├── realtime.py         # Scheduler for persistent agents (sleep/wake, debounce)
-        ├── realtime_relay.py   # Persistent mode for subprocess backends (file mailbox)
+        ├── realtime/           # Persistent-agent machinery (one concern per module)
+        │   ├── scheduler.py    # Scheduler core (sleep/wake, debounce, reminders) + guards
+        │   ├── models.py       # Shared realtime tool I/O models
+        │   └── relay.py        # Subprocess file-mailbox relay (imports the core)
         ├── reflect.py          # Reflection gate (in-memory or file-backed)
         ├── retry.py            # Retry decorator with backoff
         ├── sandbox.py          # Docker-based Python sandbox (lazy start, orphan sweep)
@@ -254,7 +256,7 @@ uv run lup-devtools trace show <session_id>
 5. **Tools** (`agent/toolsets.py`, `agent/tool_policy.py`) — register tool groups once for every backend; gate availability (API keys, modes) via the policy
 6. **Reflection** (`agent/tools/reflect.py`) — Domain-specific `ReflectInput` fields, reviewer prompt
 7. **Version** (`[tool.lup] agent_version` in `pyproject.toml`) — Set initial version, bump on behavior changes
-8. **Persistent mode** (optional) — Wire `Scheduler` from `lup.realtime`, add Stop hook, implement sleep/context/reply tools, replace request-response with sleep/wake loop
+8. **Persistent mode** (optional) — Wire `Scheduler` from `lup.realtime.scheduler`, add Stop hook, implement sleep/context/reply tools, replace request-response with sleep/wake loop
 9. **Feedback** (`devtools/feedback/state.py`) — Implement `load_outcomes()`, customize `compute_metrics()`
 
 ### Scaffolding Is a Menu, Not a Mandate

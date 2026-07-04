@@ -10,7 +10,7 @@ Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/
 - `lup.hooks` — composable hook primitives: directory-based permissions, tool allowlists, tool gates (deny until a condition unlocks), nudges, capture hooks.
 - `lup.reflect` — reflection gate for reflect-before-output workflows.
 - `lup.output` — `submit_output` finalization and the missing-output guard, shared by every backend.
-- `lup.realtime` / `lup.realtime_relay` — `Scheduler` for persistent agents (sleep/wake, debounce, reminders) with its guard hooks, and the file-mailbox relay for subprocess backends.
+- `lup.realtime` — persistent-agent machinery, one concern per module: `scheduler` (the `Scheduler` core — sleep/wake, debounce, reminders — with its guard hooks), `models` (shared tool I/O), and `relay` (the file-mailbox relay for subprocess backends, layered on the core).
 - `lup.subagents` — `run_subagent` delegation tool built from `SubagentSpec`s.
 - `lup.sandbox` — Docker-based persistent REPL (`pip install lup[docker]`).
 - `lup.history` / `lup.notes` / `lup.paths` — version-aware session storage, RO/RW notes layout, and lazy path configuration.

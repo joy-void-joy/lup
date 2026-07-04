@@ -124,7 +124,7 @@ def build_session_toolset(
         groups[SANDBOX_GROUP] = sandbox.create_tools()
 
     if realtime_dir is not None:
-        from lup.realtime_relay import create_realtime_relay_tools
+        from lup.realtime.relay import create_realtime_relay_tools
 
         groups[SESSION_GROUP] = create_realtime_relay_tools(realtime_dir)
 
