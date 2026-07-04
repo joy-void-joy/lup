@@ -185,7 +185,7 @@ def build_session_options(
     return LupAgentOptions(
         model=settings.model,
         system_prompt=system_prompt,
-        harness_preset=True,
+        coding_harness_preset=True,
         tool_servers=policy_servers,
         subagents=get_subagent_specs(),
         hooks=hooks,
