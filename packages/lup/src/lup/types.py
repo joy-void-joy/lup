@@ -1,13 +1,14 @@
-"""Internal content block, message, response, and hook types.
+"""Internal content block, message, and response types.
 
 These types are the shared vocabulary for all consumer code (core.py,
 trace.py, etc.). SDK-specific adapters convert to/from these types at
 the boundary — consumer code never imports from SDK packages directly.
+The hook vocabulary lives in :mod:`lup.hooks`, not here.
 """
 
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Literal, TypedDict
+from collections.abc import Callable, Mapping, Sequence
+from typing import Literal
 
 from pydantic import BaseModel, Field, SerializeAsAny, ValidationError
 
@@ -257,67 +258,6 @@ type LupEvent = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Hook abstraction (SDK-agnostic)
-# ---------------------------------------------------------------------------
-
-
-class LupHookInput(TypedDict, total=False): #lup: Why is this a TypedDict?
-    """SDK-agnostic hook input. Adapters populate from their native format."""
-
-    hook_event_name: str
-    tool_name: str
-    tool_input: JsonObject
-    tool_result: str
-    stop_hook_active: bool
-
-
-class LupHookOutput(TypedDict, total=False):
-    """SDK-agnostic hook output. Adapters convert to their native format."""
-
-    decision: str
-    reason: str
-    system_message: str
-
-
-type LupHookFn = Callable[[LupHookInput], Awaitable[LupHookOutput]]
-"""Async function that receives hook input and returns a hook decision."""
-
-
-class LupHookMatcher(BaseModel):
-    """A hook handler with an optional tool name matcher.
-
-    The ``tag`` field lets adapters dispatch deterministically instead
-    of guessing hook intent from ``matcher`` / caller arguments.
-    """
-
-    matcher: str | None = None
-    hook: LupHookFn
-    tag: str | None = None
-
-    model_config = {"arbitrary_types_allowed": True}
-
-
-type LupHookEvent = Literal["PreToolUse", "PostToolUse", "Stop"]
-type LupHooksConfig = dict[LupHookEvent, list[LupHookMatcher]]
-"""SDK-agnostic hook configuration. Each adapter converts to native format."""
-
-
-def allow_hook() -> LupHookOutput: #lup: Same, I don't think all of this belongs to type.py
-    """Create a generic allow decision."""
-    return LupHookOutput(decision="allow")
-
-
-def deny_hook(reason: str) -> LupHookOutput:
-    """Create a generic deny decision."""
-    return LupHookOutput(decision="deny", reason=reason)
-
-
-def block_hook(reason: str) -> LupHookOutput:
-    """Create a generic block decision."""
-    return LupHookOutput(decision="block", reason=reason)
-
-
 def extract_token_usage(raw: Mapping[str, JsonValue] | None) -> Usage | None:
     """Extract portable token counts from a raw vendor usage mapping.
 
@@ -343,7 +283,7 @@ def extract_token_usage(raw: Mapping[str, JsonValue] | None) -> Usage | None:
 def safe_normalize_usage[T](
     normalizer: Callable[[T], Usage | None],
     raw: T | None,
-) -> Usage | None: #lup: Why is this here?
+) -> Usage | None:  # lup: Why is this here?
     """Run a usage normalizer, degrading to None on failure.
 
     Usage is diagnostic — a broken normalizer must never fail a run that
@@ -359,22 +299,11 @@ def safe_normalize_usage[T](
         return None
 
 
-def merge_hooks(base: LupHooksConfig, additional: LupHooksConfig) -> LupHooksConfig:
-    """Merge two hook configurations. Base hooks run first."""
-    merged: LupHooksConfig = dict(base)
-    for event in additional:
-        if event in merged:
-            merged[event] = merged[event] + additional[event]
-        else:
-            merged[event] = additional[event]
-    return merged
-
-
 # ---------------------------------------------------------------------------
 # Effort normalization
 # ---------------------------------------------------------------------------
 
-#lup: This shouldn't live here. This should live in the adapters folders instead
+# lup: This shouldn't live here. This should live in the adapters folders instead
 EFFORT_MAP_CLAUDE: dict[str, str] = {
     "low": "low",
     "medium": "medium",

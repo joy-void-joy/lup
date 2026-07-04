@@ -7,10 +7,11 @@ invisible to the agent.
 
 from pathlib import Path
 
-from lup.hooks import create_permission_hooks
+from lup.adapters.claude import claude_hook_tool_path
+from lup.hooks import LupHookInput, LupHooksConfig, create_permission_hooks
 from lup.notes import setup_notes
 from lup.paths import path_is_under
-from lup.types import JsonObject, LupHookInput, LupHooksConfig
+from lup.types import JsonObject
 
 
 async def decision_for(
@@ -19,12 +20,13 @@ async def decision_for(
     tool_input: JsonObject,
 ) -> str | None:
     input_data = LupHookInput(
-        hook_event_name="PreToolUse",
+        event="PreToolUse",
         tool_name=tool_name,
         tool_input=tool_input,
+        tool_path=claude_hook_tool_path(tool_name, tool_input),
     )
-    output = await config["PreToolUse"][0].hook(input_data)
-    return output.get("decision")
+    output = await config.pre_tool_use[0].hook(input_data)
+    return output.decision
 
 
 async def test_write_allowed_only_under_rw(tmp_path: Path) -> None:

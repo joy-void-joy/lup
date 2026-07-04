@@ -126,12 +126,12 @@ def build_session_options(
         create_completion_guard,
         create_permission_hooks,
         create_tool_allowlist_hook,
+        merge_hooks,
     )
     from lup.mcp import create_mcp_server
     from lup.options import CodexOptions, CompatOptions, LupAgentOptions
     from lup.realtime_relay import REALTIME_DIRNAME
     from lup.reflect import create_reflection_gate
-    from lup.types import merge_hooks
 
     from lup_template.agent.subagents import get_subagent_specs
     from lup_template.agent.tool_policy import ToolPolicy

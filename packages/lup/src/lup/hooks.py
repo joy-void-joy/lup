@@ -1,7 +1,13 @@
-"""SDK-agnostic hook utilities.
+"""SDK-agnostic hook utilities — the normalized hook seam and its factories.
 
-Provides composable hook primitives that work with any backend adapter.
-Each adapter converts ``LupHooksConfig`` into its native hook format.
+This module owns the whole hook vocabulary: the normalized
+:class:`LupHookInput` / :class:`LupHookOutput` models, the
+:class:`LupHookMatcher`, the :class:`LupHooksConfig` structure, the
+``allow_hook`` / ``deny_hook`` / ``block_hook`` decision constructors, and
+``merge_hooks`` composition. Adapters translate their native hook payloads
+into :class:`LupHookInput` at the seam, so every factory here reads typed
+attributes rather than digging through a raw payload — backend-neutral by
+construction.
 
 Output helpers:
 - allow_hook() — PreToolUse allow decision
@@ -23,8 +29,7 @@ Composition:
 Examples:
     Compose permission and nudge hooks::
 
-        >>> from lup.hooks import create_permission_hooks, create_nudge_hook
-        >>> from lup.types import merge_hooks
+        >>> from lup.hooks import create_permission_hooks, create_nudge_hook, merge_hooks
         >>> perms = create_permission_hooks(
         ...     rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")]
         ... )
@@ -51,25 +56,126 @@ Examples:
         5
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Literal
 
-from lup.paths import extract_glob_dir, path_is_under
-from lup.types import (
-    LupHookInput,
-    LupHookMatcher,
-    LupHookOutput,
-    LupHooksConfig,
-    allow_hook,
-    block_hook,
-    deny_hook,
-    merge_hooks,
-)
+from pydantic import BaseModel, Field
+
+from lup.paths import path_is_under
+from lup.types import JsonObject
+
+type LupHookEvent = Literal["PreToolUse", "PostToolUse", "Stop"]
+"""The hook events a backend-neutral factory can register for."""
+
+type LupHookDecision = Literal["allow", "deny", "block"]
+"""A hook's verdict: allow the action, deny it (a PreToolUse permission
+refusal), or block it (the cross-event stop/redirect decision)."""
+
+
+class LupHookInput(BaseModel):
+    """A normalized hook event, produced by an adapter from its native payload.
+
+    Adapters translate their backend's hook payload into this model at the
+    seam (see :func:`lup.adapters.claude.build_claude_hook_handler`), so the
+    factories stay backend-neutral. Path-bearing tools
+    (Write/Edit/Read/Glob/Grep) have their target directory resolved once,
+    into :attr:`tool_path`, rather than re-extracted from :attr:`tool_input`
+    by each factory.
+    """
+
+    event: LupHookEvent
+    tool_name: str = ""
+    tool_input: JsonObject = Field(default_factory=dict)
+    tool_path: str = ""
+    tool_result: str = ""
+    stop_hook_active: bool = False
+
+
+class LupHookOutput(BaseModel):
+    """A normalized hook decision. Adapters convert it to their native output."""
+
+    decision: LupHookDecision | None = None
+    reason: str = ""
+    system_message: str | None = None
+
+
+type LupHookFn = Callable[[LupHookInput], Awaitable[LupHookOutput]]
+"""Async function that receives a normalized hook event and returns a decision."""
+
+
+class LupHookMatcher(BaseModel):
+    """A hook handler with an optional tool-name matcher.
+
+    The ``tag`` field lets adapters dispatch deterministically instead
+    of guessing hook intent from ``matcher`` / caller arguments.
+    """
+
+    matcher: str | None = None
+    hook: LupHookFn
+    tag: str | None = None
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class LupHooksConfig(BaseModel):
+    """Backend-neutral hook registration — a typed structure, not a bare dict.
+
+    One list of matchers per supported event. :func:`merge_hooks` concatenates
+    two configs event-by-event; adapters iterate :meth:`by_event` to translate
+    each event's matchers into their native form.
+    """
+
+    pre_tool_use: list[LupHookMatcher] = Field(default_factory=list)
+    post_tool_use: list[LupHookMatcher] = Field(default_factory=list)
+    stop: list[LupHookMatcher] = Field(default_factory=list)
+
+    def for_event(self, event: LupHookEvent) -> list[LupHookMatcher]:
+        """Return the matchers registered for *event*."""
+        match event:
+            case "PreToolUse":
+                return self.pre_tool_use
+            case "PostToolUse":
+                return self.post_tool_use
+            case "Stop":
+                return self.stop
+
+    def by_event(self) -> list[tuple[LupHookEvent, list[LupHookMatcher]]]:
+        """Yield ``(event, matchers)`` for each event that has matchers."""
+        pairs: list[tuple[LupHookEvent, list[LupHookMatcher]]] = [
+            ("PreToolUse", self.pre_tool_use),
+            ("PostToolUse", self.post_tool_use),
+            ("Stop", self.stop),
+        ]
+        return [(event, matchers) for event, matchers in pairs if matchers]
+
+
+def allow_hook() -> LupHookOutput:
+    """Create a generic allow decision."""
+    return LupHookOutput(decision="allow")
+
+
+def deny_hook(reason: str) -> LupHookOutput:
+    """Create a generic deny decision."""
+    return LupHookOutput(decision="deny", reason=reason)
+
+
+def block_hook(reason: str) -> LupHookOutput:
+    """Create a generic block decision."""
+    return LupHookOutput(decision="block", reason=reason)
+
+
+def merge_hooks(base: LupHooksConfig, additional: LupHooksConfig) -> LupHooksConfig:
+    """Merge two hook configurations. Base hooks run first."""
+    return LupHooksConfig(
+        pre_tool_use=base.pre_tool_use + additional.pre_tool_use,
+        post_tool_use=base.post_tool_use + additional.post_tool_use,
+        stop=base.stop + additional.stop,
+    )
 
 
 type NudgeCheck = Callable[[LupHookInput], str | None]
-"""Given a hook input, return a nudge message or None to skip."""
+"""Given a hook event, return a nudge message or None to skip."""
 
 
 def create_permission_hooks(
@@ -92,55 +198,48 @@ def create_permission_hooks(
     """
     all_readable = rw_dirs + ro_dirs
 
-    async def permission_hook(input_data: LupHookInput) -> LupHookOutput: #lup: Sounds LupHookInput is very low level. But hooks.py is higher level, and should interface with a high-level normalized BaseModel
-        if input_data.get("hook_event_name") != "PreToolUse":
+    async def permission_hook(event: LupHookInput) -> LupHookOutput:
+        if event.event != "PreToolUse":
             return LupHookOutput()
 
-        tool_name = input_data.get("tool_name", "") #lup: .get should be an antipattern as well
-        tool_input = input_data.get("tool_input", {})
-
-        match tool_name:
-            case "Write" | "Edit": #lup: Yeah, no this is very untyped here. Doesnt' generalize to Codex, etc.
-                file_path = str(tool_input.get("file_path", ""))
-                if not file_path:
+        match event.tool_name:
+            case "Write" | "Edit":
+                if not event.tool_path:
                     return LupHookOutput()
-                if path_is_under(file_path, rw_dirs):
+                if path_is_under(event.tool_path, rw_dirs):
                     return allow_hook()
                 return deny_hook(
-                    f"{tool_name} denied. Allowed: {[str(d) for d in rw_dirs]}"
+                    f"{event.tool_name} denied. Allowed: {[str(d) for d in rw_dirs]}"
                 )
 
             case "Read":
-                file_path = str(tool_input.get("file_path", ""))
-                if not file_path:
+                if not event.tool_path:
                     return LupHookOutput()
-                if path_is_under(file_path, all_readable):
+                if path_is_under(event.tool_path, all_readable):
                     return allow_hook()
                 return deny_hook(
                     f"Read denied. Allowed: {[str(d) for d in all_readable]}"
                 )
 
             case "Glob" | "Grep":
-                file_path = str(tool_input.get("path", ""))
-                if not file_path and tool_name == "Glob":
-                    file_path = extract_glob_dir(str(tool_input.get("pattern", "")))
-                if not file_path:
+                if not event.tool_path:
                     return deny_hook(
-                        f"Path required for {tool_name}. "
+                        f"Path required for {event.tool_name}. "
                         f"Specify path in: {[str(d) for d in all_readable]}"
                     )
-                if path_is_under(file_path, all_readable):
+                if path_is_under(event.tool_path, all_readable):
                     return allow_hook()
                 return deny_hook(
-                    f"{tool_name} denied. Allowed: {[str(d) for d in all_readable]}"
+                    f"{event.tool_name} denied. "
+                    f"Allowed: {[str(d) for d in all_readable]}"
                 )
 
             case _:
                 return allow_hook()
 
-    return {
-        "PreToolUse": [LupHookMatcher(hook=permission_hook, tag="permission")], #lup: Same comment here
-    }
+    return LupHooksConfig(
+        pre_tool_use=[LupHookMatcher(hook=permission_hook, tag="permission")],
+    )
 
 
 def create_tool_allowlist_hook(
@@ -164,21 +263,20 @@ def create_tool_allowlist_hook(
     allowed = frozenset(allowed_tools)
     available = ", ".join(sorted(allowed))
 
-    async def allowlist_hook(input_data: LupHookInput) -> LupHookOutput:
-        if input_data.get("hook_event_name") != "PreToolUse": #lup: Same, this file really needs thorough refactoring
+    async def allowlist_hook(event: LupHookInput) -> LupHookOutput:
+        if event.event != "PreToolUse":
             return LupHookOutput()
 
-        tool_name = input_data.get("tool_name", "")
-        if tool_name in allowed:
+        if event.tool_name in allowed:
             return allow_hook()
         return deny_hook(
-            f"Tool '{tool_name}' is not available in this session. "
+            f"Tool '{event.tool_name}' is not available in this session. "
             f"Available tools: {available}"
         )
 
-    return {
-        "PreToolUse": [LupHookMatcher(hook=allowlist_hook, tag="allowlist")],
-    }
+    return LupHooksConfig(
+        pre_tool_use=[LupHookMatcher(hook=allowlist_hook, tag="allowlist")],
+    )
 
 
 def create_nudge_hook(
@@ -209,24 +307,22 @@ def create_nudge_hook(
         SDK-agnostic hooks configuration with a PostToolUse nudge hook.
     """
 
-    async def nudge_hook(input_data: LupHookInput) -> LupHookOutput:
-        if input_data.get("hook_event_name") != "PostToolUse":
+    async def nudge_hook(event: LupHookInput) -> LupHookOutput:
+        if event.event != "PostToolUse":
             return LupHookOutput()
 
-        tool_name = input_data.get("tool_name", "")
-        check = nudges.get(tool_name)
-        if check is None:
+        if event.tool_name not in nudges:
             return LupHookOutput()
 
-        message = check(input_data)
+        message = nudges[event.tool_name](event)
         if message is None:
             return LupHookOutput()
 
         return LupHookOutput(system_message=message)
 
-    return {
-        "PostToolUse": [LupHookMatcher(hook=nudge_hook, tag="nudge")],
-    }
+    return LupHooksConfig(
+        post_tool_use=[LupHookMatcher(hook=nudge_hook, tag="nudge")],
+    )
 
 
 def create_capture_hook[T](
@@ -246,18 +342,20 @@ def create_capture_hook[T](
     """
     captured: list[T] = []
 
-    async def capture_hook(input_data: LupHookInput) -> LupHookOutput:
-        if input_data.get("hook_event_name") != "PostToolUse":
+    async def capture_hook(event: LupHookInput) -> LupHookOutput:
+        if event.event != "PostToolUse":
             return LupHookOutput()
-        if input_data.get("tool_name") != tool_name:
+        if event.tool_name != tool_name:
             return LupHookOutput()
 
-        items = extract(input_data)
+        items = extract(event)
         captured.extend(items)
         return LupHookOutput()
 
     return (
-        {"PostToolUse": [LupHookMatcher(hook=capture_hook, tag="capture")]},
+        LupHooksConfig(
+            post_tool_use=[LupHookMatcher(hook=capture_hook, tag="capture")]
+        ),
         captured,
     )
 
@@ -333,7 +431,7 @@ def create_tool_gate(
     unlock_seen = False
 
     async def gate_hook(input_data: LupHookInput) -> LupHookOutput:
-        if input_data.get("hook_event_name") != event:
+        if input_data.event != event:
             return LupHookOutput()
         if unlock_seen or (unlocked is not None and unlocked(input_data)):
             if allow_when_unlocked and event == "PreToolUse":
@@ -348,31 +446,33 @@ def create_tool_gate(
 
     async def unlock_hook(input_data: LupHookInput) -> LupHookOutput:
         nonlocal unlock_seen
-        if input_data.get("hook_event_name") == "PostToolUse":
+        if input_data.event == "PostToolUse":
             unlock_seen = True
         return LupHookOutput()
 
-    gate_matchers: list[LupHookMatcher]
+    hooks: LupHooksConfig
     match event:
         case "Stop":
-            gate_matchers = [LupHookMatcher(hook=gate_hook, tag=tag)]
+            hooks = LupHooksConfig(stop=[LupHookMatcher(hook=gate_hook, tag=tag)])
         case "PreToolUse":
             names = (
                 [gated_tool] if isinstance(gated_tool, str) else list(gated_tool or [])
             )
-            gate_matchers = [
-                LupHookMatcher(matcher=name, hook=gate_hook, tag=tag) for name in names
-            ]
+            hooks = LupHooksConfig(
+                pre_tool_use=[
+                    LupHookMatcher(matcher=name, hook=gate_hook, tag=tag)
+                    for name in names
+                ]
+            )
 
-    hooks: LupHooksConfig = {event: gate_matchers}
     if on_unlock_tool is not None:
-        unlock_config: LupHooksConfig = {
-            "PostToolUse": [
+        unlock_config = LupHooksConfig(
+            post_tool_use=[
                 LupHookMatcher(
                     matcher=on_unlock_tool, hook=unlock_hook, tag=f"{tag}_unlock"
                 )
             ]
-        }
+        )
         hooks = merge_hooks(hooks, unlock_config)
     return hooks
 
@@ -406,7 +506,7 @@ def create_completion_guard(
 
     async def completion_guard_hook(input_data: LupHookInput) -> LupHookOutput:
         nonlocal blocks
-        if input_data.get("hook_event_name") != "Stop":
+        if input_data.event != "Stop":
             return LupHookOutput()
         if output_exists():
             return LupHookOutput()
@@ -419,6 +519,6 @@ def create_completion_guard(
             f"(attempt {blocks}/{max_blocks})"
         )
 
-    return {
-        "Stop": [LupHookMatcher(hook=completion_guard_hook, tag="completion_guard")],
-    }
+    return LupHooksConfig(
+        stop=[LupHookMatcher(hook=completion_guard_hook, tag="completion_guard")],
+    )

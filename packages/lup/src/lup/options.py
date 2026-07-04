@@ -8,17 +8,17 @@ option type. Each engine consumes the mechanism payloads that belong to
 it and ignores the others'; intent knobs it cannot honor follow the
 ``on_unsupported`` policy.
 """
-#lup: Shouldn't this file live in adapters/common.py? It seems like its only purpose is building a client no?
+# lup: Shouldn't this file live in adapters/common.py? It seems like its only purpose is building a client no?
 
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from lup.hooks import LupHooksConfig
 from lup.mcp import McpServerEntry
 from lup.types import (
     JsonObject,
-    LupHooksConfig,
     PermissionMode,
     SubagentSpec,
     UsageCost,
@@ -52,11 +52,13 @@ class CodexOptions(BaseModel):
     """
 
     # lup: The intent here is really not clear. It should just be merged with LupAgentOptions, no?
-    model_config = {"arbitrary_types_allowed": True} #lup: This is code smell
+    model_config = {"arbitrary_types_allowed": True}  # lup: This is code smell
 
     sandbox: str | None = None
     approval_policy: str | None = None
-    mcp_env: dict[str, str] = Field(default_factory=dict) #lup: You know you can just do = {} in pydantic, no need for so many default_factory (same for the rest)
+    mcp_env: dict[str, str] = Field(
+        default_factory=dict
+    )  # lup: You know you can just do = {} in pydantic, no need for so many default_factory (same for the rest)
     writable_roots: list[Path] = Field(default_factory=list)
 
     session_id: str | None = None
@@ -64,7 +66,7 @@ class CodexOptions(BaseModel):
     realtime_dir: Path | None = None
 
 
-class LupAgentOptions(BaseModel): # lup: Shouldn't this be in common?
+class LupAgentOptions(BaseModel):  # lup: Shouldn't this be in common?
     """Everything an engine needs to construct a client, in neutral terms.
 
     Each engine maps these onto its native option object. Mechanism
@@ -79,18 +81,20 @@ class LupAgentOptions(BaseModel): # lup: Shouldn't this be in common?
 
     model: str
     system_prompt: str = ""
-    harness_prompt: bool = True #lup: Even with the comment, it's not clear to me what harness_prompt does? It's like, does it use the default harness prompt (for claude, the claude_code default harness prompt)? If so it should default to false
+    harness_prompt: bool = True  # lup: Even with the comment, it's not clear to me what harness_prompt does? It's like, does it use the default harness prompt (for claude, the claude_code default harness prompt)? If so it should default to false
     """Wrap the system prompt in the engine's coding-harness preset
     (Claude's ``claude_code`` preset + append). ``False`` uses it raw —
     the shape of a nested LLM call rather than an agent session."""
 
     tool_servers: dict[str, McpServerEntry] = Field(default_factory=dict)
     subagents: list[SubagentSpec] = Field(default_factory=list)
-    hooks: LupHooksConfig = Field(default_factory=dict)
-    allowed_tools: list[str] = Field(default_factory=list) #lup: I really don't like this. Shouldn't allowed_tools be auto derived with the embedded tools we give the agent?
+    hooks: LupHooksConfig = Field(default_factory=LupHooksConfig)
+    allowed_tools: list[str] = Field(
+        default_factory=list
+    )  # lup: I really don't like this. Shouldn't allowed_tools be auto derived with the embedded tools we give the agent?
     tools: list[str] | None = None
     """Base builtin toolset restriction (``None`` = the engine's default set)."""
-    served_tool_groups: tuple[str, ...] = () #lup: Same here
+    served_tool_groups: tuple[str, ...] = ()  # lup: Same here
     add_dirs: list[Path] = Field(default_factory=list)
     output_schema: JsonObject | None = None
     """JSON Schema the final response must satisfy (structured output)."""
@@ -112,5 +116,7 @@ class LupAgentOptions(BaseModel): # lup: Shouldn't this be in common?
     construction (sessions fail fast) or clear them with a log line (the
     one-shot ``query()`` degrades)."""
 
-    codex: CodexOptions = Field(default_factory=CodexOptions) #lup: What? Why is that a field? Shouldn't it just be flattened here?
+    codex: CodexOptions = Field(
+        default_factory=CodexOptions
+    )  # lup: What? Why is that a field? Shouldn't it just be flattened here?
     compat: CompatOptions = Field(default_factory=CompatOptions)

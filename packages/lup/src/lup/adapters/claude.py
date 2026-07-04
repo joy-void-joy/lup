@@ -65,6 +65,13 @@ from claude_agent_sdk.types import (
 
 from lup.adapters.common import Client, Engine, Session
 from lup.background import BackgroundAgentParams, BaseBackgroundAgent
+from lup.hooks import (
+    LupHookEvent,
+    LupHookInput,
+    LupHookMatcher,
+    LupHookOutput,
+    LupHooksConfig,
+)
 from lup.mcp import (
     LupMcpServerConfig,
     LupMcpTool,
@@ -73,6 +80,7 @@ from lup.mcp import (
     RawMcpServerConfig,
 )
 from lup.options import LupAgentOptions
+from lup.paths import extract_glob_dir
 from lup.trace import TraceLogger, print_message
 from lup.types import (
     JsonObject,
@@ -81,11 +89,6 @@ from lup.types import (
     LupContentBlock,
     LupDoneEvent,
     LupEvent,
-    LupHookEvent,
-    LupHookInput,
-    LupHookMatcher,
-    LupHookOutput,
-    LupHooksConfig,
     LupMessage,
     LupResponse,
     LupResultMessage,
@@ -115,7 +118,7 @@ under ``harness_prompt`` — a nested call keeps the SDK default."""
 
 def server_to_claude(
     entry: McpServerEntry,
-) -> McpSdkServerConfig | RawMcpServerConfig: #lup: This feels patchy?
+) -> McpSdkServerConfig | RawMcpServerConfig:  # lup: This feels patchy?
     """Narrow one neutral MCP entry to its Claude SDK form.
 
     An in-process ``LupMcpServerConfig`` becomes an SDK ``sdk`` server wrapping
@@ -134,14 +137,18 @@ def claude_effort(reasoning_effort: str | None) -> EffortLevel | None:
     The normalized value is matched against the literal's members, so an
     unrecognized effort is dropped rather than smuggled through with a cast.
     """
-    match normalize_effort(reasoning_effort, "claude"): # lup: I really feel like there are too many functions everywhere. Same thing with the server_to_claude and lup_server_to_claude.
+    match normalize_effort(
+        reasoning_effort, "claude"
+    ):  # lup: I really feel like there are too many functions everywhere. Same thing with the server_to_claude and lup_server_to_claude.
         case "low" | "medium" | "high" | "xhigh" | "max" as level:
             return level
         case _:
             return None
 
 
-def build_claude_options(opts: LupAgentOptions) -> ClaudeAgentOptions: #lup: It wasn't clear to me that ClaudeAgentOptions was a claude SDK type. Probably we shouldn't use from claude import and instead use scoped type (e.g. claude.ClaudeAgentOptions instead)
+def build_claude_options(
+    opts: LupAgentOptions,
+) -> ClaudeAgentOptions:  # lup: It wasn't clear to me that ClaudeAgentOptions was a claude SDK type. Probably we shouldn't use from claude import and instead use scoped type (e.g. claude.ClaudeAgentOptions instead)
     """Assemble the native ``ClaudeAgentOptions`` from neutral options.
 
     ``harness_prompt`` selects the session-grade shape: the ``claude_code``
@@ -181,7 +188,7 @@ def build_claude_options(opts: LupAgentOptions) -> ClaudeAgentOptions: #lup: It 
         max_thinking_tokens=max_thinking,
         permission_mode=permission_mode,
         extra_args=extra_args,
-        hooks=lup_hooks_to_claude(opts.hooks) if opts.hooks else None,
+        hooks=lup_hooks_to_claude(opts.hooks) if opts.hooks.by_event() else None,
         sandbox=(
             {
                 "enabled": True,
@@ -216,7 +223,9 @@ class ClaudeEngine(Engine):
 
     id = "claude"
 
-    unsupported = ("turn_timeout_seconds",) # lup: Why is this unsupported? Are you sure?
+    unsupported = (
+        "turn_timeout_seconds",
+    )  # lup: Why is this unsupported? Are you sure?
     """The one intent knob the SDK has no lever for: a client-side turn
     timeout."""
 
@@ -246,6 +255,27 @@ class ClaudeEngine(Engine):
 type ClaudeHooksConfig = dict[HookEvent, list[HookMatcher]]
 
 
+def claude_hook_tool_path(tool_name: str, tool_input: JsonObject) -> str:
+    """Resolve the directory a path-bearing Claude tool acts on.
+
+    Write/Edit/Read carry ``file_path``; Grep carries ``path``; Glob carries
+    ``path`` or, failing that, the directory prefix of its ``pattern``. Every
+    other tool resolves to ``""``. This is the single place a native tool
+    payload becomes the normalized ``LupHookInput.tool_path`` the backend-neutral
+    hook factories read.
+    """
+    match tool_name:
+        case "Write" | "Edit" | "Read":
+            return str(tool_input.get("file_path", ""))
+        case "Grep":
+            return str(tool_input.get("path", ""))
+        case "Glob":
+            path = str(tool_input.get("path", ""))
+            return path or extract_glob_dir(str(tool_input.get("pattern", "")))
+        case _:
+            return ""
+
+
 def build_claude_hook_handler(
     lup_matcher: LupHookMatcher,
     *,
@@ -253,9 +283,9 @@ def build_claude_hook_handler(
 ) -> Callable[[HookInput, str | None, HookContext], Awaitable[SyncHookJSONOutput]]:
     """Build a Claude SDK hook handler from a LupHookMatcher.
 
-    ``event`` is the hook event this handler is registered under — the
-    output conversion depends on it (permission decisions exist only on
-    PreToolUse).
+    ``event`` is the hook event this handler is registered under — it seeds
+    the normalized :class:`LupHookInput` and drives the output conversion
+    (permission decisions exist only on PreToolUse).
     """
     hook_fn = lup_matcher.hook
 
@@ -264,21 +294,29 @@ def build_claude_hook_handler(
         _tool_use_id: str | None,
         _context: HookContext,
     ) -> SyncHookJSONOutput:
-        lup_input = LupHookInput(
-            hook_event_name=input_data.get("hook_event_name", ""),
-            tool_name=input_data.get("tool_name", ""),
-            tool_input=input_data.get("tool_input", {}),
-        )
-        if "stop_hook_active" in input_data:
-            lup_input["stop_hook_active"] = input_data["stop_hook_active"]
+        tool_name = input_data.get("tool_name", "")
+        tool_input = input_data.get("tool_input", {})
+        tool_result = ""
         if "tool_response" in input_data:
             response = input_data["tool_response"]
-            lup_input["tool_result"] = (
+            tool_result = (
                 response
                 if isinstance(response, str)
                 else json.dumps(response, default=str)
             )
-
+        stop_hook_active = (
+            input_data["stop_hook_active"]
+            if "stop_hook_active" in input_data
+            else False
+        )
+        lup_input = LupHookInput(
+            event=event,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_path=claude_hook_tool_path(tool_name, tool_input),
+            tool_result=tool_result,
+            stop_hook_active=stop_hook_active,
+        )
         lup_output = await hook_fn(lup_input)
         return lup_hook_output_to_claude(lup_output, event=event)
 
@@ -289,7 +327,7 @@ def lup_hooks_to_claude(hooks: LupHooksConfig) -> ClaudeHooksConfig:
     """Convert SDK-agnostic LupHooksConfig to Claude SDK hook format."""
     result: ClaudeHooksConfig = {}
 
-    for event_name, matchers in hooks.items():
+    for event_name, matchers in hooks.by_event():
         claude_matchers: list[HookMatcher] = []
         for lup_matcher in matchers:
             handler = build_claude_hook_handler(lup_matcher, event=event_name)
@@ -316,9 +354,9 @@ def lup_hook_output_to_claude(
     on every other event a denial converts to the generic ``block``
     decision, and an allow is a no-op output.
     """
-    decision = output.get("decision")
-    reason = output.get("reason", "")
-    system_message = output.get("system_message")
+    decision = output.decision
+    reason = output.reason
+    system_message = output.system_message
 
     match event, decision:
         case ("PreToolUse", "allow"):

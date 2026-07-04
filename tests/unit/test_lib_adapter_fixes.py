@@ -144,12 +144,12 @@ class TestToolResultRelay:
         from claude_agent_sdk.types import HookContext, PostToolUseHookInput
 
         from lup.adapters.claude import build_claude_hook_handler
-        from lup.types import LupHookInput, LupHookMatcher, LupHookOutput
+        from lup.hooks import LupHookInput, LupHookMatcher, LupHookOutput
 
         seen: dict[str, str] = {}
 
         async def capture(inp: LupHookInput) -> LupHookOutput:
-            seen["tool_result"] = inp.get("tool_result", "<missing>")
+            seen["tool_result"] = inp.tool_result or "<missing>"
             return LupHookOutput()
 
         handler = build_claude_hook_handler(
