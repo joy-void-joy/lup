@@ -22,6 +22,7 @@ from collections.abc import Sequence
 
 from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_names
 
+
 class BaseToolPolicy:
     """Centralized machinery for tool availability.
 

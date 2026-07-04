@@ -113,9 +113,7 @@ class TestGetAllowedTools:
 
     def test_name_exclusion_removes_tools_from_allowlist(self) -> None:
         server = create_mcp_server(name="pingsrv", version="1.0.0", tools=[ping])
-        policy = ToolPolicy(
-            settings, excluded_tools={"WebFetch", "mcp__pingsrv__ping"}
-        )
+        policy = ToolPolicy(settings, excluded_tools={"WebFetch", "mcp__pingsrv__ping"})
 
         allowed = policy.get_allowed_tools(
             policy.get_mcp_servers(server), builtin_tools=CLAUDE_BUILTIN_TOOLS
@@ -137,9 +135,13 @@ class TestShellDefaultWithSandbox:
         monkeypatch.setattr(settings, "sandbox_allow_shell", False)
         policy = ToolPolicy(settings, code_execution=True)
 
-        assert "Bash" not in policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
+        assert "Bash" not in policy.get_allowed_tools(
+            {}, builtin_tools=CLAUDE_BUILTIN_TOOLS
+        )
         assert not policy.is_tool_available("Bash")
-        assert "Read" in policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
+        assert "Read" in policy.get_allowed_tools(
+            {}, builtin_tools=CLAUDE_BUILTIN_TOOLS
+        )
 
     def test_allow_shell_opts_bash_back_in(
         self, monkeypatch: pytest.MonkeyPatch
@@ -147,12 +149,16 @@ class TestShellDefaultWithSandbox:
         monkeypatch.setattr(settings, "sandbox_allow_shell", True)
         policy = ToolPolicy(settings, code_execution=True)
 
-        assert "Bash" in policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
+        assert "Bash" in policy.get_allowed_tools(
+            {}, builtin_tools=CLAUDE_BUILTIN_TOOLS
+        )
 
     def test_no_sandbox_keeps_bash(self) -> None:
         policy = ToolPolicy(settings, code_execution=False)
 
-        assert "Bash" in policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
+        assert "Bash" in policy.get_allowed_tools(
+            {}, builtin_tools=CLAUDE_BUILTIN_TOOLS
+        )
 
 
 class TestTagFiltering:

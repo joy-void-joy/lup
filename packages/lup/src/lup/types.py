@@ -304,5 +304,3 @@ def safe_normalize_usage[T](
         name = getattr(normalizer, "__name__", repr(normalizer))
         logger.exception("Usage normalizer %s failed; dropping usage", name)
         return None
-
-
