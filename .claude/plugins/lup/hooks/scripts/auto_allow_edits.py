@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# lup: ignore
 """PreToolUse hook that gates Edit and Write operations.
 
 Edit decision order:
@@ -8,11 +9,13 @@ Edit decision order:
    /lup:resolve editor subagent is allowed into protected files (its branch is
    reviewed at merge), but a marker-count change still asks.
 2. Anti-patterns scanned over added lines in .py and TS-family files
-   (see ANTI_PATTERNS / TS_ANTI_PATTERNS):
-   - file has `# lup: ignore` in its first 10 lines on disk -> skip the
-     anti-pattern scan (the size gate below still applies)
-   - violating line carries an inline `# lup: ignore` -> ask (user prompt)
-   - no marker -> deny with hint about `# lup: ignore`
+   (see ANTI_PATTERNS / TS_ANTI_PATTERNS), per rule and by rule id:
+   - bare `# lup: ignore` in the first 10 lines on disk -> skip the whole scan;
+     a typed `# lup: ignore[id]` there disables only that rule (size gate still
+     applies)
+   - violating line carries an ignore covering the rule (bare, or typed naming
+     the rule's id) -> ask (user prompt)
+   - no covering ignore -> deny with a `# lup: ignore[id]` hint for that rule
 3. Edit adds or removes any `# lup:` marker (count differs) -> ask
 4. Pure deletion (new_string is empty) -> allow
 5. replace_all that is a single-line identifier rename -> allow
@@ -60,8 +63,15 @@ LUP_IGNORE_MARKER = "# lup: ignore"
 # sync. A marker is `#`/`//` + `lup:` (any case, optional spaces); the
 # `ignore` keyword is the escape hatch, any other note is actionable feedback.
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
-IGNORE_RE = re.compile(r"(#|//)\s*lup\s*:\s*ignore\b", re.IGNORECASE)
-FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*lup\s*:\s*ignore\s*$", re.IGNORECASE)
+# An `ignore` directive is bare (`# lup: ignore`, silences every rule) or typed
+# pyright-style (`# lup: ignore[rule-id, other]`, silences only the named rules).
+# Mirrors lup.markers.IGNORE_RE / FILE_IGNORE_RE.
+IGNORE_RE = re.compile(
+    r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?", re.IGNORECASE
+)
+FILE_IGNORE_RE = re.compile(
+    r"^\s*(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?\s*$", re.IGNORECASE
+)
 
 MARKER_REVIEW_REASON = "Edit adds or removes a `# lup:` marker — review before applying"
 PROTECTED_REVIEW_REASON = "Protected file — review before applying"
@@ -85,79 +95,130 @@ RESOLVE_EDITOR_AGENTS = {"resolve-editor", "lup:resolve-editor"}
 # custom linter rules: ruff has no plugin API, and engines that have one
 # would break the hook's hermeticity.
 
-ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
+        "any-type",
         re.compile(r"\bAny\b"),
         "Never use Any — use specific types, TypedDict, or BaseModel",
     ),
     (
+        "type-ignore",
         re.compile(r"#\s*type:\s*ignore"),
         "Never use # type: ignore — fix the type error properly",
     ),
     (
+        "pyright-ignore",
         re.compile(r"#\s*pyright:\s*ignore"),
         "Never use # pyright: ignore — fix the type error properly",
     ),
-    (re.compile(r"#\s*noqa\b"), "Never use # noqa — fix the lint issue properly"),
     (
+        "noqa",
+        re.compile(r"#\s*noqa\b"),
+        "Never use # noqa — fix the lint issue properly",
+    ),
+    (
+        "generic-base",
         re.compile(r"\bGeneric\["),
         "Use Python 3.12+ class[T] syntax instead of Generic[T]",
     ),
     (
+        "typing-union",
         re.compile(r"\b(?:Optional|Union)\["),
         "Use PEP 604 unions — X | None instead of Optional, X | Y instead of Union",
     ),
     (
+        "typing-generics",
         re.compile(r"\b(?:List|Dict|Tuple|Set)\["),
         "Use lowercase builtin generics — list, dict, tuple, set — "
         "instead of the capitalized typing aliases",
     ),
     (
+        "all-export",
         re.compile(r"__all__\s*[=:]"),
         "No __all__ — import directly from the defining module",
     ),
     (
+        "dict-str-object",
         re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
         "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",
     ),
     (
-        re.compile(r"\b(?:dict|Mapping|MutableMapping)\[\s*str\s*,(?!\s*JsonValue\b)"),
-        "String-keyed dict[str, ...] hides the value shape — name the fields "
-        "with a TypedDict or BaseModel, or use JsonValue for arbitrary JSON",
+        # Flags a string-keyed dict/Mapping only when the VALUE is a scalar/
+        # payload type; concrete class/callable value types (registries/routers
+        # whose open key set is the point) are left alone. See lup.antipatterns.
+        "dict-str-payload",
+        re.compile(
+            r"\b(?:dict|Mapping|MutableMapping)\[\s*str\s*,"
+            r"\s*(?:str|int|float|bool|bytes|complex)\b"
+        ),
+        "String-keyed dict with a scalar value hides shape when the keys are a "
+        "CLOSED, enumerable set — use a BaseModel or dict[Literal[...], V]. When the keys "
+        "are open and data-driven (a registry/cache/counter keyed by external data) this is "
+        "legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value "
+        "types (dict[str, Engine]) are already accepted; JsonValue covers arbitrary JSON",
     ),
     (
+        # Flags every `.get(` — the broad choice; open dicts add the ignore.
+        "dict-get",
+        re.compile(r"\.get\s*\("),
+        "`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
+        "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache, "
+        "os.environ) add `# lup: ignore[dict-get]`",
+    ),
+    (
+        "bare-object",
         re.compile(r"(?:(?<!\w)(?!_)\w+\s*:|->)\s*object\b"),
         "Bare `object` says nothing about the value — use a concrete type, "
         "TypedDict, or BaseModel, and narrow at untyped boundaries",
     ),
     (
+        "bare-basemodel",
         re.compile(r"(?:(?<!\[)\b\w+\s*:|->)\s*BaseModel\b(?!\s*[\]|])"),
         "A parameter or return annotated exactly BaseModel accepts any model — "
         "name the concrete union of models or make the function generic",
     ),
     (
+        # `\btuple\[` catches every declared tuple shape — return, variable, and
+        # attribute annotations alike. Existing tuple[...] annotations never
+        # surfaced before because the hook scans only ADDED lines; the on-demand
+        # tree auditor scans every line and reports the ones that predate it.
+        "tuple-shape",
         re.compile(r"\btuple\["),
-        "`tuple[...]` as a return shape is a code smell — name the fields with a "
-        "TypedDict or BaseModel, or a `type Alias = ...` if it is a reused shape",
+        "A declared `tuple[...]` shape hides what each position means — name the "
+        "fields with a TypedDict or BaseModel, a `type Alias = ...` for a reused shape, or "
+        "`list` for a variable-length sequence",
     ),
     (
+        # Mirrors tuple-shape for frozenset; an immutable-default-argument use is
+        # the one legitimate site — `# lup: ignore[frozenset-shape]` marks it.
+        "frozenset-shape",
+        re.compile(r"\bfrozenset\b"),
+        "A declared `frozenset[...]` shape or constant is usually overkill — use "
+        "set[str] or a purpose-built structure. For a genuinely immutable default argument "
+        "add `# lup: ignore[frozenset-shape]`",
+    ),
+    (
+        "cast",
         re.compile(r"\bcast\s*\("),
         "`cast(...)` is a code smell — narrow with isinstance or a type guard, "
         "or fix the annotation so the cast is unnecessary",
     ),
     (
+        "import-re",
         re.compile(r"\bimport\s+re\b"),
         "`import re` is a code smell — parse structured data with its own API instead: "
         "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
         "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     (
+        "re-import",
         re.compile(r"\bfrom\s+re\s+import\b"),
         "`from re import` is a code smell — parse structured data with its own API instead: "
         "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
         "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     (
+        "re-call",
         re.compile(r"\bre\.(compile|search|match|fullmatch|sub|findall|split)\s*\("),
         "Avoid regex for structured data — reach for its parser instead: "
         "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
@@ -166,90 +227,124 @@ ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         # `.replace` on `os`, `Path`, or a `*path` receiver is pathlib/os's
         # atomic file rename, not string surgery — the lookbehinds keep the
-        # codebase's path-named receivers out of the net.
+        # codebase's path-named receivers out of the net; os.replace is steered
+        # toward pathlib by os-file-ops instead, keeping the two rules coherent.
+        "string-replace",
         re.compile(r"(?<!\bos)(?<![Pp]ath)\.replace\s*\("),
         "Avoid .replace() for structured data — edit it through its parser instead "
         "(pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
     ),
     (
-        # Argument-less `.split()` is whitespace tokenization, which has no
-        # parser alternative — only splitting on an explicit separator matches.
+        # Only separator-form `.split(sep)` is flagged: a separator implies
+        # structure with a real parser. Argument-less `.split()` is whitespace
+        # tokenization of free text, for which no parser exists — exempted.
+        "string-split",
         re.compile(r"\.split\s*\((?!\s*\))"),
         "Avoid .split() for structured data — parse it instead "
         "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     (
+        "string-strip",
         re.compile(r"\.strip\s*\("),
         "Avoid .strip() for structured data — parse it instead "
         "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     (
+        "bare-except",
         re.compile(r"\bexcept\s*:"),
         "Bare `except:` catches SystemExit/KeyboardInterrupt — name the exception",
     ),
     (
+        "except-baseexception",
         re.compile(r"\bexcept\s+BaseException\b"),
         "except BaseException catches KeyboardInterrupt — use Exception or narrower",
     ),
     (
+        "suppress",
         re.compile(r"\bcontextlib\.suppress\b"),
         "contextlib.suppress silently swallows exceptions — log, handle, or re-raise",
     ),
     (
+        "suppress-import",
         re.compile(r"\bfrom\s+contextlib\s+import\b.*\bsuppress\b"),
         "contextlib.suppress silently swallows exceptions — log, handle, or re-raise",
     ),
     (
+        "dataclass",
         re.compile(
             r"@dataclass|\bimport\s+dataclasses\b|\bfrom\s+dataclasses\s+import\b"
         ),
         "Use Pydantic BaseModel (or TypedDict) instead of dataclasses",
     ),
     (
+        "subprocess",
         re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
         "Use the `sh` library instead of subprocess",
     ),
     (
+        "os-shell",
         re.compile(r"\bos\.(?:system|popen)\s*\("),
         "Use the `sh` library instead of os.system()/os.popen()",
     ),
     (
+        "argparse",
         re.compile(r"\bimport\s+argparse\b|\bfrom\s+argparse\s+import\b"),
         "Use `typer` instead of argparse",
     ),
     (
+        "rich-progress",
         re.compile(r"\brich\.progress\b|\bfrom\s+rich\.progress\s+import\b"),
         "Use `tqdm` instead of rich progress bars",
     ),
     (
+        "os-path",
         re.compile(r"\bos\.path\b"),
         "Use pathlib.Path instead of os.path",
     ),
     (
+        # A scoped list of os file/dir operations with a pathlib.Path equivalent.
+        # os.environ/os.getenv and process/exec APIs are deliberately absent.
+        "os-file-ops",
+        re.compile(
+            r"\bos\.(?:getcwd|chdir|listdir|scandir|walk|mkdir|makedirs|rmdir|"
+            r"removedirs|remove|unlink|rename|renames|replace|link|symlink|"
+            r"readlink|stat|lstat|chmod|chown)\s*\("
+        ),
+        "Use pathlib.Path for file/dir operations instead of os.* "
+        "(Path.iterdir/mkdir/unlink/rename/replace/stat/...); os.environ, os.getenv, and "
+        "process/exec APIs stay",
+    ),
+    (
+        "eval-exec",
         re.compile(r"(?<![.\w])(?:eval|exec)\s*\("),
         "Never use eval()/exec() — parse the data (ast.literal_eval for "
         "literals) or dispatch explicitly",
     ),
     (
+        "utcnow",
         re.compile(r"\butcnow\s*\("),
         "datetime.utcnow() is naive and deprecated — use datetime.now(timezone.utc)",
     ),
     (
+        "global-statement",
         re.compile(r"^global\s+\w"),
         "No `global` statements — mutate a module-level holder object or pass "
         "state explicitly",
     ),
     (
+        "private-function",
         re.compile(r"\bdef\s+_[a-zA-Z]"),
         "No `_` prefix on functions/methods — nothing is private (nest inside caller if needed)",
     ),
     (
+        "private-class",
         re.compile(r"\bclass\s+_[A-Z]"),
         "No `_` prefix on classes — nothing is private",
     ),
     # Fires only on assignments: bare annotations and trailing-comma lines
     # are function parameters, which may use `_` for unused arguments.
     (
+        "private-variable",
         re.compile(r"^_[a-zA-Z]\w*\s*(?::[^=]*)?=(?!=)(?!.*,\s*$)"),
         "No `_` prefix on variables/constants — nothing is private "
         "(unused `_` function parameters are exempt)",
@@ -262,62 +357,76 @@ TS_LUP_IGNORE_MARKER = "// lup: ignore"
 # Same contract as ANTI_PATTERNS, for TypeScript/JavaScript-family files,
 # using the `// lup: ignore` marker. Mirrors lup.antipatterns.TS_ANTI_PATTERNS;
 # test_ts_table_matches_hook pins the mirror equal.
-TS_ANTI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+TS_ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
+        "as-any",
         re.compile(r"\bas\s+any\b"),
         "Never use `as any` — use proper types or type guards",
     ),
     (
+        "as-unknown",
         re.compile(r"\bas\s+unknown\b"),
         "Never use `as unknown` — use type guards or proper types",
     ),
     (
+        "any-annotation",
         re.compile(r":\s*any\b"),
         "Never use `any` type annotation — use specific types, generics, or `unknown`",
     ),
     (
+        "any-assertion",
         re.compile(r"<any>"),
         "Never use `<any>` type assertion — use proper types",
     ),
     (
+        "ts-ignore",
         re.compile(r"@ts-ignore"),
         "Never use @ts-ignore — fix the type error properly",
     ),
     (
+        "ts-expect-error",
         re.compile(r"@ts-expect-error"),
         "Never use @ts-expect-error — fix the type error properly",
     ),
     (
+        "ts-nocheck",
         re.compile(r"@ts-nocheck"),
         "Never use @ts-nocheck — fix the type errors in the file",
     ),
     (
+        "eslint-disable",
         re.compile(r"//\s*eslint-disable"),
         "Never use eslint-disable — fix the lint issue properly",
     ),
     (
+        "eslint-disable-block",
         re.compile(r"/\*\s*eslint-disable"),
         "Never use eslint-disable — fix the lint issue properly",
     ),
     (
+        "tslint-disable",
         re.compile(r"//\s*tslint:disable"),
         "Never use tslint:disable — migrate to eslint and fix the issue",
     ),
     (
+        "non-null-assertion",
         re.compile(r"[\w\)\]]!\."),
         "Postfix `!.` non-null assertion hides a possible null/undefined — "
         "narrow the type or handle the missing case",
     ),
     (
+        "var-declaration",
         re.compile(r"\bvar\s+[A-Za-z_$]"),
         "Use `const` or `let` instead of `var` — var is function-scoped and hoisted",
     ),
     (
+        "function-object-type",
         re.compile(r":\s*(?:Function|Object)\b"),
         "Never use `Function` or `Object` as a type — declare the call "
         "signature or the object shape",
     ),
     (
+        "console-log",
         re.compile(r"\bconsole\.log\s*\("),
         "console.log is a debug leftover — remove it or route through a logger",
     ),
@@ -345,18 +454,52 @@ def marker_count(text: str) -> int:
     return len(MARKER_RE.findall(text))
 
 
-def has_file_level_ignore(file_path: str) -> bool:
-    """Check if the file on disk has a `# lup: ignore` marker in the first 10 lines."""
+class IgnoreDirective(BaseModel):
+    """A `# lup: ignore` directive's coverage. Mirrors lup.markers.
+
+    ``rule_ids`` is ``None`` for a bare ignore that silences every rule; a set
+    names the rules a typed ``# lup: ignore[a, b]`` silences.
+    """
+
+    rule_ids: set[str] | None
+
+    def covers(self, rule_id: str) -> bool:
+        return self.rule_ids is None or rule_id in self.rule_ids
+
+
+def ignore_rule_ids(match: re.Match[str]) -> set[str] | None:
+    """Rule ids a matched ignore names, or None for a bare (all-rules) ignore."""
+    raw = match.group("ids")
+    if raw is None:
+        return None
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def inline_ignore(line: str) -> IgnoreDirective | None:
+    """The inline `# lup: ignore` directive on a line, or None."""
+    match = IGNORE_RE.search(line)
+    if match is None:
+        return None
+    return IgnoreDirective(rule_ids=ignore_rule_ids(match))
+
+
+def read_file_level_ignore(file_path: str) -> IgnoreDirective | None:
+    """The file-level `# lup: ignore` on disk (first 10 lines), or None.
+
+    A bare directive disables every rule for the file; a typed
+    `# lup: ignore[id]` disables only the named rules file-wide.
+    """
     try:
         with open(file_path) as f:
             for i, line in enumerate(f):
                 if i >= 10:
                     break
-                if FILE_IGNORE_RE.match(line):
-                    return True
+                match = FILE_IGNORE_RE.match(line)
+                if match is not None:
+                    return IgnoreDirective(rule_ids=ignore_rule_ids(match))
     except OSError:
-        return False
-    return False
+        return None
+    return None
 
 
 STRING_PREFIX_RE = re.compile(r"^[fFbBrRuU]*")
@@ -620,26 +763,30 @@ def find_anti_pattern_violations(
     old_string: str,
     new_string: str,
     file_path: str = "",
-    patterns: list[tuple[re.Pattern[str], str]] | None = None,
+    patterns: list[tuple[str, re.Pattern[str], str]] | None = None,
     ignore_marker: str = LUP_IGNORE_MARKER,
     line_violations: dict[int, str] | None = None,
 ) -> Violation | None:
-    """Check newly added lines for anti-patterns.
+    """Check newly added lines for anti-patterns, per rule.
 
-    A file-level ignore marker (first 10 lines on disk) disables the scan;
-    the caller's size gate still applies. line_violations maps new_string
-    line indices to precomputed violation reasons (e.g. silent swallows
-    from find_swallowed_excepts).
+    A bare file-level ignore (first 10 lines on disk) disables every rule; a
+    typed `# lup: ignore[id]` disables only the named rule file-wide. On an
+    added line, each tripped rule is checked on its own: an inline directive
+    that covers the rule downgrades it to a prompt, one that does not (or none
+    at all) denies. line_violations maps new_string line indices to precomputed
+    violation reasons (e.g. silent swallows from find_swallowed_excepts).
 
     Returns (decision, reason) or None:
-    - inline ignore marker on the violating line -> ("ask", reason)
-    - no marker -> ("deny", reason with hint)
+    - inline ignore covering the rule -> ("ask", reason)
+    - no covering ignore -> ("deny", reason with a typed-ignore hint)
     """
     if patterns is None:
         patterns = ANTI_PATTERNS
 
-    if file_path and has_file_level_ignore(file_path):
-        return None
+    file_directive = read_file_level_ignore(file_path) if file_path else None
+    if file_directive is not None and file_directive.rule_ids is None:
+        return None  # bare file-level opt-out disables every rule
+    file_disabled = file_directive.rule_ids if file_directive is not None else set()
 
     old_lines = old_string.splitlines() if old_string else []
     new_lines = new_string.splitlines() if new_string else []
@@ -659,17 +806,28 @@ def find_anti_pattern_violations(
             stripped = new_lines[idx].strip()
             if not stripped or stripped.startswith("#") and "type:" not in stripped:
                 continue
-            hits = [r for pattern, r in patterns if pattern.search(stripped)]
+            hits: list[tuple[str, str]] = [
+                (rule_id, message)
+                for rule_id, pattern, message in patterns
+                if pattern.search(stripped)
+            ]
             if line_violations and idx in line_violations:
-                hits.insert(0, line_violations[idx])
+                hits.insert(0, ("silent-except", line_violations[idx]))
             if not hits:
                 continue
             preview = stripped[:80]
-            if IGNORE_RE.search(new_lines[idx]):
-                ask_reasons.append(f"{hits[0]} | line: {preview}")
-            else:
-                hint = f"Add `{ignore_marker}` to the line (or file-level) to request approval"
-                return ("deny", f"Denied: {hits[0]} | line: {preview}. {hint}")
+            directive = inline_ignore(new_lines[idx])
+            for rule_id, message in hits:
+                if rule_id in file_disabled:
+                    continue
+                if directive is not None and directive.covers(rule_id):
+                    ask_reasons.append(f"{message} | line: {preview}")
+                    continue
+                hint = (
+                    f"Add `{ignore_marker}[{rule_id}]` to the line "
+                    "(or file-level) to request approval"
+                )
+                return ("deny", f"Denied: {message} | line: {preview}. {hint}")
 
     if ask_reasons:
         return ("ask", ask_reasons[0])

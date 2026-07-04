@@ -35,24 +35,35 @@ hook = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hook)
 
 
-def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str]]:
-    return [(ap.pattern.pattern, ap.message) for ap in patterns]
+def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str, str]]:
+    return [(ap.id, ap.pattern.pattern, ap.message) for ap in patterns]
 
 
-def hook_rows(table: list[tuple[re.Pattern[str], str]]) -> list[tuple[str, str]]:
-    return [(pattern.pattern, message) for pattern, message in table]
+def hook_rows(
+    table: list[tuple[str, re.Pattern[str], str]],
+) -> list[tuple[str, str, str]]:
+    return [(rule_id, pattern.pattern, message) for rule_id, pattern, message in table]
 
 
 def test_python_table_matches_hook() -> None:
-    """The library Python table is identical to the hook's inline copy."""
-    hook_table: list[tuple[re.Pattern[str], str]] = hook.ANTI_PATTERNS
+    """The library Python table is identical to the hook's inline copy (ids too)."""
+    hook_table: list[tuple[str, re.Pattern[str], str]] = hook.ANTI_PATTERNS
     assert lib_rows(PYTHON_ANTI_PATTERNS) == hook_rows(hook_table)
 
 
 def test_ts_table_matches_hook() -> None:
-    """The library TS table is identical to the hook's inline copy."""
-    hook_table: list[tuple[re.Pattern[str], str]] = hook.TS_ANTI_PATTERNS
+    """The library TS table is identical to the hook's inline copy (ids too)."""
+    hook_table: list[tuple[str, re.Pattern[str], str]] = hook.TS_ANTI_PATTERNS
     assert lib_rows(TS_ANTI_PATTERNS) == hook_rows(hook_table)
+
+
+def test_rule_ids_are_unique_kebab_case() -> None:
+    """Every rule id is a distinct kebab-case token a typed ignore can target."""
+    for table in (PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS):
+        ids = [ap.id for ap in table]
+        assert len(ids) == len(set(ids))
+        for rule_id in ids:
+            assert re.fullmatch(r"[a-z][a-z0-9-]*", rule_id), rule_id
 
 
 def test_audit_flags_unguarded_match() -> None:
@@ -61,14 +72,41 @@ def test_audit_flags_unguarded_match() -> None:
     assert findings[0].line == 1
 
 
-def test_audit_accepts_guarded_match() -> None:
+def test_audit_flags_bare_ignore_as_untyped() -> None:
+    # A bare `# lup: ignore` still silences the rule (stays valid) but is
+    # surfaced as "untyped" so the migration to typed directives is gradual;
+    # the message names the rule it should narrow to.
     findings = audit_text("x: Any = 1  # lup: ignore\n", PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["untyped"]
+    assert "any-type" in findings[0].message
+
+
+def test_audit_typed_ignore_silences_exactly_its_rule() -> None:
+    findings = audit_text("x: Any = 1  # lup: ignore[any-type]\n", PYTHON_ANTI_PATTERNS)
     assert findings == []
 
 
-def test_audit_flags_spurious_marker() -> None:
+def test_audit_typed_ignore_naming_wrong_rule_still_flags() -> None:
+    # Names tuple-shape, but the line trips any-type: the real hit is missing
+    # and the tuple-shape directive guards nothing (spurious).
+    findings = audit_text(
+        "x: Any = 1  # lup: ignore[tuple-shape]\n", PYTHON_ANTI_PATTERNS
+    )
+    kinds = {f.kind for f in findings}
+    assert kinds == {"missing", "spurious"}
+
+
+def test_audit_flags_spurious_bare_marker() -> None:
     findings = audit_text("x: int = 1  # lup: ignore\n", PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["spurious"]
+
+
+def test_audit_flags_typed_ignore_guarding_nothing() -> None:
+    findings = audit_text(
+        "x: int = 1  # lup: ignore[tuple-shape]\n", PYTHON_ANTI_PATTERNS
+    )
+    assert [f.kind for f in findings] == ["spurious"]
+    assert "tuple-shape" in findings[0].message
 
 
 def test_audit_skips_file_level_ignore() -> None:
@@ -82,7 +120,10 @@ def test_audit_skips_plain_comment_lines() -> None:
 
 
 def test_atomic_renames_are_exempt_from_replace_rule() -> None:
-    source = "os.replace(src, dst)\ntmp_path.replace(target)\nPath.replace(a, b)\n"
+    # Path-receiver `.replace` is an atomic rename, not string surgery, so the
+    # string-replace rule leaves it alone. (os.replace is redirected to
+    # os-file-ops — see test_audit_flags_os_file_ops_but_not_environ.)
+    source = "tmp_path.replace(target)\nPath.replace(a, b)\n"
     assert audit_text(source, PYTHON_ANTI_PATTERNS) == []
 
 
@@ -125,7 +166,7 @@ def test_audit_flags_strip_like_split() -> None:
 def test_audit_flags_string_keyed_dict_annotation() -> None:
     findings = audit_text("env: dict[str, str] = {}\n", PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["missing"]
-    assert "TypedDict" in findings[0].message
+    assert findings[0].rule_id == "dict-str-payload"
 
 
 def test_audit_accepts_non_string_keyed_dict() -> None:
@@ -203,11 +244,76 @@ def test_audit_accepts_strict_equality_and_typed_ts() -> None:
     assert audit_text(clean, TS_ANTI_PATTERNS) == []
 
 
-def test_audit_flags_string_keyed_mapping_annotations() -> None:
-    findings = audit_text("data: Mapping[str, V]\n", PYTHON_ANTI_PATTERNS)
+def test_audit_flags_string_keyed_mapping_with_scalar_value() -> None:
+    findings = audit_text("data: Mapping[str, int]\n", PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["missing"]
+    assert findings[0].rule_id == "dict-str-payload"
+
+
+def test_audit_accepts_string_keyed_dict_with_concrete_value() -> None:
+    # The relaxed rule permits concrete class/callable value types: these are
+    # registries/routers whose open, data-driven key set is the point.
+    clean = (
+        "engines: dict[str, Engine] = {}\n"
+        "tools: dict[str, LupMcpTool] = {}\n"
+        "factories: Mapping[str, Callable[[], Engine]] = {}\n"
+    )
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
 
 
 def test_audit_accepts_jsonvalue_dicts() -> None:
     clean = "payload: dict[str, JsonValue] = {}\nargs: Mapping[str, JsonValue]\n"
     assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_flags_tuple_variable_and_attribute_annotations() -> None:
+    # The rule catches every declared tuple shape, not just return types.
+    for line in (
+        "pair: tuple[int, str] = (1, 'a')\n",
+        "    self.pair: tuple[int, str] = pair\n",
+        "def f() -> tuple[int, str]: ...\n",
+    ):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert [f.kind for f in findings] == ["missing"], line
+        assert findings[0].rule_id == "tuple-shape"
+
+
+def test_audit_flags_declared_frozenset() -> None:
+    for line in (
+        "FRAMEWORK_TOOLS: frozenset[str] = frozenset({'x'})\n",
+        "TOKENS = frozenset({'a', 'b'})\n",
+    ):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert findings and findings[0].rule_id == "frozenset-shape"
+
+
+def test_audit_flags_os_file_ops_but_not_environ() -> None:
+    for line in (
+        "entries = os.listdir(path)\n",
+        "os.makedirs(path)\n",
+        "os.replace(tmp, dst)\n",
+    ):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert findings and findings[0].rule_id == "os-file-ops", line
+    clean = "value = os.environ['KEY']\nhome = os.getenv('HOME')\n"
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_flags_every_dict_get() -> None:
+    findings = audit_text("name = payload.get('name')\n", PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["missing"]
+    assert findings[0].rule_id == "dict-get"
+
+
+def test_audit_dict_get_silenced_by_typed_ignore() -> None:
+    source = "name = registry.get(key)  # lup: ignore[dict-get]\n"
+    assert audit_text(source, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_file_level_typed_ignore_disables_only_that_rule() -> None:
+    # `# lup: ignore[dict-get]` at the top silences dict-get file-wide, but
+    # every other rule stays live.
+    source = "# lup: ignore[dict-get]\nname = data.get(k)\nx: Any = 1\n"
+    findings = audit_text(source, PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["missing"]
+    assert findings[0].rule_id == "any-type"

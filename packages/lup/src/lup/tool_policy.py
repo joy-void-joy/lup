@@ -36,7 +36,7 @@ CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(
         "WebSearch",
         "Write",
     }
-) #lup: We shouldn't have claude specific mentions here
+)  # lup: We shouldn't have claude specific mentions here
 """The Claude Code built-in tool names a session may call.
 
 A property of the Claude backend, not of any domain: the tools the SDK
@@ -45,7 +45,7 @@ to name every tool a Claude session may call; Codex/OpenAI agents get
 tools from the served MCP groups plus the Codex runtime's own native
 tools instead."""
 
-FRAMEWORK_TOOLS: frozenset[str] = frozenset({"StructuredOutput"}) #lup: Neither frozenset
+FRAMEWORK_TOOLS: set[str] = {"StructuredOutput"}
 """Tools the agent always needs: ``StructuredOutput`` emits the final result
 under ``ClaudeAgentOptions.output_format``, so the allowlist must carry it even
 though no template tool defines it."""

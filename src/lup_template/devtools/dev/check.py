@@ -89,13 +89,16 @@ def run_checks(fix: bool, no_test: bool) -> None:
         results.append(("claude comments", True))
 
     findings = scan_antipatterns()
-    if findings:
-        typer.echo(f"antipatterns: FAIL ({len(findings)} finding(s))")
-        for finding in findings:
+    blocking = [f for f in findings if f.kind != "untyped"]
+    if blocking:
+        typer.echo(f"antipatterns: FAIL ({len(blocking)} finding(s))")
+        for finding in blocking:
             typer.echo(f"  {finding.file}:{finding.line} [{finding.kind}]")
         results.append(("antipatterns", False))
     else:
-        typer.echo("antipatterns: ok")
+        advisory = len(findings) - len(blocking)
+        tail = f" ({advisory} untyped, advisory)" if advisory else ""
+        typer.echo(f"antipatterns: ok{tail}")
         results.append(("antipatterns", True))
 
     # summary
