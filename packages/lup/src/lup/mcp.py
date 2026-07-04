@@ -38,7 +38,7 @@ from typing import Literal, NotRequired, TypedDict, cast, get_type_hints
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from lup.types import JsonObject
 
@@ -76,6 +76,9 @@ class CallToolResultWithAlias(CallToolResult):
 
 # MCP hands an arbitrary JSON args object validated by the per-tool BaseModel.
 type LupToolHandler = Callable[[JsonObject], Awaitable[ToolResponse]]
+
+# A tool's typed implementation: a validated input model in, an output model out.
+type ToolHandler[I: BaseModel, O: BaseModel] = Callable[[I], Awaitable[O]]
 
 
 class LupMcpServerConfig(BaseModel):
@@ -250,7 +253,7 @@ class ToolError(Exception):
     """Raise in a tool handler to return an MCP error response."""
 
 
-class LupMcpTool[I: BaseModel, O: BaseModel]: #lup: Why is this not a BaseModel?
+class LupMcpTool[I: BaseModel, O: BaseModel](BaseModel):
     """MCP tool with typed input/output models for introspection.
 
     Stores the tool definition (name, description, schema, handler) directly.
@@ -259,28 +262,23 @@ class LupMcpTool[I: BaseModel, O: BaseModel]: #lup: Why is this not a BaseModel?
     serialization.
     """
 
-    def __init__(
-        self,
-        name: str,
-        description: str,
-        input_schema: JsonObject,
-        handler: LupToolHandler,
-        call_handler: Callable[[I], Awaitable[O]],
-        input_model: type[I],
-        output_model: type[O] | None = None,
-        tags: list[str] | None = None,
-    ) -> None:
-        self.name = name
-        self.description = description
-        self.input_schema = input_schema
-        self.handler = handler
-        self.call_handler = call_handler
-        self.input_model = input_model
-        self.output_model = output_model
-        self.tags = tags or []
+    name: str
+    description: str
+    input_schema: JsonObject
+    handler: LupToolHandler
+    call_handler: ToolHandler[I, O]
+    input_model: type[I]
+    output_model: type[O] | None = None
+    tags: list[str] = Field(default_factory=list)
 
     async def __call__(self, params: I) -> O:
         return await self.call_handler(params)
+
+
+# What ``lup_tool`` returns: a decorator that wraps a ToolHandler into a LupMcpTool.
+type ToolDecorator[I: BaseModel, O: BaseModel] = Callable[
+    [ToolHandler[I, O]], LupMcpTool[I, O]
+]
 
 
 def lup_tool[I: BaseModel, O: BaseModel](
@@ -290,10 +288,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
     *,
     name: str | None = None,
     tags: list[str] | None = None,
-) -> Callable[
-    [Callable[[I], Awaitable[O]]],
-    LupMcpTool[I, O],
-]: #lup: Type is hard to read, surely there's a type to indicate "This is a decorator"? If not, we should create it
+) -> ToolDecorator[I, O]:
     """Decorator for defining MCP tools with typed input/output models.
 
     Infers input/output schemas from type annotations, auto-validates input,
@@ -321,7 +316,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
     from lup.metrics import collector
 
     def decorator(
-        handler: Callable[[I], Awaitable[O]],
+        handler: ToolHandler[I, O],
     ) -> LupMcpTool[I, O]:
         tool_name = name or handler.__name__
 
@@ -391,7 +386,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
             call_handler=handler,
             input_model=final_input,
             output_model=cast(type[O] | None, resolved_output),
-            tags=tags,
+            tags=tags or [],
         )
 
     return decorator
