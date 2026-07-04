@@ -53,6 +53,7 @@ from lup.adapters.common import (
     TurnTimeoutError,
     UnsupportedOperationError,
 )
+from lup.adapters.tools.claude import WEB_SEARCH
 from lup.hooks import LupHooksConfig
 from lup.realtime.relay import RealtimeMailbox
 from lup.trace import TraceLogger, print_message
@@ -276,7 +277,7 @@ def codex_items_to_lup(
                 blocks.append(
                     LupToolUseBlock(
                         id=inner.id,
-                        name="WebSearch",
+                        name=WEB_SEARCH,
                         input={"query": inner.query},
                     )
                 )

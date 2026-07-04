@@ -44,10 +44,13 @@ from lup.types import Decorator, JsonObject
 
 logger = logging.getLogger(__name__)
 
-#lup: This seems claude specific?
 
 class ToolResponse(TypedDict, total=False):
-    """Shape of the dict returned by MCP tool handlers."""
+    """The MCP tool-result protocol shape every tool handler returns.
+
+    Cross-backend, not Claude-specific: Codex and OpenAI serve the same
+    ``mcp__server__tool`` protocol, so this dict is the one result shape a
+    handler produces on every engine."""
 
     content: list[dict[str, str]]
     is_error: bool
