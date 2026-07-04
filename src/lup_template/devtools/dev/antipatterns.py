@@ -3,12 +3,15 @@
 Backs `lup-devtools dev check --antipatterns` (and the standalone
 `dev check`-row). Walks every git-tracked `.py`/TS-family file and runs the
 single `lup.review.antipatterns` set over it — the same set the edit hook enforces —
-reporting two classes the hook cannot catch after the fact:
+reporting three classes the hook cannot catch after the fact:
 
-- **missing**: a line trips an anti-pattern but carries no `# lup: ignore`
-  (it slipped in past the hook, or predates the pattern).
-- **spurious**: an inline `# lup: ignore` guards a line that trips nothing
-  (a dead marker to delete).
+- **missing**: a line trips a rule but carries no `# lup: ignore` covering it
+  (it slipped in past the hook, or predates the rule). Blocking.
+- **spurious**: a `# lup: ignore[id]` (or a bare one) guards a rule the line
+  does not trip — a dead directive to delete. Blocking.
+- **untyped**: a bare `# lup: ignore` validly silences a line but names no
+  rule. Advisory (does not fail the check) — surfaced so the migration to
+  typed `# lup: ignore[id]` directives is gradual.
 """
 
 from pathlib import Path
@@ -42,12 +45,20 @@ def scan_antipatterns() -> list[FoundAntiPattern]:
     return results
 
 
+ADVISORY_KINDS = {"untyped"}
+
+
 def report(as_json: bool) -> None:
-    """List anti-pattern findings; exit non-zero when any remain."""
+    """List anti-pattern findings; exit non-zero when a blocking one remains.
+
+    "untyped" findings are advisory (a bare `# lup: ignore` to migrate to a
+    typed one) and never fail the command; "missing" and "spurious" do.
+    """
     found = scan_antipatterns()
+    blocking = [finding for finding in found if finding.kind not in ADVISORY_KINDS]
     if as_json:
         output_json([finding.model_dump() for finding in found])
-        if found:
+        if blocking:
             raise typer.Exit(1)
         return
     if not found:
@@ -57,5 +68,8 @@ def report(as_json: bool) -> None:
         typer.echo(f"{finding.file}:{finding.line} [{finding.kind}] {finding.message}")
         typer.echo(f"    {finding.text}")
     files = {finding.file for finding in found}
-    typer.echo(f"\n{len(found)} finding(s) in {len(files)} file(s)")
-    raise typer.Exit(1)
+    advisory = len(found) - len(blocking)
+    tail = f" (+{advisory} untyped, advisory)" if advisory else ""
+    typer.echo(f"\n{len(blocking)} blocking finding(s){tail} in {len(files)} file(s)")
+    if blocking:
+        raise typer.Exit(1)

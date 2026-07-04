@@ -22,22 +22,57 @@ from typing import Self
 
 from pydantic import BaseModel
 
-IGNORE_RE = re.compile(r"(#|//)\s*lup\s*:\s*ignore\b", re.IGNORECASE)
-FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*lup\s*:\s*ignore\s*$", re.IGNORECASE)
+# An `ignore` directive is bare (`# lup: ignore`, silences every rule) or typed
+# pyright-style (`# lup: ignore[rule-id, other-rule]`, silences only the named
+# rules). The optional `ids` group captures the comma-separated list when typed.
+IGNORE_RE = re.compile(
+    r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?", re.IGNORECASE
+)
+FILE_IGNORE_RE = re.compile(
+    r"^\s*(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?\s*$", re.IGNORECASE
+)
 
 
-def has_file_level_ignore(text: str, max_lines: int = 10) -> bool:
-    """Whether a standalone `# lup: ignore` sits in the first `max_lines`.
+def ignore_rule_ids(match: re.Match[str]) -> set[str] | None:
+    """Rule ids a matched `IGNORE_RE`/`FILE_IGNORE_RE` directive names.
 
-    Such a directive opts the whole file out of anti-pattern checks (never out
-    of feedback-note gathering — see `lup.review.markers.find_feedback`).
+    ``None`` is the bare, untyped `# lup: ignore` that silences every rule; a
+    set names exactly the rules a typed `# lup: ignore[a, b]` silences (empty
+    brackets yield an empty set — a typed directive that names nothing).
+    """
+    raw = match.group("ids")
+    if raw is None:
+        return None
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+class FileIgnore(BaseModel):
+    """A file-level `# lup: ignore` near a file's top and what it disables.
+
+    ``rule_ids`` is ``None`` for a bare `# lup: ignore` that disables every
+    rule for the whole file; a set names the rules a typed
+    `# lup: ignore[rule-id]` disables file-wide. ``line`` is 1-based.
+    """
+
+    line: int
+    rule_ids: set[str] | None
+
+
+def file_level_ignore(text: str, max_lines: int = 10) -> FileIgnore | None:
+    """The file-level `# lup: ignore` in the first `max_lines`, or ``None``.
+
+    A standalone bare `# lup: ignore` opts the whole file out of anti-pattern
+    checks; the typed `# lup: ignore[rule-id]` form opts out only the named
+    rules. Feedback-note scanning never consults this — an opted-out file still
+    surfaces its `# lup:` notes (see `lup.review.markers.find_feedback`).
     """
     for i, line in enumerate(text.splitlines()):
         if i >= max_lines:
             break
-        if FILE_IGNORE_RE.match(line):
-            return True
-    return False
+        match = FILE_IGNORE_RE.match(line)
+        if match is not None:
+            return FileIgnore(line=i + 1, rule_ids=ignore_rule_ids(match))
+    return None
 
 
 def python_comment_columns(text: str) -> dict[int, int] | None:

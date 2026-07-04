@@ -10,6 +10,7 @@ todos that `dev todos` gathers for `/lup:init`.
 
 from pathlib import Path
 
+from lup.review.common import IGNORE_RE, file_level_ignore, ignore_rule_ids
 from lup.review.markers import (
     TEMPLATE_MARKER_RE,
     ScanMode,
@@ -88,6 +89,29 @@ def test_note_mentioning_the_ignore_hatch_in_prose_is_still_a_note() -> None:
 def test_inline_ignore_directive_is_still_skipped() -> None:
     source = "x = 1  # lup: ignore\ny = 2  # lup: real note\n"
     assert texts(source, ScanMode.PYTHON) == ["real note"]
+
+
+def test_typed_ignore_directive_is_not_feedback() -> None:
+    # A typed `# lup: ignore[id]` is an escape hatch, not a review note, so it
+    # is skipped by the feedback scan just like the bare form.
+    source = "x = 1  # lup: ignore[dict-get]\ny = 2  # lup: real note\n"
+    assert texts(source, ScanMode.PYTHON) == ["real note"]
+
+
+def test_ignore_rule_ids_parses_bare_and_typed() -> None:
+    bare = IGNORE_RE.search("# lup: ignore")
+    assert bare is not None and ignore_rule_ids(bare) is None
+    typed = IGNORE_RE.search("x = 1  # lup: ignore[dict-get, tuple-shape]")
+    assert typed is not None
+    assert ignore_rule_ids(typed) == {"dict-get", "tuple-shape"}
+
+
+def test_file_level_ignore_reads_bare_typed_and_absent() -> None:
+    bare = file_level_ignore("# lup: ignore\nx = 1\n")
+    assert bare is not None and bare.rule_ids is None
+    typed = file_level_ignore("# lup: ignore[dict-get]\nx = 1\n")
+    assert typed is not None and typed.rule_ids == {"dict-get"}
+    assert file_level_ignore("x = 1\n") is None
 
 
 def test_scan_mode_for_routes_by_suffix() -> None:

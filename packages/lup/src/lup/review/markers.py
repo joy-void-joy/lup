@@ -1,5 +1,4 @@
 # lup: ignore
-# lup: I do not feel comfortable with a generic # lup: ignore like that. I think this should have types, like pyright does, for instance # lup: ignore[regex]
 """Inline marker scanning for the repo's two marker families.
 
 - Review notes (`# lup:` / `// lup:`): actionable feedback left in the code;
@@ -177,7 +176,6 @@ class MarkerScan:
 
         return content_of
 
-    # lup: Maybe we're lacking a directive in claude.md about using for, not while
     def notes(self) -> list[MarkerComment]:
         found: list[MarkerComment] = []
         for line_no, line in self.cursor:
