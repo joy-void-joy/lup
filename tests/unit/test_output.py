@@ -11,11 +11,10 @@ from typing import cast
 
 from pydantic import BaseModel, Field
 
-from lup.hooks import create_completion_guard
+from lup.hooks import LupHookInput, create_completion_guard
 from lup.mcp import ToolResponse
 from lup.output import create_output_tool, output_path, read_output
 from lup.reflect import ReflectionGate
-from lup.types import LupHookInput
 
 
 class DemoOutput(BaseModel):
@@ -91,32 +90,32 @@ class TestCompletionGuard:
         hooks = create_completion_guard(
             flag.exists, output_tool_name="submit_output", max_blocks=3
         )
-        hook = hooks["Stop"][0].hook
-        stop_event = LupHookInput(hook_event_name="Stop")
+        hook = hooks.stop[0].hook
+        stop_event = LupHookInput(event="Stop")
 
         blocked = await hook(stop_event)
-        assert blocked.get("decision") == "block"
-        assert "submit_output" in blocked.get("reason", "")
+        assert blocked.decision == "block"
+        assert "submit_output" in blocked.reason
 
         flag.write_text("{}", encoding="utf-8")
         allowed = await hook(stop_event)
-        assert "decision" not in allowed
+        assert allowed.decision is None
 
     async def test_gives_up_after_max_blocks(self) -> None:
         hooks = create_completion_guard(lambda: False, max_blocks=2)
-        hook = hooks["Stop"][0].hook
-        stop_event = LupHookInput(hook_event_name="Stop")
+        hook = hooks.stop[0].hook
+        stop_event = LupHookInput(event="Stop")
 
         first = await hook(stop_event)
         second = await hook(stop_event)
         third = await hook(stop_event)
-        assert first.get("decision") == "block"
-        assert second.get("decision") == "block"
-        assert "decision" not in third
+        assert first.decision == "block"
+        assert second.decision == "block"
+        assert third.decision is None
 
     async def test_ignores_non_stop_events(self) -> None:
         hooks = create_completion_guard(lambda: False)
-        hook = hooks["Stop"][0].hook
+        hook = hooks.stop[0].hook
 
-        result = await hook(LupHookInput(hook_event_name="PreToolUse"))
-        assert "decision" not in result
+        result = await hook(LupHookInput(event="PreToolUse"))
+        assert result.decision is None

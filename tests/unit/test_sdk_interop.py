@@ -21,19 +21,17 @@ from lup.adapters.clients.codex import (
 from lup.adapters.common import engine_id_of, factory_for_model
 from lup.types import normalize_effort
 from lup.hooks import (
+    LupHookInput,
+    LupHooksConfig,
+    allow_hook,
     create_nudge_hook,
     create_permission_hooks,
     create_tool_allowlist_hook,
-)
-from lup.reflect import ReflectionGate, create_reflection_gate
-from lup.types import (
-    LupHookInput,
-    LupHooksConfig,
-    SubagentSpec,
-    allow_hook,
     deny_hook,
     merge_hooks,
 )
+from lup.reflect import ReflectionGate, create_reflection_gate
+from lup.types import SubagentSpec, normalize_effort
 
 
 class TestMcpConfigOverrides:
@@ -345,7 +343,7 @@ class TestCodexAdapter:
 
 class TestMergeHooks:
     def test_merge_disjoint_events(self) -> None:
-        from lup.types import LupHookMatcher, LupHookOutput
+        from lup.hooks import LupHookMatcher, LupHookOutput
 
         async def hook_a(inp: LupHookInput) -> LupHookOutput:
             return allow_hook()
@@ -353,14 +351,14 @@ class TestMergeHooks:
         async def hook_b(inp: LupHookInput) -> LupHookOutput:
             return allow_hook()
 
-        a: LupHooksConfig = {"PreToolUse": [LupHookMatcher(hook=hook_a)]}
-        b: LupHooksConfig = {"PostToolUse": [LupHookMatcher(hook=hook_b)]}
+        a = LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=hook_a)])
+        b = LupHooksConfig(post_tool_use=[LupHookMatcher(hook=hook_b)])
         merged = merge_hooks(a, b)
-        assert "PreToolUse" in merged
-        assert "PostToolUse" in merged
+        assert merged.pre_tool_use
+        assert merged.post_tool_use
 
     def test_merge_same_event(self) -> None:
-        from lup.types import LupHookMatcher, LupHookOutput
+        from lup.hooks import LupHookMatcher, LupHookOutput
 
         async def hook_a(inp: LupHookInput) -> LupHookOutput:
             return allow_hook()
@@ -368,16 +366,16 @@ class TestMergeHooks:
         async def hook_b(inp: LupHookInput) -> LupHookOutput:
             return deny_hook("no")
 
-        a: LupHooksConfig = {"PreToolUse": [LupHookMatcher(hook=hook_a)]}
-        b: LupHooksConfig = {"PreToolUse": [LupHookMatcher(hook=hook_b)]}
+        a = LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=hook_a)])
+        b = LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=hook_b)])
         merged = merge_hooks(a, b)
-        assert len(merged["PreToolUse"]) == 2
+        assert len(merged.pre_tool_use) == 2
 
 
 class TestLupHooksToClaudeConversion:
     def test_converts_allow_decision(self) -> None:
         from lup.adapters.clients.claude import lup_hook_output_to_claude
-        from lup.types import LupHookOutput
+        from lup.hooks import LupHookOutput
 
         output = LupHookOutput(decision="allow")
         result = lup_hook_output_to_claude(output)
@@ -387,7 +385,7 @@ class TestLupHooksToClaudeConversion:
 
     def test_converts_deny_decision(self) -> None:
         from lup.adapters.clients.claude import lup_hook_output_to_claude
-        from lup.types import LupHookOutput
+        from lup.hooks import LupHookOutput
 
         output = LupHookOutput(decision="deny", reason="test reason")
         result = lup_hook_output_to_claude(output)
@@ -398,7 +396,7 @@ class TestLupHooksToClaudeConversion:
 
     def test_converts_block_decision(self) -> None:
         from lup.adapters.clients.claude import lup_hook_output_to_claude
-        from lup.types import LupHookOutput
+        from lup.hooks import LupHookOutput
 
         output = LupHookOutput(decision="block", reason="blocked")
         result = lup_hook_output_to_claude(output)
@@ -410,7 +408,7 @@ class TestLupHooksToClaudeConversion:
         Stop/PostToolUse hook must become the generic block decision, not a
         misrouted PreToolUse hookSpecificOutput."""
         from lup.adapters.clients.claude import lup_hook_output_to_claude
-        from lup.types import LupHookOutput
+        from lup.hooks import LupHookOutput
 
         output = LupHookOutput(decision="deny", reason="not done yet")
         result = lup_hook_output_to_claude(output, event="Stop")
@@ -420,7 +418,7 @@ class TestLupHooksToClaudeConversion:
 
     def test_allow_outside_pre_tool_use_is_noop(self) -> None:
         from lup.adapters.clients.claude import lup_hook_output_to_claude
-        from lup.types import LupHookOutput
+        from lup.hooks import LupHookOutput
 
         output = LupHookOutput(decision="allow")
         result = lup_hook_output_to_claude(output, event="PostToolUse")
@@ -429,7 +427,7 @@ class TestLupHooksToClaudeConversion:
 
     def test_converts_system_message(self) -> None:
         from lup.adapters.clients.claude import lup_hook_output_to_claude
-        from lup.types import LupHookOutput
+        from lup.hooks import LupHookOutput
 
         output = LupHookOutput(system_message="try another way")
         result = lup_hook_output_to_claude(output)
@@ -437,7 +435,7 @@ class TestLupHooksToClaudeConversion:
 
     def test_converts_empty_output(self) -> None:
         from lup.adapters.clients.claude import lup_hook_output_to_claude
-        from lup.types import LupHookOutput
+        from lup.hooks import LupHookOutput
 
         output = LupHookOutput()
         result = lup_hook_output_to_claude(output)

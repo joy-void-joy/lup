@@ -28,11 +28,16 @@ from lup.history import (
     update_session_metadata,
 )
 from lup.hooks import (
+    LupHooksConfig,
+    allow_hook,
+    block_hook,
     create_capture_hook,
     create_nudge_hook,
     create_permission_hooks,
     create_tool_allowlist_hook,
     create_tool_gate,
+    deny_hook,
+    merge_hooks,
 )
 from lup.mcp import (
     LupMcpTool,
@@ -70,12 +75,7 @@ from lup.trace import TraceLogger, print_message
 from lup.types import (
     JsonObject,
     JsonValue,
-    LupHooksConfig,
     Usage,
-    allow_hook,
-    block_hook,
-    deny_hook,
-    merge_hooks,
 )
 
 if TYPE_CHECKING:

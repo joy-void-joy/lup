@@ -4,9 +4,13 @@ from collections.abc import Iterator
 
 import pytest
 
-from lup.hooks import create_capture_hook, create_nudge_hook
+from lup.hooks import (
+    LupHookInput,
+    LupHookOutput,
+    create_capture_hook,
+    create_nudge_hook,
+)
 from lup.metrics import get_metrics_summary, reset_metrics, tracked
-from lup.types import LupHookInput
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +22,7 @@ def clean_metrics() -> Iterator[None]:
 
 def post_input(tool_name: str, tool_result: str = "") -> LupHookInput:
     return LupHookInput(
-        hook_event_name="PostToolUse",
+        event="PostToolUse",
         tool_name=tool_name,
         tool_input={},
         tool_result=tool_result,
@@ -70,21 +74,21 @@ async def test_nudge_hook_injects_system_message_for_matching_tool() -> None:
         return "try the structured API instead"
 
     config = create_nudge_hook({"WebFetch": check})
-    hook = config["PostToolUse"][0].hook
+    hook = config.post_tool_use[0].hook
 
     nudged = await hook(post_input("WebFetch"))
-    assert nudged.get("system_message") == "try the structured API instead"
+    assert nudged.system_message == "try the structured API instead"
 
     skipped = await hook(post_input("OtherTool"))
-    assert skipped == {}
+    assert skipped == LupHookOutput()
 
 
 async def test_nudge_check_returning_none_skips_the_nudge() -> None:
     config = create_nudge_hook({"WebFetch": lambda _data: None})
-    hook = config["PostToolUse"][0].hook
+    hook = config.post_tool_use[0].hook
 
     out = await hook(post_input("WebFetch"))
-    assert out == {}
+    assert out == LupHookOutput()
 
 
 # ---------------------------------------------------------------------------
@@ -94,10 +98,10 @@ async def test_nudge_check_returning_none_skips_the_nudge() -> None:
 
 async def test_capture_hook_collects_only_matching_tool_data() -> None:
     def extract(data: LupHookInput) -> list[str]:
-        return [str(data.get("tool_result", ""))]
+        return [data.tool_result]
 
     config, captured = create_capture_hook("WebSearch", extract)
-    hook = config["PostToolUse"][0].hook
+    hook = config.post_tool_use[0].hook
 
     await hook(post_input("WebSearch", "r1"))
     await hook(post_input("Other", "ignored"))
