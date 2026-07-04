@@ -19,8 +19,7 @@ Examples:
     Gate ``StructuredOutput`` until the agent has reflected::
 
         >>> from lup.reflect import ReflectionGate
-        >>> from lup.hooks import create_reflection_gate
-        >>> from lup.types import merge_hooks
+        >>> from lup.hooks import create_reflection_gate, merge_hooks
         >>> gate = ReflectionGate()
         >>> gate_hooks = create_reflection_gate(
         ...     gate=gate,
@@ -44,8 +43,7 @@ Examples:
 
 from pathlib import Path
 
-from lup.hooks import create_tool_gate
-from lup.types import LupHooksConfig
+from lup.hooks import LupHooksConfig, create_tool_gate
 
 
 class ReflectionGate:
@@ -145,4 +143,4 @@ def create_reflection_gate(
         unlocked=lambda _input: gate.reflected,
         allow_when_unlocked=True,
         tag="reflection_gate",
-    ) #lup: Claude specific?
+    )  # lup: Claude specific?

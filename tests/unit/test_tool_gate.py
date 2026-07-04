@@ -7,7 +7,13 @@ call through once unlocked.
 
 import pytest
 
-from lup.hooks import create_tool_gate
+from lup.hooks import (
+    LupHookEvent,
+    LupHookInput,
+    LupHookOutput,
+    LupHooksConfig,
+    create_tool_gate,
+)
 from lup.realtime import (
     Scheduler,
     create_meta_before_sleep_guard,
@@ -15,18 +21,12 @@ from lup.realtime import (
     create_stop_guard,
 )
 from lup.reflect import ReflectionGate, create_reflection_gate
-from lup.types import (
-    JsonObject,
-    LupHookEvent,
-    LupHookInput,
-    LupHookOutput,
-    LupHooksConfig,
-)
+from lup.types import JsonObject
 
 
 def pre_tool_use(tool_name: str, tool_input: JsonObject | None = None) -> LupHookInput:
     return LupHookInput(
-        hook_event_name="PreToolUse",
+        event="PreToolUse",
         tool_name=tool_name,
         tool_input=tool_input or {},
     )
@@ -34,7 +34,7 @@ def pre_tool_use(tool_name: str, tool_input: JsonObject | None = None) -> LupHoo
 
 def post_tool_use(tool_name: str) -> LupHookInput:
     return LupHookInput(
-        hook_event_name="PostToolUse",
+        event="PostToolUse",
         tool_name=tool_name,
         tool_input={},
     )
@@ -42,7 +42,7 @@ def post_tool_use(tool_name: str) -> LupHookInput:
 
 def stop_input(stop_hook_active: bool) -> LupHookInput:
     return LupHookInput(
-        hook_event_name="Stop",
+        event="Stop",
         stop_hook_active=stop_hook_active,
     )
 
@@ -54,16 +54,16 @@ async def run_hook(
     index: int = 0,
 ) -> LupHookOutput:
     """Invoke the hook callback registered for *event* directly."""
-    matcher = config[event][index]
+    matcher = config.for_event(event)[index]
     return await matcher.hook(input_data)
 
 
 def permission_decision(output: LupHookOutput) -> str | None:
-    return output.get("decision")
+    return output.decision
 
 
 def denial_reason(output: LupHookOutput) -> str:
-    return output.get("reason", "")
+    return output.reason
 
 
 async def noop_action(_content: str) -> None:
@@ -89,7 +89,7 @@ async def test_gate_denies_before_unlock_and_passes_after() -> None:
 
     flag["open"] = True
     passed = await run_hook(config, "PreToolUse", pre_tool_use("Target"))
-    assert passed == {}
+    assert passed == LupHookOutput()
 
 
 async def test_gate_allow_when_unlocked_returns_explicit_allow() -> None:
@@ -111,8 +111,8 @@ async def test_gate_block_style_uses_decision_field() -> None:
         style="block",
     )
     out = await run_hook(config, "PreToolUse", pre_tool_use("Target"))
-    assert out.get("decision") == "block"
-    assert out.get("reason") == "halt"
+    assert out.decision == "block"
+    assert out.reason == "halt"
 
 
 async def test_gate_dynamic_message_evaluated_at_denial_time() -> None:
@@ -138,14 +138,14 @@ async def test_on_unlock_tool_opens_the_gate() -> None:
     await run_hook(config, "PostToolUse", post_tool_use("A"))
 
     passed = await run_hook(config, "PreToolUse", pre_tool_use("B"))
-    assert passed == {}
+    assert passed == LupHookOutput()
 
 
 async def test_gate_matches_each_guarded_tool() -> None:
     config = create_tool_gate(
         gated_tool=["t1", "t2"], message="m", unlocked=lambda _input: False
     )
-    assert [m.matcher for m in config["PreToolUse"]] == ["t1", "t2"]
+    assert [m.matcher for m in config.pre_tool_use] == ["t1", "t2"]
 
 
 def test_gate_requires_a_condition_and_a_target() -> None:
@@ -160,7 +160,7 @@ async def test_gate_passes_through_mismatched_events() -> None:
         gated_tool="X", message="m", unlocked=lambda _input: False
     )
     out = await run_hook(config, "PreToolUse", stop_input(False))
-    assert out == {}
+    assert out == LupHookOutput()
 
 
 # ---------------------------------------------------------------------------
@@ -193,11 +193,11 @@ async def test_stop_guard_preset() -> None:
     config = create_stop_guard()
 
     blocked = await run_hook(config, "Stop", stop_input(False))
-    assert blocked.get("decision") == "block"
-    assert "sleep" in blocked.get("reason", "")
+    assert blocked.decision == "block"
+    assert "sleep" in blocked.reason
 
     passed = await run_hook(config, "Stop", stop_input(True))
-    assert passed == {}
+    assert passed == LupHookOutput()
 
 
 async def test_pending_event_guard_preset() -> None:
@@ -208,33 +208,33 @@ async def test_pending_event_guard_preset() -> None:
         scheduler=scheduler,
         guarded_tools=["mcp__s__sleep", "mcp__s__schedule_action"],
     )
-    assert [m.matcher for m in config["PreToolUse"]] == [
+    assert [m.matcher for m in config.pre_tool_use] == [
         "mcp__s__sleep",
         "mcp__s__schedule_action",
     ]
 
     blocked = await run_hook(config, "PreToolUse", pre_tool_use("mcp__s__sleep"))
-    assert blocked.get("decision") == "block"
-    assert "2 unread" in blocked.get("reason", "")
+    assert blocked.decision == "block"
+    assert "2 unread" in blocked.reason
 
     forced = await run_hook(
         config, "PreToolUse", pre_tool_use("mcp__s__sleep", {"force": True})
     )
-    assert forced == {}
+    assert forced == LupHookOutput()
 
     own_debounce = await run_hook(
         config, "PreToolUse", pre_tool_use("mcp__s__sleep", {"debounce_initial": 5})
     )
-    assert own_debounce == {}
+    assert own_debounce == LupHookOutput()
 
     scheduler.wake("event")
     wake_pending = await run_hook(config, "PreToolUse", pre_tool_use("mcp__s__sleep"))
-    assert wake_pending == {}
+    assert wake_pending == LupHookOutput()
     scheduler.consume_wake()
 
     unread["n"] = 0
     nothing_unread = await run_hook(config, "PreToolUse", pre_tool_use("mcp__s__sleep"))
-    assert nothing_unread == {}
+    assert nothing_unread == LupHookOutput()
 
 
 async def test_meta_before_sleep_guard_preset() -> None:
