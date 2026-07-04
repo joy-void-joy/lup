@@ -17,13 +17,13 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from lup.options import LupAgentOptions
+    from lup.adapters.common import LupAgentOptions
     from lup.sandbox import Sandbox
     from lup.types import UsageCost
 
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
-from lup.adapters.common import Client
+from lup.adapters.clients.common import Client
 from lup.history import save_session
 from lup.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
 from lup.notes import NotesConfig, setup_notes
@@ -127,8 +127,8 @@ def build_session_options(
         create_permission_hooks,
         create_tool_allowlist_hook,
     )
+    from lup.adapters.common import LupAgentOptions
     from lup.mcp import create_mcp_server
-    from lup.options import CodexOptions, CompatOptions, LupAgentOptions
     from lup.realtime_relay import REALTIME_DIRNAME
     from lup.reflect import create_reflection_gate
     from lup.types import merge_hooks
@@ -180,12 +180,13 @@ def build_session_options(
     return LupAgentOptions(
         model=settings.model,
         system_prompt=system_prompt,
+        harness_preset=True,
         tool_servers=policy_servers,
         subagents=get_subagent_specs(),
         hooks=hooks,
         allowed_tools=allowed_tools,
-        served_tool_groups=policy.filter_group_names(
-            tool_group_names(realtime=realtime)
+        served_tool_groups=list(
+            policy.filter_group_names(tool_group_names(realtime=realtime))
         ),
         add_dirs=list(notes.all_dirs),
         permission_mode=settings.permission_mode,
@@ -196,20 +197,16 @@ def build_session_options(
         turn_timeout_seconds=settings.turn_timeout_seconds,
         usage_cost=build_usage_cost(),
         realtime=realtime,
-        codex=CodexOptions(
-            sandbox=settings.codex_sandbox,
-            approval_policy=settings.codex_approval_policy,
-            mcp_env=mcp_env,
-            writable_roots=writable_roots,
-            session_id=notes.session.name,
-            shared_dir=notes.session / "sandbox_shared",
-            realtime_dir=realtime_dir,
-        ),
-        compat=CompatOptions(
-            base_url=settings.openai_base_url,
-            api_key=settings.openai_api_key,
-            model_provider=settings.openai_model_provider,
-        ),
+        base_url=settings.openai_base_url,
+        api_key=settings.openai_api_key,
+        model_provider=settings.openai_model_provider,
+        codex_sandbox=settings.codex_sandbox,
+        approval_policy=settings.codex_approval_policy,
+        mcp_env=mcp_env,
+        writable_roots=writable_roots,
+        session_id=notes.session.name,
+        shared_dir=notes.session / "sandbox_shared",
+        realtime_dir=realtime_dir,
     )
 
 
@@ -268,7 +265,7 @@ def build_usage_cost() -> "UsageCost | None":
     ``_CACHED_INPUT``). Without rates this stays ``None``, and a codex-tier
     engine given a budget refuses the construction.
     """
-    from lup.adapters.codex import per_mtok_usage_cost
+    from lup.adapters.clients.codex import per_mtok_usage_cost
 
     if (
         settings.codex_usd_per_mtok_input is None
@@ -355,7 +352,7 @@ def build_session_client(
 ) -> SessionBuild:
     """Build the session's client for ``settings.agent_sdk``.
 
-    Assembles neutral :class:`~lup.options.LupAgentOptions` and hands them
+    Assembles neutral :class:`~lup.adapters.common.LupAgentOptions` and hands them
     to ``create_client`` with the configured engine — no ``match`` on the
     backend, no native option type. Session-scoped resources live inside
     ``client.session()``; session artifacts are read from the notes.

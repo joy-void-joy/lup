@@ -29,7 +29,7 @@ Examples:
         PosixPath('/tmp/trace.md')
 """
 
-#lup: Feels like this file should maybe be split in several?
+# lup: Feels like this file should maybe be split in several?
 
 import itertools
 import json

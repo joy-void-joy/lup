@@ -34,9 +34,9 @@ Examples:
         ...     sb.run_install(["scipy"])
         ...     server = sb.create_mcp_server(name="sandbox")
 """
-#lup: There are often errors with this sandbox. For instance, the agent inside often can't access files in the /shared folder. It's not clear what's mounted where, the agent gets lost.
-#lup: Can you verify this all makes sense?
-#lup: Also Bash should be forbidden by default in terms of builtins
+# lup: There are often errors with this sandbox. For instance, the agent inside often can't access files in the /shared folder. It's not clear what's mounted where, the agent gets lost.
+# lup: Can you verify this all makes sense?
+# lup: Also Bash should be forbidden by default in terms of builtins
 
 import io
 import json

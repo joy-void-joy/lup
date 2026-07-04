@@ -250,7 +250,7 @@ class ToolError(Exception):
     """Raise in a tool handler to return an MCP error response."""
 
 
-class LupMcpTool[I: BaseModel, O: BaseModel]: #lup: Why is this not a BaseModel?
+class LupMcpTool[I: BaseModel, O: BaseModel]:  # lup: Why is this not a BaseModel?
     """MCP tool with typed input/output models for introspection.
 
     Stores the tool definition (name, description, schema, handler) directly.
@@ -293,7 +293,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
 ) -> Callable[
     [Callable[[I], Awaitable[O]]],
     LupMcpTool[I, O],
-]: #lup: Type is hard to read, surely there's a type to indicate "This is a decorator"? If not, we should create it
+]:  # lup: Type is hard to read, surely there's a type to indicate "This is a decorator"? If not, we should create it
     """Decorator for defining MCP tools with typed input/output models.
 
     Infers input/output schemas from type annotations, auto-validates input,

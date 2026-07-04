@@ -315,7 +315,7 @@ class SessionContext(BaseModel):
     cannot drift apart.
     """
 
-    #lup: This seems out of place and Codex specific?
+    # lup: This seems out of place and Codex specific?
     session_dir: Path
     outputs_dir: Path | None = None
     gate_flag: Path | None = None
@@ -324,7 +324,7 @@ class SessionContext(BaseModel):
     realtime_dir: Path | None = None
 
     def to_env(self) -> dict[str, str]:
-        #lup: Like, I really don't get what this is doing here
+        # lup: Like, I really don't get what this is doing here
         """Serialize to the env vars consumed by read_session_context()."""
         env = {SESSION_DIR_ENV: str(self.session_dir)}
         if self.outputs_dir is not None:
