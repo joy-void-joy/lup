@@ -50,14 +50,14 @@ class TestThrottleCancellation:
         throttle = Throttle(max_concurrent=1, min_interval=100.0)
 
         # Prime last_request_time so the next entrant must wait the interval.
-        async with throttle:
+        async with throttle.slot():
             pass
 
         entered = asyncio.Event()
 
         async def holder() -> None:
             entered.set()
-            async with throttle:
+            async with throttle.slot():
                 pass
 
         semaphore = throttle.get_state().semaphore
@@ -81,7 +81,7 @@ class TestThrottleCancellation:
     async def test_normal_exit_still_releases(self) -> None:
         """Sanity: the happy path frees the permit so reuse works."""
         throttle = Throttle(max_concurrent=1)
-        async with throttle:
+        async with throttle.slot():
             pass
         semaphore = throttle.get_state().semaphore
         async with asyncio.timeout(1.0):
