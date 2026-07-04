@@ -146,6 +146,13 @@ class TestClaudeEngine:
         assert isinstance(client, ClaudeClient)
 
 
+def compat_env(opts: LupAgentOptions) -> dict[str, str]:
+    """The SDK subprocess environment the claude-compat engine builds."""
+    client = create_claude_compat(opts)
+    assert isinstance(client, ClaudeClient)
+    return client.options.env
+
+
 class TestClaudeCompatEngine:
     def test_env_points_the_sdk_at_the_endpoint(self) -> None:
         opts = LupAgentOptions(
@@ -156,10 +163,60 @@ class TestClaudeCompatEngine:
         )
         client = create_claude_compat(opts)
         assert isinstance(client, ClaudeClient)
-        assert client.options.env["ANTHROPIC_BASE_URL"] == "http://local:8000"
-        assert client.options.env["ANTHROPIC_AUTH_TOKEN"] == "k"
+        env = client.options.env
+        assert env["ANTHROPIC_BASE_URL"] == "http://local:8000"
+        # Default auth_style is bearer; the x-api-key header is blanked so an
+        # ambient Anthropic key can't leak to the endpoint.
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "k"
+        assert env["ANTHROPIC_API_KEY"] == ""
         # The scaffolding shape is inherited from the claude engine.
         assert client.options.permission_mode == "bypassPermissions"
+
+    def test_api_key_auth_style_uses_the_native_header(self) -> None:
+        opts = LupAgentOptions(
+            model="glm-4",
+            base_url="http://local:8000",
+            api_key="k",
+            auth_style="api_key",
+        )
+        env = compat_env(opts)
+        assert env["ANTHROPIC_API_KEY"] == "k"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == ""
+
+    def test_missing_key_still_supplies_a_placeholder_credential(self) -> None:
+        opts = LupAgentOptions(
+            model="glm-4", base_url="http://local:8000"
+        )
+        env = compat_env(opts)
+        assert env["ANTHROPIC_AUTH_TOKEN"]
+        assert env["ANTHROPIC_API_KEY"] == ""
+
+    def test_single_model_endpoint_maps_every_claude_alias(self) -> None:
+        opts = LupAgentOptions(
+            model="glm-4", base_url="http://local:8000"
+        )
+        env = compat_env(opts)
+        assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "glm-4"
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "glm-4"
+        assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "glm-4"
+
+    def test_multi_model_gateway_leaves_aliases_untouched(self) -> None:
+        opts = LupAgentOptions(
+            model="glm-4",
+            base_url="http://gateway:8000",
+            map_model_aliases=False,
+        )
+        assert "ANTHROPIC_DEFAULT_OPUS_MODEL" not in compat_env(opts)
+
+    def test_nonessential_traffic_is_silenced(self) -> None:
+        opts = LupAgentOptions(
+            model="glm-4", base_url="http://local:8000"
+        )
+        env = compat_env(opts)
+        assert env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
+        assert env["DISABLE_TELEMETRY"] == "1"
+        assert env["DISABLE_ERROR_REPORTING"] == "1"
+        assert env["DISABLE_BUG_COMMAND"] == "1"
 
     def test_missing_base_url_fails_loudly(self) -> None:
         with pytest.raises(ValueError, match="base_url"):

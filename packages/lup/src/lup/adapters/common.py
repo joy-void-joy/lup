@@ -130,6 +130,14 @@ class LupAgentOptions(BaseModel):
     ``ANTHROPIC_BASE_URL``."""
     api_key: str | None = None
     model_provider: str | None = None
+    auth_style: Literal["auth_token", "api_key"] = "auth_token"
+    """Which header carries ``api_key`` on a claude-compat endpoint: bearer
+    ``ANTHROPIC_AUTH_TOKEN`` (hosted gateways) or native ``x-api-key`` via
+    ``ANTHROPIC_API_KEY`` (local servers)."""
+    map_model_aliases: bool = True
+    """Point Claude's opus/sonnet/haiku aliases at ``model`` on a claude-compat
+    endpoint, so a single-model endpoint is never asked for an alias it does
+    not serve."""
 
     codex_sandbox: str | None = None
     """Codex-runtime sandbox mode (named to avoid colliding with
