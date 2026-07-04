@@ -91,15 +91,22 @@ def remove_profile(name: str) -> None:
 
 
 class ProfileSupport(ABC):
-    """A backend's account-profile capability.
+    """A backend's account-profile capability — opt-in, one impl by design.
 
     The registry above is neutral; a subclass supplies the one
     backend-specific piece: where the account home lives when nothing is
     selected (:attr:`default_config_dir`). The env var that points a
     runner at a chosen dir is a constant beside the subclass (e.g.
     ``lup.adapters.profiles.claude.CONFIG_DIR_ENV``).
+
+    Backends opt into this capability by implementing it rather than
+    declaring a flag: a backend whose runner reads a whole account home
+    from a config dir (Claude) provides a ``ProfileSupport`` module
+    beside this one; a backend with no such home (e.g. Codex) has no
+    profile capability and no module to write. A single implementation
+    is thus the designed shape, and an absent one is a capability
+    declined rather than a piece left unwritten.
     """
-    #lup: This ABC seems too strict. The fact that there isn't any codex.py is a sign that there is a problem, no?
 
     @property
     @abstractmethod
