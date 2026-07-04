@@ -102,7 +102,6 @@ from lup.types import (
     SubagentSpec,
     Usage,
     extract_token_usage,
-    normalize_effort,
     safe_normalize_usage,
 )
 
@@ -128,13 +127,24 @@ def server_to_claude(
             return entry
 
 
+CLAUDE_EFFORT_MAP: dict[str, str] = {
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "max",
+    "max": "max",
+}
+
+
 def claude_effort(reasoning_effort: str | None) -> EffortLevel | None:
     """Map a generic effort level to the Claude SDK's ``EffortLevel``.
 
-    The normalized value is matched against the literal's members, so an
+    The mapped value is matched against the literal's members, so an
     unrecognized effort is dropped rather than smuggled through with a cast.
     """
-    match normalize_effort(reasoning_effort, "claude"): # lup: I really feel like there are too many functions everywhere. Same thing with the server_to_claude and lup_server_to_claude.
+    if reasoning_effort is None:
+        return None
+    match CLAUDE_EFFORT_MAP.get(reasoning_effort, reasoning_effort): # lup: I really feel like there are too many functions everywhere. Same thing with the server_to_claude and lup_server_to_claude.
         case "low" | "medium" | "high" | "xhigh" | "max" as level:
             return level
         case _:

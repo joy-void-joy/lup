@@ -15,7 +15,7 @@ import sh
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from lup.paths import (
+from lup.adapters.session_relay import (
     GATE_FLAG_ENV,
     OUTPUTS_DIR_ENV,
     REALTIME_DIR_ENV,

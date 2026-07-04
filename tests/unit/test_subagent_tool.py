@@ -40,6 +40,25 @@ def response_text(response: ToolResponse) -> str:
     return "".join(item.get("text", "") for item in response.get("content", []))
 
 
+def fake_create_client(captured: dict[str, JsonValue], text: str):
+    """A stand-in ``create_client`` that records its kwargs and the query prompt.
+
+    Returns a client whose ``query`` yields a fixed text response, so the
+    delegation path is exercised without constructing a real SDK client.
+    """
+
+    class FakeClient:
+        async def query(self, prompt: str, **_kwargs: JsonValue) -> LupResponse:
+            captured["prompt"] = prompt
+            return LupResponse(blocks=[LupTextBlock(text=text)])
+
+    def build(**kwargs: JsonValue) -> FakeClient:
+        captured.update(kwargs)
+        return FakeClient()
+
+    return build
+
+
 class TestRunSubagentTool:
     async def test_unknown_role_lists_available(self) -> None:
         tool = create_run_subagent_tool([RESEARCHER], default_model="haiku")
@@ -60,12 +79,9 @@ class TestRunSubagentTool:
     ) -> None:
         captured: dict[str, JsonValue] = {}
 
-        async def fake_query(prompt: str, **kwargs: JsonValue) -> LupResponse:
-            captured["prompt"] = prompt
-            captured.update(kwargs)
-            return LupResponse(blocks=[LupTextBlock(text="findings")])
-
-        monkeypatch.setattr(lup.subagents, "query", fake_query)
+        monkeypatch.setattr(
+            lup.subagents, "create_client", fake_create_client(captured, "findings")
+        )
         tool = create_run_subagent_tool([RESEARCHER], default_model="opus")
 
         result = await tool.handler({"name": "researcher", "task": "look this up"})
@@ -81,12 +97,9 @@ class TestRunSubagentTool:
     ) -> None:
         captured: dict[str, JsonValue] = {}
 
-        async def fake_query(prompt: str, **kwargs: JsonValue) -> LupResponse:
-            captured["prompt"] = prompt
-            captured.update(kwargs)
-            return LupResponse(blocks=[LupTextBlock(text="adapted")])
-
-        monkeypatch.setattr(lup.subagents, "query", fake_query)
+        monkeypatch.setattr(
+            lup.subagents, "create_client", fake_create_client(captured, "adapted")
+        )
         tool = create_run_subagent_tool([INHERITOR], default_model="gpt-5.5")
 
         result = await tool.handler({"name": "inheritor", "task": "go"})

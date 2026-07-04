@@ -316,10 +316,10 @@ def create_tool_gate(
         allow_when_unlocked: When True, return an explicit allow decision
             once unlocked instead of passing through to later hooks
             (PreToolUse only).
-        tag: Matcher tag for adapter dispatch. Subprocess backends
-            (Codex) cannot run the in-process ``unlocked`` closure; they
-            regenerate known gates as external hook scripts by tag, so
-            presets with a file-representable condition pass their own
+        tag: Matcher tag for adapter dispatch. Subprocess backends cannot
+            run the in-process ``unlocked`` closure; they regenerate known
+            gates as external hook scripts by tag, so presets with a
+            file-representable condition pass their own
             (e.g. ``"reflection_gate"``).
 
     Returns:

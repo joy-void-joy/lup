@@ -122,6 +122,7 @@ def build_session_options(
     what it cannot honor, and unset knobs get engine defaults. Sessions
     persist, so ``lup run --resume`` can continue them.
     """
+    from lup.adapters.tools.claude import CLAUDE_BUILTIN_TOOLS
     from lup.hooks import (
         create_completion_guard,
         create_permission_hooks,
@@ -168,7 +169,9 @@ def build_session_options(
     hooks = merge_hooks(hooks, create_completion_guard(toolset["output_path"].exists))
     # Tool allowlist: allowed_tools in options is ignored under
     # bypassPermissions, so availability is enforced by a PreToolUse hook.
-    allowed_tools = policy.get_allowed_tools(policy_servers)
+    allowed_tools = policy.get_allowed_tools(
+        policy_servers, builtin_tools=CLAUDE_BUILTIN_TOOLS
+    )
     hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
 
     # Subprocess assembly — consumed by natively-sandboxed engines (codex*).
@@ -230,7 +233,7 @@ def build_codex_session(
     """
     import tempfile
 
-    from lup.paths import SessionContext
+    from lup.adapters.session_relay import SessionContext
 
     from lup_template.agent.prompts import get_system_prompt
 

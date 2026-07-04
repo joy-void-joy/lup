@@ -2,9 +2,9 @@
 
 Each test pins a specific fix: Codex item coverage and web-search
 mapping, full-model-ID passthrough for subagents, timestamp-ordered
-session metadata, the curated guard for Claude-only spec fields, the
-PostToolUse tool_response relay, and the corrected Codex custom-provider
-config keys.
+session metadata, the guard that rejects spec fields the target engine
+cannot honor, the PostToolUse tool_response relay, and the corrected
+Codex custom-provider config keys.
 """
 
 from collections.abc import Iterator
@@ -219,7 +219,7 @@ class TestLatestSessionByTimestamp:
 
 
 # ---------------------------------------------------------------------------
-# Fix #11 — curated guard rejects Claude-only spec fields on other backends
+# Fix #11 — guard rejects spec fields the target engine cannot honor
 # ---------------------------------------------------------------------------
 
 
@@ -249,11 +249,15 @@ class TestSubagentMaxTurnsGuard:
 
         captured: dict[str, JsonValue] = {}
 
-        async def fake_query(prompt: str, **kwargs: JsonValue) -> LupResponse:
-            captured.update(kwargs)
-            return LupResponse(blocks=[LupTextBlock(text="ok")])
+        class FakeClient:
+            async def query(self, prompt: str, **_kwargs: JsonValue) -> LupResponse:
+                return LupResponse(blocks=[LupTextBlock(text="ok")])
 
-        monkeypatch.setattr(lup.subagents, "query", fake_query)
+        def fake_create_client(**kwargs: JsonValue) -> FakeClient:
+            captured.update(kwargs)
+            return FakeClient()
+
+        monkeypatch.setattr(lup.subagents, "create_client", fake_create_client)
         spec = SubagentSpec(
             name="claude-worker",
             description="Runs on Claude",
