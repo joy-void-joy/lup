@@ -38,11 +38,11 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, model_validator
 
+from lup.hooks import LupHooksConfig
 from lup.mcp import LupMcpServerConfig, McpServerEntry, server_tool_names
 from lup.trace import TraceLogger
 from lup.types import (
     JsonObject,
-    LupHooksConfig,
     LupResponse,
     PermissionMode,
     SubagentSpec,
@@ -85,7 +85,7 @@ class LupAgentOptions(BaseModel):
 
     tool_servers: dict[str, McpServerEntry] = {}
     subagents: list[SubagentSpec] = []
-    hooks: LupHooksConfig = {}
+    hooks: LupHooksConfig = LupHooksConfig()
     allowed_tools: list[str] = []
     """Tool names the agent may call. The ``mcp__{server}__{tool}`` name of
     every in-process tool server's tools is added automatically — those

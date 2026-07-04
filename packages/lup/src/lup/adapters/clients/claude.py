@@ -41,12 +41,20 @@ from lup.adapters.clients.common import (
     refuse_unconsumed,
 )
 from lup.adapters.common import LupAgentOptions
+from lup.hooks import (
+    LupHookEvent,
+    LupHookInput,
+    LupHookMatcher,
+    LupHookOutput,
+    LupHooksConfig,
+)
 from lup.mcp import (
     LupMcpServerConfig,
     LupMcpTool,
     LupToolHandler,
     RawMcpServerConfig,
 )
+from lup.paths import extract_glob_dir
 from lup.trace import TraceLogger, print_message
 from lup.types import (
     JsonObject,
@@ -55,11 +63,6 @@ from lup.types import (
     LupContentBlock,
     LupDoneEvent,
     LupEvent,
-    LupHookEvent,
-    LupHookInput,
-    LupHookMatcher,
-    LupHookOutput,
-    LupHooksConfig,
     LupMessage,
     LupResponse,
     LupResultMessage,
@@ -142,7 +145,7 @@ def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:
         max_thinking_tokens=max_thinking,
         permission_mode=permission_mode,
         extra_args=extra_args,
-        hooks=lup_hooks_to_claude(opts.hooks) if opts.hooks else None,
+        hooks=lup_hooks_to_claude(opts.hooks) if opts.hooks.by_event() else None,
         sandbox=(
             {
                 "enabled": True,
@@ -185,6 +188,27 @@ def create_claude(options: LupAgentOptions) -> Client:
 type ClaudeHooksConfig = dict[claude_types.HookEvent, list[claude_types.HookMatcher]]
 
 
+def claude_hook_tool_path(tool_name: str, tool_input: JsonObject) -> str:
+    """Resolve the directory a path-bearing Claude tool acts on.
+
+    Write/Edit/Read carry ``file_path``; Grep carries ``path``; Glob carries
+    ``path`` or, failing that, the directory prefix of its ``pattern``. Every
+    other tool resolves to ``""``. This is the single place a native tool
+    payload becomes the normalized ``LupHookInput.tool_path`` the backend-neutral
+    hook factories read.
+    """
+    match tool_name:
+        case "Write" | "Edit" | "Read":
+            return str(tool_input.get("file_path", ""))
+        case "Grep":
+            return str(tool_input.get("path", ""))
+        case "Glob":
+            path = str(tool_input.get("path", ""))
+            return path or extract_glob_dir(str(tool_input.get("pattern", "")))
+        case _:
+            return ""
+
+
 def build_claude_hook_handler(
     lup_matcher: LupHookMatcher,
     *,
@@ -195,9 +219,9 @@ def build_claude_hook_handler(
 ]:
     """Build a Claude SDK hook handler from a LupHookMatcher.
 
-    ``event`` is the hook event this handler is registered under — the
-    output conversion depends on it (permission decisions exist only on
-    PreToolUse).
+    ``event`` is the hook event this handler is registered under — it seeds
+    the normalized :class:`LupHookInput` and drives the output conversion
+    (permission decisions exist only on PreToolUse).
     """
     hook_fn = lup_matcher.hook
 
@@ -206,21 +230,29 @@ def build_claude_hook_handler(
         _tool_use_id: str | None,
         _context: claude_types.HookContext,
     ) -> claude_types.SyncHookJSONOutput:
-        lup_input = LupHookInput(
-            hook_event_name=input_data.get("hook_event_name", ""),
-            tool_name=input_data.get("tool_name", ""),
-            tool_input=input_data.get("tool_input", {}),
-        )
-        if "stop_hook_active" in input_data:
-            lup_input["stop_hook_active"] = input_data["stop_hook_active"]
+        tool_name = input_data.get("tool_name", "")
+        tool_input = input_data.get("tool_input", {})
+        tool_result = ""
         if "tool_response" in input_data:
             response = input_data["tool_response"]
-            lup_input["tool_result"] = (
+            tool_result = (
                 response
                 if isinstance(response, str)
                 else json.dumps(response, default=str)
             )
-
+        stop_hook_active = (
+            input_data["stop_hook_active"]
+            if "stop_hook_active" in input_data
+            else False
+        )
+        lup_input = LupHookInput(
+            event=event,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_path=claude_hook_tool_path(tool_name, tool_input),
+            tool_result=tool_result,
+            stop_hook_active=stop_hook_active,
+        )
         lup_output = await hook_fn(lup_input)
         return lup_hook_output_to_claude(lup_output, event=event)
 
@@ -231,7 +263,7 @@ def lup_hooks_to_claude(hooks: LupHooksConfig) -> ClaudeHooksConfig:
     """Convert SDK-agnostic LupHooksConfig to Claude SDK hook format."""
     result: ClaudeHooksConfig = {}
 
-    for event_name, matchers in hooks.items():
+    for event_name, matchers in hooks.by_event():
         claude_matchers: list[claude_types.HookMatcher] = []
         for lup_matcher in matchers:
             handler = build_claude_hook_handler(lup_matcher, event=event_name)
@@ -260,9 +292,9 @@ def lup_hook_output_to_claude(
     on every other event a denial converts to the generic ``block``
     decision, and an allow is a no-op output.
     """
-    decision = output.get("decision")
-    reason = output.get("reason", "")
-    system_message = output.get("system_message")
+    decision = output.decision
+    reason = output.reason
+    system_message = output.system_message
 
     match event, decision:
         case ("PreToolUse", "allow"):

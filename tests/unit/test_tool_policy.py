@@ -3,10 +3,9 @@
 import pytest
 from pydantic import BaseModel
 
-from lup.hooks import create_tool_allowlist_hook
+from lup.hooks import LupHookInput, LupHooksConfig, create_tool_allowlist_hook
 from lup.mcp import create_mcp_server, lup_tool
 from lup.tool_policy import BaseToolPolicy
-from lup.types import LupHookInput, LupHooksConfig
 
 from lup_template.agent.config import settings
 from lup_template.agent.tool_policy import ToolPolicy
@@ -37,12 +36,12 @@ async def allowlist_decision(
 ) -> tuple[str | None, str | None]:
     """Run the allowlist hook for a tool; return (decision, reason)."""
     input_data = LupHookInput(
-        hook_event_name="PreToolUse",
+        event="PreToolUse",
         tool_name=tool_name,
         tool_input={},
     )
-    output = await config["PreToolUse"][0].hook(input_data)
-    return output.get("decision"), output.get("reason")
+    output = await config.pre_tool_use[0].hook(input_data)
+    return output.decision, output.reason
 
 
 class TestToolPolicyIsToolAvailable:

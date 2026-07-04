@@ -53,6 +53,7 @@ from lup.adapters.common import (
     TurnTimeoutError,
     UnsupportedOperationError,
 )
+from lup.hooks import LupHooksConfig
 from lup.realtime_relay import RealtimeMailbox
 from lup.trace import TraceLogger, print_message
 from lup.types import (
@@ -60,7 +61,6 @@ from lup.types import (
     LupAssistantMessage,
     LupContentBlock,
     LupEvent,
-    LupHooksConfig,
     LupResponse,
     LupResultMessage,
     LupTextBlock,
@@ -1079,7 +1079,7 @@ def lup_hooks_to_codex(
     configs: list[CodexHookConfig] = []
     seen_tags: set[str] = set()
 
-    for _event_name, matchers in hooks.items():
+    for _event_name, matchers in hooks.by_event():
         for matcher in matchers:
             tag = matcher.tag or ""
             if tag in seen_tags:

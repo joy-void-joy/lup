@@ -32,7 +32,7 @@ Examples:
     Create a Stop hook to keep the agent in a persistent loop::
 
         >>> from lup.realtime import create_stop_guard
-        >>> from lup.types import merge_hooks
+        >>> from lup.hooks import merge_hooks
         >>> hooks = merge_hooks(permission_hooks, create_stop_guard())
 """
 
@@ -46,12 +46,8 @@ from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.hooks import create_tool_gate
+from lup.hooks import LupHookInput, LupHooksConfig, create_tool_gate
 from lup.reflect import ReflectionGate
-from lup.types import (
-    LupHookInput,
-    LupHooksConfig,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -629,15 +625,13 @@ def create_stop_guard() -> LupHooksConfig:
 
     Usage:
         from lup.realtime import create_stop_guard
-        from lup.types import merge_hooks
+        from lup.hooks import merge_hooks
 
         hooks = merge_hooks(permission_hooks, create_stop_guard())
     """
 
     def stop_already_handled(input_data: LupHookInput) -> bool:
-        return input_data.get("hook_event_name") == "Stop" and input_data.get(
-            "stop_hook_active", False
-        )
+        return input_data.event == "Stop" and input_data.stop_hook_active
 
     return create_tool_gate(
         event="Stop",
@@ -677,9 +671,9 @@ def create_pending_event_guard(
     """
 
     def no_unread_events(input_data: LupHookInput) -> bool:
-        if input_data.get("hook_event_name") != "PreToolUse":
+        if input_data.event != "PreToolUse":
             return True
-        tool_input = input_data.get("tool_input", {})
+        tool_input = input_data.tool_input
         if tool_input.get("force", False):
             return True
         if tool_input.get("debounce_initial") is not None:
