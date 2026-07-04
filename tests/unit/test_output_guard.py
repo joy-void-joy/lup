@@ -8,7 +8,8 @@ dry, or the budget cutting the session off.
 
 from pathlib import Path
 
-from lup.adapters.common import BudgetExceededError, Session
+from lup.adapters.clients.common import Session
+from lup.adapters.common import BudgetExceededError
 from lup.output import (
     MISSING_OUTPUT_MESSAGE,
     ensure_output_submitted,
@@ -39,6 +40,9 @@ class SubmittingConversation(Session):
             self.path.write_text("{}", encoding="utf-8")
         return LupResponse()
 
+    async def interrupt(self) -> None:
+        raise NotImplementedError
+
 
 class BrokeConversation(Session):
     """Every turn is refused: the session crossed its budget."""
@@ -51,6 +55,9 @@ class BrokeConversation(Session):
         prefix: str = "",
     ) -> LupResponse:
         raise BudgetExceededError("over budget")
+
+    async def interrupt(self) -> None:
+        raise NotImplementedError
 
 
 async def test_no_turn_when_output_already_exists(tmp_path: Path) -> None:

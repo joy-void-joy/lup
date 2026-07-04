@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from lup.adapters.common import Client, Session
+    from lup.adapters.clients.common import Client, Session
     from lup.types import LupResponse
 
 import sh
@@ -137,8 +137,8 @@ def apply_repl_overrides(
     if not no_tools and not no_prompt:
         return
 
-    from lup.adapters.claude import ClaudeClient
-    from lup.adapters.codex import CodexClient
+    from lup.adapters.clients.claude import ClaudeClient
+    from lup.adapters.clients.codex import CodexClient
 
     match adapter:
         case ClaudeClient():

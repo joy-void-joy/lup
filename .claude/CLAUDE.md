@@ -81,17 +81,13 @@ packages/
     └── src/lup/
         ├── __init__.py         # Public API re-exports (__all__); imports no SDK
         ├── py.typed            # PEP 561 typing marker
-        ├── adapters/           # ALL SDK-specific code, one module per engine
-        │   ├── common.py       # The whole SDK-free seam: Client/Session/Engine ABCs, errors, model router, create_client(), query()
-        │   ├── claude.py       # claude engine: option translation, SDK adaptation, sessions, background
-        │   ├── claude_compat.py# claude-compat engine: Claude scaffolding on Anthropic-compatible endpoints
-        │   ├── codex.py        # codex engine: runtime config, SDK adaptation, sessions, hook codegen (quarantined), background
-        │   └── openai_compat.py# openai-compat engine: OpenAI-protocol endpoints through the Codex runtime
+        ├── adapters/           # ALL SDK-specific code, behind one neutral seam
+        │   ├── common.py       # SDK-free door: LupAgentOptions, seam errors, ENGINES/MODEL_ROUTES routers, create_client(), query()
+        │   ├── clients/        # Client/Session ABCs (pure) + shared helpers; per-engine client, translation, and create_* factory (claude, claude_compat, codex, openai_compat)
+        │   └── background/     # per-engine background: pure contract + wake/debounce machinery (common.py), claude & codex implementations
         ├── antipatterns.py     # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
-        ├── options.py          # LupAgentOptions — backend-agnostic options crossing template -> lib
         ├── markers.py          # `# lup:` / `// lup:` review-marker scanning (dev comments)
         ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
-        ├── background.py       # Background agent base + SDK-aware factory
         ├── history.py          # Session storage/retrieval
         ├── hooks.py            # SDK-agnostic hook factories (permission, gate, completion guard)
         ├── mcp.py              # MCP server creation, @lup_tool decorator
@@ -154,7 +150,7 @@ Code in `packages/lup/` must be **complete-as-is and configurable through functi
 - **No imports from `lup_template`** in `lup` code — the dependency arrow points one way
 - **Placement test:** Can this module be used as-is in a different project without modification? If yes → `packages/lup/`. Does it import from `lup_template`? If yes → `src/lup_template/`.
 
-**Backend dispatch lives only in the adapter layer.** Consumer code — `core.py`, template tools, devtools — never branches on the backend. It assembles one backend-agnostic `LupAgentOptions` and calls `create_client(options=..., engine=...)` (or the one-shot `query()`); `engine_for_id` in `lup.adapters.common` (reading the `ENGINE_ROUTER` table) is the one sanctioned dispatch, and each `Engine` (claude, claude-compat, codex, openai-compat) constructs its own native options behind the `Client`/`Session` interface. There are no capability declarations to branch on: an engine refuses intent knobs it cannot honor (`UnsupportedOptionsError`; `query()` drops them with a log line), raises `UnsupportedOperationError` at the point of use, and the README capability matrix is probed from that behavior rather than declared (the probe harness lives in `devtools/agent/capabilities.py`). A custom backend is an `Engine` subclass passed as `engine=` — no registry to edit. `dev check --antipatterns` regression-guards this: a reintroduced backend `match` outside the sanctioned dispatch or `ServerConfig = Any` surfaces as a finding.
+**Backend dispatch lives only in the adapter layer.** Consumer code — `core.py`, template tools, devtools — never branches on the backend. It assembles one backend-agnostic `LupAgentOptions` and calls `create_client(options=..., engine=...)` (or the one-shot `query()`). Two plain routers in `lup.adapters.common` are the only dispatch: `ENGINES` maps each engine id to its per-engine `create_*` factory (insertion order is the capability-table column order), and `MODEL_ROUTES` maps a model-name regex to a factory (first match wins) for model inference. `create_client` resolves an explicit factory > an id in `ENGINES` > the first `MODEL_ROUTES` match, and each engine's `create_*` factory builds its own native options behind the purely abstract `Client`/`Session` interface. There are no capability declarations to branch on: an engine refuses intent knobs it cannot honor — detected from the translation itself (a knob the translation never reads is one the engine has no lever for) — with `UnsupportedOptionsError` (`query()` drops them with a log line), raises `UnsupportedOperationError` at the point of use, and the README capability matrix is probed from that behavior rather than declared (the probe harness lives in `devtools/agent/capabilities.py`). A custom backend is a factory callable passed as `engine=` — no registry to edit; backend-committed library code can call `create_claude(...)` (etc.) from `lup.adapters.clients.*` directly. `AGENT_SDK=codex|openai-compat|claude-compat` still selects the engine through `ENGINES`. `dev check --antipatterns` regression-guards this: a reintroduced backend `match` outside the sanctioned dispatch or `ServerConfig = Any` surfaces as a finding.
 
 ---
 

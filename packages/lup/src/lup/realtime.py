@@ -36,7 +36,7 @@ Examples:
         >>> hooks = merge_hooks(permission_hooks, create_stop_guard())
 """
 
-#lup: The purpose of this file is really not clear, esp compared to realtime_relay
+# lup: The purpose of this file is really not clear, esp compared to realtime_relay
 
 import asyncio
 import logging
@@ -387,7 +387,7 @@ class Scheduler:
             self.fired_reminder_labels.clear()
         return result
 
-    #lup: All those @properties and method feels like code smells here
+    # lup: All those @properties and method feels like code smells here
 
     # ------------------------------------------------------------------
     # Debounce

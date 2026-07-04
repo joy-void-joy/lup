@@ -1,20 +1,24 @@
 """Generated capability matrix — probed from the engines, never declared.
 
-Each cell is derived from the engines' actual refusal behavior: option
-rows construct a probe client with exactly one intent knob set and
-record whether the engine raises
+Each cell is derived from the engines' actual behavior: option rows
+construct a probe client with exactly one intent knob set and record
+whether the engine raises
 :class:`~lup.adapters.common.UnsupportedOptionsError`; the streaming row
-checks whether the engine's client overrides the post-hoc ``stream``
-default; the background row asks the engine for a tool-using background
-agent and catches the refusal. Construction never connects, so probing
-is offline and cheap — and the table embedded in the top-level
-``README.md`` and printed by ``uv run lup-devtools agent capabilities``
-cannot drift from the code, because it *is* the code.
+reads whether the engine's ``stream`` is itself an async generator that
+yields as the turn unfolds (live) or a plain method that returns
+:func:`~lup.adapters.clients.common.replay_stream`, which emits every
+event only after the turn completes (post-hoc); the background row asks
+the engine for a tool-using background agent and catches the refusal.
+Construction and generator creation never connect, so probing is offline
+and cheap — and the table embedded in the top-level ``README.md`` and
+printed by ``uv run lup-devtools agent capabilities`` cannot drift from
+the code, because it *is* the code.
 
 The harness consumes only the public seam surface, and its only
 consumers are this devtools command and the README regression test
 (``tests/unit/test_capability_matrix_docs.py``) — which is why it lives
-in devtools, not the library.
+in devtools, not the library. Columns follow the :data:`ENGINES`
+insertion order.
 
 Facts that only surface on a live connection (interrupt support, session
 resume) have no row here; they are documented in prose and raise
@@ -22,17 +26,17 @@ resume) have no row here; they are documented in prose and raise
 use.
 """
 
+import inspect
+
 from pydantic import BaseModel
 
+from lup.adapters.background.common import create_background_agent
 from lup.adapters.common import (
-    SHIPPED_ENGINE_IDS,
-    Client,
-    Engine,
+    ENGINES,
+    ClientFactory,
+    LupAgentOptions,
     UnsupportedOptionsError,
-    engine_for_id,
 )
-from lup.background import BackgroundAgentParams
-from lup.options import CompatOptions, LupAgentOptions
 
 
 class CapabilityCell(BaseModel):
@@ -58,11 +62,11 @@ def probe_base_options() -> LupAgentOptions:
     """
     return LupAgentOptions(
         model="capability-probe",
-        harness_prompt=False,
         persist_session=False,
         sdk_sandbox=False,
         on_unsupported="raise",
-        compat=CompatOptions(base_url="http://probe.invalid", api_key="probe"),
+        base_url="http://probe.invalid",
+        api_key="probe",
     )
 
 
@@ -85,51 +89,56 @@ def option_probes() -> list[tuple[str, LupAgentOptions]]:
     ]
 
 
-def probe_option(engine: Engine, opts: LupAgentOptions) -> bool:
+def probe_option(factory: ClientFactory, opts: LupAgentOptions) -> bool:
     """Whether the engine constructs a client for *opts* without refusing."""
     try:
-        engine.client(opts)
+        factory(opts)
     except UnsupportedOptionsError:
         return False
     return True
 
 
-def probe_streaming(engine: Engine) -> str:
-    """``live`` when the engine's client overrides the post-hoc default."""
-    client = engine.client(probe_base_options())
-    return "post_hoc" if type(client).stream is Client.stream else "live"
+def probe_streaming(factory: ClientFactory) -> str:
+    """``live`` when the engine's ``stream`` is its own async generator.
+
+    A live engine yields events as the turn unfolds, so its ``stream`` is
+    an async-generator function. A post-hoc engine's ``stream`` is a plain
+    method that returns :func:`replay_stream`, which yields only after the
+    turn completes.
+    """
+    client = factory(probe_base_options())
+    return "live" if inspect.isasyncgenfunction(type(client).stream) else "post_hoc"
 
 
-def probe_background_tools(engine: Engine) -> bool:
+def probe_background_tools(engine_id: str) -> bool:
     """Whether the engine builds a background agent that acts through tools."""
     try:
-        engine.background(
-            BackgroundAgentParams(
-                name="capability-probe",
-                system_prompt="",
-                build_message=lambda: None,
-                model="capability-probe",
-                builtin_tools=["Read"],
-            )
+        create_background_agent(
+            engine_id,
+            name="capability-probe",
+            system_prompt="",
+            build_message=lambda: None,
+            model="capability-probe",
+            builtin_tools=["Read"],
         )
     except (ValueError, NotImplementedError):
         return False
     return True
 
 
-def engine_capabilities(engine: Engine) -> EngineCapabilities:
+def engine_capabilities(engine_id: str, factory: ClientFactory) -> EngineCapabilities:
     """Probe one engine into its display column."""
-    cells = [CapabilityCell(capability="streaming", value=probe_streaming(engine))]
+    cells = [CapabilityCell(capability="streaming", value=probe_streaming(factory))]
     cells.extend(
-        CapabilityCell(capability=name, value=probe_option(engine, opts))
+        CapabilityCell(capability=name, value=probe_option(factory, opts))
         for name, opts in option_probes()
     )
     cells.append(
         CapabilityCell(
-            capability="background_tools", value=probe_background_tools(engine)
+            capability="background_tools", value=probe_background_tools(engine_id)
         )
     )
-    return EngineCapabilities(name=engine.id, cells=cells)
+    return EngineCapabilities(name=engine_id, cells=cells)
 
 
 def canonical_capability_matrix() -> list[EngineCapabilities]:
@@ -137,9 +146,12 @@ def canonical_capability_matrix() -> list[EngineCapabilities]:
 
     The single source for every rendering: the ``lup-devtools agent
     capabilities`` command, the README table, and the regression test
-    that keeps the two identical. Columns follow ``SHIPPED_ENGINE_IDS``.
+    that keeps the two identical. Columns follow :data:`ENGINES`.
     """
-    return [engine_capabilities(engine_for_id(name)) for name in SHIPPED_ENGINE_IDS]
+    return [
+        engine_capabilities(engine_id, factory)
+        for engine_id, factory in ENGINES.items()
+    ]
 
 
 def capability_matrix_markdown(engines: list[EngineCapabilities]) -> str:

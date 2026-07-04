@@ -42,7 +42,8 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field, ValidationError
 
-from lup.adapters.common import BudgetExceededError, Session
+from lup.adapters.clients.common import Session
+from lup.adapters.common import BudgetExceededError
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.reflect import ReflectionGate
 from lup.trace import TraceLogger

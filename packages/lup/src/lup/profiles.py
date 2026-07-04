@@ -12,7 +12,7 @@ are reused across projects; the active selection lives there too.
 name, else the active profile, else the default ``~/.claude``.
 """
 
-#lup: This is naming claude specifically, but things here should be agnostic. We should also transform it into an ABC, this file is claude specific. Profiles should be a general capabilities of clients
+# lup: This is naming claude specifically, but things here should be agnostic. We should also transform it into an ABC, this file is claude specific. Profiles should be a general capabilities of clients
 import json
 from pathlib import Path
 from typing import TypedDict, cast
