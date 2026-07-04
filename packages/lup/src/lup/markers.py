@@ -1,5 +1,4 @@
 # lup: ignore
-# lup: I do not feel comfortable with a generic # lup: ignore like that. I think this should have types, like pyright does, for instance # lup: ignore[regex]
 """Inline marker scanning for the repo's two marker families.
 
 - Review notes (`# lup:` / `// lup:`): actionable feedback left in the code;
@@ -40,8 +39,15 @@ from pydantic import BaseModel
 
 # lup: This feels like a duplicate of antipattern? Probably both files should be in a common folder (like markers/ or something) and dedup the commonalities
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
-IGNORE_RE = re.compile(r"(#|//)\s*lup\s*:\s*ignore\b", re.IGNORECASE)
-FILE_IGNORE_RE = re.compile(r"^\s*(#|//)\s*lup\s*:\s*ignore\s*$", re.IGNORECASE)
+# An `ignore` directive is bare (`# lup: ignore`, silences every rule) or typed
+# pyright-style (`# lup: ignore[rule-id, other-rule]`, silences only the named
+# rules). The optional `ids` group captures the comma-separated list when typed.
+IGNORE_RE = re.compile(
+    r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?", re.IGNORECASE
+)
+FILE_IGNORE_RE = re.compile(
+    r"^\s*(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?\s*$", re.IGNORECASE
+)
 # Customization todos are shouty and case-sensitive (like TODO:/FIXME:), so
 # prose about "the template" never matches. The comment prefix is optional
 # because a docstring todo carries no `#`; group 1 still captures the
@@ -102,14 +108,46 @@ def marker_count(text: str) -> int:
     return len(MARKER_RE.findall(text))
 
 
-def has_file_level_ignore(text: str, max_lines: int = 10) -> bool:
-    """Whether a standalone `# lup: ignore` sits in the first `max_lines`."""
+def ignore_rule_ids(match: re.Match[str]) -> set[str] | None:
+    """Rule ids a matched `IGNORE_RE`/`FILE_IGNORE_RE` directive names.
+
+    ``None`` is the bare, untyped `# lup: ignore` that silences every rule; a
+    set names exactly the rules a typed `# lup: ignore[a, b]` silences (empty
+    brackets yield an empty set — a typed directive that names nothing).
+    """
+    raw = match.group("ids")
+    if raw is None:
+        return None
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+class FileIgnore(BaseModel):
+    """A file-level `# lup: ignore` near a file's top and what it disables.
+
+    ``rule_ids`` is ``None`` for a bare `# lup: ignore` that disables every
+    rule for the whole file; a set names the rules a typed
+    `# lup: ignore[rule-id]` disables file-wide. ``line`` is 1-based.
+    """
+
+    line: int
+    rule_ids: set[str] | None
+
+
+def file_level_ignore(text: str, max_lines: int = 10) -> FileIgnore | None:
+    """The file-level `# lup: ignore` in the first `max_lines`, or ``None``.
+
+    A standalone bare `# lup: ignore` opts the whole file out of anti-pattern
+    checks; the typed `# lup: ignore[rule-id]` form opts out only the named
+    rules. Feedback-note scanning never consults this — an opted-out file still
+    surfaces its `# lup:` notes.
+    """
     for i, line in enumerate(text.splitlines()):
         if i >= max_lines:
             break
-        if FILE_IGNORE_RE.match(line):
-            return True
-    return False
+        match = FILE_IGNORE_RE.match(line)
+        if match is not None:
+            return FileIgnore(line=i + 1, rule_ids=ignore_rule_ids(match))
+    return None
 
 
 def inside_inline_code(line: str, pos: int) -> bool:
@@ -208,7 +246,6 @@ def find_markers(
     i = 0
 
     # lup: Why do it this way? This seems a bit ugly
-    # lup: Maybe we're lacking a directive in claude.md about using for, not while
     while i < total:
         line = lines[i]
 
