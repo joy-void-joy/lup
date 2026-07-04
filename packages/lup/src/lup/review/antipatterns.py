@@ -15,14 +15,18 @@ inside the hermetic hook — the shared table, mirrored hook, equality test, and
 tree auditor together are the unification a linter would have provided.
 
 Each entry pairs a compiled regex with the message the hook and auditor show.
-This module imports only the standard library and `pydantic` so the hook and the
-auditor can load it cheaply; `# lup:` marker detection itself stays in
-`lup.markers`, which both this set's consumers and the auditor import directly.
+This module imports only the standard library and `pydantic` (directly and
+through `lup.review.common`) so the auditor can load it cheaply; `# lup:` marker
+detection stays in `lup.review.markers`, and the shared scan core — ignore
+matching, comment-column tokenization, the line cursor — in `lup.review.common`,
+which this set's consumers and the auditor import directly.
 """
 
 import re
 
 from pydantic import BaseModel
+
+from lup.review.common import IGNORE_RE, PythonContext, has_file_level_ignore
 
 
 class AntiPattern(BaseModel):
@@ -76,8 +80,8 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         pattern=re.compile(
             r"\b(?:dict|Mapping|MutableMapping)\[\s*str\s*,(?!\s*JsonValue\b)"
         ),
-        message="String-keyed dict[str, ...] hides the value shape — name the fields " #lup: I'm torn on this one. Like, for instance it can make sense to have dict[str, Engine], and use keyof this dict directly to have no dedup.
-        #lup: We should add tuple here though
+        message="String-keyed dict[str, ...] hides the value shape — name the fields "  # lup: I'm torn on this one. Like, for instance it can make sense to have dict[str, Engine], and use keyof this dict directly to have no dedup.
+        # lup: We should add tuple here though
         "with a TypedDict or BaseModel, or use JsonValue for arbitrary JSON",
     ),
     AntiPattern(
@@ -92,7 +96,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         pattern=re.compile(r"\btuple\["),
-        message="`tuple[...]` as a return shape is a code smell — name the fields with a " #lup: As a variable as well
+        message="`tuple[...]` as a return shape is a code smell — name the fields with a "  # lup: As a variable as well
         "TypedDict or BaseModel, or a `type Alias = ...` if it is a reused shape",
     ),
     AntiPattern(
@@ -124,7 +128,9 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # `.replace` on `os`, `Path`, or a `*path` receiver is pathlib/os's
         # atomic file rename, not string surgery — the lookbehinds keep the
         # codebase's path-named receivers out of the net.
-        pattern=re.compile(r"(?<!\bos)(?<![Pp]ath)\.replace\s*\("), #lup: When possible we should avoid os. and prefer Path. Probably os. should be part of the antippattern
+        pattern=re.compile(
+            r"(?<!\bos)(?<![Pp]ath)\.replace\s*\("
+        ),  # lup: When possible we should avoid os. and prefer Path. Probably os. should be part of the antippattern
         message="Avoid .replace() for structured data — edit it through its parser instead "
         "(pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
     ),
@@ -338,20 +344,16 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
     Text that does not tokenize as Python falls back to a plain substring
     check.
     """
-    from lup.markers import IGNORE_RE, has_file_level_ignore, python_comment_columns
-
     if has_file_level_ignore(text):
         return []
 
-    comment_columns = python_comment_columns(text)
+    context = PythonContext.parse(text)
 
     def inline_ignore(line_no: int, line: str) -> bool:
         match = IGNORE_RE.search(line)
         if match is None:
             return False
-        if comment_columns is None:
-            return True
-        return comment_columns.get(line_no) == match.start()
+        return context.comment_at(line_no, match.start())
 
     findings: list[AntiPatternFinding] = []
     for index, line in enumerate(text.splitlines(), start=1):
