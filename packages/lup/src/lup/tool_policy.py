@@ -61,12 +61,12 @@ class BaseToolPolicy:
         self,
         *,
         restricted_mode: bool = False,
-        excluded_tools: frozenset[str] = frozenset(),
-        excluded_tags: frozenset[str] = frozenset(),
+        excluded_tools: set[str] | None = None,
+        excluded_tags: set[str] | None = None,
     ) -> None:
         self.restricted_mode = restricted_mode
-        self.excluded_tools: frozenset[str] = frozenset(excluded_tools)
-        self.excluded_tags: frozenset[str] = frozenset(excluded_tags)
+        self.excluded_tools: set[str] = set(excluded_tools or ())
+        self.excluded_tags: set[str] = set(excluded_tags or ())
 
     def filter_tools(self, tools: Sequence[LupMcpTool]) -> list[LupMcpTool]:
         """Drop tools whose tags intersect the policy's excluded tags.

@@ -37,6 +37,9 @@ class ToolPolicy(BaseToolPolicy):
     - API key availability (from settings)
     - Mode configuration (e.g., restricted mode)
     - Session context (e.g., allow certain tools only in some contexts)
+    - Code-execution sandbox: pass ``code_execution=True`` when the session
+      has one, and raw shell (Bash) is dropped unless ``AGENT_SANDBOX_ALLOW_SHELL``
+      opts back in — the sandbox's ``execute_code`` is the sanctioned code path.
 
     TEMPLATE: customize ``__init__`` to define your exclusion logic; override
     ``group_enabled`` to gate groups on your domain's conditions (e.g. a
@@ -56,21 +59,29 @@ class ToolPolicy(BaseToolPolicy):
         settings: "Settings",
         *,
         restricted_mode: bool = False,
-        excluded_tools: frozenset[str] = frozenset(),
-        excluded_tags: frozenset[str] = frozenset(),
+        excluded_tools: set[str] | None = None,
+        excluded_tags: set[str] | None = None,
+        code_execution: bool = False,
     ) -> None:
-        tags: set[str] = set(excluded_tags)
+        tags: set[str] = set(excluded_tags or ())
+        names: set[str] = set(excluded_tools or ())
 
         # TEMPLATE: map each unmet requirement to its tag — replace the
         # example-api check with your domain's keys, one tag per service
         if not settings.example_api_key:
             tags.add("requires:example-api")
 
-        # TEMPLATE: add name-set exclusions for tools you don't own here
+        # A code-execution sandbox provides isolated execute_code; drop raw
+        # host shell (Bash, the Claude backend's shell builtin) unless
+        # explicitly re-allowed, so the agent cannot bypass the sandbox.
+        if code_execution and not settings.sandbox_allow_shell:
+            names.add("Bash")
+
+        # TEMPLATE: add more name-set exclusions for tools you don't own here
 
         super().__init__(
             restricted_mode=restricted_mode,
-            excluded_tools=excluded_tools,
-            excluded_tags=frozenset(tags),
+            excluded_tools=names,
+            excluded_tags=tags,
         )
         self.settings = settings
