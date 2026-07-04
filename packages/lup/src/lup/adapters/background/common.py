@@ -32,7 +32,7 @@ Examples:
         >>> from lup.adapters.background.common import create_background_agent
         >>> notes: list[str] = []
         >>> agent = create_background_agent(
-        ...     "claude",
+        ...     engine_id,  # a shipped engine id or an Engine instance
         ...     name="observer",
         ...     system_prompt="Summarize conversations...",
         ...     tools=create_observer_tools(notes=notes),
@@ -250,7 +250,7 @@ def create_background_agent(
     opus-class model and can act through tools).
 
     Args:
-        engine: A shipped engine id ("claude", "codex", ...).
+        engine: A shipped engine id or an ``Engine`` instance.
         name: Agent identifier.
         system_prompt: System prompt for the background agent.
         build_message: Callable that returns the next message or None.

@@ -8,7 +8,7 @@ place that decision lives, so a tool that needs a key you haven't configured
 simply never reaches the agent (it can't call a tool that would only fail).
 
 The machinery (tag filtering, group predicates, server assembly, the
-Claude-path allowlist) lives in :class:`lup.tool_policy.BaseToolPolicy`;
+hook-enforced allowlist) lives in :class:`lup.tool_policy.BaseToolPolicy`;
 this subclass only maps the application's settings onto exclusions. See
 the base class for the tag-vs-name rule of thumb.
 

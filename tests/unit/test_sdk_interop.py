@@ -12,6 +12,7 @@ from lup.adapters.clients.codex import (
     build_permission_hooks,
     build_reflection_gate_hook,
     build_tool_allowlist_hook,
+    codex_effort,
     format_codex_hook_output,
     write_nudge_script,
     write_permission_hook_script,
@@ -19,7 +20,6 @@ from lup.adapters.clients.codex import (
     write_tool_allowlist_script,
 )
 from lup.adapters.common import engine_id_of, factory_for_model
-from lup.types import normalize_effort
 from lup.hooks import (
     LupHookInput,
     LupHooksConfig,
@@ -31,7 +31,7 @@ from lup.hooks import (
     merge_hooks,
 )
 from lup.reflect import ReflectionGate, create_reflection_gate
-from lup.types import SubagentSpec, normalize_effort
+from lup.types import SubagentSpec
 
 
 class TestMcpConfigOverrides:
@@ -225,21 +225,14 @@ class TestModelBackend:
 
 
 class TestEffortNormalization:
-    def test_claude_effort(self) -> None:
-        assert normalize_effort("low", "claude") == "low"
-        assert normalize_effort("high", "claude") == "high"
-        assert normalize_effort("xhigh", "claude") == "max"
-        assert normalize_effort("max", "claude") == "max"
-
     def test_codex_effort(self) -> None:
-        assert normalize_effort("low", "openai") == "low"
-        assert normalize_effort("high", "openai") == "high"
-        assert normalize_effort("xhigh", "openai") == "xhigh"
-        assert normalize_effort("max", "openai") == "xhigh"
+        assert codex_effort("low") == "low"
+        assert codex_effort("high") == "high"
+        assert codex_effort("xhigh") == "xhigh"
+        assert codex_effort("max") == "xhigh"
 
     def test_none_passthrough(self) -> None:
-        assert normalize_effort(None, "anthropic") is None
-        assert normalize_effort(None, "openai") is None
+        assert codex_effort(None) is None
 
 
 class TestToolAllowlistHookScripts:

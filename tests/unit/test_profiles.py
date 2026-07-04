@@ -1,4 +1,4 @@
-"""Behavior tests for the profile registry (named Claude config dirs).
+"""Behavior tests for the profile registry (named config dirs).
 
 Exercises registry CRUD with state verification against a temporary
 registry file: add/activate/remove transitions, persistence round-trips,
@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from lup import profiles
+from lup.adapters.profiles import common as profiles
+from lup.adapters.profiles.claude import DEFAULT_CONFIG_DIR, ClaudeProfileSupport
 
 
 @pytest.fixture(autouse=True)
@@ -85,12 +86,13 @@ def test_config_dir_for_expands_user_and_rejects_unknown(tmp_path: Path) -> None
 def test_resolve_config_dir_prefers_name_then_active_then_default(
     tmp_path: Path,
 ) -> None:
-    assert profiles.resolve_config_dir() == profiles.DEFAULT_CONFIG_DIR
+    support = ClaudeProfileSupport()
+    assert support.resolve_config_dir() == DEFAULT_CONFIG_DIR
 
     profiles.add_profile("a", tmp_path / "a")
     profiles.add_profile("b", tmp_path / "b")
-    assert profiles.resolve_config_dir() == tmp_path / "a"  # active
-    assert profiles.resolve_config_dir("b") == tmp_path / "b"  # explicit wins
+    assert support.resolve_config_dir() == tmp_path / "a"  # active
+    assert support.resolve_config_dir("b") == tmp_path / "b"  # explicit wins
 
     profiles.remove_profile("a")
-    assert profiles.resolve_config_dir() == profiles.DEFAULT_CONFIG_DIR
+    assert support.resolve_config_dir() == DEFAULT_CONFIG_DIR

@@ -986,11 +986,11 @@ class Sandbox:
 def sandbox_cleanup(session_id: str, shared_dir: Path) -> Generator[None]:
     """Guarantee a session's sandbox container is removed on exit.
 
-    For sessions whose sandbox lives in a tool subprocess (Codex/OpenAI
-    paths): the subprocess owner may kill it without a graceful exit,
-    skipping its atexit cleanup. The parent wraps the session in this
-    context so the container and volume are removed regardless of how
-    the subprocess died.
+    For sessions whose sandbox lives in a tool subprocess (the
+    subprocess-served-tool paths): the subprocess owner may kill it
+    without a graceful exit, skipping its atexit cleanup. The parent
+    wraps the session in this context so the container and volume are
+    removed regardless of how the subprocess died.
     """
     try:
         yield

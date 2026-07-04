@@ -79,6 +79,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+CODEX_EFFORT_MAP: dict[str, str] = {
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "xhigh",
+}
+
+
+def codex_effort(reasoning_effort: str | None) -> str | None:
+    """Map a generic effort level to the Codex runtime's ``ReasoningEffort``.
+
+    An unrecognized level passes through unchanged for the enum to reject.
+    """
+    if reasoning_effort is None:
+        return None
+    return CODEX_EFFORT_MAP.get(reasoning_effort, reasoning_effort)
+
 
 def subprocess_sandbox_cleanup(
     opts: LupAgentOptions,
@@ -299,7 +317,7 @@ def build_mcp_config_overrides(
         serve_tools_args: Base arguments for the launcher (the
             ``--server <name>`` selector is appended per group).
         env: Session-context env vars for the subprocesses (see
-            :class:`lup.paths.SessionContext`).
+            :class:`lup.adapters.session_relay.SessionContext`).
         servers: Server groups to register.
     """
     base_args = serve_tools_args or ["run", "lup-devtools", "agent", "serve-tools"]
@@ -532,7 +550,8 @@ class CodexSession(Session):
         import openai_codex.generated.v2_all as codex_items
 
         self.check_budget()
-        effort = codex_items.ReasoningEffort(self.effort) if self.effort else None
+        mapped_effort = codex_effort(self.effort)
+        effort = codex_items.ReasoningEffort(mapped_effort) if mapped_effort else None
         started = time.perf_counter()
         try:
             async with asyncio.timeout(self.turn_timeout_seconds):

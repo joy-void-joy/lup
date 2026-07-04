@@ -94,8 +94,9 @@ class SubagentSpec(BaseModel):
     """SDK-agnostic subagent definition.
 
     Each adapter interprets this into its native subagent primitive:
-    Claude converts to ``AgentDefinition``; other backends serve a
-    ``run_subagent`` tool that dispatches a one-shot query per spec.
+    engines with native subagents convert it into that primitive; engines
+    without one serve a ``run_subagent`` tool that dispatches a one-shot
+    query per spec.
     """
 
     name: str
@@ -160,9 +161,9 @@ class Usage(BaseModel):
 type UsageCost = Callable[[Usage], float]
 """Estimates the USD cost of accumulated token usage.
 
-Backends that report token counts but no cost (Codex/OpenAI) take one of these
-to enforce a budget; build it from per-token rates with
-``lup.adapters.clients.codex.per_mtok_usage_cost``.
+Backends that report token counts but no cost take one of these to enforce a
+budget; build it from per-token rates with the ``per_mtok_usage_cost`` helper
+each such adapter provides.
 """
 
 
@@ -305,31 +306,3 @@ def safe_normalize_usage[T](
         return None
 
 
-# ---------------------------------------------------------------------------
-# Effort normalization
-# ---------------------------------------------------------------------------
-
-# lup: This shouldn't live here. This should live in the adapters folders instead
-EFFORT_MAP_CLAUDE: dict[str, str] = {
-    "low": "low",
-    "medium": "medium",
-    "high": "high",
-    "xhigh": "max",
-    "max": "max",
-}
-
-EFFORT_MAP_CODEX: dict[str, str] = {
-    "low": "low",
-    "medium": "medium",
-    "high": "high",
-    "xhigh": "xhigh",
-    "max": "xhigh",
-}
-
-
-def normalize_effort(effort: str | None, engine: str) -> str | None:
-    """Map a generic effort level to SDK-specific value."""
-    if effort is None:
-        return None
-    effort_map = EFFORT_MAP_CLAUDE if engine == "claude" else EFFORT_MAP_CODEX
-    return effort_map.get(effort, effort)

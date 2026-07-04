@@ -115,7 +115,11 @@ def test_build_result_falls_back_when_no_output_submitted(tmp_path: Path) -> Non
 
 def test_allowed_tools_excludes_todoread() -> None:
     """The computed allow-list also omits the stale TodoRead tool."""
-    allowed = ToolPolicy(settings).get_allowed_tools({})
+    from lup.adapters.tools.claude import CLAUDE_BUILTIN_TOOLS
+
+    allowed = ToolPolicy(settings).get_allowed_tools(
+        {}, builtin_tools=CLAUDE_BUILTIN_TOOLS
+    )
     assert "TodoRead" not in allowed
     assert "TodoWrite" in allowed
 

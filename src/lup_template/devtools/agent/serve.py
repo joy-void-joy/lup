@@ -11,8 +11,8 @@ from lup_template.agent.toolsets import (
     build_session_toolset,
 )
 from lup_template.agent.tools.example import EXAMPLE_TOOLS
+from lup.adapters.session_relay import SessionContext
 from lup.mcp import LupMcpTool
-from lup.paths import SessionContext
 
 
 def collect_tools_by_server(
@@ -24,8 +24,9 @@ def collect_tools_by_server(
     (:func:`~lup_template.agent.toolsets.build_session_toolset`) — the
     same builder every backend registers — so the served names cannot
     drift from the session's. Without a session context only the static
-    example group is servable; with one (relayed by the Codex/OpenAI
-    adapters via env vars) the session-bound tools — reflect,
+    example group is servable; with one (relayed by the
+    subprocess-served-tool adapters via env vars) the session-bound
+    tools — reflect,
     submit_output, sandbox, relay — are constructed and served too. To
     enumerate the full registry without a session (inspection), use
     :func:`collect_registry_tools`.
@@ -84,9 +85,9 @@ def collect_registry_tools() -> dict[ServerGroup, list[LupMcpTool]]:
 
 def serve_tools(list_only: bool, server_group: ServerGroup | None) -> None:
     """Serve the collected tools over MCP stdio (see the ``serve-tools`` command)."""
+    from lup.adapters.session_relay import read_session_context
     from lup.mcp import create_mcp_server, serve_stdio
     from lup.metrics import configure_metrics, metrics_path
-    from lup.paths import read_session_context
 
     context = read_session_context()
     if context is not None:
