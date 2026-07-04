@@ -275,6 +275,14 @@ def check_cmd(
             "only — the same lup.review.antipatterns rules the edit hook enforces",
         ),
     ] = False,
+    stats: Annotated[
+        bool,
+        typer.Option(
+            "--stats",
+            help="With --antipatterns: tally findings by rule and kind instead "
+            "of listing each — the sweep triage view",
+        ),
+    ] = False,
     as_json: Annotated[
         bool,
         typer.Option("--json", help="Output findings as JSON (with --antipatterns)"),
@@ -282,7 +290,10 @@ def check_cmd(
 ) -> None:
     """Run ruff format, ruff check, pyright, and pytest. Read-only by default."""
     if antipatterns:
-        antipatterns_mod.report(as_json)
+        if stats:
+            antipatterns_mod.summarize(as_json)
+        else:
+            antipatterns_mod.report(as_json)
         return
     check.run_checks(fix, no_test)
 

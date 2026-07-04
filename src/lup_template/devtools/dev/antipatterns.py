@@ -14,6 +14,7 @@ reporting three classes the hook cannot catch after the fact:
   typed `# lup: ignore[id]` directives is gradual.
 """
 
+from collections import Counter
 from pathlib import Path
 
 import typer
@@ -46,6 +47,53 @@ def scan_antipatterns() -> list[FoundAntiPattern]:
 
 
 ADVISORY_KINDS = {"untyped"}
+
+
+def summarize(as_json: bool) -> None:
+    """Tally anti-pattern findings by rule and kind — the sweep triage view.
+
+    A per-rule count (most-frequent first, with how many files each spans) and
+    a per-kind split, so a cleanup targets the noisiest rules first instead of
+    reading the whole listing. ``--json`` emits the same tally for tooling.
+    """
+    found = scan_antipatterns()
+    by_rule: Counter[str] = Counter()
+    by_kind: Counter[str] = Counter()
+    files_by_rule: dict[str, set[str]] = {}
+    for finding in found:
+        rule = finding.rule_id or "(bare)"
+        by_rule[rule] += 1
+        by_kind[finding.kind] += 1
+        files_by_rule.setdefault(rule, set()).add(finding.file)
+
+    blocking = sum(1 for finding in found if finding.kind not in ADVISORY_KINDS)
+    file_count = len({finding.file for finding in found})
+
+    if as_json:
+        output_json(
+            {
+                "total": len(found),
+                "blocking": blocking,
+                "files": file_count,
+                "by_kind": dict(by_kind),
+                "by_rule": {
+                    rule: {"count": count, "files": len(files_by_rule[rule])}
+                    for rule, count in by_rule.most_common()
+                },
+            }
+        )
+        return
+
+    if not found:
+        typer.echo("No anti-pattern findings.")
+        return
+    typer.echo(
+        f"{len(found)} findings ({blocking} blocking) across {file_count} file(s)"
+    )
+    typer.echo("  by kind: " + ", ".join(f"{k}={v}" for k, v in by_kind.most_common()))
+    typer.echo("  by rule:")
+    for rule, count in by_rule.most_common():
+        typer.echo(f"    {count:5}  {rule}  ({len(files_by_rule[rule])} file(s))")
 
 
 def report(as_json: bool) -> None:
