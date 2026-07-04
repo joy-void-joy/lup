@@ -4,8 +4,8 @@ Three modules, one concern each, with a one-way dependency arrow:
 
 - :mod:`lup.realtime.scheduler` — the in-process ``Scheduler`` state machine
   (sleep/wake, debounce, scheduled actions, reminders, delayed actions) plus
-  the Stop/gate hook factories that hold a Claude persistent agent in its
-  wake -> act -> sleep loop.
+  the Stop/gate hook factories that hold an in-process persistent agent in
+  its wake -> act -> sleep loop.
 - :mod:`lup.realtime.models` — the tool input/output models the agent-facing
   realtime tools speak, independent of how those tools are wired.
 - :mod:`lup.realtime.relay` — the subprocess transport (file mailbox, relay
