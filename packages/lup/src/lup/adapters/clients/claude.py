@@ -85,38 +85,44 @@ from lup.types import (
 
 logger = logging.getLogger(__name__)
 
-HARNESS_THINKING_TOKENS = 128_000 - 1
-"""Session-grade thinking default: as hard as the API allows. Applied only
-under ``harness_preset`` — a nested call keeps the SDK default."""
+SESSION_THINKING_TOKENS = 128_000 - 1
+"""The Claude engine's session-grade thinking default: as hard as the API
+allows. A persisting session that leaves ``max_thinking_tokens`` unset runs at
+this; a nested one-shot keeps the SDK default."""
 
 
 def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:
     """Assemble the native ``ClaudeAgentOptions`` from neutral options.
 
-    ``harness_preset`` selects the session-grade shape: the ``claude_code``
-    preset wraps the system prompt and the harness policy defaults apply —
-    think as hard as the API allows, bypass per-call permission prompts
-    (enforcement is the hook layer the options carry). Without it the
-    prompt is used raw and SDK defaults stand: the shape of a nested LLM
-    call.
+    ``coding_harness_preset`` wraps the system prompt in the ``claude_code``
+    preset; otherwise the prompt is used raw. Independently, a persisting
+    session (``persist_session``) takes the Claude engine's session-grade
+    defaults for any intent knob left unset: an unset ``permission_mode``
+    bypasses per-call prompts (enforcement is the hook layer the options
+    carry) and an unset ``max_thinking_tokens`` runs as hard as the API
+    allows. A nested one-shot keeps the SDK defaults.
 
     Shared by :func:`create_claude` and
     :func:`~lup.adapters.clients.claude_compat.create_claude_compat`, which
     reads ``base_url`` onto the native env afterward.
     """
     system_prompt: str | claude_types.SystemPromptPreset | None
-    max_thinking = opts.max_thinking_tokens
-    permission_mode = opts.permission_mode
-    if opts.harness_preset:
+    if opts.coding_harness_preset:
         system_prompt = {
             "type": "preset",
             "preset": "claude_code",
             "append": opts.system_prompt,
         }
-        max_thinking = HARNESS_THINKING_TOKENS if max_thinking is None else max_thinking
-        permission_mode = permission_mode or "bypassPermissions"
     else:
         system_prompt = opts.system_prompt or None
+
+    max_thinking = opts.max_thinking_tokens
+    permission_mode = opts.permission_mode
+    if opts.persist_session:
+        if max_thinking is None:
+            max_thinking = SESSION_THINKING_TOKENS
+        if permission_mode is None:
+            permission_mode = "bypassPermissions"
 
     extra_args: dict[str, str | None] = {}
     if not opts.persist_session:
