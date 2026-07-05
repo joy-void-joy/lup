@@ -18,8 +18,9 @@ export const meta = {
 //     notes: [{ file, line, text }],  // the original markers this concern subsumes
 //   }],
 // }
-const base = (args && args.base) || 'HEAD'
-const concerns = (args && args.concerns) || []
+const input = typeof args === 'string' ? JSON.parse(args) : args || {}
+const base = input.base || 'HEAD'
+const concerns = input.concerns || []
 
 if (!concerns.length) {
   log('No concerns passed; nothing to execute.')
@@ -95,7 +96,7 @@ function editPrompt(c) {
     `not just the first. Likely starting points: ${starts}.`,
     ``,
     `Steps:`,
-    `1. uv run lup-devtools dev resolve-branch ${c.id}   (makes resolve/${c.id} from ${base})`,
+    `1. git checkout -B resolve/${c.id} ${base}   (fork your branch DIRECTLY from the base commit. Your isolated worktree may start on a different branch/HEAD than ${base}, so pin the base explicitly here — do NOT use 'dev resolve-branch', which forks from HEAD and would give you the wrong base.)`,
     `2. ${strip}`,
     `   This strips THIS concern's \`# lup:\` markers from your worktree so you`,
     `   fix the issue itself, not the note. Do not re-add markers or leave`,
