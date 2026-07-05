@@ -102,7 +102,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="dict-str-object",
         pattern=re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
-        message="Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel", #lup: We should disallow = {}, = [] and = set() constructions I think
+        message="Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",
     ),
     AntiPattern(
         # Flags a string-keyed dict/Mapping only when the VALUE is a scalar/
@@ -127,12 +127,12 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         # Flags every `.get(` — the user's explicit broad choice over a narrow
         # rule. On payload/TypedDict-shaped data use typed attribute access; on
-        # a genuinely open dict (registry, cache, environ) it is one comment.
+        # a genuinely open dict (a registry or cache) it is one comment.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
         message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
-        "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache, "
-        "os.environ) add `# lup: ignore[dict-get]`", #lup: os.environ or os in general should be banned. For os.environ, we use pydantic-settings
+        "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) "
+        "add `# lup: ignore[dict-get]`",
     ),
     AntiPattern(
         id="bare-object",
@@ -155,14 +155,34 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         # Mirrors tuple-shape for frozenset: every declared frozenset annotation
-        # or constructed constant. A fixed name-set constant wants set[str] (or
-        # a purpose-built structure); an immutable-default-argument use is the
-        # one legitimate site — `# lup: ignore[frozenset-shape]` marks it.
+        # or constructed constant. A fixed name set constant wants a dict or a
+        # purpose-built structure; an immutable-default-argument use is the one
+        # legitimate site — `# lup: ignore[frozenset-shape]` marks it.
         id="frozenset-shape",
-        pattern=re.compile(r"\bfrozenset\b"), #lup: We should disable set as well, usually dict is better
+        pattern=re.compile(r"\bfrozenset\b"),
         message="A declared `frozenset[...]` shape or constant is usually overkill — use "
-        "set[str] or a purpose-built structure. For a genuinely immutable default argument "
+        "a dict or a purpose-built structure. For a genuinely immutable default argument "
         "add `# lup: ignore[frozenset-shape]`",
+    ),
+    AntiPattern(
+        # A bare `set` is usually better as a dict (keyed lookup) or a
+        # purpose-built structure. `frozenset` is caught by frozenset-shape and
+        # never trips this, since its "set" is not a standalone word.
+        id="set-shape",
+        pattern=re.compile(r"\bset\b"),
+        message="A declared `set` is usually better as a dict (keyed lookup) or a "
+        "purpose-built structure. For a genuinely set-shaped value add "
+        "`# lup: ignore[set-shape]`",
+    ),
+    AntiPattern(
+        # Broad by intent: every empty-collection literal, even a typed one. A
+        # deliberate typed default carries `# lup: ignore[empty-collection]`. The
+        # lookbehind keeps `==`/`!=`/`<=`/`>=` comparisons out of the net.
+        id="empty-collection",
+        pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
+        message="Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an "
+        "append/mutate loop — build the collection with a comprehension instead, or add "
+        "`# lup: ignore[empty-collection]` for a deliberate typed default",
     ),
     AntiPattern(
         id="cast",
@@ -172,16 +192,9 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="import-re",
-        pattern=re.compile(r"\bimport\s+re\b"),
-        message="`import re` is a code smell — parse structured data with its own API instead: "
-        "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
-        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
-    ),
-    AntiPattern(
-        id="re-import", #lup: What? this should also be import-re, no?
-        pattern=re.compile(r"\bfrom\s+re\s+import\b"),
-        message="`from re import` is a code smell — parse structured data with its own API instead: "
-        "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
+        pattern=re.compile(r"\bimport\s+re\b|\bfrom\s+re\s+import\b"),
+        message="`import re` / `from re import` is a code smell — parse structured data with "
+        "its own API instead: JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
         "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     AntiPattern(
@@ -254,8 +267,8 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="os-shell",
-        pattern=re.compile(r"\bos\.(?:system|popen)\s*\("),
-        message="Use the `sh` library instead of os.system()/os.popen()",
+        pattern=re.compile(r"\bos\.(?:system|popen|exec[lv]\w*)\s*\("),
+        message="Use the `sh` library instead of os.system()/os.popen()/os.exec*()",
     ),
     AntiPattern(
         id="argparse",
@@ -275,10 +288,8 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         # A scoped list of os file/dir operations that all have a pathlib.Path
         # equivalent (iterdir, mkdir, unlink, rename, replace, stat, ...).
-        # os.environ/os.getenv (config) and process/exec APIs (os.fork,
-        # os.exec*, os.kill, os.getpid) are deliberately absent — they are not
-        # file/dir work and pathlib does not cover them.
-        #lup: No, os.environ should be pydantic setting, os.exec etc  is handled by sh
+        # Config access (os.environ/os.getenv) and process launching (os.system/
+        # os.exec*/os.popen) are covered by os-environ and os-shell instead.
         id="os-file-ops",
         pattern=re.compile(
             r"\bos\.(?:getcwd|chdir|listdir|scandir|walk|mkdir|makedirs|rmdir|"
@@ -286,8 +297,12 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             r"readlink|stat|lstat|chmod|chown)\s*\("
         ),
         message="Use pathlib.Path for file/dir operations instead of os.* "
-        "(Path.iterdir/mkdir/unlink/rename/replace/stat/...); os.environ, os.getenv, and "
-        "process/exec APIs stay",
+        "(Path.iterdir/mkdir/unlink/rename/replace/stat/...)",
+    ),
+    AntiPattern(
+        id="os-environ",
+        pattern=re.compile(r"\bos\.(?:environ|getenv)\b"),
+        message="Read configuration through pydantic-settings, not os.environ/os.getenv",
     ),
     AntiPattern(
         id="eval-exec",

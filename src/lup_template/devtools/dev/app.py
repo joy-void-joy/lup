@@ -10,6 +10,7 @@ import lup_template.devtools.dev.branches as branches
 import lup_template.devtools.dev.check as check
 import lup_template.devtools.dev.comments as comments
 import lup_template.devtools.dev.conflicts as conflicts
+import lup_template.devtools.dev.gen_hook as gen_hook
 import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.plugin as plugin
 import lup_template.devtools.dev.pr as pr
@@ -296,6 +297,18 @@ def check_cmd(
             antipatterns_mod.report(as_json)
         return
     check.run_checks(fix, no_test)
+
+
+@app.command("gen-hook")
+def gen_hook_cmd() -> None:
+    """Regenerate the edit hook's anti-pattern mirror from lup.review.antipatterns.
+
+    The hook cannot import a package on its per-edit hot path, so its
+    ANTI_PATTERNS/TS_ANTI_PATTERNS tables are a committed copy of the single
+    source of truth. This rewrites that copy from the library; run it after
+    changing any rule, and the pinning test guards that it was run.
+    """
+    gen_hook.regenerate()
 
 
 # -- comments command --

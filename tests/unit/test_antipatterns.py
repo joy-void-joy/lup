@@ -1,16 +1,15 @@
 # lup: ignore
 """The anti-pattern set is single-sourced, and the auditor agrees with the hook.
 
-`lup.review.antipatterns` is the importable source of truth; the edit hook mirrors it
-inline because it cannot import on its hot path. These tests pin that the two
-copies stay byte-identical (so they cannot drift) and that the auditor flags the
-two classes the hook cannot catch after the fact: a match with no marker, and a
-marker guarding nothing.
+`lup.review.antipatterns` is the importable source of truth; the edit hook carries
+a generated copy inline because it cannot import on its hot path. These tests pin
+that the committed mirror equals `lup-devtools dev gen-hook`'s output (so it can
+never drift) and that the auditor flags the two classes the hook cannot catch
+after the fact: a match with no marker, and a marker guarding nothing.
 """
 
 import importlib.util
 import re
-from pathlib import Path
 
 from lup.review.antipatterns import (
     PYTHON_ANTI_PATTERNS,
@@ -18,16 +17,7 @@ from lup.review.antipatterns import (
     AntiPattern,
     audit_text,
 )
-
-HOOK_PATH = (
-    Path(__file__).parents[2]
-    / ".claude"
-    / "plugins"
-    / "lup"
-    / "hooks"
-    / "scripts"
-    / "auto_allow_edits.py"
-)
+from lup_template.devtools.dev.gen_hook import HOOK_PATH, render_hook_text
 
 spec = importlib.util.spec_from_file_location("auto_allow_edits", HOOK_PATH)
 assert spec is not None and spec.loader is not None
@@ -46,9 +36,8 @@ def hook_rows(
 
 
 def test_python_table_matches_hook() -> None:
-    """The library Python table is identical to the hook's inline copy (ids too)."""
-    hook_table: list[tuple[str, re.Pattern[str], str]] = hook.ANTI_PATTERNS
-    assert lib_rows(PYTHON_ANTI_PATTERNS) == hook_rows(hook_table)
+    """The committed hook equals `dev gen-hook`'s output — regenerate after editing a rule."""
+    assert render_hook_text() == HOOK_PATH.read_text(encoding="utf-8")
 
 
 def test_ts_table_matches_hook() -> None:
@@ -122,7 +111,7 @@ def test_audit_skips_plain_comment_lines() -> None:
 def test_atomic_renames_are_exempt_from_replace_rule() -> None:
     # Path-receiver `.replace` is an atomic rename, not string surgery, so the
     # string-replace rule leaves it alone. (os.replace is redirected to
-    # os-file-ops — see test_audit_flags_os_file_ops_but_not_environ.)
+    # os-file-ops — see test_audit_flags_os_file_ops_and_environ.)
     source = "tmp_path.replace(target)\nPath.replace(a, b)\n"
     assert audit_text(source, PYTHON_ANTI_PATTERNS) == []
 
@@ -164,13 +153,13 @@ def test_audit_flags_strip_like_split() -> None:
 
 
 def test_audit_flags_string_keyed_dict_annotation() -> None:
-    findings = audit_text("env: dict[str, str] = {}\n", PYTHON_ANTI_PATTERNS)
+    findings = audit_text("env: dict[str, str]\n", PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["missing"]
     assert findings[0].rule_id == "dict-str-payload"
 
 
 def test_audit_accepts_non_string_keyed_dict() -> None:
-    assert audit_text("counts: dict[int, str] = {}\n", PYTHON_ANTI_PATTERNS) == []
+    assert audit_text("counts: dict[int, str]\n", PYTHON_ANTI_PATTERNS) == []
 
 
 def test_audit_flags_bare_object_annotations() -> None:
@@ -211,7 +200,7 @@ def test_audit_flags_typing_and_stdlib_modernization() -> None:
     for line, needle in (
         ("x: Optional[int] = None\n", "PEP 604"),
         ("pairs: Union[int, str] = 1\n", "PEP 604"),
-        ("items: List[str] = []\n", "lowercase builtin"),
+        ("items: List[str]\n", "lowercase builtin"),
         ("base = os.path.dirname(p)\n", "pathlib.Path"),
         ("value = eval(expr)\n", "eval()"),
         ("os.system('ls')\n", "`sh` library"),
@@ -254,15 +243,15 @@ def test_audit_accepts_string_keyed_dict_with_concrete_value() -> None:
     # The relaxed rule permits concrete class/callable value types: these are
     # registries/routers whose open, data-driven key set is the point.
     clean = (
-        "engines: dict[str, Engine] = {}\n"
-        "tools: dict[str, LupMcpTool] = {}\n"
-        "factories: Mapping[str, Callable[[], Engine]] = {}\n"
+        "engines: dict[str, Engine]\n"
+        "tools: dict[str, LupMcpTool]\n"
+        "factories: Mapping[str, Callable[[], Engine]]\n"
     )
     assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
 
 
 def test_audit_accepts_jsonvalue_dicts() -> None:
-    clean = "payload: dict[str, JsonValue] = {}\nargs: Mapping[str, JsonValue]\n"
+    clean = "payload: dict[str, JsonValue]\nargs: Mapping[str, JsonValue]\n"
     assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
 
 
@@ -287,7 +276,42 @@ def test_audit_flags_declared_frozenset() -> None:
         assert findings and findings[0].rule_id == "frozenset-shape"
 
 
-def test_audit_flags_os_file_ops_but_not_environ() -> None:
+def test_audit_flags_bare_set_shape() -> None:
+    # A bare `set` is flagged like frozenset; `frozenset` itself trips only
+    # frozenset-shape, since its "set" is not a standalone word.
+    for line in ("names: set[str]\n", "seen = set(values)\n"):
+        rule_ids = {f.rule_id for f in audit_text(line, PYTHON_ANTI_PATTERNS)}
+        assert "set-shape" in rule_ids, line
+    frozen = audit_text("TOKENS = frozenset({'a'})\n", PYTHON_ANTI_PATTERNS)
+    assert [f.rule_id for f in frozen] == ["frozenset-shape"]
+
+
+def test_audit_flags_empty_collection_literals() -> None:
+    for line in ("cache = {}\n", "items = []\n", "buffer = set()\n"):
+        rule_ids = {f.rule_id for f in audit_text(line, PYTHON_ANTI_PATTERNS)}
+        assert "empty-collection" in rule_ids, line
+
+
+def test_audit_accepts_populated_and_compared_collections() -> None:
+    # Non-empty literals are fine, and a `==` comparison is not an assignment,
+    # so the empty-collection rule leaves it alone.
+    clean = "cache = {'k': 1}\nitems = [1, 2]\nif payload == {}:\n    pass\n"
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_flags_os_exec_as_shell() -> None:
+    for line in ("os.execv(path, args)\n", "os.execvp('ls', argv)\n"):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert findings and findings[0].rule_id == "os-shell", line
+
+
+def test_audit_flags_both_re_import_forms() -> None:
+    for line in ("import re\n", "from re import compile\n"):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert findings and findings[0].rule_id == "import-re", line
+
+
+def test_audit_flags_os_file_ops_and_environ() -> None:
     for line in (
         "entries = os.listdir(path)\n",
         "os.makedirs(path)\n",
@@ -295,8 +319,12 @@ def test_audit_flags_os_file_ops_but_not_environ() -> None:
     ):
         findings = audit_text(line, PYTHON_ANTI_PATTERNS)
         assert findings and findings[0].rule_id == "os-file-ops", line
-    clean = "value = os.environ['KEY']\nhome = os.getenv('HOME')\n"
-    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
+    for line in (
+        "value = os.environ['KEY']\n",
+        "home = os.getenv('HOME')\n",
+    ):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert findings and findings[0].rule_id == "os-environ", line
 
 
 def test_audit_flags_every_dict_get() -> None:

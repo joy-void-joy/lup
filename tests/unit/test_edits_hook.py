@@ -153,14 +153,30 @@ def test_declared_frozenset_is_denied() -> None:
     assert edit_decision("src/module.py", "", new) == "deny"
 
 
-def test_os_file_op_is_denied_but_environ_is_allowed() -> None:
+def test_os_file_op_and_environ_are_denied() -> None:
     assert edit_decision("src/module.py", "", "entries = os.listdir(p)\n") == "deny"
-    assert edit_decision("src/module.py", "", "home = os.environ['HOME']\n") == "allow"
+    assert edit_decision("src/module.py", "", "home = os.environ['HOME']\n") == "deny"
+    assert edit_decision("src/module.py", "", "port = os.getenv('PORT')\n") == "deny"
+
+
+def test_os_exec_is_denied_as_shell() -> None:
+    assert edit_decision("src/module.py", "", "os.execv(path, argv)\n") == "deny"
+
+
+def test_empty_collection_literal_is_denied() -> None:
+    assert edit_decision("src/module.py", "", "cache = {}\n") == "deny"
+    assert edit_decision("src/module.py", "", "items = []\n") == "deny"
+
+
+def test_bare_set_annotation_is_denied() -> None:
+    assert edit_decision("src/module.py", "", "seen: set[str]\n") == "deny"
 
 
 def test_concrete_valued_dict_is_allowed() -> None:
-    # The relaxed dict rule permits concrete class value types (a registry).
-    new = "engines: dict[str, Engine] = {}\n"
+    # The relaxed dict rule permits concrete class value types (a registry);
+    # dropping the `= {}` keeps the case focused on the annotation, not the
+    # empty-collection literal.
+    new = "engines: dict[str, Engine]\n"
     assert edit_decision("src/module.py", "", new) == "allow"
 
 
