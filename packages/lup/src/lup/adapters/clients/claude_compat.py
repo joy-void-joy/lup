@@ -43,7 +43,7 @@ Everything else — option translation, refusal, backgrounds — reuses
 import claude_agent_sdk as claude
 
 from lup.adapters.clients.claude import ClaudeClient, build_claude_options
-from lup.adapters.clients.common import Client, refuse_unconsumed
+from lup.adapters.clients.Client import Client, refuse_unconsumed
 from lup.adapters.common import LupAgentOptions
 
 DISABLE_NONESSENTIAL_TRAFFIC_ENV = {

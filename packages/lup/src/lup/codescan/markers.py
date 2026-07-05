@@ -14,7 +14,7 @@
 Both families share one scan (:func:`find_markers`, parameterized over the
 marker regex); :func:`find_feedback` binds it to the review-note rules. The
 tokenization, docstring detection, ignore matching, and line cursor the scan
-stands on live in :mod:`lup.review.common`, shared with the anti-pattern
+stands on live in :mod:`lup.codescan.common`, shared with the anti-pattern
 auditor.
 
 Detection is deliberately liberal — `#` or `//`, any case, optional spaces — so
@@ -38,7 +38,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.review.common import IGNORE_RE, LineCursor, PythonContext
+from lup.codescan.common import IGNORE_RE, LineCursor, PythonContext
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # Customization todos are shouty and case-sensitive (like TODO:/FIXME:), so
@@ -226,7 +226,7 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     Binds :func:`find_markers` to the review-note rules: `ignore` directives
     are skipped — they are the anti-pattern escape hatch, not feedback. That
     covers the standalone file-level `# lup: ignore` too: it disables
-    anti-pattern checks (see `lup.review.antipatterns`), never note gathering,
+    anti-pattern checks (see `lup.codescan.antipatterns`), never note gathering,
     so feedback in an opted-out file still surfaces.
     """
     return find_markers(text, mode, marker=MARKER_RE, ignore=IGNORE_RE)

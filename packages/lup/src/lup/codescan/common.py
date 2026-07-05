@@ -1,7 +1,7 @@
 # lup: ignore
 """Shared scanning core for the review-marker and anti-pattern scanners.
 
-Both `lup.review.markers` and `lup.review.antipatterns` walk a file line by
+Both `lup.codescan.markers` and `lup.codescan.antipatterns` walk a file line by
 line and must tell prose from code: a `#` that opens a real comment, or a
 docstring, is where a review note or an `# lup: ignore` directive can live,
 while the same characters inside an ordinary string literal are code.
@@ -64,7 +64,7 @@ def file_level_ignore(text: str, max_lines: int = 10) -> FileIgnore | None:
     A standalone bare `# lup: ignore` opts the whole file out of anti-pattern
     checks; the typed `# lup: ignore[rule-id]` form opts out only the named
     rules. Feedback-note scanning never consults this — an opted-out file still
-    surfaces its `# lup:` notes (see `lup.review.markers.find_feedback`).
+    surfaces its `# lup:` notes (see `lup.codescan.markers.find_feedback`).
     """
     for i, line in enumerate(text.splitlines()):
         if i >= max_lines:

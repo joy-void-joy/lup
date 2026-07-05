@@ -11,7 +11,7 @@ from lup_template.agent.toolsets import (
     build_session_toolset,
 )
 from lup_template.agent.tools.example import EXAMPLE_TOOLS
-from lup.adapters.session_relay import SessionContext
+from lup.workspace.context import SessionContext
 from lup.mcp import LupMcpTool
 
 
@@ -38,7 +38,7 @@ def collect_tools_by_server(
 
     sandbox = None
     if context.session_id:
-        from lup.sandbox import Sandbox
+        from lup.sandbox.container import Sandbox
 
         sandbox = Sandbox(
             session_id=context.session_id,
@@ -69,7 +69,7 @@ def collect_registry_tools() -> dict[ServerGroup, list[LupMcpTool]]:
     import tempfile
     from pathlib import Path
 
-    from lup.sandbox import Sandbox
+    from lup.sandbox.container import Sandbox
 
     with tempfile.TemporaryDirectory(prefix="lup_toolset_enum_") as tmp:
         base = Path(tmp)
@@ -85,9 +85,9 @@ def collect_registry_tools() -> dict[ServerGroup, list[LupMcpTool]]:
 
 def serve_tools(list_only: bool, server_group: ServerGroup | None) -> None:
     """Serve the collected tools over MCP stdio (see the ``serve-tools`` command)."""
-    from lup.adapters.session_relay import read_session_context
+    from lup.workspace.context import read_session_context
     from lup.mcp import create_mcp_server, serve_stdio
-    from lup.metrics import configure_metrics, metrics_path
+    from lup.telemetry.metrics import configure_metrics, metrics_path
 
     context = read_session_context()
     if context is not None:

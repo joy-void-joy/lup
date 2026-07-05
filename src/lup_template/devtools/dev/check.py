@@ -3,7 +3,7 @@
 import sh
 import typer
 
-from lup.review.markers import find_feedback
+from lup.codescan.markers import find_feedback
 
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
 from lup_template.devtools.dev.comments import scan_tracked

@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 
-from lup.adapters.clients.common import Session
+from lup.adapters.clients.Client import Session
 from lup.mcp import LupMcpTool, ToolResponse
 from lup.realtime.relay import (
     MISSING_SLEEP_MESSAGE,
@@ -34,7 +34,7 @@ from lup.realtime.relay import (
 )
 from lup.realtime.scheduler import Scheduler
 from lup.reflect import ReflectionGate
-from lup.trace import TraceLogger
+from lup.telemetry.trace import TraceLogger
 from lup.types import JsonObject, LupResponse
 
 

@@ -23,7 +23,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.paths import (
+from lup.workspace.paths import (
     TIMESTAMP_FMT,
     outputs_dir,
     runtime_logs_path,
@@ -82,7 +82,7 @@ def setup_notes(
 ) -> NotesConfig:
     """Create session-specific notes folder structure.
 
-    Uses version-aware paths from lup.paths. Separates:
+    Uses version-aware paths from lup.workspace.paths. Separates:
     - RW directories: This session can write here
     - RO directories: Historical data, read-only for this session
     - Logs: Agent cannot access (for feedback loop analysis)

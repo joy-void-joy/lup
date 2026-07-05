@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup.paths import configure, project_root
-from lup.trace import TraceLogger
+from lup.telemetry.trace import TraceLogger
+from lup.workspace.paths import configure, project_root
 from lup.types import LupTextBlock, LupToolResultBlock, LupToolUseBlock
 
 ORIGINAL_ROOT = project_root()

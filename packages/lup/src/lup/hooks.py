@@ -62,7 +62,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from lup.paths import path_is_under
+from lup.workspace.paths import path_is_under
 from lup.types import JsonObject
 
 type LupHookEvent = Literal["PreToolUse", "PostToolUse", "Stop"]
@@ -493,7 +493,7 @@ def create_completion_guard(
 ) -> LupHooksConfig:
     """Create a Stop hook that blocks finishing until output is submitted.
 
-    Output submission happens through a tool (see :mod:`lup.output`), so a
+    Output submission happens through a tool (see :mod:`lup.workspace.output`), so a
     backend's native finalization no longer guarantees a result exists. On
     backends with a stop event, this hook pushes the agent back with a
     corrective message when it tries to finish without submitting.

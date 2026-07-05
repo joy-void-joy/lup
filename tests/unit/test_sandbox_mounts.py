@@ -7,7 +7,8 @@ in __init__.
 
 from pathlib import Path
 
-from lup.sandbox import NetworkMode, Sandbox
+from lup.sandbox.container import Sandbox
+from lup.sandbox.models import NetworkMode
 
 
 def make_sandbox(tmp_path: Path, network_mode: NetworkMode = "bridge") -> Sandbox:

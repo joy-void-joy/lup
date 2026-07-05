@@ -22,8 +22,6 @@ Examples:
         ...     return await do_request()
 """
 
-# lup: Feels like this should go in its dedicated subfolder
-
 import asyncio
 import time
 import weakref

@@ -47,7 +47,7 @@ from typing import Annotated, Required, TypedDict, cast
 import sh
 import typer
 
-from lup.paths import project_root
+from lup.workspace.paths import project_root
 from lup_template.devtools.utils import format_table, git, short_sha
 
 app = typer.Typer(no_args_is_help=True)

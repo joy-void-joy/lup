@@ -18,20 +18,24 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from lup.adapters.common import LupAgentOptions
-    from lup.sandbox import Sandbox
+    from lup.sandbox.container import Sandbox
     from lup.types import UsageCost
 
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
-from lup.adapters.clients.common import Client
+from lup.adapters.clients.Client import Client
 from lup.adapters.tools.claude import WEB_TOOLS
-from lup.history import save_session
-from lup.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
-from lup.notes import NotesConfig, setup_notes
-from lup.output import ensure_output_submitted, output_path
-from lup.trace import TraceLogger
+from lup.telemetry.metrics import (
+    get_metrics_summary,
+    log_metrics_summary,
+    reset_metrics,
+)
+from lup.telemetry.trace import TraceLogger
+from lup.workspace.history import save_session
+from lup.workspace.notes import NotesConfig, setup_notes
+from lup.workspace.output import ensure_output_submitted, output_path
 from lup.types import LupContentBlock, LupResponse, LupTextBlock, LupToolUseBlock
-from lup.paths import agent_version
+from lup.workspace.paths import agent_version
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +77,8 @@ def build_result(
     metrics file when tools ran in a subprocess (Codex/OpenAI paths),
     falling back to the in-process collector (Claude path).
     """
-    from lup.metrics import read_metrics_summary
-    from lup.output import read_output
+    from lup.telemetry.metrics import read_metrics_summary
+    from lup.workspace.output import read_output
 
     result = response.result
     if result is None:
@@ -229,7 +233,7 @@ def build_codex_session(
     """
     import tempfile
 
-    from lup.adapters.session_relay import SessionContext
+    from lup.workspace.context import SessionContext
 
     from lup_template.agent.prompts import get_system_prompt
 
@@ -298,7 +302,7 @@ def resolve_resume_token(reference: str) -> str:
     already be an engine session id and passes through — a saved run that
     recorded no token fails loudly instead of silently starting fresh.
     """
-    from lup.history import get_latest_session_json
+    from lup.workspace.history import get_latest_session_json
 
     record = get_latest_session_json(reference)
     if record is None:
@@ -323,7 +327,7 @@ def build_session_sandbox(notes: "NotesConfig") -> "Sandbox | None":
     if not settings.sandbox_enabled:
         return None
     try:
-        from lup.sandbox import Sandbox
+        from lup.sandbox.container import Sandbox
     except ImportError:
         logger.warning(
             "docker extra not installed; running without code-execution tools"

@@ -20,15 +20,15 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.history import (
+from lup.workspace.history import (
     get_latest_session_json,
     iter_session_dirs,
     list_all_session_ids,
     resolve_version,
     session_backend,
 )
-from lup.metrics import MetricsSummary, ToolMetricsDict
-from lup.paths import agent_version, feedback_path, project_root, traces_path
+from lup.telemetry.metrics import MetricsSummary, ToolMetricsDict
+from lup.workspace.paths import agent_version, feedback_path, project_root, traces_path
 from lup.types import JsonValue
 from lup_template.devtools.utils import format_table, git, output_json
 
@@ -49,7 +49,7 @@ class TokenUsage(TypedDict, total=False):
 class SessionData(TypedDict, total=False):
     """Raw session JSON loaded from disk.
 
-    The payload shape comes from :class:`lup.history.SessionResult`;
+    The payload shape comes from :class:`lup.workspace.history.SessionResult`;
     ``_session_id`` and ``_file`` are injected at load time for display.
     """
 
@@ -435,7 +435,7 @@ def save_analyzed(session_ids: set[str]) -> None:
 def get_uncommitted_session_ids() -> set[str]:
     """Find session IDs with uncommitted result files.
 
-    Paths are matched against the *configured* trace root (``lup.paths``),
+    Paths are matched against the *configured* trace root (``lup.workspace.paths``),
     so a relocated ``AGENT_NOTES_PATH`` keeps ``feedback commit`` working.
     The layout below the root is ``<version>/(sessions|logs)/<session_id>/``.
     Uses ``-z`` so paths with spaces or quoting never shear.

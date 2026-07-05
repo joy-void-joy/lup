@@ -330,7 +330,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
     Returns:
         A decorator that wraps the async handler into a ``LupMcpTool``.
     """
-    from lup.metrics import collector
+    from lup.telemetry.metrics import collector
 
     def decorator(
         handler: ToolHandler[I, O],

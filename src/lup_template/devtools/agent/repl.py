@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from lup.adapters.clients.common import Client, Session
+    from lup.adapters.clients.Client import Client, Session
     from lup.types import LupResponse
 
 import sh
@@ -261,7 +261,7 @@ async def repl(
     from rich.console import Console
     from rich.panel import Panel
 
-    from lup.paths import project_root
+    from lup.workspace.paths import project_root
 
     console = Console(highlight=False)
     effective_model = model or settings.model

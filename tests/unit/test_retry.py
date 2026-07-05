@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from lup.retry import with_retry
+from lup.resilience.retry import with_retry
 
 
 class TestWithRetry:

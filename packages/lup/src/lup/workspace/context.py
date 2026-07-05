@@ -13,7 +13,6 @@ cannot drift apart. In-process backends run these tools in the agent
 process and never touch the relay.
 """
 
-#lup: This seems to have nothing to do in adapters. Shouldn't we just use the same session/ folder inside adapter instead?
 import os
 from collections.abc import Mapping
 from pathlib import Path

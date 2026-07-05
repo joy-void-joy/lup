@@ -130,7 +130,7 @@ def test_codex_session_env_relays_backend_settings(
     """The serve-tools subprocess resolves aux_model() from its own
     settings, and the Codex runtime does not inherit the shell env —
     the relay must carry the inputs that resolution needs."""
-    from lup.notes import NotesConfig
+    from lup.workspace.notes import NotesConfig
 
     from lup_template.agent.core import build_codex_session
 

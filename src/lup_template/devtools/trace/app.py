@@ -5,7 +5,7 @@ from typing import Annotated
 import typer
 
 import lup_template.devtools.trace.traces as traces
-from lup.history import resolve_version
+from lup.workspace.history import resolve_version
 from lup_template.devtools.utils import VERSION_OPT, ALL_VERSIONS_OPT, JSON_OPT
 
 app = typer.Typer(no_args_is_help=True)

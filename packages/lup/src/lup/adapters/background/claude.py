@@ -13,7 +13,10 @@ from collections.abc import AsyncGenerator, Callable
 import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
 
-from lup.adapters.background.common import BackgroundAgentParams, BaseBackgroundAgent
+from lup.adapters.background.Background import (
+    BackgroundAgentParams,
+    BaseBackgroundAgent,
+)
 from lup.adapters.clients.claude import lup_tools_to_sdk
 from lup.mcp import LupMcpTool
 from lup.types import JsonObject

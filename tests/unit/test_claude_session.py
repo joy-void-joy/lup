@@ -242,7 +242,7 @@ async def test_collector_raises_mid_iteration_on_error() -> None:
 async def test_error_result_is_traced_and_kept_before_raising(tmp_path: Path) -> None:
     """An error result must land in the trace and collector state, then raise."""
     from lup.adapters.clients.claude import ClaudeResponseCollector
-    from lup.trace import TraceLogger
+    from lup.telemetry.trace import TraceLogger
 
     progress = AssistantMessage(content=[TextBlock(text="working...")], model="m")
     error = result_message(is_error=True, result="budget exceeded")

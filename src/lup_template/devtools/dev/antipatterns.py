@@ -2,7 +2,7 @@
 
 Backs `lup-devtools dev check --antipatterns` (and the standalone
 `dev check`-row). Walks every git-tracked `.py`/TS-family file and runs the
-single `lup.review.antipatterns` set over it — the same set the edit hook enforces —
+single `lup.codescan.antipatterns` set over it — the same set the edit hook enforces —
 reporting three classes the hook cannot catch after the fact:
 
 - **missing**: a line trips a rule but carries no `# lup: ignore` covering it
@@ -19,12 +19,16 @@ from pathlib import Path
 
 import typer
 
-from lup.review.antipatterns import AntiPatternFinding, audit_text, patterns_for_suffix
+from lup.codescan.antipatterns import (
+    AntiPatternFinding,
+    audit_text,
+    patterns_for_suffix,
+)
 from lup_template.devtools.utils import git, output_json
 
 
 class FoundAntiPattern(AntiPatternFinding):
-    """An :class:`~lup.review.antipatterns.AntiPatternFinding` tagged with its file."""
+    """An :class:`~lup.codescan.antipatterns.AntiPatternFinding` tagged with its file."""
 
     file: str
 

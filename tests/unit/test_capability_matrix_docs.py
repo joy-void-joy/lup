@@ -9,7 +9,7 @@ from lup_template.devtools.agent.capabilities import (
     canonical_capability_matrix,
     capability_matrix_markdown,
 )
-from lup.paths import project_root
+from lup.workspace.paths import project_root
 
 
 def test_readme_capability_matrix_is_current() -> None:
