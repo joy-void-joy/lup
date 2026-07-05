@@ -57,7 +57,6 @@ logger = logging.getLogger(__name__)
 
 
 class LupAgentOptions(BaseModel):
-    # lup: This LupAgentOptions seems to mix several concern into one?
     """Everything an engine needs to construct a client, in neutral terms.
 
     A caller assembles one of these (its domain work: which tools, which
@@ -78,12 +77,12 @@ class LupAgentOptions(BaseModel):
 
     model: str
     system_prompt: str = ""
-    harness_preset: bool = False
-    """Wrap the system prompt in the engine's coding-harness preset
-    (Claude's ``claude_code`` preset + append), thinking as hard as the
-    API allows and bypassing per-call permission prompts. ``False`` — the
-    unmarked default — sends the prompt verbatim under SDK defaults: the
-    shape of a nested LLM call rather than an agent session."""  # lup: What? This seems to conflate several concerns here, whether to enable "think as hard as it allows", whether to embed the claude_code preset, etc...
+    coding_harness_preset: bool = False
+    """Wrap ``system_prompt`` in the engine's coding-harness preset (Claude's
+    ``claude_code`` preset + append). ``False`` — the default — sends the
+    prompt verbatim. Engines without such a preset (Codex) ignore it. Thinking
+    budget and permission handling are the separate ``max_thinking_tokens`` and
+    ``permission_mode`` knobs."""
 
     tool_servers: dict[str, McpServerEntry] = {}
     subagents: list[SubagentSpec] = []

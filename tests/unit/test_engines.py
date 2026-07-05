@@ -11,7 +11,7 @@ two forms.
 import pytest
 
 from lup.adapters.clients.claude import (
-    HARNESS_THINKING_TOKENS,
+    SESSION_THINKING_TOKENS,
     ClaudeClient,
     create_claude,
 )
@@ -66,17 +66,16 @@ class TestEngineResolution:
 
 class TestClaudeEngine:
     def test_session_grade_translation(self) -> None:
-        """harness_preset selects the preset and the harness policy defaults."""
+        """A persisting session takes the preset and the engine policy defaults."""
         opts = LupAgentOptions(
             model="claude-opus-4-6",
             system_prompt="be good",
-            harness_preset=True,
+            coding_harness_preset=True,
             tool_servers={"notes": create_mcp_server("notes", tools=[])},
             subagents=[SubagentSpec(name="r", description="d", prompt="p")],
             allowed_tools=["Read"],
             max_turns=7,
             reasoning_effort="high",
-            persist_session=False,
         )
         client = create_claude(opts)
         assert isinstance(client, ClaudeClient)
@@ -86,9 +85,9 @@ class TestClaudeEngine:
             "preset": "claude_code",
             "append": "be good",
         }
-        assert native.max_thinking_tokens == HARNESS_THINKING_TOKENS
+        assert native.max_thinking_tokens == SESSION_THINKING_TOKENS
         assert native.permission_mode == "bypassPermissions"
-        assert native.extra_args == {"no-session-persistence": None}
+        assert native.extra_args == {}
         assert native.max_turns == 7
         assert native.effort == "high"
         assert native.sandbox is not None
@@ -98,11 +97,11 @@ class TestClaudeEngine:
         assert native.agents is not None and "r" in native.agents
 
     def test_call_tier_translation(self) -> None:
-        """Without the harness: raw prompt, SDK defaults, structured output."""
+        """A nested one-shot: raw prompt, SDK defaults, structured output."""
         opts = LupAgentOptions(
             model="claude-opus-4-6",
             system_prompt="be brief",
-            harness_preset=False,
+            coding_harness_preset=False,
             sdk_sandbox=False,
             persist_session=False,
             output_schema={"type": "object"},
@@ -125,10 +124,60 @@ class TestClaudeEngine:
         assert native.extra_args == {"no-session-persistence": None}
 
     def test_empty_raw_prompt_means_sdk_default(self) -> None:
-        opts = LupAgentOptions(model="claude-opus-4-6", harness_preset=False)
+        opts = LupAgentOptions(model="claude-opus-4-6", coding_harness_preset=False)
         client = create_claude(opts)
         assert isinstance(client, ClaudeClient)
         assert client.options.system_prompt is None
+
+    def test_preset_and_session_defaults_are_independent(self) -> None:
+        """The preset wraps the prompt; the policy defaults follow persistence.
+
+        ``coding_harness_preset`` controls only the prompt shape, so a nested
+        one-shot can wrap the prompt without taking the session defaults, and a
+        persisting session takes the defaults without the preset.
+        """
+        preset_only = create_claude(
+            LupAgentOptions(
+                model="claude-opus-4-6",
+                system_prompt="hi",
+                coding_harness_preset=True,
+                persist_session=False,
+            )
+        )
+        assert isinstance(preset_only, ClaudeClient)
+        assert preset_only.options.system_prompt == {
+            "type": "preset",
+            "preset": "claude_code",
+            "append": "hi",
+        }
+        assert preset_only.options.max_thinking_tokens is None
+        assert preset_only.options.permission_mode is None
+
+        session_only = create_claude(
+            LupAgentOptions(
+                model="claude-opus-4-6",
+                system_prompt="hi",
+                coding_harness_preset=False,
+                persist_session=True,
+            )
+        )
+        assert isinstance(session_only, ClaudeClient)
+        assert session_only.options.system_prompt == "hi"
+        assert session_only.options.max_thinking_tokens == SESSION_THINKING_TOKENS
+        assert session_only.options.permission_mode == "bypassPermissions"
+
+    def test_explicit_intent_knobs_win_over_session_defaults(self) -> None:
+        """A session honors explicit thinking/permission over the engine default."""
+        opts = LupAgentOptions(
+            model="claude-opus-4-6",
+            persist_session=True,
+            max_thinking_tokens=4096,
+            permission_mode="plan",
+        )
+        client = create_claude(opts)
+        assert isinstance(client, ClaudeClient)
+        assert client.options.max_thinking_tokens == 4096
+        assert client.options.permission_mode == "plan"
 
     def test_turn_timeout_refused_on_sessions(self) -> None:
         opts = LupAgentOptions(model="claude-opus-4-6", turn_timeout_seconds=30.0)
@@ -157,7 +206,7 @@ class TestClaudeCompatEngine:
     def test_env_points_the_sdk_at_the_endpoint(self) -> None:
         opts = LupAgentOptions(
             model="glm-4",
-            harness_preset=True,
+            coding_harness_preset=True,
             base_url="http://local:8000",
             api_key="k",
         )
@@ -302,7 +351,7 @@ class TestCreateClient:
         engine = RecordingEngine()
         create_client(model="gpt-5.5", engine=engine)
         opts = engine.built[0]
-        assert opts.harness_preset is False
+        assert opts.coding_harness_preset is False
         assert opts.persist_session is False
         assert opts.sdk_sandbox is False
 
@@ -340,4 +389,4 @@ class TestQuerySugar:
         ran = engine.ran[0]
         assert ran.on_unsupported == "drop"
         assert ran.max_turns == 3
-        assert ran.harness_preset is False
+        assert ran.coding_harness_preset is False
