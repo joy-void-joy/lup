@@ -46,6 +46,7 @@ from lup.adapters.clients.common import (
     query_via_session,
     refuse_unconsumed,
     replay_stream,
+    safe_normalize_usage,
 )
 from lup.adapters.common import (
     BudgetExceededError,
@@ -70,7 +71,6 @@ from lup.types import (
     LupUserMessage,
     Usage,
     UsageCost,
-    safe_normalize_usage,
 )
 
 if TYPE_CHECKING:

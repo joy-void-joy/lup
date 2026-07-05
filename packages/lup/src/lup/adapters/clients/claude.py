@@ -38,8 +38,10 @@ from lup.adapters.clients.common import (
     Client,
     ResponseCollector,
     Session,
+    extract_token_usage,
     query_via_session,
     refuse_unconsumed,
+    safe_normalize_usage,
 )
 from lup.adapters.common import LupAgentOptions
 from lup.hooks import (
@@ -79,8 +81,6 @@ from lup.types import (
     LupUserMessage,
     SubagentSpec,
     Usage,
-    extract_token_usage,
-    safe_normalize_usage,
 )
 
 logger = logging.getLogger(__name__)
