@@ -164,7 +164,7 @@ def create_codex(options: LupAgentOptions) -> Client:
     Consumes the subprocess mechanism payloads (served tool groups, env
     relay, writable roots) and ignores the in-process ones (hooks, tool
     servers — enforcement here is the runtime's native sandbox) and the
-    Claude-only ``harness_preset``/``sdk_sandbox`` shape flags. Subagent
+    Claude-only ``coding_harness_preset``/``sdk_sandbox`` shape flags. Subagent
     specs are served through the ``run_subagent`` tool group rather than
     run natively. Persistent mode surfaces the file-relay mailbox.
     """
