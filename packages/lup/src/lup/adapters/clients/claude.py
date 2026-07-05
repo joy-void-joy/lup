@@ -16,7 +16,7 @@ The SDK is imported as a qualified namespace (``claude`` for the package,
 ``claude_types`` for its ``types`` submodule) so every SDK type reads with
 its origin visible at the use site.
 """
-#lup: What's not clear here is: Where is background/claude.py, profiles/claude.py, etc... initiated and used. They should all converge somewhere. We should use deeper nested folder
+# lup: What's not clear here is: Where is background/claude.py, profiles/claude.py, etc... initiated and used. They should all converge somewhere. We should use deeper nested folder
 
 import copy
 import json
@@ -87,16 +87,16 @@ logger = logging.getLogger(__name__)
 
 SESSION_THINKING_TOKENS = 128_000 - 1
 """The Claude engine's session-grade thinking default: as hard as the API
-allows. A persisting session that leaves ``max_thinking_tokens`` unset runs at
-this; a nested one-shot keeps the SDK default."""
+allows. A session (``session_defaults``) that leaves ``max_thinking_tokens``
+unset runs at this; a nested one-shot keeps the SDK default."""
 
 
 def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:
     """Assemble the native ``ClaudeAgentOptions`` from neutral options.
 
     ``coding_harness_preset`` wraps the system prompt in the ``claude_code``
-    preset; otherwise the prompt is used raw. Independently, a persisting
-    session (``persist_session``) takes the Claude engine's session-grade
+    preset; otherwise the prompt is used raw. Independently, a session
+    (``session_defaults``) takes the Claude engine's session-grade
     defaults for any intent knob left unset: an unset ``permission_mode``
     bypasses per-call prompts (enforcement is the hook layer the options
     carry) and an unset ``max_thinking_tokens`` runs as hard as the API
@@ -118,7 +118,7 @@ def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:
 
     max_thinking = opts.max_thinking_tokens
     permission_mode = opts.permission_mode
-    if opts.persist_session:
+    if opts.session_defaults:
         if max_thinking is None:
             max_thinking = SESSION_THINKING_TOKENS
         if permission_mode is None:

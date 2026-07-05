@@ -104,6 +104,7 @@ class TestClaudeEngine:
             coding_harness_preset=False,
             sdk_sandbox=False,
             persist_session=False,
+            session_defaults=False,
             output_schema={"type": "object"},
             tools=["Read"],
             max_budget_usd=2.0,
@@ -130,18 +131,18 @@ class TestClaudeEngine:
         assert client.options.system_prompt is None
 
     def test_preset_and_session_defaults_are_independent(self) -> None:
-        """The preset wraps the prompt; the policy defaults follow persistence.
+        """The preset wraps the prompt; the policy defaults follow session_defaults.
 
-        ``coding_harness_preset`` controls only the prompt shape, so a nested
-        one-shot can wrap the prompt without taking the session defaults, and a
-        persisting session takes the defaults without the preset.
+        ``coding_harness_preset`` controls only the prompt shape, so a run can
+        wrap the prompt without taking the session defaults (``session_defaults``
+        off), and take the defaults without the preset — the two are orthogonal.
         """
         preset_only = create_claude(
             LupAgentOptions(
                 model="claude-opus-4-6",
                 system_prompt="hi",
                 coding_harness_preset=True,
-                persist_session=False,
+                session_defaults=False,
             )
         )
         assert isinstance(preset_only, ClaudeClient)
@@ -158,7 +159,7 @@ class TestClaudeEngine:
                 model="claude-opus-4-6",
                 system_prompt="hi",
                 coding_harness_preset=False,
-                persist_session=True,
+                session_defaults=True,
             )
         )
         assert isinstance(session_only, ClaudeClient)
@@ -170,7 +171,7 @@ class TestClaudeEngine:
         """A session honors explicit thinking/permission over the engine default."""
         opts = LupAgentOptions(
             model="claude-opus-4-6",
-            persist_session=True,
+            session_defaults=True,
             max_thinking_tokens=4096,
             permission_mode="plan",
         )
@@ -178,6 +179,39 @@ class TestClaudeEngine:
         assert isinstance(client, ClaudeClient)
         assert client.options.max_thinking_tokens == 4096
         assert client.options.permission_mode == "plan"
+
+    def test_persistence_and_session_defaults_are_independent(self) -> None:
+        """persist_session (SDK persistence) and session_defaults (engine
+        behavior defaults) are orthogonal knobs, not one bundled bool."""
+        # Persist the SDK session but decline the session-grade defaults.
+        persist_no_defaults = create_claude(
+            LupAgentOptions(
+                model="claude-opus-4-6",
+                persist_session=True,
+                session_defaults=False,
+            )
+        )
+        assert isinstance(persist_no_defaults, ClaudeClient)
+        assert persist_no_defaults.options.max_thinking_tokens is None
+        assert persist_no_defaults.options.permission_mode is None
+        assert "no-session-persistence" not in persist_no_defaults.options.extra_args
+
+        # Take the session-grade defaults on a non-persisting call.
+        defaults_no_persist = create_claude(
+            LupAgentOptions(
+                model="claude-opus-4-6",
+                persist_session=False,
+                session_defaults=True,
+            )
+        )
+        assert isinstance(defaults_no_persist, ClaudeClient)
+        assert (
+            defaults_no_persist.options.max_thinking_tokens == SESSION_THINKING_TOKENS
+        )
+        assert defaults_no_persist.options.permission_mode == "bypassPermissions"
+        assert defaults_no_persist.options.extra_args == {
+            "no-session-persistence": None
+        }
 
     def test_turn_timeout_refused_on_sessions(self) -> None:
         opts = LupAgentOptions(model="claude-opus-4-6", turn_timeout_seconds=30.0)
