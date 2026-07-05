@@ -64,6 +64,7 @@ def probe_base_options() -> LupAgentOptions:
     return LupAgentOptions(
         model="capability-probe",
         persist_session=False,
+        session_defaults=False,
         sdk_sandbox=False,
         on_unsupported="raise",
         base_url="http://probe.invalid",

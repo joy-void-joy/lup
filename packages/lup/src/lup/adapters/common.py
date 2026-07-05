@@ -116,6 +116,15 @@ class LupAgentOptions(BaseModel):
     the budget intent, not itself an intent knob."""
 
     persist_session: bool = True
+    """Keep the engine's SDK session alive across turns, vs a one-shot nested
+    call that does not persist. Purely about session persistence — the
+    session-grade behavior defaults are the separate ``session_defaults`` knob."""
+    session_defaults: bool = True
+    """Apply the engine's session-grade defaults for intent knobs left unset —
+    on Claude, an unset ``max_thinking_tokens`` runs as hard as the API allows
+    and an unset ``permission_mode`` bypasses per-call prompts. A full agent
+    session wants these; a nested one-shot sets it ``False``. Independent of
+    ``persist_session`` so persistence and behavior-defaults stay separate axes."""
     sdk_sandbox: bool = True
     """Enable the engine's own OS sandbox where it has one (Claude SDK)."""
     realtime: bool = False
@@ -382,6 +391,7 @@ def create_client(
             model=model,
             system_prompt=system_prompt or "",
             persist_session=False,
+            session_defaults=False,
             sdk_sandbox=False,
             output_schema=output_type.model_json_schema() if output_type else None,
             tools=tools,
