@@ -29,7 +29,7 @@ with the persistent agent pattern (observer example).
 Examples:
     Create an observer that maintains conversation notes::
 
-        >>> from lup.adapters.background.common import create_background_agent
+        >>> from lup.adapters.background.Background import create_background_agent
         >>> notes: list[str] = []
         >>> agent = create_background_agent(
         ...     engine_id,  # a shipped engine id or an Engine instance

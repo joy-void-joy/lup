@@ -23,17 +23,17 @@ tree auditor together are the unification a linter would have provided.
 
 Each entry pairs a stable id and a compiled regex with the message the hook and
 auditor show. This module imports only the standard library and `pydantic`
-(directly and through `lup.review.common`) so the auditor can load it cheaply;
-`# lup:` marker detection stays in `lup.review.markers`, and the shared scan
+(directly and through `lup.codescan.common`) so the auditor can load it cheaply;
+`# lup:` marker detection stays in `lup.codescan.markers`, and the shared scan
 core — ignore matching, comment-column tokenization, the line cursor — in
-`lup.review.common`, which this set's consumers and the auditor import directly.
+`lup.codescan.common`, which this set's consumers and the auditor import directly.
 """
 
 import re
 
 from pydantic import BaseModel
 
-from lup.review.common import (
+from lup.codescan.common import (
     IGNORE_RE,
     PythonContext,
     file_level_ignore,

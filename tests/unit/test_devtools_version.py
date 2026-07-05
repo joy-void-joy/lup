@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import typer
 
-from lup import paths
+from lup.workspace import paths
 from lup_template.devtools import version
 
 

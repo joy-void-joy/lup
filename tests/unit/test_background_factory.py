@@ -6,7 +6,7 @@ silently dropping tools was how the Codex path shipped broken before.
 
 import pytest
 
-from lup.adapters.background.common import create_background_agent
+from lup.adapters.background.Background import create_background_agent
 
 
 def build_message() -> str | None:

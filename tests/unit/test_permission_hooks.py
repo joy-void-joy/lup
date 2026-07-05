@@ -9,8 +9,8 @@ from pathlib import Path
 
 from lup.adapters.clients.claude import claude_hook_tool_path
 from lup.hooks import LupHookInput, LupHooksConfig, create_permission_hooks
-from lup.notes import setup_notes
-from lup.paths import path_is_under
+from lup.workspace.notes import setup_notes
+from lup.workspace.paths import path_is_under
 from lup.types import JsonObject
 
 

@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from lup.history import iter_session_dirs, load_sessions_json, save_session
-from lup.paths import configure, project_root
+from lup.workspace.history import iter_session_dirs, load_sessions_json, save_session
+from lup.workspace.paths import configure, project_root
 
 ORIGINAL_ROOT = project_root()
 
@@ -64,7 +64,7 @@ class TestBackendStamp:
         """The codex path persists through the same layout as claude: the
         agent_sdk stamp survives the round-trip and session_backend reads
         it back for the trace tooling."""
-        from lup.history import session_backend
+        from lup.workspace.history import session_backend
 
         save_session(
             CodexResult(

@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from lup import paths
-from lup.notes import setup_notes
-from lup.paths import parse_timestamp
+from lup.workspace import paths
+from lup.workspace.notes import setup_notes
+from lup.workspace.paths import parse_timestamp
 
 
 @pytest.fixture

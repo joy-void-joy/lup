@@ -26,15 +26,16 @@ from pathlib import Path
 
 import pytest
 
-from lup import paths
-from lup.metrics import MetricsCollector, metrics_path, read_metrics_summary
-from lup.notes import setup_notes
-from lup.paths import path_is_under, sessions_dir, trace_logs_dir
+from lup.workspace import paths
+from lup.telemetry.metrics import MetricsCollector, metrics_path, read_metrics_summary
+from lup.workspace.notes import setup_notes
+from lup.workspace.paths import path_is_under, sessions_dir, trace_logs_dir
 from lup.realtime.models import SleepInput
 from lup.realtime.relay import RealtimeMailbox, ReplyEvent, RemindEvent
 from lup.reflect import ReflectionGate
-from lup.sandbox import Sandbox, process_is_alive, process_start_token
-from lup.throttle import Throttle
+from lup.sandbox.container import Sandbox
+from lup.sandbox.process import process_is_alive, process_start_token
+from lup.resilience.throttle import Throttle
 
 HAVE_PROC = Path("/proc/self/stat").exists()
 

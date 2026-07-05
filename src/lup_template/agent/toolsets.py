@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict
 if TYPE_CHECKING:
     from lup.mcp import LupMcpTool
     from lup.reflect import ReflectionGate
-    from lup.sandbox import Sandbox
+    from lup.sandbox.container import Sandbox
 
 ServerGroup = Literal["notes", "sandbox", "session", "example"]
 """A tool-group name this registry can build — the group vocabulary every
@@ -93,7 +93,7 @@ def build_session_toolset(
         The groups plus the shared gate and the submitted-output path,
         which hook wiring (reflection gate, completion guard) needs.
     """
-    from lup.output import create_output_tool
+    from lup.workspace.output import create_output_tool
     from lup.subagents import create_run_subagent_tool
 
     from lup_template.agent.config import aux_model, settings

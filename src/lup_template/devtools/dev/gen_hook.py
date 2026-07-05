@@ -2,7 +2,7 @@
 
 `.claude/plugins/lup/hooks/scripts/auto_allow_edits.py` cannot import a package
 on its per-edit hot path, so it carries an inline copy of the
-`lup.review.antipatterns` tables. This module renders those copies straight from
+`lup.codescan.antipatterns` tables. This module renders those copies straight from
 the importable source and splices them back into the committed hook, so the
 mirror is generated rather than hand-maintained and can never drift.
 
@@ -20,7 +20,11 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.review.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS, AntiPattern
+from lup.codescan.antipatterns import (
+    PYTHON_ANTI_PATTERNS,
+    TS_ANTI_PATTERNS,
+    AntiPattern,
+)
 
 HOOK_PATH = (
     Path(__file__).resolve().parents[4]

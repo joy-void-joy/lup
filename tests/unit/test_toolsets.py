@@ -9,7 +9,7 @@ run_subagent asymmetry.
 
 from pathlib import Path
 
-from lup.sandbox import Sandbox
+from lup.sandbox.container import Sandbox
 
 from lup_template.agent.toolsets import (
     EXAMPLE_GROUP,

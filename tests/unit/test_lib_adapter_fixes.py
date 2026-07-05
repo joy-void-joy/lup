@@ -183,7 +183,7 @@ class TestToolResultRelay:
 class TestLatestSessionByTimestamp:
     @pytest.fixture
     def isolated_root(self, tmp_path: Path) -> Iterator[Path]:
-        from lup.paths import configure, project_root
+        from lup.workspace.paths import configure, project_root
 
         original = project_root()
         configure(root=tmp_path, version="0.10.0")
@@ -195,7 +195,7 @@ class TestLatestSessionByTimestamp:
     ) -> None:
         import json
 
-        from lup.history import update_session_metadata
+        from lup.workspace.history import update_session_metadata
 
         traces = isolated_root / "notes" / "traces"
 

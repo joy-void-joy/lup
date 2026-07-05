@@ -1,7 +1,7 @@
 # lup: ignore
 """The anti-pattern set is single-sourced, and the auditor agrees with the hook.
 
-`lup.review.antipatterns` is the importable source of truth; the edit hook carries
+`lup.codescan.antipatterns` is the importable source of truth; the edit hook carries
 a generated copy inline because it cannot import on its hot path. These tests pin
 that the committed mirror equals `lup-devtools dev gen-hook`'s output (so it can
 never drift) and that the auditor flags the two classes the hook cannot catch
@@ -11,7 +11,7 @@ after the fact: a match with no marker, and a marker guarding nothing.
 import importlib.util
 import re
 
-from lup.review.antipatterns import (
+from lup.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
     TS_ANTI_PATTERNS,
     AntiPattern,

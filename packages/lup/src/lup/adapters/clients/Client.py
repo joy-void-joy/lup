@@ -33,7 +33,8 @@ from typing import TYPE_CHECKING
 from pydantic import PrivateAttr, ValidationError
 
 from lup.adapters.common import LupAgentOptions, UnsupportedOptionsError
-from lup.trace import TraceLogger, print_message
+from lup.telemetry.display import print_message
+from lup.telemetry.trace import TraceLogger
 from lup.types import (
     JsonValue,
     LupAssistantMessage,
@@ -205,7 +206,7 @@ class ResponseCollector[MessageT](ABC):
     :meth:`collect` drains the engine's native messages through
     :meth:`drain` — which accumulates the engine's terminal state — turns
     each into a lup message via :meth:`to_lup_message` that it both keeps
-    and hands to :func:`~lup.trace.print_message` (the sole display/trace
+    and hands to :func:`~lup.telemetry.display.print_message` (the sole display/trace
     point on the run path), then projects the kept messages into a
     backend-neutral ``LupResponse`` that :meth:`finalize` stamps the
     engine's result and session id onto.

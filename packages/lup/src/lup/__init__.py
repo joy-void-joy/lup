@@ -12,13 +12,13 @@ extra for the backend you use (one per engine module under
 
 from typing import TYPE_CHECKING
 
-from lup.adapters.background.common import (
+from lup.adapters.background.Background import (
     BaseBackgroundAgent,
     create_background_agent,
 )
-from lup.adapters.clients.common import Client, Session
+from lup.adapters.clients.Client import Client, Session
 from lup.adapters.common import LupAgentOptions, create_client, query
-from lup.history import (
+from lup.workspace.history import (
     SessionResult,
     format_history_for_context,
     get_latest_session_json,
@@ -46,7 +46,7 @@ from lup.mcp import (
     create_mcp_server,
     lup_tool,
 )
-from lup.metrics import (
+from lup.telemetry.metrics import (
     MetricsSummary,
     get_metrics_summary,
     log_metrics_summary,
@@ -54,8 +54,8 @@ from lup.metrics import (
     reset_metrics,
     tracked,
 )
-from lup.notes import NotesConfig, setup_notes
-from lup.paths import (
+from lup.workspace.notes import NotesConfig, setup_notes
+from lup.workspace.paths import (
     TIMESTAMP_FMT,
     agent_version,
     configure,
@@ -70,9 +70,10 @@ from lup.realtime.scheduler import (
     create_stop_guard,
 )
 from lup.reflect import ReflectionGate, create_reflection_gate
-from lup.retry import with_retry
-from lup.throttle import Throttle
-from lup.trace import TraceLogger, print_message
+from lup.resilience.retry import with_retry
+from lup.resilience.throttle import Throttle
+from lup.telemetry.display import print_message
+from lup.telemetry.trace import TraceLogger
 from lup.types import (
     JsonObject,
     JsonValue,
@@ -80,7 +81,7 @@ from lup.types import (
 )
 
 if TYPE_CHECKING:
-    from lup.sandbox import Sandbox
+    from lup.sandbox.container import Sandbox
 
 __all__ = [
     "TIMESTAMP_FMT",
@@ -146,7 +147,7 @@ __all__ = [
 def __getattr__(name: str) -> object:
     """Lazy import for exports with optional dependencies."""
     if name == "Sandbox":
-        from lup.sandbox import Sandbox
+        from lup.sandbox.container import Sandbox
 
         return Sandbox
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from lup import paths
-from lup.adapters.clients.common import (
+from lup.workspace import paths
+from lup.adapters.clients.Client import (
     Client,
     Session,
     query_via_session,
     replay_stream,
 )
 from lup.adapters.common import LupAgentOptions
-from lup.trace import TraceLogger
+from lup.telemetry.trace import TraceLogger
 from lup.types import LupEvent, LupResponse, LupTextBlock
 
 LUP_PROJECT_VERSION = "1.2.3"
@@ -97,7 +97,7 @@ class RecordingEngine:
 
 @pytest.fixture
 def tmp_lup_project(tmp_path: Path) -> Iterator[Path]:
-    """A throwaway project root wired into lup.paths, restored afterwards."""
+    """A throwaway project root wired into lup.workspace.paths, restored afterwards."""
     (tmp_path / "pyproject.toml").write_text(
         f'[tool.lup]\nagent_version = "{LUP_PROJECT_VERSION}"\n', encoding="utf-8"
     )

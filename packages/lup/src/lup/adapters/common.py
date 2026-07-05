@@ -1,8 +1,8 @@
 """The neutral seam: every engine behind ``create_client()`` and ``query()``.
 
 An engine is one backend, complete: a ``create_*`` factory that turns
-neutral :class:`LupAgentOptions` into a :class:`~lup.adapters.clients.common.Client`,
-and the client opens :class:`~lup.adapters.clients.common.Session`\\ s.
+neutral :class:`LupAgentOptions` into a :class:`~lup.adapters.clients.Client.Client`,
+and the client opens :class:`~lup.adapters.clients.Client.Session`\\ s.
 ``query()`` is the self-contained one-shot (opens, sends, closes —
 nothing to leak); ``session()`` is the explicit multi-turn context,
 resumable across process runs via ``session(resume=...)`` and
@@ -41,7 +41,7 @@ from pydantic import BaseModel, model_validator
 
 from lup.hooks import LupHooksConfig
 from lup.mcp import LupMcpServerConfig, McpServerEntry, server_tool_names
-from lup.trace import TraceLogger
+from lup.telemetry.trace import TraceLogger
 from lup.types import (
     JsonObject,
     LupResponse,
@@ -51,7 +51,7 @@ from lup.types import (
 )
 
 if TYPE_CHECKING:
-    from lup.adapters.clients.common import Client
+    from lup.adapters.clients.Client import Client
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ class LupAgentOptions(BaseModel):
 
     session_id: str | None = None
     """Session-wiring trio (``session_id``, ``shared_dir``,
-    ``realtime_dir``) mirroring :class:`lup.paths.SessionContext`. Supplied
+    ``realtime_dir``) mirroring :class:`lup.workspace.context.SessionContext`. Supplied
     by the session builder rather than derived: the on-disk session layout
     (where the shared sandbox dir lives, what the session is named) is the
     caller's to define, not the adapter's."""
@@ -235,7 +235,7 @@ class BudgetExceededError(RuntimeError):
 
 type ClientFactory = Callable[[LupAgentOptions], "Client"]
 """One engine, as the seam sees it: neutral options in, a configured
-:class:`~lup.adapters.clients.common.Client` out. The shipped engines'
+:class:`~lup.adapters.clients.Client.Client` out. The shipped engines'
 factories live in ``lup.adapters.clients.*``; a custom backend is any
 callable of this shape passed as ``engine=``."""
 
@@ -345,7 +345,7 @@ def create_client(
     max_budget_usd: float | None = None,
     on_unsupported: Literal["raise", "drop"] = "raise",
 ) -> "Client":
-    """Build a configured :class:`~lup.adapters.clients.common.Client` — the one door to every engine.
+    """Build a configured :class:`~lup.adapters.clients.Client.Client` — the one door to every engine.
 
     The keyword form is the nested-call tier: raw system prompt, nothing
     persists, no SDK sandbox — what a tool that needs an LLM call wants.
