@@ -90,7 +90,7 @@ RULES: list[Allow | Deny | Ask] = [
     Allow(pattern=r"^gh (pr|issue) (list|view|diff|status)\b"),
     # Git (safe subset)
     Allow(
-        pattern=r"^git (status|log|diff|show|branch|worktree|stash|remote|fetch|tag|add|commit)\b"
+        pattern=r"^git (status|log|diff|show|branch|worktree|stash|remote|fetch|tag|add|commit|mv)\b"
     ),
     # uv package management: remove/lock only touch local files; add/sync fetch
     # and execute dependency code, so they require explicit approval.
