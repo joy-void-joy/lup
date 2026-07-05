@@ -30,6 +30,7 @@ from typing import TypedDict
 from pydantic import BaseModel, Field
 
 from lup.adapters.common import query
+from lup.adapters.tools.claude import GLOB, GREP, READ, WEB_FETCH
 from lup.mcp import LupMcpTool, lup_tool
 from lup.reflect import ReflectionGate
 
@@ -145,6 +146,19 @@ class ReviewOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+REVIEWER_TOOLS: list[str] = [READ, GLOB, GREP, WEB_FETCH]
+"""What the reviewer may call: file tools over past outputs (Read/Glob/Grep)
+plus WebFetch for known URLs. The reviewer reads and verifies; it does not act."""
+
+REVIEWER_THINKING_BUDGET = 8000
+"""Thinking-token budget for the reviewer's critique — enough to weigh the
+evidence without matching the main agent's full budget."""
+
+REVIEWER_MAX_TURNS = 5
+"""Turn cap for the reviewer: a bounded read-and-critique pass, not an
+open-ended investigation."""
+
+
 async def run_reviewer(
     validated: ReflectInput,
     outputs_dir: Path | None,
@@ -180,12 +194,10 @@ async def run_reviewer(
         prefix="  ↳ [reviewer] ",
         model=model,
         system_prompt=REVIEWER_SYSTEM_PROMPT.format(outputs_dir=outputs_dir or "N/A"),
-        max_thinking_tokens=8000,
+        max_thinking_tokens=REVIEWER_THINKING_BUDGET,
         permission_mode="bypassPermissions",
-        # lup: hardcoded Claude builtin tool names; the thinking budget and
-        # max_turns here are magic literals too.
-        tools=["Read", "Glob", "Grep", "WebFetch"],
-        max_turns=5,
+        tools=REVIEWER_TOOLS,
+        max_turns=REVIEWER_MAX_TURNS,
     )
 
     return response.text

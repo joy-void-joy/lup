@@ -24,6 +24,7 @@ Usage:
 
 from typing import TYPE_CHECKING
 
+from lup.adapters.tools.claude import BASH
 from lup.tool_policy import BaseToolPolicy
 
 if TYPE_CHECKING:
@@ -37,9 +38,9 @@ class ToolPolicy(BaseToolPolicy):
     - API key availability (from settings)
     - Mode configuration (e.g., restricted mode)
     - Session context (e.g., allow certain tools only in some contexts)
-    - Code-execution sandbox: pass ``code_execution=True`` when the session
-      has one, and raw shell (Bash) is dropped unless ``AGENT_SANDBOX_ALLOW_SHELL``
-      opts back in — the sandbox's ``execute_code`` is the sanctioned code path.
+    - Host shell: raw shell (Bash) is dropped unless ``AGENT_SANDBOX_ALLOW_SHELL``
+      opts it back in — ``execute_code`` in the sandbox is the sanctioned code
+      path, so host shell is never granted implicitly, sandbox present or not.
 
     TEMPLATE: customize ``__init__`` to define your exclusion logic; override
     ``group_enabled`` to gate groups on your domain's conditions (e.g. a
@@ -61,7 +62,6 @@ class ToolPolicy(BaseToolPolicy):
         restricted_mode: bool = False,
         excluded_tools: set[str] | None = None,
         excluded_tags: set[str] | None = None,
-        code_execution: bool = False,
     ) -> None:
         tags: set[str] = set(excluded_tags or ())
         names: set[str] = set(excluded_tools or ())
@@ -71,14 +71,11 @@ class ToolPolicy(BaseToolPolicy):
         if not settings.example_api_key:
             tags.add("requires:example-api")
 
-        # A code-execution sandbox provides isolated execute_code; drop raw
-        # host shell (Bash, the Claude backend's shell builtin) unless
-        # explicitly re-allowed, so the agent cannot bypass the sandbox.
-        # lup: "Bash" is Claude-specific. And why couple disallowing it to the
-        # sandbox? Raw host shell should probably be disallowed generally,
-        # sandbox or not.
-        if code_execution and not settings.sandbox_allow_shell:
-            names.add("Bash")
+        # Raw host shell is disallowed regardless of any code-execution
+        # sandbox: execute_code is the sanctioned code path. Opt it back in
+        # with AGENT_SANDBOX_ALLOW_SHELL.
+        if not settings.sandbox_allow_shell:
+            names.add(BASH)
 
         # TEMPLATE: add more name-set exclusions for tools you don't own here
 

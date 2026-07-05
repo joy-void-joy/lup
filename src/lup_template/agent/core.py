@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
 from lup.adapters.clients.common import Client
+from lup.adapters.tools.claude import WEB_TOOLS
 from lup.history import save_session
 from lup.metrics import get_metrics_summary, log_metrics_summary, reset_metrics
 from lup.notes import NotesConfig, setup_notes
@@ -49,11 +50,7 @@ def extract_sources(blocks: list[LupContentBlock]) -> list[str]:
     """Extract source URLs/queries from tool use blocks."""
     sources: list[str] = []
     for block in blocks:
-        # lup: "WebSearch"/"WebFetch" are Claude tool names hardcoded here.
-        if isinstance(block, LupToolUseBlock) and block.name in (
-            "WebSearch",
-            "WebFetch",
-        ):
+        if isinstance(block, LupToolUseBlock) and block.name in WEB_TOOLS:
             if isinstance(block.input, dict):
                 source = block.input.get("url") or block.input.get("query")
                 if source:
@@ -144,7 +141,7 @@ def build_session_options(
     )
 
     sandbox = build_session_sandbox(notes)
-    policy = ToolPolicy(settings, code_execution=sandbox is not None)
+    policy = ToolPolicy(settings)
 
     # In-process assembly — consumed by hook-enforced engines (claude*).
     toolset = build_session_toolset(

@@ -36,6 +36,7 @@ the full catalog. Where the siblings live:
   null-filling, extraction)
 """
 
+from lup.adapters.tools.claude import GLOB, READ, WEB_FETCH, WEB_SEARCH
 from lup.types import SubagentSpec
 
 # =============================================================================
@@ -51,20 +52,19 @@ def research_tools() -> list[str]:
     beside the rest of the selection. Resolved at import here; to vary it
     per session, call it from :func:`get_subagent_specs` instead.
     """
-    # lup: hardcoded Claude builtin tool names.
     return [
-        "WebSearch",
-        "WebFetch",
-        "Read",
-        "Glob",
+        WEB_SEARCH,
+        WEB_FETCH,
+        READ,
+        GLOB,
     ]
 
 
 def analysis_tools() -> list[str]:
     """Names of the tools an analysis subagent is allowed to call."""
     return [
-        "Read",
-        "Glob",
+        READ,
+        GLOB,
     ]
 
 

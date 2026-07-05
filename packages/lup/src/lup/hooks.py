@@ -66,7 +66,11 @@ from lup.paths import path_is_under
 from lup.types import JsonObject
 
 type LupHookEvent = Literal["PreToolUse", "PostToolUse", "Stop"]
-"""The hook events a backend-neutral factory can register for."""
+"""The canonical hook-event names — the neutral seam every backend maps onto.
+
+Claude Code's event vocabulary is adopted as the framework's lingua franca: an
+adapter translates its backend's native lifecycle events into these names, so
+the factories here register against one spelling regardless of engine."""
 
 type LupHookDecision = Literal["allow", "deny", "block"]
 """A hook's verdict: allow the action, deny it (a PreToolUse permission
@@ -143,7 +147,7 @@ class LupHooksConfig(BaseModel):
     def by_event(self) -> list[tuple[LupHookEvent, list[LupHookMatcher]]]:
         """Yield ``(event, matchers)`` for each event that has matchers."""
         pairs: list[tuple[LupHookEvent, list[LupHookMatcher]]] = [
-            ("PreToolUse", self.pre_tool_use), #lup: This seems claude specific, still
+            ("PreToolUse", self.pre_tool_use),
             ("PostToolUse", self.post_tool_use),
             ("Stop", self.stop),
         ]
@@ -189,6 +193,10 @@ def create_permission_hooks(
     - Read/Glob/Grep: Allowed in rw_dirs + ro_dirs
     - Other tools: Allowed (filtered by allowed_tools in options)
 
+    The matched tool names (Write/Edit/Read/Glob/Grep) are the canonical
+    neutral vocabulary — each adapter maps its backend's native file tools onto
+    these before the hook runs, so the match reads a single spelling.
+
     Args:
         rw_dirs: Directories where Write/Edit/Read are allowed.
         ro_dirs: Additional directories where only Read is allowed.
@@ -203,7 +211,7 @@ def create_permission_hooks(
             return LupHookOutput()
 
         match event.tool_name:
-            case "Write" | "Edit": #lup: Same here
+            case "Write" | "Edit":
                 if not event.tool_path:
                     return LupHookOutput()
                 if path_is_under(event.tool_path, rw_dirs):
