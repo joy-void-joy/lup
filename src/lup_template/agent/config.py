@@ -263,9 +263,9 @@ class Settings(BaseSettings):
     sandbox_allow_shell: bool = Field(
         default=False,
         validation_alias="AGENT_SANDBOX_ALLOW_SHELL",
-        description="Grant the raw shell (Bash) builtin alongside the "
-        "code-execution sandbox. Off by default: execute_code is the "
-        "sanctioned code path, so host shell is an explicit opt-in.",
+        description="Grant the raw shell (Bash) builtin. Off by default: host "
+        "shell is dropped regardless of the code-execution sandbox "
+        "(execute_code is the sanctioned code path), so it is an explicit opt-in.",
     )
 
 

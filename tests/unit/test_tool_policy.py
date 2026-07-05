@@ -106,7 +106,7 @@ class TestGetAllowedTools:
             policy.get_mcp_servers(server), builtin_tools=CLAUDE_BUILTIN_TOOLS
         )
 
-        assert "Bash" in allowed
+        assert "Read" in allowed
         assert "StructuredOutput" in allowed
         assert "mcp__pingsrv__ping" in allowed
         assert "TodoRead" not in allowed
@@ -124,16 +124,17 @@ class TestGetAllowedTools:
         assert "WebSearch" in allowed
 
 
-class TestShellDefaultWithSandbox:
-    """A code-execution sandbox drops raw shell (Bash) from the allowlist by
-    default: execute_code is the sanctioned code path, so host shell is an
-    explicit opt-in rather than granted alongside it."""
+class TestHostShellExclusion:
+    """Raw host shell (Bash) is dropped from the allowlist independent of any
+    code-execution sandbox: execute_code is the sanctioned code path, so host
+    shell is an explicit opt-in via AGENT_SANDBOX_ALLOW_SHELL, never granted
+    implicitly."""
 
-    def test_sandbox_drops_bash_by_default(
+    def test_host_shell_dropped_by_default(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(settings, "sandbox_allow_shell", False)
-        policy = ToolPolicy(settings, code_execution=True)
+        policy = ToolPolicy(settings)
 
         assert "Bash" not in policy.get_allowed_tools(
             {}, builtin_tools=CLAUDE_BUILTIN_TOOLS
@@ -147,14 +148,7 @@ class TestShellDefaultWithSandbox:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(settings, "sandbox_allow_shell", True)
-        policy = ToolPolicy(settings, code_execution=True)
-
-        assert "Bash" in policy.get_allowed_tools(
-            {}, builtin_tools=CLAUDE_BUILTIN_TOOLS
-        )
-
-    def test_no_sandbox_keeps_bash(self) -> None:
-        policy = ToolPolicy(settings, code_execution=False)
+        policy = ToolPolicy(settings)
 
         assert "Bash" in policy.get_allowed_tools(
             {}, builtin_tools=CLAUDE_BUILTIN_TOOLS
