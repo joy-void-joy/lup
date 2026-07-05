@@ -98,3 +98,21 @@ def test_editor_marker_count_change_still_prompts() -> None:
 def test_editor_anti_patterns_still_deny() -> None:
     assert edit_dec("src/module.py", "", "from typing import Any\n", EDITOR) == "deny"
     assert write_dec("src/module.py", "import dataclasses\n", EDITOR) == "deny"
+
+
+def test_editor_new_devtools_file_allows_where_main_session_asks(
+    tmp_path: Path,
+) -> None:
+    # The new-tooling checkpoint prompts the main session but, like every other
+    # prompt, collapses to an auto-allow for the editor on its reviewed branch.
+    new_cmd = tmp_path / "src" / "lup_template" / "devtools" / "shiny.py"
+    assert edit_dec(str(new_cmd), "", "value = build()\n") == "ask"
+    assert edit_dec(str(new_cmd), "", "value = build()\n", EDITOR) == "allow"
+    assert write_dec(str(new_cmd), "value = build()\n") == "ask"
+    assert write_dec(str(new_cmd), "value = build()\n", EDITOR) == "allow"
+
+
+def test_editor_new_devtools_file_still_denies_anti_patterns(tmp_path: Path) -> None:
+    new_cmd = tmp_path / "src" / "lup_template" / "devtools" / "shiny.py"
+    assert edit_dec(str(new_cmd), "", "from typing import Any\n", EDITOR) == "deny"
+    assert write_dec(str(new_cmd), "import dataclasses\n", EDITOR) == "deny"

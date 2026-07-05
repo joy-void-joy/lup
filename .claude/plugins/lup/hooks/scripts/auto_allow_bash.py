@@ -66,7 +66,10 @@ COMMAND_PREFIX = (
 UV_LAUNCHER = r"(?:uv\s+run\s+(?:-\S+\s+|--\S+(?:[= ]\S+)?\s+)*|uvx\s+)"
 
 INTERPRETER_DENY_REASON = (
-    "Denied: use lup-devtools or `uv run lup` instead, or create a script in ./tmp/." #lup: the problem is that the bot will often create ./tmp scripts that are actually very good in term of actual devtools. So I think we should instead heavily encourage the bot to modify devtools, say to use ./tmp at last resort, and modify the permissions to be auto-ask when the bot modifies the devtools/.* files
+    "Denied: no bare interpreters. First resort — add or extend a lup-devtools "
+    "command (edit src/lup_template/devtools/*), then run it with `uv run "
+    "lup-devtools ...` (or `uv run lup` for the agent). Fall back to a `./tmp/` "
+    "script only as a genuine last resort."
 )
 
 RULES: list[Allow | Deny | Ask] = [
