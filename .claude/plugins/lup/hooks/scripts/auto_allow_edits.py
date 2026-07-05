@@ -88,14 +88,15 @@ RESOLVE_EDITOR_AGENTS = {"resolve-editor", "lup:resolve-editor"}
 # on disk) skips this table entirely.
 #
 # The importable source of truth is lup.review.antipatterns.PYTHON_ANTI_PATTERNS,
-# which `lup-devtools dev check --antipatterns` audits the whole tree with;
-# this hook mirrors it because a safety hook must stay hermetic (no package
-# import on the per-edit hot path), and test_python_table_matches_hook in
-# tests/unit/test_antipatterns.py pins the mirror equal. The rules are not
-# custom linter rules: ruff has no plugin API, and engines that have one
-# would break the hook's hermeticity.
+# which `lup-devtools dev check --antipatterns` audits the whole tree with. This
+# hook cannot import it on the per-edit hot path, so `lup-devtools dev gen-hook`
+# generates the table below from that source and writes it here — change a rule
+# there and regenerate, never edit this block by hand. test_python_table_matches_hook
+# in tests/unit/test_antipatterns.py pins this committed copy equal to that output.
+# The rules are not custom linter rules: ruff has no plugin API, and engines that
+# have one would break the hook's hermeticity.
 
-ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [ #lup: Why are we re-declaring antipatterns here? Shouldn't we instead directly import it from lup? Feels wrong to do it this way?
+ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "any-type",
         re.compile(r"\bAny\b"),
@@ -129,8 +130,7 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [ #lup: Why are we re-de
     (
         "typing-generics",
         re.compile(r"\b(?:List|Dict|Tuple|Set)\["),
-        "Use lowercase builtin generics — list, dict, tuple, set — "
-        "instead of the capitalized typing aliases",
+        "Use lowercase builtin generics — list, dict, tuple, set — instead of the capitalized typing aliases",
     ),
     (
         "all-export",
@@ -143,111 +143,76 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [ #lup: Why are we re-de
         "Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",
     ),
     (
-        # Flags a string-keyed dict/Mapping only when the VALUE is a scalar/
-        # payload type; concrete class/callable value types (registries/routers
-        # whose open key set is the point) are left alone. See lup.antipatterns.
         "dict-str-payload",
         re.compile(
-            r"\b(?:dict|Mapping|MutableMapping)\[\s*str\s*,"
-            r"\s*(?:str|int|float|bool|bytes|complex)\b"
+            r"\b(?:dict|Mapping|MutableMapping)\[\s*str\s*,\s*(?:str|int|float|bool|bytes|complex)\b"
         ),
-        "String-keyed dict with a scalar value hides shape when the keys are a "
-        "CLOSED, enumerable set — use a BaseModel or dict[Literal[...], V]. When the keys "
-        "are open and data-driven (a registry/cache/counter keyed by external data) this is "
-        "legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value "
-        "types (dict[str, Engine]) are already accepted; JsonValue covers arbitrary JSON",
+        "String-keyed dict with a scalar value hides shape when the keys are a CLOSED, enumerable set — use a BaseModel or dict[Literal[...], V]. When the keys are open and data-driven (a registry/cache/counter keyed by external data) this is legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value types (dict[str, Engine]) are already accepted; JsonValue covers arbitrary JSON",
     ),
     (
-        # Flags every `.get(` — the broad choice; open dicts add the ignore.
         "dict-get",
         re.compile(r"\.get\s*\("),
-        "`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
-        "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache, "
-        "os.environ) add `# lup: ignore[dict-get]`",
+        "`.get(` on payload/TypedDict-shaped data hides the schema — use typed attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]`",
     ),
     (
         "bare-object",
         re.compile(r"(?:(?<!\w)(?!_)\w+\s*:|->)\s*object\b"),
-        "Bare `object` says nothing about the value — use a concrete type, "
-        "TypedDict, or BaseModel, and narrow at untyped boundaries",
+        "Bare `object` says nothing about the value — use a concrete type, TypedDict, or BaseModel, and narrow at untyped boundaries",
     ),
     (
         "bare-basemodel",
         re.compile(r"(?:(?<!\[)\b\w+\s*:|->)\s*BaseModel\b(?!\s*[\]|])"),
-        "A parameter or return annotated exactly BaseModel accepts any model — "
-        "name the concrete union of models or make the function generic",
+        "A parameter or return annotated exactly BaseModel accepts any model — name the concrete union of models or make the function generic",
     ),
     (
-        # `\btuple\[` catches every declared tuple shape — return, variable, and
-        # attribute annotations alike. Existing tuple[...] annotations never
-        # surfaced before because the hook scans only ADDED lines; the on-demand
-        # tree auditor scans every line and reports the ones that predate it.
         "tuple-shape",
         re.compile(r"\btuple\["),
-        "A declared `tuple[...]` shape hides what each position means — name the "
-        "fields with a TypedDict or BaseModel, a `type Alias = ...` for a reused shape, or "
-        "`list` for a variable-length sequence",
+        "A declared `tuple[...]` shape hides what each position means — name the fields with a TypedDict or BaseModel, a `type Alias = ...` for a reused shape, or `list` for a variable-length sequence",
     ),
     (
-        # Mirrors tuple-shape for frozenset; an immutable-default-argument use is
-        # the one legitimate site — `# lup: ignore[frozenset-shape]` marks it.
         "frozenset-shape",
         re.compile(r"\bfrozenset\b"),
-        "A declared `frozenset[...]` shape or constant is usually overkill — use "
-        "set[str] or a purpose-built structure. For a genuinely immutable default argument "
-        "add `# lup: ignore[frozenset-shape]`",
+        "A declared `frozenset[...]` shape or constant is usually overkill — use a dict or a purpose-built structure. For a genuinely immutable default argument add `# lup: ignore[frozenset-shape]`",
+    ),
+    (
+        "set-shape",
+        re.compile(r"\bset\b"),
+        "A declared `set` is usually better as a dict (keyed lookup) or a purpose-built structure. For a genuinely set-shaped value add `# lup: ignore[set-shape]`",
+    ),
+    (
+        "empty-collection",
+        re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
+        "Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an append/mutate loop — build the collection with a comprehension instead, or add `# lup: ignore[empty-collection]` for a deliberate typed default",
     ),
     (
         "cast",
         re.compile(r"\bcast\s*\("),
-        "`cast(...)` is a code smell — narrow with isinstance or a type guard, "
-        "or fix the annotation so the cast is unnecessary",
+        "`cast(...)` is a code smell — narrow with isinstance or a type guard, or fix the annotation so the cast is unnecessary",
     ),
     (
         "import-re",
-        re.compile(r"\bimport\s+re\b"),
-        "`import re` is a code smell — parse structured data with its own API instead: "
-        "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
-        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
-    ),
-    (
-        "re-import",
-        re.compile(r"\bfrom\s+re\s+import\b"),
-        "`from re import` is a code smell — parse structured data with its own API instead: "
-        "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
-        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
+        re.compile(r"\bimport\s+re\b|\bfrom\s+re\s+import\b"),
+        "`import re` / `from re import` is a code smell — parse structured data with its own API instead: JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     (
         "re-call",
         re.compile(r"\bre\.(compile|search|match|fullmatch|sub|findall|split)\s*\("),
-        "Avoid regex for structured data — reach for its parser instead: "
-        "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
-        "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
+        "Avoid regex for structured data — reach for its parser instead: JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
     ),
     (
-        # `.replace` on `os`, `Path`, or a `*path` receiver is pathlib/os's
-        # atomic file rename, not string surgery — the lookbehinds keep the
-        # codebase's path-named receivers out of the net; os.replace is steered
-        # toward pathlib by os-file-ops instead, keeping the two rules coherent.
         "string-replace",
         re.compile(r"(?<!\bos)(?<![Pp]ath)\.replace\s*\("),
-        "Avoid .replace() for structured data — edit it through its parser instead "
-        "(pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
+        "Avoid .replace() for structured data — edit it through its parser instead (pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
     ),
     (
-        # Only separator-form `.split(sep)` is flagged: a separator implies
-        # structure with a real parser. Argument-less `.split()` is whitespace
-        # tokenization of free text, for which no parser exists — exempted.
         "string-split",
         re.compile(r"\.split\s*\((?!\s*\))"),
-        "Avoid .split() for structured data — parse it instead "
-        "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
+        "Avoid .split() for structured data — parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     (
         "string-strip",
         re.compile(r"\.strip\s*\("),
-        "Avoid .strip() for structured data — parse it instead "
-        "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
+        "Avoid .strip() for structured data — parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     (
         "bare-except",
@@ -283,8 +248,8 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [ #lup: Why are we re-de
     ),
     (
         "os-shell",
-        re.compile(r"\bos\.(?:system|popen)\s*\("),
-        "Use the `sh` library instead of os.system()/os.popen()",
+        re.compile(r"\bos\.(?:system|popen|exec[lv]\w*)\s*\("),
+        "Use the `sh` library instead of os.system()/os.popen()/os.exec*()",
     ),
     (
         "argparse",
@@ -302,23 +267,21 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [ #lup: Why are we re-de
         "Use pathlib.Path instead of os.path",
     ),
     (
-        # A scoped list of os file/dir operations with a pathlib.Path equivalent.
-        # os.environ/os.getenv and process/exec APIs are deliberately absent.
         "os-file-ops",
         re.compile(
-            r"\bos\.(?:getcwd|chdir|listdir|scandir|walk|mkdir|makedirs|rmdir|"
-            r"removedirs|remove|unlink|rename|renames|replace|link|symlink|"
-            r"readlink|stat|lstat|chmod|chown)\s*\("
+            r"\bos\.(?:getcwd|chdir|listdir|scandir|walk|mkdir|makedirs|rmdir|removedirs|remove|unlink|rename|renames|replace|link|symlink|readlink|stat|lstat|chmod|chown)\s*\("
         ),
-        "Use pathlib.Path for file/dir operations instead of os.* "
-        "(Path.iterdir/mkdir/unlink/rename/replace/stat/...); os.environ, os.getenv, and "
-        "process/exec APIs stay",
+        "Use pathlib.Path for file/dir operations instead of os.* (Path.iterdir/mkdir/unlink/rename/replace/stat/...)",
+    ),
+    (
+        "os-environ",
+        re.compile(r"\bos\.(?:environ|getenv)\b"),
+        "Read configuration through pydantic-settings, not os.environ/os.getenv",
     ),
     (
         "eval-exec",
         re.compile(r"(?<![.\w])(?:eval|exec)\s*\("),
-        "Never use eval()/exec() — parse the data (ast.literal_eval for "
-        "literals) or dispatch explicitly",
+        "Never use eval()/exec() — parse the data (ast.literal_eval for literals) or dispatch explicitly",
     ),
     (
         "utcnow",
@@ -328,8 +291,7 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [ #lup: Why are we re-de
     (
         "global-statement",
         re.compile(r"^global\s+\w"),
-        "No `global` statements — mutate a module-level holder object or pass "
-        "state explicitly",
+        "No `global` statements — mutate a module-level holder object or pass state explicitly",
     ),
     (
         "private-function",
@@ -341,13 +303,10 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [ #lup: Why are we re-de
         re.compile(r"\bclass\s+_[A-Z]"),
         "No `_` prefix on classes — nothing is private",
     ),
-    # Fires only on assignments: bare annotations and trailing-comma lines
-    # are function parameters, which may use `_` for unused arguments.
     (
         "private-variable",
         re.compile(r"^_[a-zA-Z]\w*\s*(?::[^=]*)?=(?!=)(?!.*,\s*$)"),
-        "No `_` prefix on variables/constants — nothing is private "
-        "(unused `_` function parameters are exempt)",
+        "No `_` prefix on variables/constants — nothing is private (unused `_` function parameters are exempt)",
     ),
 ]
 
@@ -375,22 +334,22 @@ TS_ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "any-assertion",
-        re.compile(r"<any>"),
+        re.compile("<any>"),
         "Never use `<any>` type assertion — use proper types",
     ),
     (
         "ts-ignore",
-        re.compile(r"@ts-ignore"),
+        re.compile("@ts-ignore"),
         "Never use @ts-ignore — fix the type error properly",
     ),
     (
         "ts-expect-error",
-        re.compile(r"@ts-expect-error"),
+        re.compile("@ts-expect-error"),
         "Never use @ts-expect-error — fix the type error properly",
     ),
     (
         "ts-nocheck",
-        re.compile(r"@ts-nocheck"),
+        re.compile("@ts-nocheck"),
         "Never use @ts-nocheck — fix the type errors in the file",
     ),
     (
@@ -411,8 +370,7 @@ TS_ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "non-null-assertion",
         re.compile(r"[\w\)\]]!\."),
-        "Postfix `!.` non-null assertion hides a possible null/undefined — "
-        "narrow the type or handle the missing case",
+        "Postfix `!.` non-null assertion hides a possible null/undefined — narrow the type or handle the missing case",
     ),
     (
         "var-declaration",
@@ -422,8 +380,7 @@ TS_ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "function-object-type",
         re.compile(r":\s*(?:Function|Object)\b"),
-        "Never use `Function` or `Object` as a type — declare the call "
-        "signature or the object shape",
+        "Never use `Function` or `Object` as a type — declare the call signature or the object shape",
     ),
     (
         "console-log",
