@@ -380,6 +380,12 @@ def create_realtime_relay_tools(
     mailbox = RealtimeMailbox(realtime_dir)
     context_read = [False]  # Mutable container for closure
 
+    # Advertise the meta-before-sleep requirement only when a gate enforces it;
+    # with no gate, meta is relayed for tracing but never required.
+    reply_meta = " and requires a fresh meta before sleep" if gate is not None else ""
+    sleep_meta = "You MUST call meta before sleeping. " if gate is not None else ""
+    meta_when = "Required before sleep." if gate is not None else "Relayed for tracing."
+
     @lup_tool(
         "Deliver a message to the environment. Text output and thinking "
         "don't reach the user — this is the only way to communicate. "
@@ -387,7 +393,7 @@ def create_realtime_relay_tools(
         "turn continues. For a sequence of short reactions you can batch "
         "with staggered delay_seconds; delayed messages cancel if an "
         "external event arrives. Sending also cancels any pending "
-        "scheduled_action and requires a fresh meta before sleep.",
+        f"scheduled_action{reply_meta}.",
         name="reply",
     )
     async def reply_tool(inp: ReplyInput) -> ReplyOutput:
@@ -445,7 +451,7 @@ def create_realtime_relay_tools(
         "parameters and instructs you to end your turn — the environment "
         "sleeps on them and wakes you with a new turn (external event, "
         "reminder, or timer), so this is how every turn should end. "
-        "You MUST call meta before sleeping. Blocked while unread events "
+        f"{sleep_meta}Blocked while unread events "
         "exist that you haven't read via context — use force=true to "
         "bypass. Set debounce_initial/debounce_quiet to batch event "
         "bursts; follow_ups send messages at intervals while you sleep.",
@@ -504,7 +510,7 @@ def create_realtime_relay_tools(
         "Record a process assessment for the improvement loop. "
         "What worked this turn? What was friction? Are you missing "
         "tools or information? Rate pacing, timing, quality. "
-        "Be specific. Required before sleep.",
+        f"Be specific. {meta_when}",
         name="meta",
     )
     async def meta_tool(inp: MetaInput) -> MetaOutput:
