@@ -15,7 +15,7 @@ Core tools:
 - ``reply`` delivers actions to the environment
 - Timing tools (debounce, remind, schedule) are non-blocking
 
-Background agents (see ``lup.adapters.background.common.create_background_agent``):
+Background agents (see ``lup.adapters.background.Background.create_background_agent``):
 - Run companion agents alongside the main session
 - Observer example at the bottom shows conversation summarization
 - Any use case: research, execution, monitoring — not just observation
@@ -30,7 +30,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.background.common import (
+from lup.adapters.background.Background import (
     BaseBackgroundAgent,
     create_background_agent,
 )
@@ -52,7 +52,7 @@ from lup.realtime.models import (
     SleepOutput,
 )
 from lup.realtime.scheduler import Scheduler
-from lup.trace import TraceLogger
+from lup.telemetry.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
 

@@ -9,14 +9,12 @@ and the entries-as-single-store rendering contract.
 
 from pathlib import Path
 
-from lup.trace import (
-    JsonValue,
+from lup.telemetry.blocks import JsonValue, format_tool_result, truncate_str_fields
+from lup.telemetry.display import resolve_color_tag
+from lup.telemetry.trace import (
     TraceLogger,
     format_block_markdown,
-    format_tool_result,
     read_trace_events,
-    resolve_color_tag,
-    truncate_str_fields,
 )
 from lup.types import (
     LupTextBlock,
@@ -112,7 +110,7 @@ def test_color_tag_pairs_use_with_result() -> None:
 def test_separate_color_assigners_isolate_pairings() -> None:
     """Concurrent streams with their own assigners can't cross-pair: an
     assigner that never saw a tool use resolves its result to default."""
-    from lup.trace import ColorAssigner
+    from lup.telemetry.display import ColorAssigner
 
     own = ColorAssigner()
     other = ColorAssigner()

@@ -285,12 +285,12 @@ def aux_model() -> str:
     return "claude-opus-4-6" if settings.agent_sdk == "claude" else settings.model
 
 
-# Route notes/logs paths into lup.paths so every consumer (history,
+# Route notes/logs paths into lup.workspace.paths so every consumer (history,
 # devtools, traces) honors the configured locations
 if settings.notes_path != "./notes" or settings.logs_path != "./logs":
     from pathlib import Path
 
-    from lup.paths import configure
+    from lup.workspace.paths import configure
 
     configure(
         notes_dir=Path(settings.notes_path).resolve(),

@@ -35,7 +35,7 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 ### Reusable Library Code
 
 - `packages/lup/src/lup/` — utilities (trace, hooks, metrics, mcp, retry, notes, history, paths)
-- `lup.paths.agent_version()` — version tracking pattern (reads `[tool.lup] agent_version` from pyproject.toml)
+- `lup.workspace.paths.agent_version()` — version tracking pattern (reads `[tool.lup] agent_version` from pyproject.toml)
 
 ### DevTools CLI
 

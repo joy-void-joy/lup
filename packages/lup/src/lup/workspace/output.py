@@ -42,11 +42,11 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field, ValidationError
 
-from lup.adapters.clients.common import Session
+from lup.adapters.clients.Client import Session
 from lup.adapters.common import BudgetExceededError
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.reflect import ReflectionGate
-from lup.trace import TraceLogger
+from lup.telemetry.trace import TraceLogger
 from lup.types import LupResponse
 
 logger = logging.getLogger(__name__)

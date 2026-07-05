@@ -8,7 +8,7 @@ not by lexicographic path order (where 0.10.0 < 0.9.0).
 import json
 from pathlib import Path
 
-from lup.history import (
+from lup.workspace.history import (
     get_latest_session_json,
     load_sessions_json,
     resolve_version,

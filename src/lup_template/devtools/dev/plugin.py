@@ -25,7 +25,7 @@ from typing import TypedDict, cast
 
 import typer
 
-from lup.paths import find_project_root
+from lup.workspace.paths import find_project_root
 
 PLUGIN_NAME = "lup"
 SELF_PATH = "./.claude/plugins"

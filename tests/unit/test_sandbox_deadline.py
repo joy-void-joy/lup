@@ -2,7 +2,7 @@
 
 import time
 
-from lup.sandbox import compute_deadline
+from lup.sandbox.process import compute_deadline
 
 
 def test_positive_timeout_adds_grace_to_the_deadline() -> None:

@@ -17,7 +17,7 @@ from lup_template.devtools.trace.traces import (
     CapabilityRequest,
     scan_for_capability_gaps,
 )
-from lup.history import resolve_version
+from lup.workspace.history import resolve_version
 
 
 class ToolHealth(TypedDict):

@@ -83,32 +83,43 @@ packages/
         ├── py.typed            # PEP 561 typing marker
         ├── adapters/           # ALL SDK-specific code, behind one neutral seam
         │   ├── common.py       # SDK-free door: LupAgentOptions, seam errors, ENGINES/MODEL_ROUTES routers, create_client(), query()
-        │   ├── clients/        # Client/Session ABCs (pure) + shared helpers; per-engine client, translation, and create_* factory (claude, claude_compat, codex, openai_compat)
-        │   └── background/     # per-engine background: pure contract + wake/debounce machinery (common.py), claude & codex implementations
-        ├── review/             # Marker + anti-pattern scanning for dev tooling
+        │   ├── clients/        # Client.py (Client/Session ABCs + shared helpers) + per-engine client/translation/create_* factory (claude, claude_compat, codex, openai_compat)
+        │   ├── background/     # Background.py (pure contract + wake/debounce machinery) + claude & codex implementations
+        │   ├── profiles/       # Profiles.py (neutral account registry + ProfileSupport ABC) + per-engine support (claude)
+        │   └── tools/          # per-engine built-in tool-name tables (claude)
+        ├── codescan/           # Source scanning for dev tooling: review notes + forbidden shapes
         │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor
         │   ├── markers.py      # `# lup:` / `// lup:` review-marker scanning (dev comments)
         │   └── antipatterns.py # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
-        ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
-        ├── history.py          # Session storage/retrieval
-        ├── hooks.py            # SDK-agnostic hook factories (permission, gate, completion guard)
-        ├── mcp.py              # MCP server creation, @lup_tool decorator
-        ├── metrics.py          # Tool call tracking (+ file-backed flush for subprocesses)
-        ├── notes.py            # RO/RW directory structure
-        ├── output.py           # submit_output finalization + missing-output guard (all backends)
-        ├── paths.py            # Version-aware paths + SessionContext env relay
-        ├── profiles.py         # Named Claude config-dir profiles (accounts), machine-wide
+        ├── workspace/          # Session workspace: where a run's data lives and how it's addressed
+        │   ├── paths.py        # Version-aware path layout + active-session relay
+        │   ├── context.py      # SessionContext carried across the subprocess boundary
+        │   ├── history.py      # Session storage/retrieval
+        │   ├── notes.py        # RO/RW directory structure
+        │   └── output.py       # submit_output finalization + missing-output guard (all backends)
+        ├── telemetry/          # What a run records about itself for later analysis
+        │   ├── trace.py        # TraceLogger: markdown trace + machine-readable event sidecar
+        │   ├── display.py      # Color-coded console display of content blocks
+        │   ├── blocks.py       # Shared block-extraction and truncation helpers
+        │   └── metrics.py      # Tool call tracking (+ file-backed flush for subprocesses)
+        ├── sandbox/            # Docker-based Python sandbox (lazy start, orphan sweep)
+        │   ├── models.py       # Tool schemas, result types, mount topology, error types
+        │   ├── process.py      # Pure host helpers: output decode, process liveness, deadlines
+        │   ├── repl.py         # In-container REPL transport (socket protocol, persistent namespace)
+        │   └── container.py    # Sandbox lifecycle (create, mount, sweep, destroy) + cleanup guard
+        ├── resilience/         # Calling flaky or rate-limited services
+        │   ├── retry.py        # Retry decorator with backoff
+        │   └── throttle.py     # Rate limiting (concurrency + interval)
         ├── realtime/           # Persistent-agent machinery (one concern per module)
         │   ├── scheduler.py    # Scheduler core (sleep/wake, debounce, reminders) + guards
         │   ├── models.py       # Shared realtime tool I/O models
         │   └── relay.py        # Subprocess file-mailbox relay (imports the core)
+        ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
+        ├── hooks.py            # SDK-agnostic hook factories (permission, gate, completion guard)
+        ├── mcp.py              # MCP server creation, @lup_tool decorator
         ├── reflect.py          # Reflection gate (in-memory or file-backed)
-        ├── retry.py            # Retry decorator with backoff
-        ├── sandbox.py          # Docker-based Python sandbox (lazy start, orphan sweep)
         ├── subagents.py        # run_subagent delegation tool from SubagentSpec
-        ├── throttle.py         # Rate limiting (concurrency + interval)
-        ├── tool_policy.py      # Tool-availability machinery (BaseToolPolicy)
-        └── trace.py            # Trace logging, color-coded console display
+        └── tool_policy.py      # Tool-availability machinery (BaseToolPolicy)
 src/
 └── lup_template/               # Template application (depends on lup)
     ├── agent/                  # Domain-specific code (feedback loop improves this)

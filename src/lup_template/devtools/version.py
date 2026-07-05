@@ -20,8 +20,8 @@ from typing import Annotated, Literal, TypedDict
 import sh
 import typer
 
-from lup.history import parse_semver
-from lup.paths import agent_version
+from lup.workspace.history import parse_semver
+from lup.workspace.paths import agent_version
 
 from lup_template.devtools.utils import git, output_json, short_sha
 
@@ -246,7 +246,7 @@ def bump_cmd(
     ] = False,
 ) -> None:
     """Bump agent version and create a git tag."""
-    from lup.paths import find_project_root, read_agent_version
+    from lup.workspace.paths import find_project_root, read_agent_version
 
     root = find_project_root()
     pyproject = root / "pyproject.toml"

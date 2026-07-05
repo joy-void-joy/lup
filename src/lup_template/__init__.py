@@ -24,6 +24,6 @@ Structure:
 
 Reusable, SDK-agnostic infrastructure (history, hooks, metrics, notes,
 paths, realtime scheduling, reflection gate, retry, sandbox, trace) lives
-in the ``lup`` library — import it directly (e.g. ``from lup.history import
-save_session``).
+in the ``lup`` library — import it directly (e.g. ``from lup.workspace.history
+import save_session``).
 """

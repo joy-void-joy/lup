@@ -18,9 +18,9 @@ import tempfile
 import sh
 import typer
 
-from lup.adapters.profiles import common as profiles
+from lup.adapters.profiles import Profiles as profiles
 from lup.adapters.profiles.claude import CONFIG_DIR_ENV, ClaudeProfileSupport
-from lup.paths import project_root
+from lup.workspace.paths import project_root
 
 MCP_SERVER_NAME = "notes"
 

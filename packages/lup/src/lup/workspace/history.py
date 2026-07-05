@@ -57,8 +57,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field, SerializeAsAny
 
 from lup.types import JsonValue, Usage
-from lup.metrics import MetricsSummary
-from lup.paths import (
+from lup.telemetry.metrics import MetricsSummary
+from lup.workspace.paths import (
     TIMESTAMP_FMT,
     agent_version,
     parse_timestamp,

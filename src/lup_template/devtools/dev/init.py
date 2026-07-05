@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 import typer
 
-from lup.paths import find_project_root
+from lup.workspace.paths import find_project_root
 from lup_template.devtools.dev.plugin import set_marketplace_name
 from lup_template.devtools.utils import git
 

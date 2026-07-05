@@ -40,7 +40,7 @@ from contextlib import (
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict
 
-from lup.adapters.clients.common import (
+from lup.adapters.clients.Client import (
     Client,
     Session,
     query_via_session,
@@ -57,7 +57,8 @@ from lup.adapters.common import (
 from lup.adapters.tools.claude import WEB_SEARCH
 from lup.hooks import LupHooksConfig
 from lup.realtime.relay import RealtimeMailbox
-from lup.trace import TraceLogger, print_message
+from lup.telemetry.display import print_message
+from lup.telemetry.trace import TraceLogger
 from lup.types import (
     JsonObject,
     LupAssistantMessage,
@@ -111,7 +112,7 @@ def subprocess_sandbox_cleanup(
     if opts.session_id is None or opts.shared_dir is None:
         return nullcontext()
     try:
-        from lup.sandbox import sandbox_cleanup
+        from lup.sandbox.container import sandbox_cleanup
     except ImportError:
         return nullcontext()
     return sandbox_cleanup(session_id=opts.session_id, shared_dir=opts.shared_dir)
@@ -318,7 +319,7 @@ def build_mcp_config_overrides(
         serve_tools_args: Base arguments for the launcher (the
             ``--server <name>`` selector is appended per group).
         env: Session-context env vars for the subprocesses (see
-            :class:`lup.adapters.session_relay.SessionContext`).
+            :class:`lup.workspace.context.SessionContext`).
         servers: Server groups to register.
     """
     base_args = serve_tools_args or ["run", "lup-devtools", "agent", "serve-tools"]

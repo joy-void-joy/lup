@@ -15,7 +15,7 @@ import sh
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from lup.adapters.session_relay import (
+from lup.workspace.context import (
     GATE_FLAG_ENV,
     OUTPUTS_DIR_ENV,
     REALTIME_DIR_ENV,
@@ -23,7 +23,7 @@ from lup.adapters.session_relay import (
     SESSION_ID_ENV,
 )
 from lup.realtime.relay import MetaEvent, RealtimeMailbox, ReplyEvent
-from lup.sandbox import Sandbox
+from lup.sandbox.container import Sandbox
 
 from lup_template.agent.toolsets import (
     EXAMPLE_GROUP,

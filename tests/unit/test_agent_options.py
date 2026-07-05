@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.notes import NotesConfig
+from lup.workspace.notes import NotesConfig
 
 from lup_template.agent.config import settings
 from lup_template.agent.core import build_session_options
