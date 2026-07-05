@@ -12,12 +12,11 @@ from collections.abc import Mapping
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
 from lup.adapters.clients.codex import codex_usage_to_lup
+from lup.adapters.clients.common import extract_token_usage, safe_normalize_usage
 from lup.types import (
     JsonValue,
     LupResultMessage,
     Usage,
-    extract_token_usage,
-    safe_normalize_usage,
 )
 
 # The shape that broke a live run: nested dicts, strings, and lists

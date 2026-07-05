@@ -16,19 +16,26 @@ Refusal of intent knobs is behavioral too: :func:`refuse_unconsumed`
 runs an engine's translation over a :class:`ConsumeTracker` view of the
 options and refuses any intent knob the caller set but the translation
 never read — the engine has no lever for what it does not consume.
+
+Usage normalization is a shared helper too: :func:`safe_normalize_usage`
+runs an engine's usage normalizer under guard so a broken one degrades to
+``None`` rather than failing an already-completed run, and
+:func:`extract_token_usage` is the default normalizer for engines whose
+raw usage payload is a plain mapping.
 """
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING
 
-from pydantic import PrivateAttr
+from pydantic import PrivateAttr, ValidationError
 
 from lup.adapters.common import LupAgentOptions, UnsupportedOptionsError
 from lup.trace import TraceLogger, print_message
 from lup.types import (
+    JsonValue,
     LupAssistantMessage,
     LupDoneEvent,
     LupEvent,
@@ -43,6 +50,7 @@ from lup.types import (
     LupToolUseBlock,
     LupToolUseEvent,
     LupUserMessage,
+    Usage,
 )
 
 if TYPE_CHECKING:
@@ -289,6 +297,47 @@ class ResponseCollector[MessageT](ABC):
                     response.tool_results.extend(message.content)
         self.finalize(response)
         return response
+
+
+def extract_token_usage(raw: Mapping[str, JsonValue] | None) -> Usage | None:
+    """Extract portable token counts from a raw vendor usage mapping.
+
+    Reads only the known count fields and ignores vendor extras, so
+    payload growth in any SDK can never fail a completed run. Default
+    normalizer for adapters whose raw payload is a mapping.
+    """
+    if not raw:
+        return None
+
+    def count(key: str) -> int:
+        value = raw.get(key)
+        return value if isinstance(value, int) else 0
+
+    return Usage(
+        input_tokens=count("input_tokens"),
+        output_tokens=count("output_tokens"),
+        cache_read_input_tokens=count("cache_read_input_tokens"),
+        cache_creation_input_tokens=count("cache_creation_input_tokens"),
+    )
+
+
+def safe_normalize_usage[T](
+    normalizer: Callable[[T], Usage | None],
+    raw: T | None,
+) -> Usage | None:
+    """Run a usage normalizer, degrading to None on failure.
+
+    Usage is diagnostic — a broken normalizer must never fail a run that
+    already completed. Failures are logged loudly and dropped.
+    """
+    if raw is None:
+        return None
+    try:
+        return normalizer(raw)
+    except (ValidationError, KeyError, TypeError, AttributeError):
+        name = getattr(normalizer, "__name__", repr(normalizer))
+        logger.exception("Usage normalizer %s failed; dropping usage", name)
+        return None
 
 
 INTENT_KNOBS: frozenset[str] = frozenset(
