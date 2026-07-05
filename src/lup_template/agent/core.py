@@ -450,6 +450,7 @@ async def run_persistent_agent(
     """
     from lup.realtime.relay import run_relay_session
     from lup.realtime.scheduler import Scheduler
+    from lup.reflect import ReflectionGate
 
     from lup_template.agent.tools.realtime import MISSING_SLEEP_MESSAGE
 
@@ -463,7 +464,8 @@ async def run_persistent_agent(
 
     build = build_session_client(session_id, realtime=True)
     notes = build.notes
-    if build.client.mailbox is None:
+    mailbox = build.client.mailbox
+    if mailbox is None:
         raise ValueError(
             "Persistent mode on this engine runs in-process (customization "
             "step 8; PATTERNS.md 'Persistent Agent'); the relay entry point "
@@ -474,6 +476,7 @@ async def run_persistent_agent(
         print(f"[lup] {message}")
 
     scheduler = Scheduler(on_action=on_reply or echo_reply)
+    meta_gate = ReflectionGate(flag_path=mailbox.meta_flag_path)
     trace_logger = TraceLogger(
         trace_path=notes.trace_log, title=f"Session {session_id}"
     )
@@ -482,9 +485,10 @@ async def run_persistent_agent(
         turns = await run_relay_session(
             session,
             scheduler=scheduler,
-            mailbox=build.client.mailbox,
+            mailbox=mailbox,
             initial_prompt=task,
             missing_sleep_message=MISSING_SLEEP_MESSAGE,
+            gate=meta_gate,
             trace_logger=trace_logger,
         )
 
