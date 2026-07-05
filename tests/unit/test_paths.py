@@ -1,6 +1,6 @@
 """Lazy path resolution, configure() tolerance, and access-control helpers.
 
-Resolution must be lazy (importing lup.paths never auto-detects) and
+Resolution must be lazy (importing lup.workspace.paths never auto-detects) and
 configure() must accept roots that are not real projects: a missing
 pyproject.toml falls back to version "0.0.0", and an explicit version
 skips reading the file entirely.
@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from lup import paths
-from lup.paths import extract_glob_dir, path_is_under
+from lup.workspace import paths
+from lup.workspace.paths import extract_glob_dir, path_is_under
 
 
 @pytest.fixture

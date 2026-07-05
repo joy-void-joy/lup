@@ -273,7 +273,7 @@ def check_cmd(
         typer.Option(
             "--antipatterns",
             help="Audit tracked files for missing/spurious `# lup: ignore` markers "
-            "only — the same lup.review.antipatterns rules the edit hook enforces",
+            "only — the same lup.codescan.antipatterns rules the edit hook enforces",
         ),
     ] = False,
     stats: Annotated[
@@ -301,7 +301,7 @@ def check_cmd(
 
 @app.command("gen-hook")
 def gen_hook_cmd() -> None:
-    """Regenerate the edit hook's anti-pattern mirror from lup.review.antipatterns.
+    """Regenerate the edit hook's anti-pattern mirror from lup.codescan.antipatterns.
 
     The hook cannot import a package on its per-edit hot path, so its
     ANTI_PATTERNS/TS_ANTI_PATTERNS tables are a committed copy of the single

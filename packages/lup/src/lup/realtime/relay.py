@@ -17,7 +17,7 @@ between turns.
 State crosses the process boundary through files in a realtime directory
 (by convention ``session_dir/realtime/``, relayed to the tool subprocess
 via ``LUP_REALTIME_DIR`` — see
-:class:`lup.adapters.session_relay.SessionContext`):
+:class:`lup.workspace.context.SessionContext`):
 
 - ``actions.jsonl`` — agent → parent event stream appended by the served
   tools (reply, schedule_action, debounce, remind, meta, context reads).
@@ -40,7 +40,6 @@ via ``LUP_REALTIME_DIR`` — see
 
 Wire the parent side with :func:`run_relay_session`; the tool side is
 :func:`create_realtime_relay_tools`, served by the tool subprocess when
-#lup: Probably should be split it into a sandbox/ folder?
 the realtime directory is relayed.
 
 Examples:
@@ -66,7 +65,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from lup.adapters.clients.common import Session
+from lup.adapters.clients.Client import Session
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime.models import (
     ContextInput,
@@ -85,7 +84,7 @@ from lup.realtime.models import (
 )
 from lup.realtime.scheduler import Scheduler, SleepResult
 from lup.reflect import ReflectionGate
-from lup.trace import TraceLogger
+from lup.telemetry.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
 

@@ -1,12 +1,12 @@
 """Centralized path constants and helpers for agent session data.
 
 Pure path layout — where things go on disk. No data discovery or disk
-iteration; see :mod:`lup.history` for cross-version queries.
+iteration; see :mod:`lup.workspace.history` for cross-version queries.
 
 Paths auto-detect the project root (walking up to ``pyproject.toml``)
 on first access, but can be overridden via :func:`configure`::
 
-    from lup.paths import configure
+    from lup.workspace.paths import configure
     configure(root=Path("/my/project"), notes_dir=Path("/my/data/notes"))
 
 Resolution is lazy and cached: importing this module never touches the
@@ -24,7 +24,7 @@ Examples:
     Override paths for testing (the root does not need a pyproject.toml;
     the version falls back to "0.0.0" unless given explicitly)::
 
-        >>> from lup.paths import configure, sessions_dir, project_root
+        >>> from lup.workspace.paths import configure, sessions_dir, project_root
         >>> configure(root=Path("/tmp/test-project"))
         >>> project_root()
         PosixPath('/tmp/test-project')

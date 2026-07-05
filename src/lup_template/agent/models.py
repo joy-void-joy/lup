@@ -4,13 +4,13 @@ This is a TEMPLATE. Customize these models for your domain.
 
 The key pattern is:
 1. Define Pydantic models for structured agent output
-2. The agent submits them via the submit_output tool (see lup.output)
+2. The agent submits them via the submit_output tool (see lup.workspace.output)
 3. Store results in notes/traces/<version>/sessions/ for feedback loop analysis
 """
 
 from pydantic import BaseModel, Field
 
-from lup.history import SessionResult
+from lup.workspace.history import SessionResult
 
 
 # =============================================================================

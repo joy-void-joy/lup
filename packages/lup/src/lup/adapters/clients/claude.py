@@ -16,7 +16,6 @@ The SDK is imported as a qualified namespace (``claude`` for the package,
 ``claude_types`` for its ``types`` submodule) so every SDK type reads with
 its origin visible at the use site.
 """
-# lup: What's not clear here is: Where is background/claude.py, profiles/claude.py, etc... initiated and used. They should all converge somewhere. We should use deeper nested folder
 
 import copy
 import json
@@ -34,7 +33,7 @@ from typing import Any  # lup: ignore — confined to SdkDict, the SDK's payload
 import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
 
-from lup.adapters.clients.common import (
+from lup.adapters.clients.Client import (
     Client,
     ResponseCollector,
     Session,
@@ -57,8 +56,9 @@ from lup.mcp import (
     LupToolHandler,
     RawMcpServerConfig,
 )
-from lup.paths import extract_glob_dir
-from lup.trace import TraceLogger, print_message
+from lup.telemetry.display import print_message
+from lup.telemetry.trace import TraceLogger
+from lup.workspace.paths import extract_glob_dir
 from lup.types import (
     JsonObject,
     JsonValue,

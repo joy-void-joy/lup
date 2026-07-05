@@ -7,7 +7,7 @@ surface only failing sessions, ranked by error count.
 
 import pytest
 
-from lup.metrics import MetricsSummary, ToolMetricsDict
+from lup.telemetry.metrics import MetricsSummary, ToolMetricsDict
 from lup_template.devtools.feedback.analyze import (
     gather_error_patterns,
     gather_tool_health,

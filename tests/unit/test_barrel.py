@@ -9,7 +9,7 @@ def test_every_export_resolves() -> None:
 
 
 def test_sandbox_resolves_lazily() -> None:
-    from lup.sandbox import Sandbox
+    from lup.sandbox.container import Sandbox
 
     assert lup.Sandbox is Sandbox
 

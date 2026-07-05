@@ -6,7 +6,7 @@ whether the engine raises
 :class:`~lup.adapters.common.UnsupportedOptionsError`; the streaming row
 reads whether the engine's ``stream`` is itself an async generator that
 yields as the turn unfolds (live) or a plain method that returns
-:func:`~lup.adapters.clients.common.replay_stream`, which emits every
+:func:`~lup.adapters.clients.Client.replay_stream`, which emits every
 event only after the turn completes (post-hoc); the background row asks
 the engine for a tool-using background agent and catches the refusal.
 Construction and generator creation never connect, so probing is offline
@@ -30,7 +30,7 @@ import inspect
 
 from pydantic import BaseModel
 
-from lup.adapters.background.common import create_background_agent
+from lup.adapters.background.Background import create_background_agent
 from lup.adapters.common import (
     ENGINES,
     ClientFactory,

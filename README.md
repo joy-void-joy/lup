@@ -117,7 +117,7 @@ Every agent session writes its traces, outputs, and session JSONs under `notes/t
 
 ### lib
 
-`packages/lup` is the standalone library — a uv workspace member that any project can depend on without modification. It contains the reusable building blocks: SDK engines (Claude, Codex, OpenAI-compatible) behind one `Client`/`Session` interface (`lup.adapters`), the shared type vocabulary (`lup.types`), MCP tool creation (`lup.mcp`), hook utilities and tool gates (`lup.hooks`), the submit_output finalization tool (`lup.output`), the reflection gate (`lup.reflect`), trace logging (`lup.trace`), session history (`lup.history`), version-aware paths (`lup.paths`), the scheduler for persistent agents (`lup.realtime.scheduler`), and the Docker sandbox (`lup.sandbox`). It is configured through function arguments, never by editing its source, and it never gets renamed in downstream projects.
+`packages/lup` is the standalone library — a uv workspace member that any project can depend on without modification. It contains the reusable building blocks: SDK engines (Claude, Codex, OpenAI-compatible) behind one `Client`/`Session` interface (`lup.adapters`), the shared type vocabulary (`lup.types`), MCP tool creation (`lup.mcp`), hook utilities and tool gates (`lup.hooks`), the submit_output finalization tool (`lup.workspace.output`), the reflection gate (`lup.reflect`), trace logging (`lup.telemetry.trace`), session history (`lup.workspace.history`), version-aware paths (`lup.workspace.paths`), the scheduler for persistent agents (`lup.realtime.scheduler`), and the Docker sandbox (`lup.sandbox`). It is configured through function arguments, never by editing its source, and it never gets renamed in downstream projects.
 
 ### agent
 

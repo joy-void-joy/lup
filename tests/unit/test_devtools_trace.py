@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from lup.history import iter_trace_log_files
-from lup.trace import TraceLogger
+from lup.workspace.history import iter_trace_log_files
+from lup.telemetry.trace import TraceLogger
 from lup.types import (
     LupContentBlock,
     LupTextBlock,

@@ -16,7 +16,7 @@ from lup.adapters.clients.codex import (
     CodexSession,
     build_lup_response,
 )
-from lup.trace import TraceLogger
+from lup.telemetry.trace import TraceLogger
 from lup.types import (
     JsonObject,
     LupDoneEvent,

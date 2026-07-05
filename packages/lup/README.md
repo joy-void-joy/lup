@@ -9,15 +9,15 @@ Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/
 - `lup.mcp` — `@lup_tool` decorator for MCP tools with typed Pydantic input/output, plus a patched `create_mcp_server` that preserves `is_error`.
 - `lup.hooks` — composable hook primitives: directory-based permissions, tool allowlists, tool gates (deny until a condition unlocks), nudges, capture hooks.
 - `lup.reflect` — reflection gate for reflect-before-output workflows.
-- `lup.output` — `submit_output` finalization and the missing-output guard, shared by every backend.
+- `lup.workspace.output` — `submit_output` finalization and the missing-output guard, shared by every backend.
 - `lup.realtime` — persistent-agent machinery, one concern per module: `scheduler` (the `Scheduler` core — sleep/wake, debounce, reminders — with its guard hooks), `models` (shared tool I/O), and `relay` (the file-mailbox relay for subprocess backends, layered on the core).
 - `lup.subagents` — `run_subagent` delegation tool built from `SubagentSpec`s.
 - `lup.sandbox` — Docker-based persistent REPL (`pip install lup[docker]`).
-- `lup.history` / `lup.notes` / `lup.paths` — version-aware session storage, RO/RW notes layout, and lazy path configuration.
-- `lup.trace` — color-coded console display and markdown trace logging.
-- `lup.metrics` / `lup.retry` / `lup.throttle` — tool-call metrics, retry with backoff, rate limiting.
-- `lup.review` — review-marker scanning (`markers`) and the anti-pattern rule set (`antipatterns`) that development tooling consumes, over a shared scan core (`common`).
-- `lup.profiles` — named Claude config-dir profiles (accounts), shared machine-wide.
+- `lup.workspace` — the session workspace: `history` (version-aware session storage), `notes` (RO/RW notes layout), `paths` (lazy path configuration), `output` (submit_output finalization), and `context` (`SessionContext` relayed across the subprocess boundary).
+- `lup.telemetry.trace` / `lup.telemetry.display` — markdown trace logging and color-coded console display, over the shared block helpers in `telemetry.blocks`.
+- `lup.telemetry.metrics` / `lup.resilience.retry` / `lup.resilience.throttle` — tool-call metrics, retry with backoff, rate limiting.
+- `lup.codescan` — review-marker scanning (`markers`) and the anti-pattern rule set (`antipatterns`) that development tooling consumes, over a shared scan core (`common`).
+- `lup.adapters.profiles` — named Claude config-dir profiles (accounts), shared machine-wide.
 
 ## Usage
 
@@ -50,4 +50,4 @@ response = await query("Summarize the findings", output_type=Summary)
 summary = response.output(Summary)
 ```
 
-Paths resolve lazily: importing `lup` never touches the filesystem. Point session storage somewhere explicit with `lup.paths.configure(root=..., notes_dir=..., version=...)`.
+Paths resolve lazily: importing `lup` never touches the filesystem. Point session storage somewhere explicit with `lup.workspace.paths.configure(root=..., notes_dir=..., version=...)`.

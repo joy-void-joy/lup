@@ -101,7 +101,7 @@ Agents produce better output when forced to self-assess before committing. The r
 
 1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool the agent calls to record its self-assessment — confidence, key uncertainties, tool audit, process reflection. Optionally runs an independent reviewer sub-agent.
 2. **Reflection gate** (`lup.reflect`): A `ReflectionGate` flag tracker + `create_reflection_gate()` hook factory (a preset of `create_tool_gate` from `lup.hooks`). Denies a target tool until the agent has reflected.
-3. **Wiring**: The gate blocks `mcp__notes__submit_output` (one-shot agents) or `sleep` (persistent agents) until reflection occurs. Final output always flows through `submit_output` (`lup.output`) — the same tool on every SDK backend — which writes `session_dir/output.json`; a completion guard (`create_completion_guard`, or `ensure_output_submitted` on backends without a stop event) enforces that the output actually gets submitted.
+3. **Wiring**: The gate blocks `mcp__notes__submit_output` (one-shot agents) or `sleep` (persistent agents) until reflection occurs. Final output always flows through `submit_output` (`lup.workspace.output`) — the same tool on every SDK backend — which writes `session_dir/output.json`; a completion guard (`create_completion_guard`, or `ensure_output_submitted` on backends without a stop event) enforces that the output actually gets submitted.
 
 **Customizing reflection:** The gate mechanism in `lup.reflect` is domain-neutral and parametric. The reflection _tool_ and its input model (`ReflectInput` in `agent/tools/reflect.py`) are domain-specific — add fields for your domain (e.g., factor analysis for forecasting, move evaluation for games). The reviewer prompt should target your domain's common failure modes.
 
@@ -131,15 +131,15 @@ Agents produce better output when forced to self-assess before committing. The r
 
 - **lup/adapters/**: ALL SDK-specific code behind one neutral seam — `common.py` is the SDK-free door (`LupAgentOptions`, seam errors, the `ENGINES`/`MODEL_ROUTES` routers, `create_client()`, and one-shot `query()`); `clients/` holds the purely abstract `Client`/`Session` and each engine's client + `create_*` factory; `background/` holds the wake/debounce machinery and per-engine agents
 - **lup/options.py**: `LupAgentOptions` — backend-agnostic options crossing application -> lib
-- **lup/output.py**: `submit_output` finalization + missing-output guard (all backends)
+- **lup/workspace/output.py**: `submit_output` finalization + missing-output guard (all backends)
 - **lup/hooks.py**: Hook utilities, composition, and `create_tool_gate` (deny-until-unlocked primitive)
 - **lup/mcp.py**: MCP server creation (`lup_tool`, `LupMcpTool`, `ToolError`)
-- **lup/paths.py**: Centralized version-aware path constants and helpers
-- **lup/trace.py**: Trace logging, output formatting, color-coded console display
-- **lup/metrics.py**: Tool call tracking
+- **lup/workspace/paths.py**: Centralized version-aware path constants and helpers
+- **lup/telemetry/trace.py**: Trace logging + event sidecar; console display in `telemetry/display.py`
+- **lup/telemetry/metrics.py**: Tool call tracking
 - **lup/realtime/**: Persistent-agent machinery — `scheduler` (Scheduler core + guards), `models` (tool I/O), `relay` (subprocess file mailbox)
 - **lup/reflect.py**: Reflection gate (enforce reflect-before-output)
-- **lup/throttle.py**: Rate limiting (concurrency + interval)
+- **lup/resilience/throttle.py**: Rate limiting (concurrency + interval)
 
 **Versioning:**
 

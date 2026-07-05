@@ -8,7 +8,7 @@ profile registry; it imports no SDK.
 
 from pathlib import Path
 
-from lup.adapters.profiles.common import ProfileSupport
+from lup.adapters.profiles.Profiles import ProfileSupport
 
 DEFAULT_CONFIG_DIR = Path.home() / ".claude"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"

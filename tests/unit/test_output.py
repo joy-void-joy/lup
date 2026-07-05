@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from lup.hooks import LupHookInput, create_completion_guard
 from lup.mcp import ToolResponse
-from lup.output import create_output_tool, output_path, read_output
+from lup.workspace.output import create_output_tool, output_path, read_output
 from lup.reflect import ReflectionGate
 
 

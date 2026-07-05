@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.adapters.profiles import common as profiles
+from lup.adapters.profiles import Profiles as profiles
 from lup.adapters.profiles.claude import DEFAULT_CONFIG_DIR, ClaudeProfileSupport
 
 
