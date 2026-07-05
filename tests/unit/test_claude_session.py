@@ -1,4 +1,4 @@
-"""ClaudeSession and ResponseCollector against a scripted fake client.
+"""ClaudeSession and ClaudeResponseCollector against a scripted fake client.
 
 The conversation layer owns response assembly and error propagation —
 exactly where backends quietly diverge. These tests script SDK message
@@ -214,25 +214,26 @@ async def test_session_resume_threads_the_saved_id(
 
 
 async def test_collector_state_after_collect() -> None:
-    from lup.adapters.clients.claude import ResponseCollector
+    from lup.adapters.clients.claude import ClaudeResponseCollector
 
     fake = FakeClient(SCRIPT)
-    collector = ResponseCollector(cast(ClaudeSDKClient, fake))
+    collector = ClaudeResponseCollector(cast(ClaudeSDKClient, fake))
 
-    result = await collector.collect()
+    response = await collector.collect()
 
-    assert result.session_id == "sess-1"
-    assert collector.text == "looking at it\n\nanswer"
-    assert len(collector.blocks) == 3
-    assert len(collector.tool_results) == 1
-    assert collector.result is result
+    assert response.session_id == "sess-1"
+    assert response.text == "looking at it\n\nanswer"
+    assert len(response.blocks) == 3
+    assert len(response.tool_results) == 1
+    assert collector.result is not None
+    assert collector.result.session_id == "sess-1"
 
 
 async def test_collector_raises_mid_iteration_on_error() -> None:
-    from lup.adapters.clients.claude import ResponseCollector
+    from lup.adapters.clients.claude import ClaudeResponseCollector
 
     fake = FakeClient([result_message(is_error=True, result="boom")])
-    collector = ResponseCollector(cast(ClaudeSDKClient, fake))
+    collector = ClaudeResponseCollector(cast(ClaudeSDKClient, fake))
 
     with pytest.raises(RuntimeError, match="boom"):
         await collector.collect()
@@ -240,7 +241,7 @@ async def test_collector_raises_mid_iteration_on_error() -> None:
 
 async def test_error_result_is_traced_and_kept_before_raising(tmp_path: Path) -> None:
     """An error result must land in the trace and collector state, then raise."""
-    from lup.adapters.clients.claude import ResponseCollector
+    from lup.adapters.clients.claude import ClaudeResponseCollector
     from lup.trace import TraceLogger
 
     progress = AssistantMessage(content=[TextBlock(text="working...")], model="m")
@@ -248,7 +249,7 @@ async def test_error_result_is_traced_and_kept_before_raising(tmp_path: Path) ->
     conv, fake = session([progress, error])
     _ = fake
     trace = TraceLogger(trace_path=tmp_path / "t.md", title="T")
-    collector = ResponseCollector(conv.client, trace_logger=trace)
+    collector = ClaudeResponseCollector(conv.client, trace_logger=trace)
 
     with pytest.raises(RuntimeError, match="budget exceeded"):
         await collector.collect()
