@@ -84,7 +84,10 @@ def build_session_toolset(
             Claude, which would otherwise expose both mechanisms at once.
         sandbox: Session sandbox whose tools form the ``sandbox`` group.
         realtime_dir: Relay mailbox directory; presence adds the
-            ``session`` group (persistent-mode tools).
+            ``session`` group (persistent-mode tools), wired with a
+            file-backed reflection gate so this domain keeps its
+            meta-before-sleep requirement — reflection is opt-in and the
+            library imposes none by default.
 
     Returns:
         The groups plus the shared gate and the submitted-output path,
@@ -124,9 +127,13 @@ def build_session_toolset(
         groups[SANDBOX_GROUP] = sandbox.create_tools()
 
     if realtime_dir is not None:
-        from lup.realtime.relay import create_realtime_relay_tools
+        from lup.realtime.relay import RealtimeMailbox, create_realtime_relay_tools
+        from lup.reflect import ReflectionGate
 
-        groups[SESSION_GROUP] = create_realtime_relay_tools(realtime_dir)
+        meta_flag = RealtimeMailbox(realtime_dir).meta_flag_path
+        groups[SESSION_GROUP] = create_realtime_relay_tools(
+            realtime_dir, gate=ReflectionGate(flag_path=meta_flag)
+        )
 
     groups[EXAMPLE_GROUP] = list(EXAMPLE_TOOLS)
 
