@@ -15,10 +15,7 @@ from lup.adapters.clients.claude.options import SESSION_THINKING_TOKENS
 from lup.adapters.clients.claude_compat import create_claude_compat
 from lup.adapters.clients.codex.client import CodexClient, create_codex
 from lup.adapters.clients.codex.usage import per_mtok_usage_cost
-from lup.adapters.clients.openai_compat import (
-    OpenAICompatClient,
-    create_openai_compat,
-)
+from lup.adapters.clients.openai_compat import create_openai_compat
 from lup.adapters.errors import UnsupportedOptionsError
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.wiring import (
@@ -307,16 +304,19 @@ class TestCodexEngine:
         )
         client = create_codex(opts)
         assert isinstance(client, CodexClient)
-        assert client.mcp_servers == ["notes", "sandbox"]
-        assert client.mcp_tools is True
-        assert client.effort == "high"
-        assert client.turn_timeout_seconds == 120.0
+        overrides = client.native.config_overrides
+        assert any(o.startswith("mcp_servers.notes.") for o in overrides)
+        assert any(o.startswith("mcp_servers.sandbox.") for o in overrides)
+        assert client.native.effort == "high"
+        assert client.native.turn_timeout_seconds == 120.0
         assert client.mailbox is None
 
     def test_call_tier_serves_no_tools(self) -> None:
         client = create_codex(LupAgentOptions(model="gpt-5.5"))
         assert isinstance(client, CodexClient)
-        assert client.mcp_tools is False
+        assert not any(
+            o.startswith("mcp_servers.") for o in client.native.config_overrides
+        )
 
     def test_intent_knobs_refused_on_sessions(self) -> None:
         opts = LupAgentOptions(
@@ -349,7 +349,7 @@ class TestCodexEngine:
         )
         client = create_codex(opts)
         assert isinstance(client, CodexClient)
-        assert client.max_budget_usd == 1.0
+        assert client.native.max_budget_usd == 1.0
 
     def test_drop_policy_clears_and_builds(self) -> None:
         opts = LupAgentOptions(
@@ -360,7 +360,7 @@ class TestCodexEngine:
         )
         client = create_codex(opts)
         assert isinstance(client, CodexClient)
-        assert client.max_budget_usd is None
+        assert client.native.max_budget_usd is None
 
 
 class TestOpenAICompatEngine:
@@ -371,9 +371,12 @@ class TestOpenAICompatEngine:
             model_provider="prov",
         )
         client = create_openai_compat(opts)
-        assert isinstance(client, OpenAICompatClient)
-        assert client.base_url == "http://local"
-        assert client.model_provider == "prov"
+        assert isinstance(client, CodexClient)
+        assert (
+            'model_providers.prov.base_url="http://local"'
+            in client.native.config_overrides
+        )
+        assert client.native.model_provider == "prov"
 
 
 class TestCreateClient:

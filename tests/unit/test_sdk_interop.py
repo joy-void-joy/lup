@@ -298,42 +298,28 @@ class TestNudgeHookScripts:
             assert "systemMessage" in content
 
 
-class TestCodexAdapter:
-    def test_adapter_builds_config_overrides_with_mcp(self) -> None:
-        from lup.adapters.clients.codex.client import CodexClient
+class TestCodexNativeTranslation:
+    def test_served_groups_render_mcp_overrides(self) -> None:
+        from lup.adapters.clients.codex.options import build_codex_native
+        from lup.adapters.options import LupAgentOptions
 
-        adapter = CodexClient(
-            model="o4-mini",
-            system_prompt="test",
-            mcp_tools=True,
+        native = build_codex_native(
+            LupAgentOptions(
+                model="o4-mini",
+                system_prompt="test",
+                served_tool_groups=["notes"],
+            )
         )
-        overrides = adapter.build_config_overrides()
-        assert any("mcp_servers" in o for o in overrides)
+        assert any("mcp_servers" in o for o in native.config_overrides)
 
-    def test_adapter_builds_config_overrides_without_mcp(self) -> None:
-        from lup.adapters.clients.codex.client import CodexClient
+    def test_no_served_groups_render_no_mcp_overrides(self) -> None:
+        from lup.adapters.clients.codex.options import build_codex_native
+        from lup.adapters.options import LupAgentOptions
 
-        adapter = CodexClient(
-            model="o4-mini",
-            system_prompt="test",
-            mcp_tools=False,
+        native = build_codex_native(
+            LupAgentOptions(model="o4-mini", system_prompt="test")
         )
-        overrides = adapter.build_config_overrides()
-        assert not any("mcp_servers" in o for o in overrides)
-
-    def test_adapter_builds_config_overrides_with_hooks(self) -> None:
-        from lup.adapters.clients.codex.client import CodexClient
-
-        adapter = CodexClient(
-            model="o4-mini",
-            system_prompt="test",
-            mcp_tools=False,
-            hook_overrides=[
-                CodexHookConfig(event="PreToolUse", command="hook.py"),
-            ],
-        )
-        overrides = adapter.build_config_overrides()
-        assert any("codex_hooks" in o for o in overrides)
+        assert not any("mcp_servers" in o for o in native.config_overrides)
 
 
 class TestMergeHooks:

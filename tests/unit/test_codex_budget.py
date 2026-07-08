@@ -14,6 +14,7 @@ import pytest
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
 from lup.adapters.clients.codex.client import CodexClient, CodexSession
+from lup.adapters.clients.codex.options import CodexNativeConfig
 from lup.adapters.clients.codex.usage import per_mtok_usage_cost
 from lup.adapters.errors import BudgetExceededError, TurnTimeoutError
 from lup.types import Usage
@@ -148,7 +149,7 @@ async def test_open_thread_dispatches_start_vs_resume() -> None:
     """session(resume=) restores the saved thread instead of starting one."""
     fake = FakeCodex(FakeThread([]))
     codex = cast("AsyncCodex", cast(object, fake))  # lup: ignore — SDK-boundary fake
-    client = CodexClient(model="gpt-5.5", system_prompt="")
+    client = CodexClient(CodexNativeConfig(model="gpt-5.5"))
 
     started = await client.open_thread(codex, resume=None)
     assert started is fake.thread
@@ -218,9 +219,8 @@ class TestConversationAccounting:
 class TestAdapterValidation:
     def test_budget_without_estimator_raises(self) -> None:
         with pytest.raises(ValueError, match="usage_cost"):
-            CodexClient(
+            CodexNativeConfig(
                 model="gpt-5.5",
-                system_prompt="",
                 max_budget_usd=1.0,
             )
 
