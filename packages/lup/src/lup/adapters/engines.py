@@ -82,8 +82,9 @@ class CodexEngine(Engine):
 
     def profiles(self) -> ProfileSupport:
         raise UnsupportedOperationError(
-            "the codex runtime reads no account home from a config dir; "
-            "profiles exist only on the Claude scaffolding."
+            "profiles are not implemented for the codex runtime yet — its "
+            "CLI reads an account home from CODEX_HOME, so a "
+            "CodexProfileSupport can slot in without touching the seam."
         )
 
     def builtin_tools(self) -> frozenset[str]:

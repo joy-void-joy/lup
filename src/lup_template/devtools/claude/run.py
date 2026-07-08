@@ -18,7 +18,6 @@ import tempfile
 import sh
 import typer
 
-from lup.adapters.profiles import store as profiles
 from lup.adapters.profiles.claude import CONFIG_DIR_ENV, ClaudeProfileSupport
 from lup.workspace.paths import project_root
 
@@ -79,9 +78,10 @@ def run_claude(
 
     args.extend(extra_args)
 
-    config_dir = ClaudeProfileSupport().resolve_config_dir(profile)
+    support = ClaudeProfileSupport()
+    config_dir = support.resolve_config_dir(profile)
     env = {**os.environ, CONFIG_DIR_ENV: str(config_dir)}
-    shown = profile or profiles.active_profile() or "default"
+    shown = profile or support.active_profile() or "default"
     typer.echo(f"Launching claude (profile: {shown}, config dir: {config_dir})")
 
     try:

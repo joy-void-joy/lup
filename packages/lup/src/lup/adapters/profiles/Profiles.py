@@ -1,55 +1,30 @@
-"""Named config-dir profiles (accounts), shared across repos.
+"""The profile seam: one verb, ``select``.
 
-A profile maps a name to a backend config dir — a complete account home:
-its own login/credentials, settings, history, and plugin registry.
-Selecting a profile decides which account a backend's runner launches as
-and which account usage reporting reads.
-
-This module is the per-backend half's contract: the neutral registry —
-``name -> config dir`` and the active selection, machine-wide in
-``~/.lup/profiles.json`` because accounts are reused across projects —
-lives in :mod:`lup.adapters.profiles.store`. What a config dir *means* —
-where a backend's home lives by default, and the env var that points its
-runner at a chosen one — is a per-backend property supplied by a
-:class:`ProfileSupport` implementation beside this module (e.g.
-:mod:`lup.adapters.profiles.claude`). A backend without a
-``ProfileSupport`` simply has no profile capability.
+A profile names an account — a complete backend login with its own
+credentials, settings, and history, reused across projects.
+:class:`ProfileSupport` is the whole contract: ``select(name, client)``
+takes an already-built client and returns one running as that account.
+Everything else — how a name resolves, what an account physically is,
+where an implementation keeps its bookkeeping — is that implementation's
+own concern, kept beside this module (e.g.
+:mod:`lup.adapters.profiles.claude`). An engine with no implementation
+raises :class:`~lup.adapters.errors.UnsupportedOperationError` from
+``Engine.profiles()``.
 """
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 
-from lup.adapters.profiles.store import active_profile, config_dir_for
+from lup.adapters.clients.Client import Client
 
 
 class ProfileSupport(ABC):
-    """A backend's account-profile capability — opt-in, one impl by design.
+    """A backend's account-profile capability: put a client on an account."""
 
-    The registry (:mod:`lup.adapters.profiles.store`) is neutral; a
-    subclass supplies the one
-    backend-specific piece: where the account home lives when nothing is
-    selected (:attr:`default_config_dir`). The env var that points a
-    runner at a chosen dir is a constant beside the subclass (e.g.
-    ``lup.adapters.profiles.claude.CONFIG_DIR_ENV``).
-
-    Backends opt into this capability by implementing it rather than
-    declaring a flag: a backend whose runner reads a whole account home
-    from a config dir (Claude) provides a ``ProfileSupport`` module
-    beside this one; a backend with no such home (e.g. Codex) has no
-    profile capability and no module to write. A single implementation
-    is thus the designed shape, and an absent one is a capability
-    declined rather than a piece left unwritten.
-    """
-
-    @property
     @abstractmethod
-    def default_config_dir(self) -> Path:
-        """The account home used when no profile is selected."""
+    def select(self, name: str | None, client: Client) -> Client:
+        """Return *client* running as the named account.
 
-    # lup: This feels very bad, the ABC seems too tight in terms of what qualify as a Profile. For instance, maybe codex or another agent doesn't actually use Path but specific ids, etc..
-    def resolve_config_dir(self, name: str | None = None) -> Path:
-        """Resolve a config dir: explicit name > active profile > default."""
-        chosen = name or active_profile()
-        if chosen is None:
-            return self.default_config_dir
-        return config_dir_for(chosen)
+        ``name=None`` selects the implementation's own active or default
+        account. The given client is left untouched; the returned one is
+        a rebound handle.
+        """

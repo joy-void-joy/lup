@@ -1,8 +1,8 @@
-"""Named account profiles: a neutral registry plus per-engine support.
+"""Named account profiles: one ``select`` verb, per-engine implementations.
 
-``Profiles`` is the backend-neutral registry (name -> config dir and the
-active selection, stored in ``~/.lup/profiles.json``) and the
-:class:`~lup.adapters.profiles.Profiles.ProfileSupport` ABC; each engine
-module beside it (e.g. ``claude``) supplies the config-dir default and
-the runner env that are properties of that backend.
+``Profiles`` holds the
+:class:`~lup.adapters.profiles.Profiles.ProfileSupport` ABC —
+``select(name, client)`` returns a client running as the named account —
+and each implementation beside it (e.g. ``claude``) owns everything else
+about its accounts, storage included.
 """
