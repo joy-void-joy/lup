@@ -64,8 +64,11 @@ class Engine(ABC):
     def profiles(self) -> ProfileSupport:
         """This engine's account-profile support.
 
-        An engine whose runner reads no account home from a config dir
-        raises :class:`~lup.adapters.errors.UnsupportedOperationError`.
+        Its one verb, ``select(name, client)``, returns the client
+        running as the named account; everything else about accounts is
+        the implementation's own concern. An engine with no
+        implementation raises
+        :class:`~lup.adapters.errors.UnsupportedOperationError`.
         """
 
     @abstractmethod

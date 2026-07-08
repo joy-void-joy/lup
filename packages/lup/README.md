@@ -17,7 +17,7 @@ Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/
 - `lup.telemetry.trace` / `lup.telemetry.display` — markdown trace logging and color-coded console display, over the shared block helpers in `telemetry.blocks`.
 - `lup.telemetry.metrics` / `lup.resilience.retry` / `lup.resilience.throttle` — tool-call metrics, retry with backoff, rate limiting.
 - `lup.codescan` — review-marker scanning (`markers`) and the anti-pattern rule set (`antipatterns`) that development tooling consumes, over a shared scan core (`common`).
-- `lup.adapters.profiles` — named Claude config-dir profiles (accounts), shared machine-wide.
+- `lup.adapters.profiles` — the profile seam: `ProfileSupport.select(name, client)` returns a client running as the named account; each implementation beside the ABC (`claude`) owns its own storage and resolution.
 
 ## Usage
 

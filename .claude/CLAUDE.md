@@ -89,7 +89,7 @@ packages/
         │   ├── wiring.py       # SDK-free door: ENGINES/MODEL_ROUTES routers, resolve_engine(), create_client(), query()
         │   ├── clients/        # Client.py contract; Sessions.py & Stream.py component verbs; composed.py scaffolding (ComposedClient + ReplayStream gap-filler); shared machinery (refusal.py, usage.py); claude/ & codex/ engine packages (one concern per module); compat translations (claude_compat.py, openai_compat.py)
         │   ├── background/     # Background.py (BackgroundDriver verb + BackgroundAgent scaffolding + params) + claude & codex drivers
-        │   ├── profiles/       # Profiles.py (ProfileSupport ABC) + store.py registry + per-engine support (claude)
+        │   ├── profiles/       # Profiles.py (ProfileSupport ABC: one select(name, client) verb) + per-engine support owning its storage (claude)
         │   └── tools/          # per-engine built-in tool-name tables (claude)
         ├── codescan/           # Source scanning for dev tooling: review notes + forbidden shapes
         │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor
