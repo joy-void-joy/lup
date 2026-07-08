@@ -1,10 +1,12 @@
-"""The Claude engine's run path: ``create_claude``, sessions, and the client.
+"""The Claude engine's run path: ``create_claude``, sessions, composition.
 
 Construction refuses through the shared consume-tracking seam
 (:mod:`lup.adapters.clients.refusal`) over the translation in
-:mod:`lup.adapters.clients.claude.options`; the run path drains every
-turn through the collector in
-:mod:`lup.adapters.clients.claude.collector`.
+:mod:`lup.adapters.clients.claude.options`, then composes the engine's
+components — :class:`ClaudeSessions` and the live
+:class:`~lup.adapters.clients.claude.stream.ClaudeLiveStream` — into the
+one client shape; the session path drains every turn through the
+collector in :mod:`lup.adapters.clients.claude.collector`.
 """
 
 import copy
@@ -12,34 +14,21 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import claude_agent_sdk as claude
-from claude_agent_sdk import types as claude_types
 
 from lup.adapters.clients.claude.collector import (
     ClaudeResponseCollector,
     ClaudeUsageNormalizer,
 )
-from lup.adapters.clients.claude.messages import (
-    claude_block_to_lup,
-    claude_message_to_lup,
-)
 from lup.adapters.clients.claude.options import build_claude_options
+from lup.adapters.clients.claude.stream import ClaudeLiveStream
 from lup.adapters.clients.Client import Client, Session
-from lup.adapters.clients.fallbacks import query_via_session
+from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.refusal import refuse_unconsumed
+from lup.adapters.clients.Sessions import Sessions
 from lup.adapters.clients.usage import extract_token_usage
 from lup.adapters.options import LupAgentOptions
-from lup.telemetry.display import print_message
 from lup.telemetry.trace import TraceLogger
-from lup.types import (
-    LupContentBlock,
-    LupDoneEvent,
-    LupEvent,
-    LupResponse,
-    LupTextEvent,
-    LupThinkingEvent,
-    LupToolResultEvent,
-    LupToolUseEvent,
-)
+from lup.types import LupResponse
 
 
 def create_claude(options: LupAgentOptions) -> Client:
@@ -54,7 +43,17 @@ def create_claude(options: LupAgentOptions) -> Client:
     nothing bounds a single turn's duration), so it is left unread and
     refused.
     """
-    return ClaudeClient(refuse_unconsumed("claude", options, build_claude_options))
+    return compose_claude(refuse_unconsumed("claude", options, build_claude_options))
+
+
+def compose_claude(native: claude.ClaudeAgentOptions) -> ComposedClient:
+    """Compose the Claude engine's components into the one client shape.
+
+    Claude contributes both verbs — its sessions and a live event stream —
+    so nothing is gap-filled. ``claude-compat`` reuses this composition
+    over its own translation.
+    """
+    return ComposedClient(ClaudeSessions(native), streams=ClaudeLiveStream(native))
 
 
 class ClaudeSession(Session):
@@ -97,8 +96,8 @@ class ClaudeSession(Session):
         await self.client.interrupt()
 
 
-class ClaudeClient(Client):
-    """Run prompts via the Claude Agent SDK.
+class ClaudeSessions(Sessions):
+    """Opens Claude Agent SDK sessions.
 
     Args:
         options: Native SDK options built by
@@ -117,9 +116,7 @@ class ClaudeClient(Client):
         self.usage_normalizer = usage_normalizer
 
     @asynccontextmanager
-    async def session(
-        self, *, resume: str | None = None
-    ) -> AsyncGenerator[Session, None]:
+    async def open(self, *, resume: str | None = None) -> AsyncGenerator[Session, None]:
         options = self.options
         if resume:
             options = copy.copy(self.options)
@@ -128,63 +125,3 @@ class ClaudeClient(Client):
             yield ClaudeSession(
                 client, usage_normalizer=self.usage_normalizer, resumed=resume
             )
-
-    async def query(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> LupResponse:
-        return await query_via_session(
-            self, prompt, trace_logger=trace_logger, prefix=prefix
-        )
-
-    async def stream(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> AsyncGenerator[LupEvent, None]:
-        """Stream events live from the Claude SDK.
-
-        Drains through :class:`~lup.adapters.clients.claude.collector.ClaudeResponseCollector`
-        — the same walk the one-shot/session path uses — mapping each SDK
-        block to its live event as it arrives. The collector raises after
-        yielding an error result, so the terminal ``LupDoneEvent`` still
-        reaches the consumer first.
-        """
-        collected: list[LupContentBlock] = []
-        async with claude.ClaudeSDKClient(options=self.options) as client:
-            await client.query(prompt)
-            collector = ClaudeResponseCollector(
-                client, trace_logger=trace_logger, prefix=prefix
-            )
-            async for message in collector.drain():
-                lup_msg = claude_message_to_lup(message)
-                if lup_msg is not None and trace_logger:
-                    print_message(lup_msg, prefix=prefix, trace=trace_logger)
-
-                match message:
-                    case claude_types.AssistantMessage():
-                        for block in message.content:
-                            collected.append(claude_block_to_lup(block))
-                            match block:
-                                case claude.ThinkingBlock():
-                                    if block.thinking:
-                                        yield LupThinkingEvent(thinking=block.thinking)
-                                case claude.TextBlock():
-                                    yield LupTextEvent(text=block.text)
-                                case claude.ToolUseBlock():
-                                    yield LupToolUseEvent(id=block.id, name=block.name)
-                    case claude_types.UserMessage():
-                        if isinstance(message.content, list):
-                            for block in message.content:
-                                if isinstance(block, claude.ToolResultBlock):
-                                    yield LupToolResultEvent(
-                                        tool_use_id=block.tool_use_id,
-                                        content=str(block.content),
-                                    )
-                    case claude_types.ResultMessage():
-                        yield LupDoneEvent(blocks=collected)

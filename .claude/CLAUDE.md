@@ -87,8 +87,8 @@ packages/
         │   ├── options.py      # LupAgentOptions — the backend-neutral construction vocabulary
         │   ├── errors.py       # Seam errors: unsupported options/operations, turn timeout, budget
         │   ├── wiring.py       # SDK-free door: ENGINES/MODEL_ROUTES routers, resolve_engine(), create_client(), query()
-        │   ├── clients/        # Client.py + Collector.py contracts, shared machinery (refusal.py, usage.py, fallbacks.py), claude/ & codex/ engine packages (one concern per module), compat translations (claude_compat.py, openai_compat.py)
-        │   ├── background/     # Background.py (contract + params) + wakeloop.py machinery + claude & codex implementations
+        │   ├── clients/        # Client.py contract; Sessions.py & Stream.py component verbs; composed.py scaffolding (ComposedClient + ReplayStream gap-filler); shared machinery (refusal.py, usage.py); claude/ & codex/ engine packages (one concern per module); compat translations (claude_compat.py, openai_compat.py)
+        │   ├── background/     # Background.py (BackgroundDriver verb + BackgroundAgent scaffolding + params) + claude & codex drivers
         │   ├── profiles/       # Profiles.py (ProfileSupport ABC) + store.py registry + per-engine support (claude)
         │   └── tools/          # per-engine built-in tool-name tables (claude)
         ├── codescan/           # Source scanning for dev tooling: review notes + forbidden shapes

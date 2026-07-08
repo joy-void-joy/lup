@@ -8,13 +8,17 @@ what it translates (the Claude harness shape), what it refuses
 two forms.
 """
 
+import claude_agent_sdk as claude
 import pytest
 
-from lup.adapters.clients.claude.client import ClaudeClient, create_claude
+from lup.adapters.clients.claude.client import ClaudeSessions, create_claude
 from lup.adapters.clients.claude.options import SESSION_THINKING_TOKENS
 from lup.adapters.clients.claude_compat import create_claude_compat
-from lup.adapters.clients.codex.client import CodexClient, create_codex
+from lup.adapters.clients.Client import Client
+from lup.adapters.clients.codex.client import CodexSessions, create_codex
+from lup.adapters.clients.codex.options import CodexNativeConfig
 from lup.adapters.clients.codex.usage import per_mtok_usage_cost
+from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.openai_compat import create_openai_compat
 from lup.adapters.errors import UnsupportedOptionsError
 from lup.adapters.options import LupAgentOptions
@@ -33,6 +37,22 @@ from tests.unit.conftest import RecordingEngine
 def engine_for(model: str) -> str:
     """The engine id a model name routes to — through the model router."""
     return engine_for_model(model).id
+
+
+def claude_native(client: Client) -> claude.ClaudeAgentOptions:
+    """The translated SDK options a composed Claude client carries."""
+    assert isinstance(client, ComposedClient)
+    sessions = client.sessions
+    assert isinstance(sessions, ClaudeSessions)
+    return sessions.options
+
+
+def codex_native(client: Client) -> CodexNativeConfig:
+    """The translated native config a composed Codex client carries."""
+    assert isinstance(client, ComposedClient)
+    sessions = client.sessions
+    assert isinstance(sessions, CodexSessions)
+    return sessions.native
 
 
 class TestEngineResolution:
@@ -70,9 +90,7 @@ class TestClaudeEngine:
             max_turns=7,
             reasoning_effort="high",
         )
-        client = create_claude(opts)
-        assert isinstance(client, ClaudeClient)
-        native = client.options
+        native = claude_native(create_claude(opts))
         assert native.system_prompt == {
             "type": "preset",
             "preset": "claude_code",
@@ -102,9 +120,7 @@ class TestClaudeEngine:
             tools=["Read"],
             max_budget_usd=2.0,
         )
-        client = create_claude(opts)
-        assert isinstance(client, ClaudeClient)
-        native = client.options
+        native = claude_native(create_claude(opts))
         assert native.system_prompt == "be brief"
         assert native.max_thinking_tokens is None
         assert native.permission_mode is None
@@ -119,9 +135,7 @@ class TestClaudeEngine:
 
     def test_empty_raw_prompt_means_sdk_default(self) -> None:
         opts = LupAgentOptions(model="claude-opus-4-6", coding_harness_preset=False)
-        client = create_claude(opts)
-        assert isinstance(client, ClaudeClient)
-        assert client.options.system_prompt is None
+        assert claude_native(create_claude(opts)).system_prompt is None
 
     def test_preset_and_session_defaults_are_independent(self) -> None:
         """The preset wraps the prompt; the policy defaults follow session_defaults.
@@ -130,35 +144,37 @@ class TestClaudeEngine:
         wrap the prompt without taking the session defaults (``session_defaults``
         off), and take the defaults without the preset — the two are orthogonal.
         """
-        preset_only = create_claude(
-            LupAgentOptions(
-                model="claude-opus-4-6",
-                system_prompt="hi",
-                coding_harness_preset=True,
-                session_defaults=False,
+        preset_only = claude_native(
+            create_claude(
+                LupAgentOptions(
+                    model="claude-opus-4-6",
+                    system_prompt="hi",
+                    coding_harness_preset=True,
+                    session_defaults=False,
+                )
             )
         )
-        assert isinstance(preset_only, ClaudeClient)
-        assert preset_only.options.system_prompt == {
+        assert preset_only.system_prompt == {
             "type": "preset",
             "preset": "claude_code",
             "append": "hi",
         }
-        assert preset_only.options.max_thinking_tokens is None
-        assert preset_only.options.permission_mode is None
+        assert preset_only.max_thinking_tokens is None
+        assert preset_only.permission_mode is None
 
-        session_only = create_claude(
-            LupAgentOptions(
-                model="claude-opus-4-6",
-                system_prompt="hi",
-                coding_harness_preset=False,
-                session_defaults=True,
+        session_only = claude_native(
+            create_claude(
+                LupAgentOptions(
+                    model="claude-opus-4-6",
+                    system_prompt="hi",
+                    coding_harness_preset=False,
+                    session_defaults=True,
+                )
             )
         )
-        assert isinstance(session_only, ClaudeClient)
-        assert session_only.options.system_prompt == "hi"
-        assert session_only.options.max_thinking_tokens == SESSION_THINKING_TOKENS
-        assert session_only.options.permission_mode == "bypassPermissions"
+        assert session_only.system_prompt == "hi"
+        assert session_only.max_thinking_tokens == SESSION_THINKING_TOKENS
+        assert session_only.permission_mode == "bypassPermissions"
 
     def test_explicit_intent_knobs_win_over_session_defaults(self) -> None:
         """A session honors explicit thinking/permission over the engine default."""
@@ -168,43 +184,40 @@ class TestClaudeEngine:
             max_thinking_tokens=4096,
             permission_mode="plan",
         )
-        client = create_claude(opts)
-        assert isinstance(client, ClaudeClient)
-        assert client.options.max_thinking_tokens == 4096
-        assert client.options.permission_mode == "plan"
+        native = claude_native(create_claude(opts))
+        assert native.max_thinking_tokens == 4096
+        assert native.permission_mode == "plan"
 
     def test_persistence_and_session_defaults_are_independent(self) -> None:
         """persist_session (SDK persistence) and session_defaults (engine
         behavior defaults) are orthogonal knobs, not one bundled bool."""
         # Persist the SDK session but decline the session-grade defaults.
-        persist_no_defaults = create_claude(
-            LupAgentOptions(
-                model="claude-opus-4-6",
-                persist_session=True,
-                session_defaults=False,
+        persist_no_defaults = claude_native(
+            create_claude(
+                LupAgentOptions(
+                    model="claude-opus-4-6",
+                    persist_session=True,
+                    session_defaults=False,
+                )
             )
         )
-        assert isinstance(persist_no_defaults, ClaudeClient)
-        assert persist_no_defaults.options.max_thinking_tokens is None
-        assert persist_no_defaults.options.permission_mode is None
-        assert "no-session-persistence" not in persist_no_defaults.options.extra_args
+        assert persist_no_defaults.max_thinking_tokens is None
+        assert persist_no_defaults.permission_mode is None
+        assert "no-session-persistence" not in persist_no_defaults.extra_args
 
         # Take the session-grade defaults on a non-persisting call.
-        defaults_no_persist = create_claude(
-            LupAgentOptions(
-                model="claude-opus-4-6",
-                persist_session=False,
-                session_defaults=True,
+        defaults_no_persist = claude_native(
+            create_claude(
+                LupAgentOptions(
+                    model="claude-opus-4-6",
+                    persist_session=False,
+                    session_defaults=True,
+                )
             )
         )
-        assert isinstance(defaults_no_persist, ClaudeClient)
-        assert (
-            defaults_no_persist.options.max_thinking_tokens == SESSION_THINKING_TOKENS
-        )
-        assert defaults_no_persist.options.permission_mode == "bypassPermissions"
-        assert defaults_no_persist.options.extra_args == {
-            "no-session-persistence": None
-        }
+        assert defaults_no_persist.max_thinking_tokens == SESSION_THINKING_TOKENS
+        assert defaults_no_persist.permission_mode == "bypassPermissions"
+        assert defaults_no_persist.extra_args == {"no-session-persistence": None}
 
     def test_turn_timeout_refused_on_sessions(self) -> None:
         opts = LupAgentOptions(model="claude-opus-4-6", turn_timeout_seconds=30.0)
@@ -218,15 +231,12 @@ class TestClaudeEngine:
             turn_timeout_seconds=30.0,
             on_unsupported="drop",
         )
-        client = create_claude(opts)
-        assert isinstance(client, ClaudeClient)
+        assert isinstance(create_claude(opts), ComposedClient)
 
 
 def compat_env(opts: LupAgentOptions) -> dict[str, str]:
     """The SDK subprocess environment the claude-compat engine builds."""
-    client = create_claude_compat(opts)
-    assert isinstance(client, ClaudeClient)
-    return client.options.env
+    return claude_native(create_claude_compat(opts)).env
 
 
 class TestClaudeCompatEngine:
@@ -237,16 +247,15 @@ class TestClaudeCompatEngine:
             base_url="http://local:8000",
             api_key="k",
         )
-        client = create_claude_compat(opts)
-        assert isinstance(client, ClaudeClient)
-        env = client.options.env
+        native = claude_native(create_claude_compat(opts))
+        env = native.env
         assert env["ANTHROPIC_BASE_URL"] == "http://local:8000"
         # Default auth_style is bearer; the x-api-key header is blanked so an
         # ambient Anthropic key can't leak to the endpoint.
         assert env["ANTHROPIC_AUTH_TOKEN"] == "k"
         assert env["ANTHROPIC_API_KEY"] == ""
         # The scaffolding shape is inherited from the claude engine.
-        assert client.options.permission_mode == "bypassPermissions"
+        assert native.permission_mode == "bypassPermissions"
 
     def test_api_key_auth_style_uses_the_native_header(self) -> None:
         opts = LupAgentOptions(
@@ -303,20 +312,17 @@ class TestCodexEngine:
             turn_timeout_seconds=120.0,
         )
         client = create_codex(opts)
-        assert isinstance(client, CodexClient)
-        overrides = client.native.config_overrides
+        native = codex_native(client)
+        overrides = native.config_overrides
         assert any(o.startswith("mcp_servers.notes.") for o in overrides)
         assert any(o.startswith("mcp_servers.sandbox.") for o in overrides)
-        assert client.native.effort == "high"
-        assert client.native.turn_timeout_seconds == 120.0
+        assert native.effort == "high"
+        assert native.turn_timeout_seconds == 120.0
         assert client.mailbox is None
 
     def test_call_tier_serves_no_tools(self) -> None:
-        client = create_codex(LupAgentOptions(model="gpt-5.5"))
-        assert isinstance(client, CodexClient)
-        assert not any(
-            o.startswith("mcp_servers.") for o in client.native.config_overrides
-        )
+        native = codex_native(create_codex(LupAgentOptions(model="gpt-5.5")))
+        assert not any(o.startswith("mcp_servers.") for o in native.config_overrides)
 
     def test_intent_knobs_refused_on_sessions(self) -> None:
         opts = LupAgentOptions(
@@ -347,9 +353,7 @@ class TestCodexEngine:
             max_budget_usd=1.0,
             usage_cost=per_mtok_usage_cost(input_usd=1.0, output_usd=2.0),
         )
-        client = create_codex(opts)
-        assert isinstance(client, CodexClient)
-        assert client.native.max_budget_usd == 1.0
+        assert codex_native(create_codex(opts)).max_budget_usd == 1.0
 
     def test_drop_policy_clears_and_builds(self) -> None:
         opts = LupAgentOptions(
@@ -358,9 +362,7 @@ class TestCodexEngine:
             max_budget_usd=1.0,
             on_unsupported="drop",
         )
-        client = create_codex(opts)
-        assert isinstance(client, CodexClient)
-        assert client.native.max_budget_usd is None
+        assert codex_native(create_codex(opts)).max_budget_usd is None
 
 
 class TestOpenAICompatEngine:
@@ -370,13 +372,9 @@ class TestOpenAICompatEngine:
             base_url="http://local",
             model_provider="prov",
         )
-        client = create_openai_compat(opts)
-        assert isinstance(client, CodexClient)
-        assert (
-            'model_providers.prov.base_url="http://local"'
-            in client.native.config_overrides
-        )
-        assert client.native.model_provider == "prov"
+        native = codex_native(create_openai_compat(opts))
+        assert 'model_providers.prov.base_url="http://local"' in native.config_overrides
+        assert native.model_provider == "prov"
 
 
 class TestCreateClient:

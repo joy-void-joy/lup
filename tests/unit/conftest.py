@@ -8,17 +8,18 @@ import pytest
 
 from lup.workspace import paths
 from lup.adapters.background.Background import (
+    BackgroundAgent,
     BackgroundAgentParams,
-    BaseBackgroundAgent,
 )
 from lup.adapters.clients.Client import Client, Session
-from lup.adapters.clients.fallbacks import query_via_session, replay_stream
+from lup.adapters.clients.composed import ComposedClient
+from lup.adapters.clients.Sessions import Sessions
 from lup.adapters.Engine import Engine
 from lup.adapters.errors import UnsupportedOperationError
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.profiles.Profiles import ProfileSupport
 from lup.telemetry.trace import TraceLogger
-from lup.types import LupEvent, LupResponse, LupTextBlock
+from lup.types import LupResponse, LupTextBlock
 
 LUP_PROJECT_VERSION = "1.2.3"
 
@@ -47,38 +48,16 @@ class RecordingSession(Session):
         raise NotImplementedError("RecordingSession has no interrupt")
 
 
-class RecordingClient(Client):
-    """A fake client carrying the options it was built from."""
+class RecordingSessions(Sessions):
+    """A fake sessions component carrying the options it was built from."""
 
     def __init__(self, opts: LupAgentOptions, ran: list[LupAgentOptions]) -> None:
         self.opts = opts
         self.ran = ran
 
     @asynccontextmanager
-    async def session(
-        self, *, resume: str | None = None
-    ) -> AsyncGenerator[Session, None]:
+    async def open(self, *, resume: str | None = None) -> AsyncGenerator[Session, None]:
         yield RecordingSession(self.opts, self.ran, resumed=resume)
-
-    async def query(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> LupResponse:
-        return await query_via_session(
-            self, prompt, trace_logger=trace_logger, prefix=prefix
-        )
-
-    def stream(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> AsyncGenerator[LupEvent, None]:
-        return replay_stream(self, prompt, trace_logger=trace_logger, prefix=prefix)
 
 
 class RecordingEngine(Engine):
@@ -97,9 +76,9 @@ class RecordingEngine(Engine):
 
     def client(self, options: LupAgentOptions) -> Client:
         self.built.append(options)
-        return RecordingClient(options, self.ran)
+        return ComposedClient(RecordingSessions(options, self.ran))
 
-    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent:
+    def background(self, params: BackgroundAgentParams) -> BackgroundAgent:
         raise UnsupportedOperationError("the recording engine has no backgrounds")
 
     def profiles(self) -> ProfileSupport:

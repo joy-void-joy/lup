@@ -20,8 +20,8 @@ from abc import ABC, abstractmethod
 from typing import ClassVar
 
 from lup.adapters.background.Background import (
+    BackgroundAgent,
     BackgroundAgentParams,
-    BaseBackgroundAgent,
 )
 from lup.adapters.clients.Client import Client
 from lup.adapters.options import LupAgentOptions
@@ -50,13 +50,14 @@ class Engine(ABC):
         """
 
     @abstractmethod
-    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent:
+    def background(self, params: BackgroundAgentParams) -> BackgroundAgent:
         """Build this engine's background agent.
 
         Each engine owns the validation and defaults that are properties
         of its backend (Codex rejects tools and requires an explicit
         model; Claude defaults to an opus-class model and can act
-        through tools).
+        through tools), composing its driver into the shared
+        ``start()``/``wake()``/``stop()`` scaffolding.
         """
 
     @abstractmethod
