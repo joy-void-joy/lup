@@ -40,7 +40,7 @@ from rich.panel import Panel
 from rich.table import Table
 from tzlocal import get_localzone_name
 
-from lup.adapters.profiles import store as profiles
+from lup.adapters.profiles.claude import ClaudeProfileSupport
 from lup.workspace.paths import project_root
 
 app = typer.Typer(
@@ -60,6 +60,8 @@ CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 
 profile_app = typer.Typer(no_args_is_help=True, help="Manage Claude account profiles")
 app.add_typer(profile_app, name="profile")
+
+claude_profiles = ClaudeProfileSupport()
 
 
 # =====================================================================
@@ -540,7 +542,7 @@ def status() -> None:
     """Show current integration status."""
     console.print()
     console.print(build_status_table())
-    active = profiles.active_profile()
+    active = claude_profiles.active_profile()
     if active:
         console.print(f"  Active Claude profile: [bold]{active}[/]")
     console.print()
@@ -581,9 +583,9 @@ for _integration in INTEGRATIONS:
 @profile_app.command("list")
 def profile_list_cmd() -> None:
     """List Claude profiles; the active one is marked."""
-    registry = profiles.load_registry()
-    active = registry.get("active")
-    profs = registry.get("profiles") or {}
+    registry = claude_profiles.load_registry()
+    active = registry.active
+    profs = registry.profiles
     if not profs:
         console.print(
             "[dim]No profiles. Add one: "
@@ -596,7 +598,7 @@ def profile_list_cmd() -> None:
     table.add_column("Config dir", style="dim")
     for name, prof in profs.items():
         marker = "[green]●[/]" if name == active else " "
-        table.add_row(marker, name, prof["config_dir"])
+        table.add_row(marker, name, prof.config_dir)
     console.print()
     console.print(table)
     console.print()
@@ -614,7 +616,7 @@ def profile_add_cmd(
 ) -> None:
     """Register a Claude profile pointing at its own config dir."""
     target = (config_dir or Path.home() / f".claude-{name}").expanduser()
-    profiles.add_profile(name, target)
+    claude_profiles.add_profile(name, target)
     console.print(f"[green]Added profile {name!r}[/] -> {target}")
     console.print(f"[dim]Log in to it: CLAUDE_CONFIG_DIR={target} claude /login[/dim]")
 
@@ -625,7 +627,7 @@ def profile_use_cmd(
 ) -> None:
     """Set the active profile."""
     try:
-        profiles.set_active(name)
+        claude_profiles.set_active(name)
     except KeyError as e:
         console.print(f"[red]No such profile: {name}[/red]")
         raise typer.Exit(1) from e
@@ -637,7 +639,7 @@ def profile_remove_cmd(
     name: Annotated[str, typer.Argument(help="Profile name")],
 ) -> None:
     """Remove a profile from the registry (leaves its config dir on disk)."""
-    profiles.remove_profile(name)
+    claude_profiles.remove_profile(name)
     console.print(f"Removed profile {name!r}")
 
 

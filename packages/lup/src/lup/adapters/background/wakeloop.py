@@ -10,7 +10,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable, Coroutine
 
 
-#lup: I don't get it. If it's not an ABC implementation it doesn't belong here? It's not clear from here what purposes it serves or  why
+# lup: I don't get it. If it's not an ABC implementation it doesn't belong here? It's not clear from here what purposes it serves or  why
 class WakeLoop:
     """The concrete wake/debounce/message-stream machinery.
 
