@@ -40,7 +40,7 @@ from rich.panel import Panel
 from rich.table import Table
 from tzlocal import get_localzone_name
 
-from lup.adapters.profiles import Profiles as profiles
+from lup.adapters.profiles import store as profiles
 from lup.workspace.paths import project_root
 
 app = typer.Typer(
