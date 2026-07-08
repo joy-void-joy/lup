@@ -28,8 +28,8 @@ the full catalog. Where the siblings live:
   tool handler; the reviewer in ``agent/tools/reflect.py`` is the
   exemplar
 - Background agents: ``lup.adapters.background.Background``
-  (``create_background_agent``), with the observer example in
-  ``agent/tools/realtime.py``
+  (``BackgroundAgentParams`` + each engine's ``Engine.background``), with
+  the observer example in ``agent/tools/realtime.py``
 - Persistent agents: ``lup.realtime.scheduler`` and ``lup.realtime.relay``,
   with example tools in ``agent/tools/realtime.py``
 - Data augmentation: ``agent/tools/example.py`` (domain dispatch,

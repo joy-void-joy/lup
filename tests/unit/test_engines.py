@@ -24,10 +24,9 @@ from lup.adapters.options import LupAgentOptions
 from lup.adapters.wiring import (
     ENGINES,
     create_client,
-    engine_id_of,
-    factory_for_model,
+    engine_for_model,
     query,
-    resolve_factory,
+    resolve_engine,
 )
 from lup.mcp import create_mcp_server
 from lup.types import SubagentSpec
@@ -36,7 +35,7 @@ from tests.unit.conftest import RecordingEngine
 
 def engine_for(model: str) -> str:
     """The engine id a model name routes to — through the model router."""
-    return engine_id_of(factory_for_model(model))
+    return engine_for_model(model).id
 
 
 class TestEngineResolution:
@@ -50,16 +49,15 @@ class TestEngineResolution:
 
     def test_unknown_engine_id_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown engine"):
-            resolve_factory("gemini", model="x")
+            resolve_engine("gemini")
 
-    def test_factory_callable_passes_through(self) -> None:
+    def test_engine_instance_passes_through(self) -> None:
         engine = RecordingEngine()
-        assert resolve_factory(engine, model="x") is engine
+        assert resolve_engine(engine) is engine
 
     def test_every_shipped_id_resolves(self) -> None:
         for engine_id in ("claude", "codex", "openai-compat", "claude-compat"):
-            factory = resolve_factory(engine_id, model="x")
-            assert engine_id_of(factory) == engine_id
+            assert resolve_engine(engine_id).id == engine_id
 
 
 class TestClaudeEngine:
@@ -407,9 +405,9 @@ class TestCreateClient:
     def test_id_and_model_route_through_engines(self) -> None:
         """An engine id looks up ENGINES; ``None`` infers from the model."""
         engine = RecordingEngine()
-        assert resolve_factory("codex", model="x") is ENGINES["codex"]
-        assert resolve_factory(None, model="gpt-5.5") is ENGINES["codex"]
-        assert resolve_factory(engine, model="x") is engine
+        assert resolve_engine("codex") is ENGINES["codex"]
+        assert resolve_engine(None, model="gpt-5.5") is ENGINES["codex"]
+        assert resolve_engine(engine) is engine
 
 
 class TestQuerySugar:

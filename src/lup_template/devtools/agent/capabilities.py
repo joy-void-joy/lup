@@ -30,10 +30,11 @@ import inspect
 
 from pydantic import BaseModel
 
-from lup.adapters.background.Background import create_background_agent
+from lup.adapters.background.Background import BackgroundAgentParams
+from lup.adapters.Engine import Engine
 from lup.adapters.errors import UnsupportedOptionsError
 from lup.adapters.options import LupAgentOptions
-from lup.adapters.wiring import ENGINES, ClientFactory
+from lup.adapters.wiring import ENGINES
 from lup.adapters.tools.claude import READ
 
 
@@ -88,16 +89,16 @@ def option_probes() -> list[tuple[str, LupAgentOptions]]:
     ]
 
 
-def probe_option(factory: ClientFactory, opts: LupAgentOptions) -> bool:
+def probe_option(engine: Engine, opts: LupAgentOptions) -> bool:
     """Whether the engine constructs a client for *opts* without refusing."""
     try:
-        factory(opts)
+        engine.client(opts)
     except UnsupportedOptionsError:
         return False
     return True
 
 
-def probe_streaming(factory: ClientFactory) -> str:
+def probe_streaming(engine: Engine) -> str:
     """``live`` when the engine's ``stream`` is its own async generator.
 
     A live engine yields events as the turn unfolds, so its ``stream`` is
@@ -105,39 +106,40 @@ def probe_streaming(factory: ClientFactory) -> str:
     method that returns :func:`replay_stream`, which yields only after the
     turn completes.
     """
-    client = factory(probe_base_options())
+    client = engine.client(probe_base_options())
     return "live" if inspect.isasyncgenfunction(type(client).stream) else "post_hoc"
 
 
-def probe_background_tools(engine_id: str) -> bool:
+def probe_background_tools(engine: Engine) -> bool:
     """Whether the engine builds a background agent that acts through tools."""
     try:
-        create_background_agent(
-            engine_id,
-            name="capability-probe",
-            system_prompt="",
-            build_message=lambda: None,
-            model="capability-probe",
-            builtin_tools=[READ],
+        engine.background(
+            BackgroundAgentParams(
+                name="capability-probe",
+                system_prompt="",
+                build_message=lambda: None,
+                model="capability-probe",
+                builtin_tools=[READ],
+            )
         )
     except (ValueError, NotImplementedError):
         return False
     return True
 
 
-def engine_capabilities(engine_id: str, factory: ClientFactory) -> EngineCapabilities:
+def engine_capabilities(engine: Engine) -> EngineCapabilities:
     """Probe one engine into its display column."""
-    cells = [CapabilityCell(capability="streaming", value=probe_streaming(factory))]
+    cells = [CapabilityCell(capability="streaming", value=probe_streaming(engine))]
     cells.extend(
-        CapabilityCell(capability=name, value=probe_option(factory, opts))
+        CapabilityCell(capability=name, value=probe_option(engine, opts))
         for name, opts in option_probes()
     )
     cells.append(
         CapabilityCell(
-            capability="background_tools", value=probe_background_tools(engine_id)
+            capability="background_tools", value=probe_background_tools(engine)
         )
     )
-    return EngineCapabilities(name=engine_id, cells=cells)
+    return EngineCapabilities(name=engine.id, cells=cells)
 
 
 def canonical_capability_matrix() -> list[EngineCapabilities]:
@@ -147,10 +149,7 @@ def canonical_capability_matrix() -> list[EngineCapabilities]:
     capabilities`` command, the README table, and the regression test
     that keeps the two identical. Columns follow :data:`ENGINES`.
     """
-    return [
-        engine_capabilities(engine_id, factory)
-        for engine_id, factory in ENGINES.items()
-    ]
+    return [engine_capabilities(engine) for engine in ENGINES.values()]
 
 
 def capability_matrix_markdown(engines: list[EngineCapabilities]) -> str:

@@ -27,18 +27,26 @@ that holds a wake loop rather than subclassing one.
 See ``src/lup_template/agent/tools/realtime.py`` for example integration
 with the persistent agent pattern (observer example).
 
+Dispatch is the engine's: each :class:`~lup.adapters.Engine.Engine`
+builds its own background agent from a :class:`BackgroundAgentParams`,
+owning the validation and defaults that are properties of its backend
+(Codex rejects tools and requires an explicit model; Claude defaults to
+an opus-class model and can act through tools).
+
 Examples:
     Create an observer that maintains conversation notes::
 
-        >>> from lup.adapters.background.Background import create_background_agent
+        >>> from lup.adapters.background.Background import BackgroundAgentParams
+        >>> from lup.adapters.wiring import resolve_engine
         >>> notes: list[str] = []
-        >>> agent = create_background_agent(
-        ...     engine_id,  # a shipped engine id or an Engine instance
-        ...     name="observer",
-        ...     system_prompt="Summarize conversations...",
-        ...     tools=create_observer_tools(notes=notes),
-        ...     build_message=build_observer_message,
-        ...     allowed_tools=["mcp__observer__notes"],
+        >>> agent = resolve_engine(engine_id).background(
+        ...     BackgroundAgentParams(
+        ...         name="observer",
+        ...         system_prompt="Summarize conversations...",
+        ...         tools=create_observer_tools(notes=notes),
+        ...         build_message=build_observer_message,
+        ...         allowed_tools=["mcp__observer__notes"],
+        ...     )
         ... )
         >>> agent.start()
         >>> agent.wake()  # signal new data
@@ -119,88 +127,3 @@ class BackgroundAgentParams(BaseModel):
     builtin_tools: list[str] | None = None
     allowed_tools: list[str] | None = None
     on_response: Callable[[object], None] | None = None
-
-
-type BackgroundFactory = Callable[[BackgroundAgentParams], BaseBackgroundAgent]
-"""One engine's background builder: params in, a configured agent out."""
-
-
-def claude_background(params: BackgroundAgentParams) -> BaseBackgroundAgent:
-    from lup.adapters.background.claude import build_claude_background
-
-    return build_claude_background(params)
-
-
-def codex_background(params: BackgroundAgentParams) -> BaseBackgroundAgent:
-    from lup.adapters.background.codex import build_codex_background
-
-    return build_codex_background(params)
-
-
-BACKGROUNDS: dict[str, BackgroundFactory] = {
-    "claude": claude_background,
-    "claude-compat": claude_background,
-    "codex": codex_background,
-    "openai-compat": codex_background,
-}
-"""Engine id → background builder. The compat engines share their base
-engine's background (Claude scaffolding or the Codex runtime); engines
-absent here have no background support."""
-
-
-def create_background_agent(
-    engine: str,
-    *,
-    name: str,
-    system_prompt: str,
-    build_message: Callable[[], str | None],
-    start_message: str = "",
-    model: str | None = None,
-    debounce_seconds: float = 3.0,
-    tools: list[LupMcpTool] | None = None,
-    builtin_tools: list[str] | None = None,
-    allowed_tools: list[str] | None = None,
-    on_response: Callable[[object], None] | None = None,
-) -> BaseBackgroundAgent:
-    """Build the engine's background agent.
-
-    Delegates to the engine's :data:`BACKGROUNDS` builder — each owns the
-    validation and defaults that are properties of its backend (Codex
-    rejects tools and requires an explicit model; Claude defaults to an
-    opus-class model and can act through tools).
-
-    Args:
-        engine: A shipped engine id or an ``Engine`` instance.
-        name: Agent identifier.
-        system_prompt: System prompt for the background agent.
-        build_message: Callable that returns the next message or None.
-        start_message: Initial message when agent starts.
-        model: Model override (defaults vary by engine).
-        debounce_seconds: Batch rapid wakes.
-        tools: LupMcpTool instances (tool-capable engines only).
-        builtin_tools: Built-in SDK tools (tool-capable engines only).
-        allowed_tools: Tool allowlist (tool-capable engines only).
-        on_response: Callback for responses.
-    """
-    try:
-        factory = BACKGROUNDS[engine]
-    except KeyError:
-        raise ValueError(
-            f"Unknown engine {engine!r}. Background agents run on: "
-            f"{', '.join(BACKGROUNDS)}."
-        ) from None
-
-    return factory(
-        BackgroundAgentParams(
-            name=name,
-            system_prompt=system_prompt,
-            build_message=build_message,
-            start_message=start_message,
-            model=model,
-            debounce_seconds=debounce_seconds,
-            tools=tools,
-            builtin_tools=builtin_tools,
-            allowed_tools=allowed_tools,
-            on_response=on_response,
-        )
-    )

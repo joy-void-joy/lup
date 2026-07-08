@@ -1,44 +1,49 @@
 """The neutral seam: every engine behind ``create_client()`` and ``query()``.
 
-An engine is one backend, complete: a ``create_*`` factory that turns
-neutral :class:`~lup.adapters.options.LupAgentOptions` into a
-:class:`~lup.adapters.clients.Client.Client`,
-and the client opens :class:`~lup.adapters.clients.Client.Session`\\ s.
-``query()`` is the self-contained one-shot (opens, sends, closes —
-nothing to leak); ``session()`` is the explicit multi-turn context,
-resumable across process runs via ``session(resume=...)`` and
-``Session.id``.
+An engine is one backend, complete
+(:class:`~lup.adapters.Engine.Engine`): it turns neutral
+:class:`~lup.adapters.options.LupAgentOptions` into a
+:class:`~lup.adapters.clients.Client.Client`, and the client opens
+:class:`~lup.adapters.clients.Client.Session`\\ s. ``query()`` is the
+self-contained one-shot (opens, sends, closes — nothing to leak);
+``session()`` is the explicit multi-turn context, resumable across
+process runs via ``session(resume=...)`` and ``Session.id``.
 
-This module is SDK-free. Two plain routers relate names to engine
-factories, and both keep their values lazy — thin module-level wrappers
-that import the engine module only when called — so ``import lup`` works
-with neither SDK installed and each engine pulls in only its own:
+This module is SDK-free — an engine object imports an SDK only inside
+the method that needs it — and holds the only dispatch, two plain
+routers:
 
-- :data:`ENGINES` maps each shipped engine id to its factory. Insertion
+- :data:`ENGINES` maps each shipped engine id to its engine. Insertion
   order is the capability-table display order; anything needing the
   shipped ids iterates it.
-- :data:`MODEL_ROUTES` maps a model-name regex to a factory, first match
+- :data:`MODEL_ROUTES` maps a model-name regex to an engine, first match
   wins. The keys are regexes (not prefixes) so a future route can
   deconstruct a model name via named groups into subparams — e.g. a
   ``r"(?P<family>gpt)-(?P<size>\\d+)"`` key could read ``family``/``size``
   off the match. No route does that today; the shape is ready for it.
 
 There is no registry to mutate and no capability declarations to branch
-on: a custom backend is a factory callable passed as ``engine=``, an
-engine refuses intent knobs it cannot honor (``UnsupportedOptionsError``;
-``query()`` drops them with a log line), unsupported operations raise
-``UnsupportedOperationError`` at the point of use, and the devtools
-capability table is probed from that behavior rather than declared.
+on: a custom backend is an :class:`~lup.adapters.Engine.Engine` instance
+passed as ``engine=``, an engine refuses intent knobs it cannot honor
+(``UnsupportedOptionsError``; ``query()`` drops them with a log line),
+unsupported operations raise ``UnsupportedOperationError`` at the point
+of use, and the devtools capability table is probed from that behavior
+rather than declared.
 """
 
 import logging
 import re
-from collections.abc import Callable
-from importlib import import_module
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 
+from lup.adapters.Engine import Engine
+from lup.adapters.engines import (
+    ClaudeCompatEngine,
+    ClaudeEngine,
+    CodexEngine,
+    OpenAICompatEngine,
+)
 from lup.adapters.options import LupAgentOptions
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
@@ -52,54 +57,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-type ClientFactory = Callable[[LupAgentOptions], "Client"]
-"""One engine, as the seam sees it: neutral options in, a configured
-:class:`~lup.adapters.clients.Client.Client` out. The shipped engines'
-factories live in ``lup.adapters.clients.*``; a custom backend is any
-callable of this shape passed as ``engine=``."""
-
-
-def lazy_engine(module: str, factory: str) -> ClientFactory:
-    """Build one engine's factory: the single object both routers key on by identity.
-
-    The returned callable imports ``module``'s ``create_*`` only when first
-    invoked, so ``import lup`` needs no SDK installed and each engine pulls in
-    only its own optional dependency. Bind the result to one module-level name
-    and reference that same object from both :data:`ENGINES` and
-    :data:`MODEL_ROUTES`: :func:`engine_id_of` recovers an engine's id by object
-    identity, so a per-engine factory must stay one object, never two lambdas.
-    """
-
-    def create(options: LupAgentOptions) -> "Client":
-        create_native: ClientFactory = getattr(import_module(module), factory)
-        return create_native(options)
-
-    return create
-
-
-claude_engine = lazy_engine("lup.adapters.clients.claude.client", "create_claude")
-claude_compat_engine = lazy_engine(
-    "lup.adapters.clients.claude_compat", "create_claude_compat"
-)
-codex_engine = lazy_engine("lup.adapters.clients.codex.client", "create_codex")
-openai_compat_engine = lazy_engine(
-    "lup.adapters.clients.openai_compat", "create_openai_compat"
-)
-
-
-ENGINES: dict[str, ClientFactory] = {
-    "claude": claude_engine,
-    "codex": codex_engine,
-    "openai-compat": openai_compat_engine,
-    "claude-compat": claude_compat_engine,
+ENGINES: dict[str, Engine] = {
+    engine.id: engine
+    for engine in (
+        ClaudeEngine(),
+        CodexEngine(),
+        OpenAICompatEngine(),
+        ClaudeCompatEngine(),
+    )
 }
-"""The id router: every shipped engine's factory, in display order. The
+"""The id router: every shipped engine, in display order. The
 capability table renders one column per entry, in this order."""
 
-MODEL_ROUTES: dict[str, ClientFactory] = {
-    r"^claude-|^(?:haiku|sonnet|opus)$": claude_engine,
-    r"^gpt-|^o\d+-|^codex-": codex_engine,
-    r"": openai_compat_engine,
+MODEL_ROUTES: dict[str, Engine] = {
+    r"^claude-|^(?:haiku|sonnet|opus)$": ENGINES["claude"],
+    r"^gpt-|^o\d+-|^codex-": ENGINES["codex"],
+    r"": ENGINES["openai-compat"],
 }
 """The model-name router: a regex per engine, first match wins. A
 ``claude-`` prefix and the bare aliases route to ``claude``; a
@@ -109,40 +82,33 @@ pattern matches anything left over, landing unknown models on
 behind an Anthropic-style endpoint name it explicitly."""
 
 
-def factory_for_model(model: str) -> ClientFactory:
-    """The engine factory a model name infers to — first :data:`MODEL_ROUTES` match."""
-    for pattern, factory in MODEL_ROUTES.items():
+def engine_for_model(model: str) -> Engine:
+    """The engine a model name infers to — first :data:`MODEL_ROUTES` match."""
+    for pattern, engine in MODEL_ROUTES.items():
         if re.search(pattern, model):
-            return factory
-    return openai_compat_engine
+            return engine
+    return ENGINES["openai-compat"]
 
 
-def engine_id_of(factory: ClientFactory) -> str:
-    """The :data:`ENGINES` id for a factory, for display and family checks.
-
-    The routers share one factory object per engine, so a factory pulled
-    out of :data:`MODEL_ROUTES` finds its id here by identity.
-    """
-    for engine_id, engine_factory in ENGINES.items():
-        if engine_factory is factory:
-            return engine_id
-    raise ValueError(f"factory {factory!r} is not a shipped engine")
-
-
-def resolve_factory(
-    engine: "str | ClientFactory | None", *, model: str
-) -> ClientFactory:
-    """Pick the engine factory: explicit callable > id in :data:`ENGINES` > model route."""
+def resolve_engine(
+    engine: "str | Engine | None" = None, *, model: str | None = None
+) -> Engine:
+    """Pick the engine: explicit instance > id in :data:`ENGINES` > model route."""
     match engine:
         case None:
-            return factory_for_model(model)
+            if model is None:
+                raise ValueError(
+                    "resolve_engine needs an engine id or instance, or a "
+                    "model to infer one from."
+                )
+            return engine_for_model(model)
         case str():
             try:
                 return ENGINES[engine]
             except KeyError:
                 raise ValueError(
                     f"Unknown engine {engine!r}. Shipped ids: "
-                    f"{', '.join(ENGINES)}; pass a factory callable for a "
+                    f"{', '.join(ENGINES)}; pass an Engine instance for a "
                     "custom backend."
                 ) from None
         case _:
@@ -152,7 +118,7 @@ def resolve_factory(
 def create_client(
     *,
     model: str | None = None,
-    engine: "str | ClientFactory | None" = None,
+    engine: "str | Engine | None" = None,
     options: LupAgentOptions | None = None,
     system_prompt: str | None = None,
     output_type: type[BaseModel] | None = None,
@@ -176,8 +142,8 @@ def create_client(
     lifetime; run-time arguments (the prompt, tracing) go to
     ``Client.query`` and ``Session.send``.
 
-    ``engine`` accepts a shipped id, a custom factory callable, or ``None``
-    to infer the engine from the model name.
+    ``engine`` accepts a shipped id, an :class:`~lup.adapters.Engine.Engine`
+    instance, or ``None`` to infer the engine from the model name.
     """
     keyword_form = {
         "model": model,
@@ -221,14 +187,14 @@ def create_client(
             max_budget_usd=max_budget_usd,
             on_unsupported=on_unsupported,
         )
-    return resolve_factory(engine, model=opts.model)(opts)
+    return resolve_engine(engine, model=opts.model).client(opts)
 
 
 async def query(
     prompt: str,
     *,
     model: str = "claude-opus-4-6",
-    engine: "str | ClientFactory | None" = None,
+    engine: "str | Engine | None" = None,
     system_prompt: str | None = None,
     output_type: type[BaseModel] | None = None,
     trace_logger: TraceLogger | None = None,
