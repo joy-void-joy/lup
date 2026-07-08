@@ -13,12 +13,13 @@ extra for the backend you use (one per engine module under
 from typing import TYPE_CHECKING
 
 from lup.adapters.background.Background import (
+    BackgroundAgentParams,
     BaseBackgroundAgent,
-    create_background_agent,
 )
 from lup.adapters.clients.Client import Client, Session
+from lup.adapters.Engine import Engine
 from lup.adapters.options import LupAgentOptions
-from lup.adapters.wiring import create_client, query
+from lup.adapters.wiring import create_client, query, resolve_engine
 from lup.workspace.history import (
     SessionResult,
     format_history_for_context,
@@ -86,8 +87,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "TIMESTAMP_FMT",
+    "BackgroundAgentParams",
     "BaseBackgroundAgent",
     "Client",
+    "Engine",
     "JsonObject",
     "JsonValue",
     "LupAgentOptions",
@@ -109,7 +112,6 @@ __all__ = [
     "allow_hook",
     "block_hook",
     "configure",
-    "create_background_agent",
     "create_capture_hook",
     "create_client",
     "create_mcp_server",
@@ -136,6 +138,7 @@ __all__ = [
     "query",
     "read_metrics_summary",
     "reset_metrics",
+    "resolve_engine",
     "resolve_version",
     "save_session",
     "setup_notes",

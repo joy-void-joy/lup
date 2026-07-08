@@ -15,7 +15,7 @@ Core tools:
 - ``reply`` delivers actions to the environment
 - Timing tools (debounce, remind, schedule) are non-blocking
 
-Background agents (see ``lup.adapters.background.Background.create_background_agent``):
+Background agents (``BackgroundAgentParams`` + each engine's ``Engine.background``):
 - Run companion agents alongside the main session
 - Observer example at the bottom shows conversation summarization
 - Any use case: research, execution, monitoring — not just observation
@@ -31,9 +31,10 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from lup.adapters.background.Background import (
+    BackgroundAgentParams,
     BaseBackgroundAgent,
-    create_background_agent,
 )
+from lup.adapters.wiring import resolve_engine
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime.models import (
     ContextInput,
@@ -436,13 +437,14 @@ def create_observer(
 
     from lup_template.agent.config import settings
 
-    return create_background_agent(
-        settings.agent_sdk,
-        name="observer",
-        system_prompt=OBSERVER_SYSTEM_PROMPT,
-        tools=create_observer_tools(notes=notes),
-        build_message=build_message,
-        start_message="[Observer started — maintain notes about the conversation]",
-        model=model,
-        allowed_tools=["mcp__observer__notes"],
+    return resolve_engine(settings.agent_sdk).background(
+        BackgroundAgentParams(
+            name="observer",
+            system_prompt=OBSERVER_SYSTEM_PROMPT,
+            tools=create_observer_tools(notes=notes),
+            build_message=build_message,
+            start_message="[Observer started — maintain notes about the conversation]",
+            model=model,
+            allowed_tools=["mcp__observer__notes"],
+        )
     )

@@ -7,9 +7,16 @@ from pathlib import Path
 import pytest
 
 from lup.workspace import paths
+from lup.adapters.background.Background import (
+    BackgroundAgentParams,
+    BaseBackgroundAgent,
+)
 from lup.adapters.clients.Client import Client, Session
 from lup.adapters.clients.fallbacks import query_via_session, replay_stream
+from lup.adapters.Engine import Engine
+from lup.adapters.errors import UnsupportedOperationError
 from lup.adapters.options import LupAgentOptions
+from lup.adapters.profiles.Profiles import ProfileSupport
 from lup.telemetry.trace import TraceLogger
 from lup.types import LupEvent, LupResponse, LupTextBlock
 
@@ -74,21 +81,32 @@ class RecordingClient(Client):
         return replay_stream(self, prompt, trace_logger=trace_logger, prefix=prefix)
 
 
-class RecordingEngine:
-    """A fake engine factory passed as ``engine=``: records built and ran options.
+class RecordingEngine(Engine):
+    """A fake engine passed as ``engine=``: records built and ran options.
 
-    A plain :data:`~lup.adapters.wiring.ClientFactory` callable —
-    construction alone is not execution, so options land in ``ran`` only
-    when a session actually sends a turn.
+    Construction alone is not execution, so options land in ``ran`` only
+    when a session actually sends a turn. The non-client capabilities
+    refuse explicitly, as a real capability-less engine would.
     """
+
+    id = "recording"
 
     def __init__(self) -> None:
         self.built: list[LupAgentOptions] = []
         self.ran: list[LupAgentOptions] = []
 
-    def __call__(self, opts: LupAgentOptions) -> Client:
-        self.built.append(opts)
-        return RecordingClient(opts, self.ran)
+    def client(self, options: LupAgentOptions) -> Client:
+        self.built.append(options)
+        return RecordingClient(options, self.ran)
+
+    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent:
+        raise UnsupportedOperationError("the recording engine has no backgrounds")
+
+    def profiles(self) -> ProfileSupport:
+        raise UnsupportedOperationError("the recording engine has no profiles")
+
+    def builtin_tools(self) -> frozenset[str]:
+        raise UnsupportedOperationError("the recording engine has no builtin table")
 
 
 @pytest.fixture

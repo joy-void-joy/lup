@@ -21,7 +21,7 @@ from lup.adapters.clients.codex.hooks import (
     write_tool_allowlist_script,
 )
 from lup.adapters.clients.codex.options import codex_effort
-from lup.adapters.wiring import engine_id_of, factory_for_model
+from lup.adapters.wiring import engine_for_model
 from lup.hooks import (
     LupHookInput,
     LupHooksConfig,
@@ -205,7 +205,7 @@ class TestSubagentSpec:
 
 class TestModelBackend:
     def engine_for(self, model: str) -> str:
-        return engine_id_of(factory_for_model(model))
+        return engine_for_model(model).id
 
     def test_claude_models(self) -> None:
         assert self.engine_for("claude-opus-4-6") == "claude"
