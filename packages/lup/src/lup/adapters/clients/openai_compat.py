@@ -17,13 +17,13 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup.adapters.clients.codex import (
-    CodexClient,
-    CodexHookConfig,
-    CodexUsageNormalizer,
+from lup.adapters.clients.codex.client import CodexClient
+from lup.adapters.clients.codex.config import CodexHookConfig
+from lup.adapters.clients.codex.options import (
     budget_if_priced,
     subprocess_sandbox_cleanup,
 )
+from lup.adapters.clients.codex.usage import CodexUsageNormalizer
 from lup.adapters.clients.Client import Client
 from lup.adapters.clients.refusal import refuse_unconsumed
 from lup.adapters.options import LupAgentOptions

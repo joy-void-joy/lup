@@ -81,7 +81,7 @@ claude_engine = lazy_engine("lup.adapters.clients.claude.client", "create_claude
 claude_compat_engine = lazy_engine(
     "lup.adapters.clients.claude_compat", "create_claude_compat"
 )
-codex_engine = lazy_engine("lup.adapters.clients.codex", "create_codex")
+codex_engine = lazy_engine("lup.adapters.clients.codex.client", "create_codex")
 openai_compat_engine = lazy_engine(
     "lup.adapters.clients.openai_compat", "create_openai_compat"
 )
