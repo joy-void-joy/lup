@@ -33,15 +33,11 @@ from typing import Any  # lup: ignore — confined to SdkDict, the SDK's payload
 import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
 
-from lup.adapters.clients.Client import (
-    Client,
-    ResponseCollector,
-    Session,
-    extract_token_usage,
-    query_via_session,
-    refuse_unconsumed,
-    safe_normalize_usage,
-)
+from lup.adapters.clients.Client import Client, Session
+from lup.adapters.clients.Collector import ResponseCollector
+from lup.adapters.clients.fallbacks import query_via_session
+from lup.adapters.clients.refusal import refuse_unconsumed
+from lup.adapters.clients.usage import extract_token_usage, safe_normalize_usage
 from lup.adapters.options import LupAgentOptions
 from lup.hooks import (
     LupHookEvent,

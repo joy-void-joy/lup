@@ -40,14 +40,10 @@ from contextlib import (
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict
 
-from lup.adapters.clients.Client import (
-    Client,
-    Session,
-    query_via_session,
-    refuse_unconsumed,
-    replay_stream,
-    safe_normalize_usage,
-)
+from lup.adapters.clients.Client import Client, Session
+from lup.adapters.clients.fallbacks import query_via_session, replay_stream
+from lup.adapters.clients.refusal import refuse_unconsumed
+from lup.adapters.clients.usage import safe_normalize_usage
 from lup.adapters.errors import (
     BudgetExceededError,
     TurnTimeoutError,
