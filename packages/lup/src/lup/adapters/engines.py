@@ -12,8 +12,8 @@ and :data:`~lup.adapters.wiring.MODEL_ROUTES` routers.
 """
 
 from lup.adapters.background.Background import (
+    BackgroundAgent,
     BackgroundAgentParams,
-    BaseBackgroundAgent,
 )
 from lup.adapters.clients.Client import Client
 from lup.adapters.Engine import Engine
@@ -32,7 +32,7 @@ class ClaudeEngine(Engine):
 
         return create_claude(options)
 
-    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent:
+    def background(self, params: BackgroundAgentParams) -> BackgroundAgent:
         from lup.adapters.background.claude import build_claude_background
 
         return build_claude_background(params)
@@ -75,7 +75,7 @@ class CodexEngine(Engine):
 
         return create_codex(options)
 
-    def background(self, params: BackgroundAgentParams) -> BaseBackgroundAgent:
+    def background(self, params: BackgroundAgentParams) -> BackgroundAgent:
         from lup.adapters.background.codex import build_codex_background
 
         return build_codex_background(params)

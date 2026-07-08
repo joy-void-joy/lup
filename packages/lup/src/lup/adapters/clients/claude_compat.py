@@ -42,7 +42,7 @@ Everything else — option translation, refusal, backgrounds — reuses
 
 import claude_agent_sdk as claude
 
-from lup.adapters.clients.claude.client import ClaudeClient
+from lup.adapters.clients.claude.client import compose_claude
 from lup.adapters.clients.claude.options import build_claude_options
 from lup.adapters.clients.Client import Client
 from lup.adapters.clients.refusal import refuse_unconsumed
@@ -116,6 +116,6 @@ def create_claude_compat(options: LupAgentOptions) -> Client:
     the translation is :func:`build_claude_options` plus env, so it reads the
     same knobs and leaves the same one unread.
     """
-    return ClaudeClient(
+    return compose_claude(
         refuse_unconsumed("claude-compat", options, build_claude_compat_options)
     )

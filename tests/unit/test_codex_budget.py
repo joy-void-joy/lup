@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
-from lup.adapters.clients.codex.client import CodexClient, CodexSession
+from lup.adapters.clients.codex.client import CodexSession, CodexSessions
 from lup.adapters.clients.codex.options import CodexNativeConfig
 from lup.adapters.clients.codex.usage import per_mtok_usage_cost
 from lup.adapters.errors import BudgetExceededError, TurnTimeoutError
@@ -149,13 +149,13 @@ async def test_open_thread_dispatches_start_vs_resume() -> None:
     """session(resume=) restores the saved thread instead of starting one."""
     fake = FakeCodex(FakeThread([]))
     codex = cast("AsyncCodex", cast(object, fake))  # lup: ignore — SDK-boundary fake
-    client = CodexClient(CodexNativeConfig(model="gpt-5.5"))
+    sessions = CodexSessions(CodexNativeConfig(model="gpt-5.5"))
 
-    started = await client.open_thread(codex, resume=None)
+    started = await sessions.open_thread(codex, resume=None)
     assert started is fake.thread
     assert fake.started == ["gpt-5.5"]
 
-    resumed = await client.open_thread(codex, resume="thread-9")
+    resumed = await sessions.open_thread(codex, resume="thread-9")
     assert resumed is fake.thread
     assert fake.resumed == ["thread-9"]
 
