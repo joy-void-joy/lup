@@ -44,7 +44,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.common import query
+from lup.adapters.wiring import query
 from lup.mcp import ToolError, lup_tool
 from lup_template.agent.config import aux_model
 

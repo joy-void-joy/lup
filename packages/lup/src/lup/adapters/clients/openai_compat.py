@@ -25,7 +25,7 @@ from lup.adapters.clients.codex import (
     subprocess_sandbox_cleanup,
 )
 from lup.adapters.clients.Client import Client, refuse_unconsumed
-from lup.adapters.common import LupAgentOptions
+from lup.adapters.options import LupAgentOptions
 from lup.types import JsonObject, UsageCost
 
 if TYPE_CHECKING:

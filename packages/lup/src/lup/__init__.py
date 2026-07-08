@@ -17,7 +17,8 @@ from lup.adapters.background.Background import (
     create_background_agent,
 )
 from lup.adapters.clients.Client import Client, Session
-from lup.adapters.common import LupAgentOptions, create_client, query
+from lup.adapters.options import LupAgentOptions
+from lup.adapters.wiring import create_client, query
 from lup.workspace.history import (
     SessionResult,
     format_history_for_context,

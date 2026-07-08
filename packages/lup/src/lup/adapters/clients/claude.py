@@ -42,7 +42,7 @@ from lup.adapters.clients.Client import (
     refuse_unconsumed,
     safe_normalize_usage,
 )
-from lup.adapters.common import LupAgentOptions
+from lup.adapters.options import LupAgentOptions
 from lup.hooks import (
     LupHookEvent,
     LupHookInput,

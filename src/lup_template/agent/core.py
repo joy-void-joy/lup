@@ -17,7 +17,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from lup.adapters.common import LupAgentOptions
+    from lup.adapters.options import LupAgentOptions
     from lup.sandbox.container import Sandbox
     from lup.types import UsageCost
 
@@ -131,7 +131,7 @@ def build_session_options(
         create_tool_allowlist_hook,
         merge_hooks,
     )
-    from lup.adapters.common import LupAgentOptions
+    from lup.adapters.options import LupAgentOptions
     from lup.mcp import create_mcp_server
     from lup.realtime.relay import REALTIME_DIRNAME
     from lup.reflect import create_reflection_gate
@@ -358,12 +358,12 @@ def build_session_client(
 ) -> SessionBuild:
     """Build the session's client for ``settings.agent_sdk``.
 
-    Assembles neutral :class:`~lup.adapters.common.LupAgentOptions` and hands them
+    Assembles neutral :class:`~lup.adapters.options.LupAgentOptions` and hands them
     to ``create_client`` with the configured engine — no ``match`` on the
     backend, no native option type. Session-scoped resources live inside
     ``client.session()``; session artifacts are read from the notes.
     """
-    from lup.adapters.common import create_client
+    from lup.adapters.wiring import create_client
 
     notes = setup_notes(session_id, task_id or "0")
     opts = build_session_options(notes, realtime=realtime)

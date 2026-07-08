@@ -3,7 +3,7 @@
 Each cell is derived from the engines' actual behavior: option rows
 construct a probe client with exactly one intent knob set and record
 whether the engine raises
-:class:`~lup.adapters.common.UnsupportedOptionsError`; the streaming row
+:class:`~lup.adapters.errors.UnsupportedOptionsError`; the streaming row
 reads whether the engine's ``stream`` is itself an async generator that
 yields as the turn unfolds (live) or a plain method that returns
 :func:`~lup.adapters.clients.Client.replay_stream`, which emits every
@@ -22,7 +22,7 @@ insertion order.
 
 Facts that only surface on a live connection (interrupt support, session
 resume) have no row here; they are documented in prose and raise
-:class:`~lup.adapters.common.UnsupportedOperationError` at the point of
+:class:`~lup.adapters.errors.UnsupportedOperationError` at the point of
 use.
 """
 
@@ -31,12 +31,9 @@ import inspect
 from pydantic import BaseModel
 
 from lup.adapters.background.Background import create_background_agent
-from lup.adapters.common import (
-    ENGINES,
-    ClientFactory,
-    LupAgentOptions,
-    UnsupportedOptionsError,
-)
+from lup.adapters.errors import UnsupportedOptionsError
+from lup.adapters.options import LupAgentOptions
+from lup.adapters.wiring import ENGINES, ClientFactory
 from lup.adapters.tools.claude import READ
 
 

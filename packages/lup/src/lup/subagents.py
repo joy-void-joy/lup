@@ -18,7 +18,8 @@ import logging
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.common import UnsupportedOptionsError, create_client
+from lup.adapters.errors import UnsupportedOptionsError
+from lup.adapters.wiring import create_client
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.types import SubagentSpec
 

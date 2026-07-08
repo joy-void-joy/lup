@@ -44,7 +44,7 @@ import claude_agent_sdk as claude
 
 from lup.adapters.clients.claude import ClaudeClient, build_claude_options
 from lup.adapters.clients.Client import Client, refuse_unconsumed
-from lup.adapters.common import LupAgentOptions
+from lup.adapters.options import LupAgentOptions
 
 DISABLE_NONESSENTIAL_TRAFFIC_ENV = {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",

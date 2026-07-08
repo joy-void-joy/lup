@@ -1,7 +1,8 @@
 """The neutral seam: every engine behind ``create_client()`` and ``query()``.
 
 An engine is one backend, complete: a ``create_*`` factory that turns
-neutral :class:`LupAgentOptions` into a :class:`~lup.adapters.clients.Client.Client`,
+neutral :class:`~lup.adapters.options.LupAgentOptions` into a
+:class:`~lup.adapters.clients.Client.Client`,
 and the client opens :class:`~lup.adapters.clients.Client.Session`\\ s.
 ``query()`` is the self-contained one-shot (opens, sends, closes —
 nothing to leak); ``session()`` is the explicit multi-turn context,
@@ -34,203 +35,21 @@ import logging
 import re
 from collections.abc import Callable
 from importlib import import_module
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 
-from lup.hooks import LupHooksConfig
-from lup.mcp import LupMcpServerConfig, McpServerEntry, server_tool_names
+from lup.adapters.options import LupAgentOptions
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
-    JsonObject,
     LupResponse,
     PermissionMode,
-    SubagentSpec,
-    UsageCost,
 )
 
 if TYPE_CHECKING:
     from lup.adapters.clients.Client import Client
 
 logger = logging.getLogger(__name__)
-
-
-class LupAgentOptions(BaseModel):
-    """Everything an engine needs to construct a client, in neutral terms.
-
-    A caller assembles one of these (its domain work: which tools, which
-    hooks, which subagents, the model knobs) and hands it to
-    :func:`create_client`; the engine's factory translates it into its
-    native option object. No consumer names a backend or touches a native
-    option type. Each engine consumes the mechanism payloads that belong
-    to it (in-process hooks and tool servers on Claude; served groups, env
-    relay, and writable roots on Codex) and ignores the others'. Intent
-    knobs an engine cannot honor (thinking tokens on the Codex runtime,
-    turn timeouts on Claude) follow ``on_unsupported``: refused at
-    construction, or cleared with a log line.
-    """
-
-    # ``usage_cost`` is a bare Callable, which pydantic only accepts under
-    # arbitrary types; every other field is a model, TypedDict, or scalar.
-    model_config = {"arbitrary_types_allowed": True}
-
-    model: str
-    system_prompt: str = ""
-    coding_harness_preset: bool = False
-    """Wrap ``system_prompt`` in the engine's coding-harness preset (Claude's
-    ``claude_code`` preset + append). ``False`` — the default — sends the
-    prompt verbatim. Engines without such a preset (Codex) ignore it. Thinking
-    budget and permission handling are the separate ``max_thinking_tokens`` and
-    ``permission_mode`` knobs."""
-
-    tool_servers: dict[str, McpServerEntry] = {}
-    subagents: list[SubagentSpec] = []
-    hooks: LupHooksConfig = LupHooksConfig()
-    allowed_tools: list[str] = []
-    """Tool names the agent may call. The ``mcp__{server}__{tool}`` name of
-    every in-process tool server's tools is added automatically — those
-    tools are the agent's own — so this field carries only the extras
-    (builtins like ``Read``, framework tools). Policy exclusions are the
-    caller's to apply before construction; they cannot be derived here."""
-    tools: list[str] | None = None
-    """Base builtin toolset restriction (``None`` = the engine's default set)."""
-    served_tool_groups: list[str] = []
-    """Tool-group names served to subprocess engines out of process. Not
-    derived from ``tool_servers``: the served set is the caller's group
-    registry (it can include groups with no in-process server, e.g. a
-    sandbox served only externally), so the caller names it."""
-    add_dirs: list[Path] = []
-    output_schema: JsonObject | None = None
-    """JSON Schema the final response must satisfy (structured output)."""
-
-    permission_mode: PermissionMode | None = None
-    max_turns: int | None = None
-    max_thinking_tokens: int | None = None
-    reasoning_effort: str | None = None
-    max_budget_usd: float | None = None
-    turn_timeout_seconds: float | None = None
-    usage_cost: UsageCost | None = None
-    """Token→USD estimator that makes ``max_budget_usd`` enforceable on
-    runtimes that report tokens but not cost (Codex). The mechanism behind
-    the budget intent, not itself an intent knob."""
-
-    persist_session: bool = True
-    """Keep the engine's SDK session alive across turns, vs a one-shot nested
-    call that does not persist. Purely about session persistence — the
-    session-grade behavior defaults are the separate ``session_defaults`` knob."""
-    session_defaults: bool = True
-    """Apply the engine's session-grade defaults for intent knobs left unset —
-    on Claude, an unset ``max_thinking_tokens`` runs as hard as the API allows
-    and an unset ``permission_mode`` bypasses per-call prompts. A full agent
-    session wants these; a nested one-shot sets it ``False``. Independent of
-    ``persist_session`` so persistence and behavior-defaults stay separate axes."""
-    sdk_sandbox: bool = True
-    """Enable the engine's own OS sandbox where it has one (Claude SDK)."""
-    realtime: bool = False
-    on_unsupported: Literal["raise", "drop"] = "raise"
-    """What an engine does with intent knobs it cannot honor: refuse the
-    construction (sessions fail fast) or clear them with a log line (the
-    one-shot ``query()`` degrades)."""
-
-    base_url: str | None = None
-    """An OpenAI/Anthropic-compatible endpoint, unset for vendor-served
-    models. ``openai-compat`` defines a Codex custom provider from it;
-    ``claude-compat`` points the Claude scaffolding at it via
-    ``ANTHROPIC_BASE_URL``."""
-    api_key: str | None = None
-    model_provider: str | None = None
-    auth_style: Literal["auth_token", "api_key"] = "auth_token"
-    """Which header carries ``api_key`` on a claude-compat endpoint: bearer
-    ``ANTHROPIC_AUTH_TOKEN`` (hosted gateways) or native ``x-api-key`` via
-    ``ANTHROPIC_API_KEY`` (local servers)."""
-    map_model_aliases: bool = True
-    """Point Claude's opus/sonnet/haiku aliases at ``model`` on a claude-compat
-    endpoint, so a single-model endpoint is never asked for an alias it does
-    not serve."""
-
-    codex_sandbox: str | None = None
-    """Codex-runtime sandbox mode (named to avoid colliding with
-    ``sdk_sandbox``, the Claude SDK's OS sandbox flag)."""
-    approval_policy: str | None = None
-    mcp_env: dict[str, str] = {}
-    writable_roots: list[Path] = []
-
-    session_id: str | None = None
-    """Session-wiring trio (``session_id``, ``shared_dir``,
-    ``realtime_dir``) mirroring :class:`lup.workspace.context.SessionContext`. Supplied
-    by the session builder rather than derived: the on-disk session layout
-    (where the shared sandbox dir lives, what the session is named) is the
-    caller's to define, not the adapter's."""
-    shared_dir: Path | None = None
-    realtime_dir: Path | None = None
-
-    @model_validator(mode="after")
-    def add_owned_tools_to_allowlist(self) -> "LupAgentOptions":
-        """Auto-allow every in-process tool server's own tools.
-
-        The ``mcp__{server}__{tool}`` name of each :class:`LupMcpServerConfig`
-        tool joins ``allowed_tools`` (deduped, explicit extras kept first).
-        External transport configs cannot be introspected offline, so they
-        contribute nothing.
-        """
-        owned = [
-            f"mcp__{name}__{tool}"
-            for name, server in self.tool_servers.items()
-            if isinstance(server, LupMcpServerConfig)
-            for tool in server_tool_names(server)
-        ]
-        if owned:
-            self.allowed_tools = list(dict.fromkeys([*self.allowed_tools, *owned]))
-        return self
-
-
-class UnsupportedOperationError(NotImplementedError):
-    """The engine behind this client cannot perform the requested operation.
-
-    Raised at the point of use — ``interrupt()`` on a runtime with no
-    interruption support, ``session(resume=...)`` on an engine that cannot
-    restore threads. A ``NotImplementedError`` subclass, so generic
-    ``except NotImplementedError`` handlers also catch it.
-    """
-
-
-class UnsupportedOptionsError(ValueError):
-    """The engine cannot honor intent knobs the options carry.
-
-    Raised at construction (``on_unsupported="raise"``, the session
-    default), so a session that asked for, say, ``max_turns`` on a runtime
-    without turn caps fails before it starts. ``fields`` names the
-    offenders. With ``on_unsupported="drop"`` the engine clears them and
-    logs instead — the one-shot ``query()`` policy.
-    """
-
-    def __init__(self, engine: str, fields: list[str]) -> None:
-        self.engine = engine
-        self.fields = sorted(fields)
-        super().__init__(
-            f"options {self.fields} are not supported on the {engine} engine; "
-            "unset them or run on an engine that honors them."
-        )
-
-
-class TurnTimeoutError(RuntimeError):
-    """A turn exceeded its wall-clock timeout and was cancelled client-side.
-
-    Raised by engines that enforce ``turn_timeout_seconds`` when a single
-    turn runs past it. The backend thread's state is undefined afterwards
-    — close the session rather than sending further turns on it.
-    """
-
-
-class BudgetExceededError(RuntimeError):
-    """A session refused to start a turn: accumulated cost reached the budget.
-
-    Raised between turns by engines that enforce ``max_budget_usd``
-    through their own usage accounting (the Codex runtime reports token
-    counts, not cost). The turn that crossed the budget has already
-    completed — this error stops the *next* one.
-    """
 
 
 type ClientFactory = Callable[[LupAgentOptions], "Client"]

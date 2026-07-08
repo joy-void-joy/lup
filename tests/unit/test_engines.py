@@ -21,10 +21,10 @@ from lup.adapters.clients.openai_compat import (
     OpenAICompatClient,
     create_openai_compat,
 )
-from lup.adapters.common import (
+from lup.adapters.errors import UnsupportedOptionsError
+from lup.adapters.options import LupAgentOptions
+from lup.adapters.wiring import (
     ENGINES,
-    LupAgentOptions,
-    UnsupportedOptionsError,
     create_client,
     engine_id_of,
     factory_for_model,

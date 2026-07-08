@@ -13,7 +13,7 @@ from lup.adapters.clients.Client import (
     query_via_session,
     replay_stream,
 )
-from lup.adapters.common import LupAgentOptions
+from lup.adapters.options import LupAgentOptions
 from lup.telemetry.trace import TraceLogger
 from lup.types import LupEvent, LupResponse, LupTextBlock
 
@@ -81,7 +81,7 @@ class RecordingClient(Client):
 class RecordingEngine:
     """A fake engine factory passed as ``engine=``: records built and ran options.
 
-    A plain :data:`~lup.adapters.common.ClientFactory` callable —
+    A plain :data:`~lup.adapters.wiring.ClientFactory` callable —
     construction alone is not execution, so options land in ``ran`` only
     when a session actually sends a turn.
     """
