@@ -48,12 +48,12 @@ from lup.adapters.clients.Client import (
     replay_stream,
     safe_normalize_usage,
 )
-from lup.adapters.common import (
+from lup.adapters.errors import (
     BudgetExceededError,
-    LupAgentOptions,
     TurnTimeoutError,
     UnsupportedOperationError,
 )
+from lup.adapters.options import LupAgentOptions
 from lup.adapters.tools.claude import WEB_SEARCH
 from lup.hooks import LupHooksConfig
 from lup.realtime.relay import RealtimeMailbox

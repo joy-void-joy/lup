@@ -24,7 +24,7 @@ choice that holds regardless of ``AGENT_SDK``.
 Subagents are one of several agent shapes — ``.claude/PATTERNS.md`` is
 the full catalog. Where the siblings live:
 
-- Nested agents: a one-shot :func:`lup.adapters.common.query` inside a
+- Nested agents: a one-shot :func:`lup.adapters.wiring.query` inside a
   tool handler; the reviewer in ``agent/tools/reflect.py`` is the
   exemplar
 - Background agents: ``lup.adapters.background.Background``

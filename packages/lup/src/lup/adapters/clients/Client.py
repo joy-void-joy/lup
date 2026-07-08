@@ -32,7 +32,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import PrivateAttr, ValidationError
 
-from lup.adapters.common import LupAgentOptions, UnsupportedOptionsError
+from lup.adapters.errors import UnsupportedOptionsError
+from lup.adapters.options import LupAgentOptions
 from lup.telemetry.display import print_message
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
@@ -90,7 +91,7 @@ class Session(ABC):
         """Signal the backend to stop the current response.
 
         Engines without interruption support raise
-        :class:`~lup.adapters.common.UnsupportedOperationError` here.
+        :class:`~lup.adapters.errors.UnsupportedOperationError` here.
         """
 
 
@@ -119,7 +120,7 @@ class Client(ABC):
         yielding a :class:`Session`. The SDK client/thread is created on
         entry and cleaned up on exit. ``resume`` takes a previously saved
         :attr:`Session.id`; engines that cannot restore sessions raise
-        :class:`~lup.adapters.common.UnsupportedOperationError`.
+        :class:`~lup.adapters.errors.UnsupportedOperationError`.
         """
 
     @abstractmethod
@@ -410,7 +411,7 @@ def refuse_unconsumed[N](
     Runs ``translate`` over a :class:`ConsumeTracker`; any intent knob the
     caller set but the translation never read is one the engine cannot
     honor. Under ``on_unsupported="raise"`` (the session default) those
-    fail the construction with :class:`~lup.adapters.common.UnsupportedOptionsError`;
+    fail the construction with :class:`~lup.adapters.errors.UnsupportedOptionsError`;
     under ``"drop"`` (the ``query()`` policy) they are logged and the
     already-untouched native result is returned as-is. Because the
     translation never read them, the native object already reflects their

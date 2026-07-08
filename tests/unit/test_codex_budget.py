@@ -18,7 +18,7 @@ from lup.adapters.clients.codex import (
     CodexSession,
     per_mtok_usage_cost,
 )
-from lup.adapters.common import BudgetExceededError, TurnTimeoutError
+from lup.adapters.errors import BudgetExceededError, TurnTimeoutError
 from lup.types import Usage
 
 if TYPE_CHECKING:

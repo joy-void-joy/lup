@@ -9,7 +9,7 @@ dry, or the budget cutting the session off.
 from pathlib import Path
 
 from lup.adapters.clients.Client import Session
-from lup.adapters.common import BudgetExceededError
+from lup.adapters.errors import BudgetExceededError
 from lup.workspace.output import (
     MISSING_OUTPUT_MESSAGE,
     ensure_output_submitted,

@@ -19,7 +19,7 @@ from lup.adapters.clients.codex import (
     write_reflection_gate_script,
     write_tool_allowlist_script,
 )
-from lup.adapters.common import engine_id_of, factory_for_model
+from lup.adapters.wiring import engine_id_of, factory_for_model
 from lup.hooks import (
     LupHookInput,
     LupHooksConfig,
@@ -165,7 +165,7 @@ class TestReflectionGateHookScripts:
 class TestLupMcpServerConfig:
     def test_in_process_server_becomes_sdk_config(self) -> None:
         from lup.adapters.clients.claude import build_claude_options
-        from lup.adapters.common import LupAgentOptions
+        from lup.adapters.options import LupAgentOptions
         from lup.mcp import create_mcp_server
 
         opts = LupAgentOptions(
