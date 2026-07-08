@@ -1,4 +1,4 @@
-"""Codex-runtime background agent.
+"""Codex-runtime background driver.
 
 Codex threads are inherently persistent and concurrent — each background
 agent gets its own thread running alongside the main agent thread.
@@ -10,17 +10,18 @@ accept only their own model list, so there is no safe default.
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 
 from lup.adapters.background.Background import (
+    BackgroundAgent,
     BackgroundAgentParams,
-    BaseBackgroundAgent,
+    BackgroundDriver,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def build_codex_background(params: BackgroundAgentParams) -> BaseBackgroundAgent:
+def build_codex_background(params: BackgroundAgentParams) -> BackgroundAgent:
     """Build a Codex background agent — text-only, explicit model required.
 
     Tool support is a property of this engine: background tools share
@@ -41,42 +42,38 @@ def build_codex_background(params: BackgroundAgentParams) -> BaseBackgroundAgent
             "accounts accept only their own model list (e.g. "
             "gpt-5.5), so there is no safe default."
         )
-    return CodexBackgroundAgent(
+    driver = CodexBackgroundDriver(
         name=params.name,
         system_prompt=params.system_prompt,
+        model=params.model,
+        on_response=params.on_response,
+    )
+    return BackgroundAgent(
+        driver,
+        name=params.name,
         build_message=params.build_message,
         start_message=params.start_message,
-        model=params.model,
         debounce_seconds=params.debounce_seconds,
-        on_response=params.on_response,
     )
 
 
-class CodexBackgroundAgent(BaseBackgroundAgent):
-    """Background agent running via an independent Codex thread."""
+class CodexBackgroundDriver(BackgroundDriver):
+    """Drives background turns through an independent Codex thread."""
 
     def __init__(
         self,
         *,
         name: str,
         system_prompt: str,
-        build_message: Callable[[], str | None],
-        start_message: str = "",
         model: str,
-        debounce_seconds: float = 3.0,
         on_response: Callable[[str], None] | None = None,
     ) -> None:
-        super().__init__(
-            name=name,
-            system_prompt=system_prompt,
-            build_message=build_message,
-            start_message=start_message,
-            model=model,
-            debounce_seconds=debounce_seconds,
-        )
+        self.name = name
+        self.system_prompt = system_prompt
+        self.model = model
         self.on_response = on_response
 
-    async def run_loop(self) -> None:
+    async def run(self, messages: AsyncIterator[str]) -> None:
         """Run independent Codex thread for background work."""
         try:
             import openai_codex as codex
@@ -87,7 +84,7 @@ class CodexBackgroundAgent(BaseBackgroundAgent):
                     developer_instructions=self.system_prompt,
                 )
 
-                async for content in self.message_stream():
+                async for content in messages:
                     result = await thread.run(content)
                     if self.on_response and result.final_response:
                         self.on_response(result.final_response)

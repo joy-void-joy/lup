@@ -13,8 +13,8 @@ extra for the backend you use (one per engine module under
 from typing import TYPE_CHECKING
 
 from lup.adapters.background.Background import (
+    BackgroundAgent,
     BackgroundAgentParams,
-    BaseBackgroundAgent,
 )
 from lup.adapters.clients.Client import Client, Session
 from lup.adapters.Engine import Engine
@@ -87,8 +87,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "TIMESTAMP_FMT",
+    "BackgroundAgent",
     "BackgroundAgentParams",
-    "BaseBackgroundAgent",
     "Client",
     "Engine",
     "JsonObject",

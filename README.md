@@ -59,9 +59,9 @@ The agent runs on the Claude engine by default; `AGENT_SDK=codex` runs the same 
 
 ### Engine support
 
-The portable contract is **tiered**, deliberately. Tier 1 — the core loop every engine gets — is: run → MCP tools → reflection gate → `submit_output` finalization → session JSON, traces, metrics, and resumable sessions, plus subagents (native on Claude engines, the `run_subagent` tool elsewhere), budget caps, and persistent mode. Tier 2 is Claude-native and intentionally unported: in-process hooks, parallel native subagents, permission modes, live streaming, interrupt, and SDK-reported cost. Don't generalize Tier 2 features into the engine abstraction — pass native options to `ClaudeClient` instead.
+The portable contract is **tiered**, deliberately. Tier 1 — the core loop every engine gets — is: run → MCP tools → reflection gate → `submit_output` finalization → session JSON, traces, metrics, and resumable sessions, plus subagents (native on Claude engines, the `run_subagent` tool elsewhere), budget caps, and persistent mode. Tier 2 is Claude-native and intentionally unported: in-process hooks, parallel native subagents, permission modes, live streaming, interrupt, and SDK-reported cost. Don't generalize Tier 2 features into the engine abstraction — pass native options through `compose_claude` instead.
 
-Nothing below is declared: the matrix is **probed from the engines** (`uv run lup-devtools agent capabilities --markdown`) — option rows construct a client with exactly that knob and record whether the engine refuses it, the streaming row checks whether the engine overrides the post-hoc default, and a regression test keeps this copy current:
+Nothing below is declared: the matrix is **probed from the engines** (`uv run lup-devtools agent capabilities --markdown`) — option rows construct a client with exactly that knob and record whether the engine refuses it, the streaming row reads which stream component the engine composed (its own live feed, or the post-hoc replay gap-filler), and a regression test keeps this copy current:
 
 | Capability | claude | codex | openai-compat | claude-compat |
 |---|---|---|---|---|

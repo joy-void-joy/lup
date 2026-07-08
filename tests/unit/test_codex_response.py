@@ -1,33 +1,20 @@
-"""Codex response assembly and post-hoc streaming.
+"""Codex response assembly.
 
 build_lup_response is where Codex turns become portable lup responses:
-structured-output parsing must degrade (not raise) on non-JSON text,
-the session id must ride along, and stream must replay blocks as
-events in order with the done event last. CodexSession.send must
-stamp wall-clock duration — the SDK reports tokens but no duration.
+structured-output parsing must degrade (not raise) on non-JSON text and
+the session id must ride along. CodexSession.send must stamp wall-clock
+duration — the SDK reports tokens but no duration. (The post-hoc stream
+this engine rides is the composed client's replay path, pinned in
+``test_composed_client.py``.)
 """
 
 from typing import TYPE_CHECKING, cast
 
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
-from lup.adapters.clients.codex.client import CodexClient, CodexSession
+from lup.adapters.clients.codex.client import CodexSession
 from lup.adapters.clients.codex.messages import build_lup_response
-from lup.adapters.clients.codex.options import CodexNativeConfig
-from lup.telemetry.trace import TraceLogger
-from lup.types import (
-    JsonObject,
-    LupDoneEvent,
-    LupResponse,
-    LupTextBlock,
-    LupTextEvent,
-    LupThinkingBlock,
-    LupThinkingEvent,
-    LupToolResultBlock,
-    LupToolResultEvent,
-    LupToolUseBlock,
-    LupToolUseEvent,
-)
+from lup.types import JsonObject
 
 if TYPE_CHECKING:
     from openai_codex import AsyncThread, TurnResult
@@ -111,39 +98,3 @@ async def test_send_stamps_wall_clock_duration() -> None:
     assert response.result is not None
     assert response.result.duration_ms is not None
     assert response.result.duration_ms >= 0
-
-
-async def test_run_streamed_replays_blocks_in_order() -> None:
-    canned = LupResponse(
-        blocks=[
-            LupThinkingBlock(thinking="hmm"),
-            LupTextBlock(text="hello"),
-            LupToolUseBlock(id="t1", name="command_execution", input={}),
-            LupToolResultBlock(tool_use_id="t1", content="out"),
-        ]
-    )
-
-    class CannedAdapter(CodexClient):
-        async def query(
-            self,
-            prompt: str,
-            *,
-            trace_logger: TraceLogger | None = None,
-            prefix: str = "",
-        ) -> LupResponse:
-            _ = (prompt, trace_logger, prefix)
-            return canned
-
-    adapter = CannedAdapter(CodexNativeConfig(model="gpt-5.5"))
-    events = [event async for event in adapter.stream("go")]
-
-    assert [type(event) for event in events] == [
-        LupThinkingEvent,
-        LupTextEvent,
-        LupToolUseEvent,
-        LupToolResultEvent,
-        LupDoneEvent,
-    ]
-    done = events[-1]
-    assert isinstance(done, LupDoneEvent)
-    assert done.blocks == canned.blocks

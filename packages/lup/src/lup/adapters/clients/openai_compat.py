@@ -19,7 +19,7 @@ client — no additional dependencies needed.
 import logging
 
 from lup.adapters.clients.Client import Client
-from lup.adapters.clients.codex.client import CodexClient
+from lup.adapters.clients.codex.client import compose_codex
 from lup.adapters.clients.codex.options import CodexNativeConfig, build_codex_native
 from lup.adapters.clients.refusal import refuse_unconsumed
 from lup.adapters.options import LupAgentOptions
@@ -79,7 +79,7 @@ def create_openai_compat(options: LupAgentOptions) -> Client:
     the file-relay mailbox — the translation is
     :func:`build_openai_compat_native`, which reads the same honored knobs.
     """
-    client = CodexClient(
+    client = compose_codex(
         refuse_unconsumed("openai-compat", options, build_openai_compat_native)
     )
     if options.realtime and options.realtime_dir is not None:

@@ -3,10 +3,10 @@
 The projection layer between the Codex SDK's thread vocabulary and the
 backend-neutral ``Lup*`` types. ``LupResponse.blocks`` keeps the
 tool-result blocks inline — the shape
-:func:`~lup.adapters.clients.fallbacks.replay_stream` reconstructs
-events from — which is why this path projects for itself rather than
-conforming to :class:`~lup.adapters.clients.Collector.ResponseCollector`
-(a completed ``TurnResult`` also has no live message stream to drain).
+:class:`~lup.adapters.clients.composed.ReplayStream` reconstructs events
+from — which is why this path projects for itself rather than through
+the Claude engine's collector walk (a completed ``TurnResult`` also has
+no live message stream to drain).
 """
 
 import json

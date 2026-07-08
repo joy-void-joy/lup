@@ -1,1 +1,1 @@
-"""Per-engine background agents: the shared machinery and each engine's impl."""
+"""Background agents: the driver verb, the composing agent, each engine's driver."""

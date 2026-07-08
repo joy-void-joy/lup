@@ -128,35 +128,35 @@ def apply_repl_overrides(
 ) -> None:
     """Apply ``--no-tools``/``--no-prompt`` to a built adapter.
 
-    Claude: realized on the options object. Codex/OpenAI: realized on
-    the adapter attributes, which ``session()`` reads at open time
-    (``mcp_tools`` gates the served-tools config, ``system_prompt``
-    becomes the developer instructions). Unknown adapter types warn so
-    the flags are never silently ignored.
+    Realized on the native configuration carried by the client's
+    sessions component, which ``session()`` reads at open time (the
+    served-tools config, the system prompt/developer instructions).
+    Unknown compositions warn so the flags are never silently ignored.
     """
     if not no_tools and not no_prompt:
         return
 
-    from lup.adapters.clients.claude.client import ClaudeClient
-    from lup.adapters.clients.codex.client import CodexClient
+    from lup.adapters.clients.claude.client import ClaudeSessions
+    from lup.adapters.clients.codex.client import CodexSessions
+    from lup.adapters.clients.composed import ComposedClient
 
     match adapter:
-        case ClaudeClient():
-            options = adapter.options
+        case ComposedClient(sessions=ClaudeSessions() as sessions):
+            options = sessions.options
             if no_tools:
                 options.mcp_servers = {}
                 options.allowed_tools = []
             if no_prompt:
                 options.system_prompt = None
-        case CodexClient():
+        case ComposedClient(sessions=CodexSessions() as sessions):
             if no_tools:
-                adapter.native.config_overrides = [
+                sessions.native.config_overrides = [
                     override
-                    for override in adapter.native.config_overrides
+                    for override in sessions.native.config_overrides
                     if not override.startswith("mcp_servers.")
                 ]
             if no_prompt:
-                adapter.native.system_prompt = ""
+                sessions.native.system_prompt = ""
         case _:
             typer.echo(
                 "Warning: --no-tools/--no-prompt not supported on "

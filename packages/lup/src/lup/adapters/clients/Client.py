@@ -1,23 +1,20 @@
 """The client seam: purely abstract ``Client``/``Session``, nothing else.
 
 The ABCs draw the contract — every member is ``@abstractmethod``, no
-concrete defaults and no raising stubs. What an engine cannot do it says
-in its own module: an engine without a live event stream implements
-``stream`` as a one-line call to
-:func:`~lup.adapters.clients.fallbacks.replay_stream`, an engine without
-a self-contained one-shot implements ``query`` via
-:func:`~lup.adapters.clients.fallbacks.query_via_session`, and an engine
-that lacks a capability entirely writes its own explicit
-``raise UnsupportedOperationError(...)`` at the point of use (``interrupt``
-where there is no interruption, ``session(resume=...)`` where threads
-cannot be restored). Reading one engine module shows exactly what it
-cannot do.
+concrete defaults and no raising stubs. Engines do not subclass
+``Client``: each contributes the component verbs it natively has — its
+:class:`~lup.adapters.clients.Sessions.Sessions` always, plus a
+:class:`~lup.adapters.clients.Stream.Stream` when its SDK feeds events
+live — and :class:`~lup.adapters.clients.composed.ComposedClient`
+composes them into this surface, filling the one-shot and stream gaps
+generically. A capability an engine lacks entirely is an explicit
+``raise UnsupportedOperationError(...)`` written in its own component at
+the point of use (``interrupt`` where there is no interruption,
+``open(resume=...)`` where threads cannot be restored), so reading one
+engine's components shows exactly what it cannot do.
 
 The machinery around the contract lives beside it, one concern per
-module: :mod:`~lup.adapters.clients.fallbacks` (shared bodies for the
-missing-capability implementations above),
-:mod:`~lup.adapters.clients.Collector` (the response-path template),
-:mod:`~lup.adapters.clients.usage` (usage normalization), and
+module: :mod:`~lup.adapters.clients.usage` (usage normalization) and
 :mod:`~lup.adapters.clients.refusal` (consume-tracking refusal of intent
 knobs an engine's translation never reads).
 """
@@ -89,10 +86,9 @@ class Client(ABC):
     ) -> AbstractAsyncContextManager[Session]:
         """Open a multi-turn session; ``resume`` continues a saved one.
 
-        Implementations are ``@asynccontextmanager`` async generators
-        yielding a :class:`Session`. The SDK client/thread is created on
-        entry and cleaned up on exit. ``resume`` takes a previously saved
-        :attr:`Session.id`; engines that cannot restore sessions raise
+        The SDK client/thread is created on entry and cleaned up on exit.
+        ``resume`` takes a previously saved :attr:`Session.id`; engines
+        that cannot restore sessions raise
         :class:`~lup.adapters.errors.UnsupportedOperationError`.
         """
 
@@ -106,8 +102,6 @@ class Client(ABC):
     ) -> LupResponse:
         """Self-contained one-shot: open a session, send one prompt, close.
 
-        Engines with no native one-shot implement this as a one-line call
-        to :func:`~lup.adapters.clients.fallbacks.query_via_session`.
         Carries run-time arguments only — construction knobs were fixed
         when the engine's factory built this client.
         """
@@ -123,7 +117,7 @@ class Client(ABC):
         """Run one prompt, yielding streaming events.
 
         Engines with a live event stream yield as the turn unfolds; those
-        without implement this as a one-line call to
-        :func:`~lup.adapters.clients.fallbacks.replay_stream`, which runs
-        the turn to completion and replays its blocks.
+        without replay the completed turn's blocks
+        (:class:`~lup.adapters.clients.composed.ReplayStream`). Either
+        way the terminal ``LupDoneEvent`` comes last.
         """
