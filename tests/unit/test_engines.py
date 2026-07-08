@@ -10,11 +10,8 @@ two forms.
 
 import pytest
 
-from lup.adapters.clients.claude import (
-    SESSION_THINKING_TOKENS,
-    ClaudeClient,
-    create_claude,
-)
+from lup.adapters.clients.claude.client import ClaudeClient, create_claude
+from lup.adapters.clients.claude.options import SESSION_THINKING_TOKENS
 from lup.adapters.clients.claude_compat import create_claude_compat
 from lup.adapters.clients.codex import CodexClient, create_codex, per_mtok_usage_cost
 from lup.adapters.clients.openai_compat import (

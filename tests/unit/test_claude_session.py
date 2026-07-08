@@ -24,7 +24,8 @@ from claude_agent_sdk.types import (
     UserMessage,
 )
 
-from lup.adapters.clients.claude import ClaudeSession, ClaudeUsageNormalizer
+from lup.adapters.clients.claude.client import ClaudeSession
+from lup.adapters.clients.claude.collector import ClaudeUsageNormalizer
 from lup.types import (
     JsonValue,
     LupDoneEvent,
@@ -151,7 +152,7 @@ async def test_broken_usage_normalizer_degrades_to_none() -> None:
 async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None:
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.clients.claude import ClaudeClient
+    from lup.adapters.clients.claude.client import ClaudeClient
 
     script: list[Message] = [
         AssistantMessage(
@@ -195,7 +196,7 @@ async def test_session_resume_threads_the_saved_id(
     mutating the client's own options."""
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.clients.claude import ClaudeClient
+    from lup.adapters.clients.claude.client import ClaudeClient
 
     opened: list[ClaudeAgentOptions] = []
 
@@ -214,7 +215,7 @@ async def test_session_resume_threads_the_saved_id(
 
 
 async def test_collector_state_after_collect() -> None:
-    from lup.adapters.clients.claude import ClaudeResponseCollector
+    from lup.adapters.clients.claude.collector import ClaudeResponseCollector
 
     fake = FakeClient(SCRIPT)
     collector = ClaudeResponseCollector(cast(ClaudeSDKClient, fake))
@@ -230,7 +231,7 @@ async def test_collector_state_after_collect() -> None:
 
 
 async def test_collector_raises_mid_iteration_on_error() -> None:
-    from lup.adapters.clients.claude import ClaudeResponseCollector
+    from lup.adapters.clients.claude.collector import ClaudeResponseCollector
 
     fake = FakeClient([result_message(is_error=True, result="boom")])
     collector = ClaudeResponseCollector(cast(ClaudeSDKClient, fake))
@@ -241,7 +242,7 @@ async def test_collector_raises_mid_iteration_on_error() -> None:
 
 async def test_error_result_is_traced_and_kept_before_raising(tmp_path: Path) -> None:
     """An error result must land in the trace and collector state, then raise."""
-    from lup.adapters.clients.claude import ClaudeResponseCollector
+    from lup.adapters.clients.claude.collector import ClaudeResponseCollector
     from lup.telemetry.trace import TraceLogger
 
     progress = AssistantMessage(content=[TextBlock(text="working...")], model="m")

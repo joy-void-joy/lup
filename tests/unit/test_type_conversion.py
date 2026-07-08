@@ -10,7 +10,10 @@ from claude_agent_sdk.types import (
     UserMessage,
 )
 
-from lup.adapters.clients.claude import claude_block_to_lup, claude_message_to_lup
+from lup.adapters.clients.claude.messages import (
+    claude_block_to_lup,
+    claude_message_to_lup,
+)
 from lup.types import (
     LupAssistantMessage,
     LupSystemMessage,
