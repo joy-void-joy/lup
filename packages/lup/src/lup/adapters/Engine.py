@@ -71,6 +71,7 @@ class Engine(ABC):
     def builtin_tools(self) -> frozenset[str]:
         """The engine's builtin tool-name table.
 
-        An engine that publishes no such table raises
-        :class:`~lup.adapters.errors.UnsupportedOperationError`.
+        Names what the backend's native activity surfaces as in lup
+        traffic; whether that set is restrictable is the separate
+        ``tools`` intent knob, judged by the client translation.
         """

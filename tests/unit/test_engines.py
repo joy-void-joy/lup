@@ -18,6 +18,8 @@ from lup.adapters.clients.codex.usage import per_mtok_usage_cost
 from lup.adapters.clients.openai_compat import create_openai_compat
 from lup.adapters.errors import UnsupportedOptionsError
 from lup.adapters.options import LupAgentOptions
+from lup.adapters.tools.claude import WEB_SEARCH
+from lup.adapters.tools.codex import COMMAND_EXECUTION, FILE_CHANGE
 from lup.adapters.wiring import (
     ENGINES,
     create_client,
@@ -334,6 +336,21 @@ class TestCodexEngine:
             "permission_mode",
             "tools",
         ]
+
+    def test_builtin_table_names_activity_while_tools_knob_stays_refused(
+        self,
+    ) -> None:
+        """Naming and selectability are separate facts: the engine names what
+        its builtin activity surfaces as, while the translation still refuses
+        the ``tools`` knob that would restrict the set — even for a name
+        straight from the table."""
+        table = ENGINES["codex"].builtin_tools()
+        assert {COMMAND_EXECUTION, FILE_CHANGE, WEB_SEARCH} <= table
+        assert ENGINES["openai-compat"].builtin_tools() == table
+        opts = LupAgentOptions(model="gpt-5.5", tools=[COMMAND_EXECUTION])
+        with pytest.raises(UnsupportedOptionsError) as exc:
+            create_codex(opts)
+        assert exc.value.fields == ["tools"]
 
     def test_budget_without_rates_is_unsupported(self) -> None:
         opts = LupAgentOptions(model="gpt-5.5", max_budget_usd=1.0)

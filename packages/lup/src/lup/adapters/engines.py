@@ -87,19 +87,23 @@ class CodexEngine(Engine):
         )
 
     def builtin_tools(self) -> frozenset[str]:
-        raise UnsupportedOperationError(
-            "the codex runtime publishes no builtin tool-name table; its "
-            "builtins (command execution, file changes) are not "
-            "individually selectable."
-        )
+        """The names Codex-native builtin activity surfaces as in lup traffic.
+
+        A name table, not a selector: whether the set is restrictable is
+        the separate ``tools`` intent knob, which the codex translation
+        refuses — the runtime's builtins are always on.
+        """
+        from lup.adapters.tools.codex import CODEX_BUILTIN_TOOLS
+
+        return CODEX_BUILTIN_TOOLS
 
 
 class OpenAICompatEngine(CodexEngine):
     """The Codex runtime pointed at any OpenAI-compatible endpoint.
 
-    The same engine as ``codex`` — backgrounds and refusals are
-    inherited — with client construction that defines a custom model
-    provider from the endpoint.
+    The same engine as ``codex`` — backgrounds, the builtin table, and
+    the profile refusal are inherited — with client construction that
+    defines a custom model provider from the endpoint.
     """
 
     id = "openai-compat"

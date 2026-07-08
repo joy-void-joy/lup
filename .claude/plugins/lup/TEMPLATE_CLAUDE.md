@@ -443,7 +443,7 @@ packages/
         │   ├── clients/        # Client.py + Collector.py contracts, shared machinery (refusal.py, usage.py, fallbacks.py), claude/ & codex/ engine packages (one concern per module), compat translations (claude_compat.py, openai_compat.py)
         │   ├── background/     # Background.py (contract + params) + wakeloop.py machinery + claude & codex implementations
         │   ├── profiles/       # Profiles.py (ProfileSupport ABC) + store.py registry + per-engine support (claude)
-        │   └── tools/          # per-engine built-in tool-name tables (claude)
+        │   └── tools/          # per-engine built-in tool-name tables (claude, codex)
         ├── codescan/           # Source scanning for dev tooling: review notes + forbidden shapes
         │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor
         │   ├── markers.py      # `# lup:` / `// lup:` review-marker scanning (dev comments)

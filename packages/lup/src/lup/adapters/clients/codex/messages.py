@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from lup.adapters.clients.codex.usage import CodexUsageNormalizer, codex_usage_to_lup
 from lup.adapters.clients.usage import safe_normalize_usage
 from lup.adapters.tools.claude import WEB_SEARCH
+from lup.adapters.tools.codex import COMMAND_EXECUTION, FILE_CHANGE
 from lup.telemetry.display import print_message
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
@@ -70,7 +71,7 @@ def codex_items_to_lup(
                 blocks.append(
                     LupToolUseBlock(
                         id=inner.id,
-                        name="command_execution",
+                        name=COMMAND_EXECUTION,
                         input={"command": inner.command, "cwd": inner.cwd.root},
                     )
                 )
@@ -118,7 +119,7 @@ def codex_items_to_lup(
                 blocks.append(
                     LupToolUseBlock(
                         id=inner.id,
-                        name="file_change",
+                        name=FILE_CHANGE,
                         input={"changes": changes_desc},
                     )
                 )
