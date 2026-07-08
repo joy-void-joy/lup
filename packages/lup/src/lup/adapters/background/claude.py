@@ -17,7 +17,7 @@ from lup.adapters.background.Background import (
     BackgroundAgentParams,
     BaseBackgroundAgent,
 )
-from lup.adapters.clients.claude import lup_tools_to_sdk
+from lup.adapters.clients.claude.messages import lup_tools_to_sdk
 from lup.mcp import LupMcpTool
 from lup.types import JsonObject
 

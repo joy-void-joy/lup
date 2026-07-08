@@ -77,7 +77,7 @@ def lazy_engine(module: str, factory: str) -> ClientFactory:
     return create
 
 
-claude_engine = lazy_engine("lup.adapters.clients.claude", "create_claude")
+claude_engine = lazy_engine("lup.adapters.clients.claude.client", "create_claude")
 claude_compat_engine = lazy_engine(
     "lup.adapters.clients.claude_compat", "create_claude_compat"
 )

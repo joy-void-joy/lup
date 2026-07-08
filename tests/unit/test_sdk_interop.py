@@ -164,7 +164,7 @@ class TestReflectionGateHookScripts:
 
 class TestLupMcpServerConfig:
     def test_in_process_server_becomes_sdk_config(self) -> None:
-        from lup.adapters.clients.claude import build_claude_options
+        from lup.adapters.clients.claude.options import build_claude_options
         from lup.adapters.options import LupAgentOptions
         from lup.mcp import create_mcp_server
 
@@ -180,7 +180,7 @@ class TestLupMcpServerConfig:
 
 class TestSubagentSpec:
     def test_spec_to_claude_passes_full_model_id_through(self) -> None:
-        from lup.adapters.clients.claude import spec_to_claude
+        from lup.adapters.clients.claude.messages import spec_to_claude
 
         spec = SubagentSpec(
             name="test",
@@ -367,7 +367,7 @@ class TestMergeHooks:
 
 class TestLupHooksToClaudeConversion:
     def test_converts_allow_decision(self) -> None:
-        from lup.adapters.clients.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude.hooks import lup_hook_output_to_claude
         from lup.hooks import LupHookOutput
 
         output = LupHookOutput(decision="allow")
@@ -377,7 +377,7 @@ class TestLupHooksToClaudeConversion:
         assert specific.get("permissionDecision") == "allow"
 
     def test_converts_deny_decision(self) -> None:
-        from lup.adapters.clients.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude.hooks import lup_hook_output_to_claude
         from lup.hooks import LupHookOutput
 
         output = LupHookOutput(decision="deny", reason="test reason")
@@ -388,7 +388,7 @@ class TestLupHooksToClaudeConversion:
         assert specific.get("permissionDecisionReason") == "test reason"
 
     def test_converts_block_decision(self) -> None:
-        from lup.adapters.clients.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude.hooks import lup_hook_output_to_claude
         from lup.hooks import LupHookOutput
 
         output = LupHookOutput(decision="block", reason="blocked")
@@ -400,7 +400,7 @@ class TestLupHooksToClaudeConversion:
         """Permission decisions exist only on PreToolUse — a denial from a
         Stop/PostToolUse hook must become the generic block decision, not a
         misrouted PreToolUse hookSpecificOutput."""
-        from lup.adapters.clients.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude.hooks import lup_hook_output_to_claude
         from lup.hooks import LupHookOutput
 
         output = LupHookOutput(decision="deny", reason="not done yet")
@@ -410,7 +410,7 @@ class TestLupHooksToClaudeConversion:
         assert result.get("reason") == "not done yet"
 
     def test_allow_outside_pre_tool_use_is_noop(self) -> None:
-        from lup.adapters.clients.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude.hooks import lup_hook_output_to_claude
         from lup.hooks import LupHookOutput
 
         output = LupHookOutput(decision="allow")
@@ -419,7 +419,7 @@ class TestLupHooksToClaudeConversion:
         assert result.get("decision") is None
 
     def test_converts_system_message(self) -> None:
-        from lup.adapters.clients.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude.hooks import lup_hook_output_to_claude
         from lup.hooks import LupHookOutput
 
         output = LupHookOutput(system_message="try another way")
@@ -427,7 +427,7 @@ class TestLupHooksToClaudeConversion:
         assert result.get("systemMessage") == "try another way"
 
     def test_converts_empty_output(self) -> None:
-        from lup.adapters.clients.claude import lup_hook_output_to_claude
+        from lup.adapters.clients.claude.hooks import lup_hook_output_to_claude
         from lup.hooks import LupHookOutput
 
         output = LupHookOutput()
@@ -436,7 +436,7 @@ class TestLupHooksToClaudeConversion:
         assert result.get("hookSpecificOutput") is None
 
     def test_full_hook_conversion_roundtrip(self) -> None:
-        from lup.adapters.clients.claude import lup_hooks_to_claude
+        from lup.adapters.clients.claude.hooks import lup_hooks_to_claude
 
         hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")])
         claude_hooks = lup_hooks_to_claude(hooks)
@@ -444,7 +444,7 @@ class TestLupHooksToClaudeConversion:
         assert len(claude_hooks["PreToolUse"]) == 1
 
     def test_matcher_preserved_in_conversion(self) -> None:
-        from lup.adapters.clients.claude import lup_hooks_to_claude
+        from lup.adapters.clients.claude.hooks import lup_hooks_to_claude
 
         gate = ReflectionGate()
         hooks = create_reflection_gate(
