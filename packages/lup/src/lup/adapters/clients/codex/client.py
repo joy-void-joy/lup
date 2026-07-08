@@ -1,7 +1,8 @@
 """The Codex engine's run path: ``create_codex``, sessions, and the client.
 
 Construction refuses through the shared consume-tracking seam
-(:mod:`lup.adapters.clients.refusal`); the run path projects each
+(:mod:`lup.adapters.clients.refusal`) over the translation in
+:mod:`lup.adapters.clients.codex.options`; the run path projects each
 completed turn through
 :func:`~lup.adapters.clients.codex.messages.build_lup_response` and
 enforces the budget and turn-timeout knobs the runtime itself cannot.
@@ -10,23 +11,16 @@ enforces the budget and turn-timeout knobs the runtime itself cannot.
 import asyncio
 import importlib.util
 import time
-from collections.abc import AsyncGenerator, Sequence
-from contextlib import AbstractContextManager, asynccontextmanager, nullcontext
-from pathlib import Path
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, nullcontext
 from typing import TYPE_CHECKING
 
 from lup.adapters.clients.Client import Client, Session
-from lup.adapters.clients.codex.config import (
-    CodexHookConfig,
-    build_hook_config_overrides,
-    build_mcp_config_overrides,
-    build_sandbox_config_overrides,
-)
 from lup.adapters.clients.codex.messages import build_lup_response
 from lup.adapters.clients.codex.options import (
-    budget_if_priced,
+    CodexNativeConfig,
+    build_codex_native,
     codex_effort,
-    subprocess_sandbox_cleanup,
 )
 from lup.adapters.clients.codex.usage import CodexUsageNormalizer
 from lup.adapters.clients.fallbacks import query_via_session, replay_stream
@@ -46,34 +40,6 @@ if TYPE_CHECKING:
     import openai_codex.generated.v2_all as codex_items
 
 
-def build_codex_client(opts: LupAgentOptions) -> "CodexClient":
-    """Translate neutral options into a configured :class:`CodexClient`.
-
-    Reads the knobs the runtime honors — ``reasoning_effort``,
-    ``turn_timeout_seconds``, and ``max_budget_usd`` (only when priced by
-    ``usage_cost``) — and leaves ``max_turns``/``max_thinking_tokens``/
-    ``permission_mode``/``tools`` unread, which is how they come to be
-    refused: the runtime has no per-session turn cap, thinking budget,
-    permission mode, or builtin-toolset restriction.
-    """
-    return CodexClient(
-        model=opts.model,
-        system_prompt=opts.system_prompt,
-        output_schema=opts.output_schema,
-        sandbox=opts.codex_sandbox,
-        effort=opts.reasoning_effort,
-        approval_policy=opts.approval_policy,
-        mcp_tools=bool(opts.served_tool_groups),
-        mcp_env=dict(opts.mcp_env),
-        writable_roots=list(opts.writable_roots),
-        mcp_servers=opts.served_tool_groups,
-        max_budget_usd=budget_if_priced(opts),
-        usage_cost=opts.usage_cost,
-        turn_timeout_seconds=opts.turn_timeout_seconds,
-        cleanup=subprocess_sandbox_cleanup(opts),
-    )
-
-
 def create_codex(options: LupAgentOptions) -> Client:
     """Build a Codex-runtime client from neutral options.
 
@@ -84,7 +50,7 @@ def create_codex(options: LupAgentOptions) -> Client:
     specs are served through the ``run_subagent`` tool group rather than
     run natively. Persistent mode surfaces the file-relay mailbox.
     """
-    client = refuse_unconsumed("codex", options, build_codex_client)
+    client = CodexClient(refuse_unconsumed("codex", options, build_codex_native))
     if options.realtime and options.realtime_dir is not None:
         client.mailbox = RealtimeMailbox(options.realtime_dir)
     return client
@@ -203,90 +169,41 @@ class CodexSession(Session):
 
 
 class CodexClient(Client):
-    """Run prompts via the OpenAI Codex SDK."""
+    """Run prompts via the OpenAI Codex SDK.
 
-    model_provider: str | None = None
-    """Codex model-provider selector — set by the OpenAI-compatible
-    subclass; ``None`` runs on the account's default provider."""
+    Args:
+        native: Translated native configuration built by
+            :func:`~lup.adapters.clients.codex.options.build_codex_native`
+            (the ``openai-compat`` translation appends its provider lines
+            to the same shape).
+    """
 
-    def __init__(
-        self,
-        *,
-        model: str,
-        system_prompt: str,
-        output_schema: JsonObject | None = None,
-        sandbox: str | None = None,
-        effort: str | None = None,
-        approval_policy: str | None = None,
-        mcp_tools: bool = True,
-        mcp_env: dict[str, str] | None = None,
-        writable_roots: list[Path] | None = None,
-        hook_overrides: list[CodexHookConfig] | None = None,
-        usage_normalizer: CodexUsageNormalizer | None = None,
-        mcp_servers: Sequence[str] = ("notes", "sandbox"),
-        max_budget_usd: float | None = None,
-        usage_cost: UsageCost | None = None,
-        turn_timeout_seconds: float | None = None,
-        cleanup: AbstractContextManager[object] | None = None,
-    ) -> None:
-        if max_budget_usd is not None and usage_cost is None:
-            raise ValueError(
-                "max_budget_usd on the Codex runtime requires a usage_cost "
-                "estimator — the SDK reports token counts, not cost. Build "
-                "one with per_mtok_usage_cost(...)."
-            )
-        self.model = model
-        self.system_prompt = system_prompt
-        self.output_schema = output_schema
-        self.sandbox = sandbox
-        self.effort = effort
-        self.approval_policy = approval_policy
-        self.mcp_tools = mcp_tools
-        self.mcp_env = mcp_env
-        self.writable_roots = writable_roots
-        self.hook_overrides = hook_overrides
-        self.usage_normalizer = usage_normalizer
-        self.mcp_servers = mcp_servers
-        self.max_budget_usd = max_budget_usd
-        self.usage_cost = usage_cost
-        self.turn_timeout_seconds = turn_timeout_seconds
-        self.cleanup = cleanup
-
-    def build_config_overrides(self) -> list[str]:
-        """Assemble all config_overrides for this adapter run."""
-        overrides: list[str] = []
-        if self.mcp_tools:
-            overrides.extend(
-                build_mcp_config_overrides(env=self.mcp_env, servers=self.mcp_servers)
-            )
-        if self.writable_roots:
-            overrides.extend(build_sandbox_config_overrides(self.writable_roots))
-        if self.hook_overrides:
-            overrides.extend(build_hook_config_overrides(self.hook_overrides))
-        return overrides
+    def __init__(self, native: CodexNativeConfig) -> None:
+        self.native = native
 
     def make_session(self, thread: "codex.AsyncThread") -> CodexSession:
-        """Wrap a thread in a conversation carrying this client's settings.
+        """Wrap a thread in a conversation carrying the native config.
 
-        The single construction point for the send path, shared with the
-        OpenAI-compatible subclass so both inherit identical effort,
-        output-schema, and budget wiring.
+        The single construction point for the send path — effort,
+        output-schema, and budget wiring all come off ``native``.
         """
         return CodexSession(
             thread,
-            output_schema=self.output_schema,
-            effort=self.effort,
-            usage_normalizer=self.usage_normalizer,
-            max_budget_usd=self.max_budget_usd,
-            usage_cost=self.usage_cost,
-            turn_timeout_seconds=self.turn_timeout_seconds,
+            output_schema=self.native.output_schema,
+            effort=self.native.effort,
+            max_budget_usd=self.native.max_budget_usd,
+            usage_cost=self.native.usage_cost,
+            turn_timeout_seconds=self.native.turn_timeout_seconds,
         )
 
     def codex_config(self) -> "codex.CodexConfig":
-        """Assemble the runtime config — the compat subclass adds provider env."""
+        """The runtime config — overrides and env were rendered at translation."""
         import openai_codex as codex
 
-        return codex.CodexConfig(config_overrides=tuple(self.build_config_overrides()))
+        return codex.CodexConfig(
+            config_overrides=tuple(self.native.config_overrides),
+            env=self.native.env or None,
+        )
 
     async def open_thread(
         self, codex_client: "codex.AsyncCodex", *, resume: str | None
@@ -294,25 +211,26 @@ class CodexClient(Client):
         """Start the session's thread, or restore a saved one."""
         import openai_codex as codex
 
-        sandbox = codex.Sandbox(self.sandbox) if self.sandbox else None
+        native = self.native
+        sandbox = codex.Sandbox(native.sandbox) if native.sandbox else None
         approval_mode = (
-            codex.ApprovalMode(self.approval_policy)
-            if self.approval_policy
+            codex.ApprovalMode(native.approval_policy)
+            if native.approval_policy
             else codex.ApprovalMode.auto_review
         )
         if resume is not None:
             return await codex_client.thread_resume(
                 resume,
-                model=self.model,
-                model_provider=self.model_provider,
-                developer_instructions=self.system_prompt,
+                model=native.model,
+                model_provider=native.model_provider,
+                developer_instructions=native.system_prompt,
                 sandbox=sandbox,
                 approval_mode=approval_mode,
             )
         return await codex_client.thread_start(
-            model=self.model,
-            model_provider=self.model_provider,
-            developer_instructions=self.system_prompt,
+            model=native.model,
+            model_provider=native.model_provider,
+            developer_instructions=native.system_prompt,
             sandbox=sandbox,
             approval_mode=approval_mode,
         )
@@ -325,7 +243,8 @@ class CodexClient(Client):
 
         import openai_codex as codex
 
-        with self.cleanup if self.cleanup is not None else nullcontext():
+        cleanup = self.native.cleanup
+        with cleanup if cleanup is not None else nullcontext():
             async with codex.AsyncCodex(config=self.codex_config()) as codex_client:
                 thread = await self.open_thread(codex_client, resume=resume)
                 yield self.make_session(thread)

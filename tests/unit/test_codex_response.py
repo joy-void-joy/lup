@@ -13,6 +13,7 @@ from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
 from lup.adapters.clients.codex.client import CodexClient, CodexSession
 from lup.adapters.clients.codex.messages import build_lup_response
+from lup.adapters.clients.codex.options import CodexNativeConfig
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
     JsonObject,
@@ -133,7 +134,7 @@ async def test_run_streamed_replays_blocks_in_order() -> None:
             _ = (prompt, trace_logger, prefix)
             return canned
 
-    adapter = CannedAdapter(model="gpt-5.5", system_prompt="")
+    adapter = CannedAdapter(CodexNativeConfig(model="gpt-5.5"))
     events = [event async for event in adapter.stream("go")]
 
     assert [type(event) for event in events] == [

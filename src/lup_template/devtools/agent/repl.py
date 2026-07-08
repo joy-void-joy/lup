@@ -150,9 +150,13 @@ def apply_repl_overrides(
                 options.system_prompt = None
         case CodexClient():
             if no_tools:
-                adapter.mcp_tools = False
+                adapter.native.config_overrides = [
+                    override
+                    for override in adapter.native.config_overrides
+                    if not override.startswith("mcp_servers.")
+                ]
             if no_prompt:
-                adapter.system_prompt = ""
+                adapter.native.system_prompt = ""
         case _:
             typer.echo(
                 "Warning: --no-tools/--no-prompt not supported on "

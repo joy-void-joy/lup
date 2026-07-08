@@ -16,8 +16,9 @@ import pytest
 from lup.adapters.clients.openai_compat import (
     OPENAI_COMPAT_API_KEY_ENV,
     OPENAI_COMPAT_PROVIDER_ID,
-    OpenAICompatClient,
+    build_openai_compat_native,
 )
+from lup.adapters.options import LupAgentOptions
 from lup.mcp import ToolResponse
 from lup.subagents import create_run_subagent_tool
 from lup.types import (
@@ -280,18 +281,17 @@ class TestSubagentMaxTurnsGuard:
 
 
 class TestOpenAICompatProviderConfig:
-    def make_adapter(self) -> OpenAICompatClient:
-        return OpenAICompatClient(
+    def make_native_options(self) -> LupAgentOptions:
+        return LupAgentOptions(
             model="glm-4-7b",
             system_prompt="test",
             base_url="http://localhost:8000/v1",
             api_key="secret-key",
-            mcp_tools=False,
         )
 
     def test_provider_defined_under_plural_table(self) -> None:
-        adapter = self.make_adapter()
-        overrides = adapter.build_config_overrides()
+        native = build_openai_compat_native(self.make_native_options())
+        overrides = native.config_overrides
         pid = OPENAI_COMPAT_PROVIDER_ID
 
         # Provider definition lives in the plural model_providers.<id> table.
@@ -304,9 +304,8 @@ class TestOpenAICompatProviderConfig:
         assert f'model_provider="{pid}"' in overrides
 
     def test_no_literal_api_key_and_no_singular_table(self) -> None:
-        adapter = self.make_adapter()
-        overrides = adapter.build_config_overrides()
-        joined = "\n".join(overrides)
+        native = build_openai_compat_native(self.make_native_options())
+        joined = "\n".join(native.config_overrides)
 
         # The old broken format wrote the literal key under a singular,
         # hardcoded-id table. Neither must reappear.
@@ -316,19 +315,15 @@ class TestOpenAICompatProviderConfig:
         assert "secret-key" not in joined
 
     def test_api_key_injected_into_subprocess_env(self) -> None:
-        adapter = self.make_adapter()
-        assert adapter.provider_env() == {OPENAI_COMPAT_API_KEY_ENV: "secret-key"}
+        native = build_openai_compat_native(self.make_native_options())
+        assert native.env == {OPENAI_COMPAT_API_KEY_ENV: "secret-key"}
 
     def test_explicit_provider_id_names_the_table(self) -> None:
-        adapter = OpenAICompatClient(
-            model="glm-4-7b",
-            system_prompt="test",
-            base_url="http://localhost:8000/v1",
-            api_key="secret-key",
-            model_provider="my_proxy",
-            mcp_tools=False,
+        opts = self.make_native_options().model_copy(
+            update={"model_provider": "my_proxy"}
         )
-        overrides = adapter.build_config_overrides()
+        native = build_openai_compat_native(opts)
+        overrides = native.config_overrides
 
         # A caller-supplied id names both the selector and the definition
         # table; base_url is the signal to define the provider.
@@ -336,33 +331,21 @@ class TestOpenAICompatProviderConfig:
         assert (
             'model_providers.my_proxy.base_url="http://localhost:8000/v1"' in overrides
         )
-        assert adapter.provider_env() == {OPENAI_COMPAT_API_KEY_ENV: "secret-key"}
+        assert native.env == {OPENAI_COMPAT_API_KEY_ENV: "secret-key"}
 
     def test_no_overrides_without_base_url(self) -> None:
-        adapter = OpenAICompatClient(
-            model="llama-3.1-8b", system_prompt="test", mcp_tools=False
+        native = build_openai_compat_native(
+            LupAgentOptions(model="llama-3.1-8b", system_prompt="test")
         )
-        overrides = adapter.build_config_overrides()
-        assert not any("model_provider" in o for o in overrides)
+        assert not any("model_provider" in o for o in native.config_overrides)
 
     def test_inherits_mcp_config_from_codex_base(self) -> None:
-        adapter = OpenAICompatClient(
-            model="glm-4-7b",
-            system_prompt="test",
-            base_url="http://localhost:8000/v1",
-            mcp_tools=True,
+        native = build_openai_compat_native(
+            LupAgentOptions(
+                model="glm-4-7b",
+                system_prompt="test",
+                base_url="http://localhost:8000/v1",
+                served_tool_groups=["notes", "sandbox"],
+            )
         )
-        overrides = adapter.build_config_overrides()
-        assert any("mcp_servers.notes" in o for o in overrides)
-
-    def test_inherits_hook_config_from_codex_base(self) -> None:
-        from lup.adapters.clients.codex.config import CodexHookConfig
-
-        adapter = OpenAICompatClient(
-            model="glm-4-7b",
-            system_prompt="test",
-            mcp_tools=False,
-            hook_overrides=[CodexHookConfig(event="PreToolUse", command="check.py")],
-        )
-        overrides = adapter.build_config_overrides()
-        assert any("PreToolUse" in o for o in overrides)
+        assert any("mcp_servers.notes" in o for o in native.config_overrides)
