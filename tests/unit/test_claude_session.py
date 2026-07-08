@@ -152,7 +152,7 @@ async def test_broken_usage_normalizer_degrades_to_none() -> None:
 async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None:
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.clients.claude.client import ClaudeClient
+    from lup.adapters.clients.claude.client import compose_claude
 
     script: list[Message] = [
         AssistantMessage(
@@ -169,7 +169,7 @@ async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None
     fake = FakeClient(script)
     monkeypatch.setattr("claude_agent_sdk.ClaudeSDKClient", lambda options: fake)
 
-    adapter = ClaudeClient(ClaudeAgentOptions())
+    adapter = compose_claude(ClaudeAgentOptions())
     events = [event async for event in adapter.stream("go")]
 
     assert isinstance(events[0], LupThinkingEvent)
@@ -193,10 +193,11 @@ async def test_session_resume_threads_the_saved_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """resume= reaches the SDK options and seeds Session.id — without
-    mutating the client's own options."""
+    mutating the sessions component's own options."""
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.clients.claude.client import ClaudeClient
+    from lup.adapters.clients.claude.client import ClaudeSessions
+    from lup.adapters.clients.composed import ComposedClient
 
     opened: list[ClaudeAgentOptions] = []
 
@@ -206,12 +207,13 @@ async def test_session_resume_threads_the_saved_id(
 
     monkeypatch.setattr("claude_agent_sdk.ClaudeSDKClient", fake_sdk_client)
 
-    client = ClaudeClient(ClaudeAgentOptions())
+    sessions = ClaudeSessions(ClaudeAgentOptions())
+    client = ComposedClient(sessions)
     async with client.session(resume="sess-42") as conv:
         assert conv.id == "sess-42"
 
     assert opened[0].resume == "sess-42"
-    assert client.options.resume is None
+    assert sessions.options.resume is None
 
 
 async def test_collector_state_after_collect() -> None:

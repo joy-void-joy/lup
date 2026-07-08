@@ -1,11 +1,13 @@
-"""The Codex engine's run path: ``create_codex``, sessions, and the client.
+"""The Codex engine's run path: ``create_codex``, sessions, composition.
 
 Construction refuses through the shared consume-tracking seam
 (:mod:`lup.adapters.clients.refusal`) over the translation in
-:mod:`lup.adapters.clients.codex.options`; the run path projects each
-completed turn through
-:func:`~lup.adapters.clients.codex.messages.build_lup_response` and
-enforces the budget and turn-timeout knobs the runtime itself cannot.
+:mod:`lup.adapters.clients.codex.options`, then composes
+:class:`CodexSessions` — the runtime's one native component — into the
+one client shape (the runtime reports a turn only once complete, so the
+stream slot is filled by replay); the run path projects each completed
+turn through :func:`~lup.adapters.clients.codex.messages.build_lup_response`
+and enforces the budget and turn-timeout knobs the runtime itself cannot.
 """
 
 import asyncio
@@ -23,8 +25,9 @@ from lup.adapters.clients.codex.options import (
     codex_effort,
 )
 from lup.adapters.clients.codex.usage import CodexUsageNormalizer
-from lup.adapters.clients.fallbacks import query_via_session, replay_stream
+from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.refusal import refuse_unconsumed
+from lup.adapters.clients.Sessions import Sessions
 from lup.adapters.errors import (
     BudgetExceededError,
     TurnTimeoutError,
@@ -33,7 +36,7 @@ from lup.adapters.errors import (
 from lup.adapters.options import LupAgentOptions
 from lup.realtime.relay import RealtimeMailbox
 from lup.telemetry.trace import TraceLogger
-from lup.types import JsonObject, LupEvent, LupResponse, Usage, UsageCost
+from lup.types import JsonObject, LupResponse, Usage, UsageCost
 
 if TYPE_CHECKING:
     import openai_codex as codex
@@ -50,10 +53,20 @@ def create_codex(options: LupAgentOptions) -> Client:
     specs are served through the ``run_subagent`` tool group rather than
     run natively. Persistent mode surfaces the file-relay mailbox.
     """
-    client = CodexClient(refuse_unconsumed("codex", options, build_codex_native))
+    client = compose_codex(refuse_unconsumed("codex", options, build_codex_native))
     if options.realtime and options.realtime_dir is not None:
         client.mailbox = RealtimeMailbox(options.realtime_dir)
     return client
+
+
+def compose_codex(native: CodexNativeConfig) -> ComposedClient:
+    """Compose the Codex runtime's components into the one client shape.
+
+    Codex contributes only its sessions — the runtime reports a turn only
+    once complete, so the stream slot is left to the replay gap-filler.
+    ``openai-compat`` reuses this composition over its own translation.
+    """
+    return ComposedClient(CodexSessions(native))
 
 
 def require_codex_sdk() -> None:
@@ -168,8 +181,8 @@ class CodexSession(Session):
         )
 
 
-class CodexClient(Client):
-    """Run prompts via the OpenAI Codex SDK.
+class CodexSessions(Sessions):
+    """Opens Codex-runtime sessions.
 
     Args:
         native: Translated native configuration built by
@@ -236,9 +249,7 @@ class CodexClient(Client):
         )
 
     @asynccontextmanager
-    async def session(
-        self, *, resume: str | None = None
-    ) -> AsyncGenerator[Session, None]:
+    async def open(self, *, resume: str | None = None) -> AsyncGenerator[Session, None]:
         require_codex_sdk()
 
         import openai_codex as codex
@@ -248,23 +259,3 @@ class CodexClient(Client):
             async with codex.AsyncCodex(config=self.codex_config()) as codex_client:
                 thread = await self.open_thread(codex_client, resume=resume)
                 yield self.make_session(thread)
-
-    async def query(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> LupResponse:
-        return await query_via_session(
-            self, prompt, trace_logger=trace_logger, prefix=prefix
-        )
-
-    def stream(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> AsyncGenerator[LupEvent, None]:
-        return replay_stream(self, prompt, trace_logger=trace_logger, prefix=prefix)

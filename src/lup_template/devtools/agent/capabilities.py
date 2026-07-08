@@ -4,11 +4,11 @@ Each cell is derived from the engines' actual behavior: option rows
 construct a probe client with exactly one intent knob set and record
 whether the engine raises
 :class:`~lup.adapters.errors.UnsupportedOptionsError`; the streaming row
-reads whether the engine's ``stream`` is itself an async generator that
-yields as the turn unfolds (live) or a plain method that returns
-:func:`~lup.adapters.clients.fallbacks.replay_stream`, which emits every
-event only after the turn completes (post-hoc); the background row asks
-the engine for a tool-using background agent and catches the refusal.
+reads which stream component the engine composed — its own live feed
+(live) or the :class:`~lup.adapters.clients.composed.ReplayStream`
+gap-filler, which emits every event only after the turn completes
+(post-hoc); the background row asks the engine for a tool-using
+background agent and catches the refusal.
 Construction and generator creation never connect, so probing is offline
 and cheap — and the table embedded in the top-level ``README.md`` and
 printed by ``uv run lup-devtools agent capabilities`` cannot drift from
@@ -31,6 +31,7 @@ import inspect
 from pydantic import BaseModel
 
 from lup.adapters.background.Background import BackgroundAgentParams
+from lup.adapters.clients.composed import ComposedClient, ReplayStream
 from lup.adapters.Engine import Engine
 from lup.adapters.errors import UnsupportedOptionsError
 from lup.adapters.options import LupAgentOptions
@@ -99,15 +100,27 @@ def probe_option(engine: Engine, opts: LupAgentOptions) -> bool:
 
 
 def probe_streaming(engine: Engine) -> str:
-    """``live`` when the engine's ``stream`` is its own async generator.
+    """``live`` when the engine composed its own stream component.
 
-    A live engine yields events as the turn unfolds, so its ``stream`` is
-    an async-generator function. A post-hoc engine's ``stream`` is a plain
-    method that returns :func:`replay_stream`, which yields only after the
-    turn completes.
+    An engine with a live event feed contributes its own ``Stream``
+    implementation; one without gets the :class:`ReplayStream` gap-filler,
+    which yields only after the turn completes — so the composed
+    component's class is the structural signal. A custom client that is
+    not the composed shape is read by its ``stream`` method instead: an
+    async-generator function yields as the turn unfolds.
     """
     client = engine.client(probe_base_options())
-    return "live" if inspect.isasyncgenfunction(type(client).stream) else "post_hoc"
+    match client:
+        case ComposedClient(streams=ReplayStream()):
+            return "post_hoc"
+        case ComposedClient():
+            return "live"
+        case _:
+            return (
+                "live"
+                if inspect.isasyncgenfunction(type(client).stream)
+                else "post_hoc"
+            )
 
 
 def probe_background_tools(engine: Engine) -> bool:

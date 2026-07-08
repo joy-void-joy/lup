@@ -31,8 +31,8 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from lup.adapters.background.Background import (
+    BackgroundAgent,
     BackgroundAgentParams,
-    BaseBackgroundAgent,
 )
 from lup.adapters.wiring import resolve_engine
 from lup.mcp import LupMcpTool, ToolError, lup_tool
@@ -400,7 +400,7 @@ def create_observer(
     notes: list[str],
     transcript: list[object],
     model: str = "claude-opus-4-6",
-) -> BaseBackgroundAgent:
+) -> BackgroundAgent:
     """Create an observer background agent.
 
     TEMPLATE: customize the observer's prompt, model, and build_message.
