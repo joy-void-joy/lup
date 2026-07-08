@@ -46,6 +46,7 @@ class ProfileSupport(ABC):
     def default_config_dir(self) -> Path:
         """The account home used when no profile is selected."""
 
+    # lup: This feels very bad, the ABC seems too tight in terms of what qualify as a Profile. For instance, maybe codex or another agent doesn't actually use Path but specific ids, etc..
     def resolve_config_dir(self, name: str | None = None) -> Path:
         """Resolve a config dir: explicit name > active profile > default."""
         chosen = name or active_profile()

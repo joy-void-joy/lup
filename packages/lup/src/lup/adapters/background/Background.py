@@ -62,6 +62,7 @@ from lup.adapters.background.wakeloop import WakeLoop
 from lup.mcp import LupMcpTool
 
 
+# lup: There's really a problem in this ABC spec. Reread tacocast again: Either a class is purely ABC and has a simple run/... method to implement, or ir has scaffolding that uses one such ABC as an inner component. Never both at the same time.
 class BaseBackgroundAgent(ABC):
     """The per-engine background contract: identity plus a run loop.
 
