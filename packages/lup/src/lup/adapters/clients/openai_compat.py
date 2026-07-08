@@ -24,7 +24,8 @@ from lup.adapters.clients.codex import (
     budget_if_priced,
     subprocess_sandbox_cleanup,
 )
-from lup.adapters.clients.Client import Client, refuse_unconsumed
+from lup.adapters.clients.Client import Client
+from lup.adapters.clients.refusal import refuse_unconsumed
 from lup.adapters.options import LupAgentOptions
 from lup.types import JsonObject, UsageCost
 

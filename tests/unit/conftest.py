@@ -7,12 +7,8 @@ from pathlib import Path
 import pytest
 
 from lup.workspace import paths
-from lup.adapters.clients.Client import (
-    Client,
-    Session,
-    query_via_session,
-    replay_stream,
-)
+from lup.adapters.clients.Client import Client, Session
+from lup.adapters.clients.fallbacks import query_via_session, replay_stream
 from lup.adapters.options import LupAgentOptions
 from lup.telemetry.trace import TraceLogger
 from lup.types import LupEvent, LupResponse, LupTextBlock
