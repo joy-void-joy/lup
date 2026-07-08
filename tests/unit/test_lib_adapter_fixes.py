@@ -41,7 +41,7 @@ class TestCodexItemCoverage:
     def test_unknown_variant_is_not_dropped(self) -> None:
         from openai_codex.generated.v2_all import PlanThreadItem, ThreadItem
 
-        from lup.adapters.clients.codex import codex_items_to_lup
+        from lup.adapters.clients.codex.messages import codex_items_to_lup
 
         item = ThreadItem(
             root=PlanThreadItem(id="plan_1", text="step one\nstep two", type="plan")
@@ -60,7 +60,7 @@ class TestCodexItemCoverage:
             WebSearchThreadItem,
         )
 
-        from lup.adapters.clients.codex import codex_items_to_lup
+        from lup.adapters.clients.codex.messages import codex_items_to_lup
 
         item = ThreadItem(
             root=WebSearchThreadItem(
@@ -91,7 +91,7 @@ class TestCodexItemCoverage:
             WebSearchThreadItem,
         )
 
-        from lup.adapters.clients.codex import codex_items_to_lup
+        from lup.adapters.clients.codex.messages import codex_items_to_lup
         from lup_template.agent.core import extract_sources
 
         item = ThreadItem(
@@ -356,7 +356,7 @@ class TestOpenAICompatProviderConfig:
         assert any("mcp_servers.notes" in o for o in overrides)
 
     def test_inherits_hook_config_from_codex_base(self) -> None:
-        from lup.adapters.clients.codex import CodexHookConfig
+        from lup.adapters.clients.codex.config import CodexHookConfig
 
         adapter = OpenAICompatClient(
             model="glm-4-7b",
