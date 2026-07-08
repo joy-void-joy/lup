@@ -129,8 +129,8 @@ Agents produce better output when forced to self-assess before committing. The r
 
 **Library (`packages/lup` — the reusable `lup` package, never renamed):**
 
-- **lup/adapters/**: ALL SDK-specific code behind one neutral seam — `common.py` is the SDK-free door (`LupAgentOptions`, seam errors, the `ENGINES`/`MODEL_ROUTES` routers, `create_client()`, and one-shot `query()`); `clients/` holds the purely abstract `Client`/`Session` and each engine's client + `create_*` factory; `background/` holds the wake/debounce machinery and per-engine agents
-- **lup/options.py**: `LupAgentOptions` — backend-agnostic options crossing application -> lib
+- **lup/adapters/**: ALL SDK-specific code behind one neutral seam — `Engine.py` is the contract (one backend, complete: client/background/profiles/builtin tools) with the shipped engines in `engines.py`; `options.py` carries `LupAgentOptions`, `errors.py` the seam errors, and `wiring.py` is the SDK-free door (the `ENGINES`/`MODEL_ROUTES` routers, `resolve_engine()`, `create_client()`, and one-shot `query()`); `clients/` holds the purely abstract `Client`/`Session`, the shared machinery, and each engine's implementation package; `background/` holds the background contract, wake/debounce machinery, and per-engine agents
+- **lup/adapters/options.py**: `LupAgentOptions` — backend-agnostic options crossing application -> lib
 - **lup/workspace/output.py**: `submit_output` finalization + missing-output guard (all backends)
 - **lup/hooks.py**: Hook utilities, composition, and `create_tool_gate` (deny-until-unlocked primitive)
 - **lup/mcp.py**: MCP server creation (`lup_tool`, `LupMcpTool`, `ToolError`)
@@ -435,10 +435,14 @@ packages/
         ├── __init__.py         # Public API re-exports (__all__); imports no SDK
         ├── py.typed            # PEP 561 typing marker
         ├── adapters/           # ALL SDK-specific code, behind one neutral seam
-        │   ├── common.py       # SDK-free door: LupAgentOptions, seam errors, ENGINES/MODEL_ROUTES routers, create_client(), query()
-        │   ├── clients/        # Client.py (Client/Session ABCs + shared helpers) + per-engine client/translation/create_* factory (claude, claude_compat, codex, openai_compat)
-        │   ├── background/     # Background.py (pure contract + wake/debounce machinery) + claude & codex implementations
-        │   ├── profiles/       # Profiles.py (neutral account registry + ProfileSupport ABC) + per-engine support (claude)
+        │   ├── Engine.py       # Engine ABC — one backend, complete: client(), background(), profiles(), builtin_tools()
+        │   ├── engines.py      # The shipped engines as lazy front doors; compat engines subclass their base
+        │   ├── options.py      # LupAgentOptions — the backend-neutral construction vocabulary
+        │   ├── errors.py       # Seam errors: unsupported options/operations, turn timeout, budget
+        │   ├── wiring.py       # SDK-free door: ENGINES/MODEL_ROUTES routers, resolve_engine(), create_client(), query()
+        │   ├── clients/        # Client.py + Collector.py contracts, shared machinery (refusal.py, usage.py, fallbacks.py), claude/ & codex/ engine packages (one concern per module), compat translations (claude_compat.py, openai_compat.py)
+        │   ├── background/     # Background.py (contract + params) + wakeloop.py machinery + claude & codex implementations
+        │   ├── profiles/       # Profiles.py (ProfileSupport ABC) + store.py registry + per-engine support (claude)
         │   └── tools/          # per-engine built-in tool-name tables (claude)
         ├── codescan/           # Source scanning for dev tooling: review notes + forbidden shapes
         │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor

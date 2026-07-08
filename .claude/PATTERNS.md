@@ -82,7 +82,7 @@ async def review(params: ReviewInput) -> ReviewOutput:
     return ReviewOutput(critique=response.text or "", score=compute_score(response))
 ```
 
-**Library support:** `query()` in `lup.adapters.common` handles the full pipeline and routes by model name — Claude models via the Claude Agent SDK, GPT/o-series via the Codex runtime, everything else via OpenAI-compatible endpoints. Session persistence is automatically disabled. It returns a `LupResponse`: use `.text` for text or `.output(T)` for structured output. Options a backend cannot honor (`tools`, `max_turns`, `max_budget_usd`, …) are dropped under its `on_unsupported="drop"` policy with a log line — the caller expresses full intent and the engine keeps what it can, instead of raising or silently ignoring.
+**Library support:** `query()` in `lup.adapters.wiring` handles the full pipeline and routes by model name — Claude models via the Claude Agent SDK, GPT/o-series via the Codex runtime, everything else via OpenAI-compatible endpoints. Session persistence is automatically disabled. It returns a `LupResponse`: use `.text` for text or `.output(T)` for structured output. Options a backend cannot honor (`tools`, `max_turns`, `max_budget_usd`, …) are dropped under its `on_unsupported="drop"` policy with a log line — the caller expresses full intent and the engine keeps what it can, instead of raising or silently ignoring.
 
 **Example:** the reviewer inside `src/lup_template/agent/tools/reflect.py` (`run_reviewer`, called from the `review` tool) is the in-repo exemplar — an independent one-shot `query()` whose critique the tool folds into its structured output. The `extract` path of `fetch_example` in `agent/tools/example.py` (`extract_answer`) is the same shape applied to data augmentation.
 
@@ -111,7 +111,7 @@ For persistent agents that need parallel processing, a **background agent** runs
 
 **Lifecycle:** `start()` spawns an asyncio task. `wake()` signals new data. The message generator debounces rapid wakes and calls `build_message()` to produce the next turn. `stop()` cancels the task.
 
-**Library support:** `packages/lup/src/lup/adapters/background/Background.py` provides the `BaseBackgroundAgent` contract (composing the shared `WakeLoop` machinery) and the `create_background_agent` factory, which asks the requested engine (`"claude"` or `"codex"`) to build the agent; the background classes live in the engine modules (`lup/adapters/background/claude.py`, `lup/adapters/background/codex.py`). See observer example in `src/lup_template/agent/tools/realtime.py`.
+**Library support:** `packages/lup/src/lup/adapters/background/Background.py` provides the `BaseBackgroundAgent` contract and `BackgroundAgentParams` (composing the shared `WakeLoop` machinery from `background/wakeloop.py`); each engine builds its own agent via `Engine.background(params)` — `resolve_engine(engine_id).background(...)` — and the background classes live in the engine modules (`lup/adapters/background/claude.py`, `lup/adapters/background/codex.py`). See observer example in `src/lup_template/agent/tools/realtime.py`.
 
 **Customizing:** The `build_message` callback is the main extension point — it reads shared state, advances its own read pointer, and returns the next user turn content (or `None` to skip). The observer example in `agent/tools/realtime.py` shows the full wiring.
 
@@ -139,4 +139,4 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 
 **Example:** `src/lup_template/agent/tools/example.py` is the template for all three forms — `fetch_example` routes known hosts to a specialized handler (`fetch_wiki_article`, domain dispatch) and distills fetched pages through a nested `query()` call (`extract_answer`, extraction); `search_example` recovers missing snippet fields from a fallback source (`fill_missing_snippets`, null-filling).
 
-**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API client wrappers. Extraction uses `query()` from `lup.adapters.common` (see [Nested Agent Pattern](#nested-agent-pattern)).
+**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API client wrappers. Extraction uses `query()` from `lup.adapters.wiring` (see [Nested Agent Pattern](#nested-agent-pattern)).

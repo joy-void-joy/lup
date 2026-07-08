@@ -4,7 +4,7 @@ Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/
 
 ## Modules
 
-- `lup.adapters` — ALL SDK-specific code, behind one neutral seam. `adapters.common` is the SDK-free door: backend-agnostic `LupAgentOptions`, the unsupported-behavior errors, the `ENGINES` (id → factory) and `MODEL_ROUTES` (model-name regex → factory) routers, and the only doors in — `create_client()` and the one-shot `query()` with structured output. `adapters.clients` holds the purely abstract `Client`/`Session` plus each engine's client, translation, and `create_*` factory (`create_claude`, `create_codex`, `create_claude_compat`, `create_openai_compat`); `adapters.background` holds the shared wake/debounce machinery and each engine's background agent. Backend-committed code can import an engine's factory directly (`from lup.adapters.clients.claude import create_claude`) instead of routing through `create_client`. The capability table is probed from the engines by devtools, never declared here.
+- `lup.adapters` — ALL SDK-specific code, behind one neutral seam. `adapters.Engine` is the contract — one backend, complete: `client()`, `background()`, `profiles()`, `builtin_tools()` — and `adapters.engines` holds the shipped engines as lazy front doors (the compat engines subclass their base). `adapters.options` carries the backend-agnostic `LupAgentOptions`, `adapters.errors` the unsupported-behavior errors, and `adapters.wiring` is the SDK-free door: the `ENGINES` (id → engine) and `MODEL_ROUTES` (model-name regex → engine) routers plus the only doors in — `create_client()` and the one-shot `query()` with structured output. `adapters.clients` holds the purely abstract `Client`/`Session`, the shared machinery (consume-tracking refusal, usage normalization, one-shot/stream fallbacks), and each engine's implementation package (`clients/claude/`, `clients/codex/`, one concern per module) with the compat engines as translations beside them; `adapters.background` holds the background contract and wake/debounce machinery plus each engine's background agent. Backend-committed code can import an engine's door directly (`from lup.adapters.clients.claude.client import create_claude`) instead of routing through `create_client`. The capability table is probed from the engines by devtools, never declared here.
 - `lup.types` — the shared vocabulary (blocks, messages, events, `Usage`, `SubagentSpec`, `LupResponse`).
 - `lup.mcp` — `@lup_tool` decorator for MCP tools with typed Pydantic input/output, plus a patched `create_mcp_server` that preserves `is_error`.
 - `lup.hooks` — composable hook primitives: directory-based permissions, tool allowlists, tool gates (deny until a condition unlocks), nudges, capture hooks.
@@ -24,7 +24,7 @@ Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/
 ```python
 from pydantic import BaseModel, Field
 
-from lup.adapters.common import query
+from lup.adapters.wiring import query
 from lup.mcp import lup_tool
 
 
