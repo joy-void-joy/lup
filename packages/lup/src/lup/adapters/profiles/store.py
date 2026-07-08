@@ -12,6 +12,7 @@ from typing import TypedDict, cast
 REGISTRY_PATH = Path.home() / ".lup" / "profiles.json"
 
 
+# lup: Yeah, this really doesn't work
 class Profile(TypedDict):
     config_dir: str
 

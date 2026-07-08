@@ -21,6 +21,7 @@ from lup.types import (
 )
 
 
+# lup: Reread tacocast again. Mix of concern of specific method (e.g. text) and abstract methods. More importantly, this feels like a building block that should go in its own nested folder, with the building block it's serving. It doesn't feel like Collector.py belongs top-level to client
 class ResponseCollector[MessageT](ABC):
     """Drains one turn's native message stream into a ``LupResponse``.
 

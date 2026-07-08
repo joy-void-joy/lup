@@ -28,6 +28,8 @@ from lup.types import (
 )
 
 
+# lup: This is scaffolding and doesn't belong inside the engine implementation
+# lup: Also at this point, stream should be its own object probably?
 async def query_via_session(
     client: Client,
     prompt: str,
