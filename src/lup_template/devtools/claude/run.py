@@ -18,7 +18,7 @@ import tempfile
 import sh
 import typer
 
-from lup.adapters.profiles import Profiles as profiles
+from lup.adapters.profiles import store as profiles
 from lup.adapters.profiles.claude import CONFIG_DIR_ENV, ClaudeProfileSupport
 from lup.workspace.paths import project_root
 
