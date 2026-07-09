@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
 from lup.adapters.clients.Client import Client
-from lup.adapters.tools.claude import WEB_TOOLS
+from lup.adapters.tools.names import WEB_TOOLS
 from lup.telemetry.metrics import (
     get_metrics_summary,
     log_metrics_summary,

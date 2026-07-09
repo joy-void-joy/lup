@@ -37,7 +37,7 @@ from lup.adapters.engines.Engine import Engine
 from lup.adapters.errors import UnsupportedOptionsError
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.wiring import ENGINES
-from lup.adapters.tools.claude import READ
+from lup.adapters.tools.names import READ
 
 
 class CapabilityCell(BaseModel):

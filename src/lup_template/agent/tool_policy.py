@@ -24,7 +24,7 @@ Usage:
 
 from typing import TYPE_CHECKING
 
-from lup.adapters.tools.claude import BASH
+from lup.adapters.tools.names import BASH
 from lup.tool_policy import BaseToolPolicy
 
 if TYPE_CHECKING:

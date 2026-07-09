@@ -36,7 +36,7 @@ the full catalog. Where the siblings live:
   null-filling, extraction)
 """
 
-from lup.adapters.tools.claude import GLOB, READ, WEB_FETCH, WEB_SEARCH
+from lup.adapters.tools.names import GLOB, READ, WEB_FETCH, WEB_SEARCH
 from lup.types import SubagentSpec
 
 # =============================================================================

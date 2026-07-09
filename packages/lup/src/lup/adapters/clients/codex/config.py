@@ -2,13 +2,12 @@
 
 The Codex app-server is a Rust subprocess configured through TOML; every
 capability the seam wires in lands here as override lines — external MCP
-tool servers, the native workspace-write sandbox, and command hooks.
+tool servers and the native workspace-write sandbox.
 """
 
 import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TypedDict
 
 
 def build_mcp_config_overrides(
@@ -61,41 +60,3 @@ def build_sandbox_config_overrides(writable_roots: Sequence[Path]) -> list[str]:
         'sandbox_mode="workspace-write"',
         f"sandbox_workspace_write.writable_roots={roots_json}",
     ]
-
-
-class CodexHookConfigRequired(TypedDict):
-    """Required fields for a Codex command hook."""
-
-    event: str
-    command: str
-
-
-class CodexHookConfig(CodexHookConfigRequired, total=False):
-    """Configuration for a single Codex command hook."""
-
-    matcher: str
-
-
-def build_hook_config_overrides(
-    hooks: list[CodexHookConfig],
-) -> list[str]:
-    """Build config_overrides for Codex command hooks.
-
-    Each hook dict has: event, matcher (optional), command.
-    Generates TOML-style config_overrides for the Codex hook system.
-    """
-    overrides: list[str] = []
-    overrides.append("features.codex_hooks=true")
-
-    event_counts: dict[str, int] = {}
-    for hook in hooks:
-        event = hook["event"]
-        idx = event_counts.get(event, 0)
-        event_counts[event] = idx + 1
-
-        if "matcher" in hook:
-            overrides.append(f'hooks.{event}[{idx}].matcher="{hook["matcher"]}"')
-        overrides.append(f'hooks.{event}[{idx}].hooks[0].type="command"')
-        overrides.append(f'hooks.{event}[{idx}].hooks[0].command="{hook["command"]}"')
-
-    return overrides
