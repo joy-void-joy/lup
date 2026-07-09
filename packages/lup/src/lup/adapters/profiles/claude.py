@@ -58,7 +58,8 @@ class ClaudeProfile(Profile):
         options that carry the resolved dir; the given client is left
         untouched.
         """
-        from lup.adapters.clients.claude.client import ClaudeSessions, compose_claude
+        from lup.adapters.clients.claude.create import compose_claude
+        from lup.adapters.clients.claude.sessions import ClaudeSessions
         from lup.adapters.clients.composed import ComposedClient
 
         match client:

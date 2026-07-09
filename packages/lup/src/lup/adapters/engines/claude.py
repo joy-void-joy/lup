@@ -16,7 +16,7 @@ class ClaudeEngine(Engine):
     id = "claude"
 
     def client(self, options: LupAgentOptions) -> Client:
-        from lup.adapters.clients.claude.client import create_claude
+        from lup.adapters.clients.claude.create import create_claude
 
         return create_claude(options)
 

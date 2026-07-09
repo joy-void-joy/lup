@@ -11,8 +11,9 @@ two forms.
 import claude_agent_sdk as claude
 import pytest
 
-from lup.adapters.clients.claude.client import ClaudeSessions, create_claude
+from lup.adapters.clients.claude.create import create_claude
 from lup.adapters.clients.claude.options import SESSION_THINKING_TOKENS
+from lup.adapters.clients.claude.sessions import ClaudeSessions
 from lup.adapters.clients.claude.compat import create_claude_compat
 from lup.adapters.clients.Client import Client
 from lup.adapters.clients.codex.client import CodexSessions, create_codex

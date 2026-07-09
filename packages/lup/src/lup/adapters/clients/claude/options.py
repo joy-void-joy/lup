@@ -32,7 +32,7 @@ def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:
     carry) and an unset ``max_thinking_tokens`` runs as hard as the API
     allows. A nested one-shot keeps the SDK defaults.
 
-    Shared by :func:`~lup.adapters.clients.claude.client.create_claude` and
+    Shared by :func:`~lup.adapters.clients.claude.create.create_claude` and
     :func:`~lup.adapters.clients.claude.compat.create_claude_compat`, which
     reads ``base_url`` onto the native env afterward.
     """

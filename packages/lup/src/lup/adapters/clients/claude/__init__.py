@@ -14,8 +14,9 @@ concern per module:
 - ``collector`` — the Claude response path: one turn's SDK message
   stream into a ``LupResponse``;
 - ``stream`` — ``ClaudeLiveStream``, the engine's live event feed;
-- ``client`` — ``create_claude``, ``compose_claude``, ``ClaudeSession``,
-  and ``ClaudeSessions``: the run path.
+- ``sessions`` — ``ClaudeSession`` and ``ClaudeSessions``: the run path;
+- ``create`` — ``create_claude`` and ``compose_claude``: the
+  construction door.
 
 Each module imports the SDK as a qualified namespace (``claude`` for the
 package, ``claude_types`` for its ``types`` submodule) so every SDK type
