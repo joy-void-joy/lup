@@ -22,14 +22,10 @@ knobs an engine's translation never reads).
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager
-from typing import TYPE_CHECKING
 
 from lup.adapters.clients.sessions.Session import Session
 from lup.telemetry.trace import TraceLogger
 from lup.types import LupEvent, LupResponse
-
-if TYPE_CHECKING:
-    from lup.realtime.relay import RealtimeMailbox
 
 
 class Client(ABC):
@@ -39,13 +35,6 @@ class Client(ABC):
     explicit multi-turn context; the engine's session-scoped resources
     (SDK client, container cleanup) live inside that context manager.
     """
-
-    mailbox: "RealtimeMailbox | None" = None
-    """Parent-side endpoint of the realtime file relay — not a caller knob.
-
-    ``None`` unless the engine itself set it at construction: subprocess
-    engines populate it when the options request persistent (sleep/wake)
-    mode. Consumers only read it, to drive the relay loop."""
 
     @abstractmethod
     def session(
