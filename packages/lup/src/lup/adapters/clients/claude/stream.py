@@ -15,8 +15,8 @@ from lup.adapters.clients.claude.messages import (
     claude_block_to_lup,
     claude_message_to_lup,
 )
+from lup.adapters.clients.display import console_tap
 from lup.adapters.clients.streams.Stream import Stream
-from lup.telemetry.display import print_message
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
     LupContentBlock,
@@ -51,15 +51,18 @@ class ClaudeLiveStream(Stream):
         prefix: str = "",
     ) -> AsyncGenerator[LupEvent, None]:
         collected: list[LupContentBlock] = []
+        tap = (
+            console_tap(prefix=prefix, trace_logger=trace_logger)
+            if trace_logger
+            else None
+        )
         async with claude.ClaudeSDKClient(options=self.options) as client:
             await client.query(prompt)
-            collector = ClaudeResponseCollector(
-                client, trace_logger=trace_logger, prefix=prefix
-            )
+            collector = ClaudeResponseCollector(client, trace_logger=trace_logger)
             async for message in collector.drain():
                 lup_msg = claude_message_to_lup(message)
-                if lup_msg is not None and trace_logger:
-                    print_message(lup_msg, prefix=prefix, trace=trace_logger)
+                if lup_msg is not None and tap:
+                    tap(lup_msg)
 
                 match message:
                     case claude_types.AssistantMessage():

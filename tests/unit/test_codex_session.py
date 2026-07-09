@@ -1,25 +1,23 @@
-"""Budget enforcement on the Codex runtime.
+"""Codex session behavior: thread lifecycle, pricing, and native validation.
 
-The Codex SDK reports token counts, never cost, so the adapter enforces
-``max_budget_usd`` through its own accounting: per-turn usage accumulates
-in the conversation, a caller-supplied estimator turns it into USD, and
-the turn after the budget is crossed is refused. These tests pin that
-contract without any LLM call.
+The runtime's own session concerns, pinned without any LLM call: the
+thread door (start vs resume), the session id, the per-open sandbox
+cleanup guard, per-MTok pricing, and the priced-budget validation on the
+native config. Budget and timeout governance is composed over these
+sessions by the create recipe and tested engine-agnostically in
+``test_session_governance``.
 """
 
-import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
-from lup.adapters.clients.codex.sessions import CodexSession, CodexSessions
 from lup.adapters.clients.codex.native import CodexNativeConfig
+from lup.adapters.clients.codex.sessions import CodexSession, CodexSessions
 from lup.adapters.clients.codex.translate import subprocess_sandbox_cleanup
 from lup.adapters.clients.codex.usage import per_mtok_usage_cost
-from lup.adapters.errors import BudgetExceededError, TurnTimeoutError
 from lup.adapters.options import LupAgentOptions
 from lup.types import Usage
 
@@ -28,34 +26,20 @@ if TYPE_CHECKING:
     from openai_codex import Sandbox as CodexSandbox
 
 
-def usage_for_turn(
-    input_tokens: int, output_tokens: int, cached: int = 0
-) -> ThreadTokenUsage:
-    breakdown = TokenUsageBreakdown(
-        cached_input_tokens=cached,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        reasoning_output_tokens=0,
-        total_tokens=input_tokens + output_tokens,
-    )
-    return ThreadTokenUsage(last=breakdown, total=breakdown, model_context_window=None)
-
-
 class FakeTurnResult:
-    """Minimal TurnResult stand-in: no items, scripted usage."""
+    """Minimal TurnResult stand-in: no items, no usage."""
 
-    def __init__(self, usage: ThreadTokenUsage) -> None:
+    def __init__(self) -> None:
         self.items: list[object] = []
         self.final_response: str | None = None
-        self.usage = usage
+        self.usage = None
 
 
 class FakeThread:
-    """AsyncThread stand-in returning scripted per-turn usage."""
+    """AsyncThread stand-in recording prompts."""
 
-    def __init__(self, usages: list[ThreadTokenUsage]) -> None:
+    def __init__(self) -> None:
         self.id = "thread-fake"
-        self.usages = usages
         self.prompts: list[str] = []
 
     async def run(
@@ -66,51 +50,7 @@ class FakeThread:
         output_schema: object = None,
     ) -> FakeTurnResult:
         self.prompts.append(prompt)
-        return FakeTurnResult(self.usages[len(self.prompts) - 1])
-
-
-class SlowFakeThread:
-    """AsyncThread stand-in whose turn outlives any test timeout."""
-
-    def __init__(self) -> None:
-        self.id = "thread-slow"
-
-    async def run(
-        self,
-        prompt: str,
-        *,
-        effort: object = None,
-        output_schema: object = None,
-    ) -> FakeTurnResult:
-        await asyncio.sleep(10)
-        return FakeTurnResult(usage_for_turn(0, 0))
-
-
-async def test_turn_timeout_cancels_slow_turn() -> None:
-    conv = CodexSession(
-        cast("AsyncThread", SlowFakeThread()),
-        turn_timeout_seconds=0.05,
-    )
-    with pytest.raises(TurnTimeoutError, match="wall-clock"):
-        await conv.send("hi")
-
-
-def session(
-    usages: list[ThreadTokenUsage],
-    *,
-    max_budget_usd: float | None = None,
-    usd_per_input_mtok: float | None = 1.0,
-) -> CodexSession:
-    usage_cost = (
-        per_mtok_usage_cost(input_usd=usd_per_input_mtok, output_usd=0.0)
-        if usd_per_input_mtok is not None
-        else None
-    )
-    return CodexSession(
-        cast("AsyncThread", FakeThread(usages)),
-        max_budget_usd=max_budget_usd,
-        usage_cost=usage_cost,
-    )
+        return FakeTurnResult()
 
 
 class FakeCodex:
@@ -151,7 +91,7 @@ class FakeCodex:
 
 async def test_open_thread_dispatches_start_vs_resume() -> None:
     """session(resume=) restores the saved thread instead of starting one."""
-    fake = FakeCodex(FakeThread([]))
+    fake = FakeCodex(FakeThread())
     codex = cast("AsyncCodex", cast(object, fake))  # lup: ignore — SDK-boundary fake
     sessions = CodexSessions(CodexNativeConfig(model="gpt-5.5"))
 
@@ -165,7 +105,8 @@ async def test_open_thread_dispatches_start_vs_resume() -> None:
 
 
 def test_session_id_is_the_thread_id() -> None:
-    assert session([]).id == "thread-fake"
+    conv = CodexSession(cast("AsyncThread", FakeThread()))
+    assert conv.id == "thread-fake"
 
 
 class TestPerMtokUsageCost:
@@ -185,47 +126,12 @@ class TestPerMtokUsageCost:
         assert cost(usage) == pytest.approx(2.0)
 
 
-class TestConversationAccounting:
-    async def test_cost_accumulates_across_turns_and_stamps_result(self) -> None:
-        conv = session([usage_for_turn(1_000_000, 0), usage_for_turn(1_000_000, 0)])
-
-        first = await conv.send("turn one")
-        assert first.result is not None
-        assert first.result.total_cost_usd == pytest.approx(1.0)
-
-        second = await conv.send("turn two")
-        assert second.result is not None
-        assert second.result.total_cost_usd == pytest.approx(2.0)
-        assert conv.turns_usage.input_tokens == 2_000_000
-
-    async def test_without_estimator_cost_stays_unknown(self) -> None:
-        conv = session([usage_for_turn(1_000_000, 0)], usd_per_input_mtok=None)
-
-        response = await conv.send("turn one")
-        assert response.result is not None
-        assert response.result.total_cost_usd is None
-        assert conv.cost_usd is None
-
-    async def test_budget_refuses_turn_after_crossing(self) -> None:
-        conv = session(
-            [usage_for_turn(1_000_000, 0)] * 3,
-            max_budget_usd=1.5,
-        )
-
-        await conv.send("cost 1.0 — under budget")
-        await conv.send("cost 2.0 — crosses budget mid-flight")
-
-        with pytest.raises(BudgetExceededError, match="budget"):
-            await conv.send("refused")
-        assert len(cast(FakeThread, cast(object, conv.thread)).prompts) == 2
-
-
 class FakeAsyncCodex:
     """AsyncCodex stand-in: an async context yielding a FakeCodex."""
 
     def __init__(self, *, config: object) -> None:
         _ = config
-        self.client = FakeCodex(FakeThread([]))
+        self.client = FakeCodex(FakeThread())
 
     async def __aenter__(self) -> FakeCodex:
         return self.client

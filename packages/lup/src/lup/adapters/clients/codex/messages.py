@@ -3,10 +3,11 @@
 The projection layer between the Codex SDK's thread vocabulary and the
 backend-neutral ``Lup*`` types. ``LupResponse.blocks`` keeps the
 tool-result blocks inline — the shape
-:class:`~lup.adapters.clients.composed.ReplayStream` reconstructs events
-from — which is why this path projects for itself rather than through
-the Claude engine's collector walk (a completed ``TurnResult`` also has
-no live message stream to drain).
+:class:`~lup.adapters.clients.streams.replay.ReplayStream` reconstructs
+events from — which is why this path projects its own block sequence (a
+completed ``TurnResult`` also has no live message stream to drain); the
+fold into the response shape is the shared
+:func:`~lup.adapters.clients.responses.assemble_response`.
 """
 
 import json
@@ -15,11 +16,11 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from lup.adapters.clients.codex.usage import CodexUsageNormalizer, codex_usage_to_lup
+from lup.adapters.clients.display import MessageTap
+from lup.adapters.clients.responses import assemble_response
 from lup.adapters.clients.usage import safe_normalize_usage
 from lup.adapters.tools.claude import WEB_SEARCH
 from lup.adapters.tools.codex import COMMAND_EXECUTION, FILE_CHANGE
-from lup.telemetry.display import print_message
-from lup.telemetry.trace import TraceLogger
 from lup.types import (
     JsonObject,
     LupAssistantMessage,
@@ -159,35 +160,33 @@ def build_lup_response(
     *,
     output_schema: JsonObject | None = None,
     session_id: str | None = None,
-    trace_logger: TraceLogger | None = None,
-    prefix: str = "",
     usage_normalizer: CodexUsageNormalizer | None = None,
+    tap: MessageTap | None = None,
 ) -> LupResponse:
-    """Convert a Codex TurnResult into a LupResponse."""
+    """Convert a Codex TurnResult into a LupResponse.
+
+    The inline block sequence (tool results included) is passed to the
+    shared fold explicitly — the replay stream reconstructs events from
+    ``blocks``. Each folded message is handed to ``tap`` as it lands.
+    """
 
     blocks = codex_items_to_lup(result.items)
-    response = LupResponse(blocks=blocks)
-
-    for block in blocks:
-        if isinstance(block, LupToolResultBlock):
-            response.tool_results.append(block)
-
     assistant_blocks: list[LupContentBlock] = [
         b for b in blocks if not isinstance(b, LupToolResultBlock)
     ]
     result_blocks: list[LupContentBlock] = [
         b for b in blocks if isinstance(b, LupToolResultBlock)
     ]
+    messages: list[LupAssistantMessage | LupUserMessage] = []
     if assistant_blocks:
-        response.messages.append(LupAssistantMessage(content=assistant_blocks))
+        messages.append(LupAssistantMessage(content=assistant_blocks))
     if result_blocks:
-        response.messages.append(LupUserMessage(content=result_blocks))
+        messages.append(LupUserMessage(content=result_blocks))
+    response = assemble_response(messages, blocks=blocks)
 
-    if trace_logger:
-        for block in blocks:
-            trace_logger.log_block(block)
-        lup_msg = LupAssistantMessage(content=blocks)
-        print_message(lup_msg, prefix=prefix)
+    if tap:
+        for message in messages:
+            tap(message)
 
     structured_output: JsonObject | None = None
     if result.final_response and output_schema:

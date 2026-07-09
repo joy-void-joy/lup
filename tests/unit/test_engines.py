@@ -22,6 +22,8 @@ from lup.adapters.clients.codex.native import CodexNativeConfig
 from lup.adapters.clients.codex.usage import per_mtok_usage_cost
 from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.codex.compat import create_openai_compat
+from lup.adapters.clients.sessions.budget import BudgetedSessions
+from lup.adapters.clients.sessions.timeout import TimeoutSessions
 from lup.adapters.errors import UnsupportedOptionsError
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.tools.claude import WEB_SEARCH
@@ -52,9 +54,15 @@ def claude_native(client: Client) -> claude.ClaudeAgentOptions:
 
 
 def codex_native(client: Client) -> CodexNativeConfig:
-    """The translated native config a composed Codex client carries."""
+    """The translated native config a composed Codex client carries.
+
+    Unwraps the governance the recipe may have composed on (budget,
+    timeout) down to the engine's own sessions.
+    """
     assert isinstance(client, ComposedClient)
     sessions = client.sessions
+    while isinstance(sessions, BudgetedSessions | TimeoutSessions):
+        sessions = sessions.inner
     assert isinstance(sessions, CodexSessions)
     return sessions.native
 
@@ -323,6 +331,8 @@ class TestCodexEngine:
         assert native.effort == "high"
         assert native.turn_timeout_seconds == 120.0
         assert client.mailbox is None
+        # The recipe composed the wall clock the runtime lacks.
+        assert isinstance(client.sessions, TimeoutSessions)
 
     def test_call_tier_serves_no_tools(self) -> None:
         native = codex_native(create_codex(LupAgentOptions(model="gpt-5.5")))
@@ -372,7 +382,12 @@ class TestCodexEngine:
             max_budget_usd=1.0,
             usage_cost=per_mtok_usage_cost(input_usd=1.0, output_usd=2.0),
         )
-        assert codex_native(create_codex(opts)).max_budget_usd == 1.0
+        client = create_codex(opts)
+        assert codex_native(client).max_budget_usd == 1.0
+        # The recipe composed cost metering — cumulative: Codex reports totals.
+        assert isinstance(client, ComposedClient)
+        assert isinstance(client.sessions, BudgetedSessions)
+        assert client.sessions.cumulative
 
     def test_drop_policy_clears_and_builds(self) -> None:
         opts = LupAgentOptions(

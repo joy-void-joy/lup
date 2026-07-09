@@ -2,19 +2,20 @@
 
 Construction refuses through the shared consume-tracking seam
 (:mod:`lup.adapters.clients.refusal`) over the translation in
-:mod:`lup.adapters.clients.codex.translate`, then composes
-:class:`~lup.adapters.clients.codex.sessions.CodexSessions` — the
-runtime's one native component — into the one client shape (the runtime
-reports a turn only once complete, so the stream slot is filled by
-replay).
+:mod:`lup.adapters.clients.codex.translate`, then composes the runtime's
+components into the one client shape — the recipe below is the whole
+composition, every slot named.
 """
 
 from lup.adapters.clients.Client import Client
 from lup.adapters.clients.codex.native import CodexNativeConfig
-from lup.adapters.clients.codex.translate import build_codex_native
 from lup.adapters.clients.codex.sessions import CodexSessions
+from lup.adapters.clients.codex.translate import build_codex_native
 from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.refusal import refuse_unconsumed
+from lup.adapters.clients.sessions.budget import BudgetedSessions
+from lup.adapters.clients.sessions.Sessions import Sessions
+from lup.adapters.clients.sessions.timeout import TimeoutSessions
 from lup.adapters.options import LupAgentOptions
 from lup.realtime.relay import RealtimeMailbox
 
@@ -29,17 +30,34 @@ def create_codex(options: LupAgentOptions) -> Client:
     specs are served through the ``run_subagent`` tool group rather than
     run natively. Persistent mode surfaces the file-relay mailbox.
     """
-    client = compose_codex(refuse_unconsumed("codex", options, build_codex_native))
-    if options.realtime and options.realtime_dir is not None:
-        client.mailbox = RealtimeMailbox(options.realtime_dir)
-    return client
+    return compose_codex(refuse_unconsumed("codex", options, build_codex_native))
 
 
 def compose_codex(native: CodexNativeConfig) -> ComposedClient:
     """Compose the Codex runtime's components into the one client shape.
 
     Codex contributes only its sessions — the runtime reports a turn only
-    once complete, so the stream slot is left to the replay gap-filler.
-    ``openai-compat`` reuses this composition over its own translation.
+    once complete, so the stream slot is left to the replay gap-filler —
+    and the turn governance the runtime lacks is composed over them: a
+    wall clock per turn when ``turn_timeout_seconds`` is set, and cost
+    metering (with the budget refusal) when ``usage_cost`` prices the
+    token counts — cumulative, because Codex usage reports thread
+    totals. ``openai-compat`` reuses this composition over its own
+    translation, mailbox included.
     """
-    return ComposedClient(CodexSessions(native))
+    sessions: Sessions = CodexSessions(native)
+    if native.turn_timeout_seconds is not None:
+        sessions = TimeoutSessions(sessions, seconds=native.turn_timeout_seconds)
+    if native.usage_cost is not None:
+        sessions = BudgetedSessions(
+            sessions,
+            usage_cost=native.usage_cost,
+            max_budget_usd=native.max_budget_usd,
+            cumulative=True,
+        )
+    mailbox = (
+        RealtimeMailbox(native.realtime_dir)
+        if native.realtime_dir is not None
+        else None
+    )
+    return ComposedClient(sessions, mailbox=mailbox)
