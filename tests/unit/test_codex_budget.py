@@ -8,15 +8,21 @@ contract without any LLM call.
 """
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
 from lup.adapters.clients.codex.client import CodexSession, CodexSessions
-from lup.adapters.clients.codex.options import CodexNativeConfig
+from lup.adapters.clients.codex.options import (
+    CodexNativeConfig,
+    subprocess_sandbox_cleanup,
+)
 from lup.adapters.clients.codex.usage import per_mtok_usage_cost
 from lup.adapters.errors import BudgetExceededError, TurnTimeoutError
+from lup.adapters.options import LupAgentOptions
 from lup.types import Usage
 
 if TYPE_CHECKING:
@@ -214,6 +220,55 @@ class TestConversationAccounting:
         with pytest.raises(BudgetExceededError, match="budget"):
             await conv.send("refused")
         assert len(cast(FakeThread, cast(object, conv.thread)).prompts) == 2
+
+
+class FakeAsyncCodex:
+    """AsyncCodex stand-in: an async context yielding a FakeCodex."""
+
+    def __init__(self, *, config: object) -> None:
+        _ = config
+        self.client = FakeCodex(FakeThread([]))
+
+    async def __aenter__(self) -> FakeCodex:
+        return self.client
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+class TestSandboxCleanup:
+    async def test_each_open_enters_a_fresh_cleanup_guard(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One client, two sessions: the guard factory is called per open.
+
+        ``@contextmanager`` guards are single-use — carrying an instance
+        instead of the factory made the second open on the same client
+        raise ``RuntimeError`` and tore the sandbox down after the first.
+        """
+        import openai_codex
+
+        entered: list[int] = []
+
+        @contextmanager
+        def open_guard() -> Iterator[None]:
+            entered.append(1)
+            yield
+
+        monkeypatch.setattr(openai_codex, "AsyncCodex", FakeAsyncCodex)
+        sessions = CodexSessions(CodexNativeConfig(model="gpt-5.5", cleanup=open_guard))
+        async with sessions.open():
+            pass
+        async with sessions.open():
+            pass
+        assert len(entered) == 2
+
+    def test_without_session_context_the_factory_is_reusable(self) -> None:
+        factory = subprocess_sandbox_cleanup(LupAgentOptions(model="gpt-5.5"))
+        with factory():
+            pass
+        with factory():
+            pass
 
 
 class TestAdapterValidation:
