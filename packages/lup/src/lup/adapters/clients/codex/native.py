@@ -9,6 +9,7 @@ a client subclass.
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from pathlib import Path
 
 from pydantic import BaseModel, model_validator
 
@@ -45,6 +46,9 @@ class CodexNativeConfig(BaseModel):
     usage_cost: UsageCost | None = None
     turn_timeout_seconds: float | None = None
     cleanup: Callable[[], AbstractContextManager[object]] | None = None
+    realtime_dir: Path | None = None
+    """Where the persistent-mode file relay lives; ``None`` outside
+    persistent mode. The composition builds the mailbox from it."""
 
     @model_validator(mode="after")
     def require_priced_budget(self) -> "CodexNativeConfig":

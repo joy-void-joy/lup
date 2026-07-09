@@ -16,8 +16,9 @@ import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
 
 from lup.adapters.clients.claude.messages import claude_message_to_lup
+from lup.adapters.clients.display import MessageTap
+from lup.adapters.clients.responses import assemble_response
 from lup.adapters.clients.usage import extract_token_usage, safe_normalize_usage
-from lup.telemetry.display import print_message
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
     JsonValue,
@@ -43,11 +44,11 @@ class ClaudeResponseCollector:
     logs and traces it before raising mid-stream so the failure surfaces —
     projects each SDK message through
     :func:`~lup.adapters.clients.claude.messages.claude_message_to_lup`,
-    keeps it, and hands it to :func:`~lup.telemetry.display.print_message`
-    (the sole display/trace point on the run path), then folds the kept
-    messages into a backend-neutral ``LupResponse`` stamped with the
-    terminal result — ``usage_normalizer`` normalizes the raw SDK usage
-    payload, a subclass of which may carry vendor-specific fields.
+    keeps it, and hands it to the composed ``tap`` (the run path's
+    display/trace slot), then folds the kept messages into a
+    backend-neutral ``LupResponse`` stamped with the terminal result —
+    ``usage_normalizer`` normalizes the raw SDK usage payload, a subclass
+    of which may carry vendor-specific fields.
     """
 
     def __init__(
@@ -56,12 +57,12 @@ class ClaudeResponseCollector:
         *,
         usage_normalizer: ClaudeUsageNormalizer = extract_token_usage,
         trace_logger: TraceLogger | None = None,
-        prefix: str = "",
+        tap: MessageTap | None = None,
     ) -> None:
         self.client = client
         self.usage_normalizer = usage_normalizer
         self.trace_logger = trace_logger
-        self.prefix = prefix
+        self.tap = tap
         self.messages: list[LupAssistantMessage | LupUserMessage] = []
         self.result: claude_types.ResultMessage | None = None
 
@@ -105,14 +106,13 @@ class ClaudeResponseCollector:
                 raise RuntimeError(f"Agent error: {message.result}")
 
     async def collect(self) -> LupResponse:
-        """Drain every message — displaying and tracing each — then project."""
+        """Drain every message — handing each to the tap — then project."""
         async for message in self.drain():
             match claude_message_to_lup(message):
                 case LupAssistantMessage() | LupUserMessage() as lup_message:
                     self.messages.append(lup_message)
-                    print_message(
-                        lup_message, prefix=self.prefix, trace=self.trace_logger
-                    )
+                    if self.tap:
+                        self.tap(lup_message)
                 case _:
                     pass
         return self.to_lup_response()
@@ -120,20 +120,12 @@ class ClaudeResponseCollector:
     def to_lup_response(self) -> LupResponse:
         """Project the accumulated lup messages into a ``LupResponse``.
 
-        Assistant-message blocks land in ``blocks``, tool-result blocks in
-        ``tool_results``, and each message is kept in order in
-        ``messages``; the terminal result and session id are stamped on
-        from the drained ``ResultMessage``.
+        The shared fold (:func:`~lup.adapters.clients.responses.assemble_response`)
+        shapes ``messages``/``blocks``/``tool_results``; the terminal
+        result and session id are stamped on from the drained
+        ``ResultMessage``.
         """
-        response = LupResponse()
-        for message in self.messages:
-            match message:
-                case LupAssistantMessage():
-                    response.messages.append(message)
-                    response.blocks.extend(message.content)
-                case LupUserMessage() if isinstance(message.content, list):
-                    response.messages.append(message)
-                    response.tool_results.extend(message.content)
+        response = assemble_response(self.messages)
         if self.result is None:
             raise RuntimeError("No result received from agent")
         response.session_id = self.result.session_id

@@ -16,6 +16,7 @@ from lup.adapters.clients.claude.collector import (
     ClaudeResponseCollector,
     ClaudeUsageNormalizer,
 )
+from lup.adapters.clients.display import console_tap
 from lup.adapters.clients.sessions.Session import Session
 from lup.adapters.clients.sessions.Sessions import Sessions
 from lup.adapters.clients.usage import extract_token_usage
@@ -53,7 +54,7 @@ class ClaudeSession(Session):
             self.client,
             usage_normalizer=self.usage_normalizer,
             trace_logger=trace_logger,
-            prefix=prefix,
+            tap=console_tap(prefix=prefix, trace_logger=trace_logger),
         )
         response = await collector.collect()
         self.id = response.session_id or self.id

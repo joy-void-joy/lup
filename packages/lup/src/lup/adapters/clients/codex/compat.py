@@ -76,15 +76,11 @@ def build_openai_compat_native(opts: LupAgentOptions) -> CodexNativeConfig:
 def create_openai_compat(options: LupAgentOptions) -> Client:
     """Build an OpenAI-compatible Codex client from neutral options.
 
-    Refuses the same intent knobs as ``codex`` and, when persistent, wires
-    the file-relay mailbox — the translation is
-    :func:`build_openai_compat_native`, which reads the same honored knobs.
+    Refuses the same intent knobs as ``codex`` — the translation is
+    :func:`build_openai_compat_native`, which reads the same honored
+    knobs — and shares the whole Codex composition, governance and
+    mailbox included.
     """
-    client = compose_codex(
+    return compose_codex(
         refuse_unconsumed("openai-compat", options, build_openai_compat_native)
     )
-    if options.realtime and options.realtime_dir is not None:
-        from lup.realtime.relay import RealtimeMailbox
-
-        client.mailbox = RealtimeMailbox(options.realtime_dir)
-    return client

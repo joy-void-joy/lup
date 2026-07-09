@@ -104,10 +104,11 @@ def build_codex_native(opts: LupAgentOptions) -> CodexNativeConfig:
         sandbox=opts.codex_sandbox,
         approval_policy=opts.approval_policy,
         output_schema=opts.output_schema,
-        effort=opts.reasoning_effort,
+        effort=codex_effort(opts.reasoning_effort),
         config_overrides=overrides,
         max_budget_usd=budget_if_priced(opts),
         usage_cost=opts.usage_cost,
         turn_timeout_seconds=opts.turn_timeout_seconds,
         cleanup=subprocess_sandbox_cleanup(opts),
+        realtime_dir=opts.realtime_dir if opts.realtime else None,
     )
