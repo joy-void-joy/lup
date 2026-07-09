@@ -112,7 +112,7 @@ class TestCodexItemCoverage:
 
 class TestSpecToClaudeModel:
     def test_full_model_id_passes_through(self) -> None:
-        from lup.adapters.clients.claude.messages import spec_to_claude
+        from lup.adapters.clients.claude.translate import spec_to_claude
 
         spec = SubagentSpec(
             name="deep",
@@ -124,7 +124,7 @@ class TestSpecToClaudeModel:
         assert agent_def.model == "claude-opus-4-6"
 
     def test_alias_still_passes_through(self) -> None:
-        from lup.adapters.clients.claude.messages import spec_to_claude
+        from lup.adapters.clients.claude.translate import spec_to_claude
 
         spec = SubagentSpec(
             name="quick",

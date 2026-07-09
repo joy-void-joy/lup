@@ -2,23 +2,42 @@
 
 :func:`build_claude_options` is the engine's whole translation — what it
 reads off :class:`~lup.adapters.options.LupAgentOptions` is exactly what
-the engine honors (see :mod:`lup.adapters.clients.refusal`). The
-``claude-compat`` engine reuses it and points the native env at its
-endpoint afterward.
+the engine honors (see :mod:`lup.adapters.clients.refusal`) — including
+each construction payload's adaption (:func:`spec_to_claude` for
+subagents). The ``claude-compat`` engine reuses it and points the native
+env at its endpoint afterward.
 """
 
 import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
 
 from lup.adapters.clients.claude.hooks import lup_hooks_to_claude
-from lup.adapters.clients.claude.messages import spec_to_claude
 from lup.adapters.options import LupAgentOptions
 from lup.mcp import LupMcpServerConfig, RawMcpServerConfig
+from lup.types import SubagentSpec
 
 SESSION_THINKING_TOKENS = 128_000 - 1
 """The Claude engine's session-grade thinking default: as hard as the API
 allows. A session (``session_defaults``) that leaves ``max_thinking_tokens``
 unset runs at this; a nested one-shot keeps the SDK default."""
+
+
+def spec_to_claude(spec: SubagentSpec) -> claude_types.AgentDefinition:
+    """Convert a SubagentSpec to a Claude AgentDefinition.
+
+    ``AgentDefinition.model`` is ``str | None`` and accepts both the
+    short aliases (``sonnet``/``opus``/``haiku``) and full model IDs
+    (``claude-opus-4-6``), so the spec's model passes straight through
+    rather than collapsing unknown IDs to the inherited main-loop model.
+    A spec without a model (``None``) inherits the main-loop model —
+    the same semantics ``run_subagent`` gives it on other backends.
+    """
+    return claude_types.AgentDefinition(
+        description=spec.description,
+        prompt=spec.prompt,
+        tools=spec.tools,
+        model=spec.model,
+    )
 
 
 def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:

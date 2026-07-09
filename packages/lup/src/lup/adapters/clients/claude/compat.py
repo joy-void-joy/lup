@@ -43,7 +43,7 @@ Everything else — option translation, refusal, backgrounds — reuses
 import claude_agent_sdk as claude
 
 from lup.adapters.clients.claude.create import compose_claude
-from lup.adapters.clients.claude.options import build_claude_options
+from lup.adapters.clients.claude.translate import build_claude_options
 from lup.adapters.clients.Client import Client
 from lup.adapters.clients.refusal import refuse_unconsumed
 from lup.adapters.options import LupAgentOptions

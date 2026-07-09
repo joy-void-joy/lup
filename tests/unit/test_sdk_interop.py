@@ -166,7 +166,7 @@ class TestReflectionGateHookScripts:
 
 class TestLupMcpServerConfig:
     def test_in_process_server_becomes_sdk_config(self) -> None:
-        from lup.adapters.clients.claude.options import build_claude_options
+        from lup.adapters.clients.claude.translate import build_claude_options
         from lup.adapters.options import LupAgentOptions
         from lup.mcp import create_mcp_server
 
@@ -182,7 +182,7 @@ class TestLupMcpServerConfig:
 
 class TestSubagentSpec:
     def test_spec_to_claude_passes_full_model_id_through(self) -> None:
-        from lup.adapters.clients.claude.messages import spec_to_claude
+        from lup.adapters.clients.claude.translate import spec_to_claude
 
         spec = SubagentSpec(
             name="test",
