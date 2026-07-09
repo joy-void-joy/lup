@@ -436,7 +436,7 @@ packages/
         ├── py.typed            # PEP 561 typing marker
         ├── adapters/           # ALL SDK-specific code, behind one neutral seam
         │   ├── Engine.py       # Engine ABC — one backend, complete: client(), background(), profiles(), builtin_tools()
-        │   ├── engines.py      # The shipped engines as lazy front doors; compat engines subclass their base
+        │   ├── engines.py      # The shipped engines as lazy front doors; compat engines compose their base
         │   ├── options.py      # LupAgentOptions — the backend-neutral construction vocabulary
         │   ├── errors.py       # Seam errors: unsupported options/operations, turn timeout, budget
         │   ├── wiring.py       # SDK-free door: ENGINES/MODEL_ROUTES routers, resolve_engine(), create_client(), query()
