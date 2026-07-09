@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from lup.adapters.options import LupAgentOptions
     from lup.sandbox.container import Sandbox
-    from lup.types import UsageCost
+    from lup.types import SessionResource, UsageCost
 
 from lup_template.agent.config import settings
 from lup_template.agent.models import AgentOutput, AgentSessionResult
@@ -209,8 +209,7 @@ def build_session_options(
         approval_policy=settings.codex_approval_policy,
         mcp_env=mcp_env,
         writable_roots=writable_roots,
-        session_id=notes.session.name,
-        shared_dir=notes.session / "sandbox_shared",
+        session_resources=build_session_cleanup(notes),
     )
 
 
@@ -337,6 +336,23 @@ def build_session_sandbox(notes: "NotesConfig") -> "Sandbox | None":
         shared_dir=notes.session / "sandbox_shared",
         timeout_seconds=settings.sandbox_timeout_seconds,
     )
+
+
+def build_session_cleanup(notes: "NotesConfig") -> "list[SessionResource]":
+    """The subprocess sandbox's cleanup guarantee, when docker is present.
+
+    A sandbox living in a served-tool subprocess can be killed before its
+    own atexit cleanup runs; the engine enters this factory's context with
+    the session so the container and volume are removed however the
+    subprocess died. Without the docker extra there is nothing to clean.
+    """
+    try:
+        from lup.sandbox.container import sandbox_cleanup
+    except ImportError:
+        return []
+    session_id = notes.session.name
+    shared_dir = notes.session / "sandbox_shared"
+    return [lambda: sandbox_cleanup(session_id=session_id, shared_dir=shared_dir)]
 
 
 class SessionBuild(BaseModel):

@@ -10,13 +10,14 @@ native option type.
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from lup.hooks import LupHooksConfig
 from lup.mcp import LupMcpServerConfig, McpServerEntry, server_tool_names
 from lup.types import (
     JsonObject,
     PermissionMode,
+    SessionResource,
     SubagentSpec,
     UsageCost,
 )
@@ -120,14 +121,13 @@ class LupAgentOptions(BaseModel):
     approval_policy: str | None = None
     mcp_env: dict[str, str] = {}
     writable_roots: list[Path] = []
-
-    session_id: str | None = None
-    """Session-wiring pair (``session_id``, ``shared_dir``) mirroring
-    :class:`lup.workspace.context.SessionContext`. Supplied by the session
-    builder rather than derived: the on-disk session layout (where the
-    shared sandbox dir lives, what the session is named) is the caller's
-    to define, not the adapter's."""
-    shared_dir: Path | None = None
+    session_resources: list[SessionResource] = Field(default_factory=list)
+    """Factories for session-scoped resources, entered fresh with each
+    session open and exited when it closes. Subprocess engines honor them
+    as the parent-side guarantee that what must die with the session dies
+    even if a tool subprocess is killed before its own cleanup (the caller
+    supplies e.g. its sandbox-container cleanup); in-process engines'
+    callers hold their resources directly and ignore this payload."""
 
     @model_validator(mode="after")
     def add_owned_tools_to_allowlist(self) -> "LupAgentOptions":
