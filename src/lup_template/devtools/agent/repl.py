@@ -138,7 +138,7 @@ def apply_repl_overrides(
         return
 
     from lup.adapters.clients.claude.sessions import ClaudeSessions
-    from lup.adapters.clients.codex.client import CodexSessions
+    from lup.adapters.clients.codex.sessions import CodexSessions
     from lup.adapters.clients.composed import ComposedClient
 
     match adapter:

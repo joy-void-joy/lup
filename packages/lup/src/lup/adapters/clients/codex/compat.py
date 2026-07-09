@@ -19,7 +19,7 @@ client — no additional dependencies needed.
 import logging
 
 from lup.adapters.clients.Client import Client
-from lup.adapters.clients.codex.client import compose_codex
+from lup.adapters.clients.codex.create import compose_codex
 from lup.adapters.clients.codex.options import CodexNativeConfig, build_codex_native
 from lup.adapters.clients.refusal import refuse_unconsumed
 from lup.adapters.options import LupAgentOptions
