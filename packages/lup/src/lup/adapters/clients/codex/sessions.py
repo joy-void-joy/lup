@@ -16,10 +16,8 @@ from contextlib import asynccontextmanager, nullcontext
 from typing import TYPE_CHECKING
 
 from lup.adapters.clients.codex.messages import build_lup_response
-from lup.adapters.clients.codex.options import (
-    CodexNativeConfig,
-    codex_effort,
-)
+from lup.adapters.clients.codex.native import CodexNativeConfig
+from lup.adapters.clients.codex.translate import codex_effort
 from lup.adapters.clients.codex.usage import CodexUsageNormalizer
 from lup.adapters.clients.sessions.Session import Session
 from lup.adapters.clients.sessions.Sessions import Sessions
@@ -153,7 +151,7 @@ class CodexSessions(Sessions):
 
     Args:
         native: Translated native configuration built by
-            :func:`~lup.adapters.clients.codex.options.build_codex_native`
+            :func:`~lup.adapters.clients.codex.translate.build_codex_native`
             (the ``openai-compat`` translation appends its provider lines
             to the same shape).
     """

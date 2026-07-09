@@ -4,22 +4,20 @@
 reads off :class:`~lup.adapters.options.LupAgentOptions` is exactly what
 the engine honors (see :mod:`lup.adapters.clients.refusal`) — and
 everything a run needs is computed here once, into one frozen-shape
-:class:`CodexNativeConfig` the client carries (mirroring the Claude
-engine's native ``ClaudeAgentOptions``). The ``openai-compat`` engine
-reuses it and appends its custom-provider definition afterward.
+:class:`~lup.adapters.clients.codex.native.CodexNativeConfig` the client
+carries. The ``openai-compat`` engine reuses it and appends its
+custom-provider definition afterward.
 """
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 
-from pydantic import BaseModel, model_validator
-
 from lup.adapters.clients.codex.config import (
     build_mcp_config_overrides,
     build_sandbox_config_overrides,
 )
+from lup.adapters.clients.codex.native import CodexNativeConfig
 from lup.adapters.options import LupAgentOptions
-from lup.types import JsonObject, UsageCost
 
 CODEX_EFFORT_MAP: dict[str, str] = {
     "low": "low",
@@ -78,51 +76,6 @@ def budget_if_priced(opts: LupAgentOptions) -> float | None:
     if opts.usage_cost is not None:
         return opts.max_budget_usd
     return None
-
-
-class CodexNativeConfig(BaseModel):
-    """The Codex engine's translated native configuration.
-
-    Everything a client run needs, computed once at translation: the
-    thread-start scalars, the fully rendered ``config_overrides`` lines
-    and subprocess env, the turn-governance knobs, and the session's
-    cleanup guarantee. The client only carries it — there is nothing left
-    to assemble at run time, which is what lets ``openai-compat`` be a
-    translation (appended provider lines) rather than a client subclass.
-    """
-
-    # ``usage_cost`` and the ``cleanup`` factory are bare callables —
-    # pydantic accepts them only under arbitrary types.
-    model_config = {"arbitrary_types_allowed": True}
-
-    model: str
-    system_prompt: str = ""
-    model_provider: str | None = None
-    """Codex model-provider selector for thread start; ``None`` runs on
-    the account's default provider."""
-    sandbox: str | None = None
-    approval_policy: str | None = None
-    output_schema: JsonObject | None = None
-    effort: str | None = None
-    config_overrides: list[str] = []
-    env: dict[str, str] = {}
-    """Extra env for the Codex subprocess (e.g. a provider's ``env_key``
-    credential)."""
-    max_budget_usd: float | None = None
-    usage_cost: UsageCost | None = None
-    turn_timeout_seconds: float | None = None
-    cleanup: Callable[[], AbstractContextManager[object]] | None = None
-
-    @model_validator(mode="after")
-    def require_priced_budget(self) -> "CodexNativeConfig":
-        """A budget with nothing to price it against cannot be enforced."""
-        if self.max_budget_usd is not None and self.usage_cost is None:
-            raise ValueError(
-                "max_budget_usd on the Codex runtime requires a usage_cost "
-                "estimator — the SDK reports token counts, not cost. Build "
-                "one with per_mtok_usage_cost(...)."
-            )
-        return self
 
 
 def build_codex_native(opts: LupAgentOptions) -> CodexNativeConfig:

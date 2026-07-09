@@ -16,10 +16,8 @@ import pytest
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
 from lup.adapters.clients.codex.sessions import CodexSession, CodexSessions
-from lup.adapters.clients.codex.options import (
-    CodexNativeConfig,
-    subprocess_sandbox_cleanup,
-)
+from lup.adapters.clients.codex.native import CodexNativeConfig
+from lup.adapters.clients.codex.translate import subprocess_sandbox_cleanup
 from lup.adapters.clients.codex.usage import per_mtok_usage_cost
 from lup.adapters.errors import BudgetExceededError, TurnTimeoutError
 from lup.adapters.options import LupAgentOptions
