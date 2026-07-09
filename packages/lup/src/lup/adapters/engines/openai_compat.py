@@ -1,9 +1,7 @@
 """The Codex runtime pointed at any OpenAI-compatible endpoint."""
 
-from lup.adapters.background.BackgroundDriver import (
-    BackgroundAgent,
-    BackgroundAgentParams,
-)
+from lup.adapters.background.agent import BackgroundAgent
+from lup.adapters.background.params import BackgroundAgentParams
 from lup.adapters.clients.Client import Client
 from lup.adapters.engines.codex import CodexEngine
 from lup.adapters.engines.Engine import Engine

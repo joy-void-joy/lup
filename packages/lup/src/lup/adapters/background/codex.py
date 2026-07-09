@@ -12,11 +12,9 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 
-from lup.adapters.background.BackgroundDriver import (
-    BackgroundAgent,
-    BackgroundAgentParams,
-    BackgroundDriver,
-)
+from lup.adapters.background.agent import BackgroundAgent
+from lup.adapters.background.BackgroundDriver import BackgroundDriver
+from lup.adapters.background.params import BackgroundAgentParams
 
 logger = logging.getLogger(__name__)
 

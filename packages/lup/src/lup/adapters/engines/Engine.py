@@ -19,10 +19,8 @@ that behavior rather than declared.
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
-from lup.adapters.background.BackgroundDriver import (
-    BackgroundAgent,
-    BackgroundAgentParams,
-)
+from lup.adapters.background.agent import BackgroundAgent
+from lup.adapters.background.params import BackgroundAgentParams
 from lup.adapters.clients.Client import Client
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.profiles.Profile import Profile
