@@ -8,7 +8,8 @@ opus-class model.
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from typing import Any  # lup: ignore — confined to SdkDict, the SDK's payload type
 
 import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
@@ -18,11 +19,39 @@ from lup.adapters.background.BackgroundDriver import (
     BackgroundAgentParams,
     BackgroundDriver,
 )
-from lup.adapters.clients.claude.messages import lup_tools_to_sdk
-from lup.mcp import LupMcpTool
+from lup.mcp import LupMcpTool, LupToolHandler
 from lup.types import JsonObject
 
 logger = logging.getLogger(__name__)
+
+type SdkDict = dict[str, Any]  # lup: ignore — the SDK's tool-handler payload type
+
+
+def lup_tools_to_sdk(
+    tools: list[LupMcpTool],
+) -> list[claude.SdkMcpTool[JsonObject]]:
+    """Convert LupMcpTool list to Claude SDK SdkMcpTool list.
+
+    ``SdkMcpTool.handler`` must return the SDK's untyped dict. A
+    ``ToolResponse`` is a dict at runtime, so each handler is adapted
+    with a shallow copy instead of widening ``LupToolHandler`` itself.
+    """
+
+    def as_sdk(handler: LupToolHandler) -> Callable[[JsonObject], Awaitable[SdkDict]]:
+        async def call(args: JsonObject) -> SdkDict:
+            return dict(await handler(args))
+
+        return call
+
+    return [
+        claude.SdkMcpTool(
+            name=t.name,
+            description=t.description,
+            input_schema=t.input_schema,
+            handler=as_sdk(t.handler),
+        )
+        for t in tools
+    ]
 
 
 def build_claude_background(params: BackgroundAgentParams) -> BackgroundAgent:

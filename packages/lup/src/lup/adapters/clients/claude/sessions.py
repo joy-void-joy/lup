@@ -68,7 +68,7 @@ class ClaudeSessions(Sessions):
 
     Args:
         options: Native SDK options built by
-            :func:`~lup.adapters.clients.claude.options.build_claude_options`.
+            :func:`~lup.adapters.clients.claude.translate.build_claude_options`.
         usage_normalizer: Transforms the raw SDK usage payload into a
             ``Usage`` (or subclass, for vendor-specific fields).
     """

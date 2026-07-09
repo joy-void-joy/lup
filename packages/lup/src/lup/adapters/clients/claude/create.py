@@ -2,7 +2,7 @@
 
 Construction refuses through the shared consume-tracking seam
 (:mod:`lup.adapters.clients.refusal`) over the translation in
-:mod:`lup.adapters.clients.claude.options`, then composes the engine's
+:mod:`lup.adapters.clients.claude.translate`, then composes the engine's
 components — :class:`~lup.adapters.clients.claude.sessions.ClaudeSessions`
 and the live :class:`~lup.adapters.clients.claude.stream.ClaudeLiveStream`
 — into the one client shape.
@@ -10,7 +10,7 @@ and the live :class:`~lup.adapters.clients.claude.stream.ClaudeLiveStream`
 
 import claude_agent_sdk as claude
 
-from lup.adapters.clients.claude.options import build_claude_options
+from lup.adapters.clients.claude.translate import build_claude_options
 from lup.adapters.clients.claude.sessions import ClaudeSessions
 from lup.adapters.clients.claude.stream import ClaudeLiveStream
 from lup.adapters.clients.Client import Client
