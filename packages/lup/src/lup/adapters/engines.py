@@ -3,10 +3,11 @@
 Every method body is a lazy one-liner into the implementation module
 that owns the work — the per-engine ``create_*``/``build_*`` doors under
 ``lup.adapters.clients.*`` and ``lup.adapters.background.*`` — so
-importing this module loads no SDK. The compat engines subclass their
-base engine: ``claude-compat`` keeps the whole Claude scaffolding and
-``openai-compat`` the whole Codex runtime, each overriding only the
-client construction that points it at the compatible endpoint.
+importing this module loads no SDK. The compat engines compose their
+base engine — an ``Engine`` wrapping an ``Engine``: ``claude-compat``
+delegates to the whole Claude scaffolding and ``openai-compat`` to the
+whole Codex runtime, each supplying only the client construction that
+points it at the compatible endpoint.
 :mod:`lup.adapters.wiring` assembles these into the :data:`~lup.adapters.wiring.ENGINES`
 and :data:`~lup.adapters.wiring.MODEL_ROUTES` routers.
 """
@@ -48,21 +49,33 @@ class ClaudeEngine(Engine):
         return CLAUDE_BUILTIN_TOOLS
 
 
-class ClaudeCompatEngine(ClaudeEngine):
+class ClaudeCompatEngine(Engine):
     """Claude scaffolding pointed at an Anthropic-compatible endpoint.
 
-    The same engine as ``claude`` — backgrounds, profiles, and the
-    builtin table are inherited — with client construction that reads
-    the endpoint (``base_url``, credential routing, model aliases) onto
-    the native env.
+    An engine wrapping the ``claude`` engine: backgrounds, profiles, and
+    the builtin table delegate to the composed base, and only client
+    construction is its own — it reads the endpoint (``base_url``,
+    credential routing, model aliases) onto the native env.
     """
 
     id = "claude-compat"
+
+    def __init__(self, base: ClaudeEngine | None = None) -> None:
+        self.base = base if base is not None else ClaudeEngine()
 
     def client(self, options: LupAgentOptions) -> Client:
         from lup.adapters.clients.claude_compat import create_claude_compat
 
         return create_claude_compat(options)
+
+    def background(self, params: BackgroundAgentParams) -> BackgroundAgent:
+        return self.base.background(params)
+
+    def profiles(self) -> ProfileSupport:
+        return self.base.profiles()
+
+    def builtin_tools(self) -> frozenset[str]:  # lup: ignore[frozenset-shape]
+        return self.base.builtin_tools()
 
 
 class CodexEngine(Engine):
@@ -99,17 +112,30 @@ class CodexEngine(Engine):
         return CODEX_BUILTIN_TOOLS
 
 
-class OpenAICompatEngine(CodexEngine):
+class OpenAICompatEngine(Engine):
     """The Codex runtime pointed at any OpenAI-compatible endpoint.
 
-    The same engine as ``codex`` — backgrounds, the builtin table, and
-    the profile refusal are inherited — with client construction that
-    defines a custom model provider from the endpoint.
+    An engine wrapping the ``codex`` engine: backgrounds, the builtin
+    table, and the profile refusal delegate to the composed base, and
+    only client construction is its own — it defines a custom model
+    provider from the endpoint.
     """
 
     id = "openai-compat"
+
+    def __init__(self, base: CodexEngine | None = None) -> None:
+        self.base = base if base is not None else CodexEngine()
 
     def client(self, options: LupAgentOptions) -> Client:
         from lup.adapters.clients.openai_compat import create_openai_compat
 
         return create_openai_compat(options)
+
+    def background(self, params: BackgroundAgentParams) -> BackgroundAgent:
+        return self.base.background(params)
+
+    def profiles(self) -> ProfileSupport:
+        return self.base.profiles()
+
+    def builtin_tools(self) -> frozenset[str]:  # lup: ignore[frozenset-shape]
+        return self.base.builtin_tools()

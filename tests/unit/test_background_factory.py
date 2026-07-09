@@ -40,9 +40,17 @@ class TestEngineBackground:
         with pytest.raises(ValueError, match="Unknown engine"):
             resolve_engine("gemini")
 
-    def test_compat_engines_inherit_their_base_background(self) -> None:
-        """The compat engines run their base engine's background builder."""
-        claude_like = type(resolve_engine("claude-compat"))
-        codex_like = type(resolve_engine("openai-compat"))
-        assert claude_like.background is type(resolve_engine("claude")).background
-        assert codex_like.background is type(resolve_engine("codex")).background
+    def test_compat_engines_delegate_their_base_background(self) -> None:
+        """The compat engines build through their composed base engine."""
+        params = BackgroundAgentParams(
+            name="observer",
+            system_prompt="summarize",
+            build_message=build_message,
+        )
+        compat_agent = resolve_engine("claude-compat").background(params)
+        base_agent = resolve_engine("claude").background(params)
+        assert type(compat_agent.driver) is type(base_agent.driver)
+
+        # Codex-side validation reaches through openai-compat's delegation.
+        with pytest.raises(ValueError, match="explicit model"):
+            resolve_engine("openai-compat").background(params)
