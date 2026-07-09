@@ -8,6 +8,9 @@ contract without any LLM call.
 """
 
 import asyncio
+from collections.abc import Generator
+from contextlib import contextmanager
+from types import TracebackType
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -117,6 +120,17 @@ class FakeCodex:
         self.started: list[str] = []
         self.resumed: list[str] = []
 
+    async def __aenter__(self) -> "FakeCodex":
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        return None
+
     async def thread_start(
         self,
         *,
@@ -162,6 +176,38 @@ async def test_open_thread_dispatches_start_vs_resume() -> None:
 
 def test_session_id_is_the_thread_id() -> None:
     assert session([]).id == "thread-fake"
+
+
+async def test_session_resources_enter_fresh_per_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each open() enters one fresh context per factory, exited on close.
+
+    Factories rather than contexts, because one client opens many
+    sessions — a single reused ``@contextmanager`` instance would raise
+    on the second open.
+    """
+    events = list[str]()
+
+    @contextmanager
+    def resource() -> Generator[None]:
+        events.append("enter")
+        yield
+        events.append("exit")
+
+    fake = FakeCodex(FakeThread([]))
+    monkeypatch.setattr("openai_codex.AsyncCodex", lambda *, config: fake)
+    sessions = CodexSessions(
+        CodexNativeConfig(model="gpt-5.5", session_resources=[resource])
+    )
+
+    async with sessions.open():
+        assert events == ["enter"]
+    assert events == ["enter", "exit"]
+
+    async with sessions.open():
+        pass
+    assert events == ["enter", "exit", "enter", "exit"]
 
 
 class TestPerMtokUsageCost:

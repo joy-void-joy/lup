@@ -9,16 +9,14 @@ engine's native ``ClaudeAgentOptions``). The ``openai-compat`` engine
 reuses it and appends its custom-provider definition afterward.
 """
 
-from contextlib import AbstractContextManager, nullcontext
-
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from lup.adapters.clients.codex.config import (
     build_mcp_config_overrides,
     build_sandbox_config_overrides,
 )
 from lup.adapters.options import LupAgentOptions
-from lup.types import JsonObject, UsageCost
+from lup.types import JsonObject, SessionResource, UsageCost
 
 CODEX_EFFORT_MAP: dict[str, str] = {
     "low": "low",
@@ -37,24 +35,6 @@ def codex_effort(reasoning_effort: str | None) -> str | None:
     if reasoning_effort is None:
         return None
     return CODEX_EFFORT_MAP.get(reasoning_effort, reasoning_effort)
-
-
-def subprocess_sandbox_cleanup(
-    opts: LupAgentOptions,
-) -> AbstractContextManager[object]:
-    """Guarantee the session's subprocess sandbox container dies on exit.
-
-    The Codex/OpenAI tool subprocess may be killed before it can clean up its
-    own container; the parent removes it. A no-op without the docker extra, or
-    when the build names no session.
-    """
-    if opts.session_id is None or opts.shared_dir is None:
-        return nullcontext()
-    try:
-        from lup.sandbox.container import sandbox_cleanup
-    except ImportError:
-        return nullcontext()
-    return sandbox_cleanup(session_id=opts.session_id, shared_dir=opts.shared_dir)
 
 
 def budget_if_priced(opts: LupAgentOptions) -> float | None:
@@ -76,14 +56,14 @@ class CodexNativeConfig(BaseModel):
 
     Everything a client run needs, computed once at translation: the
     thread-start scalars, the fully rendered ``config_overrides`` lines
-    and subprocess env, the turn-governance knobs, and the session's
-    cleanup guarantee. The client only carries it — there is nothing left
+    and subprocess env, the turn-governance knobs, and the session-scoped
+    resource factories. The client only carries it — there is nothing left
     to assemble at run time, which is what lets ``openai-compat`` be a
     translation (appended provider lines) rather than a client subclass.
     """
 
-    # ``usage_cost`` is a bare callable and ``cleanup`` a context manager —
-    # pydantic accepts them only under arbitrary types.
+    # ``usage_cost`` and the ``session_resources`` factories are bare
+    # callables — pydantic accepts them only under arbitrary types.
     model_config = {"arbitrary_types_allowed": True}
 
     model: str
@@ -102,7 +82,7 @@ class CodexNativeConfig(BaseModel):
     max_budget_usd: float | None = None
     usage_cost: UsageCost | None = None
     turn_timeout_seconds: float | None = None
-    cleanup: AbstractContextManager[object] | None = None
+    session_resources: list[SessionResource] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def require_priced_budget(self) -> "CodexNativeConfig":
@@ -147,5 +127,5 @@ def build_codex_native(opts: LupAgentOptions) -> CodexNativeConfig:
         max_budget_usd=budget_if_priced(opts),
         usage_cost=opts.usage_cost,
         turn_timeout_seconds=opts.turn_timeout_seconds,
-        cleanup=subprocess_sandbox_cleanup(opts),
+        session_resources=opts.session_resources,
     )
