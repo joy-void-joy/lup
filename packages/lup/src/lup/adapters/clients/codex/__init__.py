@@ -5,8 +5,10 @@ so tools are served externally (``served_tool_groups``), writes are
 confined natively (``writable_roots``), and persistent mode rides the
 file-relay mailbox. One concern per module:
 
-- ``options`` — translation-side helpers: the effort map, the
-  priced-budget read, and the session's sandbox-cleanup guarantee;
+- ``native`` — ``CodexNativeConfig``, the translated configuration the
+  client carries;
+- ``translate`` — ``build_codex_native`` and its helpers: the effort
+  map, the priced-budget read, the sandbox-cleanup guard factory;
 - ``config`` — the ``config_overrides`` builders (MCP servers, native
   sandbox, command hooks);
 - ``messages`` — thread-item conversion into lup types and the

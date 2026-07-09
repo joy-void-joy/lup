@@ -20,7 +20,7 @@ from lup.adapters.clients.codex.hooks import (
     write_reflection_gate_script,
     write_tool_allowlist_script,
 )
-from lup.adapters.clients.codex.options import codex_effort
+from lup.adapters.clients.codex.translate import codex_effort
 from lup.adapters.wiring import engine_for_model
 from lup.hooks import (
     LupHookInput,
@@ -300,7 +300,7 @@ class TestNudgeHookScripts:
 
 class TestCodexNativeTranslation:
     def test_served_groups_render_mcp_overrides(self) -> None:
-        from lup.adapters.clients.codex.options import build_codex_native
+        from lup.adapters.clients.codex.translate import build_codex_native
         from lup.adapters.options import LupAgentOptions
 
         native = build_codex_native(
@@ -313,7 +313,7 @@ class TestCodexNativeTranslation:
         assert any("mcp_servers" in o for o in native.config_overrides)
 
     def test_no_served_groups_render_no_mcp_overrides(self) -> None:
-        from lup.adapters.clients.codex.options import build_codex_native
+        from lup.adapters.clients.codex.translate import build_codex_native
         from lup.adapters.options import LupAgentOptions
 
         native = build_codex_native(

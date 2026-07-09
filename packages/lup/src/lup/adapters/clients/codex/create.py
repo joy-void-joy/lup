@@ -2,7 +2,7 @@
 
 Construction refuses through the shared consume-tracking seam
 (:mod:`lup.adapters.clients.refusal`) over the translation in
-:mod:`lup.adapters.clients.codex.options`, then composes
+:mod:`lup.adapters.clients.codex.translate`, then composes
 :class:`~lup.adapters.clients.codex.sessions.CodexSessions` — the
 runtime's one native component — into the one client shape (the runtime
 reports a turn only once complete, so the stream slot is filled by
@@ -10,7 +10,8 @@ replay).
 """
 
 from lup.adapters.clients.Client import Client
-from lup.adapters.clients.codex.options import CodexNativeConfig, build_codex_native
+from lup.adapters.clients.codex.native import CodexNativeConfig
+from lup.adapters.clients.codex.translate import build_codex_native
 from lup.adapters.clients.codex.sessions import CodexSessions
 from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.refusal import refuse_unconsumed
