@@ -256,7 +256,7 @@ class CodexSessions(Sessions):
         import openai_codex as codex
 
         cleanup = self.native.cleanup
-        with cleanup if cleanup is not None else nullcontext():
+        with cleanup() if cleanup is not None else nullcontext():
             async with codex.AsyncCodex(config=self.codex_config()) as codex_client:
                 thread = await self.open_thread(codex_client, resume=resume)
                 yield self.make_session(thread)

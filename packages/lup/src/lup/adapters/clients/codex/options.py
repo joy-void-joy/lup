@@ -9,6 +9,7 @@ engine's native ``ClaudeAgentOptions``). The ``openai-compat`` engine
 reuses it and appends its custom-provider definition afterward.
 """
 
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 
 from pydantic import BaseModel, model_validator
@@ -41,20 +42,28 @@ def codex_effort(reasoning_effort: str | None) -> str | None:
 
 def subprocess_sandbox_cleanup(
     opts: LupAgentOptions,
-) -> AbstractContextManager[object]:
-    """Guarantee the session's subprocess sandbox container dies on exit.
+) -> Callable[[], AbstractContextManager[object]]:
+    """A factory for the session's sandbox-cleanup guard, entered once per open.
 
     The Codex/OpenAI tool subprocess may be killed before it can clean up its
-    own container; the parent removes it. A no-op without the docker extra, or
-    when the build names no session.
+    own container; each opened session enters a fresh guard so the parent
+    removes the container however the subprocess died. A guard is single-use
+    (``@contextmanager``), which is why the translation carries this factory
+    rather than a guard instance. A ``nullcontext`` factory without the docker
+    extra, or when the build names no session.
     """
-    if opts.session_id is None or opts.shared_dir is None:
-        return nullcontext()
+    session_id, shared_dir = opts.session_id, opts.shared_dir
+    if session_id is None or shared_dir is None:
+        return nullcontext
     try:
         from lup.sandbox.container import sandbox_cleanup
     except ImportError:
-        return nullcontext()
-    return sandbox_cleanup(session_id=opts.session_id, shared_dir=opts.shared_dir)
+        return nullcontext
+
+    def open_guard() -> AbstractContextManager[object]:
+        return sandbox_cleanup(session_id=session_id, shared_dir=shared_dir)
+
+    return open_guard
 
 
 def budget_if_priced(opts: LupAgentOptions) -> float | None:
@@ -82,7 +91,7 @@ class CodexNativeConfig(BaseModel):
     translation (appended provider lines) rather than a client subclass.
     """
 
-    # ``usage_cost`` is a bare callable and ``cleanup`` a context manager —
+    # ``usage_cost`` and the ``cleanup`` factory are bare callables —
     # pydantic accepts them only under arbitrary types.
     model_config = {"arbitrary_types_allowed": True}
 
@@ -102,7 +111,7 @@ class CodexNativeConfig(BaseModel):
     max_budget_usd: float | None = None
     usage_cost: UsageCost | None = None
     turn_timeout_seconds: float | None = None
-    cleanup: AbstractContextManager[object] | None = None
+    cleanup: Callable[[], AbstractContextManager[object]] | None = None
 
     @model_validator(mode="after")
     def require_priced_budget(self) -> "CodexNativeConfig":
