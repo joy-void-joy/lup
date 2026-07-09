@@ -18,7 +18,7 @@ import tempfile
 import sh
 import typer
 
-from lup.adapters.profiles.claude import CONFIG_DIR_ENV, ClaudeProfile
+from lup.adapters.profiles.claude.profile import CONFIG_DIR_ENV, ClaudeProfile
 from lup.workspace.paths import project_root
 
 MCP_SERVER_NAME = "notes"
@@ -81,7 +81,7 @@ def run_claude(
     support = ClaudeProfile()
     config_dir = support.resolve_config_dir(profile)
     env = {**os.environ, CONFIG_DIR_ENV: str(config_dir)}
-    shown = profile or support.active_profile() or "default"
+    shown = profile or support.store.active_profile() or "default"
     typer.echo(f"Launching claude (profile: {shown}, config dir: {config_dir})")
 
     try:

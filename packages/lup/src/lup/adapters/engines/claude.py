@@ -24,7 +24,7 @@ class ClaudeEngine(Engine):
         return build_claude_background(params)
 
     def profiles(self) -> Profile:
-        from lup.adapters.profiles.claude import ClaudeProfile
+        from lup.adapters.profiles.claude.profile import ClaudeProfile
 
         return ClaudeProfile()
 
