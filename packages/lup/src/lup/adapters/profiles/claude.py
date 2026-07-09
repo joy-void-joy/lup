@@ -6,7 +6,7 @@ history, plugin registry — from ``CLAUDE_CONFIG_DIR``, defaulting to
 concern and lives here: the machine-wide ``name -> config dir`` registry
 (``~/.lup/profiles.json``, shared across projects because accounts are),
 the resolve order (explicit name > active profile > default), and
-:meth:`ClaudeProfileSupport.select`, which rebinds an already-built
+:meth:`ClaudeProfile.select`, which rebinds an already-built
 Claude client onto the chosen account's home. Claude-only devtools (the
 runner, usage reporting, profile CRUD) call this concrete class directly
 — none of that surface belongs to the seam contract.
@@ -18,14 +18,14 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from lup.adapters.clients.Client import Client
-from lup.adapters.profiles.Profiles import ProfileSupport
+from lup.adapters.profiles.Profile import Profile
 
 DEFAULT_CONFIG_DIR = Path.home() / ".claude"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 REGISTRY_PATH = Path.home() / ".lup" / "profiles.json"
 
 
-class Profile(BaseModel):
+class Account(BaseModel):
     """One registered account: the config dir the runner reads as its home."""
 
     config_dir: str
@@ -34,11 +34,11 @@ class Profile(BaseModel):
 class Registry(BaseModel):
     """The registry document as stored on disk: named profiles plus the active pick."""
 
-    profiles: dict[str, Profile] = Field(default_factory=dict)
+    profiles: dict[str, Account] = Field(default_factory=dict)
     active: str | None = None
 
 
-class ClaudeProfileSupport(ProfileSupport):
+class ClaudeProfile(Profile):
     """Claude's profile implementation, storage and resolution included.
 
     Args:
@@ -71,7 +71,7 @@ class ClaudeProfileSupport(ProfileSupport):
                 return compose_claude(native)
             case _:
                 raise TypeError(
-                    "ClaudeProfileSupport selects accounts on clients composed "
+                    "ClaudeProfile selects accounts on clients composed "
                     f"from Claude sessions; got {type(client).__name__}"
                 )
 
@@ -104,7 +104,7 @@ class ClaudeProfileSupport(ProfileSupport):
     def add_profile(self, name: str, config_dir: Path) -> None:
         """Register a profile; the first one added becomes active."""
         registry = self.load_registry()
-        registry.profiles[name] = Profile(config_dir=str(config_dir))
+        registry.profiles[name] = Account(config_dir=str(config_dir))
         if registry.active is None:
             registry.active = name
         self.save_registry(registry)

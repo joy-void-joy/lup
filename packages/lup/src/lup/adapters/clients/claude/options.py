@@ -33,7 +33,7 @@ def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:
     allows. A nested one-shot keeps the SDK defaults.
 
     Shared by :func:`~lup.adapters.clients.claude.client.create_claude` and
-    :func:`~lup.adapters.clients.claude_compat.create_claude_compat`, which
+    :func:`~lup.adapters.clients.claude.compat.create_claude_compat`, which
     reads ``base_url`` onto the native env afterward.
     """
     system_prompt: str | claude_types.SystemPromptPreset | None

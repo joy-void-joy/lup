@@ -17,7 +17,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, nullcontext
 from typing import TYPE_CHECKING
 
-from lup.adapters.clients.Client import Client, Session
+from lup.adapters.clients.Client import Client
 from lup.adapters.clients.codex.messages import build_lup_response
 from lup.adapters.clients.codex.options import (
     CodexNativeConfig,
@@ -27,7 +27,8 @@ from lup.adapters.clients.codex.options import (
 from lup.adapters.clients.codex.usage import CodexUsageNormalizer
 from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.refusal import refuse_unconsumed
-from lup.adapters.clients.Sessions import Sessions
+from lup.adapters.clients.sessions.Session import Session
+from lup.adapters.clients.sessions.Sessions import Sessions
 from lup.adapters.errors import (
     BudgetExceededError,
     TurnTimeoutError,

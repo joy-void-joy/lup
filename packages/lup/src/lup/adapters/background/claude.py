@@ -13,7 +13,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
 
-from lup.adapters.background.Background import (
+from lup.adapters.background.BackgroundDriver import (
     BackgroundAgent,
     BackgroundAgentParams,
     BackgroundDriver,
@@ -76,8 +76,8 @@ class ClaudeBackgroundDriver(BackgroundDriver):
 
         The one place a turn becomes the SDK's ``connect`` wire shape (a
         JSON object) — the debounced loop lives on the composing
-        :class:`~lup.adapters.background.Background.BackgroundAgent`, and
-        only this boundary speaks the SDK's dict format.
+        :class:`~lup.adapters.background.BackgroundDriver.BackgroundAgent`,
+        and only this boundary speaks the SDK's dict format.
         """
         async for content in messages:
             yield {

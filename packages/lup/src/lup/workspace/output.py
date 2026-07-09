@@ -42,7 +42,7 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field, ValidationError
 
-from lup.adapters.clients.Client import Session
+from lup.adapters.clients.sessions.Session import Session
 from lup.adapters.errors import BudgetExceededError
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.reflect import ReflectionGate

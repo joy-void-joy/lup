@@ -9,7 +9,7 @@ and stream surfaces can both be filled generically from it.
 from abc import ABC, abstractmethod
 from contextlib import AbstractAsyncContextManager
 
-from lup.adapters.clients.Client import Session
+from lup.adapters.clients.sessions.Session import Session
 
 
 class Sessions(ABC):
@@ -26,10 +26,10 @@ class Sessions(ABC):
         """Open a session; ``resume`` continues a saved one.
 
         Implementations are ``@asynccontextmanager`` async generators
-        yielding a :class:`~lup.adapters.clients.Client.Session`. The SDK
-        client/thread is created on entry and cleaned up on exit.
+        yielding a :class:`~lup.adapters.clients.sessions.Session.Session`.
+        The SDK client/thread is created on entry and cleaned up on exit.
         ``resume`` takes a previously saved
-        :attr:`~lup.adapters.clients.Client.Session.id`; engines that
-        cannot restore sessions raise
+        :attr:`~lup.adapters.clients.sessions.Session.Session.id`; engines
+        that cannot restore sessions raise
         :class:`~lup.adapters.errors.UnsupportedOperationError`.
         """

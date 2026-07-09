@@ -65,7 +65,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from lup.adapters.clients.Client import Session
+from lup.adapters.clients.sessions.Session import Session
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime.models import (
     ContextInput,

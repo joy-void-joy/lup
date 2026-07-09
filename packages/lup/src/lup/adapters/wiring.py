@@ -1,10 +1,10 @@
 """The neutral seam: every engine behind ``create_client()`` and ``query()``.
 
 An engine is one backend, complete
-(:class:`~lup.adapters.Engine.Engine`): it turns neutral
+(:class:`~lup.adapters.engines.Engine.Engine`): it turns neutral
 :class:`~lup.adapters.options.LupAgentOptions` into a
 :class:`~lup.adapters.clients.Client.Client`, and the client opens
-:class:`~lup.adapters.clients.Client.Session`\\ s. ``query()`` is the
+:class:`~lup.adapters.clients.sessions.Session.Session`\\ s. ``query()`` is the
 self-contained one-shot (opens, sends, closes — nothing to leak);
 ``session()`` is the explicit multi-turn context, resumable across
 process runs via ``session(resume=...)`` and ``Session.id``.
@@ -23,7 +23,7 @@ routers:
   off the match. No route does that today; the shape is ready for it.
 
 There is no registry to mutate and no capability declarations to branch
-on: a custom backend is an :class:`~lup.adapters.Engine.Engine` instance
+on: a custom backend is an :class:`~lup.adapters.engines.Engine.Engine` instance
 passed as ``engine=``, an engine refuses intent knobs it cannot honor
 (``UnsupportedOptionsError``; ``query()`` drops them with a log line),
 unsupported operations raise ``UnsupportedOperationError`` at the point
@@ -37,13 +37,11 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 
-from lup.adapters.Engine import Engine
-from lup.adapters.engines import (
-    ClaudeCompatEngine,
-    ClaudeEngine,
-    CodexEngine,
-    OpenAICompatEngine,
-)
+from lup.adapters.engines.claude import ClaudeEngine
+from lup.adapters.engines.claude_compat import ClaudeCompatEngine
+from lup.adapters.engines.codex import CodexEngine
+from lup.adapters.engines.Engine import Engine
+from lup.adapters.engines.openai_compat import OpenAICompatEngine
 from lup.adapters.options import LupAgentOptions
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
@@ -142,8 +140,9 @@ def create_client(
     lifetime; run-time arguments (the prompt, tracing) go to
     ``Client.query`` and ``Session.send``.
 
-    ``engine`` accepts a shipped id, an :class:`~lup.adapters.Engine.Engine`
-    instance, or ``None`` to infer the engine from the model name.
+    ``engine`` accepts a shipped id, an
+    :class:`~lup.adapters.engines.Engine.Engine` instance, or ``None`` to
+    infer the engine from the model name.
     """
     keyword_form = {
         "model": model,
