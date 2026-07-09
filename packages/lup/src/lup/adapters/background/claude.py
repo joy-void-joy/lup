@@ -103,7 +103,7 @@ class ClaudeBackgroundDriver(BackgroundDriver):
 
         The one place a turn becomes the SDK's ``connect`` wire shape (a
         JSON object) — the debounced loop lives on the composing
-        :class:`~lup.adapters.background.BackgroundDriver.BackgroundAgent`,
+        :class:`~lup.adapters.background.agent.BackgroundAgent`,
         and only this boundary speaks the SDK's dict format.
         """
         async for content in messages:

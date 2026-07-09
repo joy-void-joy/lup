@@ -5,7 +5,7 @@ construct a probe client with exactly one intent knob set and record
 whether the engine raises
 :class:`~lup.adapters.errors.UnsupportedOptionsError`; the streaming row
 reads which stream component the engine composed — its own live feed
-(live) or the :class:`~lup.adapters.clients.composed.ReplayStream`
+(live) or the :class:`~lup.adapters.clients.streams.replay.ReplayStream`
 gap-filler, which emits every event only after the turn completes
 (post-hoc); the background row asks the engine for a tool-using
 background agent and catches the refusal.

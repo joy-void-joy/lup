@@ -6,9 +6,7 @@ scaffolding — hooks, permission modes, native subagents — while an
 OpenAI-protocol endpoint runs on ``openai-compat``
 (:mod:`lup.adapters.clients.codex.compat`) through the bare Codex runtime.
 
-The native-option override carries the full endpoint setup, reconciled
-against the aimo3 project's working Anthropic-compatible configuration
-(GLM/vLLM served on Kaggle, OpenRouter locally):
+The native-option override carries the full endpoint setup:
 
 - ``ANTHROPIC_BASE_URL`` — the endpoint the scaffolding talks to.
 - Credential header — ``auth_style`` routes ``api_key`` to either
@@ -25,18 +23,12 @@ against the aimo3 project's working Anthropic-compatible configuration
   command are disabled unconditionally: pointed away from Anthropic, none of
   that traffic concerns the served model.
 
-Checked against aimo3 and deliberately not ported here, to settle the doubt
-either way:
-
-- Extended-thinking capacity (aimo3 zeroed ``max_thinking_tokens`` for vLLM)
-  is the caller's per-model lever on :class:`LupAgentOptions` — some open
-  models support thinking, some do not — so the engine does not force it.
-- ``IS_SANDBOX`` is a container/permission-bootstrap signal orthogonal to the
-  endpoint; forcing it would weaken the permission posture off Kaggle.
-- Per-request API timeouts, custom headers, and retry knobs: aimo3 sets none,
-  so the SDK defaults stand and no field is invented for them.
-
-Everything else — option translation, refusal, backgrounds — reuses
+Deliberately absent: the engine forces no thinking capacity (whether an
+open model supports extended thinking is the caller's per-model lever on
+:class:`LupAgentOptions`), no ``IS_SANDBOX`` (a container/permission
+bootstrap signal orthogonal to the endpoint), and no per-request
+timeout/header/retry fields (the SDK defaults stand). Everything else —
+option translation, refusal, backgrounds — reuses
 :func:`build_claude_options` and the ``claude`` engine.
 """
 
