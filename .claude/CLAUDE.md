@@ -86,10 +86,10 @@ packages/
         │   ├── options.py      # LupAgentOptions — the backend-neutral construction vocabulary
         │   ├── errors.py       # Seam errors: unsupported options/operations, turn timeout, budget
         │   ├── wiring.py       # SDK-free door: ENGINES/MODEL_ROUTES routers, resolve_engine(), create_client(), query()
-        │   ├── clients/        # Client.py contract + composed.py (ComposedClient, the composing implementation); sessions/ (Session.py + Sessions.py) & streams/ (Stream.py + replay.py) verb folders; utility machinery (refusal.py, usage.py); claude/ & codex/ implementation packages (one concern per module, compat.py translations inside)
-        │   ├── background/     # BackgroundDriver.py (verb ABC + BackgroundAgent scaffolding + params) + claude & codex drivers
-        │   ├── profiles/       # Profile.py (ABC: one select(name, client) verb) + per-engine implementation owning its storage (claude)
-        │   └── tools/          # per-engine built-in tool-name tables (claude, codex)
+        │   ├── clients/        # Client.py contract + composed.py (ComposedClient: sessions/streams/mailbox slots); sessions/ (Session.py + Sessions.py + composable budget.py & timeout.py governance) & streams/ (Stream.py + replay.py) verb folders; shared machinery (refusal.py, usage.py, responses.py fold, display.py tap); claude/ & codex/ implementation packages (one concern per module — create.py is each engine's recipe — compat.py translations inside)
+        │   ├── background/     # BackgroundDriver.py (verb ABC) + agent.py (BackgroundAgent scaffolding) + params.py + claude & codex drivers
+        │   ├── profiles/       # Profile.py (ABC: one select(name, client) verb) + per-engine package owning its storage (claude/: profile.py + store.py)
+        │   └── tools/          # names.py (neutral tool-name vocabulary) + per-engine builtin tables (claude, codex)
         ├── codescan/           # Source scanning for dev tooling: review notes + forbidden shapes
         │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor
         │   ├── markers.py      # `# lup:` / `// lup:` review-marker scanning (dev comments)
