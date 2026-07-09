@@ -93,7 +93,6 @@ class LupAgentOptions(BaseModel):
     ``persist_session`` so persistence and behavior-defaults stay separate axes."""
     sdk_sandbox: bool = True
     """Enable the engine's own OS sandbox where it has one (Claude SDK)."""
-    realtime: bool = False
     on_unsupported: Literal["raise", "drop"] = "raise"
     """What an engine does with intent knobs it cannot honor: refuse the
     construction (sessions fail fast) or clear them with a log line (the
@@ -123,13 +122,12 @@ class LupAgentOptions(BaseModel):
     writable_roots: list[Path] = []
 
     session_id: str | None = None
-    """Session-wiring trio (``session_id``, ``shared_dir``,
-    ``realtime_dir``) mirroring :class:`lup.workspace.context.SessionContext`. Supplied
-    by the session builder rather than derived: the on-disk session layout
-    (where the shared sandbox dir lives, what the session is named) is the
-    caller's to define, not the adapter's."""
+    """Session-wiring pair (``session_id``, ``shared_dir``) mirroring
+    :class:`lup.workspace.context.SessionContext`. Supplied by the session
+    builder rather than derived: the on-disk session layout (where the
+    shared sandbox dir lives, what the session is named) is the caller's
+    to define, not the adapter's."""
     shared_dir: Path | None = None
-    realtime_dir: Path | None = None
 
     @model_validator(mode="after")
     def add_owned_tools_to_allowlist(self) -> "LupAgentOptions":

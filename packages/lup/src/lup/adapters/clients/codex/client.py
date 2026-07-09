@@ -35,7 +35,6 @@ from lup.adapters.errors import (
     UnsupportedOperationError,
 )
 from lup.adapters.options import LupAgentOptions
-from lup.realtime.relay import RealtimeMailbox
 from lup.telemetry.trace import TraceLogger
 from lup.types import JsonObject, LupResponse, Usage, UsageCost
 
@@ -52,12 +51,9 @@ def create_codex(options: LupAgentOptions) -> Client:
     servers — enforcement here is the runtime's native sandbox) and the
     Claude-only ``coding_harness_preset``/``sdk_sandbox`` shape flags. Subagent
     specs are served through the ``run_subagent`` tool group rather than
-    run natively. Persistent mode surfaces the file-relay mailbox.
+    run natively.
     """
-    client = compose_codex(refuse_unconsumed("codex", options, build_codex_native))
-    if options.realtime and options.realtime_dir is not None:
-        client.mailbox = RealtimeMailbox(options.realtime_dir)
-    return client
+    return compose_codex(refuse_unconsumed("codex", options, build_codex_native))
 
 
 def compose_codex(native: CodexNativeConfig) -> ComposedClient:

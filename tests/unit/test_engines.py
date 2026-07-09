@@ -320,7 +320,6 @@ class TestCodexEngine:
         assert any(o.startswith("mcp_servers.sandbox.") for o in overrides)
         assert native.effort == "high"
         assert native.turn_timeout_seconds == 120.0
-        assert client.mailbox is None
 
     def test_call_tier_serves_no_tools(self) -> None:
         native = codex_native(create_codex(LupAgentOptions(model="gpt-5.5")))

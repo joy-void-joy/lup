@@ -202,7 +202,6 @@ def build_session_options(
         max_budget_usd=settings.max_budget_usd,
         turn_timeout_seconds=settings.turn_timeout_seconds,
         usage_cost=build_usage_cost(),
-        realtime=realtime,
         base_url=settings.openai_base_url,
         api_key=settings.openai_api_key,
         model_provider=settings.openai_model_provider,
@@ -212,7 +211,6 @@ def build_session_options(
         writable_roots=writable_roots,
         session_id=notes.session.name,
         shared_dir=notes.session / "sandbox_shared",
-        realtime_dir=realtime_dir,
     )
 
 
@@ -443,20 +441,31 @@ async def run_persistent_agent(
     directory; a persistent session has no ``submit_output`` finalization, so
     no session JSON is saved.
 
-    The relay transport is for subprocess engines (codex/openai-compat) —
-    they surface a ``client.mailbox``. An in-process engine (Claude — one
-    never-ending turn with a Stop hook, see PATTERNS.md, Persistent Agent)
-    has no relay mailbox, so this entry point raises rather than running
-    there.
+    The relay transport is for subprocess engines (codex/openai-compat),
+    whose served ``session`` tools write the mailbox files the parent
+    polls. An in-process engine (Claude — one never-ending turn with a
+    Stop hook, see PATTERNS.md, Persistent Agent) never writes them, so
+    this entry point refuses to start there.
 
     Returns:
         The completed-turn count.
     """
-    from lup.realtime.relay import run_relay_session
+    from lup.realtime.relay import (
+        REALTIME_DIRNAME,
+        RealtimeMailbox,
+        run_relay_session,
+    )
     from lup.realtime.scheduler import Scheduler
     from lup.reflect import ReflectionGate
 
     from lup_template.agent.tools.realtime import MISSING_SLEEP_MESSAGE
+
+    if engine_for_settings() not in ("codex", "openai-compat"):
+        raise ValueError(
+            "Persistent mode on this engine runs in-process (customization "
+            "step 8; PATTERNS.md 'Persistent Agent'); the relay entry point "
+            "needs AGENT_SDK=codex or openai."
+        )
 
     if session_id is None:
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -468,13 +477,7 @@ async def run_persistent_agent(
 
     build = build_session_client(session_id, realtime=True)
     notes = build.notes
-    mailbox = build.client.mailbox
-    if mailbox is None:
-        raise ValueError(
-            "Persistent mode on this engine runs in-process (customization "
-            "step 8; PATTERNS.md 'Persistent Agent'); the relay entry point "
-            "needs AGENT_SDK=codex or openai."
-        )
+    mailbox = RealtimeMailbox(notes.session / REALTIME_DIRNAME)
 
     async def echo_reply(message: str) -> None:
         print(f"[lup] {message}")
