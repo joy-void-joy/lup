@@ -109,9 +109,18 @@ def build_codex_native(opts: LupAgentOptions) -> CodexNativeConfig:
     """
     overrides: list[str] = []
     if opts.served_tool_groups:
+        if opts.serve_tools_command is None:
+            raise ValueError(
+                "served_tool_groups needs serve_tools_command — the command "
+                "line that serves one group when '--server <name>' is "
+                "appended. How the caller's groups are served is the "
+                "caller's contract to name."
+            )
         overrides.extend(
             build_mcp_config_overrides(
-                env=dict(opts.mcp_env), servers=opts.served_tool_groups
+                command=opts.serve_tools_command,
+                servers=opts.served_tool_groups,
+                env=dict(opts.mcp_env),
             )
         )
     if opts.writable_roots:

@@ -67,6 +67,11 @@ class LupAgentOptions(BaseModel):
     derived from ``tool_servers``: the served set is the caller's group
     registry (it can include groups with no in-process server, e.g. a
     sandbox served only externally), so the caller names it."""
+    serve_tools_command: list[str] | None = None
+    """The command line that serves one tool group out of process when
+    ``--server <name>`` is appended (e.g. the caller's devtools stdio
+    server). Required with ``served_tool_groups``: how a caller's groups
+    are served is the caller's contract, not the library's."""
     add_dirs: list[Path] = []
     output_schema: JsonObject | None = None
     """JSON Schema the final response must satisfy (structured output)."""

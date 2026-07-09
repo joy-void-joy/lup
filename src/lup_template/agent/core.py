@@ -39,6 +39,11 @@ from lup.workspace.paths import agent_version
 
 logger = logging.getLogger(__name__)
 
+SERVE_TOOLS_COMMAND = ["uv", "run", "lup-devtools", "agent", "serve-tools"]
+"""How this project serves a tool group to subprocess engines: the
+devtools stdio server, one subprocess per group (``--server <name>``
+appended by the engine's translation)."""
+
 
 class PersistentSessionResult(BaseModel):
     """Outcome of a persistent (sleep/wake) session.
@@ -194,6 +199,7 @@ def build_session_options(
         served_tool_groups=list(
             policy.filter_group_names(tool_group_names(realtime=realtime))
         ),
+        serve_tools_command=SERVE_TOOLS_COMMAND,
         add_dirs=list(notes.all_dirs),
         permission_mode=settings.permission_mode,
         max_turns=settings.max_turns,

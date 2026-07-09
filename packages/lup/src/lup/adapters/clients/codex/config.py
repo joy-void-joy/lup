@@ -12,36 +12,31 @@ from typing import TypedDict
 
 
 def build_mcp_config_overrides(
-    serve_tools_command: str = "uv",
-    serve_tools_args: list[str] | None = None,
+    command: Sequence[str],
+    servers: Sequence[str],
     env: dict[str, str] | None = None,
-    servers: Sequence[str] = ("notes", "sandbox"),
 ) -> list[str]:
-    """Build config_overrides for lup MCP tools via serve-tools.
+    """Build config_overrides serving tool groups as external MCP servers.
 
     The Codex app-server is a Rust subprocess with no in-process tool
-    registration. Tools must be configured as external MCP servers via
-    TOML config. This generates the config_overrides that point Codex
-    at the lup-devtools serve-tools command.
-
-    One entry is emitted per server group so tool names match the
-    Claude path exactly (``mcp__notes__submit_output``,
-    ``mcp__sandbox__execute_code``); each subprocess serves one group
-    via ``serve-tools --server <name>``.
+    registration, so a caller's tool groups reach it as external MCP
+    servers in TOML config. One entry is emitted per server group so tool
+    names match the in-process path exactly (``mcp__notes__submit_output``,
+    ``mcp__sandbox__execute_code``); each subprocess serves one group.
 
     Args:
-        serve_tools_command: Executable that launches the tool server.
-        serve_tools_args: Base arguments for the launcher (the
-            ``--server <name>`` selector is appended per group).
+        command: The caller's serving command line (executable plus base
+            arguments); the ``--server <name>`` selector is appended per
+            group.
+        servers: Server groups to register.
         env: Session-context env vars for the subprocesses (see
             :class:`lup.workspace.context.SessionContext`).
-        servers: Server groups to register.
     """
-    base_args = serve_tools_args or ["run", "lup-devtools", "agent", "serve-tools"]
+    executable, *base_args = command
     overrides: list[str] = []
     for name in servers:
         args = [*base_args, "--server", name]
-        overrides.append(f'mcp_servers.{name}.command="{serve_tools_command}"')
+        overrides.append(f'mcp_servers.{name}.command="{executable}"')
         overrides.append(f"mcp_servers.{name}.args={json.dumps(args)}")
         for key, value in (env or {}).items():
             overrides.append(f'mcp_servers.{name}.env.{key}="{value}"')
