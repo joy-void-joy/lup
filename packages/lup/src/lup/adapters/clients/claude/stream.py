@@ -1,7 +1,7 @@
 """The Claude engine's live event stream.
 
 The Claude SDK feeds messages as the turn unfolds, so this engine
-implements the :class:`~lup.adapters.clients.Stream.Stream` verb itself
+implements the :class:`~lup.adapters.clients.streams.Stream.Stream` verb itself
 rather than taking the replay gap-filler.
 """
 

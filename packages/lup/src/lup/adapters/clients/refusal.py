@@ -93,22 +93,11 @@ def refuse_unconsumed[N](
     translation never read them, the native object already reflects their
     absence — dropping needs no re-translation.
 
-    The alternative shape, weighed and set aside, is a per-engine intent
-    model: each engine declares a small ``BaseModel`` of exactly the knobs
-    it honors (Claude's would carry ``max_turns``/``max_thinking_tokens``/
-    ``permission_mode``/``tools``/``reasoning_effort``/``max_budget_usd``,
-    Codex's would omit them and carry ``turn_timeout_seconds``); refusal
-    becomes "set fields absent from the model", conditional refusals become
-    ``model_validator``s (Codex drops ``max_budget_usd`` unless
-    ``usage_cost`` is present), and translation consumes the validated
-    model. That shape makes the honored set a declared registry a reader
-    can see at a glance, but it duplicates every knob's type across the
-    neutral options and each engine's model, and the two can drift.
-    Consume-tracking keeps the translation code itself as the single source
-    of truth — what an engine reads is what it honors, with no second
-    declaration to maintain — at the cost of a reflective override rather
-    than a plain model. Both are sketched here so the choice can be made at
-    review.
+    Consume-tracking over a declared per-engine intent model: the
+    translation code itself stays the single source of truth — what an
+    engine reads is what it honors, with no second registry of honored
+    knobs to drift from it — at the cost of this reflective view instead
+    of a plain model.
     """
     tracker = ConsumeTracker.tracking(opts)
     native = translate(tracker)

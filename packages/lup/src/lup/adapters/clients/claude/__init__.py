@@ -2,22 +2,7 @@
 
 Runs Anthropic models with the full scaffolding — in-process MCP
 servers, permission hooks, native subagents, the SDK sandbox. One
-concern per module:
-
-- ``translate`` — neutral→native option translation
-  (``build_claude_options``, ``spec_to_claude``) and the engine's
-  session-grade defaults, shared with ``claude-compat``
-  (:mod:`lup.adapters.clients.claude.compat`);
-- ``hooks`` — ``LupHooksConfig`` → SDK hook wiring;
-- ``messages`` — block and message conversion between lup types and SDK
-  types;
-- ``collector`` — the Claude response path: one turn's SDK message
-  stream into a ``LupResponse``;
-- ``stream`` — ``ClaudeLiveStream``, the engine's live event feed;
-- ``sessions`` — ``ClaudeSession`` and ``ClaudeSessions``: the run path;
-- ``create`` — ``create_claude`` and ``compose_claude``: the
-  construction door.
-
+concern per module; ``create`` is the recipe that names every slot.
 Each module imports the SDK as a qualified namespace (``claude`` for the
 package, ``claude_types`` for its ``types`` submodule) so every SDK type
 reads with its origin visible at the use site.

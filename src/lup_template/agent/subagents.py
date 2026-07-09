@@ -27,7 +27,7 @@ the full catalog. Where the siblings live:
 - Nested agents: a one-shot :func:`lup.adapters.wiring.query` inside a
   tool handler; the reviewer in ``agent/tools/reflect.py`` is the
   exemplar
-- Background agents: ``lup.adapters.background.BackgroundDriver``
+- Background agents: ``lup.adapters.background``
   (``BackgroundAgentParams`` + each engine's ``Engine.background``), with
   the observer example in ``agent/tools/realtime.py``
 - Persistent agents: ``lup.realtime.scheduler`` and ``lup.realtime.relay``,

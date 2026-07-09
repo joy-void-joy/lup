@@ -5,7 +5,7 @@ An engine whose SDK feeds events as the turn unfolds implements
 (:class:`~lup.adapters.clients.claude.stream.ClaudeLiveStream`); an
 engine whose SDK reports a turn only once complete contributes nothing,
 and :class:`~lup.adapters.clients.composed.ComposedClient` fills the slot
-with :class:`~lup.adapters.clients.composed.ReplayStream`.
+with :class:`~lup.adapters.clients.streams.replay.ReplayStream`.
 """
 
 from abc import ABC, abstractmethod
