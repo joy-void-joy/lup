@@ -310,6 +310,7 @@ class TestCodexEngine:
             model="gpt-5.5",
             system_prompt="do it",
             served_tool_groups=["notes", "sandbox"],
+            serve_tools_command=["uv", "run", "lup-devtools", "agent", "serve-tools"],
             reasoning_effort="high",
             turn_timeout_seconds=120.0,
         )
