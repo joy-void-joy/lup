@@ -40,7 +40,7 @@ from rich.panel import Panel
 from rich.table import Table
 from tzlocal import get_localzone_name
 
-from lup.adapters.profiles.claude import ClaudeProfile
+from lup.adapters.profiles.claude.store import ProfileStore
 from lup.workspace.paths import project_root
 
 app = typer.Typer(
@@ -61,7 +61,7 @@ CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 profile_app = typer.Typer(no_args_is_help=True, help="Manage Claude account profiles")
 app.add_typer(profile_app, name="profile")
 
-claude_profiles = ClaudeProfile()
+claude_profiles = ProfileStore()
 
 
 # =====================================================================
