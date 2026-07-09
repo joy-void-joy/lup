@@ -6,7 +6,7 @@ silently dropping tools was how the Codex path shipped broken before.
 
 import pytest
 
-from lup.adapters.background.Background import BackgroundAgentParams
+from lup.adapters.background.BackgroundDriver import BackgroundAgentParams
 from lup.adapters.wiring import resolve_engine
 
 

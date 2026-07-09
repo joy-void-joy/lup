@@ -4,7 +4,7 @@ One of two homes for open models, chosen by API protocol: an endpoint
 speaking the Anthropic protocol runs here, keeping the full Claude
 scaffolding — hooks, permission modes, native subagents — while an
 OpenAI-protocol endpoint runs on ``openai-compat``
-(:mod:`lup.adapters.clients.openai_compat`) through the bare Codex runtime.
+(:mod:`lup.adapters.clients.codex.compat`) through the bare Codex runtime.
 
 The native-option override carries the full endpoint setup, reconciled
 against the aimo3 project's working Anthropic-compatible configuration

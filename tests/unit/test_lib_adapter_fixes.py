@@ -13,7 +13,7 @@ from typing import cast
 
 import pytest
 
-from lup.adapters.clients.openai_compat import (
+from lup.adapters.clients.codex.compat import (
     OPENAI_COMPAT_API_KEY_ENV,
     OPENAI_COMPAT_PROVIDER_ID,
     build_openai_compat_native,

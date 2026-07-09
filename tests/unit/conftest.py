@@ -7,17 +7,18 @@ from pathlib import Path
 import pytest
 
 from lup.workspace import paths
-from lup.adapters.background.Background import (
+from lup.adapters.background.BackgroundDriver import (
     BackgroundAgent,
     BackgroundAgentParams,
 )
-from lup.adapters.clients.Client import Client, Session
+from lup.adapters.clients.Client import Client
 from lup.adapters.clients.composed import ComposedClient
-from lup.adapters.clients.Sessions import Sessions
-from lup.adapters.Engine import Engine
+from lup.adapters.clients.sessions.Session import Session
+from lup.adapters.clients.sessions.Sessions import Sessions
+from lup.adapters.engines.Engine import Engine
 from lup.adapters.errors import UnsupportedOperationError
 from lup.adapters.options import LupAgentOptions
-from lup.adapters.profiles.Profiles import ProfileSupport
+from lup.adapters.profiles.Profile import Profile
 from lup.telemetry.trace import TraceLogger
 from lup.types import LupResponse, LupTextBlock
 
@@ -81,7 +82,7 @@ class RecordingEngine(Engine):
     def background(self, params: BackgroundAgentParams) -> BackgroundAgent:
         raise UnsupportedOperationError("the recording engine has no backgrounds")
 
-    def profiles(self) -> ProfileSupport:
+    def profiles(self) -> Profile:
         raise UnsupportedOperationError("the recording engine has no profiles")
 
     def builtin_tools(self) -> frozenset[str]:

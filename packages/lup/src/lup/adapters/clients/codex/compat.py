@@ -4,7 +4,7 @@ One of two homes for open models, chosen by API protocol: an endpoint
 speaking the OpenAI protocol runs here on the Codex runtime (custom
 ``model_providers`` definition, native sandboxing, served tools), while
 an Anthropic-protocol endpoint runs on ``claude-compat``
-(:mod:`lup.adapters.clients.claude_compat`) and keeps the full Claude
+(:mod:`lup.adapters.clients.claude.compat`) and keeps the full Claude
 scaffolding — hooks, permission modes, native subagents.
 
 The whole engine is a translation: :func:`build_openai_compat_native`

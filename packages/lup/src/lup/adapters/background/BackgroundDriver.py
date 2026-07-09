@@ -26,7 +26,7 @@ machinery and running a driver instance over its own stream.
 See ``src/lup_template/agent/tools/realtime.py`` for example integration
 with the persistent agent pattern (observer example).
 
-Dispatch is the engine's: each :class:`~lup.adapters.Engine.Engine`
+Dispatch is the engine's: each :class:`~lup.adapters.engines.Engine.Engine`
 builds its driver from a :class:`BackgroundAgentParams` and composes it
 into a :class:`BackgroundAgent`, owning the validation and defaults that
 are properties of its backend (Codex rejects tools and requires an
@@ -36,7 +36,7 @@ through tools).
 Examples:
     Create an observer that maintains conversation notes::
 
-        >>> from lup.adapters.background.Background import BackgroundAgentParams
+        >>> from lup.adapters.background.BackgroundDriver import BackgroundAgentParams
         >>> from lup.adapters.wiring import resolve_engine
         >>> notes: list[str] = []
         >>> agent = resolve_engine(engine_id).background(

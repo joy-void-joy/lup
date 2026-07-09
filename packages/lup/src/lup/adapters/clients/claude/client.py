@@ -21,10 +21,11 @@ from lup.adapters.clients.claude.collector import (
 )
 from lup.adapters.clients.claude.options import build_claude_options
 from lup.adapters.clients.claude.stream import ClaudeLiveStream
-from lup.adapters.clients.Client import Client, Session
+from lup.adapters.clients.Client import Client
 from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.refusal import refuse_unconsumed
-from lup.adapters.clients.Sessions import Sessions
+from lup.adapters.clients.sessions.Session import Session
+from lup.adapters.clients.sessions.Sessions import Sessions
 from lup.adapters.clients.usage import extract_token_usage
 from lup.adapters.options import LupAgentOptions
 from lup.telemetry.trace import TraceLogger

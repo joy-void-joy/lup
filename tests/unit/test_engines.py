@@ -13,13 +13,13 @@ import pytest
 
 from lup.adapters.clients.claude.client import ClaudeSessions, create_claude
 from lup.adapters.clients.claude.options import SESSION_THINKING_TOKENS
-from lup.adapters.clients.claude_compat import create_claude_compat
+from lup.adapters.clients.claude.compat import create_claude_compat
 from lup.adapters.clients.Client import Client
 from lup.adapters.clients.codex.client import CodexSessions, create_codex
 from lup.adapters.clients.codex.options import CodexNativeConfig
 from lup.adapters.clients.codex.usage import per_mtok_usage_cost
 from lup.adapters.clients.composed import ComposedClient
-from lup.adapters.clients.openai_compat import create_openai_compat
+from lup.adapters.clients.codex.compat import create_openai_compat
 from lup.adapters.errors import UnsupportedOptionsError
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.tools.claude import WEB_SEARCH

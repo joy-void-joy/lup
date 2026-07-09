@@ -21,7 +21,7 @@ file-relay mailbox. One concern per module:
 - ``client`` — ``create_codex``, ``compose_codex``, ``CodexSession``,
   and ``CodexSessions``: the run path.
 
-``openai-compat`` (:mod:`lup.adapters.clients.openai_compat`) fronts any
+``openai-compat`` (:mod:`lup.adapters.clients.codex.compat`) fronts any
 OpenAI-protocol endpoint through this same runtime. Each module imports
 the Codex SDK as a qualified namespace (``codex`` for the package,
 ``codex_items`` for its generated item types) so every SDK type reads

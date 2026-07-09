@@ -111,7 +111,7 @@ For persistent agents that need parallel processing, a **background agent** runs
 
 **Lifecycle:** `start()` spawns an asyncio task. `wake()` signals new data. The message generator debounces rapid wakes and calls `build_message()` to produce the next turn. `stop()` cancels the task.
 
-**Library support:** `packages/lup/src/lup/adapters/background/Background.py` provides the `BackgroundDriver` verb, the concrete `BackgroundAgent` (the wake/debounce machinery, composing a driver), and `BackgroundAgentParams`; each engine builds its driver and composes it via `Engine.background(params)` — `resolve_engine(engine_id).background(...)` — and the drivers live in the engine modules (`lup/adapters/background/claude.py`, `lup/adapters/background/codex.py`). See observer example in `src/lup_template/agent/tools/realtime.py`.
+**Library support:** `packages/lup/src/lup/adapters/background/BackgroundDriver.py` provides the `BackgroundDriver` verb, the concrete `BackgroundAgent` (the wake/debounce machinery, composing a driver), and `BackgroundAgentParams`; each engine builds its driver and composes it via `Engine.background(params)` — `resolve_engine(engine_id).background(...)` — and the drivers live in the engine modules (`lup/adapters/background/claude.py`, `lup/adapters/background/codex.py`). See observer example in `src/lup_template/agent/tools/realtime.py`.
 
 **Customizing:** The `build_message` callback is the main extension point — it reads shared state, advances its own read pointer, and returns the next user turn content (or `None` to skip). The observer example in `agent/tools/realtime.py` shows the full wiring.
 

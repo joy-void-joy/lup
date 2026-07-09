@@ -15,7 +15,7 @@ from lup.adapters.clients.claude.messages import (
     claude_block_to_lup,
     claude_message_to_lup,
 )
-from lup.adapters.clients.Stream import Stream
+from lup.adapters.clients.streams.Stream import Stream
 from lup.telemetry.display import print_message
 from lup.telemetry.trace import TraceLogger
 from lup.types import (

@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from lup.adapters.clients.Client import Client, Session
+    from lup.adapters.clients.Client import Client
+    from lup.adapters.clients.sessions.Session import Session
     from lup.types import LupResponse
 
 import sh

@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 
-from lup.adapters.clients.Client import Session
+from lup.adapters.clients.sessions.Session import Session
 from lup.mcp import LupMcpTool, ToolResponse
 from lup.realtime.relay import (
     MISSING_SLEEP_MESSAGE,

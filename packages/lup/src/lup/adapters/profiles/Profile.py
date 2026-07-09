@@ -2,7 +2,7 @@
 
 A profile names an account — a complete backend login with its own
 credentials, settings, and history, reused across projects.
-:class:`ProfileSupport` is the whole contract: ``select(name, client)``
+:class:`Profile` is the whole contract: ``select(name, client)``
 takes an already-built client and returns one running as that account.
 Everything else — how a name resolves, what an account physically is,
 where an implementation keeps its bookkeeping — is that implementation's
@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from lup.adapters.clients.Client import Client
 
 
-class ProfileSupport(ABC):
+class Profile(ABC):
     """A backend's account-profile capability: put a client on an account."""
 
     @abstractmethod

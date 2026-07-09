@@ -30,9 +30,10 @@ import inspect
 
 from pydantic import BaseModel
 
-from lup.adapters.background.Background import BackgroundAgentParams
-from lup.adapters.clients.composed import ComposedClient, ReplayStream
-from lup.adapters.Engine import Engine
+from lup.adapters.background.BackgroundDriver import BackgroundAgentParams
+from lup.adapters.clients.composed import ComposedClient
+from lup.adapters.clients.streams.replay import ReplayStream
+from lup.adapters.engines.Engine import Engine
 from lup.adapters.errors import UnsupportedOptionsError
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.wiring import ENGINES

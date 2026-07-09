@@ -10,9 +10,10 @@ last — since every post-hoc engine (codex, openai-compat) rides it.
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from lup.adapters.clients.Client import Session
-from lup.adapters.clients.composed import ComposedClient, ReplayStream
-from lup.adapters.clients.Sessions import Sessions
+from lup.adapters.clients.composed import ComposedClient
+from lup.adapters.clients.sessions.Session import Session
+from lup.adapters.clients.sessions.Sessions import Sessions
+from lup.adapters.clients.streams.replay import ReplayStream
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
     LupDoneEvent,

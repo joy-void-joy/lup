@@ -7,7 +7,7 @@ concern per module:
 - ``options`` — neutral→native option translation
   (``build_claude_options``) and the engine's session-grade defaults,
   shared with ``claude-compat``
-  (:mod:`lup.adapters.clients.claude_compat`);
+  (:mod:`lup.adapters.clients.claude.compat`);
 - ``hooks`` — ``LupHooksConfig`` → SDK hook wiring;
 - ``messages`` — subagent, block, message, and tool conversion between
   lup types and SDK types;

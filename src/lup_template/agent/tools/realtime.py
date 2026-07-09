@@ -30,7 +30,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.background.Background import (
+from lup.adapters.background.BackgroundDriver import (
     BackgroundAgent,
     BackgroundAgentParams,
 )

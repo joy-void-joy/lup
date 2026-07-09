@@ -1,11 +1,11 @@
-"""The client seam: purely abstract ``Client``/``Session``, nothing else.
+"""The client seam: the purely abstract ``Client``, nothing else.
 
-The ABCs draw the contract — every member is ``@abstractmethod``, no
+The ABC draws the contract — every member is ``@abstractmethod``, no
 concrete defaults and no raising stubs. Engines do not subclass
 ``Client``: each contributes the component verbs it natively has — its
-:class:`~lup.adapters.clients.Sessions.Sessions` always, plus a
-:class:`~lup.adapters.clients.Stream.Stream` when its SDK feeds events
-live — and :class:`~lup.adapters.clients.composed.ComposedClient`
+:class:`~lup.adapters.clients.sessions.Sessions.Sessions` always, plus a
+:class:`~lup.adapters.clients.streams.Stream.Stream` when its SDK feeds
+events live — and :class:`~lup.adapters.clients.composed.ComposedClient`
 composes them into this surface, filling the one-shot and stream gaps
 generically. A capability an engine lacks entirely is an explicit
 ``raise UnsupportedOperationError(...)`` written in its own component at
@@ -24,45 +24,12 @@ from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING
 
+from lup.adapters.clients.sessions.Session import Session
 from lup.telemetry.trace import TraceLogger
 from lup.types import LupEvent, LupResponse
 
 if TYPE_CHECKING:
     from lup.realtime.relay import RealtimeMailbox
-
-
-class Session(ABC):
-    """Multi-turn conversation session.
-
-    Wraps a live SDK client or thread. ``send()`` sends a message and
-    collects the full response. :attr:`id` is the engine-native session
-    identifier once known — save it and pass it to
-    ``Client.session(resume=...)`` to continue the conversation in a
-    different process.
-    """
-
-    id: str | None = None
-    """Engine-native session identifier (Claude session id, Codex thread
-    id). ``None`` until the engine reports it — populated on open for
-    resumed sessions, after the first turn otherwise."""
-
-    @abstractmethod
-    async def send(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> LupResponse:
-        """Send one message and collect the full response."""
-
-    @abstractmethod
-    async def interrupt(self) -> None:
-        """Signal the backend to stop the current response.
-
-        Engines without interruption support raise
-        :class:`~lup.adapters.errors.UnsupportedOperationError` here.
-        """
 
 
 class Client(ABC):
@@ -118,6 +85,6 @@ class Client(ABC):
 
         Engines with a live event stream yield as the turn unfolds; those
         without replay the completed turn's blocks
-        (:class:`~lup.adapters.clients.composed.ReplayStream`). Either
-        way the terminal ``LupDoneEvent`` comes last.
+        (:class:`~lup.adapters.clients.streams.replay.ReplayStream`).
+        Either way the terminal ``LupDoneEvent`` comes last.
         """

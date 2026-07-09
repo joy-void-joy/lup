@@ -19,13 +19,13 @@ that behavior rather than declared.
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
-from lup.adapters.background.Background import (
+from lup.adapters.background.BackgroundDriver import (
     BackgroundAgent,
     BackgroundAgentParams,
 )
 from lup.adapters.clients.Client import Client
 from lup.adapters.options import LupAgentOptions
-from lup.adapters.profiles.Profiles import ProfileSupport
+from lup.adapters.profiles.Profile import Profile
 
 
 class Engine(ABC):
@@ -61,7 +61,7 @@ class Engine(ABC):
         """
 
     @abstractmethod
-    def profiles(self) -> ProfileSupport:
+    def profiles(self) -> Profile:
         """This engine's account-profile support.
 
         Its one verb, ``select(name, client)``, returns the client

@@ -21,19 +21,19 @@ from lup.adapters.options import LupAgentOptions
 from lup.adapters.profiles.claude import (
     CONFIG_DIR_ENV,
     DEFAULT_CONFIG_DIR,
-    ClaudeProfileSupport,
+    ClaudeProfile,
 )
 from tests.unit.conftest import RecordingSessions
 
 
 @pytest.fixture
-def support(tmp_path: Path) -> ClaudeProfileSupport:
+def support(tmp_path: Path) -> ClaudeProfile:
     """Profile support pointed at a throwaway registry file."""
-    return ClaudeProfileSupport(registry_path=tmp_path / "lup" / "profiles.json")
+    return ClaudeProfile(registry_path=tmp_path / "lup" / "profiles.json")
 
 
 def selected_config_dir(
-    support: ClaudeProfileSupport, name: str | None, client: ComposedClient
+    support: ClaudeProfile, name: str | None, client: ComposedClient
 ) -> str:
     """Run ``select`` and read the config dir it put on the client's env."""
     selected = support.select(name, client)
@@ -46,7 +46,7 @@ def selected_config_dir(
 
 
 def test_select_injects_the_account_env_onto_a_copy(
-    support: ClaudeProfileSupport, tmp_path: Path
+    support: ClaudeProfile, tmp_path: Path
 ) -> None:
     support.add_profile("work", tmp_path / "work-config")
     native = claude.ClaudeAgentOptions(env={"KEEP": "1"})
@@ -64,7 +64,7 @@ def test_select_injects_the_account_env_onto_a_copy(
 
 
 def test_select_precedence_explicit_then_active_then_default(
-    support: ClaudeProfileSupport, tmp_path: Path
+    support: ClaudeProfile, tmp_path: Path
 ) -> None:
     client = compose_claude(claude.ClaudeAgentOptions())
 
@@ -79,7 +79,7 @@ def test_select_precedence_explicit_then_active_then_default(
     assert selected_config_dir(support, None, client) == str(DEFAULT_CONFIG_DIR)
 
 
-def test_select_refuses_a_non_claude_client(support: ClaudeProfileSupport) -> None:
+def test_select_refuses_a_non_claude_client(support: ClaudeProfile) -> None:
     with pytest.raises(TypeError):
         support.select(
             None, ComposedClient(RecordingSessions(LupAgentOptions(model="probe"), []))
@@ -89,7 +89,7 @@ def test_select_refuses_a_non_claude_client(support: ClaudeProfileSupport) -> No
 # ── the implementation's own registry ──────────────────────
 
 
-def test_missing_registry_reads_as_empty(support: ClaudeProfileSupport) -> None:
+def test_missing_registry_reads_as_empty(support: ClaudeProfile) -> None:
     assert not support.registry_path.exists()
     assert support.load_registry().profiles == {}
     assert support.active_profile() is None
@@ -97,7 +97,7 @@ def test_missing_registry_reads_as_empty(support: ClaudeProfileSupport) -> None:
 
 
 def test_first_added_profile_becomes_active(
-    support: ClaudeProfileSupport, tmp_path: Path
+    support: ClaudeProfile, tmp_path: Path
 ) -> None:
     support.add_profile("work", tmp_path / "work-config")
     assert support.active_profile() == "work"
@@ -109,12 +109,12 @@ def test_first_added_profile_becomes_active(
 
 
 def test_registry_round_trips_through_disk(
-    support: ClaudeProfileSupport, tmp_path: Path
+    support: ClaudeProfile, tmp_path: Path
 ) -> None:
     support.add_profile("work", tmp_path / "cfg")
     assert support.registry_path.exists()
     # A fresh instance on the same path sees the same state (no in-memory cache).
-    reloaded = ClaudeProfileSupport(registry_path=support.registry_path)
+    reloaded = ClaudeProfile(registry_path=support.registry_path)
     assert reloaded.active_profile() == "work"
     assert reloaded.config_dir_for("work") == tmp_path / "cfg"
 
@@ -132,7 +132,7 @@ def test_existing_registry_document_loads_and_round_trips(tmp_path: Path) -> Non
         )
         + "\n"
     )
-    support = ClaudeProfileSupport(registry_path=registry_path)
+    support = ClaudeProfile(registry_path=registry_path)
 
     assert support.resolve_config_dir() == tmp_path / "work-config"
 
@@ -146,7 +146,7 @@ def test_existing_registry_document_loads_and_round_trips(tmp_path: Path) -> Non
 
 
 def test_set_active_switches_and_rejects_unknown(
-    support: ClaudeProfileSupport, tmp_path: Path
+    support: ClaudeProfile, tmp_path: Path
 ) -> None:
     support.add_profile("a", tmp_path / "a")
     support.add_profile("b", tmp_path / "b")
@@ -160,7 +160,7 @@ def test_set_active_switches_and_rejects_unknown(
 
 
 def test_remove_clears_active_only_for_the_removed_profile(
-    support: ClaudeProfileSupport, tmp_path: Path
+    support: ClaudeProfile, tmp_path: Path
 ) -> None:
     support.add_profile("a", tmp_path / "a")
     support.add_profile("b", tmp_path / "b")
@@ -177,7 +177,7 @@ def test_remove_clears_active_only_for_the_removed_profile(
 
 
 def test_config_dir_for_expands_user_and_rejects_unknown(
-    support: ClaudeProfileSupport,
+    support: ClaudeProfile,
 ) -> None:
     support.add_profile("home", Path("~/claude-home"))
     assert support.config_dir_for("home") == Path.home() / "claude-home"
@@ -187,7 +187,7 @@ def test_config_dir_for_expands_user_and_rejects_unknown(
 
 
 def test_resolve_config_dir_prefers_name_then_active_then_default(
-    support: ClaudeProfileSupport, tmp_path: Path
+    support: ClaudeProfile, tmp_path: Path
 ) -> None:
     assert support.resolve_config_dir() == DEFAULT_CONFIG_DIR
 

@@ -12,12 +12,13 @@ extra for the backend you use (one per engine module under
 
 from typing import TYPE_CHECKING
 
-from lup.adapters.background.Background import (
+from lup.adapters.background.BackgroundDriver import (
     BackgroundAgent,
     BackgroundAgentParams,
 )
-from lup.adapters.clients.Client import Client, Session
-from lup.adapters.Engine import Engine
+from lup.adapters.clients.Client import Client
+from lup.adapters.clients.sessions.Session import Session
+from lup.adapters.engines.Engine import Engine
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.wiring import create_client, query, resolve_engine
 from lup.workspace.history import (
