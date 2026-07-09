@@ -137,7 +137,7 @@ def apply_repl_overrides(
     if not no_tools and not no_prompt:
         return
 
-    from lup.adapters.clients.claude.client import ClaudeSessions
+    from lup.adapters.clients.claude.sessions import ClaudeSessions
     from lup.adapters.clients.codex.client import CodexSessions
     from lup.adapters.clients.composed import ComposedClient
 

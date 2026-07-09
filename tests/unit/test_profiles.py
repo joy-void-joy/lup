@@ -15,7 +15,8 @@ from pathlib import Path
 import claude_agent_sdk as claude
 import pytest
 
-from lup.adapters.clients.claude.client import ClaudeSessions, compose_claude
+from lup.adapters.clients.claude.create import compose_claude
+from lup.adapters.clients.claude.sessions import ClaudeSessions
 from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.profiles.claude import (

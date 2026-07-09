@@ -24,8 +24,8 @@ from claude_agent_sdk.types import (
     UserMessage,
 )
 
-from lup.adapters.clients.claude.client import ClaudeSession
 from lup.adapters.clients.claude.collector import ClaudeUsageNormalizer
+from lup.adapters.clients.claude.sessions import ClaudeSession
 from lup.types import (
     JsonValue,
     LupDoneEvent,
@@ -152,7 +152,7 @@ async def test_broken_usage_normalizer_degrades_to_none() -> None:
 async def test_run_streamed_event_order(monkeypatch: pytest.MonkeyPatch) -> None:
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.clients.claude.client import compose_claude
+    from lup.adapters.clients.claude.create import compose_claude
 
     script: list[Message] = [
         AssistantMessage(
@@ -196,7 +196,7 @@ async def test_session_resume_threads_the_saved_id(
     mutating the sessions component's own options."""
     from claude_agent_sdk import ClaudeAgentOptions
 
-    from lup.adapters.clients.claude.client import ClaudeSessions
+    from lup.adapters.clients.claude.sessions import ClaudeSessions
     from lup.adapters.clients.composed import ComposedClient
 
     opened: list[ClaudeAgentOptions] = []
