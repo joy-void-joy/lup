@@ -1,9 +1,7 @@
 """Claude scaffolding pointed at an Anthropic-compatible endpoint."""
 
-from lup.adapters.background.BackgroundDriver import (
-    BackgroundAgent,
-    BackgroundAgentParams,
-)
+from lup.adapters.background.agent import BackgroundAgent
+from lup.adapters.background.params import BackgroundAgentParams
 from lup.adapters.clients.Client import Client
 from lup.adapters.engines.claude import ClaudeEngine
 from lup.adapters.engines.Engine import Engine

@@ -7,10 +7,8 @@ from pathlib import Path
 import pytest
 
 from lup.workspace import paths
-from lup.adapters.background.BackgroundDriver import (
-    BackgroundAgent,
-    BackgroundAgentParams,
-)
+from lup.adapters.background.agent import BackgroundAgent
+from lup.adapters.background.params import BackgroundAgentParams
 from lup.adapters.clients.Client import Client
 from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.sessions.Session import Session

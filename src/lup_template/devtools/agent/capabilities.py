@@ -30,7 +30,7 @@ import inspect
 
 from pydantic import BaseModel
 
-from lup.adapters.background.BackgroundDriver import BackgroundAgentParams
+from lup.adapters.background.params import BackgroundAgentParams
 from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.streams.replay import ReplayStream
 from lup.adapters.engines.Engine import Engine

@@ -14,11 +14,9 @@ from typing import Any  # lup: ignore — confined to SdkDict, the SDK's payload
 import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
 
-from lup.adapters.background.BackgroundDriver import (
-    BackgroundAgent,
-    BackgroundAgentParams,
-    BackgroundDriver,
-)
+from lup.adapters.background.agent import BackgroundAgent
+from lup.adapters.background.BackgroundDriver import BackgroundDriver
+from lup.adapters.background.params import BackgroundAgentParams
 from lup.mcp import LupMcpTool, LupToolHandler
 from lup.types import JsonObject
 
