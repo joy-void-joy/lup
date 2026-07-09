@@ -26,7 +26,7 @@ from lup.adapters.clients.sessions.budget import BudgetedSessions
 from lup.adapters.clients.sessions.timeout import TimeoutSessions
 from lup.adapters.errors import UnsupportedOptionsError
 from lup.adapters.options import LupAgentOptions
-from lup.adapters.tools.claude import WEB_SEARCH
+from lup.adapters.tools.names import WEB_SEARCH
 from lup.adapters.tools.codex import COMMAND_EXECUTION, FILE_CHANGE
 from lup.adapters.wiring import (
     ENGINES,
@@ -332,6 +332,7 @@ class TestCodexEngine:
         assert native.turn_timeout_seconds == 120.0
         assert client.mailbox is None
         # The recipe composed the wall clock the runtime lacks.
+        assert isinstance(client, ComposedClient)
         assert isinstance(client.sessions, TimeoutSessions)
 
     def test_call_tier_serves_no_tools(self) -> None:

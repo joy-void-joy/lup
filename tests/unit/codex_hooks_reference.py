@@ -1,11 +1,13 @@
 """Lup hook policies rendered as standalone Codex command-hook scripts.
 
-Quarantined: a live probe showed config.toml command hooks never fire on
-the Codex builds this project targets, so no live adapter wires this —
+The wire-format reference, quarantined out of the shipped package: a
+live probe showed config.toml command hooks never fire on the Codex
+builds this project targets, so no live adapter wires this —
 enforcement is the native workspace-write sandbox
-(:func:`~lup.adapters.clients.codex.config.build_sandbox_config_overrides`)
-— and the module is kept as the wire-format reference, imported only by
-tests.
+(:func:`~lup.adapters.clients.codex.config.build_sandbox_config_overrides`).
+Kept beside its tests so the format survives for the day the runtime
+honors hooks again; do not wire it into a live adapter without
+re-probing.
 """
 
 import json
@@ -14,10 +16,47 @@ import sys
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from lup.adapters.clients.codex.config import CodexHookConfig
 from lup.hooks import LupHooksConfig
 
 logger = logging.getLogger(__name__)
+
+
+class CodexHookConfigRequired(TypedDict):
+    """Required fields for a Codex command hook."""
+
+    event: str
+    command: str
+
+
+class CodexHookConfig(CodexHookConfigRequired, total=False):
+    """Configuration for a single Codex command hook."""
+
+    matcher: str
+
+
+def build_hook_config_overrides(
+    hooks: list[CodexHookConfig],
+) -> list[str]:
+    """Build config_overrides for Codex command hooks.
+
+    Each hook dict has: event, matcher (optional), command.
+    Generates TOML-style config_overrides for the Codex hook system.
+    """
+    overrides: list[str] = []
+    overrides.append("features.codex_hooks=true")
+
+    event_counts: dict[str, int] = {}
+    for hook in hooks:
+        event = hook["event"]
+        idx = event_counts.get(event, 0)
+        event_counts[event] = idx + 1
+
+        if "matcher" in hook:
+            overrides.append(f'hooks.{event}[{idx}].matcher="{hook["matcher"]}"')
+        overrides.append(f'hooks.{event}[{idx}].hooks[0].type="command"')
+        overrides.append(f'hooks.{event}[{idx}].hooks[0].command="{hook["command"]}"')
+
+    return overrides
 
 
 class CodexHookInput(TypedDict, total=False):

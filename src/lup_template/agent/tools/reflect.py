@@ -30,7 +30,7 @@ from typing import TypedDict
 from pydantic import BaseModel, Field
 
 from lup.adapters.wiring import query
-from lup.adapters.tools.claude import GLOB, GREP, READ, WEB_FETCH
+from lup.adapters.tools.names import GLOB, GREP, READ, WEB_FETCH
 from lup.mcp import LupMcpTool, lup_tool
 from lup.reflect import ReflectionGate
 

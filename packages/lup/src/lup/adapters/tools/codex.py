@@ -5,10 +5,10 @@ thread-item projection (``lup.adapters.clients.codex.messages``) emits
 each native builtin as a tool-use block under these names — command
 execution and file changes under their native identifiers, web search
 under the shared ``WebSearch`` constant per the lingua-franca rule in
-:mod:`lup.adapters.tools.claude`.
+:mod:`lup.adapters.tools.names`.
 """
 
-from lup.adapters.tools.claude import WEB_SEARCH
+from lup.adapters.tools.names import WEB_SEARCH
 
 COMMAND_EXECUTION = "command_execution"
 FILE_CHANGE = "file_change"

@@ -4,12 +4,10 @@ emission, and lup->SDK hook/option conversion for both engines."""
 import tempfile
 from pathlib import Path
 
-from lup.adapters.clients.codex.config import (
+from lup.adapters.clients.codex.config import build_mcp_config_overrides
+from tests.unit.codex_hooks_reference import (
     CodexHookConfig,
     build_hook_config_overrides,
-    build_mcp_config_overrides,
-)
-from lup.adapters.clients.codex.hooks import (
     build_nudge_hook,
     build_permission_hooks,
     build_reflection_gate_hook,
@@ -446,7 +444,7 @@ class TestLupHooksToClaudeConversion:
 
 class TestLupHooksToCodexConversion:
     def test_converts_permission_hooks(self) -> None:
-        from lup.adapters.clients.codex.hooks import lup_hooks_to_codex
+        from tests.unit.codex_hooks_reference import lup_hooks_to_codex
 
         hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[Path("/ref")])
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -462,7 +460,7 @@ class TestLupHooksToCodexConversion:
             assert script_path.exists()
 
     def test_converts_gate_hooks(self) -> None:
-        from lup.adapters.clients.codex.hooks import lup_hooks_to_codex
+        from tests.unit.codex_hooks_reference import lup_hooks_to_codex
 
         gate = ReflectionGate()
         hooks = create_reflection_gate(
@@ -482,7 +480,7 @@ class TestLupHooksToCodexConversion:
             assert configs[0].get("matcher") == "StructuredOutput"
 
     def test_converts_merged_hooks(self) -> None:
-        from lup.adapters.clients.codex.hooks import lup_hooks_to_codex
+        from tests.unit.codex_hooks_reference import lup_hooks_to_codex
 
         gate = ReflectionGate()
         perm_hooks = create_permission_hooks(rw_dirs=[Path("/data")], ro_dirs=[])
@@ -503,7 +501,7 @@ class TestLupHooksToCodexConversion:
             assert len(configs) == 2
 
     def test_converts_nudge_hooks(self) -> None:
-        from lup.adapters.clients.codex.hooks import lup_hooks_to_codex
+        from tests.unit.codex_hooks_reference import lup_hooks_to_codex
 
         hooks = create_nudge_hook({"Bash": lambda inp: "Use Grep instead"})
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -521,7 +519,7 @@ class TestLupHooksToCodexConversion:
             assert "Use Grep instead" in content
 
     def test_converts_allowlist_hooks(self) -> None:
-        from lup.adapters.clients.codex.hooks import lup_hooks_to_codex
+        from tests.unit.codex_hooks_reference import lup_hooks_to_codex
 
         hooks = create_tool_allowlist_hook(["Read", "Grep"])
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -539,7 +537,7 @@ class TestLupHooksToCodexConversion:
             assert "Grep" in content
 
     def test_converts_full_hook_set(self) -> None:
-        from lup.adapters.clients.codex.hooks import lup_hooks_to_codex
+        from tests.unit.codex_hooks_reference import lup_hooks_to_codex
 
         gate = ReflectionGate()
         perm_hooks = create_permission_hooks(

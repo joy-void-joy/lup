@@ -10,16 +10,10 @@ file-relay mailbox. One concern per module:
 - ``translate`` — ``build_codex_native`` and its helpers: the effort
   map, the priced-budget read, the sandbox-cleanup guard factory;
 - ``config`` — the ``config_overrides`` builders (MCP servers, native
-  sandbox, command hooks);
+  sandbox);
 - ``messages`` — thread-item conversion into lup types and the
   turn-result projection;
 - ``usage`` — usage normalization and per-MTok cost estimation;
-- ``hooks`` — lup hook policies rendered as standalone Codex
-  command-hook scripts. Quarantined: a live probe showed config.toml
-  command hooks never fire on the Codex builds this project targets, so
-  no live adapter wires it — enforcement is the native workspace-write
-  sandbox — and the module is kept as the wire-format reference,
-  imported only by tests;
 - ``sessions`` — ``CodexSession`` and ``CodexSessions``: the run path;
 - ``create`` — ``create_codex`` and ``compose_codex``: the construction
   door.
