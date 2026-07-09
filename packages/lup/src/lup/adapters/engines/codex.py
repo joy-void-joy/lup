@@ -17,7 +17,7 @@ class CodexEngine(Engine):
     id = "codex"
 
     def client(self, options: LupAgentOptions) -> Client:
-        from lup.adapters.clients.codex.client import create_codex
+        from lup.adapters.clients.codex.create import create_codex
 
         return create_codex(options)
 

@@ -16,7 +16,8 @@ from lup.adapters.clients.claude.translate import SESSION_THINKING_TOKENS
 from lup.adapters.clients.claude.sessions import ClaudeSessions
 from lup.adapters.clients.claude.compat import create_claude_compat
 from lup.adapters.clients.Client import Client
-from lup.adapters.clients.codex.client import CodexSessions, create_codex
+from lup.adapters.clients.codex.create import create_codex
+from lup.adapters.clients.codex.sessions import CodexSessions
 from lup.adapters.clients.codex.options import CodexNativeConfig
 from lup.adapters.clients.codex.usage import per_mtok_usage_cost
 from lup.adapters.clients.composed import ComposedClient

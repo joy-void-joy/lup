@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
-from lup.adapters.clients.codex.client import CodexSession
+from lup.adapters.clients.codex.sessions import CodexSession
 from lup.adapters.clients.codex.messages import build_lup_response
 from lup.types import JsonObject
 

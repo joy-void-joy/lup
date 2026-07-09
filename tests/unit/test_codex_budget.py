@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from openai_codex.generated.v2_all import ThreadTokenUsage, TokenUsageBreakdown
 
-from lup.adapters.clients.codex.client import CodexSession, CodexSessions
+from lup.adapters.clients.codex.sessions import CodexSession, CodexSessions
 from lup.adapters.clients.codex.options import (
     CodexNativeConfig,
     subprocess_sandbox_cleanup,

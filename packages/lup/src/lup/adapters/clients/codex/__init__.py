@@ -18,8 +18,9 @@ file-relay mailbox. One concern per module:
   no live adapter wires it — enforcement is the native workspace-write
   sandbox — and the module is kept as the wire-format reference,
   imported only by tests;
-- ``client`` — ``create_codex``, ``compose_codex``, ``CodexSession``,
-  and ``CodexSessions``: the run path.
+- ``sessions`` — ``CodexSession`` and ``CodexSessions``: the run path;
+- ``create`` — ``create_codex`` and ``compose_codex``: the construction
+  door.
 
 ``openai-compat`` (:mod:`lup.adapters.clients.codex.compat`) fronts any
 OpenAI-protocol endpoint through this same runtime. Each module imports
