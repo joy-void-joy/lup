@@ -19,7 +19,7 @@ from lup.adapters.clients.Client import Client
 from lup.adapters.clients.codex.create import create_codex
 from lup.adapters.clients.codex.sessions import CodexSessions
 from lup.adapters.clients.codex.native import CodexNativeConfig
-from lup.adapters.clients.codex.usage import per_mtok_usage_cost
+from lup.adapters.clients.usage import per_mtok_usage_cost
 from lup.adapters.clients.composed import ComposedClient
 from lup.adapters.clients.codex.compat import create_openai_compat
 from lup.adapters.clients.sessions.budget import BudgetedSessions

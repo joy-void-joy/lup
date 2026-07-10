@@ -159,8 +159,8 @@ type UsageCost = Callable[[Usage], float]
 """Estimates the USD cost of accumulated token usage.
 
 Backends that report token counts but no cost take one of these to enforce a
-budget; build it from per-token rates with the ``per_mtok_usage_cost`` helper
-each such adapter provides.
+budget; build it from per-token rates with the shared
+``lup.adapters.clients.usage.per_mtok_usage_cost`` helper.
 """
 
 
