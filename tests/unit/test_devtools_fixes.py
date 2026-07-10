@@ -27,32 +27,33 @@ def isolated_root(tmp_path: Path) -> Iterator[Path]:
     configure(root=ORIGINAL_ROOT)
 
 
-# ── fix 3: tool-call regex matches the real emitted trace format ──────────
+# ── fix 3: the tool-call view renders typed events, not grepped markdown ──
 
 
-def emitted_tool_trace() -> str:
-    """Produce a trace via the real TraceLogger so the format is authoritative."""
-    trace = TraceLogger(trace_path=Path("/tmp/unused.md"), title="t")
-    trace.log_block(LupToolUseBlock(id="a", name="search", input={"q": "x"}))
-    trace.log_block(LupToolResultBlock(tool_use_id="a", content="done"))
-    trace.log_block(LupTextBlock(text="some prose, not a tool call"))
-    return "\n".join(entry.content for entry in trace.entries)
+class TestToolCallView:
+    def test_renders_calls_from_the_events_sidecar(self, tmp_path: Path) -> None:
+        from lup_template.devtools.trace.traces import render_tool_calls
 
+        trace_path = tmp_path / "t.md"
+        trace = TraceLogger(trace_path=trace_path, title="t")
+        trace.log_block(LupToolUseBlock(id="a", name="search", input={"q": "x"}))
+        trace.log_block(LupToolResultBlock(tool_use_id="a", content="done"))
+        trace.log_block(LupTextBlock(text="some prose, not a tool call"))
 
-class TestToolCallPattern:
-    def test_matches_emitted_tool_and_result_headers(self) -> None:
-        from lup_template.devtools.trace.traces import filter_tool_calls
+        out = render_tool_calls(trace_path)
 
-        out = filter_tool_calls(emitted_tool_trace())
+        assert "✓ search" in out
+        assert "prose" not in out
 
-        assert "## 🔧 Tool: search" in out
-        assert "## 📋 Result" in out
+    def test_no_tool_calls_recorded(self, tmp_path: Path) -> None:
+        from lup_template.devtools.trace.traces import render_tool_calls
 
-    def test_does_not_match_when_no_tool_blocks(self) -> None:
-        from lup_template.devtools.trace.traces import filter_tool_calls
+        trace_path = tmp_path / "t.md"
+        trace = TraceLogger(trace_path=trace_path, title="t")
+        trace.log_block(LupTextBlock(text="Just some narrative text."))
+        trace.save()
 
-        prose = "# Trace\n\nJust some narrative text.\nNothing tool-shaped here.\n"
-        assert filter_tool_calls(prose) == "(no tool call lines found)"
+        assert render_tool_calls(trace_path) == "(no tool calls recorded)"
 
 
 # ── fix 5: legacy-markdown error scan reads is_error, not keywords ─────────
