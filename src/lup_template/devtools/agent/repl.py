@@ -44,15 +44,15 @@ def save_images(
 ) -> list[Path]:
     """Save raw image data to disk, deduplicating by content hash."""
     images_dir.mkdir(parents=True, exist_ok=True)
-    paths: list[Path] = []  # lup: ignore[empty-collection] — write fold
-    for image in images:
+
+    def save_one(image: ClipboardImage) -> Path:
         ext = MIME_TO_EXT.get(image.media_type, ".bin")  # lup: ignore[dict-get]
-        name = hashlib.sha256(image.data).hexdigest()[:12] + ext
-        path = images_dir / name
+        path = images_dir / (hashlib.sha256(image.data).hexdigest()[:12] + ext)
         if not path.exists():
             path.write_bytes(image.data)
-        paths.append(path)
-    return paths
+        return path
+
+    return [save_one(image) for image in images]
 
 
 CLIPBOARD_IMAGE_MIMES = ("image/png", "image/jpeg", "image/webp")

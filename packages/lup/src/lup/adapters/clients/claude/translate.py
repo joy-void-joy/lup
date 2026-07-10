@@ -81,15 +81,20 @@ def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:
     if not opts.persist_session:
         extra_args["no-session-persistence"] = None
 
-    mcp_servers: ClaudeServerMap = {}  # lup: ignore[empty-collection] — server fold
-    for name, server in opts.tool_servers.items():
+    def to_claude_server(
+        server: LupMcpServerConfig | RawMcpServerConfig,
+    ) -> claude_types.McpServerConfig:
         match server:
             case LupMcpServerConfig():
-                mcp_servers[name] = claude_types.McpSdkServerConfig(
+                return claude_types.McpSdkServerConfig(
                     type="sdk", name=server.name, instance=server.server
                 )
             case _:
-                mcp_servers[name] = server
+                return server
+
+    mcp_servers: ClaudeServerMap = {
+        name: to_claude_server(server) for name, server in opts.tool_servers.items()
+    }
     subagents = {spec.name: spec_to_claude(spec) for spec in opts.subagents}
 
     # Claude's SDK effort levels are low/medium/high/max; the neutral

@@ -102,25 +102,21 @@ def build_claude_hook_handler(
 
 def lup_hooks_to_claude(hooks: LupHooksConfig) -> ClaudeHooksConfig:
     """Convert SDK-agnostic LupHooksConfig to Claude SDK hook format."""
-    result: ClaudeHooksConfig = {}  # lup: ignore[empty-collection] — event fold
-    for event_name, matchers in hooks.by_event().items():
-        claude_matchers: list[
-            claude_types.HookMatcher
-        ] = []  # lup: ignore[empty-collection]
-        for lup_matcher in matchers:
-            handler = build_claude_hook_handler(lup_matcher, event=event_name)
-            if lup_matcher.matcher:
-                claude_matchers.append(
-                    claude_types.HookMatcher(
-                        matcher=lup_matcher.matcher, hooks=[handler]
-                    )
-                )
-            else:
-                claude_matchers.append(claude_types.HookMatcher(hooks=[handler]))
 
-        result[event_name] = claude_matchers
+    def to_claude_matcher(
+        lup_matcher: LupHookMatcher, event: LupHookEvent
+    ) -> claude_types.HookMatcher:
+        handler = build_claude_hook_handler(lup_matcher, event=event)
+        if lup_matcher.matcher:
+            return claude_types.HookMatcher(
+                matcher=lup_matcher.matcher, hooks=[handler]
+            )
+        return claude_types.HookMatcher(hooks=[handler])
 
-    return result
+    return {
+        event_name: [to_claude_matcher(m, event_name) for m in matchers]
+        for event_name, matchers in hooks.by_event().items()
+    }
 
 
 def lup_hook_output_to_claude(

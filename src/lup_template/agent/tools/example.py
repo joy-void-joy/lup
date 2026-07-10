@@ -125,21 +125,22 @@ async def fill_missing_snippets(results: list[SearchResult]) -> list[SearchResul
     alternative endpoint before returning, so the agent never re-queries
     to patch gaps in the data.
     """
-    filled: list[SearchResult] = []  # lup: ignore[empty-collection] — repair fold
-    for result in results:
-        if result.snippet is None:
-            # TEMPLATE: recover the field from a real fallback endpoint
-            # Example:
-            #
-            # summary = await fallback_api.page_summary(result.url)
-            # result = result.model_copy(update={"snippet": summary})
 
-            # Placeholder fallback
-            result = result.model_copy(
-                update={"snippet": f"Fallback summary for {result.url}"}
-            )
-        filled.append(result)
-    return filled
+    async def repaired(result: SearchResult) -> SearchResult:
+        if result.snippet is not None:
+            return result
+        # TEMPLATE: recover the field from a real fallback endpoint
+        # Example:
+        #
+        # summary = await fallback_api.page_summary(result.url)
+        # return result.model_copy(update={"snippet": summary})
+
+        # Placeholder fallback
+        return result.model_copy(
+            update={"snippet": f"Fallback summary for {result.url}"}
+        )
+
+    return [await repaired(result) for result in results]
 
 
 async def fetch_wiki_article(url: str) -> FetchOutput:

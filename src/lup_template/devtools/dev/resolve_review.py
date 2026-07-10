@@ -102,22 +102,21 @@ def load_manifest(path: Path) -> list[ManifestEntry]:
 
 
 def render_diff(text: str) -> str:
-    rendered: list[str] = []  # lup: ignore[empty-collection] — html fold
-    for line in text.splitlines():
+    def render_line(line: str) -> str:
         esc = html.escape(line)
         if line.startswith(
             ("diff --git", "index ", "+++", "---", "new file", "deleted file")
         ):
-            rendered.append(f'<span class="fhead">{esc}</span>')
-        elif line.startswith("@@"):
-            rendered.append(f'<span class="hunk">{esc}</span>')
-        elif line.startswith("+"):
-            rendered.append(f'<span class="add">{esc}</span>')
-        elif line.startswith("-"):
-            rendered.append(f'<span class="del">{esc}</span>')
-        else:
-            rendered.append(esc)
-    return "\n".join(rendered)
+            return f'<span class="fhead">{esc}</span>'
+        if line.startswith("@@"):
+            return f'<span class="hunk">{esc}</span>'
+        if line.startswith("+"):
+            return f'<span class="add">{esc}</span>'
+        if line.startswith("-"):
+            return f'<span class="del">{esc}</span>'
+        return esc
+
+    return "\n".join(render_line(line) for line in text.splitlines())
 
 
 def finding_for(entry: ManifestEntry, note: NoteRef) -> NoteFinding:
@@ -148,17 +147,18 @@ def render_concern(entry: ManifestEntry, base: str) -> str:
         else '<span class="badge warn">no commit</span>'
     )
 
-    rows: list[str] = []  # lup: ignore[empty-collection] — html fold
-    for note in entry.notes:
+    def note_row(note: NoteRef) -> str:
         finding = finding_for(entry, note)
         state = "✅" if finding.addressed else "⚠️"
-        rows.append(
+        return (
             "<tr>"
             f'<td class="note-loc">{html.escape(note.file)}:{note.line}</td>'
             f"<td>{html.escape(note.text)}</td>"
             f"<td>{state} {html.escape(finding.how)}</td>"
             "</tr>"
         )
+
+    rows = [note_row(note) for note in entry.notes]
     notes_table = (
         '<table class="notes">'
         "<tr><th>Original note</th><th>Text</th><th>How it was addressed</th></tr>"

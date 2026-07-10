@@ -24,32 +24,22 @@ def scan_module_symbols(module_name: str, pattern: str) -> list[SearchMatch]:
         return []
 
     pattern_lower = pattern.lower()
-    matches: list[SearchMatch] = []  # lup: ignore[empty-collection] — scan fold
 
-    for name in dir(mod):
-        if name.startswith("_"):
-            continue
-        if pattern_lower not in name.lower():
-            continue
-
+    def match_of(name: str) -> SearchMatch | None:
+        if name.startswith("_") or pattern_lower not in name.lower():
+            return None
         member = getattr(mod, name, None)
-        if member is None:
-            continue
-
+        if member is None or inspect.ismodule(member):
+            return None
         if inspect.isclass(member):
             kind = "class"
         elif inspect.isfunction(member) or inspect.isbuiltin(member):
             kind = "function"
-        elif inspect.ismodule(member):
-            continue
         else:
             kind = type(member).__name__
+        return SearchMatch(symbol=name, kind=kind, import_path=f"{module_name}.{name}")
 
-        matches.append(
-            SearchMatch(symbol=name, kind=kind, import_path=f"{module_name}.{name}")
-        )
-
-    return matches
+    return [m for name in dir(mod) if (m := match_of(name)) is not None]
 
 
 def get_top_level_packages() -> list[str]:

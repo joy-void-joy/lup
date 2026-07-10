@@ -287,21 +287,18 @@ def status_cmd() -> None:
         typer.echo("No projects tracked. Check downstream.json or run 'setup'.")
         raise typer.Exit(1)
 
-    rows: list[list[str]] = []  # lup: ignore[empty-collection] — display fold
-    for p in projects:
+    def project_row(p: ProjectEntry) -> list[str]:
         synced = p.get("last_synced_commit", "")
         synced_short = short_sha(synced) if synced else "never"
 
         if p.get("ignore"):
-            rows.append([p["name"], "—", "ignored", "(skipped)"])
-            continue
+            return [p["name"], "—", "ignored", "(skipped)"]
 
         resolved = resolve_existing_path(p)
         if resolved is None:
             has_url = bool(p.get("url"))
             note = "not cloned (run: sync fetch)" if has_url else "no path/url"
-            rows.append([p["name"], "—", synced_short, note])
-            continue
+            return [p["name"], "—", synced_short, note]
 
         try:
             behind: int | str = commit_count(resolved, synced)
@@ -309,7 +306,9 @@ def status_cmd() -> None:
             behind = "?"
         branch = p.get("branch", "")
         source = f"{resolved} ({branch})" if branch else resolved
-        rows.append([p["name"], str(behind), synced_short, source])
+        return [p["name"], str(behind), synced_short, source]
+
+    rows = [project_row(p) for p in projects]
 
     typer.echo()
     typer.echo(format_table(("Project", "Behind", "Last Synced", "Source"), rows))
