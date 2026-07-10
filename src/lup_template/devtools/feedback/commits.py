@@ -18,8 +18,8 @@ from lup_template.devtools.utils import git
 logger = logging.getLogger(__name__)
 
 
-def get_uncommitted_session_ids() -> set[str]:  # lup: ignore[set-shape] — id set
-    """Find session IDs with uncommitted result files.
+def get_uncommitted_session_ids() -> list[str]:
+    """Find session IDs with uncommitted result files, deduplicated, file order.
 
     Paths are matched against the *configured* trace root (``lup.workspace.paths``),
     so a relocated ``AGENT_NOTES_PATH`` keeps ``feedback commit`` working.
@@ -30,7 +30,7 @@ def get_uncommitted_session_ids() -> set[str]:  # lup: ignore[set-shape] — id 
         traces_rel = traces_path().relative_to(project_root())
     except ValueError:
         # Trace root configured outside the repo — nothing for git to commit
-        return set()  # lup: ignore[set-shape]
+        return []
 
     status = str(git.status("--porcelain", "-z", "--", str(traces_rel), _ok_code=[0]))
     return session_ids_from_status(status, traces_rel)
@@ -39,14 +39,14 @@ def get_uncommitted_session_ids() -> set[str]:  # lup: ignore[set-shape] — id 
 def session_ids_from_status(
     status: str,
     traces_rel: Path,
-) -> set[str]:  # lup: ignore[set-shape] — deduplicated ids
-    """Parse ``git status --porcelain -z`` output into session IDs.
+) -> list[str]:
+    """Parse ``git status --porcelain -z`` output into deduplicated session IDs.
 
     Only paths under ``traces_rel`` with the versioned layout
     (``<version>/(sessions|logs)/<session_id>/...``) count; rename/copy
     entries contribute their target path and their source is discarded.
     """
-    session_ids: set[str] = set()  # lup: ignore[set-shape, empty-collection]
+    session_ids: list[str] = []  # lup: ignore[empty-collection] — record fold
     chunks = iter(status.split("\0"))  # lup: ignore[string-split] — -z records
     for chunk in chunks:
         if len(chunk) < 4:
@@ -59,9 +59,9 @@ def session_ids_from_status(
             continue
         match relative.relative_to(traces_rel).parts:
             case (_, "sessions" | "logs", session_id, *_):
-                session_ids.add(session_id)
+                session_ids.append(session_id)
 
-    return session_ids
+    return list(dict.fromkeys(session_ids))
 
 
 def get_session_summary(session_id: str) -> str:

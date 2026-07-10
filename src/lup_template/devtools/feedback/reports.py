@@ -67,7 +67,7 @@ def print_version_info(effective: list[str] | None) -> None:
 
 def print_data_availability(
     effective: list[str] | None,
-    all_session_ids: set[str],  # lup: ignore[set-shape] — deduplicated ids
+    all_session_ids: list[str],
 ) -> None:
     typer.echo("\n=== Data Availability ===\n")
 
@@ -215,11 +215,11 @@ def status(
     print_data_availability(effective, all_session_ids)
 
     analyzed = load_analyzed()
-    unanalyzed_ids = sorted(all_session_ids - analyzed)
+    unanalyzed_ids = sorted(i for i in all_session_ids if i not in analyzed)
 
     typer.echo("\n=== Analysis State ===\n")
     typer.echo(f"Session directories: {session_count}")
-    typer.echo(f"Analyzed: {len(analyzed & all_session_ids)}")
+    typer.echo(f"Analyzed: {sum(1 for i in all_session_ids if i in analyzed)}")
     typer.echo(f"Unanalyzed: {len(unanalyzed_ids)}")
 
     sessions = load_sessions_for_versions(effective)
@@ -533,24 +533,22 @@ def history(limit: int) -> None:
 def mark(session_ids: list[str]) -> None:
     """Mark sessions as analyzed in the feedback loop."""
     analyzed = load_analyzed()
-    new_ids = set(session_ids) - analyzed  # lup: ignore[set-shape] — id membership
+    new_ids = [i for i in dict.fromkeys(session_ids) if i not in analyzed]
     if not new_ids:
         typer.echo("All specified sessions already marked")
         return
-    analyzed.update(new_ids)
-    save_analyzed(analyzed)
+    save_analyzed(analyzed + new_ids)
     typer.echo(f"Marked {len(new_ids)} sessions as analyzed")
 
 
 def unmark(session_ids: list[str]) -> None:
     """Remove analysis marks from sessions."""
     analyzed = load_analyzed()
-    removed = analyzed.intersection(session_ids)
+    removed = [i for i in analyzed if i in session_ids]
     if not removed:
         typer.echo("None of the specified sessions were marked")
         return
-    analyzed -= removed
-    save_analyzed(analyzed)
+    save_analyzed([i for i in analyzed if i not in removed])
     typer.echo(f"Unmarked {len(removed)} sessions")
 
 
@@ -617,7 +615,7 @@ def unanalyzed(version: str | None, all_versions: bool) -> None:
     all_session_ids = collect_session_ids(effective)
     analyzed = load_analyzed()
 
-    for sid in sorted(all_session_ids - analyzed):
+    for sid in sorted(i for i in all_session_ids if i not in analyzed):
         typer.echo(sid)
 
 

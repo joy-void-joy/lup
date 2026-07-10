@@ -50,18 +50,18 @@ def get_top_level_packages() -> list[str]:
     except AttributeError:
         pass
 
-    packages: set[str] = set()  # lup: ignore[set-shape, empty-collection] — dedup
+    packages: list[str] = []  # lup: ignore[empty-collection] — per-dist fold
     for dist in importlib.metadata.distributions():
         top_level = dist.read_text("top_level.txt")
         if top_level:
             for line in top_level.splitlines():
                 pkg = line.strip()  # lup: ignore[string-strip] — metadata lines
                 if pkg and not pkg.startswith("_"):
-                    packages.add(pkg)
+                    packages.append(pkg)
         else:
             name = dist.metadata["Name"]
             if name:
                 # Distribution names use "-", import names "_" — the packaging
                 # convention this fallback normalizes by.
-                packages.add(name.replace("-", "_"))  # lup: ignore[string-replace]
-    return sorted(packages)
+                packages.append(name.replace("-", "_"))  # lup: ignore[string-replace]
+    return sorted(dict.fromkeys(packages))

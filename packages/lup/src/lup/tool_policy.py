@@ -18,7 +18,7 @@ Express each exclusion whichever way is cheaper to maintain:
   external server tools per dependency and subtract them.
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_names
 
@@ -40,10 +40,12 @@ class BaseToolPolicy:
         self,
         *,
         restricted_mode: bool = False,
-        excluded_tools: NameSet | None = None,
-        excluded_tags: NameSet | None = None,
+        excluded_tools: Iterable[str] | None = None,
+        excluded_tags: Iterable[str] | None = None,
     ) -> None:
         self.restricted_mode = restricted_mode
+        # Internal state is set-shaped for the exclusion algebra
+        # (difference/intersection in the filters below).
         tools_off = set(excluded_tools or ())  # lup: ignore[set-shape]
         tags_off = set(excluded_tags or ())  # lup: ignore[set-shape]
         self.excluded_tools: NameSet = tools_off
