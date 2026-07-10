@@ -240,7 +240,7 @@ def bump_cmd(
         typer.echo(f"Version {current} is not in X.Y.Z format")
         raise typer.Exit(1)
 
-    major, minor, patch_v = semver
+    major, minor, patch_v = semver.major, semver.minor, semver.patch
 
     if level is None:
         typer.echo(f"Current version: {current}")

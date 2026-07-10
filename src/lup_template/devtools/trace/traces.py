@@ -28,7 +28,9 @@ import re
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple, TypedDict
+from typing import TypedDict
+
+from pydantic import BaseModel
 
 import typer
 
@@ -49,7 +51,7 @@ from lup.workspace.paths import parse_timestamp, project_root, traces_path
 from lup_template.devtools.utils import output_json
 
 
-class TraceRef(NamedTuple):
+class TraceRef(BaseModel):
     """One discovered trace: which store it came from, its session id, its dir."""
 
     source: str
@@ -523,9 +525,17 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
     versions_iter = effective if effective else [None]
     for ver in versions_iter:
         for session_dir in iter_session_dirs(version=ver):
-            raw.append(TraceRef("sessions", session_dir.name, session_dir))
+            raw.append(
+                TraceRef(
+                    source="sessions", session_id=session_dir.name, path=session_dir
+                )
+            )
         for log_file in iter_trace_log_files(version=ver):
-            raw.append(TraceRef("logs", log_file.parent.name, log_file.parent))
+            raw.append(
+                TraceRef(
+                    source="logs", session_id=log_file.parent.name, path=log_file.parent
+                )
+            )
 
     if not raw:
         if as_json:
@@ -544,14 +554,14 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
         seen.values(), key=lambda row: entry_recency(row.path), reverse=True
     )
     entries: list[TraceRow] = []  # lup: ignore[empty-collection] — display fold
-    for source, session_id, path in unique[:limit]:
-        files = list(path.glob("*"))
+    for ref in unique[:limit]:
+        files = list(ref.path.glob("*"))
         size = sum(f.stat().st_size for f in files if f.is_file())
         entries.append(
             {
-                "session_id": session_id,
-                "source": source,
-                "backend": session_backend(path),
+                "session_id": ref.session_id,
+                "source": ref.source,
+                "backend": session_backend(ref.path),
                 "files": len(files),
                 "size_kb": round(size / 1024, 1),
             }

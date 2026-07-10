@@ -52,7 +52,8 @@ def list_cmd(
     as_json: JSON_OPT = False,
 ) -> None:
     """List available traces."""
-    effective, warning = resolve_version(version, all_versions)
+    scope = resolve_version(version, all_versions)
+    effective, warning = scope.versions, scope.warning
     if warning:
         typer.echo(warning)
     traces.list_traces(limit, effective, as_json)
@@ -69,7 +70,8 @@ def errors_cmd(
     as_json: JSON_OPT = False,
 ) -> None:
     """Show sessions with errors found in trace files."""
-    effective, warning = resolve_version(version, all_versions)
+    scope = resolve_version(version, all_versions)
+    effective, warning = scope.versions, scope.warning
     if warning:
         typer.echo(warning)
     traces.errors_in_traces(limit, effective, as_json)

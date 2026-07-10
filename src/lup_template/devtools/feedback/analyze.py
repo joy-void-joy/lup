@@ -115,7 +115,7 @@ def gather_error_patterns(sessions: Sequence[SessionData]) -> list[ErrorPattern]
 
 def build_report(version: str | None, all_versions: bool) -> AnalysisReport:
     """Build a complete analysis report."""
-    effective, _ = resolve_version(version, all_versions)
+    effective = resolve_version(version, all_versions).versions
     sessions = load_sessions_for_versions(effective)
 
     return {

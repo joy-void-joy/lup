@@ -46,7 +46,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import NamedTuple, TypedDict
+from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -59,8 +59,10 @@ ActionCallback = Callable[[str], Awaitable[None]]
 """Async callback for delivering actions (messages, commands, etc.)."""
 
 
-class DelayedAction(NamedTuple):
+class DelayedAction(BaseModel):
     """A pending delayed-action task with its content, so cancels can save ideas."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     task: asyncio.Task[None]
     content: str
@@ -363,14 +365,14 @@ class Scheduler:
     def add_delayed_action(self, content: str, delay: int) -> None:
         """Schedule an action with a delay. Cancelled if an event arrives."""
         task = asyncio.create_task(self.run_delayed_action(content, delay))
-        self.pending_actions.append(DelayedAction(task, content))
+        self.pending_actions.append(DelayedAction(task=task, content=content))
 
     def cancel_delayed_actions(self) -> None:
         """Cancel all pending delayed actions, saving them as ideas."""
-        for task, content in self.pending_actions:
-            if not task.done():
-                task.cancel()
-                self.ideas.append(content)
+        for action in self.pending_actions:
+            if not action.task.done():
+                action.task.cancel()
+                self.ideas.append(action.content)
         self.pending_actions.clear()
 
     async def run_delayed_action(self, content: str, delay: int) -> None:

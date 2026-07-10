@@ -61,7 +61,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Annotated, Literal, NamedTuple
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
@@ -173,7 +173,7 @@ type RelayEvent = Annotated[
 RELAY_EVENT_ADAPTER: TypeAdapter[RelayEvent] = TypeAdapter(RelayEvent)
 
 
-class EventOffset(NamedTuple):
+class EventOffset(BaseModel):
     """One parsed event with the file offset that consumes it (crash-safe apply)."""
 
     event: RelayEvent
@@ -306,20 +306,23 @@ class RealtimeMailbox:
                 continue
             try:
                 pairs.append(
-                    EventOffset(RELAY_EVENT_ADAPTER.validate_json(line), consumed)
+                    EventOffset(
+                        event=RELAY_EVENT_ADAPTER.validate_json(line),
+                        commit_offset=consumed,
+                    )
                 )
             except ValidationError:
                 logger.exception("Skipping malformed relay event: %r", line)
         if pairs:
-            pairs[-1] = EventOffset(pairs[-1].event, region_end)
+            pairs[-1] = pairs[-1].model_copy(update={"commit_offset": region_end})
         return pairs
 
     def read_new_events(self) -> list[RelayEvent]:
         """Return events appended since the last read (complete lines only)."""
         pairs = self.peek_new_events()
         if pairs:
-            self.read_offset = pairs[-1][1]
-        return [event for event, _ in pairs]
+            self.read_offset = pairs[-1].commit_offset
+        return [pair.event for pair in pairs]
 
     def consume_sleep_request(self) -> SleepInput | None:
         """Read and remove the sleep request, or None when the agent didn't sleep."""
@@ -658,13 +661,13 @@ async def run_relay_session(
         # applied — a cancellation or a raising handler then leaves the
         # offset on the first un-applied event, so the next poll redelivers
         # it. No agent event (the user-facing replies) is ever dropped.
-        for event, commit_offset in mailbox.peek_new_events():
+        for pair in mailbox.peek_new_events():
             await apply_relay_event(
-                event, scheduler=scheduler, trace_logger=trace_logger
+                pair.event, scheduler=scheduler, trace_logger=trace_logger
             )
             if on_event is not None:
-                await on_event(event)
-            mailbox.read_offset = commit_offset
+                await on_event(pair.event)
+            mailbox.read_offset = pair.commit_offset
 
     async def watch_mailbox() -> None:
         while not stop_watching.is_set():

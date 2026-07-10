@@ -144,14 +144,14 @@ def test_codex_session_env_relays_backend_settings(
         rw=[tmp_path / "session"],
     )
 
-    _prompt, mcp_env, _roots = build_codex_session(notes)
+    mcp_env = build_codex_session(notes).mcp_env
 
     assert mcp_env["AGENT_SDK"] == "codex"
     assert mcp_env["AGENT_MODEL"] == "gpt-5.5"
     assert "AGENT_AUX_MODEL" not in mcp_env
 
     monkeypatch.setattr(settings, "aux_model", "my-reviewer")
-    _prompt, mcp_env, _roots = build_codex_session(notes)
+    mcp_env = build_codex_session(notes).mcp_env
 
     assert mcp_env["AGENT_AUX_MODEL"] == "my-reviewer"
 

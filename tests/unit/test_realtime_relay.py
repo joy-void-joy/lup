@@ -106,19 +106,20 @@ class TestMailbox:
         pairs = reader.peek_new_events()
         assert len(pairs) == 2
         repeated = reader.peek_new_events()
-        assert [e.message for e, _ in repeated if isinstance(e, ReplyEvent)] == [
+        assert [
+            p.event.message for p in repeated if isinstance(p.event, ReplyEvent)
+        ] == [
             "first",
             "second",
         ]
 
-        first_event, first_offset = pairs[0]
-        assert isinstance(first_event, ReplyEvent)
-        reader.read_offset = first_offset
+        assert isinstance(pairs[0].event, ReplyEvent)
+        reader.read_offset = pairs[0].commit_offset
 
         redelivered = reader.peek_new_events()
-        assert [e.message for e, _ in redelivered if isinstance(e, ReplyEvent)] == [
-            "second"
-        ]
+        assert [
+            p.event.message for p in redelivered if isinstance(p.event, ReplyEvent)
+        ] == ["second"]
 
     def test_reset_for_new_run_clears_protocol_files(self, tmp_path: Path) -> None:
         """Re-running a session id must not replay the previous run: events,

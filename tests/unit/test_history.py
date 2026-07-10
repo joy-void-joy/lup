@@ -31,47 +31,48 @@ def seed_sessions(root: Path, version: str, count: int) -> None:
 
 def test_exact_version_with_enough_data(tmp_lup_project: Path) -> None:
     seed_sessions(tmp_lup_project, "1.2.3", 3)
-    versions, warning = resolve_version("1.2.3", min_datapoints=2)
-    assert versions == ["1.2.3"]
-    assert warning is None
+    scope = resolve_version("1.2.3", min_datapoints=2)
+    assert scope.versions == ["1.2.3"]
+    assert scope.warning is None
 
 
 def test_widens_to_same_minor(tmp_lup_project: Path) -> None:
     seed_sessions(tmp_lup_project, "1.2.3", 1)
     seed_sessions(tmp_lup_project, "1.2.0", 3)
-    versions, warning = resolve_version("1.2.3", min_datapoints=3)
-    assert set(versions or []) == {"1.2.0", "1.2.3"}
-    assert warning is not None
-    assert "v1.2.*" in warning
+    scope = resolve_version("1.2.3", min_datapoints=3)
+    assert set(scope.versions or []) == {"1.2.0", "1.2.3"}
+    assert scope.warning is not None
+    assert "v1.2.*" in scope.warning
 
 
 def test_widens_to_same_major(tmp_lup_project: Path) -> None:
     seed_sessions(tmp_lup_project, "1.2.3", 1)
     seed_sessions(tmp_lup_project, "1.0.0", 4)
-    versions, warning = resolve_version("1.2.3", min_datapoints=5)
-    assert set(versions or []) == {"1.0.0", "1.2.3"}
-    assert warning is not None
-    assert "v1.*" in warning
+    scope = resolve_version("1.2.3", min_datapoints=5)
+    assert set(scope.versions or []) == {"1.0.0", "1.2.3"}
+    assert scope.warning is not None
+    assert "v1.*" in scope.warning
 
 
 def test_falls_back_to_all_versions(tmp_lup_project: Path) -> None:
     seed_sessions(tmp_lup_project, "1.2.3", 1)
     seed_sessions(tmp_lup_project, "2.0.0", 1)
-    versions, warning = resolve_version("1.2.3", min_datapoints=10)
-    assert versions is None
-    assert warning is not None
-    assert "all versions" in warning
+    scope = resolve_version("1.2.3", min_datapoints=10)
+    assert scope.versions is None
+    assert scope.warning is not None
+    assert "all versions" in scope.warning
 
 
 def test_no_data_includes_all_versions_quietly(tmp_lup_project: Path) -> None:
-    versions, warning = resolve_version("1.2.3", min_datapoints=10)
-    assert versions is None
-    assert warning is None
+    scope = resolve_version("1.2.3", min_datapoints=10)
+    assert scope.versions is None
+    assert scope.warning is None
 
 
 def test_all_versions_flag_short_circuits(tmp_lup_project: Path) -> None:
     seed_sessions(tmp_lup_project, "1.2.3", 1)
-    assert resolve_version(None, all_versions=True) == (None, None)
+    scope = resolve_version(None, all_versions=True)
+    assert scope.versions is None and scope.warning is None
 
 
 # ---------------------------------------------------------------------------

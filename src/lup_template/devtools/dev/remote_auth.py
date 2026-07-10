@@ -7,16 +7,16 @@ unrecognized remotes pass. Callers gate remote operations on
 as one actionable message instead of a failed push.
 """
 
-from typing import NamedTuple
 from urllib.parse import urlparse
 
 import sh
 import typer
+from pydantic import BaseModel
 
 from lup_template.devtools.utils import gh, git
 
 
-class RemoteRef(NamedTuple):
+class RemoteRef(BaseModel):
     """A git remote reduced to what auth probing needs."""
 
     scheme: str
@@ -41,7 +41,9 @@ def parse_remote(remote_url: str) -> RemoteRef | None:
         parsed = urlparse(normalized)
     if parsed.scheme and parsed.hostname:
         user_prefix = f"{parsed.username}@" if parsed.username else ""
-        return RemoteRef(parsed.scheme, f"{user_prefix}{parsed.hostname}")
+        return RemoteRef(
+            scheme=parsed.scheme, destination=f"{user_prefix}{parsed.hostname}"
+        )
     return None
 
 
@@ -93,10 +95,9 @@ def check_remote_auth() -> bool:
     remote = parse_remote(remote_url)
     if remote is None:
         return True
-    scheme, destination = remote
-    match scheme:
+    match remote.scheme:
         case "ssh" | "git":
-            return probe_ssh_auth(destination, remote_url)
+            return probe_ssh_auth(remote.destination, remote_url)
         case "http" | "https":
             return probe_gh_auth(remote_url)
         case _:
