@@ -31,10 +31,10 @@ Examples:
 
     Load past sessions for analysis::
 
-        >>> sessions = load_sessions_json("s1")
+        >>> sessions = load_session_records("s1")
         >>> len(sessions)
         1
-        >>> sessions[0]["summary"]
+        >>> sessions[0].output["summary"]
         'done'
 
     Iterate sessions across versions::
@@ -56,9 +56,9 @@ from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, Field, SerializeAsAny
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, ValidationError
 
-from lup.types import JsonValue, Usage
+from lup.types import JsonObject, JsonValue, Usage
 from lup.telemetry.metrics import MetricsSummary
 from lup.workspace.paths import (
     TIMESTAMP_FMT,
@@ -69,9 +69,6 @@ from lup.workspace.paths import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Type alias for raw session JSON — schema varies by domain
-type SessionData = dict[str, JsonValue]
 
 
 class SessionResult[OutputT: BaseModel](BaseModel):
@@ -112,6 +109,33 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     outcome: str | None = Field(default=None, description="Outcome after resolution")
 
 
+class SessionRecord(BaseModel):
+    """A session result read back from disk, tolerant of domain variation.
+
+    The read-side counterpart of :class:`SessionResult`: every core field
+    is defaulted (old sessions may predate it), ``output`` stays raw JSON
+    because the domain's output model is not known at read time, and
+    fields a domain adds to its result model survive via ``extra="allow"``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    session_id: str = ""
+    task_id: str | None = None
+    agent_version: str = ""
+    agent_sdk: str | None = None
+    sdk_session_id: str | None = None
+    timestamp: str = ""
+    output: JsonObject = Field(default_factory=dict)
+    reasoning: str = ""
+    sources_consulted: list[str] = Field(default_factory=list)
+    duration_seconds: float | None = None
+    cost_usd: float | None = None
+    token_usage: Usage | None = None
+    tool_metrics: MetricsSummary | None = None
+    outcome: JsonValue = None
+
+
 def save_session(
     result: BaseModel,  # lup: ignore[bare-basemodel] — any domain's result model
     *,
@@ -150,49 +174,52 @@ def session_backend(session_dir: Path) -> str | None:
             data = json.loads(filepath.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        if isinstance(data, dict):
-            sdk = data.get("agent_sdk")  # lup: ignore[dict-get] — payload probe
-            if isinstance(sdk, str):
-                return sdk
+        try:
+            record = SessionRecord.model_validate(data)
+        except ValidationError:
+            continue
+        if record.agent_sdk:
+            return record.agent_sdk
     return None
 
 
-def load_sessions_json(session_id: str) -> list[SessionData]:
-    """Load all session JSON dicts for a given ID across all versions.
+def load_session_records(session_id: str) -> list[SessionRecord]:
+    """Load all session records for a given ID across all versions.
 
-    Returns raw dicts rather than typed models, so this function has
-    no dependency on domain-specific model classes.
+    Core fields are typed via :class:`SessionRecord`; domain-added
+    fields ride along as extras, so this function still has no
+    dependency on domain-specific model classes.
 
     Args:
         session_id: The session identifier.
 
     Returns:
-        List of session dicts, sorted by timestamp field (oldest first).
+        List of session records, sorted by timestamp (oldest first).
     """
-    sessions: list[SessionData] = []  # lup: ignore[empty-collection] — tolerant fold
+    sessions: list[SessionRecord] = []  # lup: ignore[empty-collection] — tolerant fold
 
     for session_dir in iter_session_dirs(session_id=session_id):
         for filepath in sorted(session_dir.glob("*.json")):
             try:
-                data: SessionData = json.loads(filepath.read_text(encoding="utf-8"))
-                sessions.append(data)
-            except (json.JSONDecodeError, OSError) as e:
+                data = json.loads(filepath.read_text(encoding="utf-8"))
+                sessions.append(SessionRecord.model_validate(data))
+            except (json.JSONDecodeError, OSError, ValidationError) as e:
                 logger.warning("Failed to load session from %s: %s", filepath, e)
 
-    sessions.sort(key=lambda s: str(s.get("timestamp", "")))  # lup: ignore[dict-get]
+    sessions.sort(key=lambda s: s.timestamp)
     return sessions
 
 
-def get_latest_session_json(session_id: str) -> SessionData | None:
-    """Get the most recent session dict for an ID.
+def latest_session_record(session_id: str) -> SessionRecord | None:
+    """Get the most recent session record for an ID.
 
     Args:
         session_id: The session identifier.
 
     Returns:
-        The most recent session dict, or None if no sessions exist.
+        The most recent session record, or None if no sessions exist.
     """
-    sessions = load_sessions_json(session_id)
+    sessions = load_session_records(session_id)
     return sessions[-1] if sessions else None
 
 
@@ -233,7 +260,7 @@ def update_session_metadata(
     latest_file = max(all_files, key=file_timestamp)
 
     try:
-        data: SessionData = json.loads(latest_file.read_text(encoding="utf-8"))
+        data: JsonObject = json.loads(latest_file.read_text(encoding="utf-8"))
 
         if outcome is not None:
             data["outcome"] = outcome
@@ -252,43 +279,42 @@ def update_session_metadata(
 # -- Default formatter for format_history_for_context -------------------------
 
 
-def default_session_formatter(session: SessionData) -> str:
-    """Format a session dict as a markdown summary.
+def default_session_formatter(session: SessionRecord) -> str:
+    """Format a session record as a markdown summary.
 
     Extracts common fields that most domains will have. Downstream
     projects can provide a custom formatter for domain-specific display.
     """
-    stamp = session.get("timestamp", "unknown")  # lup: ignore[dict-get] — optional key
+    stamp = session.timestamp or "unknown"
     lines: list[str] = [f"### {stamp}"]
 
-    output = session.get("output", {})  # lup: ignore[dict-get] — optional key
-    if isinstance(output, dict):
-        if "summary" in output:
-            lines.append(f"**Summary**: {str(output['summary'])[:200]}...")
-        if "confidence" in output:
-            confidence = output["confidence"]
-            if isinstance(confidence, (int, float)):
-                lines.append(f"**Confidence**: {confidence:.1%}")
+    output = session.output
+    if "summary" in output:
+        lines.append(f"**Summary**: {str(output['summary'])[:200]}...")
+    if "confidence" in output:
+        confidence = output["confidence"]
+        if isinstance(confidence, (int, float)):
+            lines.append(f"**Confidence**: {confidence:.1%}")
 
-    if session.get("outcome"):  # lup: ignore[dict-get] — optional key
-        lines.append(f"**Outcome**: {session['outcome']}")
+    if session.outcome:
+        lines.append(f"**Outcome**: {session.outcome}")
 
     lines.append("")
     return "\n".join(lines)
 
 
 def format_history_for_context(
-    sessions: list[SessionData],
+    sessions: list[SessionRecord],
     *,
     max_sessions: int = 5,
-    formatter: Callable[[SessionData], str] | None = None,
+    formatter: Callable[[SessionRecord], str] | None = None,
 ) -> str:
     """Format past sessions as context for the agent.
 
     Args:
-        sessions: List of session dicts (from :func:`load_sessions_json`).
+        sessions: List of session records (from :func:`load_session_records`).
         max_sessions: Maximum number of sessions to include.
-        formatter: Callable that formats a single session dict into
+        formatter: Callable that formats a single session record into
             a markdown string. Uses a default formatter if ``None``.
 
     Returns:

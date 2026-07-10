@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from lup.workspace.history import iter_session_dirs, load_sessions_json, save_session
+from lup.types import Usage
+from lup.workspace.history import iter_session_dirs, load_session_records, save_session
 from lup.workspace.paths import configure, project_root
 
 ORIGINAL_ROOT = project_root()
@@ -35,9 +36,9 @@ class TestSessionRoundTrip:
         assert saved_path.is_relative_to(
             isolated_root / "notes" / "traces" / "1.2.3" / "sessions" / "s1"
         )
-        loaded = load_sessions_json("s1")
+        loaded = load_session_records("s1")
         assert len(loaded) == 1
-        assert loaded[0]["value"] == 42
+        assert loaded[0].model_extra == {"value": 42}
 
     def test_iter_session_dirs_filters_by_session(self, isolated_root: Path) -> None:
         save_session(DemoResult(session_id="a", value=1), session_id="a")
@@ -50,7 +51,7 @@ class TestSessionRoundTrip:
         assert all_dirs == {"a", "b"}
 
     def test_load_missing_session_returns_empty(self, isolated_root: Path) -> None:
-        assert load_sessions_json("ghost") == []
+        assert load_session_records("ghost") == []
 
 
 class CodexResult(BaseModel):
@@ -77,9 +78,9 @@ class TestBackendStamp:
             session_id="cx1",
         )
 
-        loaded = load_sessions_json("cx1")
-        assert loaded[0]["agent_sdk"] == "codex"
-        assert loaded[0]["token_usage"] == {"input_tokens": 540, "output_tokens": 88}
+        loaded = load_session_records("cx1")
+        assert loaded[0].agent_sdk == "codex"
+        assert loaded[0].token_usage == Usage(input_tokens=540, output_tokens=88)
 
         session_dirs = list(iter_session_dirs(session_id="cx1"))
         assert session_backend(session_dirs[0]) == "codex"
