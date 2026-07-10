@@ -6,7 +6,7 @@ import io
 import signal
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from rich.console import Console
@@ -21,7 +21,13 @@ import typer
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
 
-type ClipboardImage = tuple[str, bytes]  # lup: ignore[tuple-shape] — (mime, bytes)
+
+class ClipboardImage(NamedTuple):
+    """Raw image bytes read from the clipboard, with their MIME type."""
+
+    media_type: str
+    data: bytes
+
 
 MIME_TO_EXT: dict[str, str] = {  # lup: ignore[dict-str-payload] — mime → suffix
     "image/png": ".png",
@@ -70,7 +76,7 @@ def read_clipboard_image() -> ClipboardImage | None:
             xclip("-selection", "clipboard", "-o", "-t", mime, _out=buf)
             data = buf.getvalue()
             if data:
-                return (mime, data)
+                return ClipboardImage(mime, data)
         except sh.ErrorReturnCode:
             continue
     return None

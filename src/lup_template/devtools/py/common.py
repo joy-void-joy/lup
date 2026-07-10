@@ -16,9 +16,14 @@ from lup.workspace.paths import find_nearest_pyproject
 # ---------------------------------------------------------------------------
 
 
-def resolve_object(
-    path: str,
-) -> tuple[object, str]:  # lup: ignore[tuple-shape] — (live object, leaf name)
+class ResolvedObject(typing.NamedTuple):
+    """A resolved dotted path: the live object and the leaf name that reached it."""
+
+    value: object  # lup: ignore[bare-object] — any importable live object
+    leaf_name: str
+
+
+def resolve_object(path: str) -> ResolvedObject:
     """Resolve a dotted or colon path to a Python object, returning (object, leaf_name).
 
     Accepts both ``module.sub.Object`` (dot form) and the entry-point
@@ -37,7 +42,9 @@ def resolve_object(
                 obj = getattr(obj, attr)
             except AttributeError as e:
                 raise ValueError(f"'{module_path}' has no attribute '{attr}'") from e
-        return obj, attrs[-1] if attrs else module_path.rsplit(".", 1)[-1]
+        return ResolvedObject(
+            obj, attrs[-1] if attrs else module_path.rsplit(".", 1)[-1]
+        )
 
     parts = path.split(".")  # lup: ignore[string-split] — dotted-path segments
     for i in range(len(parts), 0, -1):
@@ -46,7 +53,7 @@ def resolve_object(
             obj = importlib.import_module(module_path)
             for attr in parts[i:]:
                 obj = getattr(obj, attr)
-            return obj, parts[-1]
+            return ResolvedObject(obj, parts[-1])
         except (ImportError, AttributeError):
             continue
     raise ValueError(f"Could not resolve: {path}")

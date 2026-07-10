@@ -61,7 +61,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
@@ -172,8 +172,12 @@ type RelayEvent = Annotated[
 
 RELAY_EVENT_ADAPTER: TypeAdapter[RelayEvent] = TypeAdapter(RelayEvent)
 
-type EventOffset = tuple[RelayEvent, int]  # lup: ignore[tuple-shape] — commit pair
-"""One parsed event with the file offset that consumes it (crash-safe apply)."""
+
+class EventOffset(NamedTuple):
+    """One parsed event with the file offset that consumes it (crash-safe apply)."""
+
+    event: RelayEvent
+    commit_offset: int
 
 
 class RelayState(BaseModel):
@@ -301,12 +305,13 @@ class RealtimeMailbox:
             if not line:
                 continue
             try:
-                pairs.append((RELAY_EVENT_ADAPTER.validate_json(line), consumed))
+                pairs.append(
+                    EventOffset(RELAY_EVENT_ADAPTER.validate_json(line), consumed)
+                )
             except ValidationError:
                 logger.exception("Skipping malformed relay event: %r", line)
         if pairs:
-            event, _ = pairs[-1]
-            pairs[-1] = (event, region_end)
+            pairs[-1] = EventOffset(pairs[-1].event, region_end)
         return pairs
 
     def read_new_events(self) -> list[RelayEvent]:

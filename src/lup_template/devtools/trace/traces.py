@@ -28,7 +28,7 @@ import re
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 
 import typer
 
@@ -48,7 +48,13 @@ from lup.workspace.paths import parse_timestamp, project_root, traces_path
 
 from lup_template.devtools.utils import output_json
 
-type TraceRef = tuple[str, str, Path]  # lup: ignore[tuple-shape] — source/id/path
+
+class TraceRef(NamedTuple):
+    """One discovered trace: which store it came from, its session id, its dir."""
+
+    source: str
+    session_id: str
+    path: Path
 
 
 # ── types ─────────────────────────────────────────────────
@@ -517,9 +523,9 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
     versions_iter = effective if effective else [None]
     for ver in versions_iter:
         for session_dir in iter_session_dirs(version=ver):
-            raw.append(("sessions", session_dir.name, session_dir))
+            raw.append(TraceRef("sessions", session_dir.name, session_dir))
         for log_file in iter_trace_log_files(version=ver):
-            raw.append(("logs", log_file.parent.name, log_file.parent))
+            raw.append(TraceRef("logs", log_file.parent.name, log_file.parent))
 
     if not raw:
         if as_json:
@@ -530,11 +536,13 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
         return
 
     seen: dict[str, TraceRef] = {}  # lup: ignore[empty-collection] — dedup fold
-    for source, session_id, path in raw:
-        if session_id not in seen or source == "logs":
-            seen[session_id] = (source, session_id, path)
+    for ref in raw:
+        if ref.session_id not in seen or ref.source == "logs":
+            seen[ref.session_id] = ref
 
-    unique = sorted(seen.values(), key=lambda row: entry_recency(row[2]), reverse=True)
+    unique = sorted(
+        seen.values(), key=lambda row: entry_recency(row.path), reverse=True
+    )
     entries: list[TraceRow] = []  # lup: ignore[empty-collection] — display fold
     for source, session_id, path in unique[:limit]:
         files = list(path.glob("*"))

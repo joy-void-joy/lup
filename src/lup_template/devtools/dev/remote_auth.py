@@ -7,6 +7,7 @@ unrecognized remotes pass. Callers gate remote operations on
 as one actionable message instead of a failed push.
 """
 
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 import sh
@@ -15,9 +16,14 @@ import typer
 from lup_template.devtools.utils import gh, git
 
 
-def parse_remote(
-    remote_url: str,
-) -> tuple[str, str] | None:  # lup: ignore[tuple-shape] — (scheme, destination)
+class RemoteRef(NamedTuple):
+    """A git remote reduced to what auth probing needs."""
+
+    scheme: str
+    destination: str
+
+
+def parse_remote(remote_url: str) -> RemoteRef | None:
     """Parse a git remote into (scheme, destination) for auth probing.
 
     URL forms (https://host/org/repo, ssh://git@host/org/repo) are parsed
@@ -35,7 +41,7 @@ def parse_remote(
         parsed = urlparse(normalized)
     if parsed.scheme and parsed.hostname:
         user_prefix = f"{parsed.username}@" if parsed.username else ""
-        return parsed.scheme, f"{user_prefix}{parsed.hostname}"
+        return RemoteRef(parsed.scheme, f"{user_prefix}{parsed.hostname}")
     return None
 
 
