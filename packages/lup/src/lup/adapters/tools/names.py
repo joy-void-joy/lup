@@ -20,7 +20,7 @@ WEB_FETCH = "WebFetch"
 WEB_SEARCH = "WebSearch"
 WRITE = "Write"
 
-WEB_TOOLS: set[str] = {WEB_SEARCH, WEB_FETCH}  # lup: ignore[set-shape] — membership
+WEB_TOOLS = (WEB_SEARCH, WEB_FETCH)
 """The web-reaching builtins — search and fetch. Code that keys on whether a
-turn touched the web matches against this set instead of re-listing the two
-names."""
+turn touched the web matches against these names instead of re-listing the
+two."""

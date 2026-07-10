@@ -14,7 +14,7 @@ reporting three classes the hook cannot catch after the fact:
   typed `# lup: ignore[id]` directives is gradual.
 """
 
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import typer
@@ -63,16 +63,16 @@ def summarize(as_json: bool) -> None:
     found = scan_antipatterns()
     by_rule: Counter[str] = Counter()
     by_kind: Counter[str] = Counter()
-    files_by_rule: dict[str, set[str]] = {}  # lup: ignore[set-shape, empty-collection]
+    files_by_rule: defaultdict[str, list[str]] = defaultdict(list)
     for finding in found:
         rule = finding.rule_id or "(bare)"
         by_rule[rule] += 1
         by_kind[finding.kind] += 1
-        rule_files = files_by_rule.setdefault(rule, set())  # lup: ignore[set-shape]
-        rule_files.add(finding.file)
+        if finding.file not in files_by_rule[rule]:
+            files_by_rule[rule].append(finding.file)
 
     blocking = sum(1 for finding in found if finding.kind not in ADVISORY_KINDS)
-    file_count = len({finding.file for finding in found})
+    file_count = len(dict.fromkeys(finding.file for finding in found))
 
     if as_json:
         output_json(

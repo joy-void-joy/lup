@@ -115,13 +115,17 @@ def load_sessions_for_versions(
 
 def collect_session_ids(
     effective: list[str] | None,
-) -> set[str]:  # lup: ignore[set-shape] — deduplicated ids
-    """Collect all session IDs for the given version list (None = all)."""
+) -> list[str]:
+    """Collect all session IDs for the given version list (None = all), deduplicated."""
     if not effective:
-        return set(list_all_session_ids())  # lup: ignore[set-shape]
-    return {
-        session_id for v in effective for session_id in list_all_session_ids(version=v)
-    }
+        return list_all_session_ids()
+    return list(
+        dict.fromkeys(
+            session_id
+            for v in effective
+            for session_id in list_all_session_ids(version=v)
+        )
+    )
 
 
 # =============================================================================
@@ -134,20 +138,18 @@ def analyzed_file() -> Path:
     return feedback_path() / "analyzed.json"
 
 
-def load_analyzed() -> set[str]:  # lup: ignore[set-shape] — id membership
-    """Load the set of already-analyzed session IDs."""
+def load_analyzed() -> list[str]:
+    """Load the already-analyzed session IDs (sorted on save, deduplicated)."""
     path = analyzed_file()
     if not path.exists():
-        return set()  # lup: ignore[set-shape]
+        return []
     data: dict[str, list[str]] = json.loads(path.read_text())
-    return set(data.get("analyzed", []))  # lup: ignore[set-shape]
+    return list(dict.fromkeys(data.get("analyzed", [])))
 
 
-def save_analyzed(
-    session_ids: set[str],  # lup: ignore[set-shape] — id membership
-) -> None:
-    """Save the set of analyzed session IDs."""
+def save_analyzed(session_ids: list[str]) -> None:
+    """Save the analyzed session IDs, sorted and deduplicated."""
     feedback_path().mkdir(parents=True, exist_ok=True)
     analyzed_file().write_text(
-        json.dumps({"analyzed": sorted(session_ids)}, indent=2) + "\n"
+        json.dumps({"analyzed": sorted(dict.fromkeys(session_ids))}, indent=2) + "\n"
     )

@@ -22,6 +22,7 @@ Usage:
     hooks = create_tool_allowlist_hook(policy.get_allowed_tools(mcp_servers))
 """
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from lup.adapters.tools.names import BASH
@@ -60,8 +61,8 @@ class ToolPolicy(BaseToolPolicy):
         settings: "Settings",
         *,
         restricted_mode: bool = False,
-        excluded_tools: set[str] | None = None,  # lup: ignore[set-shape] — membership
-        excluded_tags: set[str] | None = None,  # lup: ignore[set-shape] — membership
+        excluded_tools: Iterable[str] | None = None,
+        excluded_tags: Iterable[str] | None = None,
     ) -> None:
         tags: set[str] = set(excluded_tags or ())  # lup: ignore[set-shape]
         names: set[str] = set(excluded_tools or ())  # lup: ignore[set-shape]

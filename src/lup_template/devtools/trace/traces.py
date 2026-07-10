@@ -275,7 +275,7 @@ def scan_for_capability_gaps(
         {
             "text": text,
             "count": len(session_ids),
-            "session_ids": sorted(set(session_ids)),  # lup: ignore[set-shape]
+            "session_ids": sorted(dict.fromkeys(session_ids)),
         }
         for text, session_ids in sorted(
             requests_by_text.items(), key=lambda x: -len(x[1])

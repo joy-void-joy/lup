@@ -18,6 +18,7 @@ Examples::
     $ uv run lup-devtools dev todos --json
 """
 
+from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
@@ -111,14 +112,14 @@ def clear_markers(targets: list[str]) -> None:
         else:
             del lines[comment.start_line - 1 : comment.end_line]
 
-    by_file: dict[str, set[int]] = {}  # lup: ignore[set-shape, empty-collection]
+    by_file: defaultdict[str, list[int]] = defaultdict(list)
     for target in targets:
         rel, _, line_str = target.rpartition(":")
         if not rel or not line_str.isdigit():
             typer.echo(f"Skipping malformed target: {target}", err=True)
             continue
-        file_lines = by_file.setdefault(rel, set())  # lup: ignore[set-shape]
-        file_lines.add(int(line_str))
+        if int(line_str) not in by_file[rel]:
+            by_file[rel].append(int(line_str))
 
     for rel, wanted in by_file.items():
         path = Path(rel)

@@ -318,7 +318,7 @@ class TestSessionIdsFromStatus:
 
         ids = session_ids_from_status(status, root)
 
-        assert ids == {"sess with space", "sess-2"}
+        assert ids == ["sess with space", "sess-2"]
 
     def test_rename_source_is_discarded(self) -> None:
         from lup_template.devtools.feedback.commits import session_ids_from_status
@@ -334,4 +334,4 @@ class TestSessionIdsFromStatus:
 
         ids = session_ids_from_status(status, root)
 
-        assert ids == {"new-id"}
+        assert ids == ["new-id"]

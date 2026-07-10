@@ -142,15 +142,15 @@ def auto_import_namespace(
     """Build a namespace by importing modules referenced in the expression."""
     namespace = dict(SAFE_BUILTINS)
 
-    root_names: set[str] = set()  # lup: ignore[set-shape, empty-collection]
+    root_names: list[str] = []  # lup: ignore[empty-collection] — walk fold
     attr_nodes: list[ast.Attribute] = []  # lup: ignore[empty-collection] — walk fold
     for node in ast.walk(tree.body):
         if isinstance(node, ast.Name) and node.id not in namespace:
-            root_names.add(node.id)
+            root_names.append(node.id)
         elif isinstance(node, ast.Attribute):
             attr_nodes.append(node)
 
-    for name in root_names:
+    for name in dict.fromkeys(root_names):
         if name in DANGEROUS_MODULES:
             continue
         try:
@@ -158,7 +158,7 @@ def auto_import_namespace(
         except ImportError:
             pass
 
-    dotted_paths: set[str] = set()  # lup: ignore[set-shape, empty-collection]
+    dotted_paths: list[str] = []  # lup: ignore[empty-collection] — chain fold
     for node in attr_nodes:
         chain: list[str] = []  # lup: ignore[empty-collection] — attr-chain walk
         current: ast.expr = node
@@ -169,9 +169,9 @@ def auto_import_namespace(
             chain.append(current.id)
             chain.reverse()
             for i in range(2, len(chain) + 1):
-                dotted_paths.add(".".join(chain[:i]))
+                dotted_paths.append(".".join(chain[:i]))
 
-    for dotted in sorted(dotted_paths):
+    for dotted in sorted(dict.fromkeys(dotted_paths)):
         root, _, _ = dotted.partition(".")
         if root in DANGEROUS_MODULES:
             continue

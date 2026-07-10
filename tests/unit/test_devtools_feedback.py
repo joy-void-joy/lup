@@ -83,4 +83,4 @@ def test_uncommitted_session_ids_handle_spaces_and_renames(
     monkeypatch.chdir(repo)
     session_ids = commits.get_uncommitted_session_ids()
 
-    assert session_ids == {"sess with space", "renamed-session"}
+    assert sorted(session_ids) == ["renamed-session", "sess with space"]
