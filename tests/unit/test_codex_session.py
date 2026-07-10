@@ -17,7 +17,7 @@ import pytest
 from lup.adapters.clients.codex.native import CodexNativeConfig
 from lup.adapters.clients.codex.sessions import CodexSession, CodexSessions
 from lup.adapters.clients.codex.translate import subprocess_sandbox_cleanup
-from lup.adapters.clients.codex.usage import per_mtok_usage_cost
+from lup.adapters.clients.usage import per_mtok_usage_cost
 from lup.adapters.options import LupAgentOptions
 from lup.types import Usage
 

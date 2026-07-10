@@ -271,7 +271,7 @@ def build_usage_cost() -> "UsageCost | None":
     ``_CACHED_INPUT``). Without rates this stays ``None``, and a codex-tier
     engine given a budget refuses the construction.
     """
-    from lup.adapters.clients.codex.usage import per_mtok_usage_cost
+    from lup.adapters.clients.usage import per_mtok_usage_cost
 
     if (
         settings.codex_usd_per_mtok_input is None
