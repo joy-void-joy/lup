@@ -118,6 +118,16 @@ def test_audit_skips_plain_comment_lines() -> None:
     assert findings == []
 
 
+def test_audit_skips_docstring_prose() -> None:
+    # Prose is not code, and no inline directive could ever guard a docstring
+    # line — a comment cannot open inside a string. Code outside stays audited.
+    text = '"""Unlike ``Any``, a set(x) here is\njust prose."""\nx: Any = 1\n'
+    findings = audit_text(text, PYTHON_ANTI_PATTERNS)
+    assert [(f.kind, f.line, f.rule_id) for f in findings] == [
+        ("missing", 3, "any-type")
+    ]
+
+
 def test_atomic_renames_are_exempt_from_replace_rule() -> None:
     # Path-receiver `.replace` is an atomic rename, not string surgery, so the
     # string-replace rule leaves it alone. (os.replace is redirected to
@@ -287,13 +297,24 @@ def test_audit_flags_declared_frozenset() -> None:
 
 
 def test_audit_flags_bare_set_shape() -> None:
-    # A bare `set` is flagged like frozenset; `frozenset` itself trips only
-    # frozenset-shape, since its "set" is not a standalone word.
-    for line in ("names: set[str]\n", "seen = set(values)\n"):
+    # A declared/constructed set is flagged like frozenset; `frozenset` itself
+    # trips only frozenset-shape, since its "set" is not a standalone word.
+    for line in (
+        "names: set[str]\n",
+        "seen = set(values)\n",
+        "def f(items: set) -> set:\n    return items\n",
+    ):
         rule_ids = {f.rule_id for f in audit_text(line, PYTHON_ANTI_PATTERNS)}
         assert "set-shape" in rule_ids, line
     frozen = audit_text("TOKENS = frozenset({'a'})\n", PYTHON_ANTI_PATTERNS)
     assert [f.rule_id for f in frozen] == ["frozenset-shape"]
+
+
+def test_audit_accepts_set_methods_and_prose() -> None:
+    # `.set()` is a method call, not a declared set shape, and the word "set"
+    # in a message string carries neither the bracket nor the annotation form.
+    clean = 'self.wake_event.set()\nmsg = "when set, the debounce window opens"\n'
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
 
 
 def test_audit_flags_empty_collection_literals() -> None:

@@ -185,7 +185,7 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "set-shape",
-        re.compile(r"\bset\b"),
+        re.compile(r"(?<!\.)\bset[\[(]|(?::|->)\s*set\b"),
         "A declared `set` is usually better as a dict (keyed lookup) or a purpose-built structure. For a genuinely set-shaped value add `# lup: ignore[set-shape]`",
     ),
     (
