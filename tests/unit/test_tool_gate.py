@@ -266,5 +266,5 @@ async def test_meta_before_sleep_guard_preset() -> None:
 async def test_sleep_result_carries_reason_and_time() -> None:
     scheduler = Scheduler(on_action=noop_action)
     result = await scheduler.sleep(0)
-    assert result.get("reason") == "timer"
-    assert result.get("time")
+    assert result.reason == "timer"
+    assert result.time

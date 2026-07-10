@@ -31,14 +31,14 @@ class TestSleepWake:
         result = await scheduler.sleep(5)
         await waker_task
 
-        assert result.get("reason") == "new-message"
+        assert result.reason == "new-message"
 
     async def test_sleep_times_out_with_timer_reason(self) -> None:
         scheduler = make_scheduler()
 
         result = await scheduler.sleep(0)
 
-        assert result.get("reason") == "timer"
+        assert result.reason == "timer"
 
     async def test_pending_wake_returns_immediately_then_clears(self) -> None:
         scheduler = make_scheduler()
@@ -46,7 +46,7 @@ class TestSleepWake:
 
         result = await scheduler.sleep(60)
 
-        assert result.get("reason") == "early"
+        assert result.reason == "early"
         assert scheduler.wake_pending is False
 
 
@@ -60,7 +60,7 @@ class TestDebounce:
 
         assert scheduler.wake_pending
         result = await scheduler.sleep(5)
-        assert result.get("reason") == "event"
+        assert result.reason == "event"
 
     async def test_empty_window_wakes_on_timer(self) -> None:
         scheduler = make_scheduler()
@@ -69,7 +69,7 @@ class TestDebounce:
         await asyncio.sleep(0.05)
 
         result = await scheduler.sleep(5)
-        assert result.get("reason") == "timer"
+        assert result.reason == "timer"
 
     async def test_replacing_window_cancels_previous(self) -> None:
         scheduler = make_scheduler()

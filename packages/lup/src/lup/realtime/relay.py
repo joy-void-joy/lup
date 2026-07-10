@@ -581,11 +581,9 @@ async def apply_relay_event(
 
 def default_wake_message(result: SleepResult) -> str:
     """Minimal wake message; supply build_wake_message for domain context."""
-    reason = result.get("reason", "timer")  # lup: ignore[dict-get] — optional key
-    parts = [f"[wake] reason: {reason}"]
-    fired = result.get("fired_reminders")  # lup: ignore[dict-get] — optional key
-    if fired:
-        parts.append("fired reminders: " + ", ".join(fired))
+    parts = [f"[wake] reason: {result.reason}"]
+    if result.fired_reminders:
+        parts.append("fired reminders: " + ", ".join(result.fired_reminders))
     parts.append("Read context, act as needed, then meta and sleep again.")
     return "\n".join(parts)
 
