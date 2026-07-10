@@ -242,7 +242,7 @@ class TestToolMetricsNull:
     def test_tools_does_not_crash_on_null_metrics(
         self, isolated_root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        from lup_template.devtools.feedback import state
+        from lup_template.devtools.feedback import reports
 
         self.write_session(
             isolated_root,
@@ -250,20 +250,20 @@ class TestToolMetricsNull:
             '"tool_metrics": null}',
         )
         # Would raise AttributeError before the fix (None.get(...)).
-        state.tools(version="1.2.3", all_versions=False, as_json=True)
+        reports.tools(version="1.2.3", all_versions=False, as_json=True)
         assert "Traceback" not in capsys.readouterr().err
 
     def test_errors_does_not_crash_on_null_metrics(
         self, isolated_root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        from lup_template.devtools.feedback import state
+        from lup_template.devtools.feedback import reports
 
         self.write_session(
             isolated_root,
             '{"session_id": "s-null", "timestamp": "2026-01-01T00:00:00", '
             '"tool_metrics": null}',
         )
-        state.errors(limit=10, version="1.2.3", all_versions=False, as_json=True)
+        reports.errors(limit=10, version="1.2.3", all_versions=False, as_json=True)
         assert "Traceback" not in capsys.readouterr().err
 
 
@@ -300,7 +300,7 @@ class TestWriteEnvLocal:
 
 class TestSessionIdsFromStatus:
     def test_versioned_layout_and_root_anchoring(self) -> None:
-        from lup_template.devtools.feedback.state import session_ids_from_status
+        from lup_template.devtools.feedback.commits import session_ids_from_status
 
         root = Path("notes/traces")
         status = "\0".join(
@@ -318,7 +318,7 @@ class TestSessionIdsFromStatus:
         assert ids == {"sess with space", "sess-2"}
 
     def test_rename_source_is_discarded(self) -> None:
-        from lup_template.devtools.feedback.state import session_ids_from_status
+        from lup_template.devtools.feedback.commits import session_ids_from_status
 
         root = Path("notes/traces")
         status = "\0".join(

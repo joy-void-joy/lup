@@ -12,7 +12,8 @@ from pathlib import Path
 from collections.abc import Sequence
 from typing import TypedDict
 
-from lup_template.devtools.feedback.state import SessionData, load_sessions_for_versions
+from lup_template.devtools.feedback.models import SessionData
+from lup_template.devtools.feedback.state import load_sessions_for_versions
 from lup_template.devtools.trace.traces import (
     CapabilityRequest,
     scan_for_capability_gaps,

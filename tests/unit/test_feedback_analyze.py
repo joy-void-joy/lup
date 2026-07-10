@@ -12,7 +12,7 @@ from lup_template.devtools.feedback.analyze import (
     gather_error_patterns,
     gather_tool_health,
 )
-from lup_template.devtools.feedback.state import SessionData
+from lup_template.devtools.feedback.models import SessionData
 
 
 def tool_metrics(call_count: int, error_count: int) -> ToolMetricsDict:
