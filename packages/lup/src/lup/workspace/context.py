@@ -13,11 +13,10 @@ cannot drift apart. In-process backends run these tools in the agent
 process and never touch the relay.
 """
 
-import os
-from collections.abc import Mapping
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
 
 SESSION_DIR_ENV = "LUP_SESSION_DIR"
 OUTPUTS_DIR_ENV = "LUP_OUTPUTS_DIR"
@@ -53,30 +52,35 @@ class SessionContext(BaseModel):
         return env
 
 
-def read_session_context(
-    environ: Mapping[str, str] | None = None,  # lup: ignore[dict-str-payload]
-) -> SessionContext | None:
+class SessionEnv(BaseSettings):
+    """The relay's consumer side, parsed from the environment by pydantic-settings.
+
+    Each field's alias is the same constant :meth:`SessionContext.to_env`
+    writes, so the producer and consumer cannot drift apart.
+    """
+
+    session_dir: Path | None = Field(default=None, validation_alias=SESSION_DIR_ENV)
+    outputs_dir: Path | None = Field(default=None, validation_alias=OUTPUTS_DIR_ENV)
+    gate_flag: Path | None = Field(default=None, validation_alias=GATE_FLAG_ENV)
+    session_id: str | None = Field(default=None, validation_alias=SESSION_ID_ENV)
+    task_id: str | None = Field(default=None, validation_alias=TASK_ID_ENV)
+    realtime_dir: Path | None = Field(default=None, validation_alias=REALTIME_DIR_ENV)
+
+
+def read_session_context() -> SessionContext | None:
     """Read a SessionContext from env vars, or None when not in a session.
 
     Returns None when ``LUP_SESSION_DIR`` is unset — the marker that the
     process was not launched by an adapter (e.g. plain devtools usage).
-    This module IS the subprocess env boundary, so it reads ``os.environ``
-    directly rather than through settings.
     """
-    env = os.environ if environ is None else environ  # lup: ignore[os-environ]
-    session_dir = env.get(SESSION_DIR_ENV)  # lup: ignore[dict-get] — env map
-    if not session_dir:
+    env = SessionEnv()
+    if env.session_dir is None:
         return None
-
-    def path_or_none(key: str) -> Path | None:
-        value = env.get(key)  # lup: ignore[dict-get] — env map
-        return Path(value) if value else None
-
     return SessionContext(
-        session_dir=Path(session_dir),
-        outputs_dir=path_or_none(OUTPUTS_DIR_ENV),
-        gate_flag=path_or_none(GATE_FLAG_ENV),
-        session_id=env.get(SESSION_ID_ENV) or None,  # lup: ignore[dict-get]
-        task_id=env.get(TASK_ID_ENV) or None,  # lup: ignore[dict-get]
-        realtime_dir=path_or_none(REALTIME_DIR_ENV),
+        session_dir=env.session_dir,
+        outputs_dir=env.outputs_dir,
+        gate_flag=env.gate_flag,
+        session_id=env.session_id or None,
+        task_id=env.task_id or None,
+        realtime_dir=env.realtime_dir,
     )

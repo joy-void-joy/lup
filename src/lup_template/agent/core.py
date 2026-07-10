@@ -21,7 +21,12 @@ if TYPE_CHECKING:
     from lup.sandbox.container import Sandbox
     from lup.types import UsageCost
 
-from lup_template.agent.config import settings
+from lup_template.agent.config import (
+    compat_api_key,
+    compat_base_url,
+    engine_for_settings,
+    settings,
+)
 from lup_template.agent.models import AgentOutput, AgentSessionResult
 from lup.adapters.clients.Client import Client
 from lup.adapters.tools.names import WEB_TOOLS
@@ -244,8 +249,8 @@ def build_session_options(
         turn_timeout_seconds=settings.turn_timeout_seconds,
         usage_cost=build_usage_cost(),
         realtime=realtime,
-        base_url=settings.openai_base_url,
-        api_key=settings.openai_api_key,
+        base_url=compat_base_url(),
+        api_key=compat_api_key(),
         model_provider=settings.openai_model_provider,
         codex_sandbox=settings.codex_sandbox,
         approval_policy=settings.codex_approval_policy,
@@ -329,15 +334,6 @@ def build_usage_cost() -> "UsageCost | None":
         output_usd=settings.codex_usd_per_mtok_output,
         cached_input_usd=settings.codex_usd_per_mtok_cached_input,
     )
-
-
-def engine_for_settings() -> str:
-    """Map ``settings.agent_sdk`` to the engine id.
-
-    The values coincide except the legacy alias: ``AGENT_SDK=openai``
-    means the OpenAI-compatible engine.
-    """
-    return "openai-compat" if settings.agent_sdk == "openai" else settings.agent_sdk
 
 
 def resolve_resume_token(reference: str) -> str:

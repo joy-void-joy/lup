@@ -46,7 +46,12 @@ from pydantic import BaseModel, Field
 
 from lup.adapters.wiring import query
 from lup.mcp import ToolError, lup_tool
-from lup_template.agent.config import aux_model
+from lup_template.agent.config import (
+    aux_model,
+    compat_api_key,
+    compat_base_url,
+    engine_for_settings,
+)
 
 
 # --- Schemas ---
@@ -209,6 +214,9 @@ async def extract_answer(content: str, question: str) -> str:
     response = await query(
         f"Question: {question}\n\nDocument:\n{content}",
         model=aux_model(),
+        engine=engine_for_settings(),
+        base_url=compat_base_url(),
+        api_key=compat_api_key(),
         system_prompt=(
             "Answer the question using only the document provided. "
             "Reply with the answer alone; say so if the document does "

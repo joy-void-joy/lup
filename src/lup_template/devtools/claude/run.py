@@ -84,6 +84,9 @@ def run_claude(
 
     support = ClaudeProfile()
     config_dir = support.resolve_config_dir(profile)
+    # Forwarding the full parent env to the `claude` child process (plus the
+    # profile's config dir) — process spawning, not config reading, so no
+    # settings layer applies.
     env = {**os.environ, CONFIG_DIR_ENV: str(config_dir)}  # lup: ignore[os-environ]
     shown = profile or support.store.active_profile() or "default"
     typer.echo(f"Launching claude (profile: {shown}, config dir: {config_dir})")
