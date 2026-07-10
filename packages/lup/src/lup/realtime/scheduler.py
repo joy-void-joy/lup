@@ -73,12 +73,12 @@ class DelayedAction(BaseModel):
 # =====================================================================
 
 
-class SleepResult(TypedDict, total=False):
+class SleepResult(BaseModel):
     """Result returned by Scheduler.sleep()."""
 
-    reason: str
-    fired_reminders: list[str]
-    time: str
+    reason: str = "timer"
+    fired_reminders: list[str] = Field(default_factory=list)
+    time: str = ""
 
 
 class ScheduledActionState(TypedDict):
@@ -215,7 +215,7 @@ class Scheduler:
             time=datetime.now().strftime("%H:%M:%S"),
         )
         if self.fired_reminder_labels:
-            result["fired_reminders"] = list(self.fired_reminder_labels)
+            result.fired_reminders = list(self.fired_reminder_labels)
             self.fired_reminder_labels.clear()
         return result
 
