@@ -3,7 +3,7 @@
 This is a TEMPLATE script. Run ``/lup:init`` to customize it for your domain.
 """
 
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime
 
 from lup.types import Usage
@@ -46,9 +46,9 @@ def rollup_costs(
     ``CODEX_USD_PER_MTOK_*`` rates) count into ``without_cost`` so a
     missing-rates gap stays visible instead of reading as free.
     """
-    rows: dict[str, BackendCostRow] = {}  # lup: ignore[empty-collection] — rollup
+    rows: defaultdict[str, BackendCostRow] = defaultdict(empty_cost_row)
     for s in sessions:
-        row = rows.setdefault(s.agent_sdk or "unknown", empty_cost_row())
+        row = rows[s.agent_sdk or "unknown"]
         row["sessions"] += 1
         if s.cost_usd:
             row["cost_usd"] += s.cost_usd
@@ -58,4 +58,4 @@ def rollup_costs(
         row["input_tokens"] += usage.input_tokens
         row["output_tokens"] += usage.output_tokens
         row["cache_read_input_tokens"] += usage.cache_read_input_tokens
-    return rows
+    return dict(rows)
