@@ -166,11 +166,14 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "add `# lup: ignore[frozenset-shape]`",
     ),
     AntiPattern(
-        # A bare `set` is usually better as a dict (keyed lookup) or a
-        # purpose-built structure. `frozenset` is caught by frozenset-shape and
-        # never trips this, since its "set" is not a standalone word.
+        # A declared or constructed set — `set(...)`/`set[...]` (no space
+        # before the bracket; ruff never formats one in) or a `: set`/`-> set`
+        # annotation. The dot lookbehind keeps `.set()` method calls out, and
+        # prose about "set" never carries the bracket or annotation shape.
+        # `frozenset` is caught by frozenset-shape and never trips this, since
+        # its "set" is not a standalone word.
         id="set-shape",
-        pattern=re.compile(r"\bset\b"),
+        pattern=re.compile(r"(?<!\.)\bset[\[(]|(?::|->)\s*set\b"),
         message="A declared `set` is usually better as a dict (keyed lookup) or a "
         "purpose-built structure. For a genuinely set-shaped value add "
         "`# lup: ignore[set-shape]`",
@@ -489,7 +492,11 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
 
     A bare file-level `# lup: ignore` opts the whole file out (matching the
     hook), so it yields no findings; a typed file-level `# lup: ignore[id]`
-    opts out only the named rule file-wide. Then, per line and per rule:
+    opts out only the named rule file-wide. Docstring lines are skipped
+    entirely: prose is not code, and no inline directive could ever guard it —
+    a comment cannot open inside a string. (The hook still scans docstring
+    lines at edit time; it sees only text fragments it cannot tokenize, so the
+    hook stays strictly stricter than this audit.) Then, per line and per rule:
 
     - a tripped rule with no covering ignore -> "missing";
     - a typed `# lup: ignore[id]` naming a rule the line does not trip, or a
@@ -524,6 +531,8 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
     for index, line in enumerate(text.splitlines(), start=1):
         if index == file_ignore_line:
             continue  # the file-level directive line is not itself audited
+        if index in context.docstring_lines:
+            continue  # docstring prose is not code, and no comment can guard it
         preview = line.strip()[:80]
         hits = line_hits(line, patterns)
         hit_ids = {ap.id for ap in hits}
