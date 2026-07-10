@@ -2,6 +2,7 @@
 
 import ast
 import inspect
+from collections import defaultdict
 from collections.abc import Callable
 from typing import Annotated, cast
 
@@ -256,16 +257,16 @@ def imports_cmd(
                 continue
             all_entries.extend(collect_imports_from_source(source))
 
-        grouped: dict[str, list[ImportEntry]] = {}  # lup: ignore[empty-collection]
+        grouped: defaultdict[str, list[ImportEntry]] = defaultdict(list)
         for entry in all_entries:
             if entry["module"] in seen:
                 continue
             seen.add(entry["module"])
-            grouped.setdefault(entry["category"], []).append(entry)
+            grouped[entry["category"]].append(entry)
             next_modules.append(entry["module"])
 
         for category in ("project", "third-party", "stdlib"):
-            entries = grouped.get(category, [])  # lup: ignore[dict-get] — bucket
+            entries = grouped[category]
             if not entries:
                 continue
             typer.echo(f"\n{category} ({len(entries)}):")

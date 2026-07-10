@@ -7,6 +7,7 @@ Formats pacing bars, labels, bucket sections, the daily breakdown, and
 the assembled panel from already-fetched data — no I/O here.
 """
 
+from collections import Counter
 from datetime import datetime, timedelta
 
 from pydantic import BaseModel
@@ -350,15 +351,14 @@ def render_daily_breakdown(
         if total_tokens(entry) > 0
     }
 
-    model_totals: dict[str, int] = {}  # lup: ignore[dict-str-payload, empty-collection]
+    model_totals: Counter[str] = Counter()
     daily_weights: list[float] = []  # lup: ignore[empty-collection] — day fold
     for day in daily:
         weight = sum(
             tokens * cost_rates.get(model, 0)
             for model, tokens in day.tokens_by_model.items()
         )
-        for model, tokens in day.tokens_by_model.items():
-            model_totals[model] = model_totals.get(model, 0) + tokens
+        model_totals.update(day.tokens_by_model)
         daily_weights.append(weight)
 
     # Fall back to raw token counts when cost data is unavailable
@@ -591,8 +591,7 @@ def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnaps
     )
 
     daily: list[DaySnapshot] = []  # lup: ignore[empty-collection] — window fold
-    tally: dict[str, int] = {}  # lup: ignore[dict-str-payload, empty-collection]
-    tokens_by_model = tally
+    tokens_by_model: Counter[str] = Counter()
     if stats:
         window_end = breakdown_window(usage).end
         for day in trailing_week(stats, window_end):
@@ -604,8 +603,7 @@ def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnaps
                     message_count=day.activity.message_count if day.activity else 0,
                 )
             )
-            for model, tokens in day.tokens_by_model.items():
-                tokens_by_model[model] = tokens_by_model.get(model, 0) + tokens
+            tokens_by_model.update(day.tokens_by_model)
 
     return UsageSnapshot(
         buckets=buckets,
