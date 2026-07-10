@@ -1,3 +1,6 @@
+# lup: ignore[import-re, re-call]
+# Diff hunks are semi-structured text with no parser — significance detection
+# is alternation over diff lines, so the regex rules are opted out file-wide.
 """Conflict scope classification, audit, and completion for merge/rebase conflicts.
 
 After a failed merge or rebase, classifies conflicted files as in-scope
@@ -17,7 +20,7 @@ Examples::
 """
 
 import logging
-import re  # lup: ignore[import-re] — alternation over semi-structured diff lines
+import re
 from pathlib import Path
 from typing import TypedDict
 
@@ -231,7 +234,7 @@ class AuditResult(BaseModel):
     has_warnings: bool
 
 
-SIGNIFICANT_PATTERN = re.compile(  # lup: ignore[re-call] — diff-line alternation
+SIGNIFICANT_PATTERN = re.compile(
     r"^-(def |class |async def |@app\.|@[a-z]+_tool|    def )"
 )
 

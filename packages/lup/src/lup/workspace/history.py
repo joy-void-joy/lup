@@ -1,3 +1,6 @@
+# lup: ignore[import-re, re-call]
+# The semver parser is a three-integer pattern over version directory names —
+# regex is the tool, so those rules are opted out file-wide.
 """Session history storage, retrieval, and cross-version data discovery.
 
 This module handles:
@@ -49,7 +52,7 @@ Examples:
 
 import json
 import logging
-import re  # lup: ignore[import-re] — the semver parser
+import re
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
@@ -391,7 +394,7 @@ def list_all_session_ids(version: str | None = None) -> list[str]:
 
 MIN_VERSION_DATAPOINTS = 10
 
-SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")  # lup: ignore[re-call] — the parser
+SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 
 def parse_semver(

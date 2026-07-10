@@ -1,3 +1,6 @@
+# lup: ignore[import-re, re-call]
+# The session-timestamp shape check is a pattern over an id format this module
+# itself defines — regex is the tool, so those rules are opted out file-wide.
 """Centralized path constants and helpers for agent session data.
 
 Pure path layout — where things go on disk. No data discovery or disk
@@ -47,7 +50,7 @@ Examples:
 """
 
 import functools
-import re  # lup: ignore[import-re] — session-timestamp shape check
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -226,7 +229,7 @@ def feedback_path() -> Path:
 # -- Timestamp helpers --------------------------------------------------------
 
 TIMESTAMP_FMT = "%Y%m%d_%H%M%S"
-TIMESTAMP_RE = re.compile(r"\d{8}_\d{6}")  # lup: ignore[re-call] — id shape check
+TIMESTAMP_RE = re.compile(r"\d{8}_\d{6}")
 
 
 def parse_timestamp(name: str) -> datetime:
