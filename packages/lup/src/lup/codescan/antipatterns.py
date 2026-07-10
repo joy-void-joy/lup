@@ -265,6 +265,14 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Use Pydantic BaseModel (or TypedDict) instead of dataclasses",
     ),
     AntiPattern(
+        # Same dodge as dataclass: a typed record that ducks pydantic
+        # validation. Catches the typing.NamedTuple class form and the
+        # collections.namedtuple factory alike.
+        id="namedtuple",
+        pattern=re.compile(r"\bNamedTuple\b|\bnamedtuple\b"),
+        message="Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple",
+    ),
+    AntiPattern(
         id="subprocess",
         pattern=re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
         message="Use the `sh` library instead of subprocess",
