@@ -251,6 +251,11 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         "Use Pydantic BaseModel (or TypedDict) instead of dataclasses",
     ),
     (
+        "namedtuple",
+        re.compile(r"\bNamedTuple\b|\bnamedtuple\b"),
+        "Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple",
+    ),
+    (
         "subprocess",
         re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
         "Use the `sh` library instead of subprocess",
