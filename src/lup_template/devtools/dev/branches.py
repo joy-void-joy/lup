@@ -7,7 +7,7 @@ from typing import Required, TypedDict
 
 import sh
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lup_template.devtools.dev.remote_auth import check_remote_auth
 from lup_template.devtools.utils import (
@@ -23,10 +23,14 @@ logger = logging.getLogger(__name__)
 
 
 class PRStatus(BaseModel):
+    """One PR row as `gh pr list --json` returns it (aliases are gh's names)."""
+
     number: int
-    title: str
-    state: str
-    merged_at: str | None
+    title: str = ""
+    state: str = ""
+    merged_at: str | None = Field(default=None, alias="mergedAt")
+    head_ref: str = Field(default="", alias="headRefName")
+    url: str = ""
 
 
 class BranchInfo(BaseModel):
@@ -57,7 +61,7 @@ class BranchClassification(TypedDict, total=False):
 
 
 class ParsedBranch(TypedDict):
-    """One row of ``git branch -vv`` output."""
+    """One local branch row from ``git for-each-ref``."""
 
     name: str
     commit: str
@@ -66,57 +70,47 @@ class ParsedBranch(TypedDict):
 
 
 def parse_branches() -> list[ParsedBranch]:
-    """Parse ``git branch -vv`` into structured data.
+    """Structured local-branch rows via ``git for-each-ref``.
 
-    Handles prefix markers: ``*`` (current), ``+`` (checked out in another worktree).
+    NUL-separated ``--format`` fields are the machine interface — no marker
+    columns or bracket surgery; ``%(HEAD)`` is ``*`` exactly for the branch
+    checked out in the current worktree.
     """
-    output = str(git("branch", "-vv")).strip()
-    results: list[ParsedBranch] = []
 
-    for line in output.splitlines():
-        is_current = line.startswith("*")
-        # Strip the 2-char prefix column (* /+/space + space)
-        line = line[2:].strip()
-        parts = line.split(maxsplit=2)
-        if len(parts) < 2:
-            continue
+    def parse(row: str) -> ParsedBranch:
+        name, commit, upstream, head = row.split("\x00")  # lup: ignore[string-split]
+        return {
+            "name": name,
+            "commit": commit,
+            "tracking": upstream or None,
+            "is_current": head == "*",
+        }
 
-        name = parts[0]
-        commit = parts[1]
-        tracking: str | None = None
-
-        if len(parts) > 2:
-            rest = parts[2]
-            if rest.startswith("["):
-                bracket_end = rest.find("]")
-                if bracket_end != -1:
-                    tracking_info = rest[1:bracket_end]
-                    tracking = tracking_info.split(":")[0].strip()
-
-        results.append(
-            {
-                "name": name,
-                "commit": commit,
-                "tracking": tracking,
-                "is_current": is_current,
-            }
+    return [
+        parse(row)
+        for row in git.lines(
+            "for-each-ref",
+            "refs/heads",
+            "--format=%(refname:short)%00%(objectname:short)"
+            "%00%(upstream:short)%00%(HEAD)",
         )
+    ]
 
-    return results
 
+def parse_worktrees() -> dict[str, str]:  # lup: ignore[dict-str-payload]
+    """Map branch name -> worktree path from ``git worktree list --porcelain``.
 
-def parse_worktrees() -> dict[str, str]:
-    """Map branch name -> worktree path from ``git worktree list --porcelain``."""
-    output = str(git("worktree", "list", "--porcelain")).strip()
-    mapping: dict[str, str] = {}
+    Open, data-driven keys (whatever branches have worktrees), folded from
+    porcelain records that span multiple lines — the one stateful walk here.
+    """
+    mapping: dict[str, str] = {}  # lup: ignore[dict-str-payload, empty-collection]
     current_path = ""
 
-    for line in output.splitlines():
+    for line in git.lines("worktree", "list", "--porcelain"):
         if line.startswith("worktree "):
-            current_path = line.split(" ", 1)[1]
+            current_path = line.removeprefix("worktree ")
         elif line.startswith("branch refs/heads/"):
-            branch_name = line.split("refs/heads/", 1)[1]
-            mapping[branch_name] = current_path
+            mapping[line.removeprefix("branch refs/heads/")] = current_path
 
     return mapping
 
@@ -140,10 +134,9 @@ def build_containment(branch_names: list[str]) -> dict[str, list[str]]:
 
 def fetch_pr_status(branch_names: list[str]) -> dict[str, PRStatus]:
     """Query GitHub for PR status of branches."""
-    mapping: dict[str, PRStatus] = {}
     try:
-        raw = str(
-            gh(
+        rows = json.loads(
+            gh.out(
                 "pr",
                 "list",
                 "--state",
@@ -153,28 +146,19 @@ def fetch_pr_status(branch_names: list[str]) -> dict[str, PRStatus]:
                 "--json",
                 "number,title,headRefName,state,mergedAt",
             )
-        ).strip()
-        prs = json.loads(raw)
-        for pr in prs:
-            ref = pr.get("headRefName", "")
-            if ref in branch_names:
-                mapping[ref] = PRStatus(
-                    number=pr["number"],
-                    title=pr.get("title", ""),
-                    state=pr.get("state", ""),
-                    merged_at=pr.get("mergedAt"),
-                )
+        )
     except sh.ErrorReturnCode as e:
         logger.warning("Failed to fetch PR status: %s", decode_stderr(e))
-
-    return mapping
+        return {}
+    prs = [PRStatus.model_validate(row) for row in rows]
+    return {pr.head_ref: pr for pr in prs if pr.head_ref in branch_names}
 
 
 def count_unique_commits(branch: str, integration: str) -> int:
-    """Count commits on branch not cherry-picked into integration."""
+    """Count commits on branch not cherry-picked into integration (-1: unknown)."""
     try:
-        output = str(
-            git(
+        return int(
+            git.out(
                 "rev-list",
                 "--count",
                 "--cherry-pick",
@@ -182,43 +166,38 @@ def count_unique_commits(branch: str, integration: str) -> int:
                 f"{branch}...{integration}",
                 _ok_code=[0],
             )
-        ).strip()
-        return int(output)
+        )
     except (sh.ErrorReturnCode, ValueError):
         return -1
 
 
 def count_source_diff_lines(branch: str, integration: str) -> int:
-    """Count lines of source-file diff between branch and integration."""
+    """Count lines of source-file diff between branch and integration (-1: unknown).
+
+    ``--numstat`` is the machine format: one ``added<TAB>deleted<TAB>path`` row
+    per file (``-`` for binary files, which count no lines).
+    """
     try:
-        output = str(
-            git(
-                "diff",
-                "--stat",
-                branch,
-                integration,
-                "--",
-                "src/",
-                ".claude/",
-                "tests/",
-                _ok_code=[0, 1],
-            )
-        ).strip()
-        if not output:
-            return 0
-        last_line = output.splitlines()[-1]
-        parts = last_line.split(",")
-        total = 0
-        for part in parts:
-            part = part.strip()
-            for word in ("insertion", "deletion"):
-                if word in part:
-                    tokens = part.split()
-                    if tokens and tokens[0].isdigit():
-                        total += int(tokens[0])
-        return total
+        rows = git.lines(
+            "diff",
+            "--numstat",
+            branch,
+            integration,
+            "--",
+            "src/",
+            ".claude/",
+            "tests/",
+            _ok_code=[0, 1],
+        )
     except sh.ErrorReturnCode:
         return -1
+    total = 0
+    for row in rows:
+        added, _, rest = row.partition("\t")
+        deleted = rest.partition("\t")[0]
+        total += int(added) if added.isdigit() else 0
+        total += int(deleted) if deleted.isdigit() else 0
+    return total
 
 
 def get_integration_branch() -> str:
@@ -241,14 +220,14 @@ def is_ancestor(ancestor: str, descendant: str) -> bool:
 
 def get_branch_worktree(branch: str) -> str | None:
     """Return the worktree path for a branch, or None."""
-    return parse_worktrees().get(branch)
+    return parse_worktrees().get(branch)  # lup: ignore[dict-get] — open branch map
 
 
-def get_pr_info(branch: str) -> dict[str, str]:
-    """Get PR info for a branch via gh CLI. Returns empty dict if none."""
+def get_pr_info(branch: str) -> PRStatus | None:
+    """Get PR info for a branch via gh CLI. None when there is none (or no gh)."""
     try:
-        output = str(
-            gh(
+        items = json.loads(
+            gh.out(
                 "pr",
                 "list",
                 "--state=all",
@@ -257,13 +236,10 @@ def get_pr_info(branch: str) -> dict[str, str]:
                 "--limit=1",
                 _ok_code=[0],
             )
-        ).strip()
-        items: list[dict[str, str]] = json.loads(output)
-        if items:
-            return items[0]
+        )
     except (sh.ErrorReturnCode, sh.CommandNotFound, json.JSONDecodeError):
-        pass
-    return {}
+        return None
+    return PRStatus.model_validate(items[0]) if items else None
 
 
 PROTECTED_BRANCHES = {"main", "master", "dev", "develop"}
@@ -294,11 +270,11 @@ def classify_branch(
 
     merged_into_integration = is_ancestor(branch, integration)
     worktree = get_branch_worktree(branch)
-    pr = get_pr_info(branch) if has_remote else {}
-    pr_state = pr.get("state", "")
+    pr = get_pr_info(branch) if has_remote else None
+    pr_state = pr.state if pr else ""
     pr_merged = pr_state == "MERGED"
-    pr_number = pr.get("number", "")
-    pr_url = pr.get("url", "")
+    pr_number: str | int = pr.number if pr else ""
+    pr_url = pr.url if pr else ""
 
     if merged_into_integration:
         return {
@@ -320,20 +296,8 @@ def classify_branch(
             "pr_url": pr_url,
         }
 
-    try:
-        output = str(
-            git(
-                "log",
-                "--oneline",
-                "--cherry-pick",
-                "--left-only",
-                f"{branch}...{integration}",
-                _ok_code=[0],
-            )
-        ).strip()
-        unique = len(output.splitlines()) if output else 0
-    except sh.ErrorReturnCode:
-        unique = 999
+    counted = count_unique_commits(branch, integration)
+    unique = counted if counted >= 0 else 999
 
     if unique == 0:
         return {
@@ -355,62 +319,67 @@ def classify_branch(
     }
 
 
-def detect_base_branch(branch: str | None = None) -> tuple[str, str, int]:
+class BaseCandidate(BaseModel):
+    """A candidate base branch, measured against the branch under test."""
+
+    name: str
+    distance: int
+    merge_base: str
+    is_ancestor: bool
+
+
+def detect_base_branch(branch: str | None = None) -> BaseCandidate:
     """Detect the base branch for the given (or current) branch.
 
     Prefers ancestor branches (the natural parent in a two-tier model)
     over siblings. Among ancestors, picks the one with the fewest commits
-    ahead. Falls back to non-ancestor heuristics when no ancestor exists.
-
-    Returns (base_branch, merge_base_sha, commits_ahead).
+    ahead (``distance``). Falls back to non-ancestors when no ancestor exists.
     """
-    if branch is None:
-        branch = str(git("branch", "--show-current")).strip()
+    effective = branch or git.out("branch", "--show-current")
 
     local_branches = [
-        b.strip().lstrip("* ")
-        for b in str(git("branch", "--format=%(refname:short)")).strip().splitlines()
-        if b.strip().lstrip("* ") != branch
+        b for b in git.lines("branch", "--format=%(refname:short)") if b != effective
     ]
 
     if not local_branches:
         typer.echo("No other local branches to compare against.", err=True)
         raise typer.Exit(1)
 
-    ancestors: list[tuple[str, int, str]] = []
-    non_ancestors: list[tuple[str, int, str]] = []
-
-    for candidate in local_branches:
+    def measure(candidate: str) -> BaseCandidate | None:
         try:
-            merge_base = str(git("merge-base", branch, candidate, _ok_code=[0])).strip()
-            distance = int(
-                str(git("rev-list", "--count", f"{merge_base}..{branch}")).strip()
-            )
-            if is_ancestor(candidate, branch):
-                ancestors.append((candidate, distance, merge_base))
-            else:
-                non_ancestors.append((candidate, distance, merge_base))
+            merge_base = git.out("merge-base", effective, candidate, _ok_code=[0])
+            distance = int(git.out("rev-list", "--count", f"{merge_base}..{effective}"))
         except sh.ErrorReturnCode:
-            continue
+            return None
+        return BaseCandidate(
+            name=candidate,
+            distance=distance,
+            merge_base=merge_base,
+            is_ancestor=is_ancestor(candidate, effective),
+        )
 
-    # Prefer ancestors — they are the natural base
-    candidates = ancestors if ancestors else non_ancestors
+    measured = [m for c in local_branches if (m := measure(c)) is not None]
+    ancestors = [m for m in measured if m.is_ancestor]
+
+    # Prefer ancestors — they are the natural base. With none, every measured
+    # candidate is a non-ancestor, so `measured` IS the sibling fallback.
+    candidates = ancestors or measured
 
     if not candidates:
         typer.echo("Could not determine base branch.", err=True)
         raise typer.Exit(1)
 
-    candidates.sort(key=lambda c: c[1])
-    best_branch, best_distance, best_merge_base = candidates[0]
+    ranked = sorted(candidates, key=lambda c: c.distance)
+    best = ranked[0]
 
-    tied = [c for c in candidates[1:] if c[1] == best_distance]
+    tied = [c for c in ranked[1:] if c.distance == best.distance]
     if tied:
         typer.echo("Ambiguous base branch. Candidates:", err=True)
-        for name, dist, _ in [candidates[0], *tied]:
-            typer.echo(f"  {name} ({dist} commits ahead)", err=True)
+        for c in [best, *tied]:
+            typer.echo(f"  {c.name} ({c.distance} commits ahead)", err=True)
         raise typer.Exit(1)
 
-    return best_branch, best_merge_base, best_distance
+    return best
 
 
 # -- CLI functions --
@@ -421,21 +390,16 @@ def branch_status(branch: str | None, as_json: bool) -> None:
     has_remote = check_remote_auth()
 
     integration = get_integration_branch()
-    current = str(git("branch", "--show-current")).strip()
+    current = git.out("branch", "--show-current")
 
-    if branch:
-        branch_list = [branch]
-    else:
-        branch_list = [
-            b.strip().lstrip("* ")
-            for b in str(git("branch", "--format=%(refname:short)"))
-            .strip()
-            .splitlines()
-        ]
+    branch_list = (
+        [branch] if branch else git.lines("branch", "--format=%(refname:short)")
+    )
 
-    results: list[BranchClassification] = []
-    for b in branch_list:
-        results.append(classify_branch(b, integration, current, has_remote=has_remote))
+    results = [
+        classify_branch(b, integration, current, has_remote=has_remote)
+        for b in branch_list
+    ]
 
     if as_json:
         output_json(results)
@@ -450,13 +414,13 @@ def branch_status(branch: str | None, as_json: bool) -> None:
         "CURRENT": "*",
         "NOT_FOUND": "?",
     }
-    rows: list[tuple[str, str, str]] = []
-    for r in results:
-        status = r["status"]
-        marker = status_markers.get(str(status), " ")
-        wt = " [worktree]" if r.get("worktree") else ""
-        rows.append((f"[{marker}] {r['branch']}", status, f"{r['reason']}{wt}"))
-    typer.echo(format_table(("Branch", "Status", "Reason"), rows))
+
+    def row(r: BranchClassification) -> list[str]:
+        marker = status_markers.get(r["status"], " ")  # lup: ignore[dict-get]
+        wt = " [worktree]" if r.get("worktree") else ""  # lup: ignore[dict-get]
+        return [f"[{marker}] {r['branch']}", r["status"], f"{r['reason']}{wt}"]
+
+    typer.echo(format_table(("Branch", "Status", "Reason"), [row(r) for r in results]))
 
     typer.echo()
     deletable = [r for r in results if r["status"] in ("DELETE", "STALE")]
@@ -466,23 +430,23 @@ def branch_status(branch: str | None, as_json: bool) -> None:
 
 def base_branch(branch: str | None, as_json: bool) -> None:
     """Detect the base branch for the current (or specified) branch."""
-    base, merge_base, ahead = detect_base_branch(branch)
-    effective = branch or str(git("branch", "--show-current")).strip()
+    base = detect_base_branch(branch)
+    effective = branch or git.out("branch", "--show-current")
 
     if as_json:
         output_json(
             {
                 "branch": effective,
-                "base": base,
-                "merge_base": merge_base,
-                "commits_ahead": ahead,
+                "base": base.name,
+                "merge_base": base.merge_base,
+                "commits_ahead": base.distance,
             }
         )
     else:
         typer.echo(f"Branch: {effective}")
-        typer.echo(f"Base: {base}")
-        typer.echo(f"Merge base: {short_sha(merge_base)}")
-        typer.echo(f"Commits ahead: {ahead}")
+        typer.echo(f"Base: {base.name}")
+        typer.echo(f"Merge base: {short_sha(base.merge_base)}")
+        typer.echo(f"Commits ahead: {base.distance}")
 
 
 COMMIT_PREFIX_LABELS = {
@@ -499,44 +463,37 @@ COMMIT_PREFIX_LABELS = {
 
 def pr_body(base_override: str | None) -> None:
     """Generate a PR body from the current branch's commits against its base."""
-    if base_override:
-        base = base_override
-    else:
-        base, _, _ = detect_base_branch()
+    base = base_override or detect_base_branch().name
 
-    log_output = str(
-        git(
-            "log",
-            "--oneline",
-            "--no-decorate",
-            "--no-merges",
-            f"{base}..HEAD",
-            _ok_code=[0],
-        )
-    ).strip()
-    if not log_output:
+    log_lines = git.lines(
+        "log",
+        "--oneline",
+        "--no-decorate",
+        "--no-merges",
+        f"{base}..HEAD",
+        _ok_code=[0],
+    )
+    if not log_lines:
         typer.echo("No commits found since base branch", err=True)
         raise typer.Exit(1)
 
     groups: dict[str, list[str]] = defaultdict(list)
-    for line in log_output.splitlines():
-        parts = line.split(" ", 1)
-        if len(parts) < 2:
+    for line in log_lines:
+        message = line.partition(" ")[2]
+        if not message:
             continue
-        message = parts[1]
-        prefix = message.split("(")[0].split(":")[0].lower().strip()
+        prefix = message.partition("(")[0].partition(":")[0].lower()
         groups[prefix].append(message)
 
-    summary_lines: list[str] = []
-    for prefix, messages in groups.items():
-        label = COMMIT_PREFIX_LABELS.get(prefix, prefix.capitalize())
-        desc = messages[0].split(":", 1)[-1].strip()
-        if len(messages) == 1:
-            summary_lines.append(f"- {label} {desc}")
-        else:
-            summary_lines.append(f"- {label} {desc} (+{len(messages) - 1} more)")
+    def summarize(prefix: str, messages: list[str]) -> str:
+        fallback = prefix.capitalize()
+        label = COMMIT_PREFIX_LABELS.get(prefix, fallback)  # lup: ignore[dict-get]
+        desc = (messages[0].partition(":")[2] or messages[0]).lstrip()
+        more = f" (+{len(messages) - 1} more)" if len(messages) > 1 else ""
+        return f"- {label} {desc}{more}"
 
-    body_parts = ["## Summary", *summary_lines, "", "## Commits", log_output]
+    summary_lines = [summarize(p, msgs) for p, msgs in groups.items()]
+    body_parts = ["## Summary", *summary_lines, "", "## Commits", *log_lines]
     body_parts.extend(["", "## Test plan", "- [ ] Verify changes work as expected"])
 
     typer.echo("\n".join(body_parts))
@@ -554,47 +511,42 @@ def survey(as_json: bool) -> None:
             logger.warning("Failed to fetch: %s", decode_stderr(e))
 
     integration = get_integration_branch()
-    cur = str(git("branch", "--show-current")).strip()
+    cur = git.out("branch", "--show-current")
 
     raw_branches = parse_branches()
     worktrees = parse_worktrees()
     branch_names = [b["name"] for b in raw_branches]
     containment = build_containment(branch_names)
 
-    if has_remote:
-        if not as_json:
-            typer.echo("Querying PR status...", err=True)
-        pr_map = fetch_pr_status(branch_names)
-    else:
-        pr_map: dict[str, PRStatus] = {}
+    if has_remote and not as_json:
+        typer.echo("Querying PR status...", err=True)
+    pr_map: dict[str, PRStatus] = fetch_pr_status(branch_names) if has_remote else {}
 
-    branches_list: list[BranchInfo] = []
-    for b in raw_branches:
+    def info(b: ParsedBranch) -> BranchInfo:
         name = b["name"]
-        contained_in = containment.get(name, [])
-        is_contained = bool(contained_in)
+        contained_in = containment[name]
         pr_merged = name in pr_map and pr_map[name].state == "MERGED"
 
-        if is_contained or pr_merged:
+        if contained_in or pr_merged:
             unique = 0
             diff_lines = 0
         else:
             unique = count_unique_commits(name, integration)
             diff_lines = count_source_diff_lines(name, integration)
 
-        branches_list.append(
-            BranchInfo(
-                name=name,
-                commit=b["commit"],
-                tracking=b["tracking"],
-                worktree=worktrees.get(name),
-                is_current=b["is_current"],
-                contained_in=contained_in,
-                pr=pr_map.get(name),
-                unique_commits=unique,
-                source_diff_lines=diff_lines,
-            )
+        return BranchInfo(
+            name=name,
+            commit=b["commit"],
+            tracking=b["tracking"],
+            worktree=worktrees.get(name),  # lup: ignore[dict-get]
+            is_current=b["is_current"],
+            contained_in=contained_in,
+            pr=pr_map.get(name),  # lup: ignore[dict-get]
+            unique_commits=unique,
+            source_diff_lines=diff_lines,
         )
+
+    branches_list = [info(b) for b in raw_branches]
 
     result = SurveyResult(
         integration_branch=integration,
@@ -606,23 +558,22 @@ def survey(as_json: bool) -> None:
         output_json(result)
     else:
         typer.echo(f"\nIntegration: {integration} | Current: {cur}\n")
-        rows: list[tuple[str, str, str, str, str, str]] = []
-        for bi in branches_list:
+
+        def display_row(bi: BranchInfo) -> list[str]:
             contained = ", ".join(bi.contained_in) if bi.contained_in else "-"
             pr_str = f"#{bi.pr.number} {bi.pr.state}" if bi.pr else "-"
             marker = "* " if bi.is_current else "  "
-            rows.append(
-                (
-                    f"{marker}{bi.name}",
-                    bi.commit,
-                    contained,
-                    pr_str,
-                    str(bi.unique_commits),
-                    str(bi.source_diff_lines),
-                )
-            )
+            return [
+                f"{marker}{bi.name}",
+                bi.commit,
+                contained,
+                pr_str,
+                str(bi.unique_commits),
+                str(bi.source_diff_lines),
+            ]
+
         headers = ("Branch", "Commit", "Contained In", "PR", "Unique", "Diff")
-        typer.echo(format_table(headers, rows))
+        typer.echo(format_table(headers, [display_row(bi) for bi in branches_list]))
 
 
 def delete_branch(
@@ -631,19 +582,17 @@ def delete_branch(
     force: bool,
 ) -> None:
     """Delete a branch, its worktree, and remote tracking branch."""
-    cur = str(git("branch", "--show-current")).strip()
+    cur = git.out("branch", "--show-current")
     if name == cur:
         typer.echo(f"Error: cannot delete the current branch ({name})", err=True)
         raise typer.Exit(1)
 
-    worktrees = parse_worktrees()
-    worktree_path = worktrees.get(name)
+    worktree_path = parse_worktrees().get(name)  # lup: ignore[dict-get]
 
-    actions: list[str] = []
-
-    if worktree_path:
-        actions.append(f"Remove worktree: {worktree_path}")
-    actions.append(f"Delete local branch: {name} ({'force' if force else 'safe'})")
+    actions = [
+        *([f"Remove worktree: {worktree_path}"] if worktree_path else []),
+        f"Delete local branch: {name} ({'force' if force else 'safe'})",
+    ]
 
     has_remote = False
     try:
@@ -695,7 +644,7 @@ def create_resolve_branch(concern_id: str) -> None:
     so the bash hook needs no editor special-case. The name is fixed to the
     `resolve/<slug>` convention the workflow's merge and cleanup rely on.
     """
-    slug = concern_id.strip().strip("/")
+    slug = concern_id.strip().strip("/")  # lup: ignore[string-strip] — typed-id hygiene
     ok = bool(slug) and slug[0].isalnum()
     ok = ok and all(c.isalnum() or c in "._-" for c in slug)
     if not ok:
@@ -705,6 +654,6 @@ def create_resolve_branch(concern_id: str) -> None:
     try:
         git("checkout", "-b", branch)
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Could not create {branch}: {decode_stderr(e).strip()}", err=True)
+        typer.echo(f"Could not create {branch}: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)
     typer.echo(f"Created and switched to {branch}")

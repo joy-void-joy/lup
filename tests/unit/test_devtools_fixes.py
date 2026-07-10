@@ -108,12 +108,12 @@ class TestLegacyMarkdownErrorScan:
 
 
 class TestDecodeStderr:
-    def test_decodes_bytes(self) -> None:
+    def test_decodes_bytes_and_trims_framing(self) -> None:
         from lup_template.devtools.utils import decode_stderr
 
         err = sh.ErrorReturnCode.__new__(sh.ErrorReturnCode)
         err.stderr = b"boom\n"
-        assert decode_stderr(err) == "boom\n"
+        assert decode_stderr(err) == "boom"
 
     def test_passes_through_str(self) -> None:
         from lup_template.devtools.utils import decode_stderr
@@ -185,11 +185,12 @@ class TestPrCreate:
 
         calls: list[tuple[str, ...]] = []
 
-        def fake_gh(*args: str) -> str:
-            calls.append(tuple(str(a) for a in args))
-            return "https://github.com/org/repo/pull/42\n"
+        class FakeGh:
+            def out(self, *args: str) -> str:
+                calls.append(tuple(str(a) for a in args))
+                return "https://github.com/org/repo/pull/42"
 
-        monkeypatch.setattr(pr, "gh", fake_gh)
+        monkeypatch.setattr(pr, "gh", FakeGh())
 
         results: list[pr.CreateResult] = []
         monkeypatch.setattr(pr, "output_result", lambda r, _as_json: results.append(r))

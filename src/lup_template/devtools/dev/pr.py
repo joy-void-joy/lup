@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 
 import sh
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lup_template.devtools.dev.branches import (
     detect_base_branch,
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 def current_branch() -> str:
-    return str(git("branch", "--show-current")).strip()
+    return git.out("branch", "--show-current")
 
 
 class ReviewInfo(BaseModel):
@@ -45,6 +45,47 @@ class CheckInfo(BaseModel):
     name: str
     status: str
     conclusion: str
+
+
+class GhAuthor(BaseModel):
+    """`author` object inside `gh pr view --json reviews`."""
+
+    login: str = "unknown"
+
+
+class GhReview(BaseModel):
+    """One element of `gh pr view --json reviews`, as gh names the fields."""
+
+    author: GhAuthor | None = None
+    state: str = ""
+    body: str = ""
+
+
+class GhCheck(BaseModel):
+    """One `statusCheckRollup` element: check runs carry `name`/`status`/
+    `conclusion`; legacy status contexts only `context`."""
+
+    name: str = ""
+    context: str = ""
+    status: str = ""
+    conclusion: str = ""
+
+
+class GhPrDetail(BaseModel):
+    """The `gh pr view --json` payload (aliases are gh's camelCase names)."""
+
+    reviews: list[GhReview] = Field(default_factory=list)
+    checks: list[GhCheck] = Field(default_factory=list, alias="statusCheckRollup")
+    review_decision: str = Field(default="", alias="reviewDecision")
+    mergeable: str = ""
+
+
+class GhPrRef(BaseModel):
+    """One row of `gh pr list --json number,title,url`."""
+
+    number: int
+    title: str = ""
+    url: str = ""
 
 
 class PRInfo(BaseModel):
@@ -162,8 +203,7 @@ def format_pr_status(result: PRStatusResult) -> None:
 def find_base_branch() -> str:
     """Auto-detect the base branch by merge-base proximity to HEAD."""
     try:
-        base, _, _ = detect_base_branch()
-        return base
+        return detect_base_branch().name
     except (typer.Exit, SystemExit):
         return get_integration_branch()
 
@@ -176,8 +216,8 @@ def status(
     branch_name = branch or current_branch()
 
     try:
-        pr_list_raw = str(
-            gh(
+        rows = json.loads(
+            gh.out(
                 "pr",
                 "list",
                 "--head",
@@ -187,11 +227,11 @@ def status(
                 "--json",
                 "number,title,url",
             )
-        ).strip()
+        )
     except sh.ErrorReturnCode as e:
         typer.echo(f"Failed to query PRs via gh: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)
-    prs = json.loads(pr_list_raw)
+    prs = [GhPrRef.model_validate(row) for row in rows]
 
     if not prs:
         result = PRStatusResult(branch=branch_name, pr=None)
@@ -201,42 +241,40 @@ def status(
         return
 
     pr_data = prs[0]
-    pr_number = pr_data["number"]
+    pr_number = pr_data.number
 
     try:
-        detail_raw = str(
-            gh(
+        detail = GhPrDetail.model_validate_json(
+            gh.out(
                 "pr",
                 "view",
                 str(pr_number),
                 "--json",
                 "reviews,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision",
             )
-        ).strip()
+        )
     except sh.ErrorReturnCode as e:
         typer.echo(
             f"Failed to fetch PR #{pr_number} via gh: {decode_stderr(e)}", err=True
         )
         raise typer.Exit(1)
-    detail = json.loads(detail_raw)
 
     reviews = [
         ReviewInfo(
-            author=r.get("author", {}).get("login", "unknown"),
-            state=r.get("state", ""),
-            body=r.get("body", ""),
+            author=r.author.login if r.author else "unknown",
+            state=r.state,
+            body=r.body,
         )
-        for r in detail.get("reviews", [])
+        for r in detail.reviews
     ]
 
-    raw_checks = detail.get("statusCheckRollup", []) or []
     checks = [
         CheckInfo(
-            name=c.get("name", c.get("context", "unknown")),
-            status=c.get("status", ""),
-            conclusion=c.get("conclusion", ""),
+            name=c.name or c.context or "unknown",
+            status=c.status,
+            conclusion=c.conclusion,
         )
-        for c in raw_checks
+        for c in detail.checks
     ]
 
     checks_passing = (
@@ -251,10 +289,10 @@ def status(
 
     pr_info = PRInfo(
         number=pr_number,
-        title=pr_data["title"],
-        url=pr_data["url"],
-        review_decision=detail.get("reviewDecision", ""),
-        mergeable=detail.get("mergeable", ""),
+        title=pr_data.title,
+        url=pr_data.url,
+        review_decision=detail.review_decision,
+        mergeable=detail.mergeable,
         checks_passing=checks_passing,
         reviews=reviews,
         checks=checks,
@@ -347,13 +385,11 @@ def sync_base(
             feature_branch=feature,
             base_branch=base_branch,
             merged=True,
-            conflicts=[],
+            conflicts=[],  # lup: ignore[empty-collection] — merged means none
         )
     except sh.ErrorReturnCode:
-        conflict_output = str(
-            git("diff", "--name-only", "--diff-filter=U", _ok_code=[0, 1])
-        ).strip()
-        conflicts = [f for f in conflict_output.splitlines() if f]
+        unmerged = git.lines("diff", "--name-only", "--diff-filter=U", _ok_code=[0, 1])
+        conflicts = [f for f in unmerged if f]
         result = SyncBaseResult(
             feature_branch=feature,
             base_branch=base_branch,
@@ -389,21 +425,20 @@ def push(
 
     existing_pr = None
     try:
-        pr_raw = str(
-            gh(
-                "pr",
-                "list",
-                "--head",
-                branch_name,
-                "--state",
-                "open",
-                "--json",
-                "number,url",
-            )
-        ).strip()
-        prs = json.loads(pr_raw) if pr_raw else []
+        pr_raw = gh.out(
+            "pr",
+            "list",
+            "--head",
+            branch_name,
+            "--state",
+            "open",
+            "--json",
+            "number,url",
+        )
+        rows = json.loads(pr_raw) if pr_raw else []
+        prs = [GhPrRef.model_validate(row) for row in rows]
         if prs:
-            existing_pr = ExistingPR(number=prs[0]["number"], url=prs[0]["url"])
+            existing_pr = ExistingPR(number=prs[0].number, url=prs[0].url)
     except sh.ErrorReturnCode:
         pass
 
@@ -421,7 +456,7 @@ def push(
 def parse_pr_url(stdout: str) -> str:
     """Extract the PR URL from ``gh pr create`` stdout (last URL-like line)."""
     for line in reversed(stdout.splitlines()):
-        candidate = line.strip()
+        candidate = line.strip()  # lup: ignore[string-strip] — free-form tool chatter
         if urlparse(candidate).scheme in ("http", "https"):
             return candidate
     return ""
@@ -439,18 +474,16 @@ def create(
     PR's URL to stdout. The PR number is the final path segment of that URL.
     """
     try:
-        raw = str(
-            gh(
-                "pr",
-                "create",
-                "--base",
-                base,
-                "--title",
-                title,
-                "--body",
-                body,
-            )
-        ).strip()
+        raw = gh.out(
+            "pr",
+            "create",
+            "--base",
+            base,
+            "--title",
+            title,
+            "--body",
+            body,
+        )
     except sh.ErrorReturnCode as e:
         typer.echo(f"Failed to create PR: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)

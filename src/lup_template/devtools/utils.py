@@ -37,11 +37,43 @@ class LazyCommand:
             self.resolved = command
         return self.resolved
 
-    def __call__(self, *args: str, **kwargs: object) -> sh.RunningCommand | str | None:
+    def __call__(
+        self,
+        *args: str,
+        **kwargs: object,  # lup: ignore[bare-object] — sh's untyped special kwargs
+    ) -> sh.RunningCommand | str | None:
         return self.resolve()(*args, **kwargs)
 
     def __getattr__(self, attr: str) -> sh.Command:
         return getattr(self.resolve(), attr)
+
+    def out(
+        self,
+        *args: str,
+        **kwargs: object,  # lup: ignore[bare-object] — sh's untyped special kwargs
+    ) -> str:
+        """The command's stdout with its trailing-newline framing removed.
+
+        The single-value boundary: CLIs frame every output — `git rev-parse`,
+        `gh pr list --json` — with a trailing newline, and ``sh`` exposes no
+        trimmed accessor, so value reads go through here instead of a per-site
+        `str(...).strip()`. Not for column-significant text (`status
+        --porcelain` leading columns): use :meth:`lines`.
+        """
+        return str(self(*args, **kwargs)).strip()  # lup: ignore[string-strip]
+
+    def lines(
+        self,
+        *args: str,
+        **kwargs: object,  # lup: ignore[bare-object] — sh's untyped special kwargs
+    ) -> list[str]:
+        """The command's stdout as a list of lines.
+
+        For line-oriented output (`--format=` templates, `--porcelain`
+        records): the line breaks are consumed by ``splitlines``, while
+        leading columns and blank separator lines are preserved exactly.
+        """
+        return str(self(*args, **kwargs)).splitlines()
 
 
 git = LazyCommand("git", "--no-pager", "-c", "color.ui=never", tty_out=False)
@@ -50,12 +82,14 @@ uv = LazyCommand("uv")
 
 
 def decode_stderr(e: sh.ErrorReturnCode) -> str:
-    """Decode a failed ``sh`` command's stderr to text.
+    """Decode a failed ``sh`` command's stderr to trimmed text.
 
-    ``sh`` captures stderr as raw ``bytes`` and exposes no decoded
-    accessor, so callers that want a readable message decode it here.
+    ``sh`` captures stderr as raw ``bytes`` and exposes no decoded accessor,
+    so callers that want a readable message decode it here; the trailing
+    newline the failing tool printed with is framing, not message.
     """
-    return e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
+    raw = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
+    return raw.strip()  # lup: ignore[string-strip]
 
 
 def copy_to_clipboard(text: str) -> bool:
@@ -82,7 +116,7 @@ def copy_to_clipboard(text: str) -> bool:
 
 
 def output_json(
-    data: object,  # lup: ignore — pretty-printer boundary: any JSON-serializable payload
+    data: object,  # lup: ignore[bare-object] — pretty-printer: any serializable payload
 ) -> None:
     if isinstance(data, BaseModel):
         typer.echo(data.model_dump_json(indent=2))
@@ -120,16 +154,14 @@ def format_table(
 
     def render(cells: Sequence[str]) -> str:
         last = len(cells) - 1
-        parts: list[str] = []
-        for i, cell in enumerate(cells):
+
+        def pad(i: int, cell: str) -> str:
             align = aligns[i] if aligns else "left"
-            if i == last:
-                parts.append(cell if align == "left" else f"{cell:>{widths[i]}}")
-            elif align == "right":
-                parts.append(f"{cell:>{widths[i]}}")
-            else:
-                parts.append(f"{cell:<{widths[i]}}")
-        return " ".join(parts)
+            if align == "right":
+                return f"{cell:>{widths[i]}}"
+            return cell if i == last else f"{cell:<{widths[i]}}"
+
+        return " ".join(pad(i, cell) for i, cell in enumerate(cells))
 
     header_line = render(headers)
     lines = [header_line, "-" * len(header_line)]
