@@ -155,11 +155,11 @@ class Scheduler:
         self.scheduled_action_fire_at: float | None = None
 
         # Reminders — live mutable state, the scheduler's whole job.
-        self.reminders: list[PendingReminder] = []  # lup: ignore[empty-collection]
-        self.fired_reminder_labels: list[str] = []  # lup: ignore[empty-collection]
+        self.reminders: list[PendingReminder] = []
+        self.fired_reminder_labels: list[str] = []
 
         # Delayed actions
-        self.pending_actions: list[DelayedAction] = []  # lup: ignore[empty-collection]
+        self.pending_actions: list[DelayedAction] = []
 
         # Meta-before-sleep gate. Pass a file-backed gate when the meta
         # tool runs in a subprocess (see lup.realtime.relay).
