@@ -1,3 +1,5 @@
+# lup: ignore[dict-get]
+# Test fixtures and assertions construct these shapes deliberately.
 """Tests for the Claude Code usage display assembly.
 
 The daily breakdown is fed by the local stats cache, so it must render

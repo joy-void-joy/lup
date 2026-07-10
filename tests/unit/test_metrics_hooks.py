@@ -1,3 +1,5 @@
+# lup: ignore[dict-str-payload, empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """tracked decorator metrics and the nudge/capture PostToolUse hooks."""
 
 from collections.abc import Iterator

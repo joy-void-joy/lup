@@ -1,3 +1,5 @@
+# lup: ignore[cast, dict-get, dict-str-payload, empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """Backend-adapter fidelity and API-hygiene regressions.
 
 Each test pins a specific fix: Codex item coverage and web-search

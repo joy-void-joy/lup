@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection, set-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """build_session_options wiring: limits, served tool servers, REPL overrides.
 
 The in-process assembly produces a backend-agnostic ``LupAgentOptions``; the

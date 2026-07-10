@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection, tuple-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Regression tests for devtools CLI bug fixes.
 
 Each test pins a behavior that was broken in live testing: trace regexes

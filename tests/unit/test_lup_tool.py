@@ -1,3 +1,5 @@
+# lup: ignore[cast, dict-get]
+# Test fixtures and assertions construct these shapes deliberately.
 """Behavior tests for the lup_tool decorator and LupMcpTool.
 
 Covers the three response paths of the SDK-facing handler (success,

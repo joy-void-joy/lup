@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection, set-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Live parity test: the same task on both SDK backends.
 
 Costs real LLM calls on two providers, so it carries the integration

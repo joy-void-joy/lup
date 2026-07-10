@@ -1,3 +1,5 @@
+# lup: ignore[cast, empty-collection, tuple-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """ClaudeSession and ClaudeResponseCollector against a scripted fake client.
 
 The conversation layer owns response assembly and error propagation —

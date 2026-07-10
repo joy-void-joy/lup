@@ -1,3 +1,5 @@
+# lup: ignore[dict-get]
+# Test fixtures and assertions construct these shapes deliberately.
 """Tests for usage normalization at the adapter boundary.
 
 Vendor usage payloads are unstable (SDKs add nested fields and strings

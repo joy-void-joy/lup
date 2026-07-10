@@ -1,3 +1,5 @@
+# lup: ignore[cast, dict-get]
+# Test fixtures and assertions construct these shapes deliberately.
 """Tests for the submit_output finalization tool and completion guard.
 
 The output tool is the SDK-agnostic finalization mechanism: validation

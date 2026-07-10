@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """Tests for the Throttle utility."""
 
 import asyncio

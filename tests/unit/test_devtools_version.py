@@ -1,3 +1,5 @@
+# lup: ignore[bare-object, empty-collection, tuple-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Behavior tests for `lup-devtools version`: commit classification and bump.
 
 `classify_commit` feeds the changelog's behavior/data/infrastructure split;

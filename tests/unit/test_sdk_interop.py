@@ -1,3 +1,5 @@
+# lup: ignore[dict-get, empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """SDK interop behavior: Codex config-override generation, hook-script
 emission, and lup->SDK hook/option conversion for both engines."""
 

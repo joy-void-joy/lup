@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection, set-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """The reviewer never inspects the backend (reflect.run_reviewer).
 
 Backend concerns live only in the adapter layer: ``run_reviewer`` asks for the

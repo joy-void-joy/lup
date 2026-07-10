@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# lup: ignore[import-re, re-call, tuple-shape, dict-str-payload]
+# A regex-rule engine on the hermetic hook hot path: URL patterns are its
+# whole job, DENY_PATTERNS pairs each pattern with its reason, and the hook
+# wire I/O is string-keyed JSON.
 """PreToolUse hook that controls WebFetch permissions via regex patterns.
 
 The URL is normalized to `scheme://host/path` (lowercased host; credentials,

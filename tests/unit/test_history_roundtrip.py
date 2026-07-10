@@ -1,3 +1,5 @@
+# lup: ignore[dict-str-payload]
+# Test fixtures and assertions construct these shapes deliberately.
 """Session storage round-trip through the versioned notes layout."""
 
 from collections.abc import Iterator

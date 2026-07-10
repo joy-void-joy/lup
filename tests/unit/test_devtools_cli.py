@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection, string-replace, tuple-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Smoke and behavior tests for the lup-devtools CLI.
 
 The smoke test walks the root typer app's full command tree (sub-apps and
