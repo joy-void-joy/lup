@@ -128,7 +128,7 @@ class TestDecodeStderr:
 
 class TestParseRemote:
     def test_https_remote_routes_to_https_scheme(self) -> None:
-        from lup_template.devtools.dev.branches import parse_remote
+        from lup_template.devtools.dev.remote_auth import parse_remote
 
         assert parse_remote("https://github.com/org/repo.git") == (
             "https",
@@ -136,12 +136,12 @@ class TestParseRemote:
         )
 
     def test_scp_style_extracts_user_and_host(self) -> None:
-        from lup_template.devtools.dev.branches import parse_remote
+        from lup_template.devtools.dev.remote_auth import parse_remote
 
         assert parse_remote("git@github.com:org/repo.git") == ("ssh", "git@github.com")
 
     def test_ssh_scheme_extracts_user_and_host(self) -> None:
-        from lup_template.devtools.dev.branches import parse_remote
+        from lup_template.devtools.dev.remote_auth import parse_remote
 
         assert parse_remote("ssh://git@example.com/org/repo") == (
             "ssh",
@@ -149,7 +149,7 @@ class TestParseRemote:
         )
 
     def test_local_path_is_not_a_remote(self) -> None:
-        from lup_template.devtools.dev.branches import parse_remote
+        from lup_template.devtools.dev.remote_auth import parse_remote
 
         assert parse_remote("/srv/git/repo.git") is None
 
