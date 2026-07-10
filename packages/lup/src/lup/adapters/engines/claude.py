@@ -28,7 +28,7 @@ class ClaudeEngine(Engine):
 
         return ClaudeProfile()
 
-    def builtin_tools(self) -> frozenset[str]:
+    def builtin_tools(self) -> frozenset[str]:  # lup: ignore[frozenset-shape]
         from lup.adapters.tools.claude import CLAUDE_BUILTIN_TOOLS
 
         return CLAUDE_BUILTIN_TOOLS

@@ -19,7 +19,7 @@ from lup.adapters.options import LupAgentOptions
 logger = logging.getLogger(__name__)
 
 
-INTENT_KNOBS: frozenset[str] = frozenset(
+INTENT_KNOBS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
     {
         "max_turns",
         "max_thinking_tokens",

@@ -20,7 +20,7 @@ from lup.adapters.tools.names import (
     WRITE,
 )
 
-CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(
+CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
     {
         BASH,
         EDIT,
