@@ -102,7 +102,7 @@ def read_agent_version(root: Path) -> str:
         data = tomllib.load(f)
     tool = data.get("tool", {})  # lup: ignore[dict-get] — TOML payload
     lup_table = tool.get("lup", {})  # lup: ignore[dict-get] — TOML payload
-    return lup_table.get("agent_version", "0.0.0")  # lup: ignore[dict-get]
+    return lup_table.get("agent_version", "0.0.0")  # lup: ignore[dict-get] — TOML probe
 
 
 # -- Mutable path state -------------------------------------------------------

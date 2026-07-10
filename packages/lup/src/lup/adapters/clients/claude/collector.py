@@ -65,7 +65,7 @@ class ClaudeResponseCollector:
         self.tap = tap
         self.messages: list[
             LupAssistantMessage | LupUserMessage
-        ] = []  # lup: ignore[empty-collection]
+        ] = []  # lup: ignore[empty-collection] — streaming accumulator
         self.result: claude_types.ResultMessage | None = None
 
     @property

@@ -87,7 +87,7 @@ if TYPE_CHECKING:
 
 # The package-root public API — the one sanctioned __all__ (subpackages and
 # internal modules never re-export).
-__all__ = [  # lup: ignore[all-export]
+__all__ = [  # lup: ignore[all-export] — the packages/ public-API exception
     "TIMESTAMP_FMT",
     "BackgroundAgent",
     "BackgroundAgentParams",
