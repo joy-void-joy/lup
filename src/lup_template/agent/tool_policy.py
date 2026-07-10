@@ -22,11 +22,11 @@ Usage:
     hooks = create_tool_allowlist_hook(policy.get_allowed_tools(mcp_servers))
 """
 
-from collections.abc import Iterable
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from lup.adapters.tools.names import BASH
-from lup.tool_policy import BaseToolPolicy
+from lup.tool_policy import BaseToolPolicy, ExclusionReasons
 
 if TYPE_CHECKING:
     from lup_template.agent.config import Settings
@@ -61,24 +61,27 @@ class ToolPolicy(BaseToolPolicy):
         settings: "Settings",
         *,
         restricted_mode: bool = False,
-        excluded_tools: Iterable[str] | None = None,
-        excluded_tags: Iterable[str] | None = None,
+        excluded_tools: Mapping[str, str] | None = None,
+        excluded_tags: Mapping[str, str] | None = None,
     ) -> None:
-        tags: set[str] = set(excluded_tags or ())  # lup: ignore[set-shape]
-        names: set[str] = set(excluded_tools or ())  # lup: ignore[set-shape]
+        tags: ExclusionReasons = dict(excluded_tags or {})
+        names: ExclusionReasons = dict(excluded_tools or {})
 
-        # TEMPLATE: map each unmet requirement to its tag — replace the
-        # example-api check with your domain's keys, one tag per service
+        # TEMPLATE: map each unmet requirement to its tag and the reason —
+        # replace the example-api check with your domain's keys
         if not settings.example_api_key:
-            tags.add("requires:example-api")
+            tags["requires:example-api"] = "EXAMPLE_API_KEY is not configured"
 
         # Raw host shell is disallowed regardless of any code-execution
         # sandbox: execute_code is the sanctioned code path. Opt it back in
         # with AGENT_SANDBOX_ALLOW_SHELL.
         if not settings.sandbox_allow_shell:
-            names.add(BASH)
+            names[BASH] = (
+                "host shell is off by default (AGENT_SANDBOX_ALLOW_SHELL opts "
+                "it back in); execute_code is the sanctioned code path"
+            )
 
-        # TEMPLATE: add more name-set exclusions for tools you don't own here
+        # TEMPLATE: add more name exclusions for tools you don't own here
 
         super().__init__(
             restricted_mode=restricted_mode,

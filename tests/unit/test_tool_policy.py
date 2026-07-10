@@ -53,7 +53,7 @@ class TestToolPolicyIsToolAvailable:
     def test_excluded_tool_is_unavailable(self) -> None:
         """A tool in excluded_tools must report unavailable."""
         policy = ToolPolicy(settings)
-        policy.excluded_tools = {"mcp__live__quote"}
+        policy.excluded_tools = {"mcp__live__quote": "off in test"}
 
         assert not policy.is_tool_available("mcp__live__quote")
         assert policy.is_tool_available("mcp__live__history")
@@ -61,16 +61,18 @@ class TestToolPolicyIsToolAvailable:
     def test_excluded_tools_dropped_from_allowed_list(self) -> None:
         """get_allowed_tools must omit excluded built-in tools."""
         policy = ToolPolicy(settings)
-        policy.excluded_tools = {"WebSearch"}
+        policy.excluded_tools = {"WebSearch": "off in test"}
 
         allowed = policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
         assert "WebSearch" not in allowed
         assert "Read" in allowed
 
     def test_excluded_tool_unavailable(self) -> None:
-        policy = ToolPolicy(settings, excluded_tools={"WebFetch"})
+        policy = ToolPolicy(settings, excluded_tools={"WebFetch": "off in test"})
 
         assert not policy.is_tool_available("WebFetch")
+        assert policy.exclusion_reason("WebFetch") == "off in test"
+        assert policy.exclusion_reason("Read") is None
 
 
 class TestGetMcpServers:
@@ -115,7 +117,13 @@ class TestGetAllowedTools:
 
     def test_name_exclusion_removes_tools_from_allowlist(self) -> None:
         server = create_mcp_server(name="pingsrv", version="1.0.0", tools=[ping])
-        policy = ToolPolicy(settings, excluded_tools={"WebFetch", "mcp__pingsrv__ping"})
+        policy = ToolPolicy(
+            settings,
+            excluded_tools={
+                "WebFetch": "off in test",
+                "mcp__pingsrv__ping": "off in test",
+            },
+        )
 
         allowed = policy.get_allowed_tools(
             policy.get_mcp_servers(server), builtin_tools=CLAUDE_BUILTIN_TOOLS
@@ -162,7 +170,9 @@ class TestTagFiltering:
     are never registered instead of failing on their first call."""
 
     def test_tagged_tool_filtered_when_tag_excluded(self) -> None:
-        policy = ToolPolicy(settings, excluded_tags={"requires:demo-api"})
+        policy = ToolPolicy(
+            settings, excluded_tags={"requires:demo-api": "off in test"}
+        )
 
         kept = policy.filter_tools([ping, gated_ping])
 
@@ -171,7 +181,8 @@ class TestTagFiltering:
 
     def test_untagged_tools_unaffected_by_tag_exclusions(self) -> None:
         policy = ToolPolicy(
-            settings, excluded_tags={"requires:demo-api", "requires:other"}
+            settings,
+            excluded_tags={"requires:demo-api": "off", "requires:other": "off"},
         )
 
         assert policy.filter_tools([ping]) == [ping]
@@ -207,8 +218,8 @@ class TestBaseToolPolicyStandalone:
 
     def test_construction_args_drive_all_filtering(self) -> None:
         policy = BaseToolPolicy(
-            excluded_tools={"WebFetch"},
-            excluded_tags={"requires:demo-api"},
+            excluded_tools={"WebFetch": "off in test"},
+            excluded_tags={"requires:demo-api": "off in test"},
         )
 
         assert policy.filter_tools([ping, gated_ping]) == [ping]
@@ -259,7 +270,7 @@ class TestAllowlistEnforcement:
         assert decision == "allow"
 
     async def test_excluded_tool_denied_with_available_tools_listed(self) -> None:
-        policy = ToolPolicy(settings, excluded_tools={"WebFetch"})
+        policy = ToolPolicy(settings, excluded_tools={"WebFetch": "off in test"})
         config = create_tool_allowlist_hook(
             policy.get_allowed_tools({}, builtin_tools=CLAUDE_BUILTIN_TOOLS)
         )
