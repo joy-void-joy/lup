@@ -129,8 +129,10 @@ def load_analyzed() -> list[str]:
     path = analyzed_file()
     if not path.exists():
         return []
-    data: dict[str, list[str]] = json.loads(path.read_text())
-    return list(dict.fromkeys(data.get("analyzed", [])))
+    match json.loads(path.read_text()):
+        case {"analyzed": list(ids)}:
+            return list(dict.fromkeys(ids))
+    return []
 
 
 def save_analyzed(session_ids: list[str]) -> None:

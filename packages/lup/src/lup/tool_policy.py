@@ -19,7 +19,7 @@ Express each exclusion whichever way is cheaper to maintain:
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_names
 
@@ -46,8 +46,8 @@ class BaseToolPolicy:
         self,
         *,
         restricted_mode: bool = False,
-        excluded_tools: Mapping[str, str] | None = None,
-        excluded_tags: Mapping[str, str] | None = None,
+        excluded_tools: ExclusionReasons | None = None,
+        excluded_tags: ExclusionReasons | None = None,
     ) -> None:
         """Each exclusion maps the tool/tag name to the reason it is off
         ("EXAMPLE_API_KEY is not configured", "restricted mode"), so

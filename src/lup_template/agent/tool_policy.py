@@ -22,7 +22,6 @@ Usage:
     hooks = create_tool_allowlist_hook(policy.get_allowed_tools(mcp_servers))
 """
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from lup.adapters.tools.names import BASH
@@ -61,8 +60,8 @@ class ToolPolicy(BaseToolPolicy):
         settings: "Settings",
         *,
         restricted_mode: bool = False,
-        excluded_tools: Mapping[str, str] | None = None,
-        excluded_tags: Mapping[str, str] | None = None,
+        excluded_tools: ExclusionReasons | None = None,
+        excluded_tags: ExclusionReasons | None = None,
     ) -> None:
         tags: ExclusionReasons = dict(excluded_tags or {})
         names: ExclusionReasons = dict(excluded_tools or {})
