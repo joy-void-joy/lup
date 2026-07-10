@@ -18,7 +18,10 @@ import tempfile
 import sh
 import typer
 
-from lup.adapters.profiles.claude.profile import CONFIG_DIR_ENV, ClaudeProfile
+from lup.adapters.profiles.claude.profile import (  # lup: ignore[seam-boundary]
+    CONFIG_DIR_ENV,
+    ClaudeProfile,
+)
 from lup.workspace.paths import project_root
 
 MCP_SERVER_NAME = "notes"

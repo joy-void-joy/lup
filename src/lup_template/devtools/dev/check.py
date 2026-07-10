@@ -6,6 +6,7 @@ import typer
 from lup.codescan.markers import find_feedback
 
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
+from lup_template.devtools.dev.boundaries import scan_boundaries
 from lup_template.devtools.dev.comments import scan_tracked
 from lup_template.devtools.utils import git, uv
 
@@ -100,6 +101,16 @@ def run_checks(fix: bool, no_test: bool) -> None:
         tail = f" ({advisory} untyped, advisory)" if advisory else ""
         typer.echo(f"antipatterns: ok{tail}")
         results.append(("antipatterns", True))
+
+    breaches = scan_boundaries()
+    if breaches:
+        typer.echo(f"seam boundaries: FAIL ({len(breaches)} breach(es))")
+        for breach in breaches:
+            typer.echo(f"  {breach.file}:{breach.line}  {breach.module}")
+        results.append(("seam boundaries", False))
+    else:
+        typer.echo("seam boundaries: ok")
+        results.append(("seam boundaries", True))
 
     # summary
     passed = sum(1 for _, ok in results if ok)
