@@ -49,7 +49,9 @@ class SessionToolset(TypedDict):
     output_path: Path
 
 
-def tool_group_names(*, realtime: bool) -> tuple[ServerGroup, ...]:
+def tool_group_names(
+    *, realtime: bool
+) -> tuple[ServerGroup, ...]:  # lup: ignore[tuple-shape]
     """Group names served to subprocess backends (Codex/OpenAI).
 
     Excludes :data:`EXAMPLE_GROUP`. Uses the same name constants as

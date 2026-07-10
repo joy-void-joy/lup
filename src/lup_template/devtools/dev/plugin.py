@@ -1,3 +1,6 @@
+# lup: ignore[dict-get]
+# Every read here probes Claude-settings JSON whose keys are all optional,
+# so dict-get is opted out file-wide.
 """Marketplace naming for the local lup plugin.
 
 Marketplace names live in one global namespace
@@ -47,7 +50,7 @@ class MarketplaceJson(TypedDict, total=False):
 
 class SettingsJson(TypedDict, total=False):
     extraKnownMarketplaces: dict[str, MarketplaceEntry]
-    enabledPlugins: dict[str, bool]
+    enabledPlugins: dict[str, bool]  # lup: ignore[dict-str-payload] — settings wire
 
 
 def plugin_root(root: Path) -> Path:
@@ -82,7 +85,7 @@ def validate_name(name: str) -> str:
     return name
 
 
-def write_json(path: Path, data: object) -> None:
+def write_json(path: Path, data: object) -> None:  # lup: ignore[bare-object]
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
@@ -99,7 +102,8 @@ def apply_marketplace_json(root: Path, name: str, dry_run: bool) -> list[str]:
     path = marketplace_file(root)
     if not path.exists():
         raise typer.BadParameter(f"No marketplace.json at {path}")
-    data = cast(MarketplaceJson, json.loads(path.read_text()))
+    raw = json.loads(path.read_text())
+    data = cast(MarketplaceJson, raw)  # lup: ignore[cast] — TypedDict from JSON
     old = data.get("name")
     if old == name:
         return []
@@ -112,11 +116,11 @@ def apply_marketplace_json(root: Path, name: str, dry_run: bool) -> list[str]:
 def apply_settings_json(root: Path, name: str, dry_run: bool) -> list[str]:
     path = settings_file(root)
     settings = (
-        cast(SettingsJson, json.loads(path.read_text()))
+        cast(SettingsJson, json.loads(path.read_text()))  # lup: ignore[cast]
         if path.exists()
         else SettingsJson()
     )
-    changes: list[str] = []
+    changes: list[str] = []  # lup: ignore[empty-collection] — change log
 
     known = settings.get("extraKnownMarketplaces") or {}
     for key in [k for k, v in known.items() if k != name and points_at_self(v, root)]:

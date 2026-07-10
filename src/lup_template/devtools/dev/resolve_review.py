@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from lup_template.devtools.utils import git
 
@@ -72,10 +72,10 @@ class ManifestEntry(BaseModel):
     reason: str = ""
     residual: str = ""
     summary: str = ""
-    files_changed: list[str] = []
-    swept_beyond_scope: list[str] = []
-    note_findings: list[NoteFinding] = []
-    notes: list[NoteRef] = []
+    files_changed: list[str] = Field(default_factory=list)
+    swept_beyond_scope: list[str] = Field(default_factory=list)
+    note_findings: list[NoteFinding] = Field(default_factory=list)
+    notes: list[NoteRef] = Field(default_factory=list)
 
 
 def load_manifest(path: Path) -> list[ManifestEntry]:
@@ -102,7 +102,7 @@ def load_manifest(path: Path) -> list[ManifestEntry]:
 
 
 def render_diff(text: str) -> str:
-    rendered: list[str] = []
+    rendered: list[str] = []  # lup: ignore[empty-collection] — html fold
     for line in text.splitlines():
         esc = html.escape(line)
         if line.startswith(
@@ -134,7 +134,7 @@ def finding_for(entry: ManifestEntry, note: NoteRef) -> NoteFinding:
 
 def render_concern(entry: ManifestEntry, base: str) -> str:
     branch = entry.branch or "(none)"
-    badges: list[str] = []
+    badges: list[str] = []  # lup: ignore[empty-collection] — badge assembly
     badges.append(
         '<span class="badge ok">verifier: accepted</span>'
         if entry.accepted
@@ -148,7 +148,7 @@ def render_concern(entry: ManifestEntry, base: str) -> str:
         else '<span class="badge warn">no commit</span>'
     )
 
-    rows: list[str] = []
+    rows: list[str] = []  # lup: ignore[empty-collection] — html fold
     for note in entry.notes:
         finding = finding_for(entry, note)
         state = "✅" if finding.addressed else "⚠️"

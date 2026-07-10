@@ -566,9 +566,8 @@ def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnaps
     )
 
     daily: list[DaySnapshot] = []  # lup: ignore[empty-collection] — window fold
-    tokens_by_model: dict[
-        str, int
-    ] = {}  # lup: ignore[dict-str-payload, empty-collection]
+    tally: dict[str, int] = {}  # lup: ignore[dict-str-payload, empty-collection]
+    tokens_by_model = tally
     if stats:
         window_end, _ = breakdown_window(usage)
         for day in trailing_week(stats, window_end):

@@ -18,7 +18,7 @@ from lup_template.devtools.utils import git
 logger = logging.getLogger(__name__)
 
 
-def get_uncommitted_session_ids() -> set[str]:
+def get_uncommitted_session_ids() -> set[str]:  # lup: ignore[set-shape] — id set
     """Find session IDs with uncommitted result files.
 
     Paths are matched against the *configured* trace root (``lup.workspace.paths``),
@@ -30,21 +30,24 @@ def get_uncommitted_session_ids() -> set[str]:
         traces_rel = traces_path().relative_to(project_root())
     except ValueError:
         # Trace root configured outside the repo — nothing for git to commit
-        return set()
+        return set()  # lup: ignore[set-shape]
 
     status = str(git.status("--porcelain", "-z", "--", str(traces_rel), _ok_code=[0]))
     return session_ids_from_status(status, traces_rel)
 
 
-def session_ids_from_status(status: str, traces_rel: Path) -> set[str]:
+def session_ids_from_status(
+    status: str,
+    traces_rel: Path,
+) -> set[str]:  # lup: ignore[set-shape] — deduplicated ids
     """Parse ``git status --porcelain -z`` output into session IDs.
 
     Only paths under ``traces_rel`` with the versioned layout
     (``<version>/(sessions|logs)/<session_id>/...``) count; rename/copy
     entries contribute their target path and their source is discarded.
     """
-    session_ids: set[str] = set()
-    chunks = iter(status.split("\0"))  # lup: ignore — NUL is porcelain -z framing
+    session_ids: set[str] = set()  # lup: ignore[set-shape, empty-collection]
+    chunks = iter(status.split("\0"))  # lup: ignore[string-split] — -z records
     for chunk in chunks:
         if len(chunk) < 4:
             continue
@@ -66,9 +69,9 @@ def get_session_summary(session_id: str) -> str:
     data = get_latest_session_json(session_id)
     if data is None:
         return f"session {session_id}"
-    output = data.get("output", {})
+    output = data.get("output", {})  # lup: ignore[dict-get] — optional key
     if isinstance(output, dict):
-        summary = output.get("summary")
+        summary = output.get("summary")  # lup: ignore[dict-get] — optional key
         if isinstance(summary, str):
             return summary[:50]
     return f"session {session_id}"
@@ -76,10 +79,9 @@ def get_session_summary(session_id: str) -> str:
 
 def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
     """Stage and commit files for a single session ID."""
-    paths: list[str] = []
-
-    for session_dir in iter_session_dirs(session_id=session_id):
-        paths.append(str(session_dir))
+    paths = [
+        str(session_dir) for session_dir in iter_session_dirs(session_id=session_id)
+    ]
 
     if traces_path().exists():
         for ver_dir in traces_path().iterdir():

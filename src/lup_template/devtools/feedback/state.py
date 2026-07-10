@@ -1,3 +1,6 @@
+# lup: ignore[dict-get]
+# The loaders probe SessionData payloads whose keys are all optional, so
+# dict-get is opted out file-wide (mirrors reports.py).
 """Feedback state: session loading, outcome matching, and analysis marks.
 
 This is a TEMPLATE script. Run ``/lup:init`` to customize it for your domain.
@@ -25,7 +28,7 @@ def load_sessions(
     since: datetime | None = None, version: str | None = None
 ) -> list[SessionData]:
     """Load session data, optionally filtered by version."""
-    sessions: list[SessionData] = []
+    sessions: list[SessionData] = []  # lup: ignore[empty-collection] — tolerant fold
 
     for session_dir in iter_session_dirs(version=version):
         session_files = sorted(session_dir.glob("*.json"), reverse=True)
@@ -33,7 +36,8 @@ def load_sessions(
             continue
 
         try:
-            data = cast(SessionData, json.loads(session_files[0].read_text()))
+            raw = json.loads(session_files[0].read_text())
+            data = cast(SessionData, raw)  # lup: ignore[cast] — TypedDict from JSON
             data["_session_id"] = session_dir.name
             data["_file"] = str(session_files[0])
 
@@ -76,8 +80,8 @@ def match_outcomes(
         outcomes = load_outcomes()
     except NotImplementedError as e:
         typer.echo(f"note: collecting without outcomes — {e}", err=True)
-        outcomes = {}
-    results = []
+        outcomes = {}  # lup: ignore[empty-collection] — degrade to no outcomes
+    results = []  # lup: ignore[empty-collection] — per-session fold
 
     for session in sessions:
         session_id = session.get("_session_id", "")
@@ -103,20 +107,18 @@ def load_sessions_for_versions(
     """Load sessions for a resolved version list (None = all)."""
     if versions is None:
         return load_sessions()
-    results: list[SessionData] = []
-    for v in versions:
-        results.extend(load_sessions(version=v))
-    return results
+    return [s for v in versions for s in load_sessions(version=v)]
 
 
-def collect_session_ids(effective: list[str] | None) -> set[str]:
+def collect_session_ids(
+    effective: list[str] | None,
+) -> set[str]:  # lup: ignore[set-shape] — deduplicated ids
     """Collect all session IDs for the given version list (None = all)."""
     if not effective:
-        return set(list_all_session_ids())
-    ids: set[str] = set()
-    for v in effective:
-        ids.update(list_all_session_ids(version=v))
-    return ids
+        return set(list_all_session_ids())  # lup: ignore[set-shape]
+    return {
+        session_id for v in effective for session_id in list_all_session_ids(version=v)
+    }
 
 
 # =============================================================================
@@ -129,16 +131,18 @@ def analyzed_file() -> Path:
     return feedback_path() / "analyzed.json"
 
 
-def load_analyzed() -> set[str]:
+def load_analyzed() -> set[str]:  # lup: ignore[set-shape] — id membership
     """Load the set of already-analyzed session IDs."""
     path = analyzed_file()
     if not path.exists():
-        return set()
+        return set()  # lup: ignore[set-shape]
     data: dict[str, list[str]] = json.loads(path.read_text())
-    return set(data.get("analyzed", []))
+    return set(data.get("analyzed", []))  # lup: ignore[set-shape]
 
 
-def save_analyzed(session_ids: set[str]) -> None:
+def save_analyzed(
+    session_ids: set[str],  # lup: ignore[set-shape] — id membership
+) -> None:
     """Save the set of analyzed session IDs."""
     feedback_path().mkdir(parents=True, exist_ok=True)
     analyzed_file().write_text(

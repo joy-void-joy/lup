@@ -26,10 +26,13 @@ class ClaudeRunnerGroup(TyperGroup):
     and the explicit ``claude run`` escape hatch for collisions.
     """
 
-    # typer vendors click as ``typer._click``; match TyperGroup.resolve_command.
+    # typer vendors click as ``typer._click``; match TyperGroup.resolve_command,
+    # whose triple return shape is click's to define.
     def resolve_command(
         self, ctx: _click.Context, args: list[str]
-    ) -> tuple[str | None, _click.Command | None, list[str]]:
+    ) -> tuple[  # lup: ignore[tuple-shape] — click's triple
+        str | None, _click.Command | None, list[str]
+    ]:
         if args and args[0] not in self.commands:
             args = ["run", *args]
         return super().resolve_command(ctx, args)
@@ -90,5 +93,5 @@ def main(ctx: typer.Context) -> None:
         no_tools=False,
         no_plugin=False,
         with_prompt=False,
-        extra_args=[],
+        extra_args=[],  # lup: ignore[empty-collection] — none to forward
     )

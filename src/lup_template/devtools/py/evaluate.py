@@ -12,7 +12,7 @@ from pprint import pformat
 # py eval — safe expression evaluation
 # ---------------------------------------------------------------------------
 
-BLOCKED_CALLS = frozenset(
+BLOCKED_CALLS = frozenset(  # lup: ignore[frozenset-shape] — blocklist
     {
         "exec",
         "eval",
@@ -29,7 +29,7 @@ BLOCKED_CALLS = frozenset(
     }
 )
 
-BLOCKED_ATTRS = frozenset(
+BLOCKED_ATTRS = frozenset(  # lup: ignore[frozenset-shape] — blocklist
     {
         "__builtins__",
         "__class__",
@@ -47,7 +47,7 @@ BLOCKED_ATTRS = frozenset(
     }
 )
 
-DANGEROUS_MODULES = frozenset(
+DANGEROUS_MODULES = frozenset(  # lup: ignore[frozenset-shape] — blocklist
     {
         "os",
         "sys",
@@ -74,7 +74,7 @@ DANGEROUS_MODULES = frozenset(
     }
 )
 
-SAFE_BUILTINS: dict[str, object] = {  # lup: ignore — a namespace of live objects
+SAFE_BUILTINS: dict[str, object] = {  # lup: ignore[dict-str-object] — live namespace
     "True": True,
     "False": False,
     "None": None,
@@ -95,8 +95,8 @@ SAFE_BUILTINS: dict[str, object] = {  # lup: ignore — a namespace of live obje
     "list": list,
     "dict": dict,
     "tuple": tuple,
-    "set": set,
-    "frozenset": frozenset,
+    "set": set,  # lup: ignore[set-shape] — the builtin itself
+    "frozenset": frozenset,  # lup: ignore[frozenset-shape] — the builtin
     "sorted": sorted,
     "reversed": reversed,
     "enumerate": enumerate,
@@ -138,12 +138,12 @@ def check_eval_safety(tree: ast.Expression) -> str | None:
 
 def auto_import_namespace(
     tree: ast.Expression,
-) -> dict[str, object]:  # lup: ignore — a namespace of live objects
+) -> dict[str, object]:  # lup: ignore[dict-str-object] — live namespace
     """Build a namespace by importing modules referenced in the expression."""
     namespace = dict(SAFE_BUILTINS)
 
-    root_names: set[str] = set()
-    attr_nodes: list[ast.Attribute] = []
+    root_names: set[str] = set()  # lup: ignore[set-shape, empty-collection]
+    attr_nodes: list[ast.Attribute] = []  # lup: ignore[empty-collection] — walk fold
     for node in ast.walk(tree.body):
         if isinstance(node, ast.Name) and node.id not in namespace:
             root_names.add(node.id)
@@ -158,9 +158,9 @@ def auto_import_namespace(
         except ImportError:
             pass
 
-    dotted_paths: set[str] = set()
+    dotted_paths: set[str] = set()  # lup: ignore[set-shape, empty-collection]
     for node in attr_nodes:
-        chain: list[str] = []
+        chain: list[str] = []  # lup: ignore[empty-collection] — attr-chain walk
         current: ast.expr = node
         while isinstance(current, ast.Attribute):
             chain.append(current.attr)
@@ -183,8 +183,9 @@ def auto_import_namespace(
     return namespace
 
 
-def format_eval_result(result: object) -> str:
-    if isinstance(result, (dict, list, tuple, set, frozenset)):
+def format_eval_result(result: object) -> str:  # lup: ignore[bare-object]
+    containers = (dict, list, tuple, set, frozenset)  # lup: ignore[frozenset-shape]
+    if isinstance(result, containers):
         try:
             return json.dumps(result, indent=2, default=repr)
         except (TypeError, ValueError):

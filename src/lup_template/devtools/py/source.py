@@ -20,7 +20,7 @@ def format_tree(root: Path, prefix: str = "") -> list[str]:
     ]
     files = [e for e in entries if e.is_file() and e.suffix == ".py"]
     items: list[Path] = dirs + files
-    lines: list[str] = []
+    lines: list[str] = []  # lup: ignore[empty-collection] — tree-render fold
     for i, item in enumerate(items):
         is_last = i == len(items) - 1
         connector = "└── " if is_last else "├── "

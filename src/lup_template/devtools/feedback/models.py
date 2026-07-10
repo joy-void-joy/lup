@@ -7,7 +7,7 @@ The loaders live in ``state``, aggregation in ``metrics``, presentation in
 
 from typing import TypedDict
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lup.telemetry.metrics import MetricsSummary, ToolMetricsDict
 
@@ -31,11 +31,11 @@ class SessionData(TypedDict, total=False):
 
     timestamp: str
     agent_sdk: str
-    outcome: object
+    outcome: object  # lup: ignore[bare-object] — domain-defined outcome value
     tool_metrics: MetricsSummary
     token_usage: TokenUsage
     cost_usd: float
-    output: dict[str, str]
+    output: dict[str, str]  # lup: ignore[dict-str-payload] — domain output JSON
     _session_id: str
     _file: str
 
@@ -77,7 +77,7 @@ class SessionResult(BaseModel):
     session_id: str
     timestamp: str
     agent_sdk: str | None = None
-    outcome: object | None = None
+    outcome: object | None = None  # lup: ignore[bare-object] — domain-defined
     metrics: MetricsSummary | None = None
 
 
@@ -91,8 +91,11 @@ class FeedbackMetrics(BaseModel):
     since_timestamp: str | None = None
     total_sessions: int
     sessions_with_outcomes: int
-    sessions_by_sdk: dict[str, int] = {}
-    results: list[SessionResult] = []
+    # Open per-backend tally, keyed by whatever sdk ids appear.
+    sessions_by_sdk: dict[str, int] = Field(  # lup: ignore[dict-str-payload]
+        default_factory=dict
+    )
+    results: list[SessionResult] = Field(default_factory=list)
 
 
 # =============================================================================

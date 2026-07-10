@@ -72,7 +72,7 @@ def probe_base_options() -> LupAgentOptions:
     )
 
 
-def option_probes() -> list[tuple[str, LupAgentOptions]]:
+def option_probes() -> list[tuple[str, LupAgentOptions]]:  # lup: ignore[tuple-shape]
     """One probe per intent knob: the baseline plus exactly that knob."""
     base = probe_base_options()
     return [
@@ -178,7 +178,7 @@ def capability_matrix_markdown(engines: list[EngineCapabilities]) -> str:
         "|---" * (len(engines) + 1) + "|",
     ]
     for row, cell in enumerate(engines[0].cells):
-        cells: list[str] = []
+        cells: list[str] = []  # lup: ignore[empty-collection] — table row fold
         for engine in engines:
             match engine.cells[row].value:
                 case bool() as flag:

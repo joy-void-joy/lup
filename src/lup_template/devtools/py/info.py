@@ -1,6 +1,11 @@
+# lup: ignore[bare-object, cast, frozenset-shape]
+# Introspection's domain IS the arbitrary live object, so `object` params are
+# the honest type, each display branch casts after its isinstance/inspect
+# check, and TypedDict's own key-introspection API hands back frozensets;
+# all three rules are opted out file-wide.
 """Helpers for ``py info`` — unified object introspection."""
 
-import dataclasses
+import dataclasses  # lup: ignore[dataclass] — inspected, not used for modeling
 import enum
 import inspect
 import json
@@ -39,7 +44,7 @@ def get_docstring(obj: object) -> str:
     doc = inspect.getdoc(obj)
     if not doc:
         return ""
-    return doc.split("\n\n")[0]
+    return doc.split("\n\n")[0]  # lup: ignore[string-split] — first paragraph
 
 
 # ---------------------------------------------------------------------------
@@ -80,10 +85,11 @@ def show_module(obj: object, path: str, private: bool) -> None:
 
     module_name = getattr(obj, "__name__", path)
 
-    classes: list[str] = []
-    functions: list[str] = []
-    values: list[str] = []
-    reexports: list[str] = []
+    # Four display buckets, filled by the classify loop below.
+    classes: list[str] = []  # lup: ignore[empty-collection]
+    functions: list[str] = []  # lup: ignore[empty-collection]
+    values: list[str] = []  # lup: ignore[empty-collection]
+    reexports: list[str] = []  # lup: ignore[empty-collection]
     for name in sorted(dir(obj)):
         if name.startswith("_") and not private:
             continue
@@ -123,7 +129,7 @@ def show_module(obj: object, path: str, private: bool) -> None:
             typer.echo(f"  {r}")
 
 
-PYDANTIC_INTERNALS = frozenset(
+PYDANTIC_INTERNALS = frozenset(  # lup: ignore[frozenset-shape] — membership
     {
         "model_config",
         "model_fields",
@@ -222,8 +228,9 @@ def show_pydantic_fields(cls: type, schema: bool) -> None:
 
 
 def show_typed_dict_fields(cls: type) -> None:
-    required: frozenset[str] = getattr(cls, "__required_keys__", frozenset())
-    optional: frozenset[str] = getattr(cls, "__optional_keys__", frozenset())
+    empty: frozenset[str] = frozenset()
+    required: frozenset[str] = getattr(cls, "__required_keys__", empty)
+    optional: frozenset[str] = getattr(cls, "__optional_keys__", empty)
     try:
         hints = typing.get_type_hints(cls)
     except (NameError, AttributeError, TypeError, RecursionError):
@@ -261,8 +268,8 @@ def show_dataclass_fields(cls: type) -> None:
 def show_methods_section(
     cls: type, private: bool, *, exclude_pydantic: bool = False
 ) -> None:
-    methods: list[str] = []
-    properties: list[str] = []
+    methods: list[str] = []  # lup: ignore[empty-collection] — display bucket
+    properties: list[str] = []  # lup: ignore[empty-collection] — display bucket
     for name in sorted(cls.__dict__):
         if name.startswith("_") and not private:
             continue

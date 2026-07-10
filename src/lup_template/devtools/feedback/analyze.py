@@ -1,3 +1,6 @@
+# lup: ignore[dict-get]
+# Aggregates SessionData/metrics payloads whose keys are all optional, so
+# dict-get is opted out file-wide (mirrors reports.py).
 """Feedback analysis: structured report combining tool health, errors, and capability gaps.
 
 Examples::
@@ -19,6 +22,9 @@ from lup_template.devtools.trace.traces import (
     scan_for_capability_gaps,
 )
 from lup.workspace.history import resolve_version
+
+
+type ToolBuckets = dict[str, dict[str, int]]  # lup: ignore[dict-str-payload]
 
 
 class ToolHealth(TypedDict):
@@ -45,9 +51,8 @@ class AnalysisReport(TypedDict):
 
 def gather_tool_health(sessions: Sequence[SessionData]) -> list[ToolHealth]:
     """Compute per-tool call counts, error counts, and error rates."""
-    tool_stats: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"calls": 0, "errors": 0}
-    )
+    # Open per-tool aggregation buckets, keyed by whatever tools ran.
+    tool_stats: ToolBuckets = defaultdict(lambda: {"calls": 0, "errors": 0})
 
     for s in sessions:
         metrics = s.get("tool_metrics", {})
@@ -56,7 +61,7 @@ def gather_tool_health(sessions: Sequence[SessionData]) -> list[ToolHealth]:
             tool_stats[tool_name]["calls"] += data.get("call_count", 0)
             tool_stats[tool_name]["errors"] += data.get("error_count", 0)
 
-    result: list[ToolHealth] = []
+    result: list[ToolHealth] = []  # lup: ignore[empty-collection] — stats fold
     for name in sorted(tool_stats, key=lambda t: -tool_stats[t]["calls"]):
         stats = tool_stats[name]
         calls = stats["calls"]
@@ -74,7 +79,7 @@ def gather_tool_health(sessions: Sequence[SessionData]) -> list[ToolHealth]:
 
 def gather_error_patterns(sessions: Sequence[SessionData]) -> list[ErrorPattern]:
     """Find sessions with high error rates, grouped by error type."""
-    result: list[ErrorPattern] = []
+    result: list[ErrorPattern] = []  # lup: ignore[empty-collection] — session fold
 
     for s in sessions:
         metrics = s.get("tool_metrics", {})
@@ -85,7 +90,9 @@ def gather_error_patterns(sessions: Sequence[SessionData]) -> list[ErrorPattern]
         total_calls = metrics.get("total_tool_calls", 0)
         by_tool = metrics.get("by_tool", {})
 
-        tool_errors: list[tuple[int, str]] = []
+        tool_errors: list[
+            tuple[int, str]  # lup: ignore[tuple-shape] — sortable (errors, tool)
+        ] = []  # lup: ignore[empty-collection]
         for tool_name, tool_data in by_tool.items():
             errs = tool_data.get("error_count", 0)
             if errs > 0:

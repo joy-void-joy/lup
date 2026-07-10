@@ -39,6 +39,10 @@ from lup.workspace.paths import agent_version
 
 logger = logging.getLogger(__name__)
 
+# (system_prompt, mcp_env, writable_roots) for the Codex-runtime adapters.
+type McpEnv = dict[str, str]  # lup: ignore[dict-str-payload] — open env map
+type CodexScaffold = tuple[str, McpEnv, list[Path]]  # lup: ignore[tuple-shape]
+
 
 class PersistentSessionResult(BaseModel):
     """Outcome of a persistent (sleep/wake) session.
@@ -52,14 +56,17 @@ class PersistentSessionResult(BaseModel):
 
 def extract_sources(blocks: list[LupContentBlock]) -> list[str]:
     """Extract source URLs/queries from tool use blocks."""
-    sources: list[str] = []
-    for block in blocks:
-        if isinstance(block, LupToolUseBlock) and block.name in WEB_TOOLS:
-            if isinstance(block.input, dict):
-                source = block.input.get("url") or block.input.get("query")
-                if source:
-                    sources.append(str(source))
-    return sources
+
+    def source_of(block: LupContentBlock) -> str | None:
+        if not (isinstance(block, LupToolUseBlock) and block.name in WEB_TOOLS):
+            return None
+        if not isinstance(block.input, dict):
+            return None
+        payload = block.input
+        found = payload.get("url") or payload.get("query")  # lup: ignore[dict-get]
+        return str(found) if found else None
+
+    return [source for block in blocks if (source := source_of(block))]
 
 
 def build_result(
@@ -244,7 +251,7 @@ def build_codex_session(
     *,
     realtime_dir: Path | None = None,
     model: str | None = None,
-) -> tuple[str, dict[str, str], list[Path]]:
+) -> CodexScaffold:
     """Shared scaffolding for Codex-runtime adapters.
 
     Returns (system_prompt, mcp_env, writable_roots). Enforcement on
@@ -331,7 +338,7 @@ def resolve_resume_token(reference: str) -> str:
     record = get_latest_session_json(reference)
     if record is None:
         return reference
-    token = record.get("sdk_session_id")
+    token = record.get("sdk_session_id")  # lup: ignore[dict-get] — optional key
     if not isinstance(token, str) or not token:
         raise ValueError(
             f"Session {reference!r} recorded no engine session id to resume "

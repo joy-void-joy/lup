@@ -42,7 +42,7 @@ class Settings(BaseSettings):
 
         Customize this for your domain's optional dependencies.
         """
-        missing = []
+        missing = []  # lup: ignore[empty-collection] — per-key warning fold
 
         # TEMPLATE: warn about your domain's missing optional API keys
         # if not self.example_api_key:
@@ -297,9 +297,12 @@ if settings.notes_path != "./notes" or settings.logs_path != "./logs":
         logs_dir=Path(settings.logs_path).resolve(),
     )
 
-# Route through OpenRouter when the key is set
+# Route through OpenRouter when the key is set. The SDK subprocess reads these
+# vars directly, so this settings module is exactly the env boundary.
 if settings.openrouter_api_key:
-    os.environ.setdefault("ANTHROPIC_BASE_URL", "https://openrouter.ai/api")
-    os.environ.setdefault("ANTHROPIC_AUTH_TOKEN", settings.openrouter_api_key)
-    os.environ.setdefault("ANTHROPIC_API_KEY", "")
+    base = "https://openrouter.ai/api"
+    key = settings.openrouter_api_key
+    os.environ.setdefault("ANTHROPIC_BASE_URL", base)  # lup: ignore[os-environ]
+    os.environ.setdefault("ANTHROPIC_AUTH_TOKEN", key)  # lup: ignore[os-environ]
+    os.environ.setdefault("ANTHROPIC_API_KEY", "")  # lup: ignore[os-environ]
     logger.info("OpenRouter enabled — routing API calls through openrouter.ai")

@@ -220,7 +220,7 @@ def loop(
     else:
         logging.basicConfig(level=logging.INFO)
 
-    results: list[AgentSessionResult] = []
+    results: list[AgentSessionResult] = []  # lup: ignore[empty-collection] — loop fold
     total_cost = 0.0
 
     for i, task in enumerate(tasks, 1):

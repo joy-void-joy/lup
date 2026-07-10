@@ -135,7 +135,7 @@ def source_cmd(
             typer.echo(f"{i:4d}  {line}")
         return
 
-    source_obj = cast(Callable[..., object], obj)
+    source_obj = cast(Callable[..., object], obj)  # lup: ignore[cast] — introspection
     try:
         source = inspect.getsource(source_obj)
         source_file = inspect.getfile(source_obj)
@@ -183,7 +183,9 @@ def eval_cmd(
 
     try:
         code = compile(tree, "<eval>", "eval")
-        result = eval(code, {"__builtins__": {}}, namespace)
+        # The `py eval` command's whole job, with builtins stripped and the
+        # expression pre-screened by check_expression_safety.
+        result = eval(code, {"__builtins__": {}}, namespace)  # lup: ignore[eval-exec]
     except (
         NameError,
         AttributeError,
@@ -234,15 +236,15 @@ def imports_cmd(
     if not file_path.exists():
         fail(f"Module file does not exist: {file_path}")
 
-    seen: set[str] = set()
+    seen: set[str] = set()  # lup: ignore[set-shape, empty-collection] — visited
     current_modules = [module]
 
     for current_depth in range(1, depth + 1):
-        next_modules: list[str] = []
+        next_modules: list[str] = []  # lup: ignore[empty-collection] — BFS frontier
         if current_depth > 1:
             typer.echo(f"\n--- Depth {current_depth} ---")
 
-        all_entries: list[ImportEntry] = []
+        all_entries: list[ImportEntry] = []  # lup: ignore[empty-collection] — fold
         for mod_name in current_modules:
             mod_path = find_module_path(mod_name)
             if mod_path is None or not mod_path.exists():
@@ -253,7 +255,7 @@ def imports_cmd(
                 continue
             all_entries.extend(collect_imports_from_source(source))
 
-        grouped: dict[str, list[ImportEntry]] = {}
+        grouped: dict[str, list[ImportEntry]] = {}  # lup: ignore[empty-collection]
         for entry in all_entries:
             if entry["module"] in seen:
                 continue
@@ -262,7 +264,7 @@ def imports_cmd(
             next_modules.append(entry["module"])
 
         for category in ("project", "third-party", "stdlib"):
-            entries = grouped.get(category, [])
+            entries = grouped.get(category, [])  # lup: ignore[dict-get] — bucket
             if not entries:
                 continue
             typer.echo(f"\n{category} ({len(entries)}):")
@@ -286,7 +288,7 @@ def search_cmd(
     else:
         packages = get_top_level_packages()
 
-    all_matches: list[SearchMatch] = []
+    all_matches: list[SearchMatch] = []  # lup: ignore[empty-collection] — scan fold
     scanned = 0
 
     if not package:

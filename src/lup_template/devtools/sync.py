@@ -1,3 +1,6 @@
+# lup: ignore[dict-get]
+# Every read here probes ProjectEntry/config payloads whose keys are all
+# optional, so dict-get is opted out file-wide.
 """Track upstream repos and review commits since last sync.
 
 These commands are the read/fetch half of ``/lup:update`` — the workflow that
@@ -101,7 +104,8 @@ def refs_dir() -> Path:
 def load_json(path: Path) -> DownstreamConfig:
     if not path.exists():
         return {"projects": []}
-    return cast(DownstreamConfig, json.loads(path.read_text()))
+    raw = json.loads(path.read_text())
+    return cast(DownstreamConfig, raw)  # lup: ignore[cast] — TypedDict from JSON
 
 
 def save_local(data: DownstreamConfig) -> None:
@@ -139,14 +143,15 @@ def load_projects() -> list[ProjectEntry]:
     base = load_json(downstream_file())
     local = load_json(local_file())
 
-    merged: dict[str, ProjectEntry] = {}
+    merged: dict[str, ProjectEntry] = {}  # lup: ignore[empty-collection] — merge fold
     for p in base.get("projects", []):
         merged[p["name"]] = p.copy()
     for p in local.get("projects", []):
         name = p["name"]
         if name in merged:
             base_entry = merged[name]
-            merged[name] = cast(ProjectEntry, {**base_entry, **p})
+            overlay = {**base_entry, **p}
+            merged[name] = cast(ProjectEntry, overlay)  # lup: ignore[cast] — merge
         else:
             merged[name] = p.copy()
 
@@ -276,20 +281,20 @@ def status_cmd() -> None:
         typer.echo("No projects tracked. Check downstream.json or run 'setup'.")
         raise typer.Exit(1)
 
-    rows: list[tuple[str, str, str, str]] = []
+    rows: list[list[str]] = []  # lup: ignore[empty-collection] — display fold
     for p in projects:
         synced = p.get("last_synced_commit", "")
         synced_short = short_sha(synced) if synced else "never"
 
         if p.get("ignore"):
-            rows.append((p["name"], "—", "ignored", "(skipped)"))
+            rows.append([p["name"], "—", "ignored", "(skipped)"])
             continue
 
         resolved = resolve_existing_path(p)
         if resolved is None:
             has_url = bool(p.get("url"))
             note = "not cloned (run: sync fetch)" if has_url else "no path/url"
-            rows.append((p["name"], "—", synced_short, note))
+            rows.append([p["name"], "—", synced_short, note])
             continue
 
         try:
@@ -298,7 +303,7 @@ def status_cmd() -> None:
             behind = "?"
         branch = p.get("branch", "")
         source = f"{resolved} ({branch})" if branch else resolved
-        rows.append((p["name"], str(behind), synced_short, source))
+        rows.append([p["name"], str(behind), synced_short, source])
 
     typer.echo()
     typer.echo(format_table(("Project", "Behind", "Last Synced", "Source"), rows))
