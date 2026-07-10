@@ -351,7 +351,7 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 
 **IMPORTANT:** Never commit _code_ directly to `main`. Always work in a worktree for code changes.
 
-**Exception:** Data commits (`data(outputs):`) can go directly to main -- generated outputs don't need review.
+**Exception:** Data commits (`data(outputs):`) can go directly to main -- generated outputs don't need review. This applies only if the repo commits session data at all: by default `notes/*` is gitignored and traces stay local (the commit-loop decision in /lup:init flips this).
 
 ### Worktrees vs Branches
 

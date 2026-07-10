@@ -89,7 +89,7 @@ Before customizing, decide which optional patterns this domain actually needs. T
 - **Reflection** (`agent/tools/reflect.py` + the gate wiring in `core.py`) — keep only if the agent commits a consequential, judgment-bearing output where self-critique helps.
 - **Realtime / persistent mode** (`agent/tools/realtime.py`, `lup.realtime*`, the Stop-hook/sleep-wake wiring) — keep only for agents that live over time (chat, monitoring, games); delete for one-shot agents.
 - **Feedback loop** (`devtools/feedback/`, the feedback-loop command) — keep only if ground truth or a feedback signal resolves over time.
-- **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning.
+- **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning. Session data is gitignored by default (the `notes/*` lines in `.gitignore`), so traces and outputs stay local; keeping this pattern means removing those two lines so session data can be committed. When deleting the pattern, leave the ignore lines in place.
 
 Use AskUserQuestion to confirm the keep/delete set, then **delete the files and their wiring** for everything not kept before proceeding. The customization steps below apply only to what you kept.
 
@@ -161,7 +161,7 @@ Customize the CLI for the domain's task format:
 
 - Update the `loop` command to accept domain-specific task inputs
 - Customize `_commit_results()` message format (e.g., `data(forecasts):` instead of `data(sessions):`)
-- Configure auto-commit behavior: enable/disable by default, target branch (main for data-only commits, or a dedicated branch)
+- Configure auto-commit behavior: enable/disable by default, target branch (main for data-only commits, or a dedicated branch) — requires the `notes/` ignore lines removed in Phase 1.5
 - Add domain-specific CLI commands if needed
 
 ### 5. Agent Version
