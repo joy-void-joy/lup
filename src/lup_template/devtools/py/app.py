@@ -55,9 +55,10 @@ def info_cmd(
 ) -> None:
     """Inspect a Python object — adapts to modules, classes, functions, values."""
     try:
-        obj, name = resolve_object(path)
+        resolved = resolve_object(path)
     except ValueError as e:
         fail(str(e))
+    obj, name = resolved.value, resolved.leaf_name
 
     typer.echo(f"\n{'=' * 60}")
     typer.echo(f"  {path}")
@@ -114,7 +115,7 @@ def source_cmd(
         return
 
     try:
-        obj, _ = resolve_object(path)
+        obj = resolve_object(path).value
     except ValueError as e:
         fail(str(e))
 

@@ -6,7 +6,7 @@ import io
 import signal
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from rich.console import Console
@@ -17,12 +17,13 @@ if TYPE_CHECKING:
 
 import sh
 import typer
+from pydantic import BaseModel
 
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
 
 
-class ClipboardImage(NamedTuple):
+class ClipboardImage(BaseModel):
     """Raw image bytes read from the clipboard, with their MIME type."""
 
     media_type: str
@@ -44,12 +45,12 @@ def save_images(
     """Save raw image data to disk, deduplicating by content hash."""
     images_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []  # lup: ignore[empty-collection] — write fold
-    for media_type, data in images:
-        ext = MIME_TO_EXT.get(media_type, ".bin")  # lup: ignore[dict-get]
-        name = hashlib.sha256(data).hexdigest()[:12] + ext
+    for image in images:
+        ext = MIME_TO_EXT.get(image.media_type, ".bin")  # lup: ignore[dict-get]
+        name = hashlib.sha256(image.data).hexdigest()[:12] + ext
         path = images_dir / name
         if not path.exists():
-            path.write_bytes(data)
+            path.write_bytes(image.data)
         paths.append(path)
     return paths
 
@@ -76,7 +77,7 @@ def read_clipboard_image() -> ClipboardImage | None:
             xclip("-selection", "clipboard", "-o", "-t", mime, _out=buf)
             data = buf.getvalue()
             if data:
-                return ClipboardImage(mime, data)
+                return ClipboardImage(media_type=mime, data=data)
         except sh.ErrorReturnCode:
             continue
     return None

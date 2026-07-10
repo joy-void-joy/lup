@@ -10,7 +10,7 @@ module loads without requiring any particular SDK to be installed.
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 type McpEnv = dict[str, str]  # lup: ignore[dict-str-payload] — open env map
 
 
-class CodexScaffold(NamedTuple):
+class CodexScaffold(BaseModel):
     """Shared scaffolding for the Codex-runtime adapters."""
 
     system_prompt: str
@@ -215,8 +215,13 @@ def build_session_options(
 
     # Subprocess assembly — consumed by natively-sandboxed engines (codex*).
     realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
-    system_prompt, mcp_env, writable_roots = build_codex_session(
+    scaffold = build_codex_session(
         notes, realtime_dir=realtime_dir, model=effective_model
+    )
+    system_prompt, mcp_env, writable_roots = (
+        scaffold.system_prompt,
+        scaffold.mcp_env,
+        scaffold.writable_roots,
     )
     if bare_prompt:
         system_prompt = ""
@@ -297,7 +302,11 @@ def build_codex_session(
     if settings.aux_model:
         mcp_env["AGENT_AUX_MODEL"] = settings.aux_model
 
-    return CodexScaffold(get_system_prompt(), mcp_env, list(notes.rw))
+    return CodexScaffold(
+        system_prompt=get_system_prompt(),
+        mcp_env=mcp_env,
+        writable_roots=list(notes.rw),
+    )
 
 
 def build_usage_cost() -> "UsageCost | None":

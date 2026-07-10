@@ -169,12 +169,12 @@ async def apply_with_per_event_commit(
     ``fail_on`` makes the handler raise when it sees a reply with that
     message, standing in for a handler that errors mid-batch.
     """
-    for event, commit_offset in mailbox.peek_new_events():
-        if isinstance(event, ReplyEvent):
-            if event.message == fail_on:
+    for pair in mailbox.peek_new_events():
+        if isinstance(pair.event, ReplyEvent):
+            if pair.event.message == fail_on:
                 raise RuntimeError("handler boom")
-            applied.append(event.message)
-        mailbox.read_offset = commit_offset
+            applied.append(pair.event.message)
+        mailbox.read_offset = pair.commit_offset
 
 
 class TestRelayNoLoss:
@@ -216,10 +216,12 @@ class TestRelayNoLoss:
 
         before = reader.read_offset
         pairs = reader.peek_new_events()
-        assert [e.message for e, _ in pairs if isinstance(e, ReplyEvent)] == ["x"]
+        assert [p.event.message for p in pairs if isinstance(p.event, ReplyEvent)] == [
+            "x"
+        ]
         assert reader.read_offset == before  # peek is non-destructive
         # Committing the last pair's offset consumes the event.
-        reader.read_offset = pairs[-1][1]
+        reader.read_offset = pairs[-1].commit_offset
         assert reader.peek_new_events() == []
 
 

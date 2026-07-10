@@ -8,7 +8,6 @@ the assembled panel from already-fetched data — no I/O here.
 """
 
 from datetime import datetime, timedelta
-from typing import NamedTuple
 
 from pydantic import BaseModel
 from rich.panel import Panel
@@ -173,7 +172,7 @@ def get_bucket(usage: UsageResponse, key: str) -> UsageBucket | None:
             return None
 
 
-class BucketPace(NamedTuple):
+class BucketPace(BaseModel):
     """Where a bucket stands against even pace."""
 
     linear_pct: float
@@ -189,7 +188,7 @@ def bucket_pace(bucket: UsageBucket, window_hours: float) -> BucketPace:
     total = window_hours * 3600
     linear_pct = min((elapsed / total) * 100, 100) if total > 0 else 0
     ratio = (bucket["utilization"] / linear_pct) if linear_pct > 0 else 0
-    return BucketPace(linear_pct, ratio)
+    return BucketPace(linear_pct=linear_pct, ratio=ratio)
 
 
 def place_label(text: str, position: int, line_width: int) -> str:
@@ -243,7 +242,8 @@ def render_bucket(
     """Render a usage bucket: label, pacing bar, annotations."""
     utilization = bucket["utilization"]
     resets_at = datetime.fromisoformat(bucket["resets_at"])
-    linear_pct, ratio = bucket_pace(bucket, window_hours)
+    bucket_pacing = bucket_pace(bucket, window_hours)
+    linear_pct, ratio = bucket_pacing.linear_pct, bucket_pacing.ratio
 
     pace = pace_label(ratio)
 
@@ -485,7 +485,7 @@ def render_daily_breakdown(
 # ── display assembly ───────────────────────────────────────
 
 
-class BreakdownWindow(NamedTuple):
+class BreakdownWindow(BaseModel):
     """The 7-day breakdown window's end and its budget-scaling utilization."""
 
     end: datetime
@@ -502,9 +502,10 @@ def breakdown_window(usage: UsageResponse) -> BreakdownWindow:
     seven_day = get_bucket(usage, "seven_day")
     if seven_day and seven_day.get("resets_at"):
         return BreakdownWindow(
-            datetime.fromisoformat(seven_day["resets_at"]), seven_day["utilization"]
+            end=datetime.fromisoformat(seven_day["resets_at"]),
+            utilization=seven_day["utilization"],
         )
-    return BreakdownWindow(datetime.now(), 0.0)
+    return BreakdownWindow(end=datetime.now(), utilization=0.0)
 
 
 def build_display(
@@ -529,8 +530,8 @@ def build_display(
         render_overage(out, extra, bar_w)
 
     if show_detail and stats:
-        window_end, weekly_util = breakdown_window(usage)
-        render_daily_breakdown(out, window_end, weekly_util, stats, bar_w)
+        window = breakdown_window(usage)
+        render_daily_breakdown(out, window.end, window.utilization, stats, bar_w)
 
     return Panel(
         out,
@@ -553,7 +554,7 @@ def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnaps
         if not (bucket and bucket.get("resets_at")):
             continue
         resets_at = datetime.fromisoformat(bucket["resets_at"])
-        _, ratio = bucket_pace(bucket, window_hours)
+        ratio = bucket_pace(bucket, window_hours).ratio
         buckets.append(
             BucketSnapshot(
                 name=label,
@@ -582,7 +583,7 @@ def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnaps
     tally: dict[str, int] = {}  # lup: ignore[dict-str-payload, empty-collection]
     tokens_by_model = tally
     if stats:
-        window_end, _ = breakdown_window(usage)
+        window_end = breakdown_window(usage).end
         for day in trailing_week(stats, window_end):
             daily.append(
                 DaySnapshot(

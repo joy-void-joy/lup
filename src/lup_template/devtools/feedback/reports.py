@@ -17,7 +17,6 @@ Examples::
 
 import json
 import logging
-from typing import NamedTuple
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -57,16 +56,6 @@ logger = logging.getLogger(__name__)
 
 # Open per-tool aggregation buckets, keyed by whatever tools ran.
 type ToolBuckets = dict[str, dict[str, int | float]]  # lup: ignore[dict-str-payload]
-
-
-class SummaryRow(NamedTuple):
-    """One rendered row of the tool-usage table (all cells pre-formatted)."""
-
-    name: str
-    calls: str
-    errors: str
-    error_rate: str
-    avg_ms: str
 
 
 def print_version_info(effective: list[str] | None) -> None:
@@ -155,7 +144,8 @@ def costs(version: str | None, all_versions: bool, as_json: bool) -> None:
     usage and rate-estimated cost in their session JSON, and this is
     where they aggregate.
     """
-    effective, ver_warning = resolve_version(version, all_versions)
+    scope = resolve_version(version, all_versions)
+    effective, ver_warning = scope.versions, scope.warning
     if ver_warning:
         typer.echo(ver_warning)
 
@@ -212,7 +202,8 @@ def status(
     all_versions: bool,
 ) -> None:
     """Show feedback status: version, data, analysis state, and aggregate stats."""
-    effective, ver_warning = resolve_version(version, all_versions)
+    scope = resolve_version(version, all_versions)
+    effective, ver_warning = scope.versions, scope.warning
     if ver_warning:
         typer.echo(ver_warning)
 
@@ -263,7 +254,8 @@ def collect(
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-    effective, ver_warning = resolve_version(version, all_versions)
+    scope = resolve_version(version, all_versions)
+    effective, ver_warning = scope.versions, scope.warning
     if ver_warning:
         typer.echo(ver_warning)
 
@@ -316,7 +308,8 @@ def collect(
 
 def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
     """Show tool usage aggregates."""
-    effective, warning = resolve_version(version, all_versions)
+    scope = resolve_version(version, all_versions)
+    effective, warning = scope.versions, scope.warning
     if warning:
         typer.echo(warning)
     sessions = load_sessions_for_versions(effective)
@@ -370,19 +363,19 @@ def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
         return
 
     typer.echo("\n=== Tool Usage Summary ===\n")
-    rows: list[SummaryRow] = []  # lup: ignore[empty-collection] — display fold
-    for e in entries:
+
+    def summary_cells(e: ToolUsageEntry) -> list[str]:
         err_pct = e["error_rate"] * 100
         err_indicator = " !" if err_pct > 10 else ""
-        rows.append(
-            SummaryRow(
-                e["name"],
-                str(e["calls"]),
-                str(e["errors"]),
-                f"{err_pct:.1f}%{err_indicator}",
-                f"{e['avg_ms']:.0f}",
-            )
-        )
+        return [
+            e["name"],
+            str(e["calls"]),
+            str(e["errors"]),
+            f"{err_pct:.1f}%{err_indicator}",
+            f"{e['avg_ms']:.0f}",
+        ]
+
+    rows = [summary_cells(e) for e in entries]
     headers = ("Tool", "Calls", "Errors", "Err%", "Avg ms")
     aligns = ("left", "right", "right", "right", "right")
     typer.echo(format_table(headers, rows, aligns=aligns))
@@ -395,7 +388,8 @@ def errors(
     as_json: bool,
 ) -> None:
     """Show sessions with high error rates from structured metrics."""
-    effective, warning = resolve_version(version, all_versions)
+    scope = resolve_version(version, all_versions)
+    effective, warning = scope.versions, scope.warning
     if warning:
         typer.echo(warning)
     sessions = load_sessions_for_versions(effective)
@@ -446,7 +440,8 @@ def errors(
 
 def trends(window: int, version: str | None, all_versions: bool, as_json: bool) -> None:
     """Show metric trends over time."""
-    effective, warning = resolve_version(version, all_versions)
+    scope = resolve_version(version, all_versions)
+    effective, warning = scope.versions, scope.warning
     if warning:
         typer.echo(warning)
     sessions = load_sessions_for_versions(effective)
@@ -613,7 +608,8 @@ def prompt_health(as_json: bool) -> None:
 
 def unanalyzed(version: str | None, all_versions: bool) -> None:
     """List unanalyzed session IDs, one per line."""
-    effective, ver_warning = resolve_version(version, all_versions)
+    scope = resolve_version(version, all_versions)
+    effective, ver_warning = scope.versions, scope.warning
     if ver_warning:
         typer.echo(ver_warning)
 

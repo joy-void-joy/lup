@@ -8,6 +8,7 @@ import typing
 from pathlib import Path
 
 import typer
+from pydantic import BaseModel
 
 from lup.workspace.paths import find_nearest_pyproject
 
@@ -16,7 +17,7 @@ from lup.workspace.paths import find_nearest_pyproject
 # ---------------------------------------------------------------------------
 
 
-class ResolvedObject(typing.NamedTuple):
+class ResolvedObject(BaseModel):
     """A resolved dotted path: the live object and the leaf name that reached it."""
 
     value: object  # lup: ignore[bare-object] — any importable live object
@@ -43,7 +44,8 @@ def resolve_object(path: str) -> ResolvedObject:
             except AttributeError as e:
                 raise ValueError(f"'{module_path}' has no attribute '{attr}'") from e
         return ResolvedObject(
-            obj, attrs[-1] if attrs else module_path.rsplit(".", 1)[-1]
+            value=obj,
+            leaf_name=attrs[-1] if attrs else module_path.rsplit(".", 1)[-1],
         )
 
     parts = path.split(".")  # lup: ignore[string-split] — dotted-path segments
@@ -53,7 +55,7 @@ def resolve_object(path: str) -> ResolvedObject:
             obj = importlib.import_module(module_path)
             for attr in parts[i:]:
                 obj = getattr(obj, attr)
-            return ResolvedObject(obj, parts[-1])
+            return ResolvedObject(value=obj, leaf_name=parts[-1])
         except (ImportError, AttributeError):
             continue
     raise ValueError(f"Could not resolve: {path}")
