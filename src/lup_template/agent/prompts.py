@@ -49,11 +49,12 @@ def output_format() -> str:
         "there. Reflect with the review tool first; submission is rejected",
         "until you have. Your submission includes:",
     ]
-    schema_doc = AgentOutput.model_json_schema()
-    properties = schema_doc.get("properties", {})  # lup: ignore[dict-get] — schema
-    for name, schema in properties.items():
-        description = schema.get("description", "")  # lup: ignore[dict-get] — schema
-        lines.append(f"- **{name}**: {description}" if description else f"- **{name}**")
+    for name, schema in AgentOutput.model_json_schema()["properties"].items():
+        match schema:
+            case {"description": str(description)} if description:
+                lines.append(f"- **{name}**: {description}")
+            case _:
+                lines.append(f"- **{name}**")
     return "\n".join(lines)
 
 

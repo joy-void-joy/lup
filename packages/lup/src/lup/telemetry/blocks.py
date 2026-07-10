@@ -29,12 +29,11 @@ def normalize_content(content: str | Sequence[object] | None) -> str:
     if content is None:
         return "(empty)"
     if isinstance(content, list):
-        texts: list[str] = [
-            str(item.get("text", ""))  # lup: ignore[dict-get] — wire block
-            for item in content
-            if isinstance(item, dict)
-            and item.get("type") == "text"  # lup: ignore[dict-get] — wire block probe
-        ]
+        texts: list[str] = []  # lup: ignore[empty-collection] — block fold
+        for item in content:
+            match item:
+                case {"type": "text", "text": text}:
+                    texts.append(str(text))
         return "\n".join(texts)
     return str(content)
 

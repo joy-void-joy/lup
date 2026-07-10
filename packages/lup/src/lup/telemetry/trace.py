@@ -106,8 +106,9 @@ def tool_result_ok(content: str | Sequence[object] | None) -> bool:
         parsed = json.loads(text)
     except (json.JSONDecodeError, TypeError):
         return True
-    if isinstance(parsed, dict):
-        return not bool(parsed.get("is_error"))  # lup: ignore[dict-get] — wire read
+    match parsed:
+        case {"is_error": err}:
+            return not bool(err)
     return True
 
 

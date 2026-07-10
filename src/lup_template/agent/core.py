@@ -71,11 +71,12 @@ def extract_sources(blocks: list[LupContentBlock]) -> list[str]:
     def source_of(block: LupContentBlock) -> str | None:
         if not (isinstance(block, LupToolUseBlock) and block.name in WEB_TOOLS):
             return None
-        if not isinstance(block.input, dict):
-            return None
-        payload = block.input
-        found = payload.get("url") or payload.get("query")  # lup: ignore[dict-get]
-        return str(found) if found else None
+        match block.input:
+            case {"url": str(found)} if found:
+                return found
+            case {"query": str(found)} if found:
+                return found
+        return None
 
     return [source for block in blocks if (source := source_of(block))]
 

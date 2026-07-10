@@ -180,21 +180,17 @@ def create_mcp_server(
         tool_def = tool_map[name]
         result = await tool_def.handler(arguments)
 
-        is_error = result.get("is_error", False)  # lup: ignore[dict-get] — wire read
+        is_error = "is_error" in result and bool(result["is_error"])
 
         content: list[TextContent | ImageContent] = []  # lup: ignore[empty-collection]
         if "content" in result:
             for item in result["content"]:
-                match item.get("type"):  # lup: ignore[dict-get] — wire read
-                    case "text":
-                        content.append(TextContent(type="text", text=item["text"]))
-                    case "image":
+                match item:
+                    case {"type": "text", "text": str(text)}:
+                        content.append(TextContent(type="text", text=text))
+                    case {"type": "image", "data": str(data), "mimeType": str(mime)}:
                         content.append(
-                            ImageContent(
-                                type="image",
-                                data=item["data"],
-                                mimeType=item["mimeType"],
-                            )
+                            ImageContent(type="image", data=data, mimeType=mime)
                         )
 
         blocks = cast(list[ContentBlock], content)  # lup: ignore[cast] — mcp variance
