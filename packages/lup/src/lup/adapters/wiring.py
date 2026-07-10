@@ -17,10 +17,7 @@ routers:
   order is the capability-table display order; anything needing the
   shipped ids iterates it.
 - :data:`MODEL_ROUTES` maps a model-name regex to an engine, first match
-  wins. The keys are regexes (not prefixes) so a future route can
-  deconstruct a model name via named groups into subparams — e.g. a
-  ``r"(?P<family>gpt)-(?P<size>\\d+)"`` key could read ``family``/``size``
-  off the match. No route does that today; the shape is ready for it.
+  wins; the empty catch-all pattern keeps the table total.
 
 There is no registry to mutate and no capability declarations to branch
 on: a custom backend is an :class:`~lup.adapters.engines.Engine.Engine` instance
@@ -81,11 +78,18 @@ behind an Anthropic-style endpoint name it explicitly."""
 
 
 def engine_for_model(model: str) -> Engine:
-    """The engine a model name infers to — first :data:`MODEL_ROUTES` match."""
+    """The engine a model name infers to — first :data:`MODEL_ROUTES` match.
+
+    The empty catch-all pattern makes the table total; reaching past the
+    loop means the table itself was edited out of totality.
+    """
     for pattern, engine in MODEL_ROUTES.items():
         if re.search(pattern, model):
             return engine
-    return ENGINES["openai-compat"]
+    raise LookupError(
+        f"No MODEL_ROUTES pattern matches model {model!r} — the table has "
+        "lost its catch-all route."
+    )
 
 
 def resolve_engine(
