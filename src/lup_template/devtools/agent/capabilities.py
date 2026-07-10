@@ -83,7 +83,10 @@ def option_probes() -> list[OptionProbe]:
     """One probe per intent knob: the baseline plus exactly that knob."""
     base = probe_base_options()
 
-    def probe(knob: str, **update: object) -> OptionProbe:
+    def probe(
+        knob: str,
+        **update: object,  # lup: ignore[bare-object] — heterogeneous knob values
+    ) -> OptionProbe:
         return OptionProbe(knob=knob, options=base.model_copy(update=update))
 
     return [
