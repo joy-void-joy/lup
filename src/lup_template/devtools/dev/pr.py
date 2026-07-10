@@ -385,7 +385,7 @@ def sync_base(
             feature_branch=feature,
             base_branch=base_branch,
             merged=True,
-            conflicts=[],  # lup: ignore[empty-collection] — merged means none
+            conflicts=[],
         )
     except sh.ErrorReturnCode:
         unmerged = git.lines("diff", "--name-only", "--diff-filter=U", _ok_code=[0, 1])
