@@ -12,7 +12,7 @@ import pytest
 import sh
 from typer.testing import CliRunner
 
-from lup_template.devtools.feedback import state
+from lup_template.devtools.feedback import commits
 from lup_template.devtools.main import app
 
 from tests.unit.conftest import LUP_PROJECT_VERSION
@@ -81,6 +81,6 @@ def test_uncommitted_session_ids_handle_spaces_and_renames(
     git("mv", str(committed), str(session_path(repo, "renamed-session")))
 
     monkeypatch.chdir(repo)
-    session_ids = state.get_uncommitted_session_ids()
+    session_ids = commits.get_uncommitted_session_ids()
 
     assert session_ids == {"sess with space", "renamed-session"}

@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 import lup_template.devtools.feedback.analyze as analyze
-import lup_template.devtools.feedback.state as state
+import lup_template.devtools.feedback.reports as reports
 from lup_template.devtools.utils import VERSION_OPT, ALL_VERSIONS_OPT, JSON_OPT
 
 app = typer.Typer(no_args_is_help=True)
@@ -18,7 +18,7 @@ def status_cmd(
     all_versions: ALL_VERSIONS_OPT = False,
 ) -> None:
     """Show feedback status: version, data, analysis state, and aggregate stats."""
-    state.status(version, all_versions)
+    reports.status(version, all_versions)
 
 
 @app.command("collect")
@@ -51,7 +51,7 @@ def collect_cmd(
     ] = False,
 ) -> None:
     """Collect feedback metrics from sessions."""
-    state.collect(since, all_time, version, all_versions, output, dry_run=dry_run)
+    reports.collect(since, all_time, version, all_versions, output, dry_run=dry_run)
 
 
 @app.command("costs")
@@ -61,7 +61,7 @@ def costs_cmd(
     as_json: JSON_OPT = False,
 ) -> None:
     """Per-backend cost/token rollup from session JSONs (any backend)."""
-    state.costs(version, all_versions, as_json)
+    reports.costs(version, all_versions, as_json)
 
 
 @app.command("tools")
@@ -71,7 +71,7 @@ def tools_cmd(
     as_json: JSON_OPT = False,
 ) -> None:
     """Show tool usage aggregates."""
-    state.tools(version, all_versions, as_json)
+    reports.tools(version, all_versions, as_json)
 
 
 @app.command("errors")
@@ -85,7 +85,7 @@ def errors_cmd(
     as_json: JSON_OPT = False,
 ) -> None:
     """Show sessions with high error rates from structured metrics."""
-    state.errors(limit, version, all_versions, as_json)
+    reports.errors(limit, version, all_versions, as_json)
 
 
 @app.command("trends")
@@ -99,7 +99,7 @@ def trends_cmd(
     as_json: JSON_OPT = False,
 ) -> None:
     """Show metric trends over time."""
-    state.trends(window, version, all_versions, as_json)
+    reports.trends(window, version, all_versions, as_json)
 
 
 @app.command("history")
@@ -110,7 +110,7 @@ def history_cmd(
     ] = 10,
 ) -> None:
     """Show previous feedback collection runs."""
-    state.history(limit)
+    reports.history(limit)
 
 
 @app.command("mark")
@@ -120,7 +120,7 @@ def mark_cmd(
     ],
 ) -> None:
     """Mark sessions as analyzed in the feedback loop."""
-    state.mark(session_ids)
+    reports.mark(session_ids)
 
 
 @app.command("unmark")
@@ -128,7 +128,7 @@ def unmark_cmd(
     session_ids: Annotated[list[str], typer.Argument(help="Session IDs to unmark")],
 ) -> None:
     """Remove analysis marks from sessions."""
-    state.unmark(session_ids)
+    reports.unmark(session_ids)
 
 
 @app.command("prompt-health")
@@ -136,7 +136,7 @@ def prompt_health_cmd(
     as_json: JSON_OPT = False,
 ) -> None:
     """Analyze the agent prompt for size and patch accumulation."""
-    state.prompt_health(as_json)
+    reports.prompt_health(as_json)
 
 
 @app.command("unanalyzed")
@@ -145,7 +145,7 @@ def unanalyzed_cmd(
     all_versions: ALL_VERSIONS_OPT = False,
 ) -> None:
     """List unanalyzed session IDs, one per line."""
-    state.unanalyzed(version, all_versions)
+    reports.unanalyzed(version, all_versions)
 
 
 @app.command("analyze")
@@ -171,4 +171,4 @@ def commit_cmd(
     ] = False,
 ) -> None:
     """Commit all uncommitted session result files, one commit per session."""
-    state.commit(dry_run)
+    reports.commit(dry_run)
