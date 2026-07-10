@@ -20,7 +20,9 @@ def show_cmd(
     ] = False,
     tool_calls: Annotated[
         bool,
-        typer.Option("--tool-calls", "-t", help="Show only tool call blocks"),
+        typer.Option(
+            "--tool-calls", "-t", help="Tool-call timeline from the trace's events"
+        ),
     ] = False,
     as_json: JSON_OPT = False,
 ) -> None:
