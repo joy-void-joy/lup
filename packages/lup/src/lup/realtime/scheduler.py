@@ -502,11 +502,9 @@ def create_pending_event_guard(
     def no_unread_events(input_data: LupHookInput) -> bool:
         if input_data.event != "PreToolUse":
             return True
-        tool_input = input_data.tool_input
-        if tool_input.get("force", False):  # lup: ignore[dict-get] — tool args
-            return True
-        if tool_input.get("debounce_initial") is not None:  # lup: ignore[dict-get]
-            return True
+        match input_data.tool_input:
+            case {"force": True} | {"debounce_initial": int() | float()}:
+                return True
         if scheduler.debounce_active:
             return True
         if scheduler.wake_pending:

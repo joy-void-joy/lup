@@ -66,8 +66,9 @@ def find_project_root() -> Path:
         if pyproject.exists():
             with pyproject.open("rb") as f:
                 data = tomllib.load(f)
-            if "lup" in data.get("tool", {}):  # lup: ignore[dict-get] — TOML payload
-                return parent
+            match data:
+                case {"tool": {"lup": _}}:
+                    return parent
     raise RuntimeError(
         "Could not find project root (no pyproject.toml with [tool.lup] found)"
     )
@@ -100,9 +101,10 @@ def read_agent_version(root: Path) -> str:
         return "0.0.0"
     with pyproject.open("rb") as f:
         data = tomllib.load(f)
-    tool = data.get("tool", {})  # lup: ignore[dict-get] — TOML payload
-    lup_table = tool.get("lup", {})  # lup: ignore[dict-get] — TOML payload
-    return lup_table.get("agent_version", "0.0.0")  # lup: ignore[dict-get] — TOML probe
+    match data:
+        case {"tool": {"lup": {"agent_version": str(version)}}}:
+            return version
+    return "0.0.0"
 
 
 # -- Mutable path state -------------------------------------------------------
