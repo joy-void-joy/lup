@@ -321,11 +321,11 @@ For agents that exist over time (conversations, monitoring, games), use the pers
 
 ### Step 8: Update Feedback Collection
 
-Edit `src/<project>/devtools/feedback/state.py`:
+Edit `src/<project>/devtools/feedback/`:
 
-- Implement `load_outcomes()` for your domain
-- Customize `compute_metrics()` for your metrics
-- Add domain-specific summary output
+- Implement `load_outcomes()` for your domain (`state.py`)
+- Customize `compute_metrics()` for your metrics (`metrics.py`)
+- Add domain-specific summary output (`reports.py`)
 
 ## Scaffolding Is a Menu, Not a Mandate
 
@@ -443,10 +443,11 @@ packages/
         │   ├── background/     # BackgroundDriver.py (verb ABC + BackgroundAgent scaffolding + params) + claude & codex drivers
         │   ├── profiles/       # Profile.py (ABC: one select(name, client) verb) + per-engine implementation owning its storage (claude)
         │   └── tools/          # per-engine built-in tool-name tables (claude, codex)
-        ├── codescan/           # Source scanning for dev tooling: review notes + forbidden shapes
+        ├── codescan/           # Source scanning for dev tooling: review notes, forbidden shapes, seam boundaries
         │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor
         │   ├── markers.py      # `# lup:` / `// lup:` review-marker scanning (dev comments)
-        │   └── antipatterns.py # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
+        │   ├── antipatterns.py # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
+        │   └── boundaries.py   # Seam-boundary scan: per-engine adapter imports stay inside lup.adapters
         ├── workspace/          # Session workspace: where a run's data lives and how it's addressed
         │   ├── paths.py        # Version-aware path layout + active-session relay
         │   ├── context.py      # SessionContext carried across the subprocess boundary
@@ -494,7 +495,7 @@ src/
     │   ├── main.py             # Root Typer app composing sub-apps
     │   ├── agent/              # Agent introspection (inspect, capabilities, serve-tools, repl)
     │   ├── claude/             # Claude Code runner wired for this project (+ usage)
-    │   ├── py.py               # Python module introspection (info, source, eval, ...)
+    │   ├── py/                 # Python module introspection (info, source, eval, ...)
     │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
