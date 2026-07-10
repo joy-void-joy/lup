@@ -24,9 +24,10 @@ Run it via ``lup-devtools dev plugin name``; ``rename_package`` calls it so
 import json
 import tomllib
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import TypedDict
 
 import typer
+from pydantic import ConfigDict, TypeAdapter, with_config
 
 from lup.workspace.paths import find_project_root
 
@@ -34,23 +35,34 @@ PLUGIN_NAME = "lup"
 SELF_PATH = "./.claude/plugins"
 
 
+@with_config(ConfigDict(extra="allow"))
 class DirectorySource(TypedDict, total=False):
     source: str
     path: str
     url: str
 
 
+@with_config(ConfigDict(extra="allow"))
 class MarketplaceEntry(TypedDict):
     source: DirectorySource
 
 
+@with_config(ConfigDict(extra="allow"))
 class MarketplaceJson(TypedDict, total=False):
     name: str
 
 
+@with_config(ConfigDict(extra="allow"))
 class SettingsJson(TypedDict, total=False):
     extraKnownMarketplaces: dict[str, MarketplaceEntry]
     enabledPlugins: dict[str, bool]  # lup: ignore[dict-str-payload] — settings wire
+
+
+# Validating readers for the two files this module rewrites. extra="allow" is
+# what makes the write-back safe: keys these TypedDicts don't declare (the
+# rest of settings.json, marketplace owner/plugins) survive the round-trip.
+MARKETPLACE_ADAPTER = TypeAdapter(MarketplaceJson)
+SETTINGS_ADAPTER = TypeAdapter(SettingsJson)
 
 
 def plugin_root(root: Path) -> Path:
@@ -102,8 +114,7 @@ def apply_marketplace_json(root: Path, name: str, dry_run: bool) -> list[str]:
     path = marketplace_file(root)
     if not path.exists():
         raise typer.BadParameter(f"No marketplace.json at {path}")
-    raw = json.loads(path.read_text())
-    data = cast(MarketplaceJson, raw)  # lup: ignore[cast] — TypedDict from JSON
+    data = MARKETPLACE_ADAPTER.validate_python(json.loads(path.read_text()))
     old = data.get("name")
     if old == name:
         return []
@@ -116,7 +127,7 @@ def apply_marketplace_json(root: Path, name: str, dry_run: bool) -> list[str]:
 def apply_settings_json(root: Path, name: str, dry_run: bool) -> list[str]:
     path = settings_file(root)
     settings = (
-        cast(SettingsJson, json.loads(path.read_text()))  # lup: ignore[cast]
+        SETTINGS_ADAPTER.validate_python(json.loads(path.read_text()))
         if path.exists()
         else SettingsJson()
     )

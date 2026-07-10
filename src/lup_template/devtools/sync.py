@@ -45,10 +45,11 @@ import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Required, TypedDict, cast
+from typing import Annotated, Required, TypedDict
 
 import sh
 import typer
+from pydantic import ConfigDict, TypeAdapter, with_config
 
 from lup.workspace.paths import project_root
 from lup_template.devtools.utils import decode_stderr, format_table, git, short_sha
@@ -57,14 +58,16 @@ app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
 
 
+@with_config(ConfigDict(extra="allow"))
 class ProjectEntry(TypedDict, total=False):
     """One tracked upstream project, merged from downstream.json(.local).
 
     A ``TypedDict``, not a ``BaseModel``: per CLAUDE.md, ``TypedDict`` types
     the JSON-shaped config we read from and write back to disk verbatim, while
     ``BaseModel`` is for values we validate and construct. These entries are
-    hand-edited config that round-trips through ``json.load``/``json.dump``
-    unchanged, so the dict *is* the data — no validation layer to add.
+    hand-edited config, so loads validate the declared keys (catching typos
+    with a real error instead of silent misbehavior) and ``extra="allow"``
+    keeps any hand-added keys so the document round-trips unchanged.
     """
 
     name: Required[str]
@@ -75,14 +78,19 @@ class ProjectEntry(TypedDict, total=False):
     ignore: bool
 
 
+@with_config(ConfigDict(extra="allow"))
 class DownstreamConfig(TypedDict):
     """Top-level shape of downstream.json and downstream.json.local.
 
-    Same rationale as :class:`ProjectEntry`: a ``TypedDict`` because it mirrors
-    the on-disk JSON document, not a validated model.
+    Same rationale as :class:`ProjectEntry`: a ``TypedDict`` mirroring the
+    on-disk JSON document, validated on read with extras preserved.
     """
 
     projects: list[ProjectEntry]
+
+
+DOWNSTREAM_ADAPTER = TypeAdapter(DownstreamConfig)
+PROJECT_ENTRY_ADAPTER = TypeAdapter(ProjectEntry)
 
 
 def downstream_file() -> Path:
@@ -104,8 +112,7 @@ def refs_dir() -> Path:
 def load_json(path: Path) -> DownstreamConfig:
     if not path.exists():
         return {"projects": []}
-    raw = json.loads(path.read_text())
-    return cast(DownstreamConfig, raw)  # lup: ignore[cast] — TypedDict from JSON
+    return DOWNSTREAM_ADAPTER.validate_python(json.loads(path.read_text()))
 
 
 def save_local(data: DownstreamConfig) -> None:
@@ -150,8 +157,7 @@ def load_projects() -> list[ProjectEntry]:
         name = p["name"]
         if name in merged:
             base_entry = merged[name]
-            overlay = {**base_entry, **p}
-            merged[name] = cast(ProjectEntry, overlay)  # lup: ignore[cast] — merge
+            merged[name] = PROJECT_ENTRY_ADAPTER.validate_python({**base_entry, **p})
         else:
             merged[name] = p.copy()
 
