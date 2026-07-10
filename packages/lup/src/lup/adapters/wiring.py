@@ -133,6 +133,8 @@ def create_client(
     max_turns: int | None = None,
     max_thinking_tokens: int | None = None,
     max_budget_usd: float | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
     on_unsupported: Literal["raise", "drop"] = "raise",
 ) -> "Client":
     """Build a configured :class:`~lup.adapters.clients.Client.Client` — the one door to every engine.
@@ -161,6 +163,8 @@ def create_client(
         "max_turns": max_turns,
         "max_thinking_tokens": max_thinking_tokens,
         "max_budget_usd": max_budget_usd,
+        "base_url": base_url,
+        "api_key": api_key,
     }
     if options is not None:
         given = sorted(
@@ -191,6 +195,8 @@ def create_client(
             max_turns=max_turns,
             max_thinking_tokens=max_thinking_tokens,
             max_budget_usd=max_budget_usd,
+            base_url=base_url,
+            api_key=api_key,
             on_unsupported=on_unsupported,
         )
     return resolve_engine(engine, model=opts.model).client(opts)
@@ -211,6 +217,8 @@ async def query(
     max_turns: int | None = None,
     max_thinking_tokens: int | None = None,
     max_budget_usd: float | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
 ) -> LupResponse:
     """One-shot query — the one-liner for nested LLM calls inside tools.
 
@@ -234,6 +242,8 @@ async def query(
         max_turns=max_turns,
         max_thinking_tokens=max_thinking_tokens,
         max_budget_usd=max_budget_usd,
+        base_url=base_url,
+        api_key=api_key,
         on_unsupported="drop",
     )
     return await client.query(prompt, trace_logger=trace_logger, prefix=prefix)

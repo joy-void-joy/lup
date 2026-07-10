@@ -33,6 +33,11 @@ from lup.adapters.wiring import query
 from lup.adapters.tools.names import GLOB, GREP, READ, WEB_FETCH
 from lup.mcp import LupMcpTool, lup_tool
 from lup.reflect import ReflectionGate
+from lup_template.agent.config import (
+    compat_api_key,
+    compat_base_url,
+    engine_for_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,10 +175,12 @@ async def run_reviewer(
     The tool never inspects the backend: it asks for the full reviewer setup —
     file tools over past outputs, a thinking budget, a turn cap — and ``query``
     keeps what the chosen backend can honor, dropping the rest with a log line.
-    ``query`` routes by model name, and the template wires
+    The engine and endpoint come from the same settings helpers the session
+    uses (``engine_for_settings``/``compat_base_url``), and the template wires
     ``reviewer_model=aux_model()`` (config.py), so the reviewer follows the
-    session's backend without Anthropic credentials on ``AGENT_SDK=codex``/
-    ``openai`` — where it degrades to a one-shot text critique.
+    session's backend — including OpenRouter routing — without Anthropic
+    credentials on ``AGENT_SDK=codex``/``openai``, where it degrades to a
+    one-shot text critique.
 
     Args:
         validated: The reflection input from the main agent.
@@ -193,6 +200,9 @@ async def run_reviewer(
         reviewer_prompt,
         prefix="  ↳ [reviewer] ",
         model=model,
+        engine=engine_for_settings(),
+        base_url=compat_base_url(),
+        api_key=compat_api_key(),
         system_prompt=REVIEWER_SYSTEM_PROMPT.format(outputs_dir=outputs_dir or "N/A"),
         max_thinking_tokens=REVIEWER_THINKING_BUDGET,
         permission_mode="bypassPermissions",

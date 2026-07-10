@@ -16,7 +16,6 @@ Usage:
 # We should also copy their UI patterns, and have lup host a dashboard
 
 import logging
-import os
 from typing import Literal, Self
 
 from pydantic import Field, model_validator
@@ -297,12 +296,39 @@ if settings.notes_path != "./notes" or settings.logs_path != "./logs":
         logs_dir=Path(settings.logs_path).resolve(),
     )
 
-# Route through OpenRouter when the key is set. The SDK subprocess reads these
-# vars directly, so this settings module is exactly the env boundary.
-if settings.openrouter_api_key:
-    base = "https://openrouter.ai/api"
-    key = settings.openrouter_api_key
-    os.environ.setdefault("ANTHROPIC_BASE_URL", base)  # lup: ignore[os-environ]
-    os.environ.setdefault("ANTHROPIC_AUTH_TOKEN", key)  # lup: ignore[os-environ]
-    os.environ.setdefault("ANTHROPIC_API_KEY", "")  # lup: ignore[os-environ]
-    logger.info("OpenRouter enabled — routing API calls through openrouter.ai")
+OPENROUTER_BASE_URL = "https://openrouter.ai/api"
+"""OpenRouter's Anthropic-protocol endpoint, selected by OPENROUTER_API_KEY."""
+
+
+def compat_base_url() -> str | None:
+    """The compat endpoint settings select, or None for native routing.
+
+    An explicit ``OPENAI_BASE_URL`` wins; otherwise an ``OPENROUTER_API_KEY``
+    alone selects OpenRouter. The endpoint rides on ``LupAgentOptions.base_url``
+    into the compat engines — never on the process environment.
+    """
+    if settings.openai_base_url:
+        return settings.openai_base_url
+    if settings.openrouter_api_key:
+        return OPENROUTER_BASE_URL
+    return None
+
+
+def compat_api_key() -> str | None:
+    """The credential paired with :func:`compat_base_url`."""
+    return settings.openai_api_key or settings.openrouter_api_key
+
+
+def engine_for_settings() -> str:
+    """Map settings to the engine id.
+
+    ``AGENT_SDK=openai`` is the legacy alias of ``openai-compat``, and an
+    ``OPENROUTER_API_KEY`` upgrades the claude engine to ``claude-compat`` —
+    the same Claude scaffolding pointed at OpenRouter's Anthropic-protocol
+    endpoint through options, not ambient env.
+    """
+    if settings.agent_sdk == "openai":
+        return "openai-compat"
+    if settings.agent_sdk == "claude" and settings.openrouter_api_key:
+        return "claude-compat"
+    return settings.agent_sdk
