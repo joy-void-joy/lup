@@ -297,7 +297,7 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 
 **IMPORTANT:** Never commit _code_ directly to `dev`. Always work in a worktree for code changes.
 
-**Exception:** Data commits (`data(outputs):`) can go directly to `dev` — generated outputs don't need review.
+**Exception:** Data commits (`data(outputs):`) can go directly to `dev` — generated outputs don't need review. In this repo session data under `notes/` is gitignored (traces stay local), so such commits arise only for repos that opted into the commit-loop pattern via /lup:init.
 
 ### Two-Tier Branch Model
 
