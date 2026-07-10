@@ -90,10 +90,11 @@ packages/
         │   ├── background/     # BackgroundDriver.py (verb ABC) + agent.py (BackgroundAgent scaffolding) + params.py + claude & codex drivers
         │   ├── profiles/       # Profile.py (ABC: one select(name, client) verb) + per-engine package owning its storage (claude/: profile.py + store.py)
         │   └── tools/          # names.py (neutral tool-name vocabulary) + per-engine builtin tables (claude, codex)
-        ├── codescan/           # Source scanning for dev tooling: review notes + forbidden shapes
+        ├── codescan/           # Source scanning for dev tooling: review notes, forbidden shapes, seam boundaries
         │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor
         │   ├── markers.py      # `# lup:` / `// lup:` review-marker scanning (dev comments)
-        │   └── antipatterns.py # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
+        │   ├── antipatterns.py # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
+        │   └── boundaries.py   # Seam-boundary scan: per-engine adapter imports stay inside lup.adapters
         ├── workspace/          # Session workspace: where a run's data lives and how it's addressed
         │   ├── paths.py        # Version-aware path layout + active-session relay
         │   ├── context.py      # SessionContext carried across the subprocess boundary
@@ -141,7 +142,7 @@ src/
     │   ├── main.py             # Root Typer app composing sub-apps
     │   ├── agent/              # Agent introspection (inspect, capabilities, serve-tools, repl)
     │   ├── claude/             # Claude Code runner wired for this project (+ usage)
-    │   ├── py.py               # Python module introspection (info, source, eval, ...)
+    │   ├── py/                 # Python module introspection (info, source, eval, ...)
     │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
@@ -271,7 +272,7 @@ uv run lup-devtools trace show <session_id>
 6. **Reflection** (`agent/tools/reflect.py`) — Domain-specific `ReflectInput` fields, reviewer prompt
 7. **Version** (`[tool.lup] agent_version` in `pyproject.toml`) — Set initial version, bump on behavior changes
 8. **Persistent mode** (optional) — Wire `Scheduler` from `lup.realtime.scheduler`, add Stop hook, implement sleep/context/reply tools, replace request-response with sleep/wake loop
-9. **Feedback** (`devtools/feedback/state.py`) — Implement `load_outcomes()`, customize `compute_metrics()`
+9. **Feedback** (`devtools/feedback/state.py`, `metrics.py`) — Implement `load_outcomes()`, customize `compute_metrics()`
 
 ### Scaffolding Is a Menu, Not a Mandate
 
