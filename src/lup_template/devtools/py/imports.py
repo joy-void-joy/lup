@@ -31,7 +31,7 @@ def collect_imports_from_source(source: str) -> list[ImportEntry]:
                 entries.append(
                     ImportEntry(
                         module=alias.name,
-                        names=[],  # lup: ignore[empty-collection] — plain import
+                        names=[],
                         category=categorize_import(alias.name),
                     )
                 )
