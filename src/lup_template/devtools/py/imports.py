@@ -24,14 +24,14 @@ def collect_imports_from_source(source: str) -> list[ImportEntry]:
     except SyntaxError:
         return []
 
-    entries: list[ImportEntry] = []
+    entries: list[ImportEntry] = []  # lup: ignore[empty-collection] — walk fold
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 entries.append(
                     ImportEntry(
                         module=alias.name,
-                        names=[],
+                        names=[],  # lup: ignore[empty-collection] — plain import
                         category=categorize_import(alias.name),
                     )
                 )
@@ -68,9 +68,9 @@ def entry_matches_target(entry: ImportEntry, target: str) -> bool:
 
 def find_reverse_imports(
     target_module: str, project_root: Path
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str]]:  # lup: ignore[tuple-shape] — (file, import line)
     """Find project files that import the target module."""
-    results: list[tuple[str, str]] = []
+    results: list[tuple[str, str]] = []  # lup: ignore[tuple-shape, empty-collection]
     search_dirs = [project_root / "src", project_root / "packages"]
 
     for search_dir in search_dirs:

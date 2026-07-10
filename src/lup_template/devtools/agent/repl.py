@@ -21,7 +21,9 @@ import typer
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
 
-MIME_TO_EXT: dict[str, str] = {
+type ClipboardImage = tuple[str, bytes]  # lup: ignore[tuple-shape] — (mime, bytes)
+
+MIME_TO_EXT: dict[str, str] = {  # lup: ignore[dict-str-payload] — mime → suffix
     "image/png": ".png",
     "image/jpeg": ".jpg",
     "image/webp": ".webp",
@@ -30,14 +32,14 @@ MIME_TO_EXT: dict[str, str] = {
 
 
 def save_images(
-    images: list[tuple[str, bytes]],
+    images: list[ClipboardImage],
     images_dir: Path,
 ) -> list[Path]:
     """Save raw image data to disk, deduplicating by content hash."""
     images_dir.mkdir(parents=True, exist_ok=True)
-    paths: list[Path] = []
+    paths: list[Path] = []  # lup: ignore[empty-collection] — write fold
     for media_type, data in images:
-        ext = MIME_TO_EXT.get(media_type, ".bin")
+        ext = MIME_TO_EXT.get(media_type, ".bin")  # lup: ignore[dict-get]
         name = hashlib.sha256(data).hexdigest()[:12] + ext
         path = images_dir / name
         if not path.exists():
@@ -49,7 +51,7 @@ def save_images(
 CLIPBOARD_IMAGE_MIMES = ("image/png", "image/jpeg", "image/webp")
 
 
-def read_clipboard_image() -> tuple[str, bytes] | None:
+def read_clipboard_image() -> ClipboardImage | None:
     """Read image data from the system clipboard via xclip.
 
     Returns ``(media_type, raw_bytes)`` or ``None`` when no image is available.
@@ -147,7 +149,7 @@ def print_response_stats(response: LupResponse, console: "Console") -> float:
     Returns the turn's cost in USD (0.0 when the backend reports none)
     so callers can accumulate a session total.
     """
-    parts: list[str] = []
+    parts: list[str] = []  # lup: ignore[empty-collection] — conditional assembly
     cost = 0.0
     if response.result and response.result.duration_ms:
         secs = response.result.duration_ms / 1000
@@ -227,7 +229,7 @@ async def repl(
     ]
     if not no_tools:
         servers = collect_registry_tools()
-        group_names: list[tuple[str, list[str]]] = [
+        group_names: list[tuple[str, list[str]]] = [  # lup: ignore[tuple-shape]
             (name, [t.name for t in stools]) for name, stools in servers.items()
         ]
         for i, (name, tool_names_list) in enumerate(group_names):
@@ -252,7 +254,7 @@ async def repl(
 
     # -- prompt_toolkit session --
     session_cost = 0.0
-    pending_images: list[tuple[str, bytes]] = []
+    pending_images: list[ClipboardImage] = []  # lup: ignore[empty-collection]
 
     def rprompt() -> FormattedText:
         parts = [effective_model]
@@ -334,7 +336,7 @@ async def repl(
                         continue
 
                     last_input_sigint = 0.0
-                    stripped = user_input.strip()
+                    stripped = user_input.strip()  # lup: ignore[string-strip]
                     if not stripped:
                         continue
                     if stripped in ("/quit", "/exit", "/q"):

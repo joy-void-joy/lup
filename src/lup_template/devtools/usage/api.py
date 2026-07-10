@@ -69,7 +69,9 @@ class DailyActivity(BaseModel):
 class DailyModelTokens(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     date: str
-    tokens_by_model: dict[str, int] = Field(alias="tokensByModel", default_factory=dict)
+    tokens_by_model: dict[str, int] = Field(  # lup: ignore[dict-str-payload] — tally
+        alias="tokensByModel", default_factory=dict
+    )
 
 
 class ModelUsageEntry(BaseModel):
@@ -111,7 +113,9 @@ class StatsCache(BaseModel):
     total_messages: int = Field(alias="totalMessages", default=0)
     longest_session: LongestSession | None = Field(alias="longestSession", default=None)
     first_session_date: str = Field(alias="firstSessionDate", default="")
-    hour_counts: dict[str, int] = Field(alias="hourCounts", default_factory=dict)
+    hour_counts: dict[str, int] = Field(  # lup: ignore[dict-str-payload] — tally
+        alias="hourCounts", default_factory=dict
+    )
     total_speculation_time_saved_ms: int = Field(
         alias="totalSpeculationTimeSavedMs", default=0
     )
@@ -123,7 +127,7 @@ class StatsCache(BaseModel):
 class DailyBreakdown(BaseModel):
     date: str
     total_tokens: int
-    tokens_by_model: dict[str, int]
+    tokens_by_model: dict[str, int]  # lup: ignore[dict-str-payload] — open tally
     activity: DailyActivity | None
 
 
@@ -141,7 +145,7 @@ def fetch_usage(config_dir: Path) -> UsageResponse:
         msg = f"Bad credentials file at {creds_file}: {e}"
         raise RuntimeError(msg) from e
 
-    resp = httpx.get(
+    resp = httpx.get(  # lup: ignore[dict-get] — httpx's GET verb, not a dict read
         USAGE_API_URL,
         headers={
             "Authorization": f"Bearer {token}",
@@ -179,19 +183,17 @@ def get_daily_breakdown(
     }
     activity_by_date = {entry.date: entry for entry in stats.daily_activity}
 
-    days: list[DailyBreakdown] = []
-    d = window_start.date()
-    end = window_end.date()
-    while d <= end:
-        ds = d.isoformat()
-        by_model = tokens_by_date.get(ds, {})
-        days.append(
-            DailyBreakdown(
-                date=ds,
-                total_tokens=sum(by_model.values()),
-                tokens_by_model=by_model,
-                activity=activity_by_date.get(ds),
-            )
+    def day_breakdown(ds: str) -> DailyBreakdown:
+        by_model = tokens_by_date.get(ds, {})  # lup: ignore[dict-get] — date map
+        return DailyBreakdown(
+            date=ds,
+            total_tokens=sum(by_model.values()),
+            tokens_by_model=by_model,
+            activity=activity_by_date.get(ds),  # lup: ignore[dict-get] — date map
         )
-        d += timedelta(days=1)
-    return days
+
+    span = (window_end.date() - window_start.date()).days
+    return [
+        day_breakdown((window_start.date() + timedelta(days=offset)).isoformat())
+        for offset in range(span + 1)
+    ]

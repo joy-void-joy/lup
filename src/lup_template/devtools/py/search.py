@@ -24,7 +24,7 @@ def scan_module_symbols(module_name: str, pattern: str) -> list[SearchMatch]:
         return []
 
     pattern_lower = pattern.lower()
-    matches: list[SearchMatch] = []
+    matches: list[SearchMatch] = []  # lup: ignore[empty-collection] — scan fold
 
     for name in dir(mod):
         if name.startswith("_"):
@@ -60,16 +60,18 @@ def get_top_level_packages() -> list[str]:
     except AttributeError:
         pass
 
-    packages: set[str] = set()
+    packages: set[str] = set()  # lup: ignore[set-shape, empty-collection] — dedup
     for dist in importlib.metadata.distributions():
         top_level = dist.read_text("top_level.txt")
         if top_level:
-            for line in top_level.strip().splitlines():
-                pkg = line.strip()
+            for line in top_level.splitlines():
+                pkg = line.strip()  # lup: ignore[string-strip] — metadata lines
                 if pkg and not pkg.startswith("_"):
                     packages.add(pkg)
         else:
             name = dist.metadata["Name"]
             if name:
-                packages.add(name.replace("-", "_"))
+                # Distribution names use "-", import names "_" — the packaging
+                # convention this fallback normalizes by.
+                packages.add(name.replace("-", "_"))  # lup: ignore[string-replace]
     return sorted(packages)

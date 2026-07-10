@@ -223,9 +223,9 @@ def create_realtime_tools(
 
         result = await scheduler.sleep(inp.seconds)
         return SleepOutput(
-            reason=result.get("reason", "timer"),
+            reason=result.get("reason", "timer"),  # lup: ignore[dict-get]
             time=datetime.now().strftime("%H:%M:%S"),
-            fired_reminders=result.get("fired_reminders", []),
+            fired_reminders=result.get("fired_reminders", []),  # lup: ignore[dict-get]
         )
 
     @lup_tool(

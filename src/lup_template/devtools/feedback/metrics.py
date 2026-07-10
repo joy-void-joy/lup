@@ -45,18 +45,21 @@ def rollup_costs(
     ``CODEX_USD_PER_MTOK_*`` rates) count into ``without_cost`` so a
     missing-rates gap stays visible instead of reading as free.
     """
-    rows: dict[str, BackendCostRow] = {}
+    rows: dict[str, BackendCostRow] = {}  # lup: ignore[empty-collection] — rollup
     for s in sessions:
-        sdk = s.get("agent_sdk") or "unknown"
+        sdk = s.get("agent_sdk") or "unknown"  # lup: ignore[dict-get]
         row = rows.setdefault(sdk, empty_cost_row())
         row["sessions"] += 1
-        cost = s.get("cost_usd")
+        cost = s.get("cost_usd")  # lup: ignore[dict-get] — optional key
         if cost:
             row["cost_usd"] += cost
         else:
             row["without_cost"] += 1
-        usage = s.get("token_usage") or {}
-        row["input_tokens"] += usage.get("input_tokens", 0) or 0
-        row["output_tokens"] += usage.get("output_tokens", 0) or 0
-        row["cache_read_input_tokens"] += usage.get("cache_read_input_tokens", 0) or 0
+        usage = s.get("token_usage") or {}  # lup: ignore[dict-get] — optional key
+        tokens_in = usage.get("input_tokens", 0) or 0  # lup: ignore[dict-get]
+        tokens_out = usage.get("output_tokens", 0) or 0  # lup: ignore[dict-get]
+        cached = usage.get("cache_read_input_tokens", 0) or 0  # lup: ignore[dict-get]
+        row["input_tokens"] += tokens_in
+        row["output_tokens"] += tokens_out
+        row["cache_read_input_tokens"] += cached
     return rows

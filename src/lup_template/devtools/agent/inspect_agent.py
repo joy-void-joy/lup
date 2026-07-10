@@ -51,12 +51,15 @@ def tool_location(tool: LupMcpTool) -> str:
 
 def tool_signature(tool: LupMcpTool) -> str:
     """One-liner: input fields → output model name, file:line."""
-    parts: list[str] = []
-    for name, f in tool.input_model.model_fields.items():
-        ann = f.annotation
+
+    def field_sig(name: str, ann: object) -> str:  # lup: ignore[bare-object]
         type_name = getattr(ann, "__name__", None) if ann is not None else None
-        parts.append(f"{name}: {type_name}" if type_name else name)
-    fields = ", ".join(parts)
+        return f"{name}: {type_name}" if type_name else name
+
+    fields = ", ".join(
+        field_sig(name, f.annotation)
+        for name, f in tool.input_model.model_fields.items()
+    )
     output_part = f" → {tool.output_model.__name__}" if tool.output_model else ""
     return f"({fields}){output_part}  [{tool_location(tool)}]"
 
@@ -71,9 +74,9 @@ def print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
     out.write(f"\n  {tool.name}\n")
     out.write(f"  {'─' * len(tool.name)}\n")
 
-    desc_lines = tool.description.split(". ")
+    desc_lines = tool.description.split(". ")  # lup: ignore[string-split] — sentences
     for line in desc_lines:
-        line = line.strip()
+        line = line.strip()  # lup: ignore[string-strip] — prose hygiene
         if line:
             out.write(f"    {line}.\n")
 
@@ -249,7 +252,7 @@ def run_capabilities(markdown: bool) -> None:
         " " * (label_width + 2) + "".join(f"{entry.name:>15}" for entry in matrix)
     )
     for row, cell in enumerate(matrix[0].cells):
-        cells: list[str] = []
+        cells: list[str] = []  # lup: ignore[empty-collection] — table row fold
         for entry in matrix:
             match entry.cells[row].value:
                 case bool() as flag:

@@ -104,18 +104,21 @@ def clear_markers(targets: list[str]) -> None:
     def strip_span(lines: list[str], comment: MarkerComment) -> None:
         head = lines[comment.start_line - 1]
         match = MARKER_RE.search(head)
-        if match is not None and head[: match.start()].strip():
+        head_code = head[: match.start()] if match is not None else ""
+        prefix_code = head_code.strip()  # lup: ignore[string-strip] — blank check
+        if match is not None and prefix_code:
             lines[comment.start_line - 1] = head[: match.start()].rstrip()
         else:
             del lines[comment.start_line - 1 : comment.end_line]
 
-    by_file: dict[str, set[int]] = {}
+    by_file: dict[str, set[int]] = {}  # lup: ignore[set-shape, empty-collection]
     for target in targets:
         rel, _, line_str = target.rpartition(":")
         if not rel or not line_str.isdigit():
             typer.echo(f"Skipping malformed target: {target}", err=True)
             continue
-        by_file.setdefault(rel, set()).add(int(line_str))
+        file_lines = by_file.setdefault(rel, set())  # lup: ignore[set-shape]
+        file_lines.add(int(line_str))
 
     for rel, wanted in by_file.items():
         path = Path(rel)
@@ -128,7 +131,7 @@ def clear_markers(targets: list[str]) -> None:
         spans = {c.start_line: c for c in find_feedback(text, scan_mode_for(path))}
         removed = 0
         for line_no in sorted(wanted, reverse=True):
-            comment = spans.get(line_no)
+            comment = spans.get(line_no)  # lup: ignore[dict-get] — span lookup
             if comment is None:
                 typer.echo(f"No marker at {rel}:{line_no}", err=True)
                 continue

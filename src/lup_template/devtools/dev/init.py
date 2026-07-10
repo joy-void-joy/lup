@@ -1,3 +1,6 @@
+# lup: ignore[string-replace]
+# Renaming IS text surgery over source and config files — every .replace
+# here rewrites a known literal in place, so the rule is opted out file-wide.
 """Package renaming for downstream project initialization.
 
 Renames the ``lup_template`` Python package to a project-specific name,
@@ -11,7 +14,7 @@ Examples::
     $ uv run lup-devtools dev init rename-package myproject --dry-run
 """
 
-import re
+import re  # lup: ignore[import-re] — the import-statement rewriter
 from pathlib import Path
 import typer
 
@@ -19,7 +22,7 @@ from lup.workspace.paths import find_project_root
 from lup_template.devtools.dev.plugin import set_marketplace_name
 from lup_template.devtools.utils import git
 
-PACKAGE_IMPORT_RE = re.compile(
+PACKAGE_IMPORT_RE = re.compile(  # lup: ignore[re-call] — import-form matcher
     r"""
     (?<![.\w])          # not preceded by dot or word char
     (?:from|import)     # keyword
@@ -51,7 +54,7 @@ def is_framework_reference(line: str) -> bool:
 
 def rename_match(matched: str, new_name: str) -> str:
     """Rewrite the package name inside one matched piece of source text."""
-    return matched.replace("lup_template", new_name, 1)  # lup: ignore — text surgery
+    return matched.replace("lup_template", new_name, 1)
 
 
 def rename_imports_in_file(path: Path, new_name: str) -> list[str]:
@@ -60,7 +63,7 @@ def rename_imports_in_file(path: Path, new_name: str) -> list[str]:
     Returns a list of change descriptions (empty if no changes).
     """
     text = path.read_text()
-    changes: list[str] = []
+    changes: list[str] = []  # lup: ignore[empty-collection] — change log
 
     def replace_import(m: re.Match[str]) -> str:
         full_match = m.group(0)
@@ -84,7 +87,7 @@ def rename_imports_in_file(path: Path, new_name: str) -> list[str]:
 def rename_in_pyproject(path: Path, new_name: str) -> list[str]:
     """Update pyproject.toml: package name, CLI entry point, devtools import path."""
     text = path.read_text()
-    changes: list[str] = []
+    changes: list[str] = []  # lup: ignore[empty-collection] — change log
     new_text = text
 
     old_name_line = 'name = "lup-template"'
@@ -153,9 +156,9 @@ def rename_package(
         typer.echo(f"Error: {new_pkg} already exists", err=True)
         raise typer.Exit(1)
 
-    all_changes: list[str] = []
+    all_changes: list[str] = []  # lup: ignore[empty-collection] — change log
 
-    python_files: list[Path] = []
+    python_files: list[Path] = []  # lup: ignore[empty-collection] — discovery
     for search_dir in [src_dir, root / "tests"]:
         if search_dir.is_dir():
             python_files.extend(search_dir.rglob("*.py"))

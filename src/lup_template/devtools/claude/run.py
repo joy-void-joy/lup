@@ -14,6 +14,7 @@ Extra arguments pass straight through to ``claude`` (e.g. ``--resume``).
 import json
 import os
 import tempfile
+from pathlib import Path
 
 import sh
 import typer
@@ -54,7 +55,7 @@ def run_claude(
     extra_args: list[str],
 ) -> None:
     """Exec into ``claude`` configured for this project (see module docstring)."""
-    args: list[str] = []
+    args: list[str] = []  # lup: ignore[empty-collection] — conditional assembly
 
     if model:
         args.extend(["--model", model])
@@ -83,7 +84,7 @@ def run_claude(
 
     support = ClaudeProfile()
     config_dir = support.resolve_config_dir(profile)
-    env = {**os.environ, CONFIG_DIR_ENV: str(config_dir)}
+    env = {**os.environ, CONFIG_DIR_ENV: str(config_dir)}  # lup: ignore[os-environ]
     shown = profile or support.store.active_profile() or "default"
     typer.echo(f"Launching claude (profile: {shown}, config dir: {config_dir})")
 
@@ -99,6 +100,6 @@ def run_claude(
     finally:
         if mcp_path:
             try:
-                os.unlink(mcp_path)
+                Path(mcp_path).unlink()
             except OSError:
                 pass

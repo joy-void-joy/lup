@@ -266,7 +266,9 @@ def bump_cmd(
         return
 
     content = pyproject.read_text()
-    new_content = content.replace(
+    # A comment-and-format-preserving one-line rewrite: tomllib cannot write,
+    # and the full-document TOML writers would reformat the whole file.
+    new_content = content.replace(  # lup: ignore[string-replace]
         f'agent_version = "{current}"', f'agent_version = "{new_version}"'
     )
     if new_content == content:

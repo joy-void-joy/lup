@@ -60,11 +60,11 @@ class ToolPolicy(BaseToolPolicy):
         settings: "Settings",
         *,
         restricted_mode: bool = False,
-        excluded_tools: set[str] | None = None,
-        excluded_tags: set[str] | None = None,
+        excluded_tools: set[str] | None = None,  # lup: ignore[set-shape] — membership
+        excluded_tags: set[str] | None = None,  # lup: ignore[set-shape] — membership
     ) -> None:
-        tags: set[str] = set(excluded_tags or ())
-        names: set[str] = set(excluded_tools or ())
+        tags: set[str] = set(excluded_tags or ())  # lup: ignore[set-shape]
+        names: set[str] = set(excluded_tools or ())  # lup: ignore[set-shape]
 
         # TEMPLATE: map each unmet requirement to its tag — replace the
         # example-api check with your domain's keys, one tag per service

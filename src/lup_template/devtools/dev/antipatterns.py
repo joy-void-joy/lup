@@ -35,8 +35,8 @@ class FoundAntiPattern(AntiPatternFinding):
 
 def scan_antipatterns() -> list[FoundAntiPattern]:
     """Every missing/spurious marker across tracked `.py`/TS-family files."""
-    results: list[FoundAntiPattern] = []
-    for rel in str(git("ls-files")).splitlines():
+    results: list[FoundAntiPattern] = []  # lup: ignore[empty-collection] — scan fold
+    for rel in git.lines("ls-files"):
         path = Path(rel)
         patterns = patterns_for_suffix(path.suffix.lower())
         if patterns is None:
@@ -63,12 +63,13 @@ def summarize(as_json: bool) -> None:
     found = scan_antipatterns()
     by_rule: Counter[str] = Counter()
     by_kind: Counter[str] = Counter()
-    files_by_rule: dict[str, set[str]] = {}
+    files_by_rule: dict[str, set[str]] = {}  # lup: ignore[set-shape, empty-collection]
     for finding in found:
         rule = finding.rule_id or "(bare)"
         by_rule[rule] += 1
         by_kind[finding.kind] += 1
-        files_by_rule.setdefault(rule, set()).add(finding.file)
+        rule_files = files_by_rule.setdefault(rule, set())  # lup: ignore[set-shape]
+        rule_files.add(finding.file)
 
     blocking = sum(1 for finding in found if finding.kind not in ADVISORY_KINDS)
     file_count = len({finding.file for finding in found})

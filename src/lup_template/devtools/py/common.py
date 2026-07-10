@@ -16,7 +16,9 @@ from lup.workspace.paths import find_nearest_pyproject
 # ---------------------------------------------------------------------------
 
 
-def resolve_object(path: str) -> tuple[object, str]:
+def resolve_object(
+    path: str,
+) -> tuple[object, str]:  # lup: ignore[tuple-shape] — (live object, leaf name)
     """Resolve a dotted or colon path to a Python object, returning (object, leaf_name).
 
     Accepts both ``module.sub.Object`` (dot form) and the entry-point
@@ -24,9 +26,10 @@ def resolve_object(path: str) -> tuple[object, str]:
     """
     if ":" in path:
         module_path, _, attr_path = path.partition(":")
-        attrs = [a for a in attr_path.split(".") if a]  # lup: ignore — dotted attr path
+        attrs = [a for a in attr_path.split(".") if a]  # lup: ignore[string-split]
+        obj: object  # lup: ignore[bare-object] — any importable live object
         try:
-            obj: object = importlib.import_module(module_path)
+            obj = importlib.import_module(module_path)
         except ImportError as e:
             raise ValueError(f"Could not import module '{module_path}': {e}") from e
         for attr in attrs:
@@ -36,7 +39,7 @@ def resolve_object(path: str) -> tuple[object, str]:
                 raise ValueError(f"'{module_path}' has no attribute '{attr}'") from e
         return obj, attrs[-1] if attrs else module_path.rsplit(".", 1)[-1]
 
-    parts = path.split(".")
+    parts = path.split(".")  # lup: ignore[string-split] — dotted-path segments
     for i in range(len(parts), 0, -1):
         module_path = ".".join(parts[:i])
         try:
@@ -73,7 +76,7 @@ def fail(msg: str) -> typing.NoReturn:
 
 @functools.cache
 def categorize_import(module_name: str) -> str:
-    root = module_name.split(".")[0]
+    root = module_name.split(".")[0]  # lup: ignore[string-split] — dotted path
     if root in sys.stdlib_module_names:
         return "stdlib"
     path = find_module_path(root)

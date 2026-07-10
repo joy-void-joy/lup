@@ -15,7 +15,9 @@ import typer
 from lup_template.devtools.utils import gh, git
 
 
-def parse_remote(remote_url: str) -> tuple[str, str] | None:
+def parse_remote(
+    remote_url: str,
+) -> tuple[str, str] | None:  # lup: ignore[tuple-shape] — (scheme, destination)
     """Parse a git remote into (scheme, destination) for auth probing.
 
     URL forms (https://host/org/repo, ssh://git@host/org/repo) are parsed
