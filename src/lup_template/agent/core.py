@@ -344,13 +344,13 @@ def resolve_resume_token(reference: str) -> str:
     already be an engine session id and passes through — a saved run that
     recorded no token fails loudly instead of silently starting fresh.
     """
-    from lup.workspace.history import get_latest_session_json
+    from lup.workspace.history import latest_session_record
 
-    record = get_latest_session_json(reference)
+    record = latest_session_record(reference)
     if record is None:
         return reference
-    token = record.get("sdk_session_id")  # lup: ignore[dict-get] — optional key
-    if not isinstance(token, str) or not token:
+    token = record.sdk_session_id
+    if not token:
         raise ValueError(
             f"Session {reference!r} recorded no engine session id to resume "
             "from (it predates resume support or its engine reported none)."

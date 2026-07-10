@@ -11,7 +11,7 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.workspace.history import get_latest_session_json, iter_session_dirs
+from lup.workspace.history import iter_session_dirs, latest_session_record
 from lup.workspace.paths import project_root, traces_path
 from lup_template.devtools.utils import git
 
@@ -66,13 +66,11 @@ def session_ids_from_status(
 
 def get_session_summary(session_id: str) -> str:
     """Read summary from the latest session JSON across all versions."""
-    data = get_latest_session_json(session_id)
-    if data is None:
+    record = latest_session_record(session_id)
+    if record is None:
         return f"session {session_id}"
-    output = data.get("output", {})  # lup: ignore[dict-get] — optional key
-    if isinstance(output, dict):
-        summary = output.get("summary")  # lup: ignore[dict-get] — optional key
-        if isinstance(summary, str):
+    match record.output:
+        case {"summary": str(summary)}:
             return summary[:50]
     return f"session {session_id}"
 

@@ -11,8 +11,8 @@ import json
 from pathlib import Path
 
 from lup.workspace.history import (
-    get_latest_session_json,
-    load_sessions_json,
+    latest_session_record,
+    load_session_records,
     resolve_version,
     update_session_metadata,
 )
@@ -123,9 +123,12 @@ def test_load_and_latest_session_json_order_by_timestamp(
         json.dumps({"timestamp": "2025-03-01T00:00:00", "n": 2}), encoding="utf-8"
     )
 
-    sessions = load_sessions_json(sid)
-    assert [s["n"] for s in sessions] == [1, 2]
+    sessions = load_session_records(sid)
+    assert [s.timestamp for s in sessions] == [
+        "2025-01-01T00:00:00",
+        "2025-03-01T00:00:00",
+    ]
 
-    latest = get_latest_session_json(sid)
+    latest = latest_session_record(sid)
     assert latest is not None
-    assert latest["n"] == 2
+    assert latest.timestamp == "2025-03-01T00:00:00"
