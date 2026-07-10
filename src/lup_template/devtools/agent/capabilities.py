@@ -72,22 +72,27 @@ def probe_base_options() -> LupAgentOptions:
     )
 
 
-def option_probes() -> list[tuple[str, LupAgentOptions]]:  # lup: ignore[tuple-shape]
+class OptionProbe(BaseModel):
+    """One intent-knob probe: the knob's name and options exercising it."""
+
+    knob: str
+    options: LupAgentOptions
+
+
+def option_probes() -> list[OptionProbe]:
     """One probe per intent knob: the baseline plus exactly that knob."""
     base = probe_base_options()
+
+    def probe(knob: str, **update: object) -> OptionProbe:
+        return OptionProbe(knob=knob, options=base.model_copy(update=update))
+
     return [
-        ("tools", base.model_copy(update={"tools": [READ]})),
-        ("permission_mode", base.model_copy(update={"permission_mode": "plan"})),
-        ("max_turns", base.model_copy(update={"max_turns": 3})),
-        (
-            "max_thinking_tokens",
-            base.model_copy(update={"max_thinking_tokens": 1024}),
-        ),
-        (
-            "turn_timeout_seconds",
-            base.model_copy(update={"turn_timeout_seconds": 30.0}),
-        ),
-        ("max_budget_usd", base.model_copy(update={"max_budget_usd": 1.0})),
+        probe("tools", tools=[READ]),
+        probe("permission_mode", permission_mode="plan"),
+        probe("max_turns", max_turns=3),
+        probe("max_thinking_tokens", max_thinking_tokens=1024),
+        probe("turn_timeout_seconds", turn_timeout_seconds=30.0),
+        probe("max_budget_usd", max_budget_usd=1.0),
     ]
 
 
@@ -145,8 +150,8 @@ def engine_capabilities(engine: Engine) -> EngineCapabilities:
     """Probe one engine into its display column."""
     cells = [CapabilityCell(capability="streaming", value=probe_streaming(engine))]
     cells.extend(
-        CapabilityCell(capability=name, value=probe_option(engine, opts))
-        for name, opts in option_probes()
+        CapabilityCell(capability=p.knob, value=probe_option(engine, p.options))
+        for p in option_probes()
     )
     cells.append(
         CapabilityCell(

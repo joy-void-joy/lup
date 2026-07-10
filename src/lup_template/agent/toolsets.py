@@ -49,9 +49,7 @@ class SessionToolset(TypedDict):
     output_path: Path
 
 
-def tool_group_names(
-    *, realtime: bool
-) -> tuple[ServerGroup, ...]:  # lup: ignore[tuple-shape]
+def tool_group_names(*, realtime: bool) -> list[ServerGroup]:
     """Group names served to subprocess backends (Codex/OpenAI).
 
     Excludes :data:`EXAMPLE_GROUP`. Uses the same name constants as
@@ -59,8 +57,8 @@ def tool_group_names(
     stay aligned.
     """
     if realtime:
-        return (NOTES_GROUP, SANDBOX_GROUP, SESSION_GROUP)
-    return (NOTES_GROUP, SANDBOX_GROUP)
+        return [NOTES_GROUP, SANDBOX_GROUP, SESSION_GROUP]
+    return [NOTES_GROUP, SANDBOX_GROUP]
 
 
 def build_session_toolset(

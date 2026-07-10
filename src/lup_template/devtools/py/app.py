@@ -227,9 +227,9 @@ def imports_cmd(
             typer.echo(f"No project files import '{module}'")
             return
         typer.echo(f"Files importing '{module}':\n")
-        for file_path, import_line in results:
-            typer.echo(f"  {file_path}")
-            typer.echo(f"    {import_line}")
+        for hit in results:
+            typer.echo(f"  {hit['file']}")
+            typer.echo(f"    {hit['import_line']}")
         return
 
     file_path = find_module_path(module)

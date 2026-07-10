@@ -44,15 +44,23 @@ MODEL_COLORS: dict[str, str] = {  # lup: ignore[dict-str-payload] — family →
 
 DAY_NAMES = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 
-# Bucket key in the API response → (display label, window length in hours).
+
+class BucketSpec(BaseModel):
+    """One rate-limit window the display renders: API key, label, length."""
+
+    key: str
+    label: str
+    window_hours: float
+
+
 # One source for both the pacing bars and the --json snapshot.
-BUCKET_SPECS: list[tuple[str, str, float]] = [  # lup: ignore[tuple-shape] — spec rows
-    ("seven_day", "weekly", 7 * 24),
-    ("five_hour", "5-hour", 5),
-    ("seven_day_opus", "opus 7d", 7 * 24),
-    ("seven_day_sonnet", "sonnet 7d", 7 * 24),
-    ("seven_day_cowork", "cowork 7d", 7 * 24),
-    ("seven_day_oauth_apps", "oauth 7d", 7 * 24),
+BUCKET_SPECS: list[BucketSpec] = [
+    BucketSpec(key="seven_day", label="weekly", window_hours=7 * 24),
+    BucketSpec(key="five_hour", label="5-hour", window_hours=5),
+    BucketSpec(key="seven_day_opus", label="opus 7d", window_hours=7 * 24),
+    BucketSpec(key="seven_day_sonnet", label="sonnet 7d", window_hours=7 * 24),
+    BucketSpec(key="seven_day_cowork", label="cowork 7d", window_hours=7 * 24),
+    BucketSpec(key="seven_day_oauth_apps", label="oauth 7d", window_hours=7 * 24),
 ]
 
 
@@ -103,12 +111,26 @@ class UsageSnapshot(BaseModel):
 
 # ── pacing thresholds ──────────────────────────────────────
 
-PACE_LABEL_THRESHOLDS: list[tuple[float, PaceLabel]] = [  # lup: ignore[tuple-shape]
-    (0.5, PaceLabel(word="cruising", style="bold bright_green")),
-    (0.85, PaceLabel(word="on track", style="bold bright_cyan")),
-    (1.0, PaceLabel(word="on pace", style="bold bright_cyan")),
-    (1.3, PaceLabel(word="ahead", style="bold bright_yellow")),
-    (1.6, PaceLabel(word="running hot", style="bold bright_red")),
+
+class PaceThreshold(BaseModel):
+    """A pace label that applies up to (and including) a usage ratio."""
+
+    up_to: float
+    label: PaceLabel
+
+
+PACE_LABEL_THRESHOLDS: list[PaceThreshold] = [
+    PaceThreshold(
+        up_to=0.5, label=PaceLabel(word="cruising", style="bold bright_green")
+    ),
+    PaceThreshold(
+        up_to=0.85, label=PaceLabel(word="on track", style="bold bright_cyan")
+    ),
+    PaceThreshold(up_to=1.0, label=PaceLabel(word="on pace", style="bold bright_cyan")),
+    PaceThreshold(up_to=1.3, label=PaceLabel(word="ahead", style="bold bright_yellow")),
+    PaceThreshold(
+        up_to=1.6, label=PaceLabel(word="running hot", style="bold bright_red")
+    ),
 ]
 PACE_LABEL_DEFAULT = PaceLabel(word="heavy usage", style="bold red")
 
@@ -149,9 +171,9 @@ def pace_color(ratio: float) -> str:
 
 
 def pace_label(ratio: float) -> PaceLabel:
-    for threshold, label in PACE_LABEL_THRESHOLDS:
-        if ratio <= threshold:
-            return label
+    for threshold in PACE_LABEL_THRESHOLDS:
+        if ratio <= threshold.up_to:
+            return threshold.label
     return PACE_LABEL_DEFAULT
 
 
@@ -524,10 +546,10 @@ def build_display(
     bar_w = bar_width - 14
     out = Text()
 
-    for key, label, window_hours in BUCKET_SPECS:
-        bucket = get_bucket(usage, key)
+    for spec in BUCKET_SPECS:
+        bucket = get_bucket(usage, spec.key)
         if bucket and bucket.get("resets_at"):
-            render_bucket(out, label, bucket, window_hours, bar_w)
+            render_bucket(out, spec.label, bucket, spec.window_hours, bar_w)
             out.append("\n")
 
     extra = usage.get("extra_usage")
@@ -554,16 +576,14 @@ def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnaps
     the human pacing bars.
     """
 
-    def bucket_snapshot(
-        key: str, label: str, window_hours: float
-    ) -> BucketSnapshot | None:
-        bucket = get_bucket(usage, key)
+    def bucket_snapshot(spec: BucketSpec) -> BucketSnapshot | None:
+        bucket = get_bucket(usage, spec.key)
         if not (bucket and bucket.get("resets_at")):
             return None
         resets_at = datetime.fromisoformat(bucket["resets_at"])
-        ratio = bucket_pace(bucket, window_hours).ratio
+        ratio = bucket_pace(bucket, spec.window_hours).ratio
         return BucketSnapshot(
-            name=label,
+            name=spec.label,
             utilization_pct=bucket["utilization"],
             pace=pace_label(ratio).word,
             resets_at=bucket["resets_at"],
@@ -574,8 +594,8 @@ def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnaps
 
     buckets = [
         snapshot
-        for key, label, window_hours in BUCKET_SPECS
-        if (snapshot := bucket_snapshot(key, label, window_hours)) is not None
+        for spec in BUCKET_SPECS
+        if (snapshot := bucket_snapshot(spec)) is not None
     ]
 
     extra = usage.get("extra_usage")

@@ -236,14 +236,12 @@ async def repl(
     ]
     if not no_tools:
         servers = collect_registry_tools()
-        group_names: list[tuple[str, list[str]]] = [  # lup: ignore[tuple-shape]
-            (name, [t.name for t in stools]) for name, stools in servers.items()
-        ]
-        for i, (name, tool_names_list) in enumerate(group_names):
-            is_last_server = i == len(group_names) - 1
+        for i, (name, stools) in enumerate(servers.items()):
+            is_last_server = i == len(servers) - 1
             panel_lines.append(f"[dim]{'└' if is_last_server else '├'} {name}[/dim]")
-            for j, tname in enumerate(tool_names_list):
-                is_last_tool = j == len(tool_names_list) - 1
+            for j, tool in enumerate(stools):
+                tname = tool.name
+                is_last_tool = j == len(stools) - 1
                 branch = "  └" if is_last_tool else "  ├"
                 if not is_last_server:
                     branch = f"[dim]│[/dim] {'└' if is_last_tool else '├'}"
