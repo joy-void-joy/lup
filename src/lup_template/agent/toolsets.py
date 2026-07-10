@@ -7,9 +7,9 @@ addressed as ``mcp__notes__foo`` on every backend. Grouping also lets the
 policy enable or withhold a whole capability (a server) at once.
 
 Both backend paths consume this module — the Claude path registers the groups
-in-process (``core.build_options``), the Codex/OpenAI path serves them over
-stdio (``lup-devtools agent serve-tools``) and selects them by name
-(``core.build_codex_adapter``) — so adding a group or tool here reaches every
+in-process, the Codex/OpenAI path serves them over stdio (``lup-devtools agent
+serve-tools``) and selects them by name; both assemblies live in
+``core.build_session_options`` — so adding a group or tool here reaches every
 backend, and there is deliberately nowhere else to add one.
 
 TEMPLATE: register tool groups in build_session_toolset + tool_group_names.
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 ServerGroup = Literal["notes", "sandbox", "session", "example"]
 """A tool-group name this registry can build — the group vocabulary every
-consumer shares: server registration (``core.build_inprocess_options``),
+consumer shares: server registration (``core.build_session_options``),
 subprocess serving and CLI selection (``lup-devtools agent serve-tools
 --server``). Extend it together with :func:`build_session_toolset` when
 adding a group. (A plain alias, not a ``type`` statement, so typer can
