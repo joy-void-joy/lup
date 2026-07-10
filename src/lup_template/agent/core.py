@@ -198,9 +198,7 @@ def build_session_options(
             policy_servers, builtin_tools=builtin_tools
         )
         hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
-        served_groups = list(
-            policy.filter_group_names(tool_group_names(realtime=realtime))
-        )
+        served_groups = policy.filter_group_names(tool_group_names(realtime=realtime))
 
     # Subprocess assembly — consumed by natively-sandboxed engines (codex*).
     realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None

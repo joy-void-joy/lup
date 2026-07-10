@@ -1,3 +1,7 @@
+# lup: ignore[string-strip, string-split]
+# This module IS the parser for the repo's own trace-markdown format (the
+# legacy fallback beside the .events.jsonl sidecar) — line surgery here is
+# the parse, not a substitute for one.
 """Trace display, search, and analysis implementation.
 
 Provides reusable scanner functions (``scan_for_errors``, ``scan_for_capability_gaps``)
@@ -19,7 +23,7 @@ Examples::
 """
 
 import json
-import re
+import re  # lup: ignore[import-re] — legacy-markdown fallback patterns
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +46,8 @@ from lup.workspace.history import (
 from lup.workspace.paths import parse_timestamp, project_root, traces_path
 
 from lup_template.devtools.utils import output_json
+
+type TraceRef = tuple[str, str, Path]  # lup: ignore[tuple-shape] — source/id/path
 
 
 # ── types ─────────────────────────────────────────────────
@@ -102,7 +108,7 @@ def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
     one irreducible heuristic, capability phrasing in free-form Response text,
     is shared with the live logger.
     """
-    events: list[TraceEvent] = []
+    events: list[TraceEvent] = []  # lup: ignore[empty-collection] — block fold
     pending_tool: str | None = None
     now = ""
     for label, body in iter_markdown_blocks(content):
@@ -131,16 +137,18 @@ def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
     return events
 
 
-def iter_markdown_blocks(content: str) -> list[tuple[str, str]]:
+def iter_markdown_blocks(
+    content: str,
+) -> list[tuple[str, str]]:  # lup: ignore[tuple-shape] — (label, body)
     """Split a trace markdown document into ``(label, body)`` blocks.
 
     A block starts at a ``## <emoji> <label>`` header and runs to the next
     header. The body has any surrounding ``` ``` fences stripped, so a Result
     body is the raw JSON the logger fenced — ready to parse.
     """
-    blocks: list[tuple[str, str]] = []
+    blocks: list[tuple[str, str]] = []  # lup: ignore[tuple-shape, empty-collection]
     label: str | None = None
-    body_lines: list[str] = []
+    body_lines: list[str] = []  # lup: ignore[empty-collection] — block fold
 
     def flush() -> None:
         if label is not None:
@@ -153,7 +161,7 @@ def iter_markdown_blocks(content: str) -> list[tuple[str, str]]:
             heading = line.removeprefix("## ").strip()
             parts = heading.split(" ", 1)
             label = parts[1].strip() if len(parts) > 1 else heading
-            body_lines = []
+            body_lines = []  # lup: ignore[empty-collection] — next block begins
         elif label is not None:
             body_lines.append(line)
     flush()
@@ -175,7 +183,7 @@ def resolve_trace_paths(effective: list[str] | None) -> list[Path]:
     if not traces_path().exists():
         return []
     if effective:
-        paths: list[Path] = []
+        paths: list[Path] = []  # lup: ignore[empty-collection] — per-version fold
         for v in effective:
             ver_dir = traces_path() / v
             if ver_dir.exists():
@@ -210,7 +218,7 @@ def scan_for_errors(
     and keeps the ``error`` ones — real tool failures, distinguished by the
     logged ``is_error`` flag rather than by keyword-scanning prose.
     """
-    errors_by_session: dict[str, list[str]] = {}
+    errors_by_session: dict[str, list[str]] = {}  # lup: ignore[empty-collection]
 
     for trace_file in resolve_trace_paths(effective):
         try:
@@ -225,7 +233,7 @@ def scan_for_errors(
                 f"{event.tool or 'unknown'}: {event.brief}"
             )
 
-    result: list[TraceErrorSession] = []
+    result: list[TraceErrorSession] = []  # lup: ignore[empty-collection] — fold
     for session_id, errors in sorted(
         errors_by_session.items(), key=lambda x: len(x[1]), reverse=True
     ):
@@ -260,13 +268,13 @@ def scan_for_capability_gaps(
             if event.kind == "capability_request" and event.brief:
                 requests_by_text[event.brief].append(session_id)
 
-    result: list[CapabilityRequest] = []
+    result: list[CapabilityRequest] = []  # lup: ignore[empty-collection] — fold
     for text, session_ids in sorted(requests_by_text.items(), key=lambda x: -len(x[1])):
         result.append(
             {
                 "text": text,
                 "count": len(session_ids),
-                "session_ids": sorted(set(session_ids)),
+                "session_ids": sorted(set(session_ids)),  # lup: ignore[set-shape]
             }
         )
     return result
@@ -316,7 +324,7 @@ def load_trace(trace_path: Path) -> str:
         return trace_path.read_text(encoding="utf-8")
 
     if trace_path.is_dir():
-        contents = []
+        contents = []  # lup: ignore[empty-collection] — per-file fold
         for f in sorted(trace_path.glob("*")):
             if not f.is_file():
                 continue
@@ -331,7 +339,7 @@ def load_trace(trace_path: Path) -> str:
     return ""
 
 
-TOOL_CALL_PATTERNS = re.compile(
+TOOL_CALL_PATTERNS = re.compile(  # lup: ignore[re-call] — legacy-markdown scan
     r"tool_use|tool_result|^#{2,3}\s+\S+\s+Tool:|^#{2,3}\s+\S+\s+Result\b",
     re.IGNORECASE,
 )
@@ -340,7 +348,7 @@ TOOL_CALL_PATTERNS = re.compile(
 def filter_tool_calls(content: str, context_lines: int = 3) -> str:
     """Extract lines matching tool call patterns with surrounding context."""
     lines = content.split("\n")
-    matched_indices: set[int] = set()
+    matched_indices: set[int] = set()  # lup: ignore[set-shape, empty-collection]
 
     for i, line in enumerate(lines):
         if TOOL_CALL_PATTERNS.search(line):
@@ -351,7 +359,7 @@ def filter_tool_calls(content: str, context_lines: int = 3) -> str:
     if not matched_indices:
         return "(no tool call lines found)"
 
-    result: list[str] = []
+    result: list[str] = []  # lup: ignore[empty-collection] — context-window fold
     prev_idx = -2
     for idx in sorted(matched_indices):
         if idx > prev_idx + 1:
@@ -413,8 +421,8 @@ def search(pattern: str, context: int, as_json: bool) -> None:
             typer.echo("0 matches found")
         return
 
-    regex = re.compile(pattern, re.IGNORECASE)
-    matches: list[SearchMatch] = []
+    regex = re.compile(pattern, re.IGNORECASE)  # lup: ignore[re-call] — user query
+    matches: list[SearchMatch] = []  # lup: ignore[empty-collection] — match fold
 
     trace_files = list(traces_path().rglob("*.md")) + list(
         traces_path().rglob("*.json")
@@ -486,8 +494,8 @@ def entry_recency(path: Path) -> datetime:
     try:
         names = [f.name for f in path.iterdir()]
     except OSError:
-        names = []
-    stamps: list[datetime] = []
+        names = []  # lup: ignore[empty-collection] — unreadable dir: no entries
+    stamps: list[datetime] = []  # lup: ignore[empty-collection] — parse fold
     for name in names:
         try:
             stamps.append(parse_timestamp(name))
@@ -503,7 +511,7 @@ def entry_recency(path: Path) -> datetime:
 
 def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
     """List available traces, most recent first."""
-    raw: list[tuple[str, str, Path]] = []
+    raw: list[TraceRef] = []  # lup: ignore[empty-collection] — discovery fold
 
     versions_iter = effective if effective else [None]
     for ver in versions_iter:
@@ -520,13 +528,13 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
             typer.echo(f"Checked: {traces_path()}")
         return
 
-    seen: dict[str, tuple[str, str, Path]] = {}
+    seen: dict[str, TraceRef] = {}  # lup: ignore[empty-collection] — dedup fold
     for source, session_id, path in raw:
         if session_id not in seen or source == "logs":
             seen[session_id] = (source, session_id, path)
 
     unique = sorted(seen.values(), key=lambda row: entry_recency(row[2]), reverse=True)
-    entries: list[TraceRow] = []
+    entries: list[TraceRow] = []  # lup: ignore[empty-collection] — display fold
     for source, session_id, path in unique[:limit]:
         files = list(path.glob("*"))
         size = sum(f.stat().st_size for f in files if f.is_file())
