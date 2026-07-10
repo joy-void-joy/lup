@@ -41,11 +41,12 @@ class Settings(BaseSettings):
 
         Customize this for your domain's optional dependencies.
         """
-        missing = []  # lup: ignore[empty-collection] — per-key warning fold
-
-        # TEMPLATE: warn about your domain's missing optional API keys
-        # if not self.example_api_key:
-        #     missing.append("EXAMPLE_API_KEY")
+        # TEMPLATE: list your domain's optional API keys here, e.g.
+        # "EXAMPLE_API_KEY": self.example_api_key,
+        optional_keys: dict[
+            str, str | None
+        ] = {}  # lup: ignore[empty-collection] — TEMPLATE table
+        missing = [name for name, value in optional_keys.items() if not value]
 
         if missing:
             logger.warning(

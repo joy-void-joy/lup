@@ -159,10 +159,12 @@ def rename_package(
 
     all_changes: list[str] = []  # lup: ignore[empty-collection] — change log
 
-    python_files: list[Path] = []  # lup: ignore[empty-collection] — discovery
-    for search_dir in [src_dir, root / "tests"]:
-        if search_dir.is_dir():
-            python_files.extend(search_dir.rglob("*.py"))
+    python_files = [
+        py_file
+        for search_dir in [src_dir, root / "tests"]
+        if search_dir.is_dir()
+        for py_file in search_dir.rglob("*.py")
+    ]
 
     typer.echo("Import renames:" if dry_run else "Renaming imports...")
     for py_file in sorted(python_files):

@@ -251,12 +251,14 @@ def run_capabilities(markdown: bool) -> None:
     typer.echo(
         " " * (label_width + 2) + "".join(f"{entry.name:>15}" for entry in matrix)
     )
+
+    def cell_text(value: bool | str) -> str:
+        match value:
+            case bool() as flag:
+                return f"{'yes' if flag else '—':>15}"
+            case _:
+                return f"{value:>15}"
+
     for row, cell in enumerate(matrix[0].cells):
-        cells: list[str] = []  # lup: ignore[empty-collection] — table row fold
-        for entry in matrix:
-            match entry.cells[row].value:
-                case bool() as flag:
-                    cells.append(f"{'yes' if flag else '—':>15}")
-                case value:
-                    cells.append(f"{value:>15}")
+        cells = [cell_text(entry.cells[row].value) for entry in matrix]
         typer.echo(f"{cell.capability:<{label_width}}  " + "".join(cells))

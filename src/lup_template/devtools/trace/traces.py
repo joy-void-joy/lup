@@ -192,12 +192,12 @@ def resolve_trace_paths(effective: list[str] | None) -> list[Path]:
     if not traces_path().exists():
         return []
     if effective:
-        paths: list[Path] = []  # lup: ignore[empty-collection] — per-version fold
-        for v in effective:
-            ver_dir = traces_path() / v
-            if ver_dir.exists():
-                paths.extend(ver_dir.rglob("*.md"))
-        return paths
+        return [
+            path
+            for v in effective
+            if (ver_dir := traces_path() / v).exists()
+            for path in ver_dir.rglob("*.md")
+        ]
     return list(traces_path().rglob("*.md"))
 
 
@@ -242,18 +242,12 @@ def scan_for_errors(
                 f"{event.tool or 'unknown'}: {event.brief}"
             )
 
-    result: list[TraceErrorSession] = []  # lup: ignore[empty-collection] — fold
-    for session_id, errors in sorted(
-        errors_by_session.items(), key=lambda x: len(x[1]), reverse=True
-    ):
-        result.append(
-            {
-                "session_id": session_id,
-                "error_count": len(errors),
-                "errors": errors,
-            }
+    return [
+        {"session_id": session_id, "error_count": len(errors), "errors": errors}
+        for session_id, errors in sorted(
+            errors_by_session.items(), key=lambda x: len(x[1]), reverse=True
         )
-    return result
+    ]
 
 
 def scan_for_capability_gaps(
@@ -277,16 +271,16 @@ def scan_for_capability_gaps(
             if event.kind == "capability_request" and event.brief:
                 requests_by_text[event.brief].append(session_id)
 
-    result: list[CapabilityRequest] = []  # lup: ignore[empty-collection] — fold
-    for text, session_ids in sorted(requests_by_text.items(), key=lambda x: -len(x[1])):
-        result.append(
-            {
-                "text": text,
-                "count": len(session_ids),
-                "session_ids": sorted(set(session_ids)),  # lup: ignore[set-shape]
-            }
+    return [
+        {
+            "text": text,
+            "count": len(session_ids),
+            "session_ids": sorted(set(session_ids)),  # lup: ignore[set-shape]
+        }
+        for text, session_ids in sorted(
+            requests_by_text.items(), key=lambda x: -len(x[1])
         )
-    return result
+    ]
 
 
 # ── helpers ───────────────────────────────────────────────
@@ -333,17 +327,18 @@ def load_trace(trace_path: Path) -> str:
         return trace_path.read_text(encoding="utf-8")
 
     if trace_path.is_dir():
-        contents = []  # lup: ignore[empty-collection] — per-file fold
-        for f in sorted(trace_path.glob("*")):
-            if not f.is_file():
-                continue
+
+        def rendered(f: Path) -> str:
             body = (
                 render_json_trace(f)
                 if f.suffix == ".json"
                 else f.read_text(encoding="utf-8")
             )
-            contents.append(f"--- {f.name} ---\n{body}")
-        return "\n\n".join(contents)
+            return f"--- {f.name} ---\n{body}"
+
+        return "\n\n".join(
+            rendered(f) for f in sorted(trace_path.glob("*")) if f.is_file()
+        )
 
     return ""
 
@@ -553,19 +548,19 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
     unique = sorted(
         seen.values(), key=lambda row: entry_recency(row.path), reverse=True
     )
-    entries: list[TraceRow] = []  # lup: ignore[empty-collection] — display fold
-    for ref in unique[:limit]:
+
+    def trace_row(ref: TraceRef) -> TraceRow:
         files = list(ref.path.glob("*"))
         size = sum(f.stat().st_size for f in files if f.is_file())
-        entries.append(
-            {
-                "session_id": ref.session_id,
-                "source": ref.source,
-                "backend": session_backend(ref.path),
-                "files": len(files),
-                "size_kb": round(size / 1024, 1),
-            }
-        )
+        return {
+            "session_id": ref.session_id,
+            "source": ref.source,
+            "backend": session_backend(ref.path),
+            "files": len(files),
+            "size_kb": round(size / 1024, 1),
+        }
+
+    entries = [trace_row(ref) for ref in unique[:limit]]
 
     if as_json:
         output_json({"traces": entries, "total": len(unique)})

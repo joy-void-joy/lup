@@ -61,20 +61,21 @@ def gather_tool_health(sessions: Sequence[SessionData]) -> list[ToolHealth]:
             tool_stats[tool_name]["calls"] += data.get("call_count", 0)
             tool_stats[tool_name]["errors"] += data.get("error_count", 0)
 
-    result: list[ToolHealth] = []  # lup: ignore[empty-collection] — stats fold
-    for name in sorted(tool_stats, key=lambda t: -tool_stats[t]["calls"]):
+    def health_row(name: str) -> ToolHealth:
         stats = tool_stats[name]
         calls = stats["calls"]
         errors = stats["errors"]
-        result.append(
-            {
-                "name": name,
-                "calls": calls,
-                "errors": errors,
-                "error_rate": (errors / calls) if calls > 0 else 0.0,
-            }
-        )
-    return result
+        return {
+            "name": name,
+            "calls": calls,
+            "errors": errors,
+            "error_rate": (errors / calls) if calls > 0 else 0.0,
+        }
+
+    return [
+        health_row(name)
+        for name in sorted(tool_stats, key=lambda t: -tool_stats[t]["calls"])
+    ]
 
 
 def gather_error_patterns(sessions: Sequence[SessionData]) -> list[ErrorPattern]:
@@ -90,14 +91,14 @@ def gather_error_patterns(sessions: Sequence[SessionData]) -> list[ErrorPattern]
         total_calls = metrics.get("total_tool_calls", 0)
         by_tool = metrics.get("by_tool", {})
 
-        tool_errors: list[
-            tuple[int, str]  # lup: ignore[tuple-shape] — sortable (errors, tool)
-        ] = []  # lup: ignore[empty-collection]
-        for tool_name, tool_data in by_tool.items():
-            errs = tool_data.get("error_count", 0)
-            if errs > 0:
-                tool_errors.append((errs, tool_name))
-        tool_errors.sort(reverse=True)
+        tool_errors = sorted(
+            (
+                (errs, tool_name)
+                for tool_name, tool_data in by_tool.items()
+                if (errs := tool_data.get("error_count", 0)) > 0
+            ),
+            reverse=True,
+        )
 
         result.append(
             {

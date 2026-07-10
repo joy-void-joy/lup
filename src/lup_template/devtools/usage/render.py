@@ -16,6 +16,7 @@ from rich.text import Text
 from lup_template.devtools.usage.api import (
     DailyBreakdown,
     ExtraUsage,
+    ModelUsageEntry,
     StatsCache,
     UsageBucket,
     UsageResponse,
@@ -334,16 +335,20 @@ def render_daily_breakdown(
 
     day_bar_w = bar_width
 
-    cost_rates: dict[str, float] = {}  # lup: ignore[dict-str-payload, empty-collection]
-    for mid, entry in stats.model_usage.items():
-        total_tok = (
+    def total_tokens(entry: ModelUsageEntry) -> int:
+        return (
             entry.input_tokens
             + entry.output_tokens
             + entry.cache_read_input_tokens
             + entry.cache_creation_input_tokens
         )
-        if total_tok > 0:
-            cost_rates[mid] = entry.cost_usd / total_tok
+
+    # Open per-model map, keyed by whatever model ids appear in the cache.
+    cost_rates: dict[str, float] = {  # lup: ignore[dict-str-payload]
+        mid: entry.cost_usd / total_tokens(entry)
+        for mid, entry in stats.model_usage.items()
+        if total_tokens(entry) > 0
+    }
 
     model_totals: dict[str, int] = {}  # lup: ignore[dict-str-payload, empty-collection]
     daily_weights: list[float] = []  # lup: ignore[empty-collection] — day fold
@@ -548,24 +553,30 @@ def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnaps
     breakdown, but as plain counts and limits an agent can read instead of
     the human pacing bars.
     """
-    buckets: list[BucketSnapshot] = []  # lup: ignore[empty-collection] — spec fold
-    for key, label, window_hours in BUCKET_SPECS:
+
+    def bucket_snapshot(
+        key: str, label: str, window_hours: float
+    ) -> BucketSnapshot | None:
         bucket = get_bucket(usage, key)
         if not (bucket and bucket.get("resets_at")):
-            continue
+            return None
         resets_at = datetime.fromisoformat(bucket["resets_at"])
         ratio = bucket_pace(bucket, window_hours).ratio
-        buckets.append(
-            BucketSnapshot(
-                name=label,
-                utilization_pct=bucket["utilization"],
-                pace=pace_label(ratio).word,
-                resets_at=bucket["resets_at"],
-                resets_in_seconds=max(
-                    int((resets_at - datetime.now(resets_at.tzinfo)).total_seconds()), 0
-                ),
-            )
+        return BucketSnapshot(
+            name=label,
+            utilization_pct=bucket["utilization"],
+            pace=pace_label(ratio).word,
+            resets_at=bucket["resets_at"],
+            resets_in_seconds=max(
+                int((resets_at - datetime.now(resets_at.tzinfo)).total_seconds()), 0
+            ),
         )
+
+    buckets = [
+        snapshot
+        for key, label, window_hours in BUCKET_SPECS
+        if (snapshot := bucket_snapshot(key, label, window_hours)) is not None
+    ]
 
     extra = usage.get("extra_usage")
     overage = (

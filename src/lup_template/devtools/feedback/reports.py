@@ -343,20 +343,22 @@ def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
             typer.echo("No tool metrics found")
         return
 
-    entries: list[ToolUsageEntry] = []  # lup: ignore[empty-collection] — stats fold
-    for tool_name in sorted(tool_stats.keys(), key=lambda t: -tool_stats[t]["calls"]):
+    def usage_entry(tool_name: str) -> ToolUsageEntry:
         stats = tool_stats[tool_name]
         calls = int(stats["calls"])
         errs = int(stats["errors"])
-        entries.append(
-            {
-                "name": tool_name,
-                "calls": calls,
-                "errors": errs,
-                "error_rate": (errs / calls) if calls > 0 else 0.0,
-                "avg_ms": stats["total_ms"] / calls if calls > 0 else 0.0,
-            }
-        )
+        return {
+            "name": tool_name,
+            "calls": calls,
+            "errors": errs,
+            "error_rate": (errs / calls) if calls > 0 else 0.0,
+            "avg_ms": stats["total_ms"] / calls if calls > 0 else 0.0,
+        }
+
+    entries = [
+        usage_entry(name)
+        for name in sorted(tool_stats.keys(), key=lambda t: -tool_stats[t]["calls"])
+    ]
 
     if as_json:
         output_json(entries)
@@ -400,20 +402,20 @@ def errors(
             typer.echo("No sessions found")
         return
 
-    with_errors: list[ErrorSessionEntry] = []  # lup: ignore[empty-collection] — fold
-    for s in sessions:
+    def error_entry(s: SessionData) -> ErrorSessionEntry | None:
         metrics = s.get("tool_metrics")
         if not metrics:
-            continue
+            return None
         total_errors = metrics.get("total_errors", 0)
-        if total_errors and total_errors > 0:
-            with_errors.append(
-                {
-                    "session_id": s.get("_session_id", ""),
-                    "errors": total_errors,
-                    "by_tool": metrics.get("by_tool", {}),
-                }
-            )
+        if not total_errors or total_errors <= 0:
+            return None
+        return {
+            "session_id": s.get("_session_id", ""),
+            "errors": total_errors,
+            "by_tool": metrics.get("by_tool", {}),
+        }
+
+    with_errors = [e for s in sessions if (e := error_entry(s)) is not None]
 
     if not with_errors:
         if as_json:
@@ -566,17 +568,16 @@ def prompt_health(as_json: bool) -> None:
     char_count = len(rendered)
     estimated_tokens = char_count // 4
 
-    section_reports: list[PromptSection] = []  # lup: ignore[empty-collection] — fold
-    for section_text in SECTIONS:
+    def section_report(section_text: str) -> PromptSection:
         prose = section_text.strip()  # lup: ignore[string-strip] — prompt prose
         first_line = prose.splitlines()[0] if prose else "(empty)"
-        section_reports.append(
-            {
-                "name": first_line[:60],
-                "lines": len(section_text.splitlines()),
-                "characters": len(section_text),
-            }
-        )
+        return {
+            "name": first_line[:60],
+            "lines": len(section_text.splitlines()),
+            "characters": len(section_text),
+        }
+
+    section_reports = [section_report(s) for s in SECTIONS]
 
     report: PromptHealthReport = {
         "file": str(prompts_file) if prompts_file else "unknown",
