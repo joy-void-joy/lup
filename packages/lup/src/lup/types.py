@@ -1,9 +1,10 @@
 """Internal content block, message, and response types.
 
-These types are the shared vocabulary for all consumer code (core.py,
-trace.py, etc.). SDK-specific adapters convert to/from these types at
-the boundary — consumer code never imports from SDK packages directly.
-The hook vocabulary lives in :mod:`lup.hooks`, not here.
+These types are the shared vocabulary for all consumer code — the
+application's orchestration, the trace logger, the tools. SDK-specific
+adapters convert to/from these types at the boundary — consumer code
+never imports from SDK packages directly. The hook vocabulary lives in
+:mod:`lup.hooks`, not here.
 """
 
 from collections.abc import Callable, Sequence
