@@ -137,7 +137,7 @@ def build_session_options(
     preset off. Overrides are realized here, in neutral terms, never by
     patching a translated client.
     """
-    from lup.adapters.tools.claude import CLAUDE_BUILTIN_TOOLS
+    from lup.adapters.wiring import resolve_engine
     from lup.hooks import (
         create_completion_guard,
         create_permission_hooks,
@@ -191,8 +191,11 @@ def build_session_options(
         )
         # Tool allowlist: allowed_tools in options is ignored under
         # bypassPermissions, so availability is enforced by a PreToolUse hook.
+        builtin_tools = resolve_engine(
+            engine_for_settings(), model=effective_model
+        ).builtin_tools()
         allowed_tools = policy.get_allowed_tools(
-            policy_servers, builtin_tools=CLAUDE_BUILTIN_TOOLS
+            policy_servers, builtin_tools=builtin_tools
         )
         hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
         served_groups = list(
