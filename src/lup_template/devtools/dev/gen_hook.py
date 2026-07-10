@@ -15,6 +15,7 @@ already canonical — the repo-wide `ruff format` check leaves it untouched and
 the pin test reproduces it byte for byte.
 """
 
+import inspect
 from pathlib import Path
 
 import sh
@@ -24,6 +25,7 @@ from lup.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
     TS_ANTI_PATTERNS,
     AntiPattern,
+    empty_collection_exempt_lines,
 )
 
 HOOK_PATH = (
@@ -43,6 +45,13 @@ COMPILE_CALL = "re.compile"
 # The generated region of each table runs from its `NAME:` assignment header
 # down to the closing bracket that sits alone in the first column.
 BLOCK_CLOSE = "]"
+
+# The refiner region is delimited by these exact comment lines; the function
+# source between them is `inspect.getsource` of the library's refiner.
+REFINER_BEGIN = (
+    "# --- generated: empty-collection refiner (lup.codescan.antipatterns) ---"
+)
+REFINER_END = "# --- end generated refiner ---"
 
 
 def py_string(value: str) -> str:
@@ -91,11 +100,20 @@ def splice_block(
     return lines[: start + 1] + body + lines[end:]
 
 
+def splice_refiner(lines: list[str]) -> list[str]:
+    """Replace the refiner region's body with the library function's source."""
+    start = lines.index(REFINER_BEGIN)
+    end = lines.index(REFINER_END)
+    body = inspect.getsource(empty_collection_exempt_lines).splitlines()
+    return lines[: start + 1] + body + lines[end:]
+
+
 def render_hook_text() -> str:
     """The full hook source with both anti-pattern tables regenerated and ruff-formatted."""
     lines = HOOK_PATH.read_text(encoding="utf-8").splitlines()
     lines = splice_block(lines, "ANTI_PATTERNS:", PYTHON_ANTI_PATTERNS)
     lines = splice_block(lines, "TS_ANTI_PATTERNS:", TS_ANTI_PATTERNS)
+    lines = splice_refiner(lines)
     spliced = "\n".join(lines) + "\n"
     formatted = sh.Command("ruff")(
         "format", "--stdin-filename", str(HOOK_PATH), "-", _in=spliced
