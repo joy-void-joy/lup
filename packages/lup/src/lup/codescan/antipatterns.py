@@ -33,6 +33,7 @@ import re
 
 from pydantic import BaseModel
 
+from lup.codescan.boundaries import RULE_ID as SEAM_BOUNDARY_RULE_ID
 from lup.codescan.common import (
     IGNORE_RE,
     PythonContext,
@@ -421,6 +422,16 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
 PY_SUFFIXES = (".py", ".pyi")
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 
+FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
+    {SEAM_BOUNDARY_RULE_ID}
+)
+"""Rule ids owned by other codescan scanners.
+
+A typed ``# lup: ignore[...]`` naming one of these is judged by that
+scanner (the boundary scan honors its own id), so this auditor never
+reports it spurious — while an id no scanner owns still is.
+"""
+
 
 def patterns_for_suffix(suffix: str) -> list[AntiPattern] | None:
     """The anti-pattern table that applies to a file suffix, or None to skip it.
@@ -561,7 +572,7 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
                     )
                 )
         else:
-            for rid in sorted(inline_ids - hit_ids):
+            for rid in sorted(inline_ids - hit_ids - FOREIGN_RULE_IDS):
                 findings.append(
                     AntiPatternFinding(
                         kind="spurious",
