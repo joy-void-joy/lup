@@ -10,7 +10,7 @@ module loads without requiring any particular SDK to be installed.
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import BaseModel
 
@@ -39,9 +39,15 @@ from lup.workspace.paths import agent_version
 
 logger = logging.getLogger(__name__)
 
-# (system_prompt, mcp_env, writable_roots) for the Codex-runtime adapters.
 type McpEnv = dict[str, str]  # lup: ignore[dict-str-payload] — open env map
-type CodexScaffold = tuple[str, McpEnv, list[Path]]  # lup: ignore[tuple-shape]
+
+
+class CodexScaffold(NamedTuple):
+    """Shared scaffolding for the Codex-runtime adapters."""
+
+    system_prompt: str
+    mcp_env: McpEnv
+    writable_roots: list[Path]
 
 
 class PersistentSessionResult(BaseModel):
@@ -291,7 +297,7 @@ def build_codex_session(
     if settings.aux_model:
         mcp_env["AGENT_AUX_MODEL"] = settings.aux_model
 
-    return get_system_prompt(), mcp_env, list(notes.rw)
+    return CodexScaffold(get_system_prompt(), mcp_env, list(notes.rw))
 
 
 def build_usage_cost() -> "UsageCost | None":

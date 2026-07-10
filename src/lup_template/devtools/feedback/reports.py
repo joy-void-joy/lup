@@ -17,6 +17,7 @@ Examples::
 
 import json
 import logging
+from typing import NamedTuple
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -56,7 +57,16 @@ logger = logging.getLogger(__name__)
 
 # Open per-tool aggregation buckets, keyed by whatever tools ran.
 type ToolBuckets = dict[str, dict[str, int | float]]  # lup: ignore[dict-str-payload]
-type SummaryRow = tuple[str, str, str, str, str]  # lup: ignore[tuple-shape] — cells
+
+
+class SummaryRow(NamedTuple):
+    """One rendered row of the tool-usage table (all cells pre-formatted)."""
+
+    name: str
+    calls: str
+    errors: str
+    error_rate: str
+    avg_ms: str
 
 
 def print_version_info(effective: list[str] | None) -> None:
@@ -365,7 +375,7 @@ def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
         err_pct = e["error_rate"] * 100
         err_indicator = " !" if err_pct > 10 else ""
         rows.append(
-            (
+            SummaryRow(
                 e["name"],
                 str(e["calls"]),
                 str(e["errors"]),

@@ -8,6 +8,7 @@ the assembled panel from already-fetched data — no I/O here.
 """
 
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 from pydantic import BaseModel
 from rich.panel import Panel
@@ -172,9 +173,14 @@ def get_bucket(usage: UsageResponse, key: str) -> UsageBucket | None:
             return None
 
 
-def bucket_pace(
-    bucket: UsageBucket, window_hours: float
-) -> tuple[float, float]:  # lup: ignore[tuple-shape] — (pace %, ratio)
+class BucketPace(NamedTuple):
+    """Where a bucket stands against even pace."""
+
+    linear_pct: float
+    ratio: float
+
+
+def bucket_pace(bucket: UsageBucket, window_hours: float) -> BucketPace:
     """Even-pace percent and the utilization-to-pace ratio for a bucket."""
     resets_at = datetime.fromisoformat(bucket["resets_at"])
     window_start = resets_at - timedelta(hours=window_hours)
@@ -183,7 +189,7 @@ def bucket_pace(
     total = window_hours * 3600
     linear_pct = min((elapsed / total) * 100, 100) if total > 0 else 0
     ratio = (bucket["utilization"] / linear_pct) if linear_pct > 0 else 0
-    return linear_pct, ratio
+    return BucketPace(linear_pct, ratio)
 
 
 def place_label(text: str, position: int, line_width: int) -> str:
@@ -479,9 +485,14 @@ def render_daily_breakdown(
 # ── display assembly ───────────────────────────────────────
 
 
-def breakdown_window(
-    usage: UsageResponse,
-) -> tuple[datetime, float]:  # lup: ignore[tuple-shape] — (window end, util %)
+class BreakdownWindow(NamedTuple):
+    """The 7-day breakdown window's end and its budget-scaling utilization."""
+
+    end: datetime
+    utilization: float
+
+
+def breakdown_window(usage: UsageResponse) -> BreakdownWindow:
     """Anchor the 7-day breakdown window and its budget-scaling utilization.
 
     The weekly API bucket gives the reset time and utilization when present;
@@ -490,8 +501,10 @@ def breakdown_window(
     """
     seven_day = get_bucket(usage, "seven_day")
     if seven_day and seven_day.get("resets_at"):
-        return datetime.fromisoformat(seven_day["resets_at"]), seven_day["utilization"]
-    return datetime.now(), 0.0
+        return BreakdownWindow(
+            datetime.fromisoformat(seven_day["resets_at"]), seven_day["utilization"]
+        )
+    return BreakdownWindow(datetime.now(), 0.0)
 
 
 def build_display(

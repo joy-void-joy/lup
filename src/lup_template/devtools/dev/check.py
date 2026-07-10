@@ -1,5 +1,7 @@
 """Unified pre-flight checks: ruff, pyright, pytest."""
 
+from typing import NamedTuple
+
 import sh
 import typer
 
@@ -10,7 +12,12 @@ from lup_template.devtools.dev.boundaries import scan_boundaries
 from lup_template.devtools.dev.comments import scan_tracked
 from lup_template.devtools.utils import git, uv
 
-type CheckOutcome = tuple[str, bool]  # lup: ignore[tuple-shape] — (name, passed)
+
+class CheckOutcome(NamedTuple):
+    """One pre-flight check's name and whether it passed."""
+
+    name: str
+    passed: bool
 
 
 def run_checks(fix: bool, no_test: bool) -> None:
@@ -29,12 +36,12 @@ def run_checks(fix: bool, no_test: bool) -> None:
         else:
             uv("run", "ruff", "format", ".")
             typer.echo("ruff format: applied")
-        results.append(("ruff format", True))
+        results.append(CheckOutcome("ruff format", True))
     except sh.ErrorReturnCode as e:
         typer.echo("ruff format: FAIL")
         if e.stdout:
             typer.echo(e.stdout.decode().rstrip())
-        results.append(("ruff format", False))
+        results.append(CheckOutcome("ruff format", False))
 
     # ruff check
     try:
@@ -43,12 +50,12 @@ def run_checks(fix: bool, no_test: bool) -> None:
             args.append("--fix")
         uv(*args)
         typer.echo("ruff check: ok")
-        results.append(("ruff check", True))
+        results.append(CheckOutcome("ruff check", True))
     except sh.ErrorReturnCode as e:
         typer.echo("ruff check: FAIL")
         if e.stdout:
             typer.echo(e.stdout.decode().rstrip())
-        results.append(("ruff check", False))
+        results.append(CheckOutcome("ruff check", False))
 
     if fix:
         changed = git.lines("diff", "--name-only", _ok_code=[0])
@@ -61,34 +68,34 @@ def run_checks(fix: bool, no_test: bool) -> None:
     try:
         uv("run", "pyright")
         typer.echo("pyright: ok")
-        results.append(("pyright", True))
+        results.append(CheckOutcome("pyright", True))
     except sh.ErrorReturnCode as e:
         typer.echo("pyright: FAIL")
         if e.stdout:
             typer.echo(e.stdout.decode().rstrip())
-        results.append(("pyright", False))
+        results.append(CheckOutcome("pyright", False))
 
     # pytest
     if not no_test:
         try:
             uv("run", "pytest")
             typer.echo("pytest: ok")
-            results.append(("pytest", True))
+            results.append(CheckOutcome("pytest", True))
         except sh.ErrorReturnCode as e:
             typer.echo("pytest: FAIL")
             if e.stdout:
                 typer.echo(e.stdout.decode().rstrip())
-            results.append(("pytest", False))
+            results.append(CheckOutcome("pytest", False))
 
     found = scan_tracked(find_feedback)
     if found:
         typer.echo(f"claude comments: FAIL ({len(found)} unresolved)")
         for comment in found:
             typer.echo(f"  {comment.file}:{comment.start_line}-{comment.end_line}")
-        results.append(("claude comments", False))
+        results.append(CheckOutcome("claude comments", False))
     else:
         typer.echo("claude comments: ok")
-        results.append(("claude comments", True))
+        results.append(CheckOutcome("claude comments", True))
 
     findings = scan_antipatterns()
     blocking = [f for f in findings if f.kind != "untyped"]
@@ -96,22 +103,22 @@ def run_checks(fix: bool, no_test: bool) -> None:
         typer.echo(f"antipatterns: FAIL ({len(blocking)} finding(s))")
         for finding in blocking:
             typer.echo(f"  {finding.file}:{finding.line} [{finding.kind}]")
-        results.append(("antipatterns", False))
+        results.append(CheckOutcome("antipatterns", False))
     else:
         advisory = len(findings) - len(blocking)
         tail = f" ({advisory} untyped, advisory)" if advisory else ""
         typer.echo(f"antipatterns: ok{tail}")
-        results.append(("antipatterns", True))
+        results.append(CheckOutcome("antipatterns", True))
 
     breaches = scan_boundaries()
     if breaches:
         typer.echo(f"seam boundaries: FAIL ({len(breaches)} breach(es))")
         for breach in breaches:
             typer.echo(f"  {breach.file}:{breach.line}  {breach.module}")
-        results.append(("seam boundaries", False))
+        results.append(CheckOutcome("seam boundaries", False))
     else:
         typer.echo("seam boundaries: ok")
-        results.append(("seam boundaries", True))
+        results.append(CheckOutcome("seam boundaries", True))
 
     # summary
     passed = sum(1 for _, ok in results if ok)

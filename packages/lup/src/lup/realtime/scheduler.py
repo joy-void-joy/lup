@@ -46,7 +46,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,8 +58,12 @@ logger = logging.getLogger(__name__)
 ActionCallback = Callable[[str], Awaitable[None]]
 """Async callback for delivering actions (messages, commands, etc.)."""
 
-type DelayedAction = tuple[asyncio.Task[None], str]  # lup: ignore[tuple-shape]
-"""A pending delayed-action task with its label, so cancel logs stay readable."""
+
+class DelayedAction(NamedTuple):
+    """A pending delayed-action task with its content, so cancels can save ideas."""
+
+    task: asyncio.Task[None]
+    content: str
 
 
 # =====================================================================
@@ -359,7 +363,7 @@ class Scheduler:
     def add_delayed_action(self, content: str, delay: int) -> None:
         """Schedule an action with a delay. Cancelled if an event arrives."""
         task = asyncio.create_task(self.run_delayed_action(content, delay))
-        self.pending_actions.append((task, content))
+        self.pending_actions.append(DelayedAction(task, content))
 
     def cancel_delayed_actions(self) -> None:
         """Cancel all pending delayed actions, saving them as ideas."""
@@ -377,7 +381,7 @@ class Scheduler:
                 self.on_sleep()
             await self.on_action(content)
             self.pending_actions = [
-                (t, c) for t, c in self.pending_actions if not t.done()
+                action for action in self.pending_actions if not action.task.done()
             ]
         except asyncio.CancelledError:
             pass

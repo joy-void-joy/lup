@@ -56,6 +56,7 @@ import re
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 from pydantic import BaseModel, Field, SerializeAsAny
 
@@ -397,14 +398,28 @@ MIN_VERSION_DATAPOINTS = 10
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 
-def parse_semver(
-    version: str,
-) -> tuple[int, int, int] | None:  # lup: ignore[tuple-shape]
-    """Parse 'X.Y.Z' into (major, minor, patch), or None if invalid."""
+class Semver(NamedTuple):
+    """A parsed X.Y.Z version."""
+
+    major: int
+    minor: int
+    patch: int
+
+
+def parse_semver(version: str) -> Semver | None:
+    """Parse 'X.Y.Z' into a :class:`Semver`, or None if invalid."""
     m = SEMVER_RE.match(version)
     if not m:
         return None
-    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+    return Semver(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+class VersionScope(NamedTuple):
+    """A resolved version scope: the versions to include (None = all), and the
+    widening warning to show, if the requested scope was too sparse."""
+
+    versions: list[str] | None
+    warning: str | None
 
 
 def count_sessions_for_versions(versions: list[str]) -> int:
@@ -416,7 +431,7 @@ def resolve_version(
     version: str | None,
     all_versions: bool = False,
     min_datapoints: int = MIN_VERSION_DATAPOINTS,
-) -> tuple[list[str] | None, str | None]:  # lup: ignore[tuple-shape] — (scope, label)
+) -> VersionScope:
     """Resolve effective version scope with progressive semver fallback.
 
     Fallback chain: exact version → X.Y.* → X.* → all versions.
@@ -426,7 +441,7 @@ def resolve_version(
     ``version_list`` is ``None`` when all versions should be included.
     """
     if all_versions:
-        return None, None
+        return VersionScope(None, None)
 
     effective = version if version is not None else agent_version()
     semver = parse_semver(effective)
@@ -436,15 +451,16 @@ def resolve_version(
     exact = [effective] if effective in available else []
     exact_count = count_sessions_for_versions(exact)
     if exact_count >= min_datapoints:
-        return exact, None
+        return VersionScope(exact, None)
 
     if semver is None:
         all_count = count_sessions_for_versions(available)
         if all_count == 0:
-            return None, None
-        return None, (
+            return VersionScope(None, None)
+        return VersionScope(
+            None,
             f"v{effective} has only {exact_count} sessions "
-            f"(need {min_datapoints}) — including all versions"
+            f"(need {min_datapoints}) — including all versions",
         )
 
     major, minor, _ = semver
@@ -453,31 +469,38 @@ def resolve_version(
     minor_matches = [
         v
         for v in available
-        if (sv := parse_semver(v)) is not None and sv[0] == major and sv[1] == minor
+        if (sv := parse_semver(v)) is not None
+        and sv.major == major
+        and sv.minor == minor
     ]
     minor_count = count_sessions_for_versions(minor_matches)
     if minor_count >= min_datapoints:
-        return minor_matches, (
+        return VersionScope(
+            minor_matches,
             f"v{effective} has only {exact_count} sessions "
-            f"— widening to v{major}.{minor}.* ({minor_count} sessions)"
+            f"— widening to v{major}.{minor}.* ({minor_count} sessions)",
         )
 
     # Level 3: same major (X.*)
     major_matches = [
-        v for v in available if (sv := parse_semver(v)) is not None and sv[0] == major
+        v
+        for v in available
+        if (sv := parse_semver(v)) is not None and sv.major == major
     ]
     major_count = count_sessions_for_versions(major_matches)
     if major_count >= min_datapoints:
-        return major_matches, (
+        return VersionScope(
+            major_matches,
             f"v{major}.{minor}.* has only {minor_count} sessions "
-            f"— widening to v{major}.* ({major_count} sessions)"
+            f"— widening to v{major}.* ({major_count} sessions)",
         )
 
     # Level 4: all versions
     all_count = count_sessions_for_versions(available)
     if all_count == 0:
-        return None, None
-    return None, (
+        return VersionScope(None, None)
+    return VersionScope(
+        None,
         f"v{major}.* has only {major_count} sessions "
-        f"(need {min_datapoints}) — including all versions"
+        f"(need {min_datapoints}) — including all versions",
     )

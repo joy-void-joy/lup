@@ -117,7 +117,9 @@ def capability_request_from_text(text: str) -> str | None:
     Splits on sentence boundaries and returns the matching fragment so the
     event's ``brief`` is the specific wish, not the whole block.
     """
-    sentences = re.split(r"(?<=[.!?\n])\s+", text)  # lup: ignore[string-split] — sentence bounds
+    sentences = re.split(  # lup: ignore[string-split] — sentence bounds
+        r"(?<=[.!?\n])\s+", text
+    )
     for fragment in sentences:
         stripped = fragment.strip()  # lup: ignore[string-strip] — prose hygiene
         if stripped and CAPABILITY_PHRASES.search(stripped):

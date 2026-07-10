@@ -30,7 +30,7 @@ import shutil
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NamedTuple
 from zoneinfo import ZoneInfoNotFoundError
 
 import typer
@@ -56,7 +56,14 @@ console = Console()
 
 # Env vars an integration wants written to .env.local, keyed by name.
 type EnvValues = dict[str, str]  # lup: ignore[dict-str-payload] — open env-var map
-type IntegrationStatus = tuple[bool, str]  # lup: ignore[tuple-shape] — (ok, detail)
+
+
+class IntegrationStatus(NamedTuple):
+    """Whether an integration is configured, with the human-readable detail."""
+
+    ok: bool
+    detail: str
+
 
 PROJECT_ROOT = project_root()
 ENV_LOCAL = PROJECT_ROOT / ".env.local"
@@ -248,8 +255,8 @@ class Integration(BaseModel):
             return self.status_func(env)
         values = [env.get(k, "") for k in self.env_keys]  # lup: ignore[dict-get]
         if all(values):
-            return True, mask(values[0])
-        return False, "not configured"
+            return IntegrationStatus(True, mask(values[0]))
+        return IntegrationStatus(False, "not configured")
 
 
 # =====================================================================
@@ -263,8 +270,8 @@ def slack_status(env: EnvValues) -> IntegrationStatus:
     bot = env.get("SLACK_BOT_TOKEN")  # lup: ignore[dict-get] — open env map
     app_token = env.get("SLACK_APP_TOKEN")  # lup: ignore[dict-get] — open env map
     if bot and app_token:
-        return True, mask(bot)
-    return False, "not configured"
+        return IntegrationStatus(True, mask(bot))
+    return IntegrationStatus(False, "not configured")
 
 
 def setup_google() -> EnvValues:
@@ -324,10 +331,10 @@ def google_status(_env: EnvValues) -> IntegrationStatus:
     token_path = CREDENTIALS_DIR / "token.json"
     creds_path = CREDENTIALS_DIR / "google.json"
     if token_path.exists():
-        return True, "authorized"
+        return IntegrationStatus(True, "authorized")
     if creds_path.exists():
-        return False, "credentials present, not yet authorized"
-    return False, "not configured"
+        return IntegrationStatus(False, "credentials present, not yet authorized")
+    return IntegrationStatus(False, "not configured")
 
 
 def codex_backend_status(env: EnvValues) -> IntegrationStatus:
@@ -338,8 +345,10 @@ def codex_backend_status(env: EnvValues) -> IntegrationStatus:
         if env.get(key)  # lup: ignore[dict-get] — open env map
     ]
     if len(rates) == 2:
-        return True, "rates set (budget caps enforceable)"
-    return False, "no rates (budget caps unavailable on codex/openai)"
+        return IntegrationStatus(True, "rates set (budget caps enforceable)")
+    return IntegrationStatus(
+        False, "no rates (budget caps unavailable on codex/openai)"
+    )
 
 
 def setup_timezone() -> EnvValues:
@@ -381,8 +390,8 @@ def timezone_status(env: EnvValues) -> IntegrationStatus:
     """Custom status check for timezone (not-configured is OK, just shows system default)."""
     tz = env.get("AGENT_TIMEZONE", "")  # lup: ignore[dict-get] — open env map
     if tz:
-        return True, tz
-    return False, "system default"
+        return IntegrationStatus(True, tz)
+    return IntegrationStatus(False, "system default")
 
 
 # =====================================================================
