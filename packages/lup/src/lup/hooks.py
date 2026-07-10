@@ -336,7 +336,9 @@ def create_nudge_hook(
 def create_capture_hook[T](
     tool_name: str,
     extract: Callable[[LupHookInput], list[T]],
-) -> tuple[LupHooksConfig, list[T]]:  # lup: ignore[tuple-shape] — config + live list
+) -> tuple[
+    LupHooksConfig, list[T]
+]:  # lup: ignore[tuple-shape] — a model would copy the live list
     """Create a PostToolUse hook that captures data from tool responses.
 
     Extracts data from a sub-agent's tool responses into a shared list.

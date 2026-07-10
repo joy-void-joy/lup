@@ -66,11 +66,16 @@ def entry_matches_target(entry: ImportEntry, target: str) -> bool:
     )
 
 
-def find_reverse_imports(
-    target_module: str, project_root: Path
-) -> list[tuple[str, str]]:  # lup: ignore[tuple-shape] — (file, import line)
+class ReverseImport(typing.TypedDict):
+    """One project file importing the target, with its matching import line."""
+
+    file: str
+    import_line: str
+
+
+def find_reverse_imports(target_module: str, project_root: Path) -> list[ReverseImport]:
     """Find project files that import the target module."""
-    results: list[tuple[str, str]] = []  # lup: ignore[tuple-shape, empty-collection]
+    results: list[ReverseImport] = []  # lup: ignore[empty-collection] — scan fold
     search_dirs = [project_root / "src", project_root / "packages"]
 
     for search_dir in search_dirs:
@@ -85,7 +90,12 @@ def find_reverse_imports(
             for entry in collect_imports_from_source(source):
                 if entry_matches_target(entry, target_module):
                     relative = py_file.relative_to(project_root)
-                    results.append((str(relative), format_import_entry(entry)))
+                    results.append(
+                        ReverseImport(
+                            file=str(relative),
+                            import_line=format_import_entry(entry),
+                        )
+                    )
                     break
 
-    return sorted(results)
+    return sorted(results, key=lambda r: r["file"])
