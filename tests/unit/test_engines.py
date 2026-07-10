@@ -30,6 +30,7 @@ from lup.adapters.tools.names import WEB_SEARCH
 from lup.adapters.tools.codex import COMMAND_EXECUTION, FILE_CHANGE
 from lup.adapters.wiring import (
     ENGINES,
+    MODEL_ROUTES,
     create_client,
     engine_for_model,
     query,
@@ -87,6 +88,13 @@ class TestEngineResolution:
     def test_every_shipped_id_resolves(self) -> None:
         for engine_id in ("claude", "codex", "openai-compat", "claude-compat"):
             assert resolve_engine(engine_id).id == engine_id
+
+    def test_gutted_route_table_fails_loudly(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delitem(MODEL_ROUTES, r"")
+        with pytest.raises(LookupError, match="catch-all"):
+            engine_for_model("glm-4")
 
 
 class TestClaudeEngine:
