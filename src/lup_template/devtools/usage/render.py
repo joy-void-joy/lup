@@ -1,3 +1,6 @@
+# lup: ignore[dict-get]
+# Every read here probes the OAuth usage API's payload (all-optional keys)
+# or an open per-model tally, so dict-get is opted out file-wide.
 """Pure rendering for the usage display.
 
 Formats pacing bars, labels, bucket sections, the daily breakdown, and
@@ -21,7 +24,8 @@ from lup_template.devtools.usage.api import (
 
 # ── constants ──────────────────────────────────────────────
 
-MODEL_NAMES: dict[str, str] = {
+# Open map: new model ids appear ahead of this table; .get falls back to the id.
+MODEL_NAMES: dict[str, str] = {  # lup: ignore[dict-str-payload]
     "claude-opus-4-8": "Opus 4.8",
     "claude-opus-4-6": "Opus 4.6",
     "claude-opus-4-5-20251101": "Opus 4.5",
@@ -30,7 +34,7 @@ MODEL_NAMES: dict[str, str] = {
     "claude-haiku-4-5-20251001": "Haiku 4.5",
 }
 
-MODEL_COLORS: dict[str, str] = {
+MODEL_COLORS: dict[str, str] = {  # lup: ignore[dict-str-payload] — family → style
     "opus": "bright_magenta",
     "sonnet": "bright_blue",
     "haiku": "bright_cyan",
@@ -40,7 +44,7 @@ DAY_NAMES = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 
 # Bucket key in the API response → (display label, window length in hours).
 # One source for both the pacing bars and the --json snapshot.
-BUCKET_SPECS: list[tuple[str, str, float]] = [
+BUCKET_SPECS: list[tuple[str, str, float]] = [  # lup: ignore[tuple-shape] — spec rows
     ("seven_day", "weekly", 7 * 24),
     ("five_hour", "5-hour", 5),
     ("seven_day_opus", "opus 7d", 7 * 24),
@@ -81,7 +85,7 @@ class OverageSnapshot(BaseModel):
 class DaySnapshot(BaseModel):
     date: str
     total_tokens: int
-    tokens_by_model: dict[str, int]
+    tokens_by_model: dict[str, int]  # lup: ignore[dict-str-payload] — open tally
     message_count: int
 
 
@@ -91,13 +95,13 @@ class UsageSnapshot(BaseModel):
     buckets: list[BucketSnapshot]
     overage: OverageSnapshot | None
     daily: list[DaySnapshot]
-    tokens_by_model: dict[str, int]
+    tokens_by_model: dict[str, int]  # lup: ignore[dict-str-payload] — open tally
     stats_cache_date: str | None
 
 
 # ── pacing thresholds ──────────────────────────────────────
 
-PACE_LABEL_THRESHOLDS: list[tuple[float, PaceLabel]] = [
+PACE_LABEL_THRESHOLDS: list[tuple[float, PaceLabel]] = [  # lup: ignore[tuple-shape]
     (0.5, PaceLabel(word="cruising", style="bold bright_green")),
     (0.85, PaceLabel(word="on track", style="bold bright_cyan")),
     (1.0, PaceLabel(word="on pace", style="bold bright_cyan")),
@@ -168,7 +172,9 @@ def get_bucket(usage: UsageResponse, key: str) -> UsageBucket | None:
             return None
 
 
-def bucket_pace(bucket: UsageBucket, window_hours: float) -> tuple[float, float]:
+def bucket_pace(
+    bucket: UsageBucket, window_hours: float
+) -> tuple[float, float]:  # lup: ignore[tuple-shape] — (pace %, ratio)
     """Even-pace percent and the utilization-to-pace ratio for a bucket."""
     resets_at = datetime.fromisoformat(bucket["resets_at"])
     window_start = resets_at - timedelta(hours=window_hours)
@@ -322,7 +328,7 @@ def render_daily_breakdown(
 
     day_bar_w = bar_width
 
-    cost_rates: dict[str, float] = {}
+    cost_rates: dict[str, float] = {}  # lup: ignore[dict-str-payload, empty-collection]
     for mid, entry in stats.model_usage.items():
         total_tok = (
             entry.input_tokens
@@ -333,8 +339,8 @@ def render_daily_breakdown(
         if total_tok > 0:
             cost_rates[mid] = entry.cost_usd / total_tok
 
-    model_totals: dict[str, int] = {}
-    daily_weights: list[float] = []
+    model_totals: dict[str, int] = {}  # lup: ignore[dict-str-payload, empty-collection]
+    daily_weights: list[float] = []  # lup: ignore[empty-collection] — day fold
     for day in daily:
         weight = sum(
             tokens * cost_rates.get(model, 0)
@@ -382,7 +388,7 @@ def render_daily_breakdown(
                 daily[today_idx] = DailyBreakdown(
                     date=today_str,
                     total_tokens=est_tokens,
-                    tokens_by_model={},
+                    tokens_by_model={},  # lup: ignore[empty-collection] — estimate
                     activity=daily[today_idx].activity,
                 )
             estimated_today = True
@@ -397,7 +403,7 @@ def render_daily_breakdown(
     # Heavy days eat into future budgets, light days bank surplus.
     even_daily = weekly_budget / 7
     surplus = 0.0
-    daily_budgets: list[float] = []
+    daily_budgets: list[float] = []  # lup: ignore[empty-collection] — surplus fold
     for i, day in enumerate(daily):
         d = datetime.fromisoformat(day.date).date()
         budget = even_daily + surplus
@@ -473,7 +479,9 @@ def render_daily_breakdown(
 # ── display assembly ───────────────────────────────────────
 
 
-def breakdown_window(usage: UsageResponse) -> tuple[datetime, float]:
+def breakdown_window(
+    usage: UsageResponse,
+) -> tuple[datetime, float]:  # lup: ignore[tuple-shape] — (window end, util %)
     """Anchor the 7-day breakdown window and its budget-scaling utilization.
 
     The weekly API bucket gives the reset time and utilization when present;
@@ -526,7 +534,7 @@ def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnaps
     breakdown, but as plain counts and limits an agent can read instead of
     the human pacing bars.
     """
-    buckets: list[BucketSnapshot] = []
+    buckets: list[BucketSnapshot] = []  # lup: ignore[empty-collection] — spec fold
     for key, label, window_hours in BUCKET_SPECS:
         bucket = get_bucket(usage, key)
         if not (bucket and bucket.get("resets_at")):
@@ -557,8 +565,10 @@ def build_snapshot(usage: UsageResponse, stats: StatsCache | None) -> UsageSnaps
         else None
     )
 
-    daily: list[DaySnapshot] = []
-    tokens_by_model: dict[str, int] = {}
+    daily: list[DaySnapshot] = []  # lup: ignore[empty-collection] — window fold
+    tokens_by_model: dict[
+        str, int
+    ] = {}  # lup: ignore[dict-str-payload, empty-collection]
     if stats:
         window_end, _ = breakdown_window(usage)
         for day in trailing_week(stats, window_end):

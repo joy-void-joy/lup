@@ -1,3 +1,7 @@
+# lup: ignore[dict-get]
+# This file aggregates SessionData payloads whose keys are all optional —
+# every read is a `.get` probe of session JSON, so the rule is opted out
+# file-wide rather than annotated 25 times.
 """Feedback presentation: the command bodies behind ``lup-devtools feedback``.
 
 This is a TEMPLATE script. Run ``/lup:init`` to customize it for your domain.
@@ -50,6 +54,10 @@ from lup_template.devtools.utils import format_table, output_json
 
 logger = logging.getLogger(__name__)
 
+# Open per-tool aggregation buckets, keyed by whatever tools ran.
+type ToolBuckets = dict[str, dict[str, int | float]]  # lup: ignore[dict-str-payload]
+type SummaryRow = tuple[str, str, str, str, str]  # lup: ignore[tuple-shape] — cells
+
 
 def print_version_info(effective: list[str] | None) -> None:
     typer.echo("\n=== Agent Version ===\n")
@@ -59,7 +67,8 @@ def print_version_info(effective: list[str] | None) -> None:
 
 
 def print_data_availability(
-    effective: list[str] | None, all_session_ids: set[str]
+    effective: list[str] | None,
+    all_session_ids: set[str],  # lup: ignore[set-shape] — deduplicated ids
 ) -> None:
     typer.echo("\n=== Data Availability ===\n")
 
@@ -161,7 +170,7 @@ def costs(version: str | None, all_versions: bool, as_json: bool) -> None:
         "output",
         "cached",
     )
-    table_rows: list[tuple[str, ...]] = []
+    table_rows: list[tuple[str, ...]] = []  # lup: ignore[tuple-shape, empty-collection]
     for name in sorted(rows):
         row = rows[name]
         cost_display = f"${row['cost_usd']:.2f}" if row["cost_usd"] else "—"
@@ -308,7 +317,7 @@ def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
             typer.echo("No sessions found")
         return
 
-    tool_stats: dict[str, dict[str, int | float]] = defaultdict(
+    tool_stats: ToolBuckets = defaultdict(
         lambda: {"calls": 0, "errors": 0, "total_ms": 0}
     )
 
@@ -331,7 +340,7 @@ def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
             typer.echo("No tool metrics found")
         return
 
-    entries: list[ToolUsageEntry] = []
+    entries: list[ToolUsageEntry] = []  # lup: ignore[empty-collection] — stats fold
     for tool_name in sorted(tool_stats.keys(), key=lambda t: -tool_stats[t]["calls"]):
         stats = tool_stats[tool_name]
         calls = int(stats["calls"])
@@ -351,7 +360,7 @@ def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
         return
 
     typer.echo("\n=== Tool Usage Summary ===\n")
-    rows: list[tuple[str, str, str, str, str]] = []
+    rows: list[SummaryRow] = []  # lup: ignore[empty-collection] — display fold
     for e in entries:
         err_pct = e["error_rate"] * 100
         err_indicator = " !" if err_pct > 10 else ""
@@ -387,7 +396,7 @@ def errors(
             typer.echo("No sessions found")
         return
 
-    with_errors: list[ErrorSessionEntry] = []
+    with_errors: list[ErrorSessionEntry] = []  # lup: ignore[empty-collection] — fold
     for s in sessions:
         metrics = s.get("tool_metrics")
         if not metrics:
@@ -449,7 +458,7 @@ def trends(window: int, version: str | None, all_versions: bool, as_json: bool) 
             typer.echo(f"Have: {len(sessions_with_ts)}")
         return
 
-    entries: list[TrendEntry] = []
+    entries: list[TrendEntry] = []  # lup: ignore[empty-collection] — window fold
     for i in range(window - 1, len(sessions_with_ts)):
         window_sessions = sessions_with_ts[i - window + 1 : i + 1]
 
@@ -517,7 +526,7 @@ def history(limit: int) -> None:
 def mark(session_ids: list[str]) -> None:
     """Mark sessions as analyzed in the feedback loop."""
     analyzed = load_analyzed()
-    new_ids = set(session_ids) - analyzed
+    new_ids = set(session_ids) - analyzed  # lup: ignore[set-shape] — id membership
     if not new_ids:
         typer.echo("All specified sessions already marked")
         return
@@ -529,7 +538,7 @@ def mark(session_ids: list[str]) -> None:
 def unmark(session_ids: list[str]) -> None:
     """Remove analysis marks from sessions."""
     analyzed = load_analyzed()
-    removed = analyzed & set(session_ids)
+    removed = analyzed.intersection(session_ids)
     if not removed:
         typer.echo("None of the specified sessions were marked")
         return
@@ -552,11 +561,10 @@ def prompt_health(as_json: bool) -> None:
     char_count = len(rendered)
     estimated_tokens = char_count // 4
 
-    section_reports: list[PromptSection] = []
+    section_reports: list[PromptSection] = []  # lup: ignore[empty-collection] — fold
     for section_text in SECTIONS:
-        first_line = (
-            section_text.strip().splitlines()[0] if section_text.strip() else "(empty)"
-        )
+        prose = section_text.strip()  # lup: ignore[string-strip] — prompt prose
+        first_line = prose.splitlines()[0] if prose else "(empty)"
         section_reports.append(
             {
                 "name": first_line[:60],
