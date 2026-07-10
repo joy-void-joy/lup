@@ -81,7 +81,9 @@ def find_boundary_breaches(text: str) -> list[BoundaryBreach]:
             if ids is None or RULE_ID in ids:
                 return None
         return BoundaryBreach(
-            line=line_no, module=match.group("module"), text=line.strip()
+            line=line_no,
+            module=match.group("module"),
+            text=line.strip(),  # lup: ignore[string-strip] — display preview
         )
 
     candidates = (

@@ -19,7 +19,8 @@ from lup.adapters.clients.codex.config import (
 from lup.adapters.clients.codex.native import CodexNativeConfig
 from lup.adapters.options import LupAgentOptions
 
-CODEX_EFFORT_MAP: dict[str, str] = {
+# Open on purpose: unmapped levels pass through for the runtime enum to judge.
+CODEX_EFFORT_MAP: dict[str, str] = {  # lup: ignore[dict-str-payload]
     "low": "low",
     "medium": "medium",
     "high": "high",
@@ -35,7 +36,8 @@ def codex_effort(reasoning_effort: str | None) -> str | None:
     """
     if reasoning_effort is None:
         return None
-    return CODEX_EFFORT_MAP.get(reasoning_effort, reasoning_effort)
+    mapped = CODEX_EFFORT_MAP.get(reasoning_effort)  # lup: ignore[dict-get]
+    return mapped or reasoning_effort
 
 
 def subprocess_sandbox_cleanup(
@@ -89,7 +91,7 @@ def build_codex_native(opts: LupAgentOptions) -> CodexNativeConfig:
     permission mode, or builtin-toolset restriction. The served-tool and
     native-sandbox ``config_overrides`` are rendered here, once.
     """
-    overrides: list[str] = []
+    overrides: list[str] = []  # lup: ignore[empty-collection] — conditional build
     if opts.served_tool_groups:
         overrides.extend(
             build_mcp_config_overrides(

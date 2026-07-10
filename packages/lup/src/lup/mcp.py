@@ -38,7 +38,7 @@ from typing import Literal, NotRequired, TypedDict, cast, get_type_hints
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from lup.types import Decorator, JsonObject
 
@@ -52,7 +52,7 @@ class ToolResponse(TypedDict, total=False):
     ``mcp__server__tool`` protocol, so this dict is the one result shape a
     handler produces on every engine."""
 
-    content: list[dict[str, str]]
+    content: list[dict[str, str]]  # lup: ignore[dict-str-payload] — MCP wire blocks
     is_error: bool
 
 
@@ -96,7 +96,7 @@ class LupMcpServerConfig(BaseModel):
 
     name: str
     server: Server
-    tool_names: list[str] = []
+    tool_names: list[str] = Field(default_factory=list)
 
 
 class RawStdioServerConfig(TypedDict):
@@ -105,7 +105,7 @@ class RawStdioServerConfig(TypedDict):
     type: NotRequired[Literal["stdio"]]
     command: str
     args: NotRequired[list[str]]
-    env: NotRequired[dict[str, str]]
+    env: NotRequired[dict[str, str]]  # lup: ignore[dict-str-payload] — env map
 
 
 class RawSseServerConfig(TypedDict):
@@ -113,7 +113,7 @@ class RawSseServerConfig(TypedDict):
 
     type: Literal["sse"]
     url: str
-    headers: NotRequired[dict[str, str]]
+    headers: NotRequired[dict[str, str]]  # lup: ignore[dict-str-payload] — wire
 
 
 class RawHttpServerConfig(TypedDict):
@@ -121,7 +121,7 @@ class RawHttpServerConfig(TypedDict):
 
     type: Literal["http"]
     url: str
-    headers: NotRequired[dict[str, str]]
+    headers: NotRequired[dict[str, str]]  # lup: ignore[dict-str-payload] — wire
 
 
 type RawMcpServerConfig = (
@@ -162,16 +162,14 @@ def create_mcp_server(
     @server.list_tools()
     async def list_tools() -> list[Tool]:
         """Return the list of available tools."""
-        tool_list: list[Tool] = []
-        for tool_def in registered:
-            tool_list.append(
-                Tool(
-                    name=tool_def.name,
-                    description=tool_def.description,
-                    inputSchema=tool_def.input_schema,
-                )
+        return [
+            Tool(
+                name=tool_def.name,
+                description=tool_def.description,
+                inputSchema=tool_def.input_schema,
             )
-        return tool_list
+            for tool_def in registered
+        ]
 
     @server.call_tool()
     async def call_tool(name: str, arguments: JsonObject) -> CallToolResult:
@@ -182,12 +180,12 @@ def create_mcp_server(
         tool_def = tool_map[name]
         result = await tool_def.handler(arguments)
 
-        is_error = result.get("is_error", False)
+        is_error = result.get("is_error", False)  # lup: ignore[dict-get] — wire read
 
-        content: list[TextContent | ImageContent] = []
+        content: list[TextContent | ImageContent] = []  # lup: ignore[empty-collection]
         if "content" in result:
             for item in result["content"]:
-                match item.get("type"):
+                match item.get("type"):  # lup: ignore[dict-get] — wire read
                     case "text":
                         content.append(TextContent(type="text", text=item["text"]))
                     case "image":
@@ -199,9 +197,8 @@ def create_mcp_server(
                             )
                         )
 
-        return CallToolResultWithAlias(
-            content=cast(list[ContentBlock], content), isError=is_error
-        )
+        blocks = cast(list[ContentBlock], content)  # lup: ignore[cast] — mcp variance
+        return CallToolResultWithAlias(content=blocks, isError=is_error)
 
     return LupMcpServerConfig(
         name=name,
@@ -210,7 +207,7 @@ def create_mcp_server(
     )
 
 
-def server_tool_names(server: object) -> list[str]:
+def server_tool_names(server: object) -> list[str]:  # lup: ignore[bare-object]
     """List the tool names registered on an in-process MCP server.
 
     Servers built with :func:`create_mcp_server` carry their tool list on
@@ -347,11 +344,11 @@ def lup_tool[I: BaseModel, O: BaseModel](
                 if not params:
                     msg = f"lup_tool '{tool_name}': handler has no parameters to infer input_model from"
                     raise TypeError(msg)
-                param_type = hints.get(params[0].name)
+                param_type = hints.get(params[0].name)  # lup: ignore[dict-get]
                 if isinstance(param_type, type) and issubclass(param_type, BaseModel):
                     resolved_input = param_type
             if resolved_output is None:
-                return_type = hints.get("return")
+                return_type = hints.get("return")  # lup: ignore[dict-get]
                 if isinstance(return_type, type) and issubclass(return_type, BaseModel):
                     resolved_output = return_type
 
@@ -359,7 +356,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
             msg = f"lup_tool '{tool_name}': cannot infer input_model from annotations"
             raise TypeError(msg)
 
-        final_input = cast(type[I], resolved_input)
+        final_input = cast(type[I], resolved_input)  # lup: ignore[cast] — hint infer
 
         async def wrapper(args: JsonObject) -> ToolResponse:
             start = time.perf_counter()
@@ -402,7 +399,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
             handler=wrapper,
             call_handler=handler,
             input_model=final_input,
-            output_model=cast(type[O] | None, resolved_output),
+            output_model=cast(type[O] | None, resolved_output),  # lup: ignore[cast]
             tags=tags or [],
         )
 

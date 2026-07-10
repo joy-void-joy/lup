@@ -178,7 +178,9 @@ def create_output_tool(
         name="submit_output",
         output_model=SubmitOutputResult,
     )
-    async def submit_output(validated: BaseModel) -> SubmitOutputResult:
+    async def submit_output(
+        validated: BaseModel,  # lup: ignore[bare-basemodel] — caller's output_model
+    ) -> SubmitOutputResult:
         if gate is not None and not gate.reflected:
             raise ToolError(
                 f"You must call {reflection_tool_name}() with your "

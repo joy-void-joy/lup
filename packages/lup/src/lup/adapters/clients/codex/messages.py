@@ -52,7 +52,7 @@ def codex_items_to_lup(
     """
     import openai_codex.generated.v2_all as codex_items
 
-    blocks: list[LupContentBlock] = []
+    blocks: list[LupContentBlock] = []  # lup: ignore[empty-collection] — item fold
     for item in items:
         inner = item.root if hasattr(item, "root") else item
 
@@ -177,11 +177,10 @@ def build_lup_response(
     result_blocks: list[LupContentBlock] = [
         b for b in blocks if isinstance(b, LupToolResultBlock)
     ]
-    messages: list[LupAssistantMessage | LupUserMessage] = []
-    if assistant_blocks:
-        messages.append(LupAssistantMessage(content=assistant_blocks))
-    if result_blocks:
-        messages.append(LupUserMessage(content=result_blocks))
+    messages: list[LupAssistantMessage | LupUserMessage] = [
+        *([LupAssistantMessage(content=assistant_blocks)] if assistant_blocks else []),
+        *([LupUserMessage(content=result_blocks)] if result_blocks else []),
+    ]
     response = assemble_response(messages, blocks=blocks)
 
     if tap:

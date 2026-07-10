@@ -96,11 +96,15 @@ def python_comment_columns(text: str) -> dict[int, int] | None:
 
 
 def python_docstring_lines(text: str) -> set[int]:
-    """Lines (1-based) covered by a module, class, or function docstring.
+    """Lines (1-based) covered by a docstring — module, class, function, or
+    the attribute-docstring convention (a bare string statement after a field
+    or alias).
 
-    Docstrings are the one string literal where prose — and so a real note —
-    belongs, unlike an ordinary string such as an echoed message. Returns an
-    empty set when the source cannot be parsed; the comment scan still runs.
+    Every bare string-expression statement is documentation by construction —
+    it has no runtime effect — so it is prose where a note belongs, unlike an
+    ordinary string such as an echoed message (those are operands, not
+    statements). Returns an empty set when the source cannot be parsed; the
+    comment scan still runs.
     """
     try:
         tree = ast.parse(text)
@@ -109,21 +113,13 @@ def python_docstring_lines(text: str) -> set[int]:
 
     lines: set[int] = set()
     for node in ast.walk(tree):
-        if not isinstance(
-            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
-        ):
-            continue
-        body = node.body
-        if not body:
-            continue
-        first = body[0]
         if (
-            isinstance(first, ast.Expr)
-            and isinstance(first.value, ast.Constant)
-            and isinstance(first.value.value, str)
-            and first.end_lineno is not None
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            and node.end_lineno is not None
         ):
-            lines.update(range(first.lineno, first.end_lineno + 1))
+            lines.update(range(node.lineno, node.end_lineno + 1))
     return lines
 
 

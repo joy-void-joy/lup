@@ -47,7 +47,7 @@ Examples:
 """
 
 import functools
-import re
+import re  # lup: ignore[import-re] — session-timestamp shape check
 from datetime import datetime
 from pathlib import Path
 
@@ -63,7 +63,7 @@ def find_project_root() -> Path:
         if pyproject.exists():
             with pyproject.open("rb") as f:
                 data = tomllib.load(f)
-            if "lup" in data.get("tool", {}):
+            if "lup" in data.get("tool", {}):  # lup: ignore[dict-get] — TOML payload
                 return parent
     raise RuntimeError(
         "Could not find project root (no pyproject.toml with [tool.lup] found)"
@@ -97,7 +97,9 @@ def read_agent_version(root: Path) -> str:
         return "0.0.0"
     with pyproject.open("rb") as f:
         data = tomllib.load(f)
-    return data.get("tool", {}).get("lup", {}).get("agent_version", "0.0.0")
+    tool = data.get("tool", {})  # lup: ignore[dict-get] — TOML payload
+    lup_table = tool.get("lup", {})  # lup: ignore[dict-get] — TOML payload
+    return lup_table.get("agent_version", "0.0.0")  # lup: ignore[dict-get]
 
 
 # -- Mutable path state -------------------------------------------------------
@@ -224,7 +226,7 @@ def feedback_path() -> Path:
 # -- Timestamp helpers --------------------------------------------------------
 
 TIMESTAMP_FMT = "%Y%m%d_%H%M%S"
-TIMESTAMP_RE = re.compile(r"\d{8}_\d{6}")
+TIMESTAMP_RE = re.compile(r"\d{8}_\d{6}")  # lup: ignore[re-call] — id shape check
 
 
 def parse_timestamp(name: str) -> datetime:

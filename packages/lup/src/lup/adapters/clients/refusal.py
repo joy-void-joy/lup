@@ -66,7 +66,11 @@ class ConsumeTracker(LupAgentOptions):
     the same reason, so incidental logging consumes nothing.
     """
 
-    _consumed: set[str] = PrivateAttr(default_factory=set)
+    # pydantic requires the leading underscore on PrivateAttr storage, and the
+    # read record is genuinely a membership set.
+    _consumed: set[str] = PrivateAttr(  # lup: ignore[private-variable, set-shape]
+        default_factory=set
+    )
 
     @classmethod
     def tracking(cls, opts: LupAgentOptions) -> "ConsumeTracker":
@@ -79,11 +83,11 @@ class ConsumeTracker(LupAgentOptions):
         return cls.model_construct(**opts.__dict__)
 
     @property
-    def consumed(self) -> set[str]:
+    def consumed(self) -> set[str]:  # lup: ignore[set-shape] — membership record
         """The intent-knob field names the translation has read so far."""
         return self._consumed
 
-    def __getattribute__(self, name: str) -> object:
+    def __getattribute__(self, name: str) -> object:  # lup: ignore[bare-object]
         if name in INTENT_KNOBS:
             self._consumed.add(name)
         return super().__getattribute__(name)

@@ -85,7 +85,9 @@ from lup.types import (
 if TYPE_CHECKING:
     from lup.sandbox.container import Sandbox
 
-__all__ = [
+# The package-root public API — the one sanctioned __all__ (subpackages and
+# internal modules never re-export).
+__all__ = [  # lup: ignore[all-export]
     "TIMESTAMP_FMT",
     "BackgroundAgent",
     "BackgroundAgentParams",
@@ -149,7 +151,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> object:
+def __getattr__(name: str) -> object:  # lup: ignore[bare-object] — attr protocol
     """Lazy import for exports with optional dependencies."""
     if name == "Sandbox":
         from lup.sandbox.container import Sandbox

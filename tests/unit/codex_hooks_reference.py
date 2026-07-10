@@ -417,7 +417,7 @@ def lup_hooks_to_codex(
     configs: list[CodexHookConfig] = []
     seen_tags: set[str] = set()
 
-    for _event_name, matchers in hooks.by_event():
+    for matchers in hooks.by_event().values():
         for matcher in matchers:
             tag = matcher.tag or ""
             if tag in seen_tags:

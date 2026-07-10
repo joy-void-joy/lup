@@ -13,7 +13,7 @@ from pathlib import Path
 def build_mcp_config_overrides(
     serve_tools_command: str = "uv",
     serve_tools_args: list[str] | None = None,
-    env: dict[str, str] | None = None,
+    env: dict[str, str] | None = None,  # lup: ignore[dict-str-payload] — env map
     servers: Sequence[str] = ("notes", "sandbox"),
 ) -> list[str]:
     """Build config_overrides for lup MCP tools via serve-tools.
@@ -37,7 +37,7 @@ def build_mcp_config_overrides(
         servers: Server groups to register.
     """
     base_args = serve_tools_args or ["run", "lup-devtools", "agent", "serve-tools"]
-    overrides: list[str] = []
+    overrides: list[str] = []  # lup: ignore[empty-collection] — per-server fold
     for name in servers:
         args = [*base_args, "--server", name]
         overrides.append(f'mcp_servers.{name}.command="{serve_tools_command}"')

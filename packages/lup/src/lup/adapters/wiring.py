@@ -29,7 +29,7 @@ rather than declared.
 """
 
 import logging
-import re
+import re  # lup: ignore[import-re] — MODEL_ROUTES is regex routing by design
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
@@ -84,7 +84,7 @@ def engine_for_model(model: str) -> Engine:
     loop means the table itself was edited out of totality.
     """
     for pattern, engine in MODEL_ROUTES.items():
-        if re.search(pattern, model):
+        if re.search(pattern, model):  # lup: ignore[re-call] — the routing table
             return engine
     raise LookupError(
         f"No MODEL_ROUTES pattern matches model {model!r} — the table has "

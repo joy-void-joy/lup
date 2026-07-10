@@ -64,7 +64,10 @@ auth, but the CLI still needs a non-empty credential to avoid interactive
 login or reaching for an ambient Anthropic key."""
 
 
-def set_endpoint_credential(env: dict[str, str], opts: LupAgentOptions) -> None:
+def set_endpoint_credential(
+    env: dict[str, str],  # lup: ignore[dict-str-payload] — open env map
+    opts: LupAgentOptions,
+) -> None:
     """Route the endpoint credential into its header and blank the other.
 
     ``auth_style`` picks the bearer (``ANTHROPIC_AUTH_TOKEN``) or native

@@ -144,14 +144,14 @@ class LupHooksConfig(BaseModel):
             case "Stop":
                 return self.stop
 
-    def by_event(self) -> list[tuple[LupHookEvent, list[LupHookMatcher]]]:
-        """Yield ``(event, matchers)`` for each event that has matchers."""
-        pairs: list[tuple[LupHookEvent, list[LupHookMatcher]]] = [
-            ("PreToolUse", self.pre_tool_use),
-            ("PostToolUse", self.post_tool_use),
-            ("Stop", self.stop),
-        ]
-        return [(event, matchers) for event, matchers in pairs if matchers]
+    def by_event(self) -> dict[LupHookEvent, list[LupHookMatcher]]:
+        """Each event with its matchers, in declaration order; empty events drop."""
+        events: dict[LupHookEvent, list[LupHookMatcher]] = {
+            "PreToolUse": self.pre_tool_use,
+            "PostToolUse": self.post_tool_use,
+            "Stop": self.stop,
+        }
+        return {event: matchers for event, matchers in events.items() if matchers}
 
 
 def allow_hook() -> LupHookOutput:
@@ -268,7 +268,7 @@ def create_tool_allowlist_hook(
     prompt rule: excluded tools cannot run, and the denial message turns a
     dead end into a redirect.
     """
-    allowed = frozenset(allowed_tools)
+    allowed = frozenset(allowed_tools)  # lup: ignore[frozenset-shape] — membership
     available = ", ".join(sorted(allowed))
 
     async def allowlist_hook(event: LupHookInput) -> LupHookOutput:
@@ -336,7 +336,7 @@ def create_nudge_hook(
 def create_capture_hook[T](
     tool_name: str,
     extract: Callable[[LupHookInput], list[T]],
-) -> tuple[LupHooksConfig, list[T]]:
+) -> tuple[LupHooksConfig, list[T]]:  # lup: ignore[tuple-shape] — config + live list
     """Create a PostToolUse hook that captures data from tool responses.
 
     Extracts data from a sub-agent's tool responses into a shared list.
@@ -348,7 +348,7 @@ def create_capture_hook[T](
     Returns:
         (hooks_config, captured): The hook config and the shared accumulator list.
     """
-    captured: list[T] = []
+    captured: list[T] = []  # lup: ignore[empty-collection] — the shared accumulator
 
     async def capture_hook(event: LupHookInput) -> LupHookOutput:
         if event.event != "PostToolUse":

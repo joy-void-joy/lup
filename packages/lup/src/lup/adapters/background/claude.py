@@ -9,7 +9,7 @@ opus-class model.
 import asyncio
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from typing import Any  # lup: ignore — confined to SdkDict, the SDK's payload type
+from typing import Any  # lup: ignore[any-type] — confined to SdkDict below
 
 import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
@@ -22,7 +22,7 @@ from lup.types import JsonObject
 
 logger = logging.getLogger(__name__)
 
-type SdkDict = dict[str, Any]  # lup: ignore — the SDK's tool-handler payload type
+type SdkDict = dict[str, Any]  # lup: ignore[any-type] — SDK tool-handler payload
 
 
 def lup_tools_to_sdk(
@@ -145,8 +145,8 @@ class ClaudeBackgroundDriver(BackgroundDriver):
         except Exception:
             logger.exception("Background agent '%s' crashed", self.name)
 
-    def handle_response(self, msg: object) -> None:
-        """Route response messages for logging."""
+    def handle_response(self, msg: object) -> None:  # lup: ignore[bare-object]
+        """Route response messages for logging (SDK message of any shape)."""
         match msg:
             case claude_types.AssistantMessage():
                 if self.on_response:
