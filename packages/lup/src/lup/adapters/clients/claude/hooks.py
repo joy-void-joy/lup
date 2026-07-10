@@ -69,8 +69,10 @@ def build_claude_hook_handler(
         _tool_use_id: str | None,
         _context: claude_types.HookContext,
     ) -> claude_types.SyncHookJSONOutput:
-        tool_name = input_data.get("tool_name", "")  # lup: ignore[dict-get]
-        tool_input = input_data.get("tool_input", {})  # lup: ignore[dict-get]
+        if "tool_name" in input_data and "tool_input" in input_data:
+            tool_name, tool_input = input_data["tool_name"], input_data["tool_input"]
+        else:
+            tool_name, tool_input = "", {}
         tool_result = ""
         if "tool_response" in input_data:
             response = input_data["tool_response"]
