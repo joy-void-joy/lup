@@ -77,7 +77,7 @@ def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:
         if permission_mode is None:
             permission_mode = "bypassPermissions"
 
-    extra_args: ExtraArgs = {}  # lup: ignore[empty-collection]
+    extra_args: ExtraArgs = {}  # lup: ignore[empty-collection] — conditional flag build
     if not opts.persist_session:
         extra_args["no-session-persistence"] = None
 

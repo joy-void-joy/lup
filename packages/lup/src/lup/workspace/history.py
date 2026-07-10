@@ -258,7 +258,7 @@ def default_session_formatter(session: SessionData) -> str:
     Extracts common fields that most domains will have. Downstream
     projects can provide a custom formatter for domain-specific display.
     """
-    stamp = session.get("timestamp", "unknown")  # lup: ignore[dict-get]
+    stamp = session.get("timestamp", "unknown")  # lup: ignore[dict-get] — optional key
     lines: list[str] = [f"### {stamp}"]
 
     output = session.get("output", {})  # lup: ignore[dict-get] — optional key

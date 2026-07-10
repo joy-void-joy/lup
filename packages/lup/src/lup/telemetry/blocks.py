@@ -33,7 +33,7 @@ def normalize_content(content: str | Sequence[object] | None) -> str:
             str(item.get("text", ""))  # lup: ignore[dict-get] — wire block
             for item in content
             if isinstance(item, dict)
-            and item.get("type") == "text"  # lup: ignore[dict-get]
+            and item.get("type") == "text"  # lup: ignore[dict-get] — wire block probe
         ]
         return "\n".join(texts)
     return str(content)
