@@ -83,7 +83,7 @@ class AgentOutput(BaseModel):
         """
         return cls(
             summary="No output produced",
-            factors=[],  # lup: ignore[empty-collection] — the placeholder value
+            factors=[],
             confidence=0.5,
         )
 
