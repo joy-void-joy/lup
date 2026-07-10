@@ -6,10 +6,11 @@ This is a TEMPLATE script. Run ``/lup:init`` to customize it for your domain.
 from collections import Counter
 from datetime import datetime
 
+from lup.types import Usage
 from lup_template.devtools.feedback.models import (
     BackendCostRow,
     FeedbackMetrics,
-    SessionData,
+    LoadedSession,
     SessionResult,
     empty_cost_row,
 )
@@ -37,7 +38,7 @@ def compute_metrics(results: list[SessionResult]) -> FeedbackMetrics:
 
 
 def rollup_costs(
-    sessions: list[SessionData],
+    sessions: list[LoadedSession],
 ) -> dict[str, BackendCostRow]:
     """Group session cost and token totals by ``agent_sdk``.
 
@@ -47,19 +48,14 @@ def rollup_costs(
     """
     rows: dict[str, BackendCostRow] = {}  # lup: ignore[empty-collection] — rollup
     for s in sessions:
-        sdk = s.get("agent_sdk") or "unknown"  # lup: ignore[dict-get]
-        row = rows.setdefault(sdk, empty_cost_row())
+        row = rows.setdefault(s.agent_sdk or "unknown", empty_cost_row())
         row["sessions"] += 1
-        cost = s.get("cost_usd")  # lup: ignore[dict-get] — optional key
-        if cost:
-            row["cost_usd"] += cost
+        if s.cost_usd:
+            row["cost_usd"] += s.cost_usd
         else:
             row["without_cost"] += 1
-        usage = s.get("token_usage") or {}  # lup: ignore[dict-get] — optional key
-        tokens_in = usage.get("input_tokens", 0) or 0  # lup: ignore[dict-get]
-        tokens_out = usage.get("output_tokens", 0) or 0  # lup: ignore[dict-get]
-        cached = usage.get("cache_read_input_tokens", 0) or 0  # lup: ignore[dict-get]
-        row["input_tokens"] += tokens_in
-        row["output_tokens"] += tokens_out
-        row["cache_read_input_tokens"] += cached
+        usage = s.token_usage or Usage()
+        row["input_tokens"] += usage.input_tokens
+        row["output_tokens"] += usage.output_tokens
+        row["cache_read_input_tokens"] += usage.cache_read_input_tokens
     return rows

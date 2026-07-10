@@ -1,7 +1,3 @@
-# lup: ignore[dict-get]
-# This file aggregates SessionData payloads whose keys are all optional —
-# every read is a `.get` probe of session JSON, so the rule is opted out
-# file-wide rather than annotated 25 times.
 """Feedback presentation: the command bodies behind ``lup-devtools feedback``.
 
 This is a TEMPLATE script. Run ``/lup:init`` to customize it for your domain.
@@ -37,9 +33,9 @@ from lup_template.devtools.feedback.commits import (
 from lup_template.devtools.feedback.metrics import compute_metrics, rollup_costs
 from lup_template.devtools.feedback.models import (
     ErrorSessionEntry,
+    LoadedSession,
     PromptHealthReport,
     PromptSection,
-    SessionData,
     ToolUsageEntry,
     TrendEntry,
 )
@@ -103,31 +99,26 @@ def print_data_availability(
         typer.echo("Previous feedback collections: None")
 
 
-def print_aggregate_stats(sessions: list[SessionData]) -> None:
+def print_aggregate_stats(sessions: list[LoadedSession]) -> None:
     total = len(sessions)
-    with_metrics = sum(1 for s in sessions if s.get("tool_metrics"))
-    with_tokens = sum(1 for s in sessions if s.get("token_usage"))
-    with_outcome = sum(1 for s in sessions if s.get("outcome") is not None)
+    with_metrics = sum(1 for s in sessions if s.tool_metrics)
+    with_tokens = sum(1 for s in sessions if s.token_usage)
+    with_outcome = sum(1 for s in sessions if s.outcome is not None)
 
     typer.echo(f"\n=== Aggregate Stats ({total} sessions with result JSON) ===\n")
     typer.echo(f"With metrics: {with_metrics} ({100 * with_metrics / total:.0f}%)")
     typer.echo(f"With tokens:  {with_tokens} ({100 * with_tokens / total:.0f}%)")
     typer.echo(f"With outcome: {with_outcome} ({100 * with_outcome / total:.0f}%)")
 
-    total_cost = sum(s.get("cost_usd") or 0 for s in sessions)
+    total_cost = sum(s.cost_usd or 0 for s in sessions)
 
     if total_cost > 0:
         typer.echo(f"\nTotal cost: ${total_cost:.2f}")
         typer.echo(f"Avg cost/session: ${total_cost / total:.4f}")
         typer.echo("Per-backend rollup: uv run lup-devtools feedback costs")
 
-    total_input = 0
-    total_output = 0
-    for s in sessions:
-        usage = s.get("token_usage")
-        if usage:
-            total_input += usage.get("input_tokens", 0) or 0
-            total_output += usage.get("output_tokens", 0) or 0
+    total_input = sum(s.token_usage.input_tokens for s in sessions if s.token_usage)
+    total_output = sum(s.token_usage.output_tokens for s in sessions if s.token_usage)
 
     if total_input or total_output:
         typer.echo("\nTokens:")
@@ -273,7 +264,7 @@ def collect(
         sessions = [
             s
             for s in sessions
-            if not (ts := s.get("timestamp")) or datetime.fromisoformat(ts) >= since_dt
+            if not s.timestamp or datetime.fromisoformat(s.timestamp) >= since_dt
         ]
 
     if not sessions:
@@ -325,16 +316,14 @@ def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
     )
 
     for s in sessions:
-        metrics = s.get("tool_metrics")
-        if not metrics:
+        if s.tool_metrics is None:
             continue
-        by_tool = metrics.get("by_tool", {})
-        for tool_name, data in by_tool.items():
-            tool_stats[tool_name]["calls"] += data.get("call_count", 0)
-            tool_stats[tool_name]["errors"] += data.get("error_count", 0)
-            avg_ms = data.get("avg_duration_ms", 0) or 0
-            count = data.get("call_count", 0)
-            tool_stats[tool_name]["total_ms"] += avg_ms * count
+        for tool_name, data in s.tool_metrics["by_tool"].items():
+            tool_stats[tool_name]["calls"] += data["call_count"]
+            tool_stats[tool_name]["errors"] += data["error_count"]
+            tool_stats[tool_name]["total_ms"] += (
+                data["avg_duration_ms"] * data["call_count"]
+            )
 
     if not tool_stats:
         if as_json:
@@ -402,17 +391,14 @@ def errors(
             typer.echo("No sessions found")
         return
 
-    def error_entry(s: SessionData) -> ErrorSessionEntry | None:
-        metrics = s.get("tool_metrics")
-        if not metrics:
-            return None
-        total_errors = metrics.get("total_errors", 0)
-        if not total_errors or total_errors <= 0:
+    def error_entry(s: LoadedSession) -> ErrorSessionEntry | None:
+        metrics = s.tool_metrics
+        if metrics is None or metrics["total_errors"] <= 0:
             return None
         return {
-            "session_id": s.get("_session_id", ""),
-            "errors": total_errors,
-            "by_tool": metrics.get("by_tool", {}),
+            "session_id": s.source_session_id,
+            "errors": metrics["total_errors"],
+            "by_tool": metrics["by_tool"],
         }
 
     with_errors = [e for s in sessions if (e := error_entry(s)) is not None]
@@ -435,9 +421,8 @@ def errors(
     for item in with_errors[:limit]:
         typer.echo(f"Session {item['session_id']}: {item['errors']} errors")
         for tool_name, tool_data in item["by_tool"].items():
-            errs = tool_data.get("error_count", 0)
-            if errs and int(errs) > 0:
-                typer.echo(f"  - {tool_name}: {errs}")
+            if tool_data["error_count"] > 0:
+                typer.echo(f"  - {tool_name}: {tool_data['error_count']}")
 
 
 def trends(window: int, version: str | None, all_versions: bool, as_json: bool) -> None:
@@ -454,8 +439,8 @@ def trends(window: int, version: str | None, all_versions: bool, as_json: bool) 
             typer.echo("No sessions found")
         return
 
-    sessions_with_ts = [s for s in sessions if s.get("timestamp")]
-    sessions_with_ts.sort(key=lambda s: s.get("timestamp", ""))
+    sessions_with_ts = [s for s in sessions if s.timestamp]
+    sessions_with_ts.sort(key=lambda s: s.timestamp)
 
     if len(sessions_with_ts) < window:
         if as_json:
@@ -472,17 +457,16 @@ def trends(window: int, version: str | None, all_versions: bool, as_json: bool) 
         total_calls = 0
         total_errs = 0
         for ws in window_sessions:
-            m = ws.get("tool_metrics")
-            if m:
-                total_calls += m.get("total_tool_calls", 0) or 0
-                total_errs += m.get("total_errors", 0) or 0
+            if ws.tool_metrics:
+                total_calls += ws.tool_metrics["total_tool_calls"]
+                total_errs += ws.tool_metrics["total_errors"]
         avg_calls = total_calls / window
         error_rate = total_errs / max(1, total_calls)
 
-        total_cost = sum(s.get("cost_usd", 0) or 0 for s in window_sessions)
+        total_cost = sum(s.cost_usd or 0 for s in window_sessions)
         avg_cost = total_cost / window
 
-        latest_ts = window_sessions[-1].get("timestamp", "")[:10]
+        latest_ts = window_sessions[-1].timestamp[:10]
         entries.append(
             {
                 "date": latest_ts,
@@ -519,13 +503,11 @@ def history(limit: int) -> None:
 
     for f in metrics_files[:limit]:
         try:
-            raw = json.loads(f.read_text())
-            if isinstance(raw, dict):
-                total = raw.get("total_sessions", 0)
-                with_outcomes = raw.get("sessions_with_outcomes", 0)
-                typer.echo(f"{f.name}: {total} sessions, {with_outcomes} with outcomes")
-            else:
-                typer.echo(f"{f.name}: (unexpected format)")
+            match json.loads(f.read_text()):
+                case {"total_sessions": int(total), "sessions_with_outcomes": int(w)}:
+                    typer.echo(f"{f.name}: {total} sessions, {w} with outcomes")
+                case _:
+                    typer.echo(f"{f.name}: (unexpected format)")
         except (json.JSONDecodeError, OSError):
             typer.echo(f"{f.name}: (error reading)")
 
