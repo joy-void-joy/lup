@@ -55,8 +55,8 @@ def scan_tracked(
     :func:`lup.codescan.markers.find_feedback` for review notes, or
     :func:`lup.codescan.markers.find_markers` bound to another convention.
     """
-    results: list[FoundComment] = []
-    for rel in str(git("ls-files")).splitlines():
+    results: list[FoundComment] = []  # lup: ignore[empty-collection] — scan fold
+    for rel in git.lines("ls-files"):
         path = Path(rel)
         try:
             text = path.read_text(encoding="utf-8")
@@ -90,7 +90,7 @@ def clear_markers(targets: list[str]) -> None:
     removed only through an `Edit` (which prompts for review) or a reviewed
     merge of a resolve branch.
     """
-    branch = str(git("rev-parse", "--abbrev-ref", "HEAD")).strip()
+    branch = git.out("rev-parse", "--abbrev-ref", "HEAD")
     if not branch.startswith("resolve/"):
         typer.echo(
             f"Refusing to clear markers: HEAD is '{branch}', not a resolve/* "
@@ -154,7 +154,7 @@ def commit_prompts() -> None:
     try:
         git("commit", "-m", f"{subject}\n\n{body}")
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Nothing committed: {decode_stderr(e).strip()}")
+        typer.echo(f"Nothing committed: {decode_stderr(e)}")
         return
     typer.echo(f"Committed {len(found)} prompt(s) across {len(files)} file(s).")
 

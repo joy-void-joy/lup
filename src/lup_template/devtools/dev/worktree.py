@@ -5,6 +5,7 @@ from pathlib import Path
 
 import sh
 import typer
+from pydantic import BaseModel
 
 from lup_template.devtools.utils import (
     copy_to_clipboard,
@@ -39,12 +40,11 @@ def branch_exists(branch: str) -> bool:
 
 def worktree_is_registered(path: Path) -> bool:
     """Check if a path is registered as a git worktree (even if dir is missing)."""
-    output = str(git("worktree", "list", "--porcelain"))
     resolved = str(path.resolve())
-    for line in output.splitlines():
-        if line.startswith("worktree ") and line.split(" ", 1)[1] == resolved:
-            return True
-    return False
+    return any(
+        line == f"worktree {resolved}"
+        for line in git.lines("worktree", "list", "--porcelain")
+    )
 
 
 def get_tree_dir() -> Path:
@@ -151,37 +151,45 @@ def create(
 def worktree_status(path: str) -> str:
     """Check if a worktree has uncommitted changes."""
     try:
-        status = str(git("-C", path, "status", "--porcelain", _ok_code=[0])).strip()
-        return "dirty" if status else "clean"
+        dirty = git.lines("-C", path, "status", "--porcelain", _ok_code=[0])
+        return "dirty" if dirty else "clean"
     except sh.ErrorReturnCode:
         return "?"
 
 
+class WorktreeEntry(BaseModel):
+    """One record of ``git worktree list --porcelain``."""
+
+    path: str = ""
+    head: str = ""
+    branch: str = ""
+    bare: bool = False
+    prunable: bool = False
+
+
 def list_worktrees() -> None:
     """List all git worktrees with branch and status info."""
-    output = str(git("worktree", "list", "--porcelain"))
+    entries: list[WorktreeEntry] = []  # lup: ignore[empty-collection] — record fold
+    current = WorktreeEntry()
 
-    entries: list[dict[str, str]] = []
-    current: dict[str, str] = {}
-
-    for line in output.splitlines():
-        if not line.strip():
-            if current:
+    for line in git.lines("worktree", "list", "--porcelain"):
+        if not line:
+            if current.path:
                 entries.append(current)
-                current = {}
+                current = WorktreeEntry()
             continue
         if line.startswith("worktree "):
-            current["path"] = line.split(" ", 1)[1]
+            current.path = line.removeprefix("worktree ")
         elif line.startswith("HEAD "):
-            current["head"] = short_sha(line.split(" ", 1)[1])
+            current.head = short_sha(line.removeprefix("HEAD "))
         elif line.startswith("branch "):
-            current["branch"] = line.split(" ", 1)[1].replace("refs/heads/", "")
+            current.branch = line.removeprefix("branch ").removeprefix("refs/heads/")
         elif line == "bare":
-            current["bare"] = "true"
+            current.bare = True
         elif line == "prunable":
-            current["prunable"] = "true"
+            current.prunable = True
 
-    if current:
+    if current.path:
         entries.append(current)
 
     if not entries:
@@ -190,23 +198,18 @@ def list_worktrees() -> None:
 
     cwd = str(Path.cwd().resolve())
 
+    def row(entry: WorktreeEntry) -> list[str]:
+        branch = entry.branch or ("(bare)" if entry.bare else "(detached)")
+        marker = "* " if entry.path == cwd else "  "
+        in_dir = not entry.bare and Path(entry.path).is_dir()
+        dirtiness = worktree_status(entry.path) if in_dir else ""
+        flag = " [prunable]" if entry.prunable else ""
+        return [f"{marker}{branch}", entry.head, dirtiness, f"{entry.path}{flag}"]
+
     typer.echo(f"\n=== Worktrees ({len(entries)}) ===\n")
-    rows: list[tuple[str, str, str, str]] = []
-    for entry in entries:
-        branch = entry.get("branch", "(bare)" if entry.get("bare") else "(detached)")
-        head = entry.get("head", "")
-        path = entry.get("path", "")
-        marker = "* " if path == cwd else "  "
-
-        if not entry.get("bare") and Path(path).is_dir():
-            status = worktree_status(path)
-        else:
-            status = ""
-
-        flag_str = " [prunable]" if entry.get("prunable") else ""
-        rows.append((f"{marker}{branch}", head, status, f"{path}{flag_str}"))
-
-    typer.echo(format_table(("Branch", "HEAD", "Status", "Path"), rows))
+    typer.echo(
+        format_table(("Branch", "HEAD", "Status", "Path"), [row(e) for e in entries])
+    )
 
 
 def remove(name: str, force: bool) -> None:

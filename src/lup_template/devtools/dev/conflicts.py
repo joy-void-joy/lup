@@ -17,7 +17,7 @@ Examples::
 """
 
 import logging
-import re
+import re  # lup: ignore[import-re] — alternation over semi-structured diff lines
 from pathlib import Path
 from typing import TypedDict
 
@@ -53,7 +53,7 @@ class ConflictReport(TypedDict):
 
 def find_git_dir() -> Path:
     """Locate the .git directory (works in worktrees too)."""
-    return Path(str(git("rev-parse", "--git-dir")).strip())
+    return Path(git.out("rev-parse", "--git-dir"))
 
 
 def detect_conflict_state() -> str | None:
@@ -68,60 +68,61 @@ def detect_conflict_state() -> str | None:
     return None
 
 
-def get_branch_files(state: str) -> tuple[str, set[str]]:
-    """Return (merge_base, files touched by this branch) for scope classification."""
+class BranchScope(BaseModel):
+    """The merge base plus the files this branch touched since it."""
+
+    base: str
+    files: set[str]  # lup: ignore[set-shape] — membership-tested scope set
+
+
+def get_branch_files(state: str) -> BranchScope:
+    """The merge base and this branch's touched files, for scope classification."""
     git_dir = find_git_dir()
+
+    def ref_file(path: Path) -> str:
+        return path.read_text().strip()  # lup: ignore[string-strip] — one-ref file
 
     match state:
         case "merge":
-            merge_head = str(git("rev-parse", "MERGE_HEAD")).strip()
-            base = str(git("merge-base", "HEAD", merge_head)).strip()
-            files_output = str(
-                git("diff", "--name-only", f"{base}..HEAD", _ok_code=[0])
-            ).strip()
+            merge_head = git.out("rev-parse", "MERGE_HEAD")
+            base = git.out("merge-base", "HEAD", merge_head)
+            tip = "HEAD"
 
         case "rebase":
             rebase_merge = git_dir / "rebase-merge"
             rebase_apply = git_dir / "rebase-apply"
             try:
                 if rebase_merge.exists():
-                    onto = (rebase_merge / "onto").read_text().strip()
-                    orig_head = (rebase_merge / "head").read_text().strip()
+                    onto = ref_file(rebase_merge / "onto")
+                    orig_head = ref_file(rebase_merge / "head")
                 elif rebase_apply.exists():
-                    onto = (rebase_apply / "onto").read_text().strip()
-                    orig_head = (rebase_apply / "orig-head").read_text().strip()
+                    onto = ref_file(rebase_apply / "onto")
+                    orig_head = ref_file(rebase_apply / "orig-head")
                 else:
                     typer.echo("Cannot determine rebase state", err=True)
                     raise typer.Exit(1)
             except OSError as e:
                 typer.echo(f"Cannot read rebase state: {e}", err=True)
                 raise typer.Exit(1) from e
-            base = str(git("merge-base", orig_head, onto)).strip()
-            files_output = str(
-                git("diff", "--name-only", f"{base}..{orig_head}", _ok_code=[0])
-            ).strip()
+            base = git.out("merge-base", orig_head, onto)
+            tip = orig_head
 
         case "cherry-pick":
-            cherry_head = str(git("rev-parse", "CHERRY_PICK_HEAD")).strip()
-            base = str(git("merge-base", "HEAD", cherry_head)).strip()
-            files_output = str(
-                git("diff", "--name-only", f"{base}..HEAD", _ok_code=[0])
-            ).strip()
+            cherry_head = git.out("rev-parse", "CHERRY_PICK_HEAD")
+            base = git.out("merge-base", "HEAD", cherry_head)
+            tip = "HEAD"
 
         case _:
             typer.echo(f"Unknown conflict state: {state}", err=True)
             raise typer.Exit(1)
 
-    files = set(files_output.splitlines()) if files_output else set()
-    return base, files
+    touched = git.lines("diff", "--name-only", f"{base}..{tip}", _ok_code=[0])
+    return BranchScope(base=base, files=set(touched))  # lup: ignore[set-shape]
 
 
 def list_conflicted_files() -> list[str]:
     """List files with unresolved conflicts."""
-    output = str(git("diff", "--name-only", "--diff-filter=U", _ok_code=[0])).strip()
-    if not output:
-        return []
-    return output.splitlines()
+    return git.lines("diff", "--name-only", "--diff-filter=U", _ok_code=[0])
 
 
 def count_conflict_markers(path: str) -> int:
@@ -136,37 +137,25 @@ def count_conflict_markers(path: str) -> int:
 def build_conflict_report(state: str) -> ConflictReport:
     """Build a structured conflict scope report."""
     conflicted = list_conflicted_files()
-    base, branch_files = get_branch_files(state)
+    scope = get_branch_files(state)
 
-    files: list[ConflictFile] = []
-    in_scope = 0
-    out_of_scope = 0
-
-    for path in conflicted:
-        touched = path in branch_files
-        scope = "in-scope" if touched else "out-of-scope"
-        markers = count_conflict_markers(path)
-
-        if touched:
-            in_scope += 1
-        else:
-            out_of_scope += 1
-
-        files.append(
-            {
-                "path": path,
-                "conflict_count": markers,
-                "scope": scope,
-                "branch_touched": touched,
-            }
-        )
+    files: list[ConflictFile] = [
+        {
+            "path": path,
+            "conflict_count": count_conflict_markers(path),
+            "scope": "in-scope" if path in scope.files else "out-of-scope",
+            "branch_touched": path in scope.files,
+        }
+        for path in conflicted
+    ]
+    in_scope = sum(1 for f in files if f["branch_touched"])
 
     return {
         "state": state,
-        "base": base,
+        "base": scope.base,
         "files": files,
         "in_scope_count": in_scope,
-        "out_of_scope_count": out_of_scope,
+        "out_of_scope_count": len(files) - in_scope,
     }
 
 
@@ -179,7 +168,7 @@ def conflicts(as_json: bool) -> None:
                 ConflictReport(
                     state="none",
                     base="",
-                    files=[],
+                    files=[],  # lup: ignore[empty-collection] — the no-conflict report
                     in_scope_count=0,
                     out_of_scope_count=0,
                 )
@@ -242,7 +231,7 @@ class AuditResult(BaseModel):
     has_warnings: bool
 
 
-SIGNIFICANT_PATTERN = re.compile(
+SIGNIFICANT_PATTERN = re.compile(  # lup: ignore[re-call] — diff-line alternation
     r"^-(def |class |async def |@app\.|@[a-z]+_tool|    def )"
 )
 
@@ -265,11 +254,11 @@ def theirs_ref_for(operation: str) -> str:
 
 def extract_removals(diff_output: str) -> list[str]:
     """Find removed functions/classes/decorators in a diff."""
-    removals: list[str] = []
-    for line in diff_output.splitlines():
-        if SIGNIFICANT_PATTERN.match(line):
-            removals.append(line.lstrip("-").strip())
-    return removals
+    return [
+        line.lstrip("-").strip()  # lup: ignore[string-strip] — display trim
+        for line in diff_output.splitlines()
+        if SIGNIFICANT_PATTERN.match(line)
+    ]
 
 
 def conflict_status(as_json: bool) -> None:
@@ -280,11 +269,11 @@ def conflict_status(as_json: bool) -> None:
         if as_json:
             result = ConflictStatusResult(
                 operation="none",
-                conflicted_files=[],
+                conflicted_files=[],  # lup: ignore[empty-collection] — idle state
                 ours_ref="HEAD",
                 theirs_ref="",
-                ours_commits=[],
-                theirs_commits=[],
+                ours_commits=[],  # lup: ignore[empty-collection] — idle state
+                theirs_commits=[],  # lup: ignore[empty-collection] — idle state
             )
             output_json(result)
         else:
@@ -296,22 +285,18 @@ def conflict_status(as_json: bool) -> None:
     ours_ref = "HEAD"
     theirs_ref = theirs_ref_for(operation)
 
-    ours_commits: list[str] = []
-    theirs_commits: list[str] = []
+    def log_range(base: str, tip: str) -> list[str]:
+        rows = git.lines("log", "--oneline", f"{base}..{tip}", _ok_code=[0])
+        return [r for r in rows if r]
 
     try:
-        merge_base = str(git("merge-base", "HEAD", theirs_ref, _ok_code=[0])).strip()
-        ours_raw = str(
-            git("log", "--oneline", f"{merge_base}..HEAD", _ok_code=[0])
-        ).strip()
-        ours_commits = [line for line in ours_raw.splitlines() if line]
-
-        theirs_raw = str(
-            git("log", "--oneline", f"{merge_base}..{theirs_ref}", _ok_code=[0])
-        ).strip()
-        theirs_commits = [line for line in theirs_raw.splitlines() if line]
+        merge_base = git.out("merge-base", "HEAD", theirs_ref, _ok_code=[0])
+        ours_commits = log_range(merge_base, "HEAD")
+        theirs_commits = log_range(merge_base, theirs_ref)
     except sh.ErrorReturnCode:
-        pass
+        logger.warning("No shared history with %s; showing bare status", theirs_ref)
+        ours_commits = []  # lup: ignore[empty-collection] — nothing to show
+        theirs_commits = []  # lup: ignore[empty-collection] — nothing to show
 
     result = ConflictStatusResult(
         operation=operation,
@@ -348,36 +333,32 @@ def conflict_audit(files: list[str], as_json: bool) -> None:
 
     theirs_ref = theirs_ref_for(operation)
 
-    file_results: list[FileAuditResult] = []
-    for path in files:
-        ours_diff = str(git("diff", "HEAD", "--", path, _ok_code=[0, 1])).strip()
+    def audit_file(path: str) -> FileAuditResult:
+        ours_diff = git.out("diff", "HEAD", "--", path, _ok_code=[0, 1])
         ours_removals = extract_removals(ours_diff)
 
         theirs_diff = ""
         partial = False
         try:
-            theirs_diff = str(
-                git("diff", theirs_ref, "--", path, _ok_code=[0, 1])
-            ).strip()
+            theirs_diff = git.out("diff", theirs_ref, "--", path, _ok_code=[0, 1])
         except sh.ErrorReturnCode as e:
             partial = True
             typer.echo(
                 f"Warning: could not diff {path} against {theirs_ref} — "
-                f"theirs-side audit is partial ({decode_stderr(e).strip()})",
+                f"theirs-side audit is partial ({decode_stderr(e)})",
                 err=True,
             )
         theirs_removals = extract_removals(theirs_diff)
 
-        has_warning = bool(ours_removals or theirs_removals)
-        file_results.append(
-            FileAuditResult(
-                path=path,
-                ours_removals=ours_removals,
-                theirs_removals=theirs_removals,
-                warning=has_warning,
-                partial=partial,
-            )
+        return FileAuditResult(
+            path=path,
+            ours_removals=ours_removals,
+            theirs_removals=theirs_removals,
+            warning=bool(ours_removals or theirs_removals),
+            partial=partial,
         )
+
+    file_results = [audit_file(path) for path in files]
 
     audit_result = AuditResult(
         files=file_results,

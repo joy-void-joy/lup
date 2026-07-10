@@ -48,7 +48,7 @@ import sh
 import typer
 
 from lup.workspace.paths import project_root
-from lup_template.devtools.utils import format_table, git, short_sha
+from lup_template.devtools.utils import decode_stderr, format_table, git, short_sha
 
 app = typer.Typer(no_args_is_help=True)
 logger = logging.getLogger(__name__)
@@ -216,7 +216,7 @@ def ensure_local(
             git("-C", str(cache_path), "fetch", "--quiet")
             git("-C", str(cache_path), "reset", "--hard", reset_target, "--quiet")
         except sh.ErrorReturnCode as e:
-            report(f"Warning: fetch failed: {e.stderr.decode().strip()}")
+            report(f"Warning: fetch failed: {decode_stderr(e)}")
         ensure_ref_symlink(name, str(cache_path))
         return str(cache_path)
 
@@ -230,7 +230,7 @@ def ensure_local(
         try:
             git(*clone_args)
         except sh.ErrorReturnCode as e:
-            report(f"Clone failed: {e.stderr.decode().strip()}")
+            report(f"Clone failed: {decode_stderr(e)}")
             raise typer.Exit(1)
         ensure_ref_symlink(name, str(cache_path))
         return str(cache_path)
@@ -246,7 +246,7 @@ def ensure_local(
 
 def git_in(path: str, *args: str) -> str:
     """Run git command in a specific directory."""
-    return str(git("-C", path, *args)).strip()
+    return git.out("-C", path, *args)
 
 
 def commit_count(path: str, since: str) -> int:

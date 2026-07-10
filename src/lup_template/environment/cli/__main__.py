@@ -114,14 +114,14 @@ def commit_results() -> None:
     usually drop it.
     """
     git = sh.Command("git").bake("--no-pager", "-c", "color.ui=never")
-    status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0])).strip()
-    if not status:
+    status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0]))
+    if not status.strip():  # lup: ignore[string-strip] — anything-to-commit probe
         return
 
     try:
         git.add("notes/")
-        diff = str(git.diff("--cached", "--stat", _ok_code=[0, 1])).strip()
-        if diff:
+        diff = str(git.diff("--cached", "--stat", _ok_code=[0, 1]))
+        if diff.strip():  # lup: ignore[string-strip] — anything-staged probe
             git.commit("-m", "data(sessions): auto-commit session results")
             typer.echo("Committed session results.")
     except sh.ErrorReturnCode as e:

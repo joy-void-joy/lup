@@ -41,7 +41,7 @@ def repo(tmp_path: Path) -> Path:
 
 def current_branch(work: Path) -> str:
     out = sh.Command("git")("-C", str(work), "branch", "--show-current", _tty_out=False)
-    return str(out).strip()
+    return str(out).strip()  # lup: ignore[string-strip] — newline framing
 
 
 def test_creates_resolve_branch(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

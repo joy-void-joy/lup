@@ -81,7 +81,7 @@ def check_remote_auth() -> bool:
     ssh-style remotes are probed with ``ssh -T``; https remotes are verified
     via ``gh auth status``. Local and unrecognized remotes pass.
     """
-    remote_url = str(git("remote", "get-url", "origin")).strip()
+    remote_url = git.out("remote", "get-url", "origin")
     remote = parse_remote(remote_url)
     if remote is None:
         return True
