@@ -34,6 +34,7 @@ from typing import Annotated
 from zoneinfo import ZoneInfoNotFoundError
 
 import typer
+from dotenv import dotenv_values, set_key
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
@@ -54,7 +55,8 @@ app = typer.Typer(
 console = Console()
 
 # Env vars an integration wants written to .env.local, keyed by name.
-type EnvValues = dict[str, str]
+type EnvValues = dict[str, str]  # lup: ignore[dict-str-payload] — open env-var map
+type IntegrationStatus = tuple[bool, str]  # lup: ignore[tuple-shape] — (ok, detail)
 
 PROJECT_ROOT = project_root()
 ENV_LOCAL = PROJECT_ROOT / ".env.local"
@@ -72,55 +74,29 @@ claude_profiles = ProfileStore()
 
 
 def read_env_local() -> EnvValues:
-    """Parse .env.local into a dict. Returns empty dict if file missing.
+    """Read .env.local values (empty dict when the file is missing).
 
-    The wizard owns the file as editable text, not just values: it reads
-    the raw entries here so it can round-trip them through
-    :func:`write_env_local` while preserving comments and ordering.
-    pydantic-settings only *reads* config into the running process, so it
-    cannot serve a tool whose job is to *write* .env.local back out.
+    ``dotenv`` owns the parse — the same parser pydantic-settings reads the
+    file with at runtime, so the wizard sees exactly the values the app sees.
     """
     if not ENV_LOCAL.exists():
         return {}
-    values: dict[str, str] = {}
-    for line in ENV_LOCAL.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        values[key.strip()] = value.strip()
-    return values
+    return {k: v for k, v in dotenv_values(ENV_LOCAL).items() if v is not None}
 
 
 def write_env_local(values: EnvValues) -> None:
     """Update keys in .env.local, preserving existing lines, comments, order.
 
-    Existing ``KEY=...`` lines are rewritten in place; new keys are appended.
-    Comments, blank lines, and ordering are left untouched. This is the
-    write half that pydantic-settings does not provide.
+    ``dotenv.set_key`` rewrites a ``KEY=...`` line in place and appends
+    missing keys, leaving comments, blank lines, and ordering untouched —
+    the write half pydantic-settings does not provide.
     """
     if not values:
         return
 
-    remaining = dict(values)
-    lines = ENV_LOCAL.read_text().splitlines() if ENV_LOCAL.exists() else []
-    out: list[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in line:
-            key = line.partition("=")[0].strip()
-            if key in remaining:
-                out.append(f"{key}={remaining.pop(key)}")
-                continue
-        out.append(line)
-
-    for key, value in remaining.items():
-        out.append(f"{key}={value}")
-
-    ENV_LOCAL.write_text("\n".join(out) + "\n")
+    ENV_LOCAL.touch()
+    for key, value in values.items():
+        set_key(ENV_LOCAL, key, value, quote_mode="never")
 
 
 def save_and_confirm(values: EnvValues) -> None:
@@ -214,7 +190,7 @@ class Integration(BaseModel):
         default=None,
         description="Bespoke interactive flow, used instead of the declarative fields",
     )
-    status_func: Callable[[EnvValues], tuple[bool, str]] | None = Field(
+    status_func: Callable[[EnvValues], IntegrationStatus] | None = Field(
         default=None,
         description="Custom status checker (default: checks env_keys)",
     )
@@ -235,7 +211,8 @@ class Integration(BaseModel):
         # Gate re-entry only for secrets, which can't be shown as defaults;
         # non-secret fields echo their current value, so re-walking is cheap.
         guards_secret = any(f.secret for f in self.fields)
-        if guards_secret and all(env.get(k) for k in self.env_keys):
+        configured = all(env.get(k) for k in self.env_keys)  # lup: ignore[dict-get]
+        if guards_secret and configured:
             console.print("[green]Already configured.[/]")
             if not typer.confirm("Reconfigure?", default=False):
                 return {}
@@ -246,14 +223,14 @@ class Integration(BaseModel):
             open_browser(self.browser_url)
         console.print()
 
-        values: EnvValues = {}
+        values: EnvValues = {}  # lup: ignore[empty-collection] — prompt-loop fold
         for field in self.fields:
-            current = env.get(field.key, "")
+            current = env.get(field.key, "")  # lup: ignore[dict-get] — open env map
             raw = typer.prompt(
                 field.prompt,
                 default=current,
                 show_default=bool(current) and not field.secret,
-            ).strip()
+            ).strip()  # lup: ignore[string-strip] — human-typed input
             if not raw:
                 continue
             if field.parse is not None:
@@ -265,11 +242,11 @@ class Integration(BaseModel):
             values[field.key] = raw
         return values
 
-    def check_status(self, env: EnvValues) -> tuple[bool, str]:
+    def check_status(self, env: EnvValues) -> IntegrationStatus:
         """Return (is_configured, detail_string)."""
         if self.status_func:
             return self.status_func(env)
-        values = [env.get(k, "") for k in self.env_keys]
+        values = [env.get(k, "") for k in self.env_keys]  # lup: ignore[dict-get]
         if all(values):
             return True, mask(values[0])
         return False, "not configured"
@@ -281,11 +258,12 @@ class Integration(BaseModel):
 # =====================================================================
 
 
-def slack_status(env: EnvValues) -> tuple[bool, str]:
+def slack_status(env: EnvValues) -> IntegrationStatus:
     """Custom status check for Slack."""
-    ok = bool(env.get("SLACK_BOT_TOKEN") and env.get("SLACK_APP_TOKEN"))
-    if ok:
-        return True, mask(env["SLACK_BOT_TOKEN"])
+    bot = env.get("SLACK_BOT_TOKEN")  # lup: ignore[dict-get] — open env map
+    app_token = env.get("SLACK_APP_TOKEN")  # lup: ignore[dict-get] — open env map
+    if bot and app_token:
+        return True, mask(bot)
     return False, "not configured"
 
 
@@ -318,7 +296,9 @@ def setup_google() -> EnvValues:
         open_browser("https://console.cloud.google.com/apis/credentials")
         console.print()
 
-        source = typer.prompt("Path to downloaded credentials JSON").strip()
+        source = typer.prompt(
+            "Path to downloaded credentials JSON"
+        ).strip()  # lup: ignore[string-strip] — human-typed input
         source_path = Path(source).expanduser().resolve()
 
         if not source_path.exists():
@@ -339,7 +319,7 @@ def setup_google() -> EnvValues:
     return {"GMAIL_CREDENTIALS_PATH": str(creds_path)}
 
 
-def google_status(_env: EnvValues) -> tuple[bool, str]:
+def google_status(_env: EnvValues) -> IntegrationStatus:
     """Custom status check for Google OAuth."""
     token_path = CREDENTIALS_DIR / "token.json"
     creds_path = CREDENTIALS_DIR / "google.json"
@@ -350,12 +330,12 @@ def google_status(_env: EnvValues) -> tuple[bool, str]:
     return False, "not configured"
 
 
-def codex_backend_status(env: EnvValues) -> tuple[bool, str]:
+def codex_backend_status(env: EnvValues) -> IntegrationStatus:
     """Rates present = budget caps enforceable on codex/openai."""
     rates = [
         key
         for key in ("CODEX_USD_PER_MTOK_INPUT", "CODEX_USD_PER_MTOK_OUTPUT")
-        if env.get(key)
+        if env.get(key)  # lup: ignore[dict-get] — open env map
     ]
     if len(rates) == 2:
         return True, "rates set (budget caps enforceable)"
@@ -370,7 +350,7 @@ def setup_timezone() -> EnvValues:
 
     env = read_env_local()
     system_tz = detect_system_timezone()
-    current = env.get("AGENT_TIMEZONE", "")
+    current = env.get("AGENT_TIMEZONE", "")  # lup: ignore[dict-get] — open env map
     default = current or system_tz
 
     if system_tz:
@@ -380,7 +360,7 @@ def setup_timezone() -> EnvValues:
         "AGENT_TIMEZONE",
         default=default,
         show_default=bool(default),
-    ).strip()
+    ).strip()  # lup: ignore[string-strip] — human-typed input
 
     if tz:
         try:
@@ -397,9 +377,9 @@ def setup_timezone() -> EnvValues:
     return {}
 
 
-def timezone_status(env: EnvValues) -> tuple[bool, str]:
+def timezone_status(env: EnvValues) -> IntegrationStatus:
     """Custom status check for timezone (not-configured is OK, just shows system default)."""
-    tz = env.get("AGENT_TIMEZONE", "")
+    tz = env.get("AGENT_TIMEZONE", "")  # lup: ignore[dict-get] — open env map
     if tz:
         return True, tz
     return False, "system default"
