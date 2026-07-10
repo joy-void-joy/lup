@@ -37,12 +37,20 @@ def claude_hook_tool_path(tool_name: str, tool_input: JsonObject) -> str:
     """
     match tool_name:
         case "Write" | "Edit" | "Read":
-            return str(tool_input.get("file_path", ""))  # lup: ignore[dict-get]
+            return str(
+                tool_input.get("file_path", "")  # lup: ignore[dict-get] — payload
+            )
         case "Grep":
-            return str(tool_input.get("path", ""))  # lup: ignore[dict-get]
+            return str(
+                tool_input.get("path", "")  # lup: ignore[dict-get] — per-tool payload
+            )
         case "Glob":
-            path = str(tool_input.get("path", ""))  # lup: ignore[dict-get]
-            pattern = str(tool_input.get("pattern", ""))  # lup: ignore[dict-get]
+            path = str(
+                tool_input.get("path", "")  # lup: ignore[dict-get] — per-tool payload
+            )
+            pattern = str(
+                tool_input.get("pattern", "")  # lup: ignore[dict-get] — payload
+            )
             return path or extract_glob_dir(pattern)
         case _:
             return ""
