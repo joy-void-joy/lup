@@ -1,3 +1,5 @@
+# lup: ignore[dict-get, dict-str-payload, empty-collection, set-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Lup hook policies rendered as standalone Codex command-hook scripts.
 
 The wire-format reference, quarantined out of the shipped package: a

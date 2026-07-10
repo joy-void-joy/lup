@@ -1,3 +1,5 @@
+# lup: ignore[set-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """The toolsets registry — single source of truth for both backend paths.
 
 The registry exists to make tool-group drift between backends impossible.

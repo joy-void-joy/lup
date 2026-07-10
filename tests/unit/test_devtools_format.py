@@ -1,3 +1,5 @@
+# lup: ignore[set-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Tests for the shared display helpers in ``devtools.utils``.
 
 These pin the contract the table/sha helpers replaced hard-coded widths and

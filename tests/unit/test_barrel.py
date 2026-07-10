@@ -1,3 +1,5 @@
+# lup: ignore[noqa]
+# Test fixtures and assertions construct these shapes deliberately.
 """Barrel drift guard: every name in lup.__all__ must resolve."""
 
 import lup

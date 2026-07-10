@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection, tuple-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Tests for ToolPolicy: server registry, allowlist computation and enforcement."""
 
 import pytest

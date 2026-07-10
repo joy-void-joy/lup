@@ -1,3 +1,5 @@
+# lup: ignore[bare-object, empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """Behavior tests for core-library correctness fixes.
 
 Each test pins an invariant that a specific bug used to violate:

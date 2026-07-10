@@ -1,3 +1,5 @@
+# lup: ignore[any-type, dict-get, empty-collection, tuple-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Realtime relay wiring: mailbox protocol, served tools, and the wake loop.
 
 The relay is how persistent mode works on backends whose tools run in a

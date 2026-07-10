@@ -1,3 +1,5 @@
+# lup: ignore[dict-get, dict-str-payload, empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """Engine construction: translation, refusal, dropping, and routing.
 
 The engines are the only seam, and construction never connects — so

@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection, frozenset-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Shared fixtures and fakes for unit tests."""
 
 from collections.abc import AsyncGenerator, Iterator

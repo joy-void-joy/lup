@@ -1,3 +1,5 @@
+# lup: ignore[dict-get]
+# Test fixtures and assertions construct these shapes deliberately.
 """Scheduler timing behavior: sleep/wake and debounce windows.
 
 The persistent-agent scheduler is concurrency-critical: a missed wake

@@ -1,3 +1,5 @@
+# lup: ignore[dict-str-payload, os-environ, set-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Round-trip test of the serve-tools subprocess with session-context env.
 
 This is the wiring the Codex/OpenAI adapters depend on: tools are

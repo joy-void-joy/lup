@@ -1,3 +1,5 @@
+# lup: ignore[set-shape]
+# Test fixtures and assertions construct these shapes deliberately.
 """Version resolution fallback and latest-session selection.
 
 Includes the regression for cross-version "latest" selection:

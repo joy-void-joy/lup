@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """Trace formatting and the TraceLogger save path.
 
 The trace file is the feedback loop's raw material: if block formatting,

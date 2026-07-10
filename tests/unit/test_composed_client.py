@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """The composed client's generic gap-filling over a sessions component.
 
 ``ComposedClient`` is the one concrete ``Client``: engines contribute a

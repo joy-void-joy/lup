@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """Behavior tests for the ``lup-devtools claude`` runner's arg forwarding.
 
 The ``claude`` group routes any non-subcommand invocation through ``run`` so

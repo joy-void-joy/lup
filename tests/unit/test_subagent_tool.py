@@ -1,3 +1,5 @@
+# lup: ignore[dict-get, empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """Tests for the run_subagent delegation tool.
 
 The tool exists so non-Claude engines get real subagent delegation

@@ -1,3 +1,5 @@
+# lup: ignore[empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """Tests for SDK → lup type conversion (Claude and Codex)."""
 
 from claude_agent_sdk import TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock

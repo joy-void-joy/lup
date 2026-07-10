@@ -1,3 +1,5 @@
+# lup: ignore[bare-object, cast, empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """Codex response assembly.
 
 build_lup_response is where Codex turns become portable lup responses:

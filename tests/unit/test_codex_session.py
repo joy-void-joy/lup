@@ -1,3 +1,5 @@
+# lup: ignore[bare-object, cast, empty-collection]
+# Test fixtures and assertions construct these shapes deliberately.
 """Codex session behavior: thread lifecycle, pricing, and native validation.
 
 The runtime's own session concerns, pinned without any LLM call: the
@@ -92,7 +94,7 @@ class FakeCodex:
 async def test_open_thread_dispatches_start_vs_resume() -> None:
     """session(resume=) restores the saved thread instead of starting one."""
     fake = FakeCodex(FakeThread())
-    codex = cast("AsyncCodex", cast(object, fake))  # lup: ignore — SDK-boundary fake
+    codex = cast("AsyncCodex", cast(object, fake))
     sessions = CodexSessions(CodexNativeConfig(model="gpt-5.5"))
 
     started = await sessions.open_thread(codex, resume=None)
