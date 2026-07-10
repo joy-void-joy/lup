@@ -9,6 +9,7 @@ exists to drift from the translation code.
 
 import logging
 from collections.abc import Callable
+from typing import NoReturn
 
 from pydantic import PrivateAttr
 
@@ -38,6 +39,12 @@ their helpers (``usage_cost``, the estimator behind ``max_budget_usd``)
 are outside this set — they keep their consume-or-ignore-freely
 semantics and are never policed."""
 
+BULK_READ_ERROR = (
+    "ConsumeTracker forbids bulk reads: dumping or iterating the options "
+    "would mark every intent knob consumed and silently disable refusal — "
+    "translations read intent knobs field-by-field."
+)
+
 
 class ConsumeTracker(LupAgentOptions):
     """A translation-time view of options that records intent-knob reads.
@@ -52,6 +59,11 @@ class ConsumeTracker(LupAgentOptions):
     lookup, leaving pydantic's own machinery untouched. Type checkers
     resolve known members from the class, not through ``__getattribute__``,
     so pyright still sees each field's real declared type.
+
+    Bulk reads (``model_dump``, ``model_dump_json``, iteration) raise
+    instead of recording — any one of them would mark every intent knob
+    consumed and disable refusal — and ``repr``/``str`` read no fields for
+    the same reason, so incidental logging consumes nothing.
     """
 
     _consumed: set[str] = PrivateAttr(default_factory=set)
@@ -75,6 +87,20 @@ class ConsumeTracker(LupAgentOptions):
         if name in INTENT_KNOBS:
             self._consumed.add(name)
         return super().__getattribute__(name)
+
+    def model_dump(self, **_kwargs: object) -> NoReturn:
+        raise RuntimeError(BULK_READ_ERROR)
+
+    def model_dump_json(self, **_kwargs: object) -> NoReturn:
+        raise RuntimeError(BULK_READ_ERROR)
+
+    def __iter__(self) -> NoReturn:
+        raise RuntimeError(BULK_READ_ERROR)
+
+    def __repr__(self) -> str:
+        return f"ConsumeTracker(consumed={sorted(self._consumed)})"
+
+    __str__ = __repr__
 
 
 def refuse_unconsumed[N](
