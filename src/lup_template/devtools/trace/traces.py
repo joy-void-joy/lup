@@ -1,7 +1,8 @@
-# lup: ignore[string-strip, string-split]
+# lup: ignore[import-re, re-call, string-strip, string-split]
 # This module IS the parser for the repo's own trace-markdown format (the
-# legacy fallback beside the .events.jsonl sidecar) — line surgery here is
-# the parse, not a substitute for one.
+# legacy fallback beside the .events.jsonl sidecar) — line surgery and the
+# fallback patterns are the parse, not a substitute for one, and user search
+# queries are regex by contract.
 """Trace display, search, and analysis implementation.
 
 Provides reusable scanner functions (``scan_for_errors``, ``scan_for_capability_gaps``)
@@ -23,7 +24,7 @@ Examples::
 """
 
 import json
-import re  # lup: ignore[import-re] — legacy-markdown fallback patterns
+import re
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -339,7 +340,7 @@ def load_trace(trace_path: Path) -> str:
     return ""
 
 
-TOOL_CALL_PATTERNS = re.compile(  # lup: ignore[re-call] — legacy-markdown scan
+TOOL_CALL_PATTERNS = re.compile(
     r"tool_use|tool_result|^#{2,3}\s+\S+\s+Tool:|^#{2,3}\s+\S+\s+Result\b",
     re.IGNORECASE,
 )
@@ -421,7 +422,7 @@ def search(pattern: str, context: int, as_json: bool) -> None:
             typer.echo("0 matches found")
         return
 
-    regex = re.compile(pattern, re.IGNORECASE)  # lup: ignore[re-call] — user query
+    regex = re.compile(pattern, re.IGNORECASE)
     matches: list[SearchMatch] = []  # lup: ignore[empty-collection] — match fold
 
     trace_files = list(traces_path().rglob("*.md")) + list(

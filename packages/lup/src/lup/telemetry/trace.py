@@ -1,3 +1,7 @@
+# lup: ignore[import-re, re-call]
+# Capability phrasing and sentence bounds are natural-language cues with no
+# structured parser — regex IS the tool here, so those rules are opted out
+# file-wide.
 """Session trace accumulation for feedback-loop analysis.
 
 ``TraceLogger`` collects content blocks during an agent run and writes two
@@ -21,7 +25,7 @@ Examples:
 
 import json
 import logging
-import re  # lup: ignore[import-re] — capability phrasing + sentence bounds
+import re
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -59,7 +63,7 @@ def format_block_markdown(block: LupContentBlock) -> str:
 # Capability-request phrasing. Applied to one already-isolated string at the
 # moment it is logged (an assistant text or meta thought), not swept across a
 # markdown document — so the persisted signal is structured, not regex-derived.
-CAPABILITY_PHRASES: re.Pattern[str] = re.compile(  # lup: ignore[re-call] — NL cues
+CAPABILITY_PHRASES: re.Pattern[str] = re.compile(
     r"would be useful|would have helped|would benefit from|wish I (had|could)|"
     r"if (only )?I could|need(s|ed)? access to|cannot .* because|"
     r"a tool that|missing (a )?tool",
@@ -113,7 +117,7 @@ def capability_request_from_text(text: str) -> str | None:
     Splits on sentence boundaries and returns the matching fragment so the
     event's ``brief`` is the specific wish, not the whole block.
     """
-    sentences = re.split(r"(?<=[.!?\n])\s+", text)  # lup: ignore[re-call, string-split]
+    sentences = re.split(r"(?<=[.!?\n])\s+", text)  # lup: ignore[string-split] — sentence bounds
     for fragment in sentences:
         stripped = fragment.strip()  # lup: ignore[string-strip] — prose hygiene
         if stripped and CAPABILITY_PHRASES.search(stripped):

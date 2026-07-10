@@ -1,6 +1,7 @@
-# lup: ignore[string-replace]
+# lup: ignore[import-re, re-call, string-replace]
 # Renaming IS text surgery over source and config files — every .replace
-# here rewrites a known literal in place, so the rule is opted out file-wide.
+# rewrites a known literal in place and the import-statement rewriter is a
+# regex by nature, so those rules are opted out file-wide.
 """Package renaming for downstream project initialization.
 
 Renames the ``lup_template`` Python package to a project-specific name,
@@ -14,7 +15,7 @@ Examples::
     $ uv run lup-devtools dev init rename-package myproject --dry-run
 """
 
-import re  # lup: ignore[import-re] — the import-statement rewriter
+import re
 from pathlib import Path
 import typer
 
@@ -22,7 +23,7 @@ from lup.workspace.paths import find_project_root
 from lup_template.devtools.dev.plugin import set_marketplace_name
 from lup_template.devtools.utils import git
 
-PACKAGE_IMPORT_RE = re.compile(  # lup: ignore[re-call] — import-form matcher
+PACKAGE_IMPORT_RE = re.compile(
     r"""
     (?<![.\w])          # not preceded by dot or word char
     (?:from|import)     # keyword

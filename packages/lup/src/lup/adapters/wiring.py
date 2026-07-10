@@ -1,3 +1,6 @@
+# lup: ignore[import-re, re-call]
+# MODEL_ROUTES is regex routing by design — model-name patterns ARE the table,
+# so the regex rules are opted out file-wide.
 """The neutral seam: every engine behind ``create_client()`` and ``query()``.
 
 An engine is one backend, complete
@@ -29,7 +32,7 @@ rather than declared.
 """
 
 import logging
-import re  # lup: ignore[import-re] — MODEL_ROUTES is regex routing by design
+import re
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
@@ -84,7 +87,7 @@ def engine_for_model(model: str) -> Engine:
     loop means the table itself was edited out of totality.
     """
     for pattern, engine in MODEL_ROUTES.items():
-        if re.search(pattern, model):  # lup: ignore[re-call] — the routing table
+        if re.search(pattern, model):
             return engine
     raise LookupError(
         f"No MODEL_ROUTES pattern matches model {model!r} — the table has "
