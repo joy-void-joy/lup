@@ -209,6 +209,11 @@ marimo/_lsp/
 __marimo__/
 
 # Project-specific
+# Session data (traces, outputs, feedback) stays local by default.
+# /lup:init asks whether this repo commits it (the commit-loop pattern);
+# opting in removes these two notes/ lines.
+notes/*
+!notes/.gitkeep
 worktrees/
 tmp/
 .lup/
