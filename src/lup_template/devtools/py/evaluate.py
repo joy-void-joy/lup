@@ -12,67 +12,63 @@ from pprint import pformat
 # py eval — safe expression evaluation
 # ---------------------------------------------------------------------------
 
-BLOCKED_CALLS = frozenset(  # lup: ignore[frozenset-shape] — blocklist
-    {
-        "exec",
-        "eval",
-        "compile",
-        "open",
-        "breakpoint",
-        "exit",
-        "quit",
-        "input",
-        "__import__",
-        "getattr",
-        "hasattr",
-        "vars",
-    }
-)
+# Each blocked name maps to the reason shown when it is refused, so a
+# deny message explains itself instead of just naming the offender.
+BLOCKED_CALLS: dict[str, str] = {  # lup: ignore[dict-str-payload] — reason table
+    "exec": "executes arbitrary code",
+    "eval": "evaluates arbitrary code",
+    "compile": "builds executable code objects",
+    "open": "touches the filesystem",
+    "breakpoint": "drops into a debugger",
+    "exit": "kills the process",
+    "quit": "kills the process",
+    "input": "blocks on stdin",
+    "__import__": "imports arbitrary modules",
+    "getattr": "reaches attributes dynamically, dodging the attribute blocklist",
+    "hasattr": "probes attributes dynamically",
+    "vars": "exposes raw namespaces",
+}
 
-BLOCKED_ATTRS = frozenset(  # lup: ignore[frozenset-shape] — blocklist
-    {
-        "__builtins__",
-        "__class__",
-        "__subclasses__",
-        "__globals__",
-        "__code__",
-        "__func__",
-        "__self__",
-        "__dict__",
-        "__bases__",
-        "__mro__",
-        "__import__",
-        "__loader__",
-        "__spec__",
-    }
-)
+BLOCKED_ATTRS: dict[str, str] = {  # lup: ignore[dict-str-payload] — reason table
+    "__builtins__": "exposes the full builtin namespace",
+    "__class__": "walks the type graph toward arbitrary code",
+    "__subclasses__": "enumerates every loaded class",
+    "__globals__": "exposes a function's module namespace",
+    "__code__": "exposes raw code objects",
+    "__func__": "unwraps bound methods",
+    "__self__": "unwraps bound receivers",
+    "__dict__": "exposes raw namespaces",
+    "__bases__": "walks the type graph",
+    "__mro__": "walks the type graph",
+    "__import__": "imports arbitrary modules",
+    "__loader__": "reaches the import machinery",
+    "__spec__": "reaches the import machinery",
+}
 
-DANGEROUS_MODULES = frozenset(  # lup: ignore[frozenset-shape] — blocklist
-    {
-        "os",
-        "sys",
-        "subprocess",
-        "shutil",
-        "signal",
-        "ctypes",
-        "socket",
-        "http",
-        "urllib",
-        "pathlib",
-        "multiprocessing",
-        "threading",
-        "pickle",
-        "shelve",
-        "marshal",
-        "code",
-        "codeop",
-        "webbrowser",
-        "tempfile",
-        "glob",
-        "io",
-        "builtins",
-    }
-)
+DANGEROUS_MODULES: dict[str, str] = {  # lup: ignore[dict-str-payload] — reason table
+    "os": "process and filesystem control",
+    "sys": "interpreter internals",
+    "subprocess": "spawns processes",
+    "shutil": "filesystem surgery",
+    "signal": "process signal control",
+    "ctypes": "raw memory and C calls",
+    "socket": "network access",
+    "http": "network access",
+    "urllib": "network access",
+    "pathlib": "filesystem access",
+    "multiprocessing": "spawns processes",
+    "threading": "spawns threads",
+    "pickle": "deserializes into arbitrary code",
+    "shelve": "pickle-backed storage",
+    "marshal": "loads raw code objects",
+    "code": "interactive interpreter access",
+    "codeop": "compiles code",
+    "webbrowser": "launches external programs",
+    "tempfile": "filesystem access",
+    "glob": "filesystem enumeration",
+    "io": "filesystem access",
+    "builtins": "exposes the full builtin namespace",
+}
 
 SAFE_BUILTINS: dict[str, object] = {  # lup: ignore[dict-str-object] — live namespace
     "True": True,
@@ -126,13 +122,13 @@ def check_eval_safety(tree: ast.Expression) -> str | None:
     """Return an error message if the expression contains blocked patterns."""
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr in BLOCKED_ATTRS:
-            return f"Blocked attribute: .{node.attr}"
+            return f"Blocked attribute .{node.attr}: {BLOCKED_ATTRS[node.attr]}"
         if isinstance(node, ast.Call):
             func = node.func
             if isinstance(func, ast.Name) and func.id in BLOCKED_CALLS:
-                return f"Blocked call: {func.id}()"
+                return f"Blocked call {func.id}(): {BLOCKED_CALLS[func.id]}"
             if isinstance(func, ast.Attribute) and func.attr in BLOCKED_CALLS:
-                return f"Blocked call: .{func.attr}()"
+                return f"Blocked call .{func.attr}(): {BLOCKED_CALLS[func.attr]}"
     return None
 
 

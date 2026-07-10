@@ -11,6 +11,7 @@ import typer
 from lup.workspace.paths import find_nearest_pyproject
 from lup_template.devtools.py.common import fail, find_module_path, resolve_object
 from lup_template.devtools.py.evaluate import (
+    DANGEROUS_MODULES,
     auto_import_namespace,
     check_eval_safety,
     format_eval_result,
@@ -200,6 +201,8 @@ def eval_cmd(
         StopIteration,
         ImportError,
     ) as e:
+        if isinstance(e, NameError) and e.name in DANGEROUS_MODULES:
+            fail(f"Module {e.name!r} is not auto-imported: {DANGEROUS_MODULES[e.name]}")
         fail(f"{type(e).__name__}: {e}")
 
     typer.echo(format_eval_result(result))
