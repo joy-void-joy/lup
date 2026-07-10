@@ -7,26 +7,31 @@ The loaders live in ``state``, aggregation in ``metrics``, presentation in
 
 from typing import TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, with_config
 
 from lup.telemetry.metrics import MetricsSummary, ToolMetricsDict
+from lup.types import JsonObject
 
 # =============================================================================
 # SESSION JSON TYPES
 # =============================================================================
 
 
+@with_config(ConfigDict(extra="allow"))
 class TokenUsage(TypedDict, total=False):
     input_tokens: int
     output_tokens: int
     cache_read_input_tokens: int
 
 
+@with_config(ConfigDict(extra="allow"))
 class SessionData(TypedDict, total=False):
     """Raw session JSON loaded from disk.
 
     The payload shape comes from :class:`lup.workspace.history.SessionResult`;
     ``_session_id`` and ``_file`` are injected at load time for display.
+    Loads are validated against the declared keys; ``extra="allow"`` keeps the
+    fields a domain adds to its result model, so nothing is dropped.
     """
 
     timestamp: str
@@ -35,7 +40,7 @@ class SessionData(TypedDict, total=False):
     tool_metrics: MetricsSummary
     token_usage: TokenUsage
     cost_usd: float
-    output: dict[str, str]  # lup: ignore[dict-str-payload] — domain output JSON
+    output: JsonObject
     _session_id: str
     _file: str
 

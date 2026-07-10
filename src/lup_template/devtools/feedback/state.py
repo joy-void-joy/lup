@@ -12,14 +12,17 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import cast
 
 import typer
+from pydantic import TypeAdapter, ValidationError
 
 from lup.types import JsonValue
 from lup.workspace.history import iter_session_dirs, list_all_session_ids
 from lup.workspace.paths import feedback_path
 from lup_template.devtools.feedback.models import SessionData, SessionResult
+
+SESSION_DATA_ADAPTER = TypeAdapter(SessionData)
+"""Validating reader for on-disk session JSON."""
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +40,7 @@ def load_sessions(
 
         try:
             raw = json.loads(session_files[0].read_text())
-            data = cast(SessionData, raw)  # lup: ignore[cast] — TypedDict from JSON
+            data = SESSION_DATA_ADAPTER.validate_python(raw)
             data["_session_id"] = session_dir.name
             data["_file"] = str(session_files[0])
 
@@ -48,7 +51,7 @@ def load_sessions(
                     continue
 
             sessions.append(data)
-        except (json.JSONDecodeError, OSError) as e:
+        except (json.JSONDecodeError, OSError, ValidationError) as e:
             logger.warning("Failed to load session %s: %s", session_dir.name, e)
 
     return sessions

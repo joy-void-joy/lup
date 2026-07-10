@@ -36,9 +36,9 @@ from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from functools import wraps
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import TypedDict
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,10 @@ class MetricsSummary(TypedDict):
     total_tool_time_ms: float
     tools_used: int
     by_tool: dict[str, ToolMetricsDict]
+
+
+METRICS_SUMMARY_ADAPTER = TypeAdapter(MetricsSummary)
+"""Validating reader for flushed metrics JSON."""
 
 
 class ToolMetrics(BaseModel):
@@ -276,8 +280,8 @@ def read_metrics_summary(session_dir: Path) -> MetricsSummary | None:
         return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return cast(MetricsSummary, raw)  # lup: ignore[cast] — TypedDict from JSON
-    except (json.JSONDecodeError, OSError):
+        return METRICS_SUMMARY_ADAPTER.validate_python(raw)
+    except (json.JSONDecodeError, OSError, ValidationError):
         logger.exception("Flushed metrics at %s are unreadable", path)
         return None
 
