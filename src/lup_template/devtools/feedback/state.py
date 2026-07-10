@@ -1,6 +1,3 @@
-# lup: ignore[dict-get]
-# The loaders probe SessionData payloads whose keys are all optional, so
-# dict-get is opted out file-wide (mirrors reports.py).
 """Feedback state: session loading, outcome matching, and analysis marks.
 
 This is a TEMPLATE script. Run ``/lup:init`` to customize it for your domain.
@@ -14,24 +11,21 @@ from datetime import datetime
 from pathlib import Path
 
 import typer
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
 from lup.types import JsonValue
 from lup.workspace.history import iter_session_dirs, list_all_session_ids
 from lup.workspace.paths import feedback_path
-from lup_template.devtools.feedback.models import SessionData, SessionResult
-
-SESSION_DATA_ADAPTER = TypeAdapter(SessionData)
-"""Validating reader for on-disk session JSON."""
+from lup_template.devtools.feedback.models import LoadedSession, SessionResult
 
 logger = logging.getLogger(__name__)
 
 
 def load_sessions(
     since: datetime | None = None, version: str | None = None
-) -> list[SessionData]:
+) -> list[LoadedSession]:
     """Load session data, optionally filtered by version."""
-    sessions: list[SessionData] = []  # lup: ignore[empty-collection] — tolerant fold
+    sessions: list[LoadedSession] = []  # lup: ignore[empty-collection] — tolerant fold
 
     for session_dir in iter_session_dirs(version=version):
         session_files = sorted(session_dir.glob("*.json"), reverse=True)
@@ -40,14 +34,12 @@ def load_sessions(
 
         try:
             raw = json.loads(session_files[0].read_text())
-            data = SESSION_DATA_ADAPTER.validate_python(raw)
-            data["_session_id"] = session_dir.name
-            data["_file"] = str(session_files[0])
+            data = LoadedSession.model_validate(raw)
+            data.source_session_id = session_dir.name
+            data.source_file = str(session_files[0])
 
-            ts = data.get("timestamp")
-            if since and ts:
-                session_time = datetime.fromisoformat(ts)
-                if session_time < since:
+            if since and data.timestamp:
+                if datetime.fromisoformat(data.timestamp) < since:
                     continue
 
             sessions.append(data)
@@ -72,7 +64,7 @@ def load_outcomes() -> dict[str, JsonValue]:
 
 
 def match_outcomes(
-    sessions: list[SessionData],
+    sessions: list[LoadedSession],
 ) -> list[SessionResult]:
     """Match sessions to their outcomes/feedback.
 
@@ -84,29 +76,23 @@ def match_outcomes(
     except NotImplementedError as e:
         typer.echo(f"note: collecting without outcomes — {e}", err=True)
         outcomes = {}  # lup: ignore[empty-collection] — degrade to no outcomes
-    results = []  # lup: ignore[empty-collection] — per-session fold
 
-    for session in sessions:
-        session_id = session.get("_session_id", "")
-        timestamp = session.get("timestamp", "")
-
-        outcome_data = outcomes.get(session_id)
-
-        result = SessionResult(
-            session_id=session_id,
-            timestamp=timestamp,
-            agent_sdk=session.get("agent_sdk"),
-            outcome=outcome_data,
-            metrics=session.get("tool_metrics"),
+    return [
+        SessionResult(
+            session_id=session.source_session_id,
+            timestamp=session.timestamp,
+            agent_sdk=session.agent_sdk,
+            # Keyed by whatever ids the domain's outcome source uses.
+            outcome=outcomes.get(session.source_session_id),  # lup: ignore[dict-get]
+            metrics=session.tool_metrics,
         )
-        results.append(result)
-
-    return results
+        for session in sessions
+    ]
 
 
 def load_sessions_for_versions(
     versions: list[str] | None,
-) -> list[SessionData]:
+) -> list[LoadedSession]:
     """Load sessions for a resolved version list (None = all)."""
     if versions is None:
         return load_sessions()

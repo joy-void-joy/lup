@@ -7,42 +7,27 @@ The loaders live in ``state``, aggregation in ``metrics``, presentation in
 
 from typing import TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, with_config
+from pydantic import BaseModel, Field
 
 from lup.telemetry.metrics import MetricsSummary, ToolMetricsDict
-from lup.types import JsonObject
+from lup.types import JsonValue
+from lup.workspace.history import SessionRecord
 
 # =============================================================================
 # SESSION JSON TYPES
 # =============================================================================
 
 
-@with_config(ConfigDict(extra="allow"))
-class TokenUsage(TypedDict, total=False):
-    input_tokens: int
-    output_tokens: int
-    cache_read_input_tokens: int
+class LoadedSession(SessionRecord):
+    """A session record plus load provenance for display.
 
-
-@with_config(ConfigDict(extra="allow"))
-class SessionData(TypedDict, total=False):
-    """Raw session JSON loaded from disk.
-
-    The payload shape comes from :class:`lup.workspace.history.SessionResult`;
-    ``_session_id`` and ``_file`` are injected at load time for display.
-    Loads are validated against the declared keys; ``extra="allow"`` keeps the
-    fields a domain adds to its result model, so nothing is dropped.
+    ``source_session_id`` is the session directory name and ``source_file``
+    the JSON file it was read from — injected by the loaders, distinct from
+    any ``session_id`` the payload itself carries.
     """
 
-    timestamp: str
-    agent_sdk: str
-    outcome: object  # lup: ignore[bare-object] — domain-defined outcome value
-    tool_metrics: MetricsSummary
-    token_usage: TokenUsage
-    cost_usd: float
-    output: JsonObject
-    _session_id: str
-    _file: str
+    source_session_id: str = ""
+    source_file: str = ""
 
 
 # =============================================================================
@@ -82,7 +67,7 @@ class SessionResult(BaseModel):
     session_id: str
     timestamp: str
     agent_sdk: str | None = None
-    outcome: object | None = None  # lup: ignore[bare-object] — domain-defined
+    outcome: JsonValue = None
     metrics: MetricsSummary | None = None
 
 
@@ -140,11 +125,6 @@ class PromptHealthReport(TypedDict):
     rendered_characters: int
     estimated_tokens: int
     sections: list[PromptSection]
-
-
-class FeedbackFileData(TypedDict, total=False):
-    total_sessions: int
-    sessions_with_outcomes: int
 
 
 class BackendCostRow(TypedDict):
