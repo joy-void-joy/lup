@@ -10,12 +10,14 @@ after the fact: a match with no marker, and a marker guarding nothing.
 
 import importlib.util
 import re
+from pathlib import Path
 
 from lup.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
     TS_ANTI_PATTERNS,
     AntiPattern,
     audit_text,
+    empty_collection_exempt_lines,
 )
 from lup_template.devtools.dev.gen_hook import HOOK_PATH, render_hook_text
 
@@ -116,6 +118,88 @@ def test_audit_skips_file_level_ignore() -> None:
 def test_audit_skips_plain_comment_lines() -> None:
     findings = audit_text("# a comment mentioning Any in prose\n", PYTHON_ANTI_PATTERNS)
     assert findings == []
+
+
+# ── empty-collection AST refiner ──────────────────────────────────────────
+
+INIT_STATE = """\
+class Scheduler:
+    def __init__(self) -> None:
+        self.reminders = []
+        self.actions: list[str] = []
+"""
+
+CLASS_FIELD = """\
+class Settings:
+    table: dict[str, list[str]] = {}
+"""
+
+CALL_KWARG = "result = Report(files=[], errors=0)\n"
+
+LOCAL_SEED = """\
+def build() -> list[int]:
+    items = []
+    for i in range(3):
+        items.append(i)
+    return items
+"""
+
+MODULE_SEED = "REGISTRY = {}\n"
+
+
+def test_refiner_exempts_deliberate_defaults() -> None:
+    assert empty_collection_exempt_lines(INIT_STATE) == {3, 4}
+    assert empty_collection_exempt_lines(CLASS_FIELD) == {2}
+    assert empty_collection_exempt_lines(CALL_KWARG) == {1}
+
+
+def test_refiner_keeps_flagging_seeds() -> None:
+    assert empty_collection_exempt_lines(LOCAL_SEED) == set()
+    assert empty_collection_exempt_lines(MODULE_SEED) == set()
+
+
+def test_refiner_unparseable_source_exempts_nothing() -> None:
+    assert empty_collection_exempt_lines("def broken(:\n") == set()
+
+
+def test_audit_exempt_line_needs_no_marker() -> None:
+    assert audit_text(INIT_STATE, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_marker_on_exempt_line_is_spurious() -> None:
+    marked = INIT_STATE.replace(
+        "self.reminders = []",
+        "self.reminders = []  # lup: ignore[empty-collection]",
+    )
+    findings = audit_text(marked, PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["spurious"]
+
+
+def test_audit_local_seed_still_flags() -> None:
+    findings = audit_text(LOCAL_SEED, PYTHON_ANTI_PATTERNS)
+    assert [f.kind for f in findings] == ["missing"]
+    assert findings[0].rule_id == "empty-collection"
+
+
+def test_hook_refiner_exempts_init_state_edit(tmp_path: Path) -> None:
+    """The hook composes the post-edit file, so state added inside __init__
+    passes with no marker while a module-level seed still denies."""
+    target = tmp_path / "mod.py"
+    target.write_text(
+        "class Scheduler:\n    def __init__(self) -> None:\n        self.a = 1\n",
+        encoding="utf-8",
+    )
+
+    allowed = hook.anti_pattern_decision(
+        str(target),
+        "        self.a = 1\n",
+        "        self.a = 1\n        self.pending = []\n",
+    )
+    assert allowed is None
+
+    denied = hook.anti_pattern_decision(str(target), "", "items = {}\n")
+    assert denied is not None
+    assert "empty-collection" in str(denied)
 
 
 def test_audit_skips_docstring_prose() -> None:
