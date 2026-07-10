@@ -18,11 +18,17 @@ Express each exclusion whichever way is cheaper to maintain:
   external server tools per dependency and subtract them.
 """
 
-from collections.abc import Iterable, Sequence
+import logging
+from collections.abc import Mapping, Sequence
 
 from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_names
 
+logger = logging.getLogger(__name__)
+
 type NameSet = set[str]  # lup: ignore[set-shape] — membership-tested name sets
+
+type ExclusionReasons = dict[str, str]  # lup: ignore[dict-str-payload] — name → why off
+"""Each excluded tool/tag name mapped to the reason it is unavailable."""
 
 
 class BaseToolPolicy:
@@ -40,26 +46,37 @@ class BaseToolPolicy:
         self,
         *,
         restricted_mode: bool = False,
-        excluded_tools: Iterable[str] | None = None,
-        excluded_tags: Iterable[str] | None = None,
+        excluded_tools: Mapping[str, str] | None = None,
+        excluded_tags: Mapping[str, str] | None = None,
     ) -> None:
+        """Each exclusion maps the tool/tag name to the reason it is off
+        ("EXAMPLE_API_KEY is not configured", "restricted mode"), so
+        availability answers can say why, not just no.
+        """
         self.restricted_mode = restricted_mode
-        # Internal state is set-shaped for the exclusion algebra
-        # (difference/intersection in the filters below).
-        tools_off = set(excluded_tools or ())  # lup: ignore[set-shape]
-        tags_off = set(excluded_tags or ())  # lup: ignore[set-shape]
-        self.excluded_tools: NameSet = tools_off
-        self.excluded_tags: NameSet = tags_off
+        self.excluded_tools: ExclusionReasons = dict(excluded_tools or {})
+        self.excluded_tags: ExclusionReasons = dict(excluded_tags or {})
 
     def filter_tools(self, tools: Sequence[LupMcpTool]) -> list[LupMcpTool]:
         """Drop tools whose tags intersect the policy's excluded tags.
 
         Apply before ``create_mcp_server`` so tools with unmet
         requirements are never registered — the agent only sees tools it
-        can actually use. Untagged tools always pass through.
+        can actually use. Untagged tools always pass through. Each drop
+        is debug-logged with the excluded tags' reasons.
         """
-        excluded = self.excluded_tags
-        return [tool for tool in tools if not excluded.intersection(tool.tags)]
+        kept: list[LupMcpTool] = []  # lup: ignore[empty-collection] — filter+log fold
+        for tool in tools:
+            hits = sorted(self.excluded_tags.keys() & tool.tags)
+            if hits:
+                logger.debug(
+                    "tool %s excluded: %s",
+                    tool.name,
+                    "; ".join(self.excluded_tags[tag] for tag in hits),
+                )
+                continue
+            kept.append(tool)
+        return kept
 
     def get_mcp_servers(
         self, *additional_servers: LupMcpServerConfig
@@ -142,10 +159,16 @@ class BaseToolPolicy:
             for tool_name in server_tool_names(server):
                 tools.add(f"mcp__{server_name}__{tool_name}")
 
-        tools -= self.excluded_tools
+        tools -= self.excluded_tools.keys()
 
         return sorted(tools)
 
     def is_tool_available(self, tool_name: str) -> bool:
         """Check if a specific tool is available under this policy."""
         return tool_name not in self.excluded_tools
+
+    def exclusion_reason(self, tool_name: str) -> str | None:
+        """Why a tool is unavailable by name, or None when it is allowed."""
+        if tool_name in self.excluded_tools:
+            return self.excluded_tools[tool_name]
+        return None
