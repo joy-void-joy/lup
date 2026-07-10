@@ -18,6 +18,7 @@ Examples::
 from typing import Annotated, Literal, TypedDict
 
 import sh
+import tomlkit
 import typer
 
 from lup.workspace.history import parse_semver
@@ -265,16 +266,13 @@ def bump_cmd(
             typer.echo(f"Would tag: v{new_version}")
         return
 
-    content = pyproject.read_text()
-    # A comment-and-format-preserving one-line rewrite: tomllib cannot write,
-    # and the full-document TOML writers would reformat the whole file.
-    new_content = content.replace(  # lup: ignore[string-replace]
-        f'agent_version = "{current}"', f'agent_version = "{new_version}"'
-    )
-    if new_content == content:
-        typer.echo(f"Could not find 'agent_version = \"{current}\"' in pyproject.toml")
-        raise typer.Exit(1)
-    pyproject.write_text(new_content)
+    doc = tomlkit.parse(pyproject.read_text())
+    try:
+        doc["tool"]["lup"]["agent_version"] = new_version
+    except (KeyError, TypeError):
+        typer.echo("No [tool.lup] agent_version table in pyproject.toml")
+        raise typer.Exit(1) from None
+    pyproject.write_text(tomlkit.dumps(doc))
 
     git.add(str(pyproject))
     git.commit("-m", f"chore(version): bump {current} → {new_version}")
