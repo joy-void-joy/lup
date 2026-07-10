@@ -70,7 +70,7 @@ class Engine(ABC):
         """
 
     @abstractmethod
-    def builtin_tools(self) -> frozenset[str]:
+    def builtin_tools(self) -> frozenset[str]:  # lup: ignore[frozenset-shape]
         """The engine's builtin tool-name table.
 
         Names what the backend's native activity surfaces as in lup
