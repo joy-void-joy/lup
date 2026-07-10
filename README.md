@@ -109,7 +109,7 @@ Development happens in git worktrees — one directory per branch, siblings unde
 
 ### Feedback loop
 
-Every agent session writes its traces, outputs, and session JSONs under `notes/traces/<version>/`. /lup:feedback-loop orchestrates the analysis over them: collect metrics (`lup-devtools feedback collect`), read traces deeply (`lup-devtools trace show`), classify what failed and why, then implement changes — tools first, prompts last. /lup:bump versions the agent (`[tool.lup] agent_version` in pyproject.toml) so results stay comparable across behavior changes.
+Every agent session writes its traces, outputs, and session JSONs under `notes/traces/<version>/`. This data stays out of git by default (`notes/*` is gitignored); domains that want each run's outputs versioned opt in during /lup:init, which removes the ignore lines and keeps the auto-commit loop. /lup:feedback-loop orchestrates the analysis over them: collect metrics (`lup-devtools feedback collect`), read traces deeply (`lup-devtools trace show`), classify what failed and why, then implement changes — tools first, prompts last. /lup:bump versions the agent (`[tool.lup] agent_version` in pyproject.toml) so results stay comparable across behavior changes.
 
 # More thorough description
 
