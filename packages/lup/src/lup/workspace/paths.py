@@ -46,6 +46,7 @@ Examples:
         ''
 """
 
+import functools
 import re
 from datetime import datetime
 from pathlib import Path
@@ -67,6 +68,21 @@ def find_project_root() -> Path:
     raise RuntimeError(
         "Could not find project root (no pyproject.toml with [tool.lup] found)"
     )
+
+
+@functools.cache
+def find_nearest_pyproject() -> Path | None:
+    """Find the nearest directory holding a pyproject.toml, walking up from cwd.
+
+    Unlike :func:`find_project_root` — which anchors on this installation's
+    ``[tool.lup]`` pyproject and raises when absent — this matches any
+    project's ``pyproject.toml`` and returns ``None`` when there is none.
+    """
+    cwd = Path.cwd()
+    for parent in [cwd, *cwd.parents]:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    return None
 
 
 def read_agent_version(root: Path) -> str:

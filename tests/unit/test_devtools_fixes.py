@@ -213,21 +213,21 @@ class TestPrCreate:
 
 class TestDefinedIn:
     def test_imported_class_excluded(self) -> None:
-        from lup_template.devtools import py
+        from lup_template.devtools.py import common, info
 
-        # py.py imports Path from pathlib; it is not defined there.
-        assert not py.defined_in(py, "Path")
+        # common.py imports Path from pathlib; it is not defined there.
+        assert not info.defined_in(common, "Path")
 
     def test_imported_module_excluded(self) -> None:
-        from lup_template.devtools import py
+        from lup_template.devtools.py import common, info
 
-        # py.py imports the inspect module; it is not defined there.
-        assert not py.defined_in(py, "inspect")
+        # common.py imports the importlib module; it is not defined there.
+        assert not info.defined_in(common, "importlib")
 
     def test_locally_defined_function_included(self) -> None:
-        from lup_template.devtools import py
+        from lup_template.devtools.py import common, info
 
-        assert py.defined_in(py, "resolve_object")
+        assert info.defined_in(common, "resolve_object")
 
 
 # ── fix 16: feedback state tolerates tool_metrics: null ───────────────────
