@@ -121,51 +121,6 @@ async def send_interruptible(
         loop.remove_signal_handler(signal.SIGINT)
 
 
-def apply_repl_overrides(
-    adapter: object,
-    *,
-    no_tools: bool,
-    no_prompt: bool,
-) -> None:
-    """Apply ``--no-tools``/``--no-prompt`` to a built adapter.
-
-    Realized on the native configuration carried by the client's
-    sessions component, which ``session()`` reads at open time (the
-    served-tools config, the system prompt/developer instructions).
-    Unknown compositions warn so the flags are never silently ignored.
-    """
-    if not no_tools and not no_prompt:
-        return
-
-    from lup.adapters.clients.claude.sessions import ClaudeSessions
-    from lup.adapters.clients.codex.sessions import CodexSessions
-    from lup.adapters.clients.composed import ComposedClient
-
-    match adapter:
-        case ComposedClient(sessions=ClaudeSessions() as sessions):
-            options = sessions.options
-            if no_tools:
-                options.mcp_servers = {}
-                options.allowed_tools = []
-            if no_prompt:
-                options.system_prompt = None
-        case ComposedClient(sessions=CodexSessions() as sessions):
-            if no_tools:
-                sessions.native.config_overrides = [
-                    override
-                    for override in sessions.native.config_overrides
-                    if not override.startswith("mcp_servers.")
-                ]
-            if no_prompt:
-                sessions.native.system_prompt = ""
-        case _:
-            typer.echo(
-                "Warning: --no-tools/--no-prompt not supported on "
-                f"{type(adapter).__name__}",
-                err=True,
-            )
-
-
 def build_repl_adapter(
     model: str | None,
     *,
@@ -174,23 +129,16 @@ def build_repl_adapter(
 ) -> Client:
     """Build the agent client for a REPL session, overrides applied.
 
-    ``build_session_client`` reads ``settings.model`` for every engine, so
-    the ``--model`` override is set there for the build and restored
-    after. ``--no-tools``/``--no-prompt`` are realized via
-    :func:`apply_repl_overrides`. Session-scoped resources (sandbox
-    cleanup) live inside ``client.session()``.
+    The overrides are assembly knobs on the neutral options
+    (``build_session_options``) — realized before translation, on every
+    engine alike, never by patching a built client. Session-scoped
+    resources (sandbox cleanup) live inside ``client.session()``.
     """
     from lup_template.agent.core import build_session_client
 
-    original_model = settings.model
-    if model:
-        settings.model = model
-    try:
-        build = build_session_client("repl")
-    finally:
-        settings.model = original_model
-    apply_repl_overrides(build.client, no_tools=no_tools, no_prompt=no_prompt)
-    return build.client
+    return build_session_client(
+        "repl", model=model, toolless=no_tools, bare_prompt=no_prompt
+    ).client
 
 
 def print_response_stats(response: LupResponse, console: "Console") -> float:

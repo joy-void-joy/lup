@@ -112,6 +112,9 @@ def build_session_options(
     notes: "NotesConfig",
     *,
     realtime: bool = False,
+    model: str | None = None,
+    toolless: bool = False,
+    bare_prompt: bool = False,
 ) -> "LupAgentOptions":
     """Assemble the whole session in neutral terms — no engine named.
 
@@ -123,6 +126,16 @@ def build_session_options(
     pass through as the user set them — an engine refuses at construction
     what it cannot honor, and unset knobs get engine defaults. Sessions
     persist, so ``lup run --resume`` can continue them.
+
+    The keyword overrides are assembly knobs (the REPL's ``--model``,
+    ``--no-tools``, ``--no-prompt``): ``model`` replaces the configured
+    session model everywhere it is read, ``toolless`` skips the tool
+    assembly on both sides — no tool servers, no served groups, none of
+    the tool-coupled hooks (reflection gate, completion guard, allowlist),
+    no code-execution sandbox; the permission hooks stay — and
+    ``bare_prompt`` sends an empty system prompt with the coding-harness
+    preset off. Overrides are realized here, in neutral terms, never by
+    patching a translated client.
     """
     from lup.adapters.tools.claude import CLAUDE_BUILTIN_TOOLS
     from lup.hooks import (
@@ -132,7 +145,7 @@ def build_session_options(
         merge_hooks,
     )
     from lup.adapters.options import LupAgentOptions
-    from lup.mcp import create_mcp_server
+    from lup.mcp import McpServerEntry, create_mcp_server
     from lup.realtime.relay import REALTIME_DIRNAME
     from lup.reflect import create_reflection_gate
 
@@ -144,56 +157,65 @@ def build_session_options(
         tool_group_names,
     )
 
-    sandbox = build_session_sandbox(notes)
+    effective_model = model or settings.model
     policy = ToolPolicy(settings)
 
-    # In-process assembly — consumed by hook-enforced engines (claude*).
-    toolset = build_session_toolset(
-        session_dir=notes.session,
-        outputs_dir=notes.output.parent,
-        include_subagent_tool=False,
-        sandbox=sandbox,
-    )
-    all_servers = [
-        create_mcp_server(name, tools=policy.filter_tools(tools))
-        for name, tools in toolset["groups"].items()
-        if name != EXAMPLE_GROUP
-    ]
-    policy_servers = policy.get_mcp_servers(*all_servers)
     hooks = create_permission_hooks(rw_dirs=notes.rw, ro_dirs=notes.ro)
-    hooks = merge_hooks(
-        hooks,
-        create_reflection_gate(
-            gate=toolset["gate"],
-            gated_tool="mcp__notes__submit_output",
-            reflection_tool_name="mcp__notes__review",
-        ),
-    )
-    hooks = merge_hooks(hooks, create_completion_guard(toolset["output_path"].exists))
-    # Tool allowlist: allowed_tools in options is ignored under
-    # bypassPermissions, so availability is enforced by a PreToolUse hook.
-    allowed_tools = policy.get_allowed_tools(
-        policy_servers, builtin_tools=CLAUDE_BUILTIN_TOOLS
-    )
-    hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
+    policy_servers: dict[str, McpServerEntry] = {}  # lup: ignore[empty-collection]
+    allowed_tools: list[str] = []  # lup: ignore[empty-collection]
+    served_groups: list[str] = []  # lup: ignore[empty-collection]
+    if not toolless:
+        # In-process assembly — consumed by hook-enforced engines (claude*).
+        toolset = build_session_toolset(
+            session_dir=notes.session,
+            outputs_dir=notes.output.parent,
+            include_subagent_tool=False,
+            sandbox=build_session_sandbox(notes),
+        )
+        all_servers = [
+            create_mcp_server(name, tools=policy.filter_tools(tools))
+            for name, tools in toolset["groups"].items()
+            if name != EXAMPLE_GROUP
+        ]
+        policy_servers = policy.get_mcp_servers(*all_servers)
+        hooks = merge_hooks(
+            hooks,
+            create_reflection_gate(
+                gate=toolset["gate"],
+                gated_tool="mcp__notes__submit_output",
+                reflection_tool_name="mcp__notes__review",
+            ),
+        )
+        hooks = merge_hooks(
+            hooks, create_completion_guard(toolset["output_path"].exists)
+        )
+        # Tool allowlist: allowed_tools in options is ignored under
+        # bypassPermissions, so availability is enforced by a PreToolUse hook.
+        allowed_tools = policy.get_allowed_tools(
+            policy_servers, builtin_tools=CLAUDE_BUILTIN_TOOLS
+        )
+        hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
+        served_groups = list(
+            policy.filter_group_names(tool_group_names(realtime=realtime))
+        )
 
     # Subprocess assembly — consumed by natively-sandboxed engines (codex*).
     realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
     system_prompt, mcp_env, writable_roots = build_codex_session(
-        notes, realtime_dir=realtime_dir
+        notes, realtime_dir=realtime_dir, model=effective_model
     )
+    if bare_prompt:
+        system_prompt = ""
 
     return LupAgentOptions(
-        model=settings.model,
+        model=effective_model,
         system_prompt=system_prompt,
-        coding_harness_preset=True,
+        coding_harness_preset=not bare_prompt,
         tool_servers=policy_servers,
         subagents=get_subagent_specs(),
         hooks=hooks,
         allowed_tools=allowed_tools,
-        served_tool_groups=list(
-            policy.filter_group_names(tool_group_names(realtime=realtime))
-        ),
+        served_tool_groups=served_groups,
         add_dirs=list(notes.all_dirs),
         permission_mode=settings.permission_mode,
         max_turns=settings.max_turns,
@@ -220,6 +242,7 @@ def build_codex_session(
     notes: "NotesConfig",
     *,
     realtime_dir: Path | None = None,
+    model: str | None = None,
 ) -> tuple[str, dict[str, str], list[Path]]:
     """Shared scaffolding for Codex-runtime adapters.
 
@@ -255,7 +278,7 @@ def build_codex_session(
     mcp_env = {
         **context.to_env(),
         "AGENT_SDK": settings.agent_sdk,
-        "AGENT_MODEL": settings.model,
+        "AGENT_MODEL": model or settings.model,
     }
     if settings.aux_model:
         mcp_env["AGENT_AUX_MODEL"] = settings.aux_model
@@ -355,6 +378,9 @@ def build_session_client(
     task_id: str | None = None,
     *,
     realtime: bool = False,
+    model: str | None = None,
+    toolless: bool = False,
+    bare_prompt: bool = False,
 ) -> SessionBuild:
     """Build the session's client for ``settings.agent_sdk``.
 
@@ -362,11 +388,19 @@ def build_session_client(
     to ``create_client`` with the configured engine — no ``match`` on the
     backend, no native option type. Session-scoped resources live inside
     ``client.session()``; session artifacts are read from the notes.
+    ``model``/``toolless``/``bare_prompt`` pass through to
+    :func:`build_session_options` (the REPL's overrides).
     """
     from lup.adapters.wiring import create_client
 
     notes = setup_notes(session_id, task_id or "0")
-    opts = build_session_options(notes, realtime=realtime)
+    opts = build_session_options(
+        notes,
+        realtime=realtime,
+        model=model,
+        toolless=toolless,
+        bare_prompt=bare_prompt,
+    )
     return SessionBuild(
         client=create_client(options=opts, engine=engine_for_settings()),
         notes=notes,
