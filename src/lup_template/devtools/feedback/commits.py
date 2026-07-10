@@ -105,12 +105,11 @@ def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
         except sh.ErrorReturnCode as e:
             logger.warning("Failed to stage %s: %s", path, e)
 
-    diff = str(git.diff("--cached", "--stat", _ok_code=[0, 1])).strip()
-    if not diff:
+    if not git.out("diff", "--cached", "--stat", _ok_code=[0, 1]):
         return False
 
     summary = get_session_summary(session_id)
-    slug = summary[:50].strip().rstrip(".")
+    slug = summary[:50].strip().rstrip(".")  # lup: ignore[string-strip] — title slug
     git.commit("-m", f"data(sessions): {slug}")
     typer.echo(f"  Committed {session_id}: {slug}")
     return True

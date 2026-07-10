@@ -10,6 +10,8 @@ from lup_template.devtools.dev.boundaries import scan_boundaries
 from lup_template.devtools.dev.comments import scan_tracked
 from lup_template.devtools.utils import git, uv
 
+type CheckOutcome = tuple[str, bool]  # lup: ignore[tuple-shape] — (name, passed)
+
 
 def run_checks(fix: bool, no_test: bool) -> None:
     """Run ruff format, ruff check, pyright, and pytest in sequence.
@@ -17,7 +19,7 @@ def run_checks(fix: bool, no_test: bool) -> None:
     Read-only by default (reports issues without modifying files).
     Pass *fix* to auto-fix formatting and lint issues.
     """
-    results: list[tuple[str, bool]] = []
+    results: list[CheckOutcome] = []  # lup: ignore[empty-collection] — check fold
 
     # ruff format
     try:
@@ -49,9 +51,8 @@ def run_checks(fix: bool, no_test: bool) -> None:
         results.append(("ruff check", False))
 
     if fix:
-        modified = str(git("diff", "--name-only", _ok_code=[0])).strip()
-        if modified:
-            changed = modified.splitlines()
+        changed = git.lines("diff", "--name-only", _ok_code=[0])
+        if changed:
             typer.echo(f"  auto-fixed {len(changed)} file(s)")
             for f in changed:
                 typer.echo(f"    {f}")
