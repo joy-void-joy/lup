@@ -98,6 +98,16 @@ def test_audit_flags_typed_ignore_guarding_nothing() -> None:
     assert "tuple-shape" in findings[0].message
 
 
+def test_audit_leaves_foreign_scanner_ids_alone() -> None:
+    # seam-boundary belongs to the boundary scan; the auditor owns no rule
+    # by that id and must not call its typed ignore spurious.
+    foreign = "import x.claude  # lup: ignore[seam-boundary]\n"
+    assert audit_text(foreign, PYTHON_ANTI_PATTERNS) == []
+
+    unowned = "import x.claude  # lup: ignore[no-such-rule]\n"
+    assert [f.kind for f in audit_text(unowned, PYTHON_ANTI_PATTERNS)] == ["spurious"]
+
+
 def test_audit_skips_file_level_ignore() -> None:
     findings = audit_text("# lup: ignore\nx: Any = 1\n", PYTHON_ANTI_PATTERNS)
     assert findings == []
