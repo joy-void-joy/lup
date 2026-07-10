@@ -49,7 +49,7 @@ Examples:
 
 import json
 import logging
-import re
+import re  # lup: ignore[import-re] — the semver parser
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
@@ -110,7 +110,11 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     outcome: str | None = Field(default=None, description="Outcome after resolution")
 
 
-def save_session(result: BaseModel, *, session_id: str) -> Path:
+def save_session(
+    result: BaseModel,  # lup: ignore[bare-basemodel] — any domain's result model
+    *,
+    session_id: str,
+) -> Path:
     """Save a session result to disk.
 
     Args:
@@ -145,7 +149,7 @@ def session_backend(session_dir: Path) -> str | None:
         except (json.JSONDecodeError, OSError):
             continue
         if isinstance(data, dict):
-            sdk = data.get("agent_sdk")
+            sdk = data.get("agent_sdk")  # lup: ignore[dict-get] — payload probe
             if isinstance(sdk, str):
                 return sdk
     return None
@@ -163,7 +167,7 @@ def load_sessions_json(session_id: str) -> list[SessionData]:
     Returns:
         List of session dicts, sorted by timestamp field (oldest first).
     """
-    sessions: list[SessionData] = []
+    sessions: list[SessionData] = []  # lup: ignore[empty-collection] — tolerant fold
 
     for session_dir in iter_session_dirs(session_id=session_id):
         for filepath in sorted(session_dir.glob("*.json")):
@@ -173,7 +177,7 @@ def load_sessions_json(session_id: str) -> list[SessionData]:
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to load session from %s: %s", filepath, e)
 
-    sessions.sort(key=lambda s: str(s.get("timestamp", "")))
+    sessions.sort(key=lambda s: str(s.get("timestamp", "")))  # lup: ignore[dict-get]
     return sessions
 
 
@@ -206,9 +210,11 @@ def update_session_metadata(
     Returns:
         True if a session was updated, False if not found.
     """
-    all_files: list[Path] = []
-    for session_dir in iter_session_dirs(session_id=session_id):
-        all_files.extend(session_dir.glob("*.json"))
+    all_files = [
+        filepath
+        for session_dir in iter_session_dirs(session_id=session_id)
+        for filepath in session_dir.glob("*.json")
+    ]
 
     if not all_files:
         return False
@@ -250,9 +256,10 @@ def default_session_formatter(session: SessionData) -> str:
     Extracts common fields that most domains will have. Downstream
     projects can provide a custom formatter for domain-specific display.
     """
-    lines: list[str] = [f"### {session.get('timestamp', 'unknown')}"]
+    stamp = session.get("timestamp", "unknown")  # lup: ignore[dict-get]
+    lines: list[str] = [f"### {stamp}"]
 
-    output = session.get("output", {})
+    output = session.get("output", {})  # lup: ignore[dict-get] — optional key
     if isinstance(output, dict):
         if "summary" in output:
             lines.append(f"**Summary**: {str(output['summary'])[:200]}...")
@@ -261,7 +268,7 @@ def default_session_formatter(session: SessionData) -> str:
             if isinstance(confidence, (int, float)):
                 lines.append(f"**Confidence**: {confidence:.1%}")
 
-    if session.get("outcome"):
+    if session.get("outcome"):  # lup: ignore[dict-get] — optional key
         lines.append(f"**Outcome**: {session['outcome']}")
 
     lines.append("")
@@ -377,20 +384,19 @@ def iter_trace_log_files(
 
 def list_all_session_ids(version: str | None = None) -> list[str]:
     """Return all session IDs across versions, deduplicated."""
-    ids: set[str] = set()
-    for d in iter_session_dirs(version=version):
-        ids.add(d.name)
-    return sorted(ids)
+    return sorted({d.name for d in iter_session_dirs(version=version)})
 
 
 # -- Version scope resolution ------------------------------------------------
 
 MIN_VERSION_DATAPOINTS = 10
 
-SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")  # lup: ignore[re-call] — the parser
 
 
-def parse_semver(version: str) -> tuple[int, int, int] | None:
+def parse_semver(
+    version: str,
+) -> tuple[int, int, int] | None:  # lup: ignore[tuple-shape]
     """Parse 'X.Y.Z' into (major, minor, patch), or None if invalid."""
     m = SEMVER_RE.match(version)
     if not m:
@@ -407,7 +413,7 @@ def resolve_version(
     version: str | None,
     all_versions: bool = False,
     min_datapoints: int = MIN_VERSION_DATAPOINTS,
-) -> tuple[list[str] | None, str | None]:
+) -> tuple[list[str] | None, str | None]:  # lup: ignore[tuple-shape] — (scope, label)
     """Resolve effective version scope with progressive semver fallback.
 
     Fallback chain: exact version → X.Y.* → X.* → all versions.

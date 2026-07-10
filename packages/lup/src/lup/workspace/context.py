@@ -37,7 +37,7 @@ class SessionContext(BaseModel):
     task_id: str | None = None
     realtime_dir: Path | None = None
 
-    def to_env(self) -> dict[str, str]:
+    def to_env(self) -> dict[str, str]:  # lup: ignore[dict-str-payload] — env map
         """Serialize to the env vars consumed by read_session_context()."""
         env = {SESSION_DIR_ENV: str(self.session_dir)}
         if self.outputs_dir is not None:
@@ -54,27 +54,29 @@ class SessionContext(BaseModel):
 
 
 def read_session_context(
-    environ: Mapping[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,  # lup: ignore[dict-str-payload]
 ) -> SessionContext | None:
     """Read a SessionContext from env vars, or None when not in a session.
 
     Returns None when ``LUP_SESSION_DIR`` is unset — the marker that the
     process was not launched by an adapter (e.g. plain devtools usage).
+    This module IS the subprocess env boundary, so it reads ``os.environ``
+    directly rather than through settings.
     """
-    env = os.environ if environ is None else environ
-    session_dir = env.get(SESSION_DIR_ENV)
+    env = os.environ if environ is None else environ  # lup: ignore[os-environ]
+    session_dir = env.get(SESSION_DIR_ENV)  # lup: ignore[dict-get] — env map
     if not session_dir:
         return None
 
     def path_or_none(key: str) -> Path | None:
-        value = env.get(key)
+        value = env.get(key)  # lup: ignore[dict-get] — env map
         return Path(value) if value else None
 
     return SessionContext(
         session_dir=Path(session_dir),
         outputs_dir=path_or_none(OUTPUTS_DIR_ENV),
         gate_flag=path_or_none(GATE_FLAG_ENV),
-        session_id=env.get(SESSION_ID_ENV) or None,
-        task_id=env.get(TASK_ID_ENV) or None,
+        session_id=env.get(SESSION_ID_ENV) or None,  # lup: ignore[dict-get]
+        task_id=env.get(TASK_ID_ENV) or None,  # lup: ignore[dict-get]
         realtime_dir=path_or_none(REALTIME_DIR_ENV),
     )

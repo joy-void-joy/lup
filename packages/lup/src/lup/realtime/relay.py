@@ -172,6 +172,9 @@ type RelayEvent = Annotated[
 
 RELAY_EVENT_ADAPTER: TypeAdapter[RelayEvent] = TypeAdapter(RelayEvent)
 
+type EventOffset = tuple[RelayEvent, int]  # lup: ignore[tuple-shape] — commit pair
+"""One parsed event with the file offset that consumes it (crash-safe apply)."""
+
 
 class RelayState(BaseModel):
     """Parent-maintained snapshot served to the agent's context tool.
@@ -269,7 +272,7 @@ class RealtimeMailbox:
 
     # -- parent side -----------------------------------------------------
 
-    def peek_new_events(self) -> list[tuple[RelayEvent, int]]:
+    def peek_new_events(self) -> list[EventOffset]:
         """Parse new events without advancing past un-applied ones.
 
         Returns ``(event, commit_offset)`` pairs in file order. Applying
@@ -290,11 +293,11 @@ class RealtimeMailbox:
         region = data[: end + 1]
         region_end = self.read_offset + len(region)
 
-        pairs: list[tuple[RelayEvent, int]] = []
+        pairs: list[EventOffset] = []  # lup: ignore[empty-collection] — offset fold
         consumed = self.read_offset
         for raw_line in region.splitlines(keepends=True):
             consumed += len(raw_line)
-            line = raw_line.strip()
+            line = raw_line.strip()  # lup: ignore[string-strip] — mailbox framing
             if not line:
                 continue
             try:
@@ -570,8 +573,9 @@ async def apply_relay_event(
 
 def default_wake_message(result: SleepResult) -> str:
     """Minimal wake message; supply build_wake_message for domain context."""
-    parts = [f"[wake] reason: {result.get('reason', 'timer')}"]
-    fired = result.get("fired_reminders")
+    reason = result.get("reason", "timer")  # lup: ignore[dict-get] — optional key
+    parts = [f"[wake] reason: {reason}"]
+    fired = result.get("fired_reminders")  # lup: ignore[dict-get] — optional key
     if fired:
         parts.append("fired reminders: " + ", ".join(fired))
     parts.append("Read context, act as needed, then meta and sleep again.")

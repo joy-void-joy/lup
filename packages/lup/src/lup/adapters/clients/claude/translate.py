@@ -21,6 +21,10 @@ SESSION_THINKING_TOKENS = 128_000 - 1
 allows. A session (``session_defaults``) that leaves ``max_thinking_tokens``
 unset runs at this; a nested one-shot keeps the SDK default."""
 
+# CLI flag names to values: open, flag-shaped keys, filled conditionally.
+type ExtraArgs = dict[str, str | None]  # lup: ignore[dict-str-payload]
+type ClaudeServerMap = dict[str, claude_types.McpSdkServerConfig | RawMcpServerConfig]
+
 
 def spec_to_claude(spec: SubagentSpec) -> claude_types.AgentDefinition:
     """Convert a SubagentSpec to a Claude AgentDefinition.
@@ -73,11 +77,11 @@ def build_claude_options(opts: LupAgentOptions) -> claude.ClaudeAgentOptions:
         if permission_mode is None:
             permission_mode = "bypassPermissions"
 
-    extra_args: dict[str, str | None] = {}
+    extra_args: ExtraArgs = {}  # lup: ignore[empty-collection]
     if not opts.persist_session:
         extra_args["no-session-persistence"] = None
 
-    mcp_servers: dict[str, claude_types.McpSdkServerConfig | RawMcpServerConfig] = {}
+    mcp_servers: ClaudeServerMap = {}  # lup: ignore[empty-collection] — server fold
     for name, server in opts.tool_servers.items():
         match server:
             case LupMcpServerConfig():

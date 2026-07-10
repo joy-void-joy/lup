@@ -67,7 +67,9 @@ class ColorAssigner:
 
     def __init__(self) -> None:
         self.cycle = itertools.cycle(TOOL_COLORS)
-        self.by_id: dict[str, str] = {}
+        # Open tool-use-id -> color map, filled as blocks arrive.
+        by_id: dict[str, str] = {}  # lup: ignore[dict-str-payload, empty-collection]
+        self.by_id = by_id
 
 
 DEFAULT_COLORS = ColorAssigner()

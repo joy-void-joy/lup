@@ -22,6 +22,8 @@ from collections.abc import Sequence
 
 from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_names
 
+type NameSet = set[str]  # lup: ignore[set-shape] — membership-tested name sets
+
 
 class BaseToolPolicy:
     """Centralized machinery for tool availability.
@@ -38,12 +40,14 @@ class BaseToolPolicy:
         self,
         *,
         restricted_mode: bool = False,
-        excluded_tools: set[str] | None = None,
-        excluded_tags: set[str] | None = None,
+        excluded_tools: NameSet | None = None,
+        excluded_tags: NameSet | None = None,
     ) -> None:
         self.restricted_mode = restricted_mode
-        self.excluded_tools: set[str] = set(excluded_tools or ())
-        self.excluded_tags: set[str] = set(excluded_tags or ())
+        tools_off = set(excluded_tools or ())  # lup: ignore[set-shape]
+        tags_off = set(excluded_tags or ())  # lup: ignore[set-shape]
+        self.excluded_tools: NameSet = tools_off
+        self.excluded_tags: NameSet = tags_off
 
     def filter_tools(self, tools: Sequence[LupMcpTool]) -> list[LupMcpTool]:
         """Drop tools whose tags intersect the policy's excluded tags.
@@ -52,7 +56,8 @@ class BaseToolPolicy:
         requirements are never registered — the agent only sees tools it
         can actually use. Untagged tools always pass through.
         """
-        return [tool for tool in tools if not (set(tool.tags) & self.excluded_tags)]
+        excluded = self.excluded_tags
+        return [tool for tool in tools if not excluded.intersection(tool.tags)]
 
     def get_mcp_servers(
         self, *additional_servers: LupMcpServerConfig
@@ -74,13 +79,11 @@ class BaseToolPolicy:
         Override to add a project's own servers (external transports,
         conditionally-included groups) on top of the passed-in ones.
         """
-        servers: dict[str, McpServerEntry] = {}
-
-        for server in additional_servers:
-            if self.group_enabled(server.name):
-                servers[server.name] = server
-
-        return servers
+        return {
+            server.name: server
+            for server in additional_servers
+            if self.group_enabled(server.name)
+        }
 
     def group_enabled(self, name: str) -> bool:
         """Whether a tool group is available under this policy.
@@ -97,15 +100,15 @@ class BaseToolPolicy:
         _ = name
         return True
 
-    def filter_group_names(self, names: Sequence[str]) -> tuple[str, ...]:
+    def filter_group_names(self, names: Sequence[str]) -> list[str]:
         """Filter tool-group names by policy (subprocess-served backends)."""
-        return tuple(name for name in names if self.group_enabled(name))
+        return [name for name in names if self.group_enabled(name)]
 
     def get_allowed_tools(
         self,
         servers: dict[str, McpServerEntry],
         *,
-        builtin_tools: frozenset[str] = frozenset(),
+        builtin_tools: frozenset[str] = frozenset(),  # lup: ignore[frozenset-shape]
     ) -> list[str]:
         """Compute every tool name the agent may call (hook-enforced path only —
         on subprocess-served backends tool availability is the served MCP groups).
@@ -131,7 +134,7 @@ class BaseToolPolicy:
         # StructuredOutput is the SDK's own tool for emitting the final result
         # under output_format; no template tool defines it, so the allowlist
         # carries it alongside the engine's builtins.
-        tools: set[str] = set(builtin_tools) | {"StructuredOutput"}
+        tools: NameSet = {"StructuredOutput", *builtin_tools}
 
         for server_name, server in servers.items():
             for tool_name in server_tool_names(server):

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from lup.types import JsonObject, UsageCost
 
@@ -38,8 +38,8 @@ class CodexNativeConfig(BaseModel):
     approval_policy: str | None = None
     output_schema: JsonObject | None = None
     effort: str | None = None
-    config_overrides: list[str] = []
-    env: dict[str, str] = {}
+    config_overrides: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)  # lup: ignore[dict-str-payload]
     """Extra env for the Codex subprocess (e.g. a provider's ``env_key``
     credential)."""
     max_budget_usd: float | None = None

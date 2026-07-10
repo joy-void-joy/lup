@@ -225,7 +225,7 @@ class TestBaseToolPolicyStandalone:
 
         policy = RestrictedPolicy(restricted_mode=True)
 
-        assert policy.filter_group_names(("notes", "sandbox")) == ("notes",)
+        assert policy.filter_group_names(("notes", "sandbox")) == ["notes"]
         sandbox_server = create_mcp_server(name="sandbox", version="1.0.0", tools=[])
         assert policy.get_mcp_servers(sandbox_server) == {}
 

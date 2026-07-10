@@ -9,7 +9,10 @@ Python namespace) persists across calls like notebook cells.
 import json
 import logging
 import time
+from importlib import resources
 from typing import Protocol
+
+from pydantic import BaseModel, ValidationError
 
 try:
     import docker
@@ -77,86 +80,19 @@ def socket_set_timeout(sock: ExecSocket, timeout: float | None) -> None:
             return
 
 
-REPL_SERVER_SCRIPT = r"""
-# Persistent Python REPL server — runs inside the Docker container.
-#
-# Protocol (JSON-line over stdin/stdout):
-#   Request:  {"code": "...", "timeout": 30}
-#   Response: {"exit_code": 0, "stdout": "...", "stderr": "...", "duration_ms": 42}
-#
-# - All exec() calls share a single namespace, so variables and imports
-#   persist across requests (like notebook cells).
-# - sys.stdin/stdout/stderr are redirected to /dev/null so user code cannot
-#   interfere with the JSON protocol.  The original streams are saved as
-#   _proto_in/_proto_out for protocol I/O.
-# - SIGALRM enforces per-request timeouts (exit_code 124 on expiry).
-# - stdout/stderr are capped at 1 MB to prevent memory blowouts.
+REPL_SERVER_SCRIPT = (
+    resources.files("lup.sandbox").joinpath("repl_server.py").read_text("utf-8")
+)
+"""Source of :mod:`lup.sandbox.repl_server`, copied into the container."""
 
-import json, signal, sys, time, traceback
-from contextlib import redirect_stdout, redirect_stderr
-from io import StringIO
 
-_MAX_OUTPUT = 1_048_576
-_namespace = {"__builtins__": __builtins__}
+class ReplResponse(BaseModel):
+    """One JSON-line response from the in-container REPL server."""
 
-class _Timeout(Exception):
-    pass
-
-def _alarm(signum, frame):
-    raise _Timeout()
-
-# Hijack standard streams: save originals for protocol, redirect to /dev/null
-# so user code (print, input) can't corrupt the JSON wire format.
-_proto_in = sys.stdin
-_proto_out = sys.stdout
-sys.stdin = open("/dev/null", "r")
-sys.stdout = open("/dev/null", "w")
-sys.stderr = open("/dev/null", "w")
-
-for _line in _proto_in:
-    _line = _line.strip()
-    if not _line:
-        continue
-    try:
-        _req = json.loads(_line)
-    except json.JSONDecodeError:
-        _proto_out.write(json.dumps({"exit_code": 1, "stdout": "", "stderr": "Invalid JSON", "duration_ms": 0}) + "\n")
-        _proto_out.flush()
-        continue
-
-    _code = _req.get("code", "")
-    _timeout = _req.get("timeout", 30)
-    _so = StringIO()
-    _se = StringIO()
-    _ec = 0
-    _t0 = time.perf_counter()
-    _old_alarm = signal.signal(signal.SIGALRM, _alarm)
-    try:
-        if _timeout > 0:
-            signal.alarm(_timeout)
-        with redirect_stdout(_so), redirect_stderr(_se):
-            exec(compile(_code, "<cell>", "exec"), _namespace)
-    except _Timeout:
-        _ec = 124
-        _se.write(f"Execution timed out after {_timeout} seconds\n")
-    except SystemExit as _e:
-        _ec = _e.code if isinstance(_e.code, int) else 1
-    except BaseException:
-        _ec = 1
-        _se.write(traceback.format_exc())
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, _old_alarm)
-
-    _ms = int((time.perf_counter() - _t0) * 1000)
-    _proto_out.write(json.dumps({
-        "exit_code": _ec,
-        "stdout": _so.getvalue()[:_MAX_OUTPUT],
-        "stderr": _se.getvalue()[:_MAX_OUTPUT],
-        "duration_ms": _ms,
-    }) + "\n")
-    _proto_out.flush()
-"""
+    exit_code: int = 1
+    stdout: str = ""
+    stderr: str = ""
+    duration_ms: int = 0
 
 
 class ReplSession:
@@ -171,7 +107,7 @@ class ReplSession:
         self,
         client: docker.DockerClient,
         container: Container,
-        environment: dict[str, str],
+        environment: dict[str, str],  # lup: ignore[dict-str-payload] — open env map
     ) -> None:
         self.client = client
         self.container = container
@@ -181,7 +117,7 @@ class ReplSession:
 
     def start(self) -> None:
         """Start the REPL process and verify it responds."""
-        exec_result: dict[str, str] = self.client.api.exec_create(
+        created = self.client.api.exec_create(
             self.container.id,
             ["python", "-u", "/workspace/.repl_server.py"],
             stdin=True,
@@ -191,6 +127,7 @@ class ReplSession:
             workdir="/workspace",
             environment=self.environment or None,
         )
+        exec_result: dict[str, str] = created  # lup: ignore[dict-str-payload]
         self.exec_id = exec_result["Id"]
         self.sock = self.client.api.exec_start(self.exec_id, socket=True)
         result = self.execute("pass", timeout_seconds=10)
@@ -229,16 +166,16 @@ class ReplSession:
         except (SocketError, OSError) as e:
             raise ReplCrashedError(f"REPL exited: {e}") from e
 
-        if response.get("exit_code") == 124:
+        if response.exit_code == 124:
             raise CodeExecutionTimeoutError(
                 f"Code execution timed out after {timeout_seconds} seconds"
             )
 
         return ExecuteCodeResult(
-            exit_code=int(response.get("exit_code", 1)),
-            stdout=str(response.get("stdout", "")),
-            stderr=str(response.get("stderr", "")),
-            duration_ms=int(response.get("duration_ms", 0)),
+            exit_code=response.exit_code,
+            stdout=response.stdout,
+            stderr=response.stderr,
+            duration_ms=response.duration_ms,
         )
 
     def send(self, data: bytes) -> None:
@@ -250,7 +187,7 @@ class ReplSession:
         except (BrokenPipeError, OSError) as e:
             raise ReplCrashedError(f"REPL write failed: {e}") from e
 
-    def recv_response(self, deadline: float | None) -> dict[str, int | str]:
+    def recv_response(self, deadline: float | None) -> ReplResponse:
         """Read Docker multiplex frames until a complete JSON line arrives.
 
         ``deadline=None`` blocks indefinitely (no-timeout requests).
@@ -277,8 +214,8 @@ class ReplSession:
                         line, _, _ = stdout_buf.partition(b"\n")
                         text = line.decode("utf-8", errors="replace")
                         try:
-                            return json.loads(text)
-                        except json.JSONDecodeError as e:
+                            return ReplResponse.model_validate_json(text)
+                        except ValidationError as e:
                             raise ReplCrashedError(
                                 f"REPL returned non-JSON: {text[:200]}"
                             ) from e

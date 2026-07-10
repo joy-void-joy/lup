@@ -50,7 +50,9 @@ class ClaudeLiveStream(Stream):
         trace_logger: TraceLogger | None = None,
         prefix: str = "",
     ) -> AsyncGenerator[LupEvent, None]:
-        collected: list[LupContentBlock] = []
+        collected: list[
+            LupContentBlock
+        ] = []  # lup: ignore[empty-collection] — stream fold
         tap = (
             console_tap(prefix=prefix, trace_logger=trace_logger)
             if trace_logger

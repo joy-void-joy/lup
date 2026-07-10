@@ -30,7 +30,7 @@ def extract_token_usage(raw: Mapping[str, JsonValue] | None) -> Usage | None:
         return None
 
     def count(key: str) -> int:
-        value = raw.get(key)
+        value = raw.get(key)  # lup: ignore[dict-get] — vendor payload probe
         return value if isinstance(value, int) else 0
 
     return Usage(

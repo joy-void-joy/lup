@@ -37,12 +37,13 @@ def claude_hook_tool_path(tool_name: str, tool_input: JsonObject) -> str:
     """
     match tool_name:
         case "Write" | "Edit" | "Read":
-            return str(tool_input.get("file_path", ""))
+            return str(tool_input.get("file_path", ""))  # lup: ignore[dict-get]
         case "Grep":
-            return str(tool_input.get("path", ""))
+            return str(tool_input.get("path", ""))  # lup: ignore[dict-get]
         case "Glob":
-            path = str(tool_input.get("path", ""))
-            return path or extract_glob_dir(str(tool_input.get("pattern", "")))
+            path = str(tool_input.get("path", ""))  # lup: ignore[dict-get]
+            pattern = str(tool_input.get("pattern", ""))  # lup: ignore[dict-get]
+            return path or extract_glob_dir(pattern)
         case _:
             return ""
 
@@ -68,8 +69,8 @@ def build_claude_hook_handler(
         _tool_use_id: str | None,
         _context: claude_types.HookContext,
     ) -> claude_types.SyncHookJSONOutput:
-        tool_name = input_data.get("tool_name", "")
-        tool_input = input_data.get("tool_input", {})
+        tool_name = input_data.get("tool_name", "")  # lup: ignore[dict-get]
+        tool_input = input_data.get("tool_input", {})  # lup: ignore[dict-get]
         tool_result = ""
         if "tool_response" in input_data:
             response = input_data["tool_response"]
@@ -99,10 +100,11 @@ def build_claude_hook_handler(
 
 def lup_hooks_to_claude(hooks: LupHooksConfig) -> ClaudeHooksConfig:
     """Convert SDK-agnostic LupHooksConfig to Claude SDK hook format."""
-    result: ClaudeHooksConfig = {}
-
-    for event_name, matchers in hooks.by_event():
-        claude_matchers: list[claude_types.HookMatcher] = []
+    result: ClaudeHooksConfig = {}  # lup: ignore[empty-collection] — event fold
+    for event_name, matchers in hooks.by_event().items():
+        claude_matchers: list[
+            claude_types.HookMatcher
+        ] = []  # lup: ignore[empty-collection]
         for lup_matcher in matchers:
             handler = build_claude_hook_handler(lup_matcher, event=event_name)
             if lup_matcher.matcher:

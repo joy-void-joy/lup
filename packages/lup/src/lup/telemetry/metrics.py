@@ -248,7 +248,7 @@ def tracked[**P, T](
                     case {"is_error": flag} if flag:
                         is_error = True
                 return result
-            except BaseException:
+            except BaseException:  # lup: ignore[except-baseexception] — mark + reraise
                 is_error = True
                 raise
             finally:
@@ -275,7 +275,8 @@ def read_metrics_summary(session_dir: Path) -> MetricsSummary | None:
     if not path.exists():
         return None
     try:
-        return cast(MetricsSummary, json.loads(path.read_text(encoding="utf-8")))
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return cast(MetricsSummary, raw)  # lup: ignore[cast] — TypedDict from JSON
     except (json.JSONDecodeError, OSError):
         logger.exception("Flushed metrics at %s are unreadable", path)
         return None

@@ -21,7 +21,7 @@ Examples:
 
 import json
 import logging
-import re
+import re  # lup: ignore[import-re] — capability phrasing + sentence bounds
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -59,7 +59,7 @@ def format_block_markdown(block: LupContentBlock) -> str:
 # Capability-request phrasing. Applied to one already-isolated string at the
 # moment it is logged (an assistant text or meta thought), not swept across a
 # markdown document — so the persisted signal is structured, not regex-derived.
-CAPABILITY_PHRASES: re.Pattern[str] = re.compile(
+CAPABILITY_PHRASES: re.Pattern[str] = re.compile(  # lup: ignore[re-call] — NL cues
     r"would be useful|would have helped|would benefit from|wish I (had|could)|"
     r"if (only )?I could|need(s|ed)? access to|cannot .* because|"
     r"a tool that|missing (a )?tool",
@@ -103,7 +103,7 @@ def tool_result_ok(content: str | Sequence[object] | None) -> bool:
     except (json.JSONDecodeError, TypeError):
         return True
     if isinstance(parsed, dict):
-        return not bool(parsed.get("is_error"))
+        return not bool(parsed.get("is_error"))  # lup: ignore[dict-get] — wire read
     return True
 
 
@@ -113,8 +113,9 @@ def capability_request_from_text(text: str) -> str | None:
     Splits on sentence boundaries and returns the matching fragment so the
     event's ``brief`` is the specific wish, not the whole block.
     """
-    for fragment in re.split(r"(?<=[.!?\n])\s+", text):
-        stripped = fragment.strip()
+    sentences = re.split(r"(?<=[.!?\n])\s+", text)  # lup: ignore[re-call, string-split]
+    for fragment in sentences:
+        stripped = fragment.strip()  # lup: ignore[string-strip] — prose hygiene
         if stripped and CAPABILITY_PHRASES.search(stripped):
             return truncate_str(stripped, 300)
     return None
@@ -126,9 +127,9 @@ def read_trace_events(events_path: Path) -> list[TraceEvent]:
     Skips blank or malformed lines so a truncated tail (a crash mid-write)
     never loses the events that were flushed before it.
     """
-    events: list[TraceEvent] = []
+    events: list[TraceEvent] = []  # lup: ignore[empty-collection] — tolerant fold
     for line in events_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
+        if not line.strip():  # lup: ignore[string-strip] — blank-line check
             continue
         try:
             events.append(TraceEvent.model_validate_json(line))
@@ -170,7 +171,10 @@ class TraceLogger(BaseModel):
     title: str = Field(description="Title for the trace")
     entries: list[TraceEntry] = Field(default_factory=list)
     events: list[TraceEvent] = Field(default_factory=list)
-    tool_names: dict[str, str] = Field(default_factory=dict, exclude=True)
+    # Open tool-use-id -> tool-name map, filled as blocks stream in.
+    tool_names: dict[str, str] = Field(  # lup: ignore[dict-str-payload]
+        default_factory=dict, exclude=True
+    )
 
     def model_post_init(self, _context: object) -> None:
         """Initialize the trace with header."""

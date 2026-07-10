@@ -10,7 +10,7 @@ native option type.
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from lup.hooks import LupHooksConfig
 from lup.mcp import LupMcpServerConfig, McpServerEntry, server_tool_names
@@ -50,10 +50,10 @@ class LupAgentOptions(BaseModel):
     budget and permission handling are the separate ``max_thinking_tokens`` and
     ``permission_mode`` knobs."""
 
-    tool_servers: dict[str, McpServerEntry] = {}
-    subagents: list[SubagentSpec] = []
-    hooks: LupHooksConfig = LupHooksConfig()
-    allowed_tools: list[str] = []
+    tool_servers: dict[str, McpServerEntry] = Field(default_factory=dict)
+    subagents: list[SubagentSpec] = Field(default_factory=list)
+    hooks: LupHooksConfig = Field(default_factory=LupHooksConfig)
+    allowed_tools: list[str] = Field(default_factory=list)
     """Tool names the agent may call. The ``mcp__{server}__{tool}`` name of
     every in-process tool server's tools is added automatically — those
     tools are the agent's own — so this field carries only the extras
@@ -61,12 +61,12 @@ class LupAgentOptions(BaseModel):
     caller's to apply before construction; they cannot be derived here."""
     tools: list[str] | None = None
     """Base builtin toolset restriction (``None`` = the engine's default set)."""
-    served_tool_groups: list[str] = []
+    served_tool_groups: list[str] = Field(default_factory=list)
     """Tool-group names served to subprocess engines out of process. Not
     derived from ``tool_servers``: the served set is the caller's group
     registry (it can include groups with no in-process server, e.g. a
     sandbox served only externally), so the caller names it."""
-    add_dirs: list[Path] = []
+    add_dirs: list[Path] = Field(default_factory=list)
     output_schema: JsonObject | None = None
     """JSON Schema the final response must satisfy (structured output)."""
 
@@ -119,8 +119,10 @@ class LupAgentOptions(BaseModel):
     """Codex-runtime sandbox mode (named to avoid colliding with
     ``sdk_sandbox``, the Claude SDK's OS sandbox flag)."""
     approval_policy: str | None = None
-    mcp_env: dict[str, str] = {}
-    writable_roots: list[Path] = []
+    mcp_env: dict[str, str] = Field(  # lup: ignore[dict-str-payload] — env map
+        default_factory=dict
+    )
+    writable_roots: list[Path] = Field(default_factory=list)
 
     session_id: str | None = None
     """Session-wiring trio (``session_id``, ``shared_dir``,

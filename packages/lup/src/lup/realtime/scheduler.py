@@ -58,6 +58,9 @@ logger = logging.getLogger(__name__)
 ActionCallback = Callable[[str], Awaitable[None]]
 """Async callback for delivering actions (messages, commands, etc.)."""
 
+type DelayedAction = tuple[asyncio.Task[None], str]  # lup: ignore[tuple-shape]
+"""A pending delayed-action task with its label, so cancel logs stay readable."""
+
 
 # =====================================================================
 # Result types
@@ -145,12 +148,12 @@ class Scheduler:
         self.scheduled_action_content: str | None = None
         self.scheduled_action_fire_at: float | None = None
 
-        # Reminders
-        self.reminders: list[PendingReminder] = []
-        self.fired_reminder_labels: list[str] = []
+        # Reminders — live mutable state, the scheduler's whole job.
+        self.reminders: list[PendingReminder] = []  # lup: ignore[empty-collection]
+        self.fired_reminder_labels: list[str] = []  # lup: ignore[empty-collection]
 
         # Delayed actions
-        self.pending_actions: list[tuple[asyncio.Task[None], str]] = []
+        self.pending_actions: list[DelayedAction] = []  # lup: ignore[empty-collection]
 
         # Meta-before-sleep gate. Pass a file-backed gate when the meta
         # tool runs in a subprocess (see lup.realtime.relay).
@@ -494,9 +497,9 @@ def create_pending_event_guard(
         if input_data.event != "PreToolUse":
             return True
         tool_input = input_data.tool_input
-        if tool_input.get("force", False):
+        if tool_input.get("force", False):  # lup: ignore[dict-get] — tool args
             return True
-        if tool_input.get("debounce_initial") is not None:
+        if tool_input.get("debounce_initial") is not None:  # lup: ignore[dict-get]
             return True
         if scheduler.debounce_active:
             return True

@@ -59,7 +59,7 @@ def collect_ro_dirs() -> list[Path]:
     version directories themselves would also expose ``logs/``, which is
     reserved for the feedback loop and must stay invisible to the agent.
     """
-    ro: list[Path] = []
+    ro: list[Path] = []  # lup: ignore[empty-collection] — dedup fold via add()
 
     def add(candidate: Path) -> None:
         if candidate.is_dir() and candidate not in ro:

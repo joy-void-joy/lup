@@ -116,7 +116,7 @@ class Sandbox:
         timeout_seconds: int = 30,
         pre_install: Sequence[str] | None = DEFAULT_PRE_INSTALL,
     ) -> None:
-        suffix = session_id.replace("/", "-")
+        suffix = session_id.replace("/", "-")  # lup: ignore[string-replace] — slug
         self.container_name = f"lup-sandbox-{suffix}"
         self.docker_image = docker_image
         self.volume_name = f"lup-sandbox-ws-{suffix}"
@@ -186,13 +186,18 @@ class Sandbox:
         if self.docker_client is None:
             return
         try:
-            old = self.docker_client.containers.get(self.container_name)
+            old = self.docker_client.containers.get(  # lup: ignore[dict-get]
+                self.container_name
+            )
             logger.warning("Removing stale container: %s", self.container_name)
             old.remove(force=True)
         except NotFound:
             pass
 
-    def container_is_orphaned(self, labels: dict[str, str]) -> bool:
+    def container_is_orphaned(
+        self,
+        labels: dict[str, str],  # lup: ignore[dict-str-payload] — open label map
+    ) -> bool:
         """Decide whether a labelled container belongs to a dead owner.
 
         Liveness is owner-driven: a container whose creating process is
@@ -201,15 +206,17 @@ class Sandbox:
         Only when the owner-pid label is missing (older containers, or
         ones created elsewhere) do we fall back to the age heuristic.
         """
-        owner_pid_raw = labels.get(self.OWNER_PID_LABEL)
+        owner_pid_raw = labels.get(self.OWNER_PID_LABEL)  # lup: ignore[dict-get]
         if owner_pid_raw is not None:
             try:
                 owner_pid = int(owner_pid_raw)
             except ValueError:
                 return True
-            return not process_is_alive(owner_pid, labels.get(self.OWNER_START_LABEL))
+            started = labels.get(self.OWNER_START_LABEL)  # lup: ignore[dict-get]
+            return not process_is_alive(owner_pid, started)
         try:
-            created_at = float(labels.get(self.CREATED_AT_LABEL, "0"))
+            created_raw = labels.get(self.CREATED_AT_LABEL)  # lup: ignore[dict-get]
+            created_at = float(created_raw or "0")
         except ValueError:
             created_at = 0.0
         return created_at <= time.time() - self.STALE_AGE_HOURS * 3600
@@ -242,9 +249,12 @@ class Sandbox:
             logger.warning("Removing orphaned sandbox container: %s", container.name)
             try:
                 container.remove(force=True)
-                volume_name = labels.get(self.VOLUME_LABEL)
+                volume_name = labels.get(self.VOLUME_LABEL)  # lup: ignore[dict-get]
                 if volume_name:
-                    self.docker_client.volumes.get(volume_name).remove()
+                    volume = self.docker_client.volumes.get(  # lup: ignore[dict-get]
+                        volume_name
+                    )
+                    volume.remove()
             except (NotFound, APIError, DockerException) as e:
                 logger.warning("Orphan cleanup of %s failed: %s", container.name, e)
 
@@ -262,7 +272,9 @@ class Sandbox:
 
         if self.docker_client is not None:
             try:
-                vol = self.docker_client.volumes.get(self.volume_name)
+                vol = self.docker_client.volumes.get(  # lup: ignore[dict-get]
+                    self.volume_name
+                )
                 vol.remove()
             except (NotFound, APIError):
                 pass
@@ -575,7 +587,7 @@ def sandbox_cleanup(session_id: str, shared_dir: Path) -> Generator[None]:
         sandbox.docker_client = client
         try:
             sandbox.remove_stale_container()
-            client.volumes.get(sandbox.volume_name).remove()
+            client.volumes.get(sandbox.volume_name).remove()  # lup: ignore[dict-get]
         except NotFound:
             pass
         except (APIError, DockerException) as e:
