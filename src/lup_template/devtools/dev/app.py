@@ -6,6 +6,7 @@ from typing import Annotated
 import typer
 
 import lup_template.devtools.dev.antipatterns as antipatterns_mod
+import lup_template.devtools.dev.boundaries as boundaries_mod
 import lup_template.devtools.dev.branches as branches
 import lup_template.devtools.dev.check as check
 import lup_template.devtools.dev.comments as comments
@@ -276,6 +277,14 @@ def check_cmd(
             "only — the same lup.codescan.antipatterns rules the edit hook enforces",
         ),
     ] = False,
+    boundaries: Annotated[
+        bool,
+        typer.Option(
+            "--boundaries",
+            help="Scan for per-engine adapter imports outside the seam only — "
+            "the lup.codescan.boundaries guard the full check also runs",
+        ),
+    ] = False,
     stats: Annotated[
         bool,
         typer.Option(
@@ -295,6 +304,9 @@ def check_cmd(
             antipatterns_mod.summarize(as_json)
         else:
             antipatterns_mod.report(as_json)
+        return
+    if boundaries:
+        boundaries_mod.report(as_json)
         return
     check.run_checks(fix, no_test)
 

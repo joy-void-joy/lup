@@ -13,7 +13,9 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
-from lup.adapters.profiles.claude.profile import ClaudeProfile
+from lup.adapters.profiles.claude.profile import (  # lup: ignore[seam-boundary]
+    ClaudeProfile,
+)
 from lup_template.devtools.usage.api import creds_path, fetch_usage, load_stats
 from lup_template.devtools.usage.render import (
     build_display,

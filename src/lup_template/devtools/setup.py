@@ -40,7 +40,9 @@ from rich.panel import Panel
 from rich.table import Table
 from tzlocal import get_localzone_name
 
-from lup.adapters.profiles.claude.store import ProfileStore
+from lup.adapters.profiles.claude.store import (  # lup: ignore[seam-boundary]
+    ProfileStore,
+)
 from lup.workspace.paths import project_root
 
 app = typer.Typer(
