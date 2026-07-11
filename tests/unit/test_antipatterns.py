@@ -110,9 +110,40 @@ def test_audit_leaves_foreign_scanner_ids_alone() -> None:
     assert [f.kind for f in audit_text(unowned, PYTHON_ANTI_PATTERNS)] == ["spurious"]
 
 
-def test_audit_skips_file_level_ignore() -> None:
+def test_audit_reports_bare_file_level_ignore_as_advisory() -> None:
+    # The whole-file opt-out still disables every rule, but the audit
+    # surfaces it as one untyped (advisory) finding instead of silence.
     findings = audit_text("# lup: ignore\nx: Any = 1\n", PYTHON_ANTI_PATTERNS)
-    assert findings == []
+    assert [f.kind for f in findings] == ["untyped"]
+    assert findings[0].line == 1
+    assert "whole file" in findings[0].message
+
+
+def test_audit_reports_dead_file_level_rule_as_spurious() -> None:
+    # dict-get is named file-wide but nothing in the file calls .get —
+    # the dead id reports spurious at the directive line.
+    source = "# lup: ignore[dict-get, any-type]\nx: Any = 1\n"
+    findings = audit_text(source, PYTHON_ANTI_PATTERNS)
+    assert [(f.kind, f.rule_id, f.line) for f in findings] == [
+        ("spurious", "dict-get", 1)
+    ]
+
+
+def test_audit_reports_inline_covered_file_level_rule_as_spurious() -> None:
+    # Every .get hit carries its own inline directive, so the file-wide
+    # dict-get opt-out silences nothing an inline marker does not — dead.
+    source = "# lup: ignore[dict-get]\nname = data.get(k)  # lup: ignore[dict-get]\n"
+    findings = audit_text(source, PYTHON_ANTI_PATTERNS)
+    assert [(f.kind, f.rule_id, f.line) for f in findings] == [
+        ("spurious", "dict-get", 1)
+    ]
+
+
+def test_audit_keeps_foreign_ids_out_of_file_level_verdicts() -> None:
+    # seam-boundary belongs to the boundary scan; a file-wide opt-out naming
+    # it is that scanner's business, never reported dead here.
+    source = "# lup: ignore[seam-boundary]\nx = 1\n"
+    assert audit_text(source, PYTHON_ANTI_PATTERNS) == []
 
 
 def test_audit_skips_plain_comment_lines() -> None:
