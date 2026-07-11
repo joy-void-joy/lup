@@ -1,4 +1,4 @@
-# lup: ignore[dict-get, dict-str-payload, empty-collection]
+# lup: ignore[dict-get, dict-str-payload]
 # Test fixtures and assertions construct these shapes deliberately.
 """Engine construction: translation, refusal, dropping, and routing.
 
