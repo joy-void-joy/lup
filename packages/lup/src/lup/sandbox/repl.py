@@ -127,8 +127,8 @@ class ReplSession:
             workdir="/workspace",
             environment=self.environment or None,
         )
-        exec_result: dict[str, str] = created  # lup: ignore[dict-str-payload]
-        self.exec_id = exec_result["Id"]
+        exec_id: str = created["Id"]
+        self.exec_id = exec_id
         self.sock = self.client.api.exec_start(self.exec_id, socket=True)
         result = self.execute("pass", timeout_seconds=10)
         if result["exit_code"] != 0:
