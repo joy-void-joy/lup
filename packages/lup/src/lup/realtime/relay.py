@@ -301,7 +301,7 @@ class RealtimeMailbox:
         consumed = self.read_offset
         for raw_line in region.splitlines(keepends=True):
             consumed += len(raw_line)
-            line = raw_line.strip()  # lup: ignore[string-strip] — mailbox framing
+            line = raw_line.strip()
             if not line:
                 continue
             try:

@@ -559,7 +559,7 @@ def prompt_health(as_json: bool) -> None:
     estimated_tokens = char_count // 4
 
     def section_report(section_text: str) -> PromptSection:
-        prose = section_text.strip()  # lup: ignore[string-strip] — prompt prose
+        prose = section_text.strip()
         first_line = prose.splitlines()[0] if prose else "(empty)"
         return {
             "name": first_line[:60],

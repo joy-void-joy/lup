@@ -60,7 +60,7 @@ class LazyCommand:
         `str(...).strip()`. Not for column-significant text (`status
         --porcelain` leading columns): use :meth:`lines`.
         """
-        return str(self(*args, **kwargs)).strip()  # lup: ignore[string-strip]
+        return str(self(*args, **kwargs)).strip()
 
     def lines(
         self,
@@ -89,7 +89,7 @@ def decode_stderr(e: sh.ErrorReturnCode) -> str:
     newline the failing tool printed with is framing, not message.
     """
     raw = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-    return raw.strip()  # lup: ignore[string-strip]
+    return raw.strip()
 
 
 def copy_to_clipboard(text: str) -> bool:

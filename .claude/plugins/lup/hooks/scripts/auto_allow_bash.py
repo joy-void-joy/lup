@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# lup: ignore[import-re, re-call, dict-str-payload, empty-collection, string-strip]
+# lup: ignore[import-re, re-call, dict-str-payload, empty-collection]
 # A regex-rule engine on the hermetic hook hot path: patterns are its whole
 # job, the hook wire I/O is string-keyed JSON, and the segment splitter is a
 # hand fold over shell text.

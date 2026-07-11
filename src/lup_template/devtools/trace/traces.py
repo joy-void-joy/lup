@@ -1,4 +1,4 @@
-# lup: ignore[import-re, re-call, string-strip, string-split]
+# lup: ignore[import-re, re-call, string-split]
 # This module IS the parser for the repo's own trace-markdown format (the
 # legacy fallback beside the .events.jsonl sidecar) — line surgery and the
 # fallback patterns are the parse, not a substitute for one, and user search

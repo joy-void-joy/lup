@@ -234,9 +234,13 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     AntiPattern(
+        # Only separator-form `.strip(chars)` is flagged: naming the characters
+        # to strip implies field extraction from structured text. Argless
+        # `.strip()` is whitespace framing, for which no parser exists — the
+        # negative lookahead exempts it, mirroring string-split's argless rule.
         id="string-strip",
-        pattern=re.compile(r"\.strip\s*\("),
-        message="Avoid .strip() for structured data — parse it instead "
+        pattern=re.compile(r"\.strip\s*\((?!\s*\))"),
+        message="Avoid .strip(chars) for structured data — parse it instead "
         "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     AntiPattern(
