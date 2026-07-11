@@ -114,7 +114,7 @@ def clear_markers(targets: list[str]) -> None:
 
     by_file: defaultdict[str, list[int]] = defaultdict(list)
     for target in targets:
-        rel, _, line_str = target.rpartition(":")
+        rel, _, line_str = target.rpartition(":")  # lup: ignore[string-split] — CLI arg
         if not rel or not line_str.isdigit():
             typer.echo(f"Skipping malformed target: {target}", err=True)
             continue

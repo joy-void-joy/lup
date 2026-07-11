@@ -283,7 +283,7 @@ def extract_glob_dir(pattern: str) -> str:
     """
     for i, c in enumerate(pattern):
         if c in "*?[":
-            return pattern[:i].rstrip("/")
+            return pattern[:i].rstrip("/")  # lup: ignore[string-strip] — glob prefix
     return pattern
 
 

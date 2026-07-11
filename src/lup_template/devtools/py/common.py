@@ -37,9 +37,11 @@ def resolve_object(path: str) -> ResolvedObject:
         value = pkgutil.resolve_name(path)
     except (ImportError, AttributeError, ValueError) as e:
         raise ValueError(f"Could not resolve '{path}': {e}") from e
-    module_part, _, attr_part = path.partition(":")
+    module_part, _, attr_part = path.partition(":")  # lup: ignore[string-split]
     tail = attr_part or module_part
-    return ResolvedObject(value=value, leaf_name=tail.rpartition(".")[2])
+    # lup's resolve grammar: the leaf is the last dotted segment.
+    leaf = tail.rpartition(".")[2]  # lup: ignore[string-split] — dotted-path leaf
+    return ResolvedObject(value=value, leaf_name=leaf)
 
 
 def find_module_path(module_name: str) -> Path | None:

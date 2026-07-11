@@ -258,7 +258,7 @@ def theirs_ref_for(operation: str) -> str:
 def extract_removals(diff_output: str) -> list[str]:
     """Find removed functions/classes/decorators in a diff."""
     return [
-        line.lstrip("-").strip()
+        line.lstrip("-").strip()  # lup: ignore[string-strip] — diff-line prefix
         for line in diff_output.splitlines()
         if SIGNIFICANT_PATTERN.match(line)
     ]

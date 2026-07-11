@@ -109,7 +109,7 @@ def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
         return False
 
     summary = get_session_summary(session_id)
-    slug = summary[:50].strip().rstrip(".")
+    slug = summary[:50].strip().rstrip(".")  # lup: ignore[string-strip] — prose slug
     git.commit("-m", f"data(sessions): {slug}")
     typer.echo(f"  Committed {session_id}: {slug}")
     return True

@@ -176,7 +176,11 @@ def changelog_cmd(
 
     entries: list[ChangelogEntry] = [
         {"sha": sha, "message": message, "category": classify_commit(message)}
-        for sha, _, message in (line.partition(" ") for line in log_lines if line)
+        for sha, _, message in (
+            line.partition(" ")  # lup: ignore[string-split] — log line fields
+            for line in log_lines
+            if line
+        )
     ]
     report: ChangelogReport = {
         "since_tag": since or latest_tag,

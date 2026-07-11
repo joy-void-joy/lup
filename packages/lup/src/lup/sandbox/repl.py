@@ -212,7 +212,10 @@ class ReplSession:
                 case 1:  # stdout
                     stdout_buf += data
                     if b"\n" in stdout_buf:
-                        line, _, _ = stdout_buf.partition(b"\n")
+                        # Wire line framing: json parses each framed line.
+                        line, _, _ = stdout_buf.partition(  # lup: ignore[string-split]
+                            b"\n"
+                        )
                         text = line.decode("utf-8", errors="replace")
                         try:
                             return ReplResponse.model_validate_json(text)
