@@ -197,7 +197,9 @@ def create_mcp_server(
 
         is_error = "is_error" in result and bool(result["is_error"])
 
-        content: list[ContentBlock] = []  # lup: ignore[empty-collection] — match-arm fold
+        content: list[
+            ContentBlock
+        ] = []  # lup: ignore[empty-collection] — match-arm fold
         if "content" in result:
             for item in result["content"]:
                 match item:
@@ -354,11 +356,15 @@ def lup_tool[I: BaseModel, O: BaseModel](
                 if not params:
                     msg = f"lup_tool '{tool_name}': handler has no parameters to infer input_model from"
                     raise TypeError(msg)
-                param_type = hints.get(params[0].name)  # lup: ignore[dict-get] — reflection hints
+                param_type = hints.get(  # lup: ignore[dict-get] — reflection hints
+                    params[0].name
+                )
                 if isinstance(param_type, type) and issubclass(param_type, BaseModel):
                     resolved_input = param_type
             if resolved_output is None:
-                return_type = hints.get("return")  # lup: ignore[dict-get] — reflection hints
+                return_type = hints.get(  # lup: ignore[dict-get] — reflection hints
+                    "return"
+                )
                 if isinstance(return_type, type) and issubclass(return_type, BaseModel):
                     resolved_output = return_type
 
@@ -409,7 +415,9 @@ def lup_tool[I: BaseModel, O: BaseModel](
             handler=wrapper,
             call_handler=handler,
             input_model=final_input,
-            output_model=cast(type[O] | None, resolved_output),  # lup: ignore[cast] — hint infer
+            output_model=cast(  # lup: ignore[cast] — hint infer
+                type[O] | None, resolved_output
+            ),
             tags=tags or [],
         )
 
