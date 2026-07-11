@@ -456,7 +456,7 @@ def push(
 def parse_pr_url(stdout: str) -> str:
     """Extract the PR URL from ``gh pr create`` stdout (last URL-like line)."""
     for line in reversed(stdout.splitlines()):
-        candidate = line.strip()  # lup: ignore[string-strip] — free-form tool chatter
+        candidate = line.strip()
         if urlparse(candidate).scheme in ("http", "https"):
             return candidate
     return ""
