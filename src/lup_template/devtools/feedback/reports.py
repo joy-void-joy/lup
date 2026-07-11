@@ -16,6 +16,7 @@ import logging
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import TypedDict
 
 import sh
 import typer
@@ -50,8 +51,16 @@ from lup_template.devtools.utils import format_table, output_json
 
 logger = logging.getLogger(__name__)
 
+class ToolBucket(TypedDict):
+    """One tool's aggregated call/error/duration tallies."""
+
+    calls: int
+    errors: int
+    total_ms: float
+
+
 # Open per-tool aggregation buckets, keyed by whatever tools ran.
-type ToolBuckets = dict[str, dict[str, int | float]]  # lup: ignore[dict-str-payload]
+type ToolBuckets = dict[str, ToolBucket]
 
 
 def print_version_info(effective: list[str] | None) -> None:
