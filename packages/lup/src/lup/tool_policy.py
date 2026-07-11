@@ -25,7 +25,7 @@ from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_
 
 logger = logging.getLogger(__name__)
 
-type NameSet = set[str]  # lup: ignore[set-shape] — membership-tested name sets
+type NameSet = set[str]  # lup: ignore[set-shape] — dedup + set-difference names
 
 type ExclusionReasons = dict[str, str]  # lup: ignore[dict-str-payload] — name → why off
 """Each excluded tool/tag name mapped to the reason it is unavailable."""
@@ -127,7 +127,7 @@ class BaseToolPolicy:
         self,
         servers: dict[str, McpServerEntry],
         *,
-        builtin_tools: frozenset[str] = frozenset(),  # lup: ignore[frozenset-shape]
+        builtin_tools: frozenset[str] = frozenset(),  # lup: ignore[frozenset-shape] — immutable default
     ) -> list[str]:
         """Compute every tool name the agent may call (hook-enforced path only —
         on subprocess-served backends tool availability is the served MCP groups).

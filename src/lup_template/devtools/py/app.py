@@ -186,7 +186,7 @@ def eval_cmd(
     try:
         code = compile(tree, "<eval>", "eval")
         # The `py eval` command's whole job, with builtins stripped and the
-        # expression pre-screened by check_expression_safety.
+        # expression pre-screened by check_eval_safety.
         result = eval(code, {"__builtins__": {}}, namespace)  # lup: ignore[eval-exec]
     except (
         NameError,
