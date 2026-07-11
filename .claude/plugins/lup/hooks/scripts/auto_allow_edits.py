@@ -219,13 +219,13 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "string-split",
-        re.compile(r"\.split\s*\((?!\s*\))"),
-        "Avoid .split() for structured data — parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
+        re.compile(r"\.r?split\s*\((?!\s*\))|\.r?partition\s*\("),
+        "Avoid .split(sep)/.rsplit/.partition for structured data — parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     (
         "string-strip",
-        re.compile(r"\.strip\s*\((?!\s*\))"),
-        "Avoid .strip(chars) for structured data — parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
+        re.compile(r"\.[lr]?strip\s*\((?!\s*\))"),
+        "Avoid .strip(chars)/.lstrip/.rstrip for structured data — parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     (
         "bare-except",

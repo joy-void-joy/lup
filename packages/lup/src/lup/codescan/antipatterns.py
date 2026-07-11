@@ -224,24 +224,30 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "(pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
     ),
     AntiPattern(
-        # Only separator-form `.split(sep)` is flagged: a separator implies
-        # structure with a real parser alternative (csv, pathlib, urllib, json,
-        # datetime). Argument-less `.split()` is whitespace tokenization of free
-        # text, for which no parser exists — the negative lookahead exempts it.
+        # Only separator-form `.split(sep)` is flagged — `.rsplit` and
+        # `.partition`/`.rpartition` included, so the variants are not a dodge
+        # (partition always takes a separator, so it always trips). A separator
+        # implies structure with a real parser alternative (csv, pathlib,
+        # urllib, json, datetime). Argument-less `.split()` is whitespace
+        # tokenization of free text, for which no parser exists — the negative
+        # lookahead exempts it.
         id="string-split",
-        pattern=re.compile(r"\.split\s*\((?!\s*\))"),
-        message="Avoid .split() for structured data — parse it instead "
-        "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
+        pattern=re.compile(r"\.r?split\s*\((?!\s*\))|\.r?partition\s*\("),
+        message="Avoid .split(sep)/.rsplit/.partition for structured data — parse it "
+        "instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, "
+        "datetime for dates)",
     ),
     AntiPattern(
-        # Only separator-form `.strip(chars)` is flagged: naming the characters
-        # to strip implies field extraction from structured text. Argless
-        # `.strip()` is whitespace framing, for which no parser exists — the
+        # Only separator-form `.strip(chars)` is flagged — `.lstrip`/`.rstrip`
+        # included, so the variants are not a dodge. Naming the characters to
+        # strip implies field extraction from structured text; argless
+        # stripping is whitespace framing, for which no parser exists — the
         # negative lookahead exempts it, mirroring string-split's argless rule.
         id="string-strip",
-        pattern=re.compile(r"\.strip\s*\((?!\s*\))"),
-        message="Avoid .strip(chars) for structured data — parse it instead "
-        "(urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
+        pattern=re.compile(r"\.[lr]?strip\s*\((?!\s*\))"),
+        message="Avoid .strip(chars)/.lstrip/.rstrip for structured data — parse it "
+        "instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, "
+        "datetime for dates)",
     ),
     AntiPattern(
         id="bare-except",

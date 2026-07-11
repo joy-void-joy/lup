@@ -196,8 +196,8 @@ def count_source_diff_lines(branch: str, integration: str) -> int:
         return -1
     total = 0
     for row in rows:
-        added, _, rest = row.partition("\t")
-        deleted = rest.partition("\t")[0]
+        added, _, rest = row.partition("\t")  # lup: ignore[string-split] — numstat
+        deleted = rest.partition("\t")[0]  # lup: ignore[string-split] — numstat
         total += int(added) if added.isdigit() else 0
         total += int(deleted) if deleted.isdigit() else 0
     return total
@@ -482,16 +482,18 @@ def pr_body(base_override: str | None) -> None:
 
     groups: dict[str, list[str]] = defaultdict(list)
     for line in log_lines:
-        message = line.partition(" ")[2]
+        message = line.partition(" ")[2]  # lup: ignore[string-split] — log line
         if not message:
             continue
-        prefix = message.partition("(")[0].partition(":")[0].lower()
+        head = message.partition("(")[0]  # lup: ignore[string-split] — commit type
+        prefix = head.partition(":")[0].lower()  # lup: ignore[string-split]
         groups[prefix].append(message)
 
     def summarize(prefix: str, messages: list[str]) -> str:
         fallback = prefix.capitalize()
         label = COMMIT_PREFIX_LABELS.get(prefix, fallback)  # lup: ignore[dict-get]
-        desc = (messages[0].partition(":")[2] or messages[0]).lstrip()
+        first = messages[0].partition(":")[2]  # lup: ignore[string-split] — log line
+        desc = (first or messages[0]).lstrip()
         more = f" (+{len(messages) - 1} more)" if len(messages) > 1 else ""
         return f"- {label} {desc}{more}"
 
