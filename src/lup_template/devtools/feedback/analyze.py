@@ -21,7 +21,15 @@ from lup_template.devtools.trace.traces import (
 from lup.workspace.history import resolve_version
 
 
-type ToolBuckets = dict[str, dict[str, int]]  # lup: ignore[dict-str-payload]
+class ToolBucket(TypedDict):
+    """One tool's call and error tallies."""
+
+    calls: int
+    errors: int
+
+
+# Open per-tool aggregation buckets, keyed by whatever tools ran.
+type ToolBuckets = dict[str, ToolBucket]
 
 
 class ToolHealth(TypedDict):
