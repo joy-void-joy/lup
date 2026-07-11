@@ -81,7 +81,7 @@ def parse_branches() -> list[ParsedBranch]:
     """
 
     def parse(row: str) -> ParsedBranch:
-        name, commit, upstream, head = row.split("\x00")  # lup: ignore[string-split]
+        name, commit, upstream, head = row.split("\x00")  # lup: ignore[string-split] — NUL porcelain
         return {
             "name": name,
             "commit": commit,
@@ -420,7 +420,7 @@ def branch_status(branch: str | None, as_json: bool) -> None:
 
     def row(r: BranchClassification) -> list[str]:
         marker = status_markers[r["status"]]
-        wt = " [worktree]" if r.get("worktree") else ""  # lup: ignore[dict-get]
+        wt = " [worktree]" if r.get("worktree") else ""  # lup: ignore[dict-get] — NotRequired key
         return [f"[{marker}] {r['branch']}", r["status"], f"{r['reason']}{wt}"]
 
     typer.echo(format_table(("Branch", "Status", "Reason"), [row(r) for r in results]))
@@ -486,12 +486,12 @@ def pr_body(base_override: str | None) -> None:
         if not message:
             continue
         head = message.partition("(")[0]  # lup: ignore[string-split] — commit type
-        prefix = head.partition(":")[0].lower()  # lup: ignore[string-split]
+        prefix = head.partition(":")[0].lower()  # lup: ignore[string-split] — commit type
         groups[prefix].append(message)
 
     def summarize(prefix: str, messages: list[str]) -> str:
         fallback = prefix.capitalize()
-        label = COMMIT_PREFIX_LABELS.get(prefix, fallback)  # lup: ignore[dict-get]
+        label = COMMIT_PREFIX_LABELS.get(prefix, fallback)  # lup: ignore[dict-get] — prefix labels
         first = messages[0].partition(":")[2]  # lup: ignore[string-split] — log line
         desc = (first or messages[0]).lstrip()
         more = f" (+{len(messages) - 1} more)" if len(messages) > 1 else ""
@@ -543,10 +543,10 @@ def survey(as_json: bool) -> None:
             name=name,
             commit=b["commit"],
             tracking=b["tracking"],
-            worktree=worktrees.get(name),  # lup: ignore[dict-get]
+            worktree=worktrees.get(name),  # lup: ignore[dict-get] — open map
             is_current=b["is_current"],
             contained_in=contained_in,
-            pr=pr_map.get(name),  # lup: ignore[dict-get]
+            pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
             unique_commits=unique,
             source_diff_lines=diff_lines,
         )
@@ -592,7 +592,7 @@ def delete_branch(
         typer.echo(f"Error: cannot delete the current branch ({name})", err=True)
         raise typer.Exit(1)
 
-    worktree_path = parse_worktrees().get(name)  # lup: ignore[dict-get]
+    worktree_path = parse_worktrees().get(name)  # lup: ignore[dict-get] — open map
 
     actions = [
         *([f"Remove worktree: {worktree_path}"] if worktree_path else []),

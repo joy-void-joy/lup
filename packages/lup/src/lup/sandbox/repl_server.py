@@ -76,7 +76,7 @@ def serve() -> None:
             continue
 
         code = str(request.get("code", ""))  # lup: ignore[dict-get] — wire payload
-        timeout = int(request.get("timeout", 30))  # lup: ignore[dict-get]
+        timeout = int(request.get("timeout", 30))  # lup: ignore[dict-get] — wire payload
         out_buf = StringIO()
         err_buf = StringIO()
         exit_code = 0
