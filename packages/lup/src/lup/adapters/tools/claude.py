@@ -9,6 +9,7 @@ natively.
 from lup.adapters.tools.names import (
     BASH,
     EDIT,
+    ToolNames,
     GLOB,
     GREP,
     NOTEBOOK_EDIT,
@@ -20,7 +21,7 @@ from lup.adapters.tools.names import (
     WRITE,
 )
 
-CLAUDE_BUILTIN_TOOLS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
+CLAUDE_BUILTIN_TOOLS: ToolNames = frozenset(  # lup: ignore[frozenset-shape]
     {
         BASH,
         EDIT,

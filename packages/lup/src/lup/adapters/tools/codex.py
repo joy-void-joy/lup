@@ -8,12 +8,12 @@ under the shared ``WebSearch`` constant per the lingua-franca rule in
 :mod:`lup.adapters.tools.names`.
 """
 
-from lup.adapters.tools.names import WEB_SEARCH
+from lup.adapters.tools.names import WEB_SEARCH, ToolNames
 
 COMMAND_EXECUTION = "command_execution"
 FILE_CHANGE = "file_change"
 
-CODEX_BUILTIN_TOOLS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
+CODEX_BUILTIN_TOOLS: ToolNames = frozenset(  # lup: ignore[frozenset-shape]
     {
         COMMAND_EXECUTION,
         FILE_CHANGE,
