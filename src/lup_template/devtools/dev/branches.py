@@ -3,7 +3,7 @@
 import json
 import logging
 from collections import defaultdict
-from typing import Required, TypedDict
+from typing import Literal, Required, TypedDict
 
 import sh
 import typer
@@ -51,9 +51,12 @@ class SurveyResult(BaseModel):
     branches: list[BranchInfo]
 
 
+type BranchStatus = Literal["DELETE", "STALE", "KEEP", "CURRENT", "NOT_FOUND"]
+
+
 class BranchClassification(TypedDict, total=False):
     branch: Required[str]
-    status: Required[str]
+    status: Required[BranchStatus]
     reason: Required[str]
     worktree: str | None
     pr: str | int
@@ -407,7 +410,7 @@ def branch_status(branch: str | None, as_json: bool) -> None:
 
     typer.echo(f"\nIntegration branch: {integration}")
     typer.echo(f"Current branch: {current}\n")
-    status_markers = {
+    status_markers: dict[BranchStatus, str] = {
         "DELETE": "x",
         "STALE": "~",
         "KEEP": " ",
@@ -416,7 +419,7 @@ def branch_status(branch: str | None, as_json: bool) -> None:
     }
 
     def row(r: BranchClassification) -> list[str]:
-        marker = status_markers.get(r["status"], " ")  # lup: ignore[dict-get]
+        marker = status_markers[r["status"]]
         wt = " [worktree]" if r.get("worktree") else ""  # lup: ignore[dict-get]
         return [f"[{marker}] {r['branch']}", r["status"], f"{r['reason']}{wt}"]
 
