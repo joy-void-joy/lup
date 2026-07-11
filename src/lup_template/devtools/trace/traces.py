@@ -489,7 +489,7 @@ def entry_recency(path: Path) -> datetime:
     try:
         names = [f.name for f in path.iterdir()]
     except OSError:
-        names = []  # lup: ignore[empty-collection] — unreadable dir: no entries
+        names = []
     stamps: list[datetime] = []  # lup: ignore[empty-collection] — parse fold
     for name in names:
         try:

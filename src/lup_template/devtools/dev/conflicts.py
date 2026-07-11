@@ -298,8 +298,8 @@ def conflict_status(as_json: bool) -> None:
         theirs_commits = log_range(merge_base, theirs_ref)
     except sh.ErrorReturnCode:
         logger.warning("No shared history with %s; showing bare status", theirs_ref)
-        ours_commits = []  # lup: ignore[empty-collection] — nothing to show
-        theirs_commits = []  # lup: ignore[empty-collection] — nothing to show
+        ours_commits = []
+        theirs_commits = []
 
     result = ConflictStatusResult(
         operation=operation,

@@ -419,7 +419,10 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
       instance state that accumulates over the object's life;
     - an annotated class-body field default (``x: list[str] = []``) — a
       declared typed default (pydantic copies it per instance);
-    - a call keyword (``f(x=[])``) — an explicitly passed empty value.
+    - a call keyword (``f(x=[])``) — an explicitly passed empty value;
+    - a direct assignment in an ``except`` handler body — the
+      degrade-to-empty fallback shape, which by construction is not a
+      mutate-loop seed (a loop nested inside the handler still trips).
 
     Local seeds (``x = []`` then ``.append`` in a loop) and bare
     module-level seeds still trip the rule: those are the cases a
@@ -459,6 +462,11 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
             case ast.Call(keywords=keywords):
                 for keyword in keywords:
                     mark(keyword.value)
+            case ast.ExceptHandler(body=handler_body):
+                for stmt in handler_body:
+                    match stmt:
+                        case ast.Assign(value=value) | ast.AnnAssign(value=value):
+                            mark(value)
             case ast.ClassDef(body=body):
                 for stmt in body:
                     if isinstance(stmt, ast.AnnAssign):

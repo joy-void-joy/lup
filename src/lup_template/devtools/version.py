@@ -123,7 +123,7 @@ def show(
         rows = git.lines("diff", "--name-only", f"{ref_since}..HEAD", _ok_code=[0, 128])
         files_changed = [f for f in rows if f]
     except sh.ErrorReturnCode:
-        files_changed = []  # lup: ignore[empty-collection] — unknown range: no diff
+        files_changed = []
 
     if as_json:
         info: VersionInfo = {
