@@ -97,7 +97,7 @@ def validate_name(name: str) -> str:
     return name
 
 
-def write_json(path: Path, data: object) -> None:  # lup: ignore[bare-object]
+def write_json(path: Path, data: MarketplaceJson | SettingsJson) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
