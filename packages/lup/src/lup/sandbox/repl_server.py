@@ -50,8 +50,9 @@ def serve() -> None:
     sys.stderr = open("/dev/null", "w")
 
     # Live Python objects of any type — the whole point of the namespace.
-    namespace: dict[str, object] = {}  # lup: ignore[dict-str-object, empty-collection]
-    namespace["__builtins__"] = builtins
+    namespace: dict[str, object] = {  # lup: ignore[dict-str-object]
+        "__builtins__": builtins
+    }
 
     for raw_line in proto_in:
         line = raw_line.strip()  # lup: ignore[string-strip] — wire framing
