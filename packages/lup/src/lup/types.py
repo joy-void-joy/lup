@@ -30,6 +30,13 @@ introspectable, and unlike ``Any`` it keeps the type checker honest.
 type JsonObject = dict[str, JsonValue]
 """A JSON object: tool inputs, JSON Schemas, structured outputs, session data."""
 
+type EnvVars = dict[str, str]  # lup: ignore[dict-str-payload] — open env-var map
+"""An environment-variable map — process env, dotenv values, MCP server env.
+
+The keys are open and data-driven by nature (whatever variables exist), which
+is exactly the shape the dict-str-payload rule otherwise flags: annotate env
+maps with this alias instead of respelling ``dict[str, str]`` per site."""
+
 type PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 """How a session prompts for tool permission — a neutral intent knob;
 engines without permission modes refuse it at construction."""

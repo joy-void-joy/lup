@@ -19,7 +19,7 @@ Customization:
        pure data: name, command slug, env keys, intro text, and the
        ``PromptField`` list to ask for. Its subcommand is generated for you.
     2. For a bespoke flow (OAuth files, detection, validation), pass a
-       ``setup_func`` returning ``EnvValues`` instead of declarative fields.
+       ``setup_func`` returning ``EnvVars`` instead of declarative fields.
     3. Override status display with ``status_func`` when env-key presence
        isn't the whole story.
     4. Shell helpers live in ``lup_template.devtools.utils`` (e.g.
@@ -44,6 +44,7 @@ from tzlocal import get_localzone_name
 from lup.adapters.profiles.claude.store import (  # lup: ignore[seam-boundary]
     ProfileStore,
 )
+from lup.types import EnvVars
 from lup.workspace.paths import project_root
 
 app = typer.Typer(
@@ -53,9 +54,6 @@ app = typer.Typer(
 )
 
 console = Console()
-
-# Env vars an integration wants written to .env.local, keyed by name.
-type EnvValues = dict[str, str]  # lup: ignore[dict-str-payload] — open env-var map
 
 
 class IntegrationStatus(BaseModel):
@@ -80,7 +78,7 @@ claude_profiles = ProfileStore()
 # =====================================================================
 
 
-def read_env_local() -> EnvValues:
+def read_env_local() -> EnvVars:
     """Read .env.local values (empty dict when the file is missing).
 
     ``dotenv`` owns the parse — the same parser pydantic-settings reads the
@@ -91,7 +89,7 @@ def read_env_local() -> EnvValues:
     return {k: v for k, v in dotenv_values(ENV_LOCAL).items() if v is not None}
 
 
-def write_env_local(values: EnvValues) -> None:
+def write_env_local(values: EnvVars) -> None:
     """Update keys in .env.local, preserving existing lines, comments, order.
 
     ``dotenv.set_key`` rewrites a ``KEY=...`` line in place and appends
@@ -106,7 +104,7 @@ def write_env_local(values: EnvValues) -> None:
         set_key(ENV_LOCAL, key, value, quote_mode="never")
 
 
-def save_and_confirm(values: EnvValues) -> None:
+def save_and_confirm(values: EnvVars) -> None:
     """Write values to .env.local and print confirmation."""
     if values:
         write_env_local(values)
@@ -193,22 +191,22 @@ class Integration(BaseModel):
     fields: list[PromptField] = Field(
         default_factory=list, description="Env vars to prompt for, in order"
     )
-    setup_func: Callable[[], EnvValues] | None = Field(
+    setup_func: Callable[[], EnvVars] | None = Field(
         default=None,
         description="Bespoke interactive flow, used instead of the declarative fields",
     )
-    status_func: Callable[[EnvValues], IntegrationStatus] | None = Field(
+    status_func: Callable[[EnvVars], IntegrationStatus] | None = Field(
         default=None,
         description="Custom status checker (default: checks env_keys)",
     )
 
-    def run(self) -> EnvValues:
+    def run(self) -> EnvVars:
         """Run the setup flow and return env vars to write."""
         if self.setup_func is not None:
             return self.setup_func()
         return self.run_prompts()
 
-    def run_prompts(self) -> EnvValues:
+    def run_prompts(self) -> EnvVars:
         """Standard token flow: header, reconfigure check, intro, prompts."""
         console.print()
         console.rule(f"[bold]{self.name}[/]")
@@ -230,7 +228,7 @@ class Integration(BaseModel):
             open_browser(self.browser_url)
         console.print()
 
-        values: EnvValues = {}  # lup: ignore[empty-collection] — prompt-loop fold
+        values: EnvVars = {}  # lup: ignore[empty-collection] — prompt-loop fold
         for field in self.fields:
             current = env.get(field.key, "")  # lup: ignore[dict-get] — open env map
             raw = typer.prompt(
@@ -249,7 +247,7 @@ class Integration(BaseModel):
             values[field.key] = raw
         return values
 
-    def check_status(self, env: EnvValues) -> IntegrationStatus:
+    def check_status(self, env: EnvVars) -> IntegrationStatus:
         """Return (is_configured, detail_string)."""
         if self.status_func:
             return self.status_func(env)
@@ -265,7 +263,7 @@ class Integration(BaseModel):
 # =====================================================================
 
 
-def slack_status(env: EnvValues) -> IntegrationStatus:
+def slack_status(env: EnvVars) -> IntegrationStatus:
     """Custom status check for Slack."""
     bot = env.get("SLACK_BOT_TOKEN")  # lup: ignore[dict-get] — open env map
     app_token = env.get("SLACK_APP_TOKEN")  # lup: ignore[dict-get] — open env map
@@ -274,7 +272,7 @@ def slack_status(env: EnvValues) -> IntegrationStatus:
     return IntegrationStatus(ok=False, detail="not configured")
 
 
-def setup_google() -> EnvValues:
+def setup_google() -> EnvVars:
     """Walk through Google OAuth setup (Gmail, Calendar, etc).
 
     TEMPLATE: Replace with your Google API scopes and services.
@@ -326,7 +324,7 @@ def setup_google() -> EnvValues:
     return {"GMAIL_CREDENTIALS_PATH": str(creds_path)}
 
 
-def google_status(_env: EnvValues) -> IntegrationStatus:
+def google_status(_env: EnvVars) -> IntegrationStatus:
     """Custom status check for Google OAuth."""
     token_path = CREDENTIALS_DIR / "token.json"
     creds_path = CREDENTIALS_DIR / "google.json"
@@ -339,7 +337,7 @@ def google_status(_env: EnvValues) -> IntegrationStatus:
     return IntegrationStatus(ok=False, detail="not configured")
 
 
-def codex_backend_status(env: EnvValues) -> IntegrationStatus:
+def codex_backend_status(env: EnvVars) -> IntegrationStatus:
     """Rates present = budget caps enforceable on codex/openai."""
     rates = [
         key
@@ -353,7 +351,7 @@ def codex_backend_status(env: EnvValues) -> IntegrationStatus:
     )
 
 
-def setup_timezone() -> EnvValues:
+def setup_timezone() -> EnvVars:
     """Walk through timezone configuration."""
     console.print()
     console.rule("[bold]Timezone[/]")
@@ -388,7 +386,7 @@ def setup_timezone() -> EnvValues:
     return {}
 
 
-def timezone_status(env: EnvValues) -> IntegrationStatus:
+def timezone_status(env: EnvVars) -> IntegrationStatus:
     """Custom status check for timezone (not-configured is OK, just shows system default)."""
     tz = env.get("AGENT_TIMEZONE", "")  # lup: ignore[dict-get] — open env map
     if tz:

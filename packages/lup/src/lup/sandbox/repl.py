@@ -30,6 +30,7 @@ from lup.sandbox.models import (
     SandboxNotInitializedError,
 )
 from lup.sandbox.process import compute_deadline
+from lup.types import EnvVars
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ class ReplSession:
         self,
         client: docker.DockerClient,
         container: Container,
-        environment: dict[str, str],  # lup: ignore[dict-str-payload] — open env map
+        environment: EnvVars,
     ) -> None:
         self.client = client
         self.container = container
