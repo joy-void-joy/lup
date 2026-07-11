@@ -145,8 +145,8 @@ class ClaudeBackgroundDriver(BackgroundDriver):
         except Exception:
             logger.exception("Background agent '%s' crashed", self.name)
 
-    def handle_response(self, msg: object) -> None:  # lup: ignore[bare-object]
-        """Route response messages for logging (SDK message of any shape)."""
+    def handle_response(self, msg: claude_types.Message) -> None:
+        """Route SDK stream messages for logging."""
         match msg:
             case claude_types.AssistantMessage():
                 if self.on_response:
