@@ -60,7 +60,7 @@ def entry_matches_target(entry: ImportEntry, target: str) -> bool:
         return True
     if "." not in target:
         return False
-    parent, _, leaf = target.rpartition(".")
+    parent, _, leaf = target.rpartition(".")  # lup: ignore[string-split] — dotted path
     return leaf in entry["names"] and (
         module == parent or module.startswith(parent + ".")
     )

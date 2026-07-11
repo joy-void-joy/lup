@@ -168,7 +168,7 @@ def auto_import_namespace(
                 dotted_paths.append(".".join(chain[:i]))
 
     for dotted in sorted(dict.fromkeys(dotted_paths)):
-        root, _, _ = dotted.partition(".")
+        root, _, _ = dotted.partition(".")  # lup: ignore[string-split] — dotted path
         if root in DANGEROUS_MODULES:
             continue
         try:
