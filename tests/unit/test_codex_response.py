@@ -1,4 +1,4 @@
-# lup: ignore[bare-object, cast, empty-collection]
+# lup: ignore[bare-object, cast]
 # Test fixtures and assertions construct these shapes deliberately.
 """Codex response assembly.
 

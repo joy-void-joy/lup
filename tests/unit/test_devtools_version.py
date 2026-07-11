@@ -1,4 +1,4 @@
-# lup: ignore[bare-object, empty-collection, tuple-shape]
+# lup: ignore[bare-object, tuple-shape]
 # Test fixtures and assertions construct these shapes deliberately.
 """Behavior tests for `lup-devtools version`: commit classification and bump.
 

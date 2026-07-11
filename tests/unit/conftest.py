@@ -1,4 +1,4 @@
-# lup: ignore[empty-collection, frozenset-shape]
+# lup: ignore[frozenset-shape]
 # Test fixtures and assertions construct these shapes deliberately.
 """Shared fixtures and fakes for unit tests."""
 
