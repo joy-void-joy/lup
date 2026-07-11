@@ -9,11 +9,13 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+from lup.types import EnvVars
+
 
 def build_mcp_config_overrides(
     serve_tools_command: str = "uv",
     serve_tools_args: list[str] | None = None,
-    env: dict[str, str] | None = None,  # lup: ignore[dict-str-payload] — env map
+    env: EnvVars | None = None,
     servers: Sequence[str] = ("notes", "sandbox"),
 ) -> list[str]:
     """Build config_overrides for lup MCP tools via serve-tools.

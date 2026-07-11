@@ -40,7 +40,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
 from pydantic import BaseModel, Field, ValidationError
 
-from lup.types import Decorator, JsonObject
+from lup.types import Decorator, EnvVars, JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class RawStdioServerConfig(TypedDict):
     type: NotRequired[Literal["stdio"]]
     command: str
     args: NotRequired[list[str]]
-    env: NotRequired[dict[str, str]]  # lup: ignore[dict-str-payload] — env map
+    env: NotRequired[EnvVars]
 
 
 class RawSseServerConfig(TypedDict):
