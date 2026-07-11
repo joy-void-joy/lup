@@ -177,11 +177,33 @@ def build() -> list[int]:
 
 MODULE_SEED = "REGISTRY = {}\n"
 
+EXCEPT_FALLBACK = """\
+try:
+    entries = read_dir(path)
+except OSError:
+    entries = []
+"""
+
+EXCEPT_NESTED_SEED = """\
+try:
+    entries = read_dir(path)
+except OSError:
+    for path in retry_paths:
+        entries = []
+"""
+
 
 def test_refiner_exempts_deliberate_defaults() -> None:
     assert empty_collection_exempt_lines(INIT_STATE) == {3, 4}
     assert empty_collection_exempt_lines(CLASS_FIELD) == {2}
     assert empty_collection_exempt_lines(CALL_KWARG) == {1}
+
+
+def test_refiner_exempts_except_body_fallback() -> None:
+    # Degrade-to-empty in a handler is a fallback value, not a fold seed.
+    assert empty_collection_exempt_lines(EXCEPT_FALLBACK) == {4}
+    # Only DIRECT handler statements: a seed nested in a loop still trips.
+    assert empty_collection_exempt_lines(EXCEPT_NESTED_SEED) == set()
 
 
 def test_refiner_keeps_flagging_seeds() -> None:
