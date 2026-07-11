@@ -7,6 +7,7 @@ from lup.adapters.engines.Engine import Engine
 from lup.adapters.errors import UnsupportedOperationError
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.profiles.Profile import Profile
+from lup.adapters.tools.names import ToolNames
 
 
 class CodexEngine(Engine):
@@ -31,7 +32,7 @@ class CodexEngine(Engine):
             "can slot in without touching the seam."
         )
 
-    def builtin_tools(self) -> frozenset[str]:  # lup: ignore[frozenset-shape]
+    def builtin_tools(self) -> ToolNames:
         """The names Codex-native builtin activity surfaces as in lup traffic.
 
         A name table, not a selector: whether the set is restrictable is
