@@ -179,7 +179,7 @@ def auto_import_namespace(
     return namespace
 
 
-def format_eval_result(result: object) -> str:  # lup: ignore[bare-object]
+def format_eval_result(result: object) -> str:  # lup: ignore[bare-object] — eval result
     containers = (dict, list, tuple, set, frozenset)  # lup: ignore[frozenset-shape]
     if isinstance(result, containers):
         try:

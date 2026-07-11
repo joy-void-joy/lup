@@ -186,7 +186,7 @@ class Sandbox:
         if self.docker_client is None:
             return
         try:
-            old = self.docker_client.containers.get(  # lup: ignore[dict-get]
+            old = self.docker_client.containers.get(  # lup: ignore[dict-get] — docker API
                 self.container_name
             )
             logger.warning("Removing stale container: %s", self.container_name)
@@ -206,16 +206,16 @@ class Sandbox:
         Only when the owner-pid label is missing (older containers, or
         ones created elsewhere) do we fall back to the age heuristic.
         """
-        owner_pid_raw = labels.get(self.OWNER_PID_LABEL)  # lup: ignore[dict-get]
+        owner_pid_raw = labels.get(self.OWNER_PID_LABEL)  # lup: ignore[dict-get] — label map
         if owner_pid_raw is not None:
             try:
                 owner_pid = int(owner_pid_raw)
             except ValueError:
                 return True
-            started = labels.get(self.OWNER_START_LABEL)  # lup: ignore[dict-get]
+            started = labels.get(self.OWNER_START_LABEL)  # lup: ignore[dict-get] — label map
             return not process_is_alive(owner_pid, started)
         try:
-            created_raw = labels.get(self.CREATED_AT_LABEL)  # lup: ignore[dict-get]
+            created_raw = labels.get(self.CREATED_AT_LABEL)  # lup: ignore[dict-get] — label map
             created_at = float(created_raw or "0")
         except ValueError:
             created_at = 0.0
@@ -249,9 +249,9 @@ class Sandbox:
             logger.warning("Removing orphaned sandbox container: %s", container.name)
             try:
                 container.remove(force=True)
-                volume_name = labels.get(self.VOLUME_LABEL)  # lup: ignore[dict-get]
+                volume_name = labels.get(self.VOLUME_LABEL)  # lup: ignore[dict-get] — label map
                 if volume_name:
-                    volume = self.docker_client.volumes.get(  # lup: ignore[dict-get]
+                    volume = self.docker_client.volumes.get(  # lup: ignore[dict-get] — docker API
                         volume_name
                     )
                     volume.remove()
@@ -272,7 +272,7 @@ class Sandbox:
 
         if self.docker_client is not None:
             try:
-                vol = self.docker_client.volumes.get(  # lup: ignore[dict-get]
+                vol = self.docker_client.volumes.get(  # lup: ignore[dict-get] — docker API
                     self.volume_name
                 )
                 vol.remove()
@@ -587,7 +587,7 @@ def sandbox_cleanup(session_id: str, shared_dir: Path) -> Generator[None]:
         sandbox.docker_client = client
         try:
             sandbox.remove_stale_container()
-            client.volumes.get(sandbox.volume_name).remove()  # lup: ignore[dict-get]
+            client.volumes.get(sandbox.volume_name).remove()  # lup: ignore[dict-get] — docker API
         except NotFound:
             pass
         except (APIError, DockerException) as e:
