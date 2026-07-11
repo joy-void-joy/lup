@@ -146,16 +146,19 @@ def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
     return events
 
 
+type Block = tuple[str, str]  # lup: ignore[tuple-shape] — a (label, body) trace block
+
+
 def iter_markdown_blocks(
     content: str,
-) -> list[tuple[str, str]]:  # lup: ignore[tuple-shape] — (label, body)
+) -> list[Block]:
     """Split a trace markdown document into ``(label, body)`` blocks.
 
     A block starts at a ``## <emoji> <label>`` header and runs to the next
     header. The body has any surrounding ``` ``` fences stripped, so a Result
     body is the raw JSON the logger fenced — ready to parse.
     """
-    blocks: list[tuple[str, str]] = []  # lup: ignore[tuple-shape, empty-collection]
+    blocks: list[Block] = []  # lup: ignore[empty-collection] — block fold
     label: str | None = None
     body_lines: list[str] = []  # lup: ignore[empty-collection] — block fold
 
@@ -227,7 +230,7 @@ def scan_for_errors(
     and keeps the ``error`` ones — real tool failures, distinguished by the
     logged ``is_error`` flag rather than by keyword-scanning prose.
     """
-    errors_by_session: dict[str, list[str]] = {}  # lup: ignore[empty-collection]
+    errors_by_session: defaultdict[str, list[str]] = defaultdict(list)
 
     for trace_file in resolve_trace_paths(effective):
         try:
@@ -238,7 +241,7 @@ def scan_for_errors(
         for event in events:
             if event.kind != "error":
                 continue
-            errors_by_session.setdefault(session_id, []).append(
+            errors_by_session[session_id].append(
                 f"{event.tool or 'unknown'}: {event.brief}"
             )
 
