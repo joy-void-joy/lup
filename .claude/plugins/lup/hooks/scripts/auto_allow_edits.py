@@ -13,6 +13,9 @@ Edit decision order:
    - bare `# lup: ignore` in the first 10 lines on disk -> skip the whole scan;
      a typed `# lup: ignore[id]` there disables only that rule (size gate still
      applies)
+   - empty-collection hits are AST-refined over the composed post-edit file:
+     deliberate defaults (__init__ state, call kwargs, annotated class fields)
+     pass without a marker (see the generated refiner region)
    - violating line carries an ignore covering the rule (bare, or typed naming
      the rule's id) -> ask (user prompt)
    - no covering ignore -> deny with a `# lup: ignore[id]` hint for that rule
@@ -29,6 +32,7 @@ Write decision order:
 2. Otherwise -> defer to the user (None; full-file rewrites never auto-allow)
 """
 
+import ast
 import difflib
 import json
 import re
@@ -191,7 +195,7 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "empty-collection",
         re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
-        "Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an append/mutate loop — build the collection with a comprehension instead, or add `# lup: ignore[empty-collection]` for a deliberate typed default",
+        "Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an append/mutate loop — build the collection with a comprehension instead, or add `# lup: ignore[empty-collection]` for a fold no comprehension can express",
     ),
     (
         "cast",
@@ -402,6 +406,80 @@ TS_ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         "console.log is a debug leftover — remove it or route through a logger",
     ),
 ]
+
+
+# --- generated: empty-collection refiner (lup.codescan.antipatterns) ---
+def empty_collection_exempt_lines(source: str) -> set[int]:
+    """1-based lines whose empty-collection literal is a deliberate default.
+
+    The empty-collection regex is a broad trigger; this refiner reads the
+    AST and exempts the shapes whose whole point is an empty start:
+
+    - ``self.<attr> = []`` (plain or annotated) inside ``__init__`` —
+      instance state that accumulates over the object's life;
+    - an annotated class-body field default (``x: list[str] = []``) — a
+      declared typed default (pydantic copies it per instance);
+    - a call keyword (``f(x=[])``) — an explicitly passed empty value.
+
+    Local seeds (``x = []`` then ``.append`` in a loop) and bare
+    module-level seeds still trip the rule: those are the cases a
+    comprehension replaces. Unparseable source exempts nothing, so both
+    consumers — the edit hook and the tree auditor — fall back to the
+    plain regex verdict. Self-contained over the stdlib ``ast`` module:
+    ``dev gen-hook`` splices this function's source verbatim into the
+    hook's generated refiner region.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+
+    def is_empty_literal(node: ast.expr | None) -> bool:
+        match node:
+            case ast.Dict(keys=[]) | ast.List(elts=[]):
+                return True
+            case ast.Call(func=ast.Name(id="set"), args=[], keywords=[]):
+                return True
+        return False
+
+    def is_self_attribute(node: ast.expr) -> bool:
+        match node:
+            case ast.Attribute(value=ast.Name(id="self")):
+                return True
+        return False
+
+    exempt: set[int] = set()
+
+    def mark(value: ast.expr | None) -> None:
+        if value is not None and is_empty_literal(value):
+            exempt.add(value.lineno)
+
+    for node in ast.walk(tree):
+        match node:
+            case ast.Call(keywords=keywords):
+                for keyword in keywords:
+                    mark(keyword.value)
+            case ast.ClassDef(body=body):
+                for stmt in body:
+                    if isinstance(stmt, ast.AnnAssign):
+                        mark(stmt.value)
+            case (
+                ast.FunctionDef(name="__init__") | ast.AsyncFunctionDef(name="__init__")
+            ):
+                for stmt in ast.walk(node):
+                    match stmt:
+                        case ast.Assign(targets=targets, value=value) if all(
+                            is_self_attribute(target) for target in targets
+                        ):
+                            mark(value)
+                        case ast.AnnAssign(target=target, value=value) if (
+                            is_self_attribute(target)
+                        ):
+                            mark(value)
+    return exempt
+
+
+# --- end generated refiner ---
 
 
 def is_protected_file(file_path: str) -> bool:
@@ -746,6 +824,7 @@ def find_anti_pattern_violations(
     patterns: list[tuple[str, re.Pattern[str], str]] | None = None,
     ignore_marker: str = LUP_IGNORE_MARKER,
     line_violations: dict[int, str] | None = None,
+    exempt_indices: set[int] | None = None,
 ) -> Violation | None:
     """Check newly added lines for anti-patterns, per rule.
 
@@ -791,6 +870,12 @@ def find_anti_pattern_violations(
                 for rule_id, pattern, message in patterns
                 if pattern.search(stripped)
             ]
+            if exempt_indices and idx in exempt_indices:
+                hits = [
+                    (rule_id, message)
+                    for rule_id, message in hits
+                    if rule_id != "empty-collection"
+                ]
             if line_violations and idx in line_violations:
                 hits.insert(0, ("silent-except", line_violations[idx]))
             if not hits:
@@ -812,6 +897,41 @@ def find_anti_pattern_violations(
     if ask_reasons:
         return ("ask", ask_reasons[0])
     return None
+
+
+def post_edit_layout(
+    file_path: str, old_string: str, new_string: str
+) -> tuple[str, int] | None:
+    """The file's post-edit source and new_string's 0-based start line in it.
+
+    Composes what the file will contain after the edit so the AST refiner
+    judges lines in their real context. ``None`` when the context cannot be
+    composed (unreadable file, old_string not found) — the refiner then
+    exempts nothing and the plain regex verdict stands. For ``replace_all``
+    only the first occurrence is composed: later occurrences simply stay
+    unexempted, which errs strict.
+    """
+    if not old_string:
+        return (new_string, 0)
+    try:
+        current = Path(file_path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    before, found, after = current.partition(old_string)
+    if not found:
+        return None
+    return (before + new_string + after, before.count("\n"))
+
+
+def empty_collection_exempt_indices(
+    file_path: str, old_string: str, new_string: str
+) -> set[int]:
+    """0-based new_string line indices the empty-collection refiner exempts."""
+    layout = post_edit_layout(file_path, old_string, new_string)
+    if layout is None:
+        return set()
+    source, start = layout
+    return {line - start - 1 for line in empty_collection_exempt_lines(source)}
 
 
 def violation_decision(violation: Violation) -> AllowDecision:
@@ -837,6 +957,9 @@ def anti_pattern_decision(
             new_string,
             file_path,
             line_violations=find_swallowed_excepts(new_string.splitlines()),
+            exempt_indices=empty_collection_exempt_indices(
+                file_path, old_string, new_string
+            ),
         )
         if violation:
             return violation_decision(violation)

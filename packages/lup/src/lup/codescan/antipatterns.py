@@ -29,6 +29,7 @@ core — ignore matching, comment-column tokenization, the line cursor — in
 `lup.codescan.common`, which this set's consumers and the auditor import directly.
 """
 
+import ast
 import re
 
 from pydantic import BaseModel
@@ -179,14 +180,15 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "`# lup: ignore[set-shape]`",
     ),
     AntiPattern(
-        # Broad by intent: every empty-collection literal, even a typed one. A
-        # deliberate typed default carries `# lup: ignore[empty-collection]`. The
-        # lookbehind keeps `==`/`!=`/`<=`/`>=` comparisons out of the net.
+        # Broad regex trigger, refined by the AST: empty_collection_exempt_lines
+        # exempts deliberate defaults (__init__ state, call kwargs, annotated
+        # class fields), so what reaches a verdict is the build-then-append
+        # seed. The lookbehind keeps `==`/`!=`/`<=`/`>=` comparisons out.
         id="empty-collection",
         pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
         message="Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an "
         "append/mutate loop — build the collection with a comprehension instead, or add "
-        "`# lup: ignore[empty-collection]` for a deliberate typed default",
+        "`# lup: ignore[empty-collection]` for a fold no comprehension can express",
     ),
     AntiPattern(
         id="cast",
@@ -444,6 +446,79 @@ reports it spurious — while an id no scanner owns still is.
 """
 
 
+EMPTY_COLLECTION_RULE_ID = "empty-collection"
+
+
+def empty_collection_exempt_lines(source: str) -> set[int]:
+    """1-based lines whose empty-collection literal is a deliberate default.
+
+    The empty-collection regex is a broad trigger; this refiner reads the
+    AST and exempts the shapes whose whole point is an empty start:
+
+    - ``self.<attr> = []`` (plain or annotated) inside ``__init__`` —
+      instance state that accumulates over the object's life;
+    - an annotated class-body field default (``x: list[str] = []``) — a
+      declared typed default (pydantic copies it per instance);
+    - a call keyword (``f(x=[])``) — an explicitly passed empty value.
+
+    Local seeds (``x = []`` then ``.append`` in a loop) and bare
+    module-level seeds still trip the rule: those are the cases a
+    comprehension replaces. Unparseable source exempts nothing, so both
+    consumers — the edit hook and the tree auditor — fall back to the
+    plain regex verdict. Self-contained over the stdlib ``ast`` module:
+    ``dev gen-hook`` splices this function's source verbatim into the
+    hook's generated refiner region.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+
+    def is_empty_literal(node: ast.expr | None) -> bool:
+        match node:
+            case ast.Dict(keys=[]) | ast.List(elts=[]):
+                return True
+            case ast.Call(func=ast.Name(id="set"), args=[], keywords=[]):
+                return True
+        return False
+
+    def is_self_attribute(node: ast.expr) -> bool:
+        match node:
+            case ast.Attribute(value=ast.Name(id="self")):
+                return True
+        return False
+
+    exempt: set[int] = set()
+
+    def mark(value: ast.expr | None) -> None:
+        if value is not None and is_empty_literal(value):
+            exempt.add(value.lineno)
+
+    for node in ast.walk(tree):
+        match node:
+            case ast.Call(keywords=keywords):
+                for keyword in keywords:
+                    mark(keyword.value)
+            case ast.ClassDef(body=body):
+                for stmt in body:
+                    if isinstance(stmt, ast.AnnAssign):
+                        mark(stmt.value)
+            case (
+                ast.FunctionDef(name="__init__") | ast.AsyncFunctionDef(name="__init__")
+            ):
+                for stmt in ast.walk(node):
+                    match stmt:
+                        case ast.Assign(targets=targets, value=value) if all(
+                            is_self_attribute(target) for target in targets
+                        ):
+                            mark(value)
+                        case ast.AnnAssign(target=target, value=value) if (
+                            is_self_attribute(target)
+                        ):
+                            mark(value)
+    return exempt
+
+
 def patterns_for_suffix(suffix: str) -> list[AntiPattern] | None:
     """The anti-pattern table that applies to a file suffix, or None to skip it.
 
@@ -511,6 +586,11 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
       bare ignore on a line that trips nothing -> "spurious";
     - a bare `# lup: ignore` that does silence the line -> "untyped".
 
+    An empty-collection hit on a line the AST refiner exempts (see
+    :func:`empty_collection_exempt_lines`) is not a trip at all, so a
+    directive naming the rule there reports "spurious" — the audit drives
+    the cleanup of markers the refiner made unnecessary.
+
     An ignore counts as a guard only where a comment actually starts (per the
     tokenizer), so a docstring or string literal that merely *mentions*
     `# lup: ignore` — and a note whose prose quotes it — guards nothing. Text
@@ -524,6 +604,8 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
         file_disabled = file_ignore.rule_ids
 
     context = PythonContext.parse(text)
+    refined = any(ap.id == EMPTY_COLLECTION_RULE_ID for ap in patterns)
+    exempt = empty_collection_exempt_lines(text) if refined else set()
 
     def inline_directive(line_no: int, line: str) -> re.Match[str] | None:
         match = IGNORE_RE.search(line)
@@ -543,6 +625,8 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
             continue  # docstring prose is not code, and no comment can guard it
         preview = line.strip()[:80]
         hits = line_hits(line, patterns)
+        if index in exempt:
+            hits = [ap for ap in hits if ap.id != EMPTY_COLLECTION_RULE_ID]
         hit_ids = {ap.id for ap in hits}
         directive = inline_directive(index, line)
         inline_ids = ignore_rule_ids(directive) if directive is not None else None

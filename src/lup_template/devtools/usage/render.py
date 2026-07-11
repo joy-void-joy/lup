@@ -421,7 +421,7 @@ def render_daily_breakdown(
                 daily[today_idx] = DailyBreakdown(
                     date=today_str,
                     total_tokens=est_tokens,
-                    tokens_by_model={},  # lup: ignore[empty-collection] — estimate
+                    tokens_by_model={},
                     activity=daily[today_idx].activity,
                 )
             estimated_today = True
