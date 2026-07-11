@@ -59,20 +59,15 @@ def collect_ro_dirs() -> list[Path]:
     version directories themselves would also expose ``logs/``, which is
     reserved for the feedback loop and must stay invisible to the agent.
     """
-    ro: list[Path] = []  # lup: ignore[empty-collection] — dedup fold via add()
-
-    def add(candidate: Path) -> None:
-        if candidate.is_dir() and candidate not in ro:
-            ro.append(candidate)
-
-    add(sessions_dir())
-    add(outputs_dir())
+    candidates = [sessions_dir(), outputs_dir()]
     if traces_path().exists():
-        for version_dir in sorted(traces_path().iterdir()):
-            if version_dir.is_dir():
-                add(version_dir / "sessions")
-                add(version_dir / "outputs")
-    return ro
+        candidates += [
+            version_dir / sub
+            for version_dir in sorted(traces_path().iterdir())
+            if version_dir.is_dir()
+            for sub in ("sessions", "outputs")
+        ]
+    return [c for c in dict.fromkeys(candidates) if c.is_dir()]
 
 
 def setup_notes(
