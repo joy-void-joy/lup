@@ -276,8 +276,7 @@ def test_separator_strip_is_denied_argless_allowed() -> None:
     )
     # Argless .strip() is whitespace framing — no anti-pattern, ordinary gating.
     assert (
-        edit_decision("src/module.py", "x = 1\n", "x = 1\ny = raw.strip()\n")
-        != "deny"
+        edit_decision("src/module.py", "x = 1\n", "x = 1\ny = raw.strip()\n") != "deny"
     )
 
 

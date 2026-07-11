@@ -14,6 +14,7 @@ Examples::
 
 import json
 import logging
+from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
 import sh
@@ -493,7 +494,7 @@ def create(
         typer.echo(f"PR created but URL not found in output:\n{raw}", err=True)
         raise typer.Exit(1)
 
-    number_segment = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+    number_segment = PurePosixPath(urlparse(url).path).name
     if not number_segment.isdigit():
         typer.echo(f"PR created at {url} but could not parse number", err=True)
         raise typer.Exit(1)

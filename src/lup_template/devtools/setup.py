@@ -301,9 +301,7 @@ def setup_google() -> EnvVars:
         open_browser("https://console.cloud.google.com/apis/credentials")
         console.print()
 
-        source = typer.prompt(
-            "Path to downloaded credentials JSON"
-        ).strip()
+        source = typer.prompt("Path to downloaded credentials JSON").strip()
         source_path = Path(source).expanduser().resolve()
 
         if not source_path.exists():
