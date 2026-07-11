@@ -75,7 +75,7 @@ def match_outcomes(
         outcomes = load_outcomes()
     except NotImplementedError as e:
         typer.echo(f"note: collecting without outcomes — {e}", err=True)
-        outcomes = {}  # lup: ignore[empty-collection] — degrade to no outcomes
+        outcomes = {}
 
     return [
         SessionResult(
