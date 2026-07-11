@@ -115,7 +115,7 @@ def commit_results() -> None:
     """
     git = sh.Command("git").bake("--no-pager", "-c", "color.ui=never")
     status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0]))
-    if not status.strip():  # lup: ignore[string-strip] — anything-to-commit probe
+    if not status.strip():
         return
 
     try:

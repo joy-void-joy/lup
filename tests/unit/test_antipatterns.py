@@ -292,10 +292,16 @@ def test_note_quoting_ignore_is_not_a_guard() -> None:
     assert audit_text(source, PYTHON_ANTI_PATTERNS) == []
 
 
-def test_audit_flags_strip_like_split() -> None:
-    findings = audit_text("name = raw.strip()\n", PYTHON_ANTI_PATTERNS)
+def test_audit_exempts_argless_strip() -> None:
+    # Whitespace framing has no parser alternative — argless .strip() passes,
+    # exactly like argless .split().
+    assert audit_text("name = raw.strip()\n", PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_flags_separator_strip_like_split() -> None:
+    findings = audit_text("name = raw.strip('/')\n", PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["missing"]
-    assert ".strip()" in findings[0].message
+    assert ".strip(chars)" in findings[0].message
 
 
 def test_audit_flags_string_keyed_dict_annotation() -> None:

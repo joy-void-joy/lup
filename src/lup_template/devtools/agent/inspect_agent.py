@@ -76,7 +76,7 @@ def print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
 
     desc_lines = tool.description.split(". ")  # lup: ignore[string-split] — sentences
     for line in desc_lines:
-        line = line.strip()  # lup: ignore[string-strip] — prose hygiene
+        line = line.strip()
         if line:
             out.write(f"    {line}.\n")
 

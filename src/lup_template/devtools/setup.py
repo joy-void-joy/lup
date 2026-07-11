@@ -235,7 +235,7 @@ class Integration(BaseModel):
                 field.prompt,
                 default=current,
                 show_default=bool(current) and not field.secret,
-            ).strip()  # lup: ignore[string-strip] — human-typed input
+            ).strip()
             if not raw:
                 continue
             if field.parse is not None:
@@ -303,7 +303,7 @@ def setup_google() -> EnvVars:
 
         source = typer.prompt(
             "Path to downloaded credentials JSON"
-        ).strip()  # lup: ignore[string-strip] — human-typed input
+        ).strip()
         source_path = Path(source).expanduser().resolve()
 
         if not source_path.exists():
@@ -369,7 +369,7 @@ def setup_timezone() -> EnvVars:
         "AGENT_TIMEZONE",
         default=default,
         show_default=bool(default),
-    ).strip()  # lup: ignore[string-strip] — human-typed input
+    ).strip()
 
     if tz:
         try:

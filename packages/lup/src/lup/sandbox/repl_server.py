@@ -55,7 +55,7 @@ def serve() -> None:
     }
 
     for raw_line in proto_in:
-        line = raw_line.strip()  # lup: ignore[string-strip] — wire framing
+        line = raw_line.strip()
         if not line:
             continue
         try:

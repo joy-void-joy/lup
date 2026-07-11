@@ -83,7 +83,7 @@ def find_boundary_breaches(text: str) -> list[BoundaryBreach]:
         return BoundaryBreach(
             line=line_no,
             module=match.group("module"),
-            text=line.strip(),  # lup: ignore[string-strip] — display preview
+            text=line.strip(),
         )
 
     candidates = (

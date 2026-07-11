@@ -224,8 +224,8 @@ ANTI_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "string-strip",
-        re.compile(r"\.strip\s*\("),
-        "Avoid .strip() for structured data — parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
+        re.compile(r"\.strip\s*\((?!\s*\))"),
+        "Avoid .strip(chars) for structured data — parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
     ),
     (
         "bare-except",
