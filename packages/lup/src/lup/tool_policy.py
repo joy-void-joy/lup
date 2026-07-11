@@ -127,7 +127,7 @@ class BaseToolPolicy:
         self,
         servers: dict[str, McpServerEntry],
         *,
-        builtin_tools: frozenset[str] = frozenset(),  # lup: ignore[frozenset-shape] — immutable default
+        builtin_tools: frozenset[str] = frozenset(),  # lup: ignore[frozenset-shape]
     ) -> list[str]:
         """Compute every tool name the agent may call (hook-enforced path only —
         on subprocess-served backends tool availability is the served MCP groups).
