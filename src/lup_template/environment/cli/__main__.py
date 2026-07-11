@@ -120,8 +120,9 @@ def commit_results() -> None:
 
     try:
         git.add("notes/")
-        diff = str(git.diff("--cached", "--stat", _ok_code=[0, 1]))
-        if diff.strip():  # lup: ignore[string-strip] — anything-staged probe
+        # --quiet exits 1 exactly when something is staged — git's own probe.
+        staged = git.diff("--cached", "--quiet", _ok_code=[0, 1])
+        if staged.exit_code == 1:
             git.commit("-m", "data(sessions): auto-commit session results")
             typer.echo("Committed session results.")
     except sh.ErrorReturnCode as e:
