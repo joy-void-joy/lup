@@ -3,6 +3,7 @@
 import functools
 import importlib
 import importlib.util
+import pkgutil
 import sys
 import typing
 from pathlib import Path
@@ -28,37 +29,17 @@ def resolve_object(path: str) -> ResolvedObject:
     """Resolve a dotted or colon path to a Python object, returning (object, leaf_name).
 
     Accepts both ``module.sub.Object`` (dot form) and the entry-point
-    ``module.sub:Object.attr`` (colon form, module left of the colon).
+    ``module.sub:Object.attr`` (colon form) — the two spellings
+    ``pkgutil.resolve_name`` parses; it also walks the module-vs-attribute
+    boundary itself, so no hand-rolled prefix-import loop is needed.
     """
-    if ":" in path:
-        module_path, _, attr_path = path.partition(":")
-        attrs = [a for a in attr_path.split(".") if a]  # lup: ignore[string-split]
-        obj: object  # lup: ignore[bare-object] — any importable live object
-        try:
-            obj = importlib.import_module(module_path)
-        except ImportError as e:
-            raise ValueError(f"Could not import module '{module_path}': {e}") from e
-        for attr in attrs:
-            try:
-                obj = getattr(obj, attr)
-            except AttributeError as e:
-                raise ValueError(f"'{module_path}' has no attribute '{attr}'") from e
-        return ResolvedObject(
-            value=obj,
-            leaf_name=attrs[-1] if attrs else module_path.rsplit(".", 1)[-1],
-        )
-
-    parts = path.split(".")  # lup: ignore[string-split] — dotted-path segments
-    for i in range(len(parts), 0, -1):
-        module_path = ".".join(parts[:i])
-        try:
-            obj = importlib.import_module(module_path)
-            for attr in parts[i:]:
-                obj = getattr(obj, attr)
-            return ResolvedObject(value=obj, leaf_name=parts[-1])
-        except (ImportError, AttributeError):
-            continue
-    raise ValueError(f"Could not resolve: {path}")
+    try:
+        value = pkgutil.resolve_name(path)
+    except (ImportError, AttributeError, ValueError) as e:
+        raise ValueError(f"Could not resolve '{path}': {e}") from e
+    module_part, _, attr_part = path.partition(":")
+    tail = attr_part or module_part
+    return ResolvedObject(value=value, leaf_name=tail.rpartition(".")[2])
 
 
 def find_module_path(module_name: str) -> Path | None:
