@@ -18,6 +18,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
+from lup.types import EnvVars
+
 SESSION_DIR_ENV = "LUP_SESSION_DIR"
 OUTPUTS_DIR_ENV = "LUP_OUTPUTS_DIR"
 GATE_FLAG_ENV = "LUP_GATE_FLAG"
@@ -36,7 +38,7 @@ class SessionContext(BaseModel):
     task_id: str | None = None
     realtime_dir: Path | None = None
 
-    def to_env(self) -> dict[str, str]:  # lup: ignore[dict-str-payload] — env map
+    def to_env(self) -> EnvVars:
         """Serialize to the env vars consumed by read_session_context()."""
         env = {SESSION_DIR_ENV: str(self.session_dir)}
         if self.outputs_dir is not None:
