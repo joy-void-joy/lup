@@ -1,5 +1,3 @@
-# lup: ignore[empty-collection]
-# Test fixtures and assertions construct these shapes deliberately.
 """Behavior tests for `lup-devtools trace` against a tmp project.
 
 Pins the trace listing seams: version filtering must not leak logs from

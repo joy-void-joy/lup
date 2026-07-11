@@ -1,5 +1,3 @@
-# lup: ignore[empty-collection]
-# Test fixtures and assertions construct these shapes deliberately.
 """The no-stop-event completion guard (output.ensure_output_submitted).
 
 Backends without a stop event can finish a session without ever calling

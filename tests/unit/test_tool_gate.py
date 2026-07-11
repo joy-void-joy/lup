@@ -1,5 +1,3 @@
-# lup: ignore[dict-get, empty-collection]
-# Test fixtures and assertions construct these shapes deliberately.
 """Behavior tests for create_tool_gate and its four presets.
 
 The gate pattern: deny tool B (or Stop) with an agent-readable message

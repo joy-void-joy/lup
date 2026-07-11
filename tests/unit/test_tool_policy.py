@@ -1,4 +1,4 @@
-# lup: ignore[empty-collection, tuple-shape]
+# lup: ignore[tuple-shape]
 # Test fixtures and assertions construct these shapes deliberately.
 """Tests for ToolPolicy: server registry, allowlist computation and enforcement."""
 

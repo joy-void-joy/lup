@@ -1,4 +1,4 @@
-# lup: ignore[empty-collection, string-replace, tuple-shape]
+# lup: ignore[string-replace, tuple-shape]
 # Test fixtures and assertions construct these shapes deliberately.
 """Smoke and behavior tests for the lup-devtools CLI.
 
