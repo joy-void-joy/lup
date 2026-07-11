@@ -33,7 +33,9 @@ async def echo(inp: EchoInput) -> EchoOutput:
 def response_text(resp: ToolResponse) -> str:
     content = resp.get("content")
     assert content is not None
-    return content[0]["text"]
+    block = content[0]
+    assert block["type"] == "text"
+    return block["text"]
 
 
 async def test_direct_call_returns_typed_output() -> None:

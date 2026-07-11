@@ -247,7 +247,9 @@ class TestRelayTools:
         assert denied.get("is_error") is True
 
         context = await call(tools, "context", {})
-        payload = json.loads(context.get("content", [])[0]["text"])
+        block = context.get("content", [])[0]
+        assert block["type"] == "text"
+        payload = json.loads(block["text"])
         assert payload["unread_events"] == 3
 
         allowed = await call(tools, "sleep", {"seconds": 60})
@@ -278,7 +280,9 @@ class TestRelayTools:
                 ]
             },
         )
-        payload = json.loads(result.get("content", [])[0]["text"])
+        block = result.get("content", [])[0]
+        assert block["type"] == "text"
+        payload = json.loads(block["text"])
         assert payload == {"sent": 1, "scheduled": 1}
 
         events = parent.read_new_events()
