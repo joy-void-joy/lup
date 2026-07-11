@@ -106,7 +106,7 @@ def clear_markers(targets: list[str]) -> None:
         head = lines[comment.start_line - 1]
         match = MARKER_RE.search(head)
         head_code = head[: match.start()] if match is not None else ""
-        prefix_code = head_code.strip()  # lup: ignore[string-strip] — blank check
+        prefix_code = head_code.strip()
         if match is not None and prefix_code:
             lines[comment.start_line - 1] = head[: match.start()].rstrip()
         else:

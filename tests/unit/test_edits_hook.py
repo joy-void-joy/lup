@@ -269,9 +269,15 @@ def test_underscore_module_assignments_are_still_denied() -> None:
     assert edit_decision("src/module.py", "", "_LIMIT: int = 5\n") == "deny"
 
 
-def test_strip_call_is_denied() -> None:
+def test_separator_strip_is_denied_argless_allowed() -> None:
     assert (
-        edit_decision("src/module.py", "x = 1\n", "x = 1\ny = raw.strip()\n") == "deny"
+        edit_decision("src/module.py", "x = 1\n", "x = 1\ny = raw.strip('/')\n")
+        == "deny"
+    )
+    # Argless .strip() is whitespace framing — no anti-pattern, ordinary gating.
+    assert (
+        edit_decision("src/module.py", "x = 1\n", "x = 1\ny = raw.strip()\n")
+        != "deny"
     )
 
 

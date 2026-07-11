@@ -341,7 +341,7 @@ async def repl(
                         continue
 
                     last_input_sigint = 0.0
-                    stripped = user_input.strip()  # lup: ignore[string-strip]
+                    stripped = user_input.strip()
                     if not stripped:
                         continue
                     if stripped in ("/quit", "/exit", "/q"):

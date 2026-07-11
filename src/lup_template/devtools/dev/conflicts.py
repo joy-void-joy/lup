@@ -83,7 +83,7 @@ def get_branch_files(state: str) -> BranchScope:
     git_dir = find_git_dir()
 
     def ref_file(path: Path) -> str:
-        return path.read_text().strip()  # lup: ignore[string-strip] — one-ref file
+        return path.read_text().strip()
 
     match state:
         case "merge":
@@ -258,7 +258,7 @@ def theirs_ref_for(operation: str) -> str:
 def extract_removals(diff_output: str) -> list[str]:
     """Find removed functions/classes/decorators in a diff."""
     return [
-        line.lstrip("-").strip()  # lup: ignore[string-strip] — display trim
+        line.lstrip("-").strip()
         for line in diff_output.splitlines()
         if SIGNIFICANT_PATTERN.match(line)
     ]

@@ -122,7 +122,7 @@ def capability_request_from_text(text: str) -> str | None:
         r"(?<=[.!?\n])\s+", text
     )
     for fragment in sentences:
-        stripped = fragment.strip()  # lup: ignore[string-strip] — prose hygiene
+        stripped = fragment.strip()
         if stripped and CAPABILITY_PHRASES.search(stripped):
             return truncate_str(stripped, 300)
     return None
@@ -136,7 +136,7 @@ def read_trace_events(events_path: Path) -> list[TraceEvent]:
     """
     events: list[TraceEvent] = []  # lup: ignore[empty-collection] — tolerant fold
     for line in events_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():  # lup: ignore[string-strip] — blank-line check
+        if not line.strip():
             continue
         try:
             events.append(TraceEvent.model_validate_json(line))
