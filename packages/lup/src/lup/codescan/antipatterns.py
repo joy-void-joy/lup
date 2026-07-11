@@ -574,8 +574,12 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
     """Audit one file's current text for per-rule ignore-marker health.
 
     A bare file-level `# lup: ignore` opts the whole file out (matching the
-    hook), so it yields no findings; a typed file-level `# lup: ignore[id]`
-    opts out only the named rule file-wide. Docstring lines are skipped
+    hook); the audit reports it as a single advisory "untyped" finding and
+    scans nothing else. A typed file-level `# lup: ignore[id]` opts out only
+    the named rule file-wide — and when nothing in the file still needs an
+    id (no line trips it that an inline directive would not already cover),
+    that id reports "spurious" at the directive line, so refiner and rule
+    evolution cannot leave dead file-wide opt-outs behind. Docstring lines are skipped
     entirely: prose is not code, and no inline directive could ever guard it —
     a comment cannot open inside a string. (The hook still scans docstring
     lines at edit time; it sees only text fragments it cannot tokenize, so the
@@ -600,7 +604,15 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
     file_disabled: set[str] = set()
     if file_ignore is not None:
         if file_ignore.rule_ids is None:
-            return []  # bare file-level opt-out disables every rule
+            return [  # bare file-level opt-out disables every rule — surface it
+                AntiPatternFinding(
+                    kind="untyped",
+                    line=file_ignore.line,
+                    text="# lup: ignore",
+                    message="bare file-level `# lup: ignore` opts the whole file out of "
+                    "every rule — name the rules it needs: `# lup: ignore[rule, ...]`",
+                )
+            ]
         file_disabled = file_ignore.rule_ids
 
     context = PythonContext.parse(text)
@@ -617,6 +629,7 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
 
     file_ignore_line = file_ignore.line if file_ignore is not None else 0
 
+    file_live: set[str] = set()
     findings: list[AntiPatternFinding] = []
     for index, line in enumerate(text.splitlines(), start=1):
         if index == file_ignore_line:
@@ -634,6 +647,10 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
         silenced_by_bare = False
         for ap in hits:
             if ap.id in file_disabled:
+                # Live only when the file-level directive is the sole silencer;
+                # an inline-covered hit does not keep the file-wide id alive.
+                if directive is None or not (inline_ids is None or ap.id in inline_ids):
+                    file_live.add(ap.id)
                 continue
             if directive is not None and (inline_ids is None or ap.id in inline_ids):
                 silenced_by_bare = silenced_by_bare or inline_ids is None
@@ -683,4 +700,18 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
                         rule_id=rid,
                     )
                 )
+
+    if file_ignore is not None:
+        directive_text = text.splitlines()[file_ignore.line - 1].strip()[:80]
+        for rid in sorted(file_disabled - file_live - FOREIGN_RULE_IDS):
+            findings.append(
+                AntiPatternFinding(
+                    kind="spurious",
+                    line=file_ignore.line,
+                    text=directive_text,
+                    message=f"file-level `# lup: ignore[{rid}]` names a rule nothing "
+                    "in the file needs — remove it",
+                    rule_id=rid,
+                )
+            )
     return findings
