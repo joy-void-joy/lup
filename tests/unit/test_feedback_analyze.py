@@ -12,7 +12,7 @@ from lup_template.devtools.feedback.analyze import (
     gather_error_patterns,
     gather_tool_health,
 )
-from lup_template.devtools.feedback.models import SessionData
+from lup_template.devtools.feedback.models import LoadedSession
 
 
 def tool_metrics(call_count: int, error_count: int) -> ToolMetricsDict:
@@ -27,7 +27,7 @@ def tool_metrics(call_count: int, error_count: int) -> ToolMetricsDict:
     }
 
 
-def session(session_id: str, by_tool: dict[str, ToolMetricsDict]) -> SessionData:
+def session(session_id: str, by_tool: dict[str, ToolMetricsDict]) -> LoadedSession:
     summary: MetricsSummary = {
         "session_duration_seconds": 1.0,
         "total_tool_calls": sum(t["call_count"] for t in by_tool.values()),
@@ -37,7 +37,7 @@ def session(session_id: str, by_tool: dict[str, ToolMetricsDict]) -> SessionData
         "tools_used": len(by_tool),
         "by_tool": by_tool,
     }
-    return {"_session_id": session_id, "tool_metrics": summary}
+    return LoadedSession(source_session_id=session_id, tool_metrics=summary)
 
 
 def test_tool_health_aggregates_across_sessions() -> None:
