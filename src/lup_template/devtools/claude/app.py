@@ -93,5 +93,5 @@ def main(ctx: typer.Context) -> None:
         no_tools=False,
         no_plugin=False,
         with_prompt=False,
-        extra_args=[],  # lup: ignore[empty-collection] — none to forward
+        extra_args=[],
     )

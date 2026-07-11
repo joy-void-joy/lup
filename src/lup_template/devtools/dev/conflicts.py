@@ -171,7 +171,7 @@ def conflicts(as_json: bool) -> None:
                 ConflictReport(
                     state="none",
                     base="",
-                    files=[],  # lup: ignore[empty-collection] — the no-conflict report
+                    files=[],
                     in_scope_count=0,
                     out_of_scope_count=0,
                 )
@@ -272,11 +272,11 @@ def conflict_status(as_json: bool) -> None:
         if as_json:
             result = ConflictStatusResult(
                 operation="none",
-                conflicted_files=[],  # lup: ignore[empty-collection] — idle state
+                conflicted_files=[],
                 ours_ref="HEAD",
                 theirs_ref="",
-                ours_commits=[],  # lup: ignore[empty-collection] — idle state
-                theirs_commits=[],  # lup: ignore[empty-collection] — idle state
+                ours_commits=[],
+                theirs_commits=[],
             )
             output_json(result)
         else:
