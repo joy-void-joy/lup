@@ -147,8 +147,8 @@ async def ensure_output_submitted(
     return last
 
 
-def create_output_tool(
-    output_model: type[BaseModel],
+def create_output_tool[M: BaseModel](
+    output_model: type[M],
     *,
     session_dir: Path,
     gate: ReflectionGate | None = None,
@@ -179,7 +179,7 @@ def create_output_tool(
         output_model=SubmitOutputResult,
     )
     async def submit_output(
-        validated: BaseModel,  # lup: ignore[bare-basemodel] — caller's output_model
+        validated: M,
     ) -> SubmitOutputResult:
         if gate is not None and not gate.reflected:
             raise ToolError(
