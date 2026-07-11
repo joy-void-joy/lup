@@ -22,7 +22,7 @@ allows. A session (``session_defaults``) that leaves ``max_thinking_tokens``
 unset runs at this; a nested one-shot keeps the SDK default."""
 
 # CLI flag names to values: open, flag-shaped keys, filled conditionally.
-type ExtraArgs = dict[str, str | None]  # lup: ignore[dict-str-payload]
+type ExtraArgs = dict[str, str | None]  # lup: ignore[dict-str-payload] — open CLI flags
 type ClaudeServerMap = dict[str, claude_types.McpSdkServerConfig | RawMcpServerConfig]
 
 

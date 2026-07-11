@@ -87,7 +87,7 @@ class ConsumeTracker(LupAgentOptions):
         """The intent-knob field names the translation has read so far."""
         return self._consumed
 
-    def __getattribute__(self, name: str) -> object:  # lup: ignore[bare-object]
+    def __getattribute__(self, name: str) -> object:  # lup: ignore[bare-object] — attr protocol
         if name in INTENT_KNOBS:
             self._consumed.add(name)
         return super().__getattribute__(name)
