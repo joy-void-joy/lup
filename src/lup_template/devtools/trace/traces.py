@@ -343,36 +343,24 @@ def load_trace(trace_path: Path) -> str:
     return ""
 
 
-TOOL_CALL_PATTERNS = re.compile(
-    r"tool_use|tool_result|^#{2,3}\s+\S+\s+Tool:|^#{2,3}\s+\S+\s+Result\b",
-    re.IGNORECASE,
-)
+def render_tool_calls(trace_path: Path) -> str:
+    """Render a trace's tool-call timeline from its typed events.
 
-
-def filter_tool_calls(content: str, context_lines: int = 3) -> str:
-    """Extract lines matching tool call patterns with surrounding context."""
-    lines = content.split("\n")
-    matched_indices: set[int] = set()  # lup: ignore[set-shape, empty-collection]
-
-    for i, line in enumerate(lines):
-        if TOOL_CALL_PATTERNS.search(line):
-            start = max(0, i - context_lines)
-            end = min(len(lines), i + context_lines + 1)
-            matched_indices.update(range(start, end))
-
-    if not matched_indices:
-        return "(no tool call lines found)"
-
-    result: list[str] = []  # lup: ignore[empty-collection] — context-window fold
-    prev_idx = -2
-    for idx in sorted(matched_indices):
-        if idx > prev_idx + 1:
-            if result:
-                result.append("---")
-        result.append(lines[idx])
-        prev_idx = idx
-
-    return "\n".join(result)
+    One line per call — ✓/✗ status, tool name, result brief — read from the
+    events sidecar (or the legacy-markdown fallback for traces predating it).
+    Directories and JSON files carry no event stream; ``--full`` is the view
+    for those.
+    """
+    if trace_path.suffix != ".md":
+        return "(no tool-call events for this trace format — use --full)"
+    lines = [
+        f"{'✓' if event.ok else '✗'} {event.tool or 'unknown'}  {event.brief}"
+        for event in events_for_trace(trace_path)
+        if event.kind == "tool_call"
+    ]
+    if not lines:
+        return "(no tool calls recorded)"
+    return "\n".join(lines)
 
 
 # ── CLI commands ──────────────────────────────────────────
@@ -390,7 +378,7 @@ def show(session_id: str, full: bool, tool_calls: bool, as_json: bool) -> None:
     content = load_trace(trace_path)
 
     if tool_calls:
-        content = filter_tool_calls(content)
+        content = render_tool_calls(trace_path)
     elif not full:
         lines = content.split("\n")
         if len(lines) > 100:
