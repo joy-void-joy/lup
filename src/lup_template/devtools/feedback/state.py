@@ -83,7 +83,9 @@ def match_outcomes(
             timestamp=session.timestamp,
             agent_sdk=session.agent_sdk,
             # Keyed by whatever ids the domain's outcome source uses.
-            outcome=outcomes.get(session.source_session_id),  # lup: ignore[dict-get] — outcome-id map
+            outcome=outcomes.get(  # lup: ignore[dict-get] — outcome-id map
+                session.source_session_id
+            ),
             metrics=session.tool_metrics,
         )
         for session in sessions

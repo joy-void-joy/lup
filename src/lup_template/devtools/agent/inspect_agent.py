@@ -52,7 +52,7 @@ def tool_location(tool: LupMcpTool) -> str:
 def tool_signature(tool: LupMcpTool) -> str:
     """One-liner: input fields → output model name, file:line."""
 
-    def field_sig(name: str, ann: object) -> str:  # lup: ignore[bare-object] — annotation expr
+    def field_sig(name: str, ann: object) -> str:  # lup: ignore[bare-object]
         type_name = getattr(ann, "__name__", None) if ann is not None else None
         return f"{name}: {type_name}" if type_name else name
 
