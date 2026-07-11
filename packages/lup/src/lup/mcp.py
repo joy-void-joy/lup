@@ -45,6 +45,21 @@ from lup.types import Decorator, JsonObject
 logger = logging.getLogger(__name__)
 
 
+class TextWire(TypedDict):
+    """A text content block as it crosses the MCP tool-result wire."""
+
+    type: Literal["text"]
+    text: str
+
+
+class ImageWire(TypedDict):
+    """A base64 image content block as it crosses the MCP tool-result wire."""
+
+    type: Literal["image"]
+    data: str
+    mimeType: str
+
+
 class ToolResponse(TypedDict, total=False):
     """The MCP tool-result protocol shape every tool handler returns.
 
@@ -52,7 +67,7 @@ class ToolResponse(TypedDict, total=False):
     ``mcp__server__tool`` protocol, so this dict is the one result shape a
     handler produces on every engine."""
 
-    content: list[dict[str, str]]  # lup: ignore[dict-str-payload] — MCP wire blocks
+    content: list[TextWire | ImageWire]
     is_error: bool
 
 
@@ -182,7 +197,7 @@ def create_mcp_server(
 
         is_error = "is_error" in result and bool(result["is_error"])
 
-        content: list[TextContent | ImageContent] = []  # lup: ignore[empty-collection]
+        content: list[ContentBlock] = []  # lup: ignore[empty-collection]
         if "content" in result:
             for item in result["content"]:
                 match item:
@@ -193,8 +208,7 @@ def create_mcp_server(
                             ImageContent(type="image", data=data, mimeType=mime)
                         )
 
-        blocks = cast(list[ContentBlock], content)  # lup: ignore[cast] — mcp variance
-        return CallToolResultWithAlias(content=blocks, isError=is_error)
+        return CallToolResultWithAlias(content=content, isError=is_error)
 
     return LupMcpServerConfig(
         name=name,
@@ -203,7 +217,7 @@ def create_mcp_server(
     )
 
 
-def server_tool_names(server: object) -> list[str]:  # lup: ignore[bare-object]
+def server_tool_names(server: McpServerEntry) -> list[str]:
     """List the tool names registered on an in-process MCP server.
 
     Servers built with :func:`create_mcp_server` carry their tool list on
