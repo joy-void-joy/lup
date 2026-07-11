@@ -3,8 +3,7 @@
 import ast
 import inspect
 from collections import defaultdict
-from collections.abc import Callable
-from typing import Annotated, cast
+from typing import Annotated
 
 import typer
 
@@ -29,7 +28,6 @@ from lup_template.devtools.py.info import (
     show_value_info,
 )
 from lup_template.devtools.py.search import (
-    SearchMatch,
     get_top_level_packages,
     scan_module_symbols,
 )
@@ -138,11 +136,12 @@ def source_cmd(
             typer.echo(f"{i:4d}  {line}")
         return
 
-    source_obj = cast(Callable[..., object], obj)  # lup: ignore[cast] — introspection
+    if not callable(obj):
+        fail(f"Cannot get source for '{path}': {type(obj).__name__} has no source")
     try:
-        source = inspect.getsource(source_obj)
-        source_file = inspect.getfile(source_obj)
-        _, start_lineno = inspect.getsourcelines(source_obj)
+        source = inspect.getsource(obj)
+        source_file = inspect.getfile(obj)
+        _, start_lineno = inspect.getsourcelines(obj)
         typer.echo(f"# {source_file}:{start_lineno}")
     except (TypeError, OSError) as e:
         fail(f"Cannot get source for '{path}': {e}")
@@ -293,15 +292,13 @@ def search_cmd(
     else:
         packages = get_top_level_packages()
 
-    all_matches: list[SearchMatch] = []  # lup: ignore[empty-collection] — scan fold
-    scanned = 0
-
     if not package:
         typer.echo(f"Scanning {len(packages)} installed packages...", err=True)
 
-    for pkg in packages:
-        scanned += 1
-        all_matches.extend(scan_module_symbols(pkg, pattern))
+    all_matches = [
+        match for pkg in packages for match in scan_module_symbols(pkg, pattern)
+    ]
+    scanned = len(packages)
 
     if not all_matches:
         typer.echo(f"No matches for '{pattern}' in {scanned} packages")
