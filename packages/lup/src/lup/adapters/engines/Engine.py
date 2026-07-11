@@ -24,6 +24,7 @@ from lup.adapters.background.params import BackgroundAgentParams
 from lup.adapters.clients.Client import Client
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.profiles.Profile import Profile
+from lup.adapters.tools.names import ToolNames
 
 
 class Engine(ABC):
@@ -70,7 +71,7 @@ class Engine(ABC):
         """
 
     @abstractmethod
-    def builtin_tools(self) -> frozenset[str]:  # lup: ignore[frozenset-shape]
+    def builtin_tools(self) -> ToolNames:
         """The engine's builtin tool-name table.
 
         Names what the backend's native activity surfaces as in lup

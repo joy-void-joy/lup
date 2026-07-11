@@ -6,6 +6,7 @@ from lup.adapters.clients.Client import Client
 from lup.adapters.engines.Engine import Engine
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.profiles.Profile import Profile
+from lup.adapters.tools.names import ToolNames
 
 
 class ClaudeEngine(Engine):
@@ -28,7 +29,7 @@ class ClaudeEngine(Engine):
 
         return ClaudeProfile()
 
-    def builtin_tools(self) -> frozenset[str]:  # lup: ignore[frozenset-shape]
+    def builtin_tools(self) -> ToolNames:
         from lup.adapters.tools.claude import CLAUDE_BUILTIN_TOOLS
 
         return CLAUDE_BUILTIN_TOOLS

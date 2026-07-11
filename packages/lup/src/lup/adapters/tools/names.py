@@ -8,6 +8,13 @@ the strings, so a rename lands in one place. Per-engine builtin tables
 (``tools/claude.py``, ``tools/codex.py``) build on this vocabulary.
 """
 
+type ToolNames = frozenset[str]  # lup: ignore[frozenset-shape] — immutable name table
+"""An engine's builtin tool-name table: immutable, membership-tested.
+
+The one annotation for ``builtin_tools()`` signatures and the per-engine
+table constants, so the frozenset shape is justified once here instead
+of per declaration."""
+
 BASH = "Bash"
 EDIT = "Edit"
 GLOB = "Glob"
