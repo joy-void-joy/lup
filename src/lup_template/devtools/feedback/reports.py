@@ -51,6 +51,7 @@ from lup_template.devtools.utils import format_table, output_json
 
 logger = logging.getLogger(__name__)
 
+
 class ToolBucket(TypedDict):
     """One tool's aggregated call/error/duration tallies."""
 
