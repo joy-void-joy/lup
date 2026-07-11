@@ -39,19 +39,23 @@ from lup.telemetry.trace import TraceLogger
 from lup.workspace.history import save_session
 from lup.workspace.notes import NotesConfig, setup_notes
 from lup.workspace.output import ensure_output_submitted, output_path
-from lup.types import LupContentBlock, LupResponse, LupTextBlock, LupToolUseBlock
+from lup.types import (
+    EnvVars,
+    LupContentBlock,
+    LupResponse,
+    LupTextBlock,
+    LupToolUseBlock,
+)
 from lup.workspace.paths import agent_version
 
 logger = logging.getLogger(__name__)
-
-type McpEnv = dict[str, str]  # lup: ignore[dict-str-payload] — open env map
 
 
 class CodexScaffold(BaseModel):
     """Shared scaffolding for the Codex-runtime adapters."""
 
     system_prompt: str
-    mcp_env: McpEnv
+    mcp_env: EnvVars
     writable_roots: list[Path]
 
 

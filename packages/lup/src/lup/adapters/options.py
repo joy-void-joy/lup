@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, model_validator
 from lup.hooks import LupHooksConfig
 from lup.mcp import LupMcpServerConfig, McpServerEntry, server_tool_names
 from lup.types import (
+    EnvVars,
     JsonObject,
     PermissionMode,
     SubagentSpec,
@@ -119,9 +120,7 @@ class LupAgentOptions(BaseModel):
     """Codex-runtime sandbox mode (named to avoid colliding with
     ``sdk_sandbox``, the Claude SDK's OS sandbox flag)."""
     approval_policy: str | None = None
-    mcp_env: dict[str, str] = Field(  # lup: ignore[dict-str-payload] — env map
-        default_factory=dict
-    )
+    mcp_env: EnvVars = Field(default_factory=dict)
     writable_roots: list[Path] = Field(default_factory=list)
 
     session_id: str | None = None
