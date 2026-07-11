@@ -7,6 +7,7 @@ from lup.adapters.engines.codex import CodexEngine
 from lup.adapters.engines.Engine import Engine
 from lup.adapters.options import LupAgentOptions
 from lup.adapters.profiles.Profile import Profile
+from lup.adapters.tools.names import ToolNames
 
 
 class OpenAICompatEngine(Engine):
@@ -34,5 +35,5 @@ class OpenAICompatEngine(Engine):
     def profiles(self) -> Profile:
         return self.base.profiles()
 
-    def builtin_tools(self) -> frozenset[str]:  # lup: ignore[frozenset-shape]
+    def builtin_tools(self) -> ToolNames:
         return self.base.builtin_tools()
