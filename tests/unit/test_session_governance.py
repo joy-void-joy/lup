@@ -1,5 +1,3 @@
-# lup: ignore[empty-collection]
-# Test fixtures and assertions construct these shapes deliberately.
 """Budget and timeout governance on the session wrappers.
 
 The wrappers are engine-agnostic — they govern any ``Session`` that

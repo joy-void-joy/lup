@@ -1,4 +1,4 @@
-# lup: ignore[empty-collection, set-shape]
+# lup: ignore[set-shape]
 # Test fixtures and assertions construct these shapes deliberately.
 """The reviewer never inspects the backend (reflect.run_reviewer).
 
