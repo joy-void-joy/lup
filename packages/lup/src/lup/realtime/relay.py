@@ -297,7 +297,7 @@ class RealtimeMailbox:
         region = data[: end + 1]
         region_end = self.read_offset + len(region)
 
-        pairs: list[EventOffset] = []  # lup: ignore[empty-collection] — offset fold
+        pairs: list[EventOffset] = []
         consumed = self.read_offset
         for raw_line in region.splitlines(keepends=True):
             consumed += len(raw_line)

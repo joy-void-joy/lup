@@ -1,4 +1,4 @@
-# lup: ignore[dict-get, empty-collection]
+# lup: ignore[dict-get]
 # Test fixtures and assertions construct these shapes deliberately.
 """Tests for the run_subagent delegation tool.
 

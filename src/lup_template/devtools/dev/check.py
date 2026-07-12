@@ -25,7 +25,7 @@ def run_checks(fix: bool, no_test: bool) -> None:
     Read-only by default (reports issues without modifying files).
     Pass *fix* to auto-fix formatting and lint issues.
     """
-    results: list[CheckOutcome] = []  # lup: ignore[empty-collection] — check fold
+    results: list[CheckOutcome] = []
 
     # ruff format
     try:

@@ -141,9 +141,7 @@ def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
             request = capability_request_from_text(body)
             if request is not None:
                 events.append(
-                    TraceEvent(
-                        kind="capability_request", timestamp="", brief=request
-                    )
+                    TraceEvent(kind="capability_request", timestamp="", brief=request)
                 )
     return events
 
@@ -160,7 +158,7 @@ def iter_markdown_blocks(
     header. The body has any surrounding ``` ``` fences stripped, so a Result
     body is the raw JSON the logger fenced — ready to parse.
     """
-    blocks: list[Block] = []  # lup: ignore[empty-collection] — block fold
+    blocks: list[Block] = []
     label: str | None = None
     body_lines: list[str] = []  # lup: ignore[empty-collection] — block fold
 
@@ -175,7 +173,7 @@ def iter_markdown_blocks(
             heading = line.removeprefix("## ").strip()
             parts = heading.split(" ", 1)
             label = parts[1].strip() if len(parts) > 1 else heading
-            body_lines = []  # lup: ignore[empty-collection] — next block begins
+            body_lines = []
         elif label is not None:
             body_lines.append(line)
     flush()
@@ -492,7 +490,7 @@ def entry_recency(path: Path) -> datetime:
         names = [f.name for f in path.iterdir()]
     except OSError:
         names = []
-    stamps: list[datetime] = []  # lup: ignore[empty-collection] — parse fold
+    stamps: list[datetime] = []
     for name in names:
         try:
             stamps.append(parse_timestamp(name))

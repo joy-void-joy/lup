@@ -134,7 +134,7 @@ def read_trace_events(events_path: Path) -> list[TraceEvent]:
     Skips blank or malformed lines so a truncated tail (a crash mid-write)
     never loses the events that were flushed before it.
     """
-    events: list[TraceEvent] = []  # lup: ignore[empty-collection] — tolerant fold
+    events: list[TraceEvent] = []
     for line in events_path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue

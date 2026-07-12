@@ -25,7 +25,7 @@ def load_sessions(
     since: datetime | None = None, version: str | None = None
 ) -> list[LoadedSession]:
     """Load session data, optionally filtered by version."""
-    sessions: list[LoadedSession] = []  # lup: ignore[empty-collection] — tolerant fold
+    sessions: list[LoadedSession] = []
 
     for session_dir in iter_session_dirs(version=version):
         session_files = sorted(session_dir.glob("*.json"), reverse=True)

@@ -1,4 +1,4 @@
-# lup: ignore[cast, dict-get, dict-str-payload, empty-collection]
+# lup: ignore[cast, dict-get, dict-str-payload]
 # Test fixtures and assertions construct these shapes deliberately.
 """Backend-adapter fidelity and API-hygiene regressions.
 
