@@ -119,7 +119,7 @@ def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
     """
     events: list[TraceEvent] = []  # lup: ignore[empty-collection] — block fold
     pending_tool: str | None = None
-    now = ""
+    # Legacy markdown carries no per-event timestamps; "" marks them unknown.
     for label, body in iter_markdown_blocks(content):
         if label.startswith("Tool:"):
             pending_tool = label.removeprefix("Tool:").strip() or "unknown"
@@ -130,18 +130,20 @@ def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
             brief = truncate_str(body.strip(), 300)
             events.append(
                 TraceEvent(
-                    kind="tool_call", timestamp=now, tool=name, ok=ok, brief=brief
+                    kind="tool_call", timestamp="", tool=name, ok=ok, brief=brief
                 )
             )
             if not ok:
                 events.append(
-                    TraceEvent(kind="error", timestamp=now, tool=name, brief=brief)
+                    TraceEvent(kind="error", timestamp="", tool=name, brief=brief)
                 )
         else:
             request = capability_request_from_text(body)
             if request is not None:
                 events.append(
-                    TraceEvent(kind="capability_request", timestamp=now, brief=request)
+                    TraceEvent(
+                        kind="capability_request", timestamp="", brief=request
+                    )
                 )
     return events
 
