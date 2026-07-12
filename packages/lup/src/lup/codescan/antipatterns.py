@@ -472,11 +472,19 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
     - a call keyword (``f(x=[])``) — an explicitly passed empty value;
     - a direct assignment in an ``except`` handler body — the
       degrade-to-empty fallback shape, which by construction is not a
-      mutate-loop seed (a loop nested inside the handler still trips).
+      mutate-loop seed (a loop nested inside the handler still trips);
+    - a function-local name that no loop mutates — conditional builds,
+      branch defaults, and closure accumulators have no loop to fold,
+      so there is no comprehension to prefer;
+    - a seed whose every feeding loop carries a ``try`` within it — the
+      per-item fault tolerance a comprehension cannot express;
+    - a reassignment to empty inside a loop that also mutates the name —
+      a stateful parse's reset, not a seed.
 
-    Local seeds (``x = []`` then ``.append`` in a loop) and bare
-    module-level seeds still trip the rule: those are the cases a
-    comprehension replaces. Unparseable source exempts nothing, so both
+    Plain fold seeds (``x = []`` then unguarded ``.append`` in a loop),
+    multi-accumulator and match-arm folds, and bare module-level seeds
+    still trip the rule: those either want a comprehension or carry
+    their marker deliberately. Unparseable source exempts nothing, so both
     consumers — the edit hook and the tree auditor — fall back to the
     plain regex verdict. Self-contained over the stdlib ``ast`` module:
     ``dev gen-hook`` splices this function's source verbatim into the
@@ -507,6 +515,69 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
         if value is not None and is_empty_literal(value):
             exempt.add(value.lineno)
 
+    def is_loop(node: ast.AST) -> bool:
+        return isinstance(node, ast.For | ast.AsyncFor | ast.While)
+
+    def mutated_name(node: ast.AST) -> str | None:
+        match node:
+            case ast.Call(func=ast.Attribute(value=ast.Name(id=name), attr=attr)) if (
+                attr
+                in {
+                    "append",
+                    "appendleft",
+                    "extend",
+                    "add",
+                    "update",
+                    "insert",
+                    "setdefault",
+                }
+            ):
+                return name
+            case ast.Assign(targets=[ast.Subscript(value=ast.Name(id=name))]):
+                return name
+            case ast.AugAssign(
+                target=ast.Name(id=name) | ast.Subscript(value=ast.Name(id=name))
+            ):
+                return name
+        return None
+
+    def exempt_scope_seeds(scope: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        # For each name: one entry per feeding loop, True when that loop
+        # carries a try (per-item tolerance) somewhere inside it.
+        feeding: dict[str, list[bool]] = {}
+        for loop in ast.walk(scope):
+            if not is_loop(loop):
+                continue
+            tolerant = any(isinstance(inner, ast.Try) for inner in ast.walk(loop))
+            for inner in ast.walk(loop):
+                name = mutated_name(inner)
+                if name is not None:
+                    feeding.setdefault(name, []).append(tolerant)
+
+        def visit(node: ast.AST, in_loop: bool) -> None:
+            for child in ast.iter_child_nodes(node):
+                match child:
+                    case (
+                        ast.FunctionDef()
+                        | ast.AsyncFunctionDef()
+                        | ast.ClassDef()
+                        | ast.Lambda()
+                    ):
+                        continue  # a nested scope judges its own seeds
+                    case (
+                        ast.Assign(targets=[ast.Name(id=name)], value=value)
+                        | ast.AnnAssign(target=ast.Name(id=name), value=value)
+                    ) if is_empty_literal(value):
+                        loops = feeding.get(name)
+                        if in_loop:
+                            if loops is not None:
+                                mark(value)  # a reset inside the loop refilling it
+                        elif loops is None or all(loops):
+                            mark(value)  # loop-free, or every feeding loop tolerant
+                visit(child, in_loop or is_loop(child))
+
+        visit(scope, False)
+
     for node in ast.walk(tree):
         match node:
             case ast.Call(keywords=keywords):
@@ -521,19 +592,19 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
                 for stmt in body:
                     if isinstance(stmt, ast.AnnAssign):
                         mark(stmt.value)
-            case (
-                ast.FunctionDef(name="__init__") | ast.AsyncFunctionDef(name="__init__")
-            ):
-                for stmt in ast.walk(node):
-                    match stmt:
-                        case ast.Assign(targets=targets, value=value) if all(
-                            is_self_attribute(target) for target in targets
-                        ):
-                            mark(value)
-                        case ast.AnnAssign(target=target, value=value) if (
-                            is_self_attribute(target)
-                        ):
-                            mark(value)
+            case ast.FunctionDef() | ast.AsyncFunctionDef():
+                if node.name == "__init__":
+                    for stmt in ast.walk(node):
+                        match stmt:
+                            case ast.Assign(targets=targets, value=value) if all(
+                                is_self_attribute(target) for target in targets
+                            ):
+                                mark(value)
+                            case ast.AnnAssign(target=target, value=value) if (
+                                is_self_attribute(target)
+                            ):
+                                mark(value)
+                exempt_scope_seeds(node)
     return exempt
 
 
