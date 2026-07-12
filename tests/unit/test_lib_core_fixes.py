@@ -1,4 +1,4 @@
-# lup: ignore[bare-object, empty-collection]
+# lup: ignore[bare-object]
 # Test fixtures and assertions construct these shapes deliberately.
 """Behavior tests for core-library correctness fixes.
 

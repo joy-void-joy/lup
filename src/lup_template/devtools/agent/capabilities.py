@@ -186,7 +186,7 @@ def capability_matrix_markdown(engines: list[EngineCapabilities]) -> str:
         "|---" * (len(engines) + 1) + "|",
     ]
     for row, cell in enumerate(engines[0].cells):
-        cells: list[str] = []  # lup: ignore[empty-collection] — table row fold
+        cells: list[str] = []
         for engine in engines:
             match engine.cells[row].value:
                 case bool() as flag:

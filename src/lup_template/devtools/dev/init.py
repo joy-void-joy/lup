@@ -65,7 +65,7 @@ def rename_imports_in_file(path: Path, new_name: str, dry_run: bool) -> list[str
     detects and describes without writing.
     """
     text = path.read_text()
-    changes: list[str] = []  # lup: ignore[empty-collection] — change log
+    changes: list[str] = []
 
     def replace_import(m: re.Match[str]) -> str:
         full_match = m.group(0)
@@ -89,7 +89,7 @@ def rename_imports_in_file(path: Path, new_name: str, dry_run: bool) -> list[str
 def rename_in_pyproject(path: Path, new_name: str, dry_run: bool) -> list[str]:
     """Update pyproject.toml: package name, CLI entry point, devtools import path."""
     text = path.read_text()
-    changes: list[str] = []  # lup: ignore[empty-collection] — change log
+    changes: list[str] = []
     new_text = text
 
     old_name_line = 'name = "lup-template"'

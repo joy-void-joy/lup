@@ -231,7 +231,7 @@ class Integration(BaseModel):
             open_browser(self.browser_url)
         console.print()
 
-        values: EnvVars = {}  # lup: ignore[empty-collection] — prompt-loop fold
+        values: EnvVars = {}
         for field in self.fields:
             current = env.get(field.key, "")  # lup: ignore[dict-get] — open env map
             raw = typer.prompt(

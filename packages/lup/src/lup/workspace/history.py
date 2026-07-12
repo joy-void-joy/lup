@@ -196,7 +196,7 @@ def load_session_records(session_id: str) -> list[SessionRecord]:
     Returns:
         List of session records, sorted by timestamp (oldest first).
     """
-    sessions: list[SessionRecord] = []  # lup: ignore[empty-collection] — tolerant fold
+    sessions: list[SessionRecord] = []
 
     for session_dir in iter_session_dirs(session_id=session_id):
         for filepath in sorted(session_dir.glob("*.json")):

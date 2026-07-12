@@ -91,7 +91,7 @@ def build_codex_native(opts: LupAgentOptions) -> CodexNativeConfig:
     permission mode, or builtin-toolset restriction. The served-tool and
     native-sandbox ``config_overrides`` are rendered here, once.
     """
-    overrides: list[str] = []  # lup: ignore[empty-collection] — conditional build
+    overrides: list[str] = []
     if opts.served_tool_groups:
         overrides.extend(
             build_mcp_config_overrides(

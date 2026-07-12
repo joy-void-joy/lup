@@ -349,7 +349,7 @@ def create_capture_hook[T](
     Returns:
         (hooks_config, captured): The hook config and the shared accumulator list.
     """
-    captured: list[T] = []  # lup: ignore[empty-collection] — the shared accumulator
+    captured: list[T] = []
 
     async def capture_hook(event: LupHookInput) -> LupHookOutput:
         if event.event != "PostToolUse":
