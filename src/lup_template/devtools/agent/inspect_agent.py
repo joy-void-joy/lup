@@ -9,6 +9,7 @@ import io
 import json
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 from typing import TypedDict
 
@@ -74,11 +75,8 @@ def print_tool_full(out: io.StringIO, tool: LupMcpTool) -> None:
     out.write(f"\n  {tool.name}\n")
     out.write(f"  {'─' * len(tool.name)}\n")
 
-    desc_lines = tool.description.split(". ")  # lup: ignore[string-split] — sentences
-    for line in desc_lines:
-        line = line.strip()
-        if line:
-            out.write(f"    {line}.\n")
+    for line in textwrap.wrap(tool.description, width=76):
+        out.write(f"    {line}\n")
 
     print_model_source(out, tool.input_model, "Input")
 
