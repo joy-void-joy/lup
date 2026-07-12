@@ -61,12 +61,14 @@ def serve() -> None:
         try:
             request = json.loads(line)
         except json.JSONDecodeError:
+            request = None
+        if not isinstance(request, dict) or "code" not in request:
             proto_out.write(
                 json.dumps(
                     {
                         "exit_code": 1,
                         "stdout": "",
-                        "stderr": "Invalid JSON",
+                        "stderr": 'Malformed request: expected {"code": ..., "timeout": ...}',
                         "duration_ms": 0,
                     }
                 )
@@ -75,7 +77,7 @@ def serve() -> None:
             proto_out.flush()
             continue
 
-        code = str(request.get("code", ""))  # lup: ignore[dict-get] — wire payload
+        code = str(request["code"])
         timeout = int(request.get("timeout", 30))  # lup: ignore[dict-get] — wire
         out_buf = StringIO()
         err_buf = StringIO()
