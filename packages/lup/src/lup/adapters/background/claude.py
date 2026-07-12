@@ -9,8 +9,6 @@ opus-class model.
 import asyncio
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from typing import Any  # lup: ignore[any-type] — confined to SdkDict below
-
 import claude_agent_sdk as claude
 from claude_agent_sdk import types as claude_types
 
@@ -22,7 +20,9 @@ from lup.types import JsonObject
 
 logger = logging.getLogger(__name__)
 
-type SdkDict = dict[str, Any]  # lup: ignore[any-type] — SDK tool-handler payload
+# The SDK declares handler returns dict[str, Any]; dict[str, object] satisfies
+# it while keeping call sites type-checked.
+type SdkDict = dict[str, object]  # lup: ignore[dict-str-object] — SDK payload
 
 
 def lup_tools_to_sdk(
