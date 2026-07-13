@@ -5,6 +5,11 @@ This module provides the domain-neutral gate mechanism:
 
 - ``ReflectionGate``: Flag-based state tracker for whether the agent
   has reflected in the current cycle.
+- ``ReviewVerdict`` / ``ReviewResult``: Structured outcome vocabulary
+  for a reviewer sub-agent (approve / warn / fail).
+- ``ReviewGate``: Verdict-aware ``ReflectionGate`` — the flag opens on
+  reviewer approval instead of on the mere act of reflecting, with a
+  consecutive-fail escape hatch so a harsh reviewer cannot deadlock.
 
 The reflection *tool* and its input model are domain-specific and belong
 in ``agent/tools/``. This module only provides the enforcement mechanism.
@@ -41,7 +46,10 @@ Examples:
         False
 """
 
+from enum import StrEnum
 from pathlib import Path
+
+from pydantic import BaseModel, Field
 
 from lup.hooks import LupHooksConfig, create_tool_gate
 
@@ -92,6 +100,94 @@ class ReflectionGate:
     def reset(self) -> None:
         """Require fresh reflection (start of new cycle)."""
         self.reflected = False
+
+
+class ReviewVerdict(StrEnum):
+    """Outcome of a reviewer sub-agent's evaluation."""
+
+    approve = "approve"
+    warn = "warn"
+    fail = "fail"
+
+
+class ReviewResult(BaseModel):
+    """Structured output from a reviewer sub-agent."""
+
+    verdict: ReviewVerdict = Field(
+        description=(
+            "approve: no blocking errors. warn: real but non-blocking "
+            "issues — the conclusion stands. fail: a concrete error that "
+            "would change the output; the agent must revise."
+        ),
+    )
+    assessment: str = Field(
+        description=(
+            "Full analysis. Explain what you checked, what you found, "
+            "and why you reached your verdict."
+        ),
+    )
+
+
+class ReviewGate(ReflectionGate):
+    """Verdict-aware :class:`ReflectionGate`: opens on reviewer approval.
+
+    :meth:`record` maps a reviewer's :class:`ReviewResult` onto the flag
+    every existing consumer already checks (``reflected``): approve and
+    warn open the gate immediately; fail keeps it closed — and re-closes
+    it — so the agent must revise and review again. After ``max_fails``
+    consecutive fails the gate opens anyway, an escape hatch so a harsh
+    reviewer cannot deadlock the session.
+
+    File-backed mode persists the fail counter beside the flag file, so
+    enforcement keeps working across the process boundary (the
+    serve-tools subprocess) exactly like the base flag does.
+    """
+
+    def __init__(self, flag_path: Path | None = None, *, max_fails: int = 3) -> None:
+        super().__init__(flag_path)
+        self.max_fails = max_fails
+        self.memory_fails: int = 0
+        self.last_verdict: ReviewVerdict | None = None
+
+    @property
+    def fails_path(self) -> Path | None:
+        if self.flag_path is None:
+            return None
+        return self.flag_path.with_name(self.flag_path.name + ".fails")
+
+    @property
+    def consecutive_fails(self) -> int:
+        if self.fails_path is not None:
+            if not self.fails_path.exists():
+                return 0
+            return int(self.fails_path.read_text(encoding="utf-8"))
+        return self.memory_fails
+
+    @consecutive_fails.setter
+    def consecutive_fails(self, value: int) -> None:
+        self.memory_fails = value
+        if self.fails_path is not None:
+            if value:
+                self.fails_path.parent.mkdir(parents=True, exist_ok=True)
+                self.fails_path.write_text(str(value), encoding="utf-8")
+            else:
+                self.fails_path.unlink(missing_ok=True)
+
+    def record(self, result: ReviewResult) -> None:
+        """Record a reviewer verdict and update the gate flag."""
+        self.last_verdict = result.verdict
+        if result.verdict is ReviewVerdict.fail:
+            self.consecutive_fails += 1
+            self.reflected = self.consecutive_fails >= self.max_fails
+        else:
+            self.consecutive_fails = 0
+            self.reflected = True
+
+    def reset(self) -> None:
+        """Require a fresh review (start of new cycle)."""
+        super().reset()
+        self.consecutive_fails = 0
+        self.last_verdict = None
 
 
 def create_reflection_gate(
