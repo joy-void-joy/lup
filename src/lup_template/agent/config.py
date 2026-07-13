@@ -16,10 +16,12 @@ Usage:
 # We should also copy their UI patterns, and have lup host a dashboard
 
 import logging
-from typing import Literal, Self
+import os
+from pathlib import Path
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +220,25 @@ class Settings(BaseSettings):
         validation_alias="AGENT_LOGS_PATH",
         description="Base path for trace logs",
     )
+
+    extra_dirs: Annotated[list[Path], NoDecode] = Field(
+        default_factory=list,
+        validation_alias="AGENT_EXTRA_DIRS",
+        description=(
+            "Additional directories the agent may read beyond the session "
+            "workspace, PATH-style (colon-separated) — e.g. a reference-data "
+            "or transcript directory."
+        ),
+    )
+
+    @field_validator("extra_dirs", mode="before")
+    @classmethod
+    def split_extra_dirs(cls, value: str | list[Path]) -> list[str] | list[Path]:
+        """Env values are PATH-style: colon-separated directory names."""
+        if isinstance(value, str):
+            parts = value.split(os.pathsep)  # lup: ignore[string-split] — PATH format
+            return [part for part in parts if part]
+        return value
 
     # ==========================================================================
     # LIMITS
