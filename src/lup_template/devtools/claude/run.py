@@ -55,7 +55,7 @@ def run_claude(
     extra_args: list[str],
 ) -> None:
     """Exec into ``claude`` configured for this project (see module docstring)."""
-    args: list[str] = []  # lup: ignore[empty-collection] — conditional assembly
+    args: list[str] = []
 
     if model:
         args.extend(["--model", model])

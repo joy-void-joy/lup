@@ -156,7 +156,7 @@ def auto_import_namespace(
 
     dotted_paths: list[str] = []  # lup: ignore[empty-collection] — chain fold
     for node in attr_nodes:
-        chain: list[str] = []  # lup: ignore[empty-collection] — attr-chain walk
+        chain: list[str] = []
         current: ast.expr = node
         while isinstance(current, ast.Attribute):
             chain.append(current.attr)

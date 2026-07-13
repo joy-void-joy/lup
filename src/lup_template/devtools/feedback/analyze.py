@@ -18,6 +18,7 @@ from lup_template.devtools.trace.traces import (
     CapabilityRequest,
     scan_for_capability_gaps,
 )
+from lup.telemetry.metrics import MetricsSummary
 from lup.workspace.history import resolve_version
 
 
@@ -85,16 +86,10 @@ def gather_tool_health(sessions: Sequence[LoadedSession]) -> list[ToolHealth]:
 
 def gather_error_patterns(sessions: Sequence[LoadedSession]) -> list[ErrorPattern]:
     """Find sessions with high error rates, grouped by error type."""
-    result: list[ErrorPattern] = []  # lup: ignore[empty-collection] — session fold
 
-    for s in sessions:
-        metrics = s.tool_metrics
-        if metrics is None or metrics["total_errors"] <= 0:
-            continue
-
+    def error_pattern(session_id: str, metrics: MetricsSummary) -> ErrorPattern:
         total_errors = metrics["total_errors"]
         total_calls = metrics["total_tool_calls"]
-
         tool_errors = sorted(
             (
                 (errs, tool_name)
@@ -103,19 +98,22 @@ def gather_error_patterns(sessions: Sequence[LoadedSession]) -> list[ErrorPatter
             ),
             reverse=True,
         )
+        return {
+            "session_id": session_id,
+            "error_count": total_errors,
+            "total_calls": total_calls,
+            "error_rate": (total_errors / total_calls) if total_calls > 0 else 0.0,
+            "top_errors": [f"{name}: {count}" for count, name in tool_errors],
+        }
 
-        result.append(
-            {
-                "session_id": s.source_session_id,
-                "error_count": total_errors,
-                "total_calls": total_calls,
-                "error_rate": (total_errors / total_calls) if total_calls > 0 else 0.0,
-                "top_errors": [f"{name}: {count}" for count, name in tool_errors],
-            }
-        )
-
-    result.sort(key=lambda x: -x["error_count"])
-    return result
+    return sorted(
+        (
+            error_pattern(s.source_session_id, metrics)
+            for s in sessions
+            if (metrics := s.tool_metrics) is not None and metrics["total_errors"] > 0
+        ),
+        key=lambda p: -p["error_count"],
+    )
 
 
 def build_report(version: str | None, all_versions: bool) -> AnalysisReport:

@@ -192,6 +192,70 @@ except OSError:
         entries = []
 """
 
+TOLERANT_FOLD = """\
+def load(paths):
+    records: list[int] = []
+    for path in paths:
+        try:
+            records.append(parse(path))
+        except ValueError:
+            log(path)
+    return records
+"""
+
+MIXED_FEEDING = """\
+def load(paths, extras):
+    records = []
+    for path in paths:
+        try:
+            records.append(parse(path))
+        except ValueError:
+            log(path)
+    for extra in extras:
+        records.append(extra)
+    return records
+"""
+
+CONDITIONAL_BUILD = """\
+def build_args(model, prompt):
+    args: list[str] = []
+    if model:
+        args.extend(["--model", model])
+    if prompt:
+        args.append(prompt)
+    return args
+"""
+
+HELPER_FILLED = """\
+def collect():
+    rows = []
+    fill(rows)
+    return rows
+"""
+
+CLOSURE_ACCUMULATOR = """\
+def collector():
+    captured = []
+
+    def capture(value):
+        captured.append(value)
+
+    return captured, capture
+"""
+
+LOOP_RESET = """\
+def blocks(lines):
+    out = []
+    body = []
+    for line in lines:
+        if not line:
+            out.append(body)
+            body = []
+        else:
+            body.append(line)
+    return out
+"""
+
 
 def test_refiner_exempts_deliberate_defaults() -> None:
     assert empty_collection_exempt_lines(INIT_STATE) == {3, 4}
@@ -204,6 +268,27 @@ def test_refiner_exempts_except_body_fallback() -> None:
     assert empty_collection_exempt_lines(EXCEPT_FALLBACK) == {4}
     # Only DIRECT handler statements: a seed nested in a loop still trips.
     assert empty_collection_exempt_lines(EXCEPT_NESTED_SEED) == set()
+
+
+def test_refiner_exempts_tolerant_folds() -> None:
+    # Per-item try/except is exactly what a comprehension cannot express.
+    assert empty_collection_exempt_lines(TOLERANT_FOLD) == {2}
+    # One tolerant and one plain feeding loop: the plain fold keeps tripping.
+    assert empty_collection_exempt_lines(MIXED_FEEDING) == set()
+
+
+def test_refiner_exempts_loop_free_seeds() -> None:
+    # No loop feeds these, so there is no comprehension to prefer.
+    assert empty_collection_exempt_lines(CONDITIONAL_BUILD) == {2}
+    assert empty_collection_exempt_lines(CLOSURE_ACCUMULATOR) == {2}
+    # Deliberate: mutation through a callee is invisible to the refiner.
+    assert empty_collection_exempt_lines(HELPER_FILLED) == {2}
+
+
+def test_refiner_exempts_in_loop_resets() -> None:
+    # The reset inside the loop is machinery, not a seed; both function-level
+    # seeds feed an unguarded loop and still trip.
+    assert empty_collection_exempt_lines(LOOP_RESET) == {7}
 
 
 def test_refiner_keeps_flagging_seeds() -> None:
