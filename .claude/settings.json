@@ -6,6 +6,7 @@
   "permissions": {
     "allow": [
       "WebSearch",
+      "Skill(lup:hooks)",
       "Read(./.claude/settings.json.local*)",
       "Read(./downstream.json.local)"
     ],
