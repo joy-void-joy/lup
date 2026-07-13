@@ -5,12 +5,21 @@ from pathlib import Path
 
 import sh
 import typer
+from pydantic import BaseModel
 
-from lup_template.devtools.utils import git
+from lup_template.devtools.utils import (
+    copy_to_clipboard,
+    decode_stderr,
+    format_table,
+    git,
+    short_sha,
+    uv,
+)
 
 
-PLUGIN_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache" / "local" / "lup"
-
+# Gitignored paths that `git worktree add` does not carry over but a working
+# worktree still needs (local secrets/settings, logs, downstream `refs/`
+# symlinks); `create` copies them into the new worktree unless --no-copy-data.
 GITIGNORED_EXTRAS = [
     ".env.local",
     "downstream.json.local",
@@ -31,27 +40,28 @@ def branch_exists(branch: str) -> bool:
 
 def worktree_is_registered(path: Path) -> bool:
     """Check if a path is registered as a git worktree (even if dir is missing)."""
-    output = str(git("worktree", "list", "--porcelain"))
     resolved = str(path.resolve())
-    for line in output.splitlines():
-        if line.startswith("worktree ") and line.split(" ", 1)[1] == resolved:
-            return True
-    return False
+    return any(
+        line == f"worktree {resolved}"
+        for line in git.lines("worktree", "list", "--porcelain")
+    )
 
 
 def get_tree_dir() -> Path:
-    """Find the tree/ directory that contains worktrees."""
+    """Locate the ``tree/`` directory that holds sibling worktrees.
+
+    Two checkout layouts are supported. In the bare-repo layout the current
+    checkout is itself a worktree living inside ``tree/``, so ``tree/`` is the
+    parent. Otherwise ``tree/`` sits at the current directory or an ancestor,
+    so walking upward lets the command run from anywhere inside the checkout.
+    """
     cwd = Path.cwd().resolve()
 
     if cwd.parent.name == "tree":
         return cwd.parent
 
-    tree = cwd / "tree"
-    if tree.is_dir():
-        return tree
-
-    for parent in cwd.parents:
-        tree = parent / "tree"
+    for directory in (cwd, *cwd.parents):
+        tree = directory / "tree"
         if tree.is_dir():
             return tree
 
@@ -59,32 +69,14 @@ def get_tree_dir() -> Path:
     raise typer.Exit(1)
 
 
-def copy_to_clipboard(text: str) -> bool:
-    """Copy text to system clipboard. Returns True on success."""
-    try:
-        xclip = sh.Command("xclip")
-        xclip("-selection", "clipboard", _in=text)
-        return True
-    except (sh.ErrorReturnCode, sh.CommandNotFound):
-        pass
-    try:
-        xsel = sh.Command("xsel")
-        xsel("--clipboard", "--input", _in=text)
-        return True
-    except (sh.ErrorReturnCode, sh.CommandNotFound):
-        pass
-    return False
-
-
 def create(
     name: str,
     no_sync: bool,
     no_copy_data: bool,
-    no_plugin_refresh: bool,
     base_branch: str | None,
+    force: bool = False,
 ) -> None:
     """Create or re-attach a git worktree."""
-    uv = sh.Command("uv")
     current_dir = Path.cwd()
 
     tree_dir = get_tree_dir()
@@ -95,6 +87,13 @@ def create(
         if worktree_is_registered(worktree_path):
             typer.echo(f"Worktree already active: {worktree_path}")
             raise typer.Exit(0)
+        if not force:
+            typer.echo(
+                f"Directory exists but is not a registered worktree: {worktree_path}\n"
+                "Re-run with --force to delete it and create the worktree.",
+                err=True,
+            )
+            raise typer.Exit(1)
         typer.echo(f"Removing stale worktree directory: {worktree_path}")
         shutil.rmtree(worktree_path)
 
@@ -115,8 +114,7 @@ def create(
         else:
             git("worktree", "add", str(worktree_path), "-b", name)
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        typer.echo(f"Error creating worktree: {stderr}")
+        typer.echo(f"Error creating worktree: {decode_stderr(e)}")
         raise typer.Exit(1)
 
     if not no_copy_data:
@@ -138,29 +136,7 @@ def create(
         try:
             uv("sync", _cwd=str(worktree_path))
         except sh.ErrorReturnCode as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-            typer.echo(f"Warning: uv sync failed: {stderr}")
-
-    if not no_plugin_refresh:
-        if PLUGIN_CACHE_DIR.exists():
-            shutil.rmtree(PLUGIN_CACHE_DIR)
-            typer.echo("Cleared plugin cache (lup)")
-
-        claude = sh.Command("claude")
-        try:
-            claude(
-                "plugin",
-                "install",
-                "lup@local",
-                "--scope",
-                "project",
-                _cwd=str(worktree_path),
-                _tty_out=False,
-            )
-            typer.echo("Installed lup plugin (project scope)")
-        except sh.ErrorReturnCode as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-            typer.echo(f"Warning: plugin install failed: {stderr}", err=True)
+            typer.echo(f"Warning: uv sync failed: {decode_stderr(e)}")
 
     typer.echo()
     cd_command = f"cd /; cd {worktree_path}; claude"
@@ -175,37 +151,45 @@ def create(
 def worktree_status(path: str) -> str:
     """Check if a worktree has uncommitted changes."""
     try:
-        status = str(git("-C", path, "status", "--porcelain", _ok_code=[0])).strip()
-        return "dirty" if status else "clean"
+        dirty = git.lines("-C", path, "status", "--porcelain", _ok_code=[0])
+        return "dirty" if dirty else "clean"
     except sh.ErrorReturnCode:
         return "?"
 
 
+class WorktreeEntry(BaseModel):
+    """One record of ``git worktree list --porcelain``."""
+
+    path: str = ""
+    head: str = ""
+    branch: str = ""
+    bare: bool = False
+    prunable: bool = False
+
+
 def list_worktrees() -> None:
     """List all git worktrees with branch and status info."""
-    output = str(git("worktree", "list", "--porcelain"))
+    entries: list[WorktreeEntry] = []  # lup: ignore[empty-collection] — record fold
+    current = WorktreeEntry()
 
-    entries: list[dict[str, str]] = []
-    current: dict[str, str] = {}
-
-    for line in output.splitlines():
-        if not line.strip():
-            if current:
+    for line in git.lines("worktree", "list", "--porcelain"):
+        if not line:
+            if current.path:
                 entries.append(current)
-                current = {}
+                current = WorktreeEntry()
             continue
         if line.startswith("worktree "):
-            current["path"] = line.split(" ", 1)[1]
+            current.path = line.removeprefix("worktree ")
         elif line.startswith("HEAD "):
-            current["head"] = line.split(" ", 1)[1][:10]
+            current.head = short_sha(line.removeprefix("HEAD "))
         elif line.startswith("branch "):
-            current["branch"] = line.split(" ", 1)[1].replace("refs/heads/", "")
+            current.branch = line.removeprefix("branch ").removeprefix("refs/heads/")
         elif line == "bare":
-            current["bare"] = "true"
+            current.bare = True
         elif line == "prunable":
-            current["prunable"] = "true"
+            current.prunable = True
 
-    if current:
+    if current.path:
         entries.append(current)
 
     if not entries:
@@ -214,28 +198,18 @@ def list_worktrees() -> None:
 
     cwd = str(Path.cwd().resolve())
 
+    def row(entry: WorktreeEntry) -> list[str]:
+        branch = entry.branch or ("(bare)" if entry.bare else "(detached)")
+        marker = "* " if entry.path == cwd else "  "
+        in_dir = not entry.bare and Path(entry.path).is_dir()
+        dirtiness = worktree_status(entry.path) if in_dir else ""
+        flag = " [prunable]" if entry.prunable else ""
+        return [f"{marker}{branch}", entry.head, dirtiness, f"{entry.path}{flag}"]
+
     typer.echo(f"\n=== Worktrees ({len(entries)}) ===\n")
-    typer.echo(f"  {'Branch':<28} {'HEAD':<12} {'Status':<8} {'Path'}")
-    typer.echo("-" * 90)
-
-    for entry in entries:
-        branch = entry.get("branch", "(bare)" if entry.get("bare") else "(detached)")
-        head = entry.get("head", "")
-        path = entry.get("path", "")
-        is_current = path == cwd
-        marker = "* " if is_current else "  "
-
-        flags: list[str] = []
-        if entry.get("prunable"):
-            flags.append("prunable")
-
-        if not entry.get("bare") and Path(path).is_dir():
-            status = worktree_status(path)
-        else:
-            status = ""
-
-        flag_str = f" [{', '.join(flags)}]" if flags else ""
-        typer.echo(f"{marker}{branch:<28} {head:<12} {status:<8} {path}{flag_str}")
+    typer.echo(
+        format_table(("Branch", "HEAD", "Status", "Path"), [row(e) for e in entries])
+    )
 
 
 def remove(name: str, force: bool) -> None:
@@ -257,8 +231,7 @@ def remove(name: str, force: bool) -> None:
         git(*args)
         typer.echo(f"Removed worktree: {path}")
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        typer.echo(f"Error removing worktree: {stderr}", err=True)
+        typer.echo(f"Error removing worktree: {decode_stderr(e)}", err=True)
         if not force:
             typer.echo("Use --force to remove even if dirty")
         raise typer.Exit(1)

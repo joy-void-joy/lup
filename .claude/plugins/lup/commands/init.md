@@ -82,6 +82,17 @@ Use AskUserQuestion extensively -- don't make assumptions about the domain. Ask 
 
 Let the conversation flow naturally. The goal is to understand the domain well enough to customize the template files below.
 
+## Phase 1.5: Prune Scaffolding
+
+Before customizing, decide which optional patterns this domain actually needs. The template ships them all wired; most domains use a subset, and **deleting the rest is the goal, not a failure** (see CLAUDE.md § Scaffolding Is a Menu, Not a Mandate). From the interview answers, classify each as KEEP-and-customize or DELETE-the-files:
+
+- **Reflection** (`agent/tools/reflect.py` + the gate wiring in `core.py`) — keep only if the agent commits a consequential, judgment-bearing output where self-critique helps.
+- **Realtime / persistent mode** (`agent/tools/realtime.py`, `lup.realtime*`, the Stop-hook/sleep-wake wiring) — keep only for agents that live over time (chat, monitoring, games); delete for one-shot agents.
+- **Feedback loop** (`devtools/feedback/`, the feedback-loop command) — keep only if ground truth or a feedback signal resolves over time.
+- **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning. Session data is gitignored by default (the `notes/*` lines in `.gitignore`), so traces and outputs stay local; keeping this pattern means removing those two lines so session data can be committed. When deleting the pattern, leave the ignore lines in place.
+
+Use AskUserQuestion to confirm the keep/delete set, then **delete the files and their wiring** for everything not kept before proceeding. The customization steps below apply only to what you kept.
+
 ## Phase 2: Rename Package
 
 Run the devtool to rename the package. Preview first with `--dry-run`, then execute:
@@ -91,7 +102,7 @@ uv run lup-devtools dev init rename-package <project> --dry-run
 uv run lup-devtools dev init rename-package <project>
 ```
 
-This handles directory rename (`src/lup_template/` -> `src/<project>/`), import updates, pyproject.toml entry points, and CLI app name -- all in one shot. Framework vocabulary (`lup_tool`, `lup-devtools`, `.lup/`, etc.) is preserved automatically.
+This handles directory rename (`src/lup_template/` -> `src/<project>/`), import updates, pyproject.toml entry points, CLI app name, and the plugin marketplace name -- all in one shot. The marketplace (`.claude/plugins/.claude-plugin/marketplace.json` + settings.json) is named `<project>` so it doesn't collide in the global marketplace namespace, while the plugin entry stays `lup` (so `/lup:*` is identical everywhere). Framework vocabulary (`lup_tool`, `lup-devtools`, `.lup/`, etc.) is preserved automatically.
 
 ### After renaming:
 
@@ -120,6 +131,14 @@ This handles directory rename (`src/lup_template/` -> `src/<project>/`), import 
 
 ## Phase 3: Generate Scaffolding
 
+**Start by gathering every customization point.** Each decision the template leaves to a domain carries a `TEMPLATE:` marker (`# TEMPLATE:` in comments, `TEMPLATE:` in docstrings) with a one-line description of the decision. Collect them all:
+
+```bash
+uv run lup-devtools dev todos --json
+```
+
+Walk the collected decision points one by one — each entry gives the file, line, decision text, and surrounding context. For every marker, either customize the code it points at and remove the marker, or delete it along with scaffolding pruned in Phase 1.5. The numbered steps below give domain guidance for the major ones, but the gathered list is the source of truth: a marker you never reach is a decision silently defaulted.
+
 Based on the answers from Phase 1, generate or modify:
 
 ### 1. `src/<project>/agent/models.py`
@@ -142,29 +161,26 @@ Customize the CLI for the domain's task format:
 
 - Update the `loop` command to accept domain-specific task inputs
 - Customize `_commit_results()` message format (e.g., `data(forecasts):` instead of `data(sessions):`)
-- Configure auto-commit behavior: enable/disable by default, target branch (main for data-only commits, or a dedicated branch)
+- Configure auto-commit behavior: enable/disable by default, target branch (main for data-only commits, or a dedicated branch) — requires the `notes/` ignore lines removed in Phase 1.5
 - Add domain-specific CLI commands if needed
 
 ### 5. Agent Version
 
 Set `agent_version` under `[tool.lup]` in `pyproject.toml` and explain bump rules for this domain.
 
-### 6. Configure Reflection
+### 6. Reflection (only if kept in Phase 1.5)
 
-Customize `src/<project>/agent/tools/reflect.py`:
+If this domain has no consequential, judgment-bearing output, you already deleted `reflect.py` and its gate — skip this step. Otherwise customize `src/<project>/agent/tools/reflect.py`:
 
-Ask the user:
-
-- Should the agent self-review before producing output? (default: yes -- already wired in core.py)
-- Should there be a reviewer sub-agent? (default: yes, runs on Sonnet -- adds latency but catches errors)
-- What domain-specific fields should reflection capture? (extend `ReflectInput` with fields like factor analysis, move evaluation, etc.)
+- Extend `ReflectInput` with domain-specific fields (factor analysis, move evaluation, etc.)
 - Customize the reviewer prompt for the domain's common failure modes
+- The reviewer runs on the Opus-class aux model (see CLAUDE.md § Model Selection); pass `skip_reviewer=True` per call for speed-sensitive or trivial tasks
 
 The reflection gate (`lup.reflect`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
 
-### 7. `feedback_collect.py`
+### 7. `devtools/feedback/state.py`
 
-The main feedback collection script. Customize for the domain's ground truth type.
+The feedback collection module (exposed via `uv run lup-devtools feedback collect`). Customize `load_outcomes()` and `compute_metrics()` for the domain's ground truth type.
 
 ### 8. Update `CLAUDE.md`
 
@@ -214,17 +230,18 @@ Customize the feedback loop command for the domain's specific:
 
 After generating files:
 
-1. Run `uv run pyright` to check types
-2. Run `uv run ruff check .` to check lint
-3. Run `uv run python -m <project>.environment.cli --help` to verify CLI
-4. Verify the feedback loop command references the right scripts
-5. Check that CLAUDE.md accurately describes the domain
+1. Run `uv run lup-devtools dev todos` -- any remaining `TEMPLATE:` marker is a decision not yet made; resolve or consciously defer each one
+2. Run `uv run pyright` to check types
+3. Run `uv run ruff check .` to check lint
+4. Run `uv run lup --help` to verify CLI
+5. Verify the feedback loop command references the right scripts
+6. Check that CLAUDE.md accurately describes the domain
 
 ## After Initialization
 
 Once the scaffolding is generated, guide the user to:
 
-1. Run a few sessions: `uv run python -m <project>.environment.cli loop "task1" "task2"`
+1. Run a few sessions: `uv run lup loop "task1" "task2"`
 2. Review traces in `notes/traces/`
 3. Use `/lup:feedback-loop` to analyze and improve
 4. Iterate on the feedback collection as patterns emerge

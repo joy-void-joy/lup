@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, Agent, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, Task, AskUserQuestion
 description: Aggregate tool health, capability gaps, and reasoning patterns across sessions
 ---
 
@@ -36,7 +36,7 @@ From investigation findings:
 If comparing across versions, launch the version-explorer subagent for code-level diffs:
 
 ```
-Agent(subagent_type="lup:version-explorer", prompt="Compare vX.Y.Z and vA.B.C")
+Task(subagent_type="lup:version-explorer", prompt="Compare vX.Y.Z and vA.B.C")
 ```
 
 ### 4. Summarize

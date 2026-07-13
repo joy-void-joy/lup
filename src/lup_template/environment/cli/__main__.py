@@ -5,16 +5,22 @@ This is a TEMPLATE. Customize for your domain.
 The CLI is the domain-specific harness that:
 1. Handles user interaction or game logic
 2. Runs agent sessions with inputs
-3. Auto-commits results after each session
-4. Manages application flow and lifecycle
+3. Manages application flow and lifecycle
 
-The feedback loop focuses on improving lup.agent.
+**The commit loop is optional** (see CLAUDE.md § Scaffolding Is a Menu, Not a
+Mandate): ``loop`` can auto-commit each session's outputs so a batch run leaves
+a per-session audit trail. Keep it when every run yields a data artifact worth
+versioning (forecasts, game records, generated files); for interactive or
+no-artifact domains it is just noise — pass ``--no-commit`` or remove the
+auto-commit wiring entirely.
+
+The feedback loop focuses on improving lup_template.agent.
 This code evolves with application requirements.
 
 Usage:
-    uv run python -m lup.environment.cli run "your task here"
-    uv run python -m lup.environment.cli run --session-id my-session "task"
-    uv run python -m lup.environment.cli loop "task1" "task2" "task3"
+    uv run lup run "your task here"
+    uv run lup run --session-id my-session "task"
+    uv run lup loop "task1" "task2" "task3"
 """
 
 import asyncio
@@ -23,6 +29,8 @@ from typing import Annotated
 
 import sh
 import typer
+
+import lup.workspace.paths
 
 from lup_template.agent.config import settings
 from lup_template.agent.core import run_agent
@@ -40,7 +48,21 @@ app = typer.Typer(
 
 @app.callback(invoke_without_command=True)
 def callback(ctx: typer.Context) -> None:
-    """Self-improving agent CLI."""
+    """Self-improving agent CLI.
+
+    Wires AGENT_NOTES_PATH / AGENT_LOGS_PATH (``settings.notes_path`` /
+    ``settings.logs_path``) into ``lup.workspace.paths`` so all session data —
+    sessions, outputs, and trace logs — lands under the configured
+    directories. The overrides are always applied: relative values
+    (including the "./notes" and "./logs" defaults) are anchored at the
+    project root, so default behavior is unchanged regardless of cwd,
+    while absolute env values move the data wholesale.
+    """
+    root = lup.workspace.paths.project_root()
+    lup.workspace.paths.configure(
+        notes_dir=(root / settings.notes_path).resolve(),
+        logs_dir=(root / settings.logs_path).resolve(),
+    )
     if ctx.invoked_subcommand is None:
         raise typer.Exit()
 
@@ -49,6 +71,7 @@ async def run_session(
     task: str,
     *,
     session_id: str | None = None,
+    resume: str | None = None,
 ) -> AgentSessionResult:
     """Run an agent session with the given task.
 
@@ -58,6 +81,7 @@ async def run_session(
     Args:
         task: The task/prompt for the agent.
         session_id: Optional session identifier.
+        resume: Engine session id to continue (already resolved).
 
     Returns:
         AgentSessionResult with the agent's output and metadata.
@@ -67,6 +91,7 @@ async def run_session(
     result = await run_agent(
         task,
         session_id=session_id,
+        resume=resume,
     )
 
     logger.info(
@@ -82,21 +107,22 @@ async def run_session(
 def commit_results() -> None:
     """Commit any uncommitted session results.
 
-    TEMPLATE NOTE: This auto-commits session outputs (notes/sessions/,
-    notes/traces/) after each run. For domains like
-    forecasting, game playing, or batch processing, this keeps data
-    commits atomic and automatic. Customize or remove if your domain
-    doesn't need auto-commit (e.g., interactive coaching).
+    TEMPLATE: customize the commit message/scope, or remove auto-commit.
+    This commits session outputs (notes/traces/) after each run. For
+    domains like forecasting, game playing, or batch processing, it keeps
+    data commits atomic and automatic; interactive domains (e.g. coaching)
+    usually drop it.
     """
     git = sh.Command("git").bake("--no-pager", "-c", "color.ui=never")
-    status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0])).strip()
-    if not status:
+    status = str(git.status("--porcelain", "--", "notes/", _ok_code=[0]))
+    if not status.strip():
         return
 
     try:
         git.add("notes/")
-        diff = str(git.diff("--cached", "--stat", _ok_code=[0, 1])).strip()
-        if diff:
+        # --quiet exits 1 exactly when something is staged — git's own probe.
+        staged = git.diff("--cached", "--quiet", _ok_code=[0, 1])
+        if staged.exit_code == 1:
             git.commit("-m", "data(sessions): auto-commit session results")
             typer.echo("Committed session results.")
     except sh.ErrorReturnCode as e:
@@ -121,6 +147,23 @@ def run(
         str | None,
         typer.Option("--session-id", "-s", help="Optional session identifier"),
     ] = None,
+    resume: Annotated[
+        str | None,
+        typer.Option(
+            "--resume",
+            help="Continue a previous run's conversation: a saved session "
+            "name (looked up in history) or a raw engine session id",
+        ),
+    ] = None,
+    persistent: Annotated[
+        bool,
+        typer.Option(
+            "--persistent",
+            help="Persistent (sleep/wake) session via the file relay — "
+            "AGENT_SDK=codex/openai; replies print to stdout "
+            "(see PATTERNS.md, Persistent Agent)",
+        ),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Enable verbose logging"),
@@ -132,7 +175,20 @@ def run(
     else:
         logging.basicConfig(level=logging.INFO)
 
-    result = asyncio.run(run_session(task, session_id=session_id))
+    if persistent:
+        from lup_template.agent.core import run_persistent_agent
+
+        turns = asyncio.run(run_persistent_agent(task, session_id=session_id))
+        typer.echo(f"\nPersistent session ended after {turns} turn(s).")
+        return
+
+    resume_token = None
+    if resume is not None:
+        from lup_template.agent.core import resolve_resume_token
+
+        resume_token = resolve_resume_token(resume)
+
+    result = asyncio.run(run_session(task, session_id=session_id, resume=resume_token))
     print_result(result)
 
 
@@ -152,13 +208,13 @@ def loop(
 ) -> None:
     """Run multiple agent sessions and auto-commit results.
 
-    TEMPLATE NOTE: This is the primary entry point for batch processing.
-    For a forecasting bot, tasks might be question IDs. For a game-playing
-    agent, tasks might be game configs. Customize the task format and
-    post-processing for your domain.
+    TEMPLATE: adapt the task format and post-processing for your domain.
+    This is the primary entry point for batch processing: for a
+    forecasting bot, tasks might be question IDs; for a game-playing
+    agent, game configs.
 
     Example:
-        uv run python -m lup.environment.cli loop "task1" "task2" "task3"
+        uv run lup loop "task1" "task2" "task3"
     """
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
@@ -181,6 +237,8 @@ def loop(
         except RuntimeError as e:
             typer.echo(f"Error: {e}", err=True)
             continue
+        # Batch isolation: one failed task must not abort the remaining
+        # tasks; the error is logged with traceback.
         except Exception as e:
             typer.echo(f"Unexpected error: {e}", err=True)
             logger.exception("Unexpected error on task %d/%d", i, len(tasks))

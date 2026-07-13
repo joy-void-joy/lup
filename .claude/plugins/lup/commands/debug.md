@@ -37,7 +37,7 @@ If multiple log files match, identify the **most recent** one (logs are named by
 
 If no matches found:
 
-- Try `notes/sessions/` for meta-reflections mentioning the error
+- Try `notes/traces/<version>/sessions/` for meta-reflections mentioning the error
 - Try broader search terms (exception class name, HTTP status code)
 - If still nothing: report exactly what was searched and that no logs contain this error. State what logging would need to be added and where.
 

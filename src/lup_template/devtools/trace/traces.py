@@ -1,7 +1,18 @@
+# lup: ignore[import-re, re-call, string-split]
+# This module IS the parser for the repo's own trace-markdown format (the
+# legacy fallback beside the .events.jsonl sidecar) — line surgery and the
+# fallback patterns are the parse, not a substitute for one, and user search
+# queries are regex by contract.
 """Trace display, search, and analysis implementation.
 
 Provides reusable scanner functions (``scan_for_errors``, ``scan_for_capability_gaps``)
 consumed by both trace CLI commands and ``feedback/analyze.py``.
+
+Analysis reads the machine-readable ``.events.jsonl`` sidecar that
+:class:`lup.telemetry.trace.TraceLogger` writes beside each ``.md`` trace: typed tool,
+error, and capability events, no regex. The line-scan over markdown remains
+only as the documented fallback for legacy ``.md`` traces that predate the
+sidecar.
 
 Examples::
 
@@ -12,17 +23,40 @@ Examples::
     $ uv run lup-devtools trace capabilities --json
 """
 
+import json
 import re
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
 
+from pydantic import BaseModel
+
 import typer
 
-from lup.history import iter_session_dirs, iter_trace_log_files
-from lup.paths import traces_path
+from lup.telemetry.blocks import truncate_str
+from lup.telemetry.trace import (
+    TraceEvent,
+    capability_request_from_text,
+    read_trace_events,
+    tool_result_ok,
+)
+from lup.workspace.history import (
+    iter_session_dirs,
+    iter_trace_log_files,
+    session_backend,
+)
+from lup.workspace.paths import parse_timestamp, project_root, traces_path
 
 from lup_template.devtools.utils import output_json
+
+
+class TraceRef(BaseModel):
+    """One discovered trace: which store it came from, its session id, its dir."""
+
+    source: str
+    session_id: str
+    path: Path
 
 
 # ── types ─────────────────────────────────────────────────
@@ -46,25 +80,114 @@ class SearchMatch(TypedDict):
     context: list[str]
 
 
-class TraceEntry(TypedDict):
+class TraceRow(TypedDict):
     session_id: str
     source: str
+    backend: str | None
     files: int
     size_kb: float
 
 
-# ── shared scanners ───────────────────────────────────────
+# ── event sourcing: structured sidecar, with a legacy-markdown fallback ────
 
-ERROR_PATTERNS = re.compile(
-    r"error|failed|exception|traceback|couldn't|unable to|not found|timeout",
-    re.IGNORECASE,
-)
 
-CAPABILITY_PATTERNS = re.compile(
-    r"would be useful|would have helped|would benefit from|wish I had|"
-    r"if I could|tool that|need.* access to|cannot .* because",
-    re.IGNORECASE,
-)
+def events_for_trace(trace_file: Path) -> list[TraceEvent]:
+    """Return the typed events for one ``.md`` trace.
+
+    Primary path: read the ``.events.jsonl`` sidecar written beside the trace
+    — already-typed tool/error/capability records, no parsing of prose. Only
+    when no sidecar exists (a legacy trace predating it) does this fall back
+    to :func:`events_from_legacy_markdown`.
+    """
+    sidecar = trace_file.with_suffix(".events.jsonl")
+    if sidecar.exists():
+        return read_trace_events(sidecar)
+    return events_from_legacy_markdown(trace_file.read_text(encoding="utf-8"))
+
+
+def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
+    """Reconstruct :class:`TraceEvent`s from a legacy ``.md`` trace.
+
+    The markdown is structured, not arbitrary prose: ``TraceLogger`` renders
+    each block under a ``## <emoji> <label>`` header (``Tool: <name>``,
+    ``Result`` with a fenced body, ``Response`` text). This parses that
+    structure — pairing each Result with the preceding Tool, and reading
+    ``is_error`` from the Result's JSON via :func:`tool_result_ok` — so error
+    detection matches the structured path instead of keyword-guessing. The
+    one irreducible heuristic, capability phrasing in free-form Response text,
+    is shared with the live logger.
+    """
+    events: list[TraceEvent] = []  # lup: ignore[empty-collection] — block fold
+    pending_tool: str | None = None
+    # Legacy markdown carries no per-event timestamps; "" marks them unknown.
+    for label, body in iter_markdown_blocks(content):
+        if label.startswith("Tool:"):
+            pending_tool = label.removeprefix("Tool:").strip() or "unknown"
+        elif label == "Result":
+            name = pending_tool or "unknown"
+            pending_tool = None
+            ok = tool_result_ok(body)
+            brief = truncate_str(body.strip(), 300)
+            events.append(
+                TraceEvent(
+                    kind="tool_call", timestamp="", tool=name, ok=ok, brief=brief
+                )
+            )
+            if not ok:
+                events.append(
+                    TraceEvent(kind="error", timestamp="", tool=name, brief=brief)
+                )
+        else:
+            request = capability_request_from_text(body)
+            if request is not None:
+                events.append(
+                    TraceEvent(kind="capability_request", timestamp="", brief=request)
+                )
+    return events
+
+
+type Block = tuple[str, str]  # lup: ignore[tuple-shape] — a (label, body) trace block
+
+
+def iter_markdown_blocks(
+    content: str,
+) -> list[Block]:
+    """Split a trace markdown document into ``(label, body)`` blocks.
+
+    A block starts at a ``## <emoji> <label>`` header and runs to the next
+    header. The body has any surrounding ``` ``` fences stripped, so a Result
+    body is the raw JSON the logger fenced — ready to parse.
+    """
+    blocks: list[Block] = []
+    label: str | None = None
+    body_lines: list[str] = []  # lup: ignore[empty-collection] — block fold
+
+    def flush() -> None:
+        if label is not None:
+            blocks.append((label, strip_code_fence("\n".join(body_lines))))
+
+    for line in content.split("\n"):
+        if line.startswith("## "):
+            flush()
+            # "## 🔧 Tool: search" -> "Tool: search"; emoji is the first token.
+            heading = line.removeprefix("## ").strip()
+            parts = heading.split(" ", 1)
+            label = parts[1].strip() if len(parts) > 1 else heading
+            body_lines = []
+        elif label is not None:
+            body_lines.append(line)
+    flush()
+    return blocks
+
+
+def strip_code_fence(body: str) -> str:
+    """Drop a leading ``` (or ```json) fence and its closing ``` from *body*."""
+    lines = body.strip().split("\n")
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
 
 def resolve_trace_paths(effective: list[str] | None) -> list[Path]:
@@ -72,13 +195,21 @@ def resolve_trace_paths(effective: list[str] | None) -> list[Path]:
     if not traces_path().exists():
         return []
     if effective:
-        paths: list[Path] = []
-        for v in effective:
-            ver_dir = traces_path() / v
-            if ver_dir.exists():
-                paths.extend(ver_dir.rglob("*.md"))
-        return paths
+        return [
+            path
+            for v in effective
+            if (ver_dir := traces_path() / v).exists()
+            for path in ver_dir.rglob("*.md")
+        ]
     return list(traces_path().rglob("*.md"))
+
+
+def display_path(path: Path) -> str:
+    """Project-relative path for display, absolute when outside the project."""
+    try:
+        return str(path.relative_to(project_root()))
+    except ValueError:
+        return str(path)
 
 
 def session_id_from_path(trace_file: Path) -> str:
@@ -93,130 +224,146 @@ def session_id_from_path(trace_file: Path) -> str:
 def scan_for_errors(
     effective: list[str] | None = None,
 ) -> list[TraceErrorSession]:
-    """Scan trace markdown files for error-like lines, grouped by session."""
-    errors_by_session: dict[str, list[str]] = {}
+    """Report failing tool calls per session from structured trace events.
+
+    Reads each trace's typed events (sidecar, or legacy-markdown fallback)
+    and keeps the ``error`` ones — real tool failures, distinguished by the
+    logged ``is_error`` flag rather than by keyword-scanning prose.
+    """
+    errors_by_session: defaultdict[str, list[str]] = defaultdict(list)
 
     for trace_file in resolve_trace_paths(effective):
         try:
-            content = trace_file.read_text(encoding="utf-8")
-            session_id = session_id_from_path(trace_file)
-
-            for line in content.split("\n"):
-                if ERROR_PATTERNS.search(line):
-                    if session_id not in errors_by_session:
-                        errors_by_session[session_id] = []
-                    error_line = line[:100] + "..." if len(line) > 100 else line
-                    errors_by_session[session_id].append(error_line.strip())
+            events = events_for_trace(trace_file)
         except OSError:
-            pass
+            continue
+        session_id = session_id_from_path(trace_file)
+        for event in events:
+            if event.kind != "error":
+                continue
+            errors_by_session[session_id].append(
+                f"{event.tool or 'unknown'}: {event.brief}"
+            )
 
-    result: list[TraceErrorSession] = []
-    for session_id, errors in sorted(
-        errors_by_session.items(), key=lambda x: len(x[1]), reverse=True
-    ):
-        result.append(
-            {
-                "session_id": session_id,
-                "error_count": len(errors),
-                "errors": errors,
-            }
+    return [
+        {"session_id": session_id, "error_count": len(errors), "errors": errors}
+        for session_id, errors in sorted(
+            errors_by_session.items(), key=lambda x: len(x[1]), reverse=True
         )
-    return result
+    ]
 
 
 def scan_for_capability_gaps(
     effective: list[str] | None = None,
 ) -> list[CapabilityRequest]:
-    """Scan trace markdown files for capability requests, deduplicated by text."""
+    """Report capability requests across traces, deduplicated by text.
+
+    Reads each trace's typed ``capability_request`` events (sidecar, or
+    legacy-markdown fallback) and groups identical wishes, most-requested
+    first.
+    """
     requests_by_text: dict[str, list[str]] = defaultdict(list)
 
     for trace_file in resolve_trace_paths(effective):
         try:
-            content = trace_file.read_text(encoding="utf-8")
-            session_id = session_id_from_path(trace_file)
-
-            for line in content.split("\n"):
-                if CAPABILITY_PATTERNS.search(line):
-                    text = line.strip()[:120]
-                    if text:
-                        requests_by_text[text].append(session_id)
+            events = events_for_trace(trace_file)
         except OSError:
-            pass
+            continue
+        session_id = session_id_from_path(trace_file)
+        for event in events:
+            if event.kind == "capability_request" and event.brief:
+                requests_by_text[event.brief].append(session_id)
 
-    result: list[CapabilityRequest] = []
-    for text, session_ids in sorted(requests_by_text.items(), key=lambda x: -len(x[1])):
-        result.append(
-            {
-                "text": text,
-                "count": len(session_ids),
-                "session_ids": sorted(set(session_ids)),
-            }
+    return [
+        {
+            "text": text,
+            "count": len(session_ids),
+            "session_ids": sorted(dict.fromkeys(session_ids)),
+        }
+        for text, session_ids in sorted(
+            requests_by_text.items(), key=lambda x: -len(x[1])
         )
-    return result
+    ]
 
 
 # ── helpers ───────────────────────────────────────────────
 
 
 def find_trace(session_id: str) -> Path | None:
-    """Find the trace file for a session across all versions."""
+    """Find a showable trace for a session across all versions.
+
+    Prefers a markdown reasoning log, then any ``.md`` in the session dir,
+    then the session dir itself — whose JSON ``trace list`` enumerates, so
+    every listed id is showable (rendered readably by :func:`load_trace`).
+    """
     log_files = list(iter_trace_log_files(session_id=session_id))
     if log_files:
         return sorted(log_files)[-1]
 
-    for session_dir in iter_session_dirs(session_id=session_id):
+    session_dirs = list(iter_session_dirs(session_id=session_id))
+    for session_dir in session_dirs:
         md_files = list(session_dir.glob("*.md"))
         if md_files:
             return sorted(md_files)[-1]
 
+    if session_dirs:
+        return sorted(session_dirs)[-1]
+
     return None
 
 
+def render_json_trace(path: Path) -> str:
+    """Render a session JSON file as readable, pretty-printed text."""
+    raw = path.read_text(encoding="utf-8")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    return json.dumps(parsed, indent=2, ensure_ascii=False)
+
+
 def load_trace(trace_path: Path) -> str:
-    """Load trace content from a file or directory."""
+    """Load trace content from a file or directory, rendering JSON readably."""
     if trace_path.is_file():
+        if trace_path.suffix == ".json":
+            return render_json_trace(trace_path)
         return trace_path.read_text(encoding="utf-8")
 
     if trace_path.is_dir():
-        contents = []
-        for f in sorted(trace_path.glob("*")):
-            if f.is_file():
-                contents.append(f"--- {f.name} ---\n{f.read_text(encoding='utf-8')}")
-        return "\n\n".join(contents)
+
+        def rendered(f: Path) -> str:
+            body = (
+                render_json_trace(f)
+                if f.suffix == ".json"
+                else f.read_text(encoding="utf-8")
+            )
+            return f"--- {f.name} ---\n{body}"
+
+        return "\n\n".join(
+            rendered(f) for f in sorted(trace_path.glob("*")) if f.is_file()
+        )
 
     return ""
 
 
-TOOL_CALL_PATTERNS = re.compile(
-    r"tool_use|tool_result|^##\s+Tool:|^###\s+Tool:|^Tool:|^\w+_?\w+:",
-    re.IGNORECASE,
-)
+def render_tool_calls(trace_path: Path) -> str:
+    """Render a trace's tool-call timeline from its typed events.
 
-
-def filter_tool_calls(content: str, context_lines: int = 3) -> str:
-    """Extract lines matching tool call patterns with surrounding context."""
-    lines = content.split("\n")
-    matched_indices: set[int] = set()
-
-    for i, line in enumerate(lines):
-        if TOOL_CALL_PATTERNS.search(line):
-            start = max(0, i - context_lines)
-            end = min(len(lines), i + context_lines + 1)
-            matched_indices.update(range(start, end))
-
-    if not matched_indices:
-        return "(no tool call lines found)"
-
-    result: list[str] = []
-    prev_idx = -2
-    for idx in sorted(matched_indices):
-        if idx > prev_idx + 1:
-            if result:
-                result.append("---")
-        result.append(lines[idx])
-        prev_idx = idx
-
-    return "\n".join(result)
+    One line per call — ✓/✗ status, tool name, result brief — read from the
+    events sidecar (or the legacy-markdown fallback for traces predating it).
+    Directories and JSON files carry no event stream; ``--full`` is the view
+    for those.
+    """
+    if trace_path.suffix != ".md":
+        return "(no tool-call events for this trace format — use --full)"
+    lines = [
+        f"{'✓' if event.ok else '✗'} {event.tool or 'unknown'}  {event.brief}"
+        for event in events_for_trace(trace_path)
+        if event.kind == "tool_call"
+    ]
+    if not lines:
+        return "(no tool calls recorded)"
+    return "\n".join(lines)
 
 
 # ── CLI commands ──────────────────────────────────────────
@@ -234,7 +381,7 @@ def show(session_id: str, full: bool, tool_calls: bool, as_json: bool) -> None:
     content = load_trace(trace_path)
 
     if tool_calls:
-        content = filter_tool_calls(content)
+        content = render_tool_calls(trace_path)
     elif not full:
         lines = content.split("\n")
         if len(lines) > 100:
@@ -270,7 +417,7 @@ def search(pattern: str, context: int, as_json: bool) -> None:
         return
 
     regex = re.compile(pattern, re.IGNORECASE)
-    matches: list[SearchMatch] = []
+    matches: list[SearchMatch] = []  # lup: ignore[empty-collection] — match fold
 
     trace_files = list(traces_path().rglob("*.md")) + list(
         traces_path().rglob("*.json")
@@ -286,7 +433,7 @@ def search(pattern: str, context: int, as_json: bool) -> None:
                     end = min(len(lines), i + context + 1)
                     matches.append(
                         {
-                            "file": str(trace_file.relative_to(Path.cwd())),
+                            "file": display_path(trace_file),
                             "line": i + 1,
                             "context": lines[start:end],
                         }
@@ -337,18 +484,44 @@ def errors_in_traces(
         typer.echo()
 
 
+def entry_recency(path: Path) -> datetime:
+    """Newest timestamp parsed from contained filenames, falling back to mtime."""
+    try:
+        names = [f.name for f in path.iterdir()]
+    except OSError:
+        names = []
+    stamps: list[datetime] = []
+    for name in names:
+        try:
+            stamps.append(parse_timestamp(name))
+        except ValueError:
+            continue
+    if stamps:
+        return max(stamps)
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime)
+    except OSError:
+        return datetime.min
+
+
 def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
-    """List available traces."""
-    raw: list[tuple[str, str, Path]] = []
+    """List available traces, most recent first."""
+    raw: list[TraceRef] = []  # lup: ignore[empty-collection] — discovery fold
 
     versions_iter = effective if effective else [None]
     for ver in versions_iter:
         for session_dir in iter_session_dirs(version=ver):
-            raw.append(("sessions", session_dir.name, session_dir))
-
-    for log_file in iter_trace_log_files():
-        session_id = log_file.parent.name
-        raw.append(("logs", session_id, log_file.parent))
+            raw.append(
+                TraceRef(
+                    source="sessions", session_id=session_dir.name, path=session_dir
+                )
+            )
+        for log_file in iter_trace_log_files(version=ver):
+            raw.append(
+                TraceRef(
+                    source="logs", session_id=log_file.parent.name, path=log_file.parent
+                )
+            )
 
     if not raw:
         if as_json:
@@ -358,24 +531,27 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
             typer.echo(f"Checked: {traces_path()}")
         return
 
-    seen: dict[str, tuple[str, str, Path]] = {}
-    for source, session_id, path in raw:
-        if session_id not in seen or source == "logs":
-            seen[session_id] = (source, session_id, path)
+    seen: dict[str, TraceRef] = {}  # lup: ignore[empty-collection] — dedup fold
+    for ref in raw:
+        if ref.session_id not in seen or ref.source == "logs":
+            seen[ref.session_id] = ref
 
-    unique = list(seen.values())
-    entries: list[TraceEntry] = []
-    for source, session_id, path in sorted(unique, reverse=True)[:limit]:
-        files = list(path.glob("*"))
+    unique = sorted(
+        seen.values(), key=lambda row: entry_recency(row.path), reverse=True
+    )
+
+    def trace_row(ref: TraceRef) -> TraceRow:
+        files = list(ref.path.glob("*"))
         size = sum(f.stat().st_size for f in files if f.is_file())
-        entries.append(
-            {
-                "session_id": session_id,
-                "source": source,
-                "files": len(files),
-                "size_kb": round(size / 1024, 1),
-            }
-        )
+        return {
+            "session_id": ref.session_id,
+            "source": ref.source,
+            "backend": session_backend(ref.path),
+            "files": len(files),
+            "size_kb": round(size / 1024, 1),
+        }
+
+    entries = [trace_row(ref) for ref in unique[:limit]]
 
     if as_json:
         output_json({"traces": entries, "total": len(unique)})
@@ -383,13 +559,26 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
 
     typer.echo(f"\n=== Available Traces ({len(unique)} total) ===\n")
     for e in entries:
+        backend = e["backend"] or "—"
         typer.echo(
-            f"{e['session_id']} ({e['source']}): {e['files']} files, {e['size_kb']}KB"
+            f"{e['session_id']} ({e['source']}, {backend}): "
+            f"{e['files']} files, {e['size_kb']}KB"
         )
 
 
 def capabilities(as_json: bool) -> None:
-    """Extract capability requests from traces."""
+    """Surface the tools and capabilities the agent wished it had.
+
+    Scans trace logs for moments where the agent reached for something it
+    could not do ("would be useful", "if I could", "tool that ...", "need
+    access to ...") and reports them deduplicated, most-requested first.
+
+    This is the feedback loop's primary lever: the Bitter Lesson says the agent
+    improves by gaining tools, not rules (CLAUDE.md), so a recurring capability
+    request across sessions is the strongest signal of a missing tool to build.
+    The phrasing scan is heuristic; treat the output as leads to read in full
+    via ``trace show``, not a finished backlog.
+    """
     results = scan_for_capability_gaps()
 
     if as_json:
@@ -402,7 +591,5 @@ def capabilities(as_json: bool) -> None:
 
     typer.echo(f"\n=== Capability Requests ({len(results)} found) ===\n")
 
-    for req in results[:30]:
-        text = req["text"]
-        text_short = text[:80] + "..." if len(text) > 80 else text
-        typer.echo(f"- {text_short}")
+    for req in results:
+        typer.echo(f"- {req['text']}")

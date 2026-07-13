@@ -40,8 +40,6 @@ git commit -m "$(cat <<'EOF'
 type(scope): description
 
 Optional body with more details.
-
-Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```

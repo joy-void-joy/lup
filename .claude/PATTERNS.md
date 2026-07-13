@@ -2,6 +2,8 @@
 
 Architectural patterns used in this project. For daily development guidance, see [CLAUDE.md](CLAUDE.md).
 
+**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 4.6 (`claude-opus-4-6`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see CLAUDE.md § Model Selection).
+
 ---
 
 ## Persistent Agent Pattern
@@ -21,7 +23,9 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 **Why not an event queue?** The sleep/wake pattern lets the agent stay centered — it can debounce event bursts, schedule actions, set reminders, and park thoughts for later, all on its own terms.
 
-**Library support:** `packages/lup/src/lup/realtime.py` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`). See example tools in `src/lup_template/agent/tools/realtime.py`.
+**Two wirings, one pattern:** On Claude, tools run in-process — `sleep` blocks on the Scheduler directly and a Stop hook keeps the single turn open forever. On backends whose tools run in a subprocess (Codex, OpenAI-compatible), the loop inverts: **each wake is one SDK turn**. The served tools (`lup.realtime.relay`) relay through files in `session_dir/realtime/`: `reply` and the timing tools append events a parent-side watcher applies mid-turn, `sleep` records a request and the agent ends its turn, and the parent loop (`run_relay_session`) consumes the request, sleeps on the Scheduler, and opens the next turn with a wake message. An agent that ends a turn without sleeping gets bounded corrective turns — the relay counterpart of the Stop hook. Enforcement is in-handler on both wirings (meta-before-sleep, unread-events guard), so no hooks are required.
+
+**Library support:** `packages/lup/src/lup/realtime/scheduler.py` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`); `packages/lup/src/lup/realtime/relay.py` provides the subprocess wiring (`RealtimeMailbox`, `create_realtime_relay_tools`, `run_relay_session`), sharing the tool I/O models in `packages/lup/src/lup/realtime/models.py`. Construction goes through the engine seam: `run_persistent_agent` in `agent/core.py` serves the `session` tool group into the subprocess engine, builds the parent-side session mailbox itself, and drives it via `run_relay_session` — the engine never touches the relay. See example tools in `src/lup_template/agent/tools/realtime.py`.
 
 ---
 
@@ -30,22 +34,32 @@ For agents that exist over time — maintaining conversations, monitoring system
 Agents produce better output when forced to self-assess before committing. Three components:
 
 1. **Reflection tool** (`agent/tools/reflect.py`): Domain-customizable self-assessment — confidence, uncertainties, tool audit, process reflection. Optionally runs a reviewer sub-agent.
-2. **Reflection gate** (`lup.reflect`): `ReflectionGate` flag tracker + `create_reflection_gate()` hook factory. Denies a target tool until reflection occurs.
-3. **Wiring**: The gate blocks `StructuredOutput` (one-shot agents) or `sleep` (persistent agents) until reflection occurs.
+2. **Reflection gate** (`lup.reflect`): `ReflectionGate` flag tracker — in-memory, or file-backed when tools run in a subprocess. Enforced primarily *inside* the `submit_output` handler (`lup.workspace.output`), which rejects submission with a retriable error until reflection occurs; `create_reflection_gate()` adds a PreToolUse hook as hardening where the backend supports it.
+3. **Wiring**: The gate blocks `mcp__notes__submit_output` (one-shot agents) or `sleep` (persistent agents) until reflection occurs. Final output always flows through `submit_output` — the same tool on every SDK backend — which writes `session_dir/output.json` for the orchestration layer to read. A completion guard enforces that the output actually gets submitted: a Stop hook (`create_completion_guard`) blocks finishing on backends with a stop event, and `ensure_output_submitted` (`lup.workspace.output`) sends bounded corrective turns on backends without one — the one-shot counterpart of the relay's missing-sleep message. `run_agent` picks the mechanism from `adapter.capabilities.stop_event`.
 
 **Customizing:** The gate in `lup.reflect` is domain-neutral and parametric. The reflection tool and `ReflectInput` in `agent/tools/reflect.py` are domain-specific — add fields for your domain. The reviewer prompt should target your domain's common failure modes.
 
 **Skip reviewer:** Set `skip_reviewer=True` for speed-sensitive or trivial tasks. The reviewer adds latency but catches calibration errors and reasoning gaps.
 
+**Tool gates (generalization):** The reflection gate is one instance of a general primitive: `create_tool_gate()` in `lup.hooks` denies a tool (or Stop) with an agent-readable message until a condition unlocks it — "the agent must do A before it may do B" as a structural constraint instead of a prompt rule. Presets built on it: `create_reflection_gate` (reflect before finalizing output), `create_stop_guard` (sleep instead of ending the turn), `create_pending_event_guard` (read events before timing tools), and `create_meta_before_sleep_guard` (meta-assess before sleep). Reach for the primitive directly when your domain needs a new ordering constraint.
+
+---
+
+## Subagent Pattern
+
+SDK-native delegation: the main agent dispatches a focused task to a named role defined upfront, sharing the session's trace and metrics. A subagent extends the main agent's thinking — a specialized lobe with its own prompt, tool subset, and model — where a nested agent (below) isolates work in a separate context.
+
+**Library support:** definitions are SDK-agnostic `SubagentSpec`s (`lup.types`), held in `src/lup_template/agent/subagents.py` (`get_subagent_specs()`). On Claude the adapter converts each spec to a native `AgentDefinition` dispatched via `Task()`; on backends without native subagents, `packages/lup/src/lup/subagents.py` serves the same list as a `run_subagent` tool (`create_run_subagent_tool`) that dispatches a one-shot `query()` — so the available roles never diverge between backends.
+
 ---
 
 ## Nested Agent Pattern
 
-Distinct from **subagents** (SDK-native `Task()` dispatch, defined upfront in `get_subagents()`, same session). A nested agent is a tool that internally creates an independent SDK client, runs it, and folds the result back into its tool response.
+Distinct from **subagents** (SDK-native `Task()` dispatch, defined upfront in `get_subagent_specs()`, same session — see [Subagent Pattern](#subagent-pattern)). A nested agent is a tool that internally creates an independent SDK client, runs it, and folds the result back into its tool response.
 
 | Aspect     | Subagent                          | Nested Agent                        |
 | ---------- | --------------------------------- | ----------------------------------- |
-| Definition | Upfront in `get_subagents()`      | On-demand inside a tool handler     |
+| Definition | Upfront in `get_subagent_specs()` | On-demand inside a tool handler     |
 | Client     | Main agent's SDK session          | Independent client via `query()`    |
 | Session    | Shared — same trace, same metrics | Isolated — no session persistence   |
 | Return     | SDK `ResultMessage` (structured)  | Scalar result augmented by the tool |
@@ -56,19 +70,21 @@ Distinct from **subagents** (SDK-native `Task()` dispatch, defined upfront in `g
 ```python
 @lup_tool("Review code quality and return structured assessment")
 async def review(params: ReviewInput) -> ReviewOutput:
-    collector = await query(
+    response = await query(
         build_review_prompt(params),
-        model="sonnet",
+        model="claude-opus-4-6",
         system_prompt=REVIEWER_PROMPT,
         tools=["Read", "Grep"],
         permission_mode="bypassPermissions",
         max_turns=5,
     )
     # Augment: fold nested agent's text into structured tool output
-    return ReviewOutput(critique=collector.text or "", score=compute_score(collector))
+    return ReviewOutput(critique=response.text or "", score=compute_score(response))
 ```
 
-**Library support:** `query()` in `lup.client` handles the full pipeline (build client → query → collect). Session persistence is automatically disabled. Use `collector.text` for text extraction, `collector.output(T)` for structured output, or pass `output_type=T` to `query()` to get `T | None` directly.
+**Library support:** `query()` in `lup.adapters.wiring` handles the full pipeline and routes by model name — Claude models via the Claude Agent SDK, GPT/o-series via the Codex runtime, everything else via OpenAI-compatible endpoints. Session persistence is automatically disabled. It returns a `LupResponse`: use `.text` for text or `.output(T)` for structured output. Options a backend cannot honor (`tools`, `max_turns`, `max_budget_usd`, …) are dropped under its `on_unsupported="drop"` policy with a log line — the caller expresses full intent and the engine keeps what it can, instead of raising or silently ignoring.
+
+**Example:** the reviewer inside `src/lup_template/agent/tools/reflect.py` (`run_reviewer`, called from the `review` tool) is the in-repo exemplar — an independent one-shot `query()` whose critique the tool folds into its structured output. The `extract` path of `fetch_example` in `agent/tools/example.py` (`extract_answer`) is the same shape applied to data augmentation.
 
 **When to use each:** The axis is **context separation**. **Subagents** extend the main agent's thinking — same session, shared context, like a specialized lobe that makes reasoning more efficient. **Nested agents** are for truly separable work — the two contexts shouldn't pollute each other. The main agent doesn't need the nested agent's reasoning chain, just its conclusion. The tool handler acts as a context boundary.
 
@@ -81,7 +97,7 @@ For persistent agents that need parallel processing, a **background agent** runs
 | Aspect        | Subagent                     | Nested Agent                | Background Agent                |
 | ------------- | ---------------------------- | --------------------------- | ------------------------------- |
 | Lifetime      | Per-task (SDK dispatch)      | Per-tool-call               | Session-long                    |
-| Client        | Main agent's SDK session     | Independent via `query()`   | Independent `ClaudeSDKClient`   |
+| Client        | Main agent's SDK session     | Independent via `query()`   | Independent, SDK-aware via factory |
 | Initiation    | Agent dispatches via `Task()`| Tool handler creates on-demand| Wake events trigger turns       |
 | Communication | SDK `ResultMessage`          | Tool return value           | Shared mutable state            |
 | Use case      | Specialized long-running work| Quick generation, review    | Observation, research, execution|
@@ -95,7 +111,7 @@ For persistent agents that need parallel processing, a **background agent** runs
 
 **Lifecycle:** `start()` spawns an asyncio task. `wake()` signals new data. The message generator debounces rapid wakes and calls `build_message()` to produce the next turn. `stop()` cancels the task.
 
-**Library support:** `packages/lup/src/lup/background.py` provides the `BackgroundAgent` class. See observer example in `src/lup_template/agent/tools/realtime.py`.
+**Library support:** `packages/lup/src/lup/adapters/background/` provides the pieces one concern per module — `BackgroundDriver.py` (the per-engine verb), `agent.py` (the concrete `BackgroundAgent`: wake/debounce machinery composing a driver), and `params.py` (`BackgroundAgentParams`); each engine builds its driver and composes it via `Engine.background(params)` — `resolve_engine(engine_id).background(...)` — and the drivers live in the engine modules (`lup/adapters/background/claude.py`, `lup/adapters/background/codex.py`). See observer example in `src/lup_template/agent/tools/realtime.py`.
 
 **Customizing:** The `build_message` callback is the main extension point — it reads shared state, advances its own read pointer, and returns the next user turn content (or `None` to skip). The observer example in `agent/tools/realtime.py` shows the full wiring.
 
@@ -121,4 +137,6 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 2. **Null-filling** — Multi-source fallback pipelines that recover missing fields from alternative endpoints or sibling records (e.g., primary API withholds fields → fallback endpoint fills the gaps).
 3. **Extraction** — Nested agent calls that distill large text blocks into focused answers (see [Nested Agent Pattern](#nested-agent-pattern)).
 
-**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API client wrappers. Extraction uses `query()` from `lup.client` (see [Nested Agent Pattern](#nested-agent-pattern)).
+**Example:** `src/lup_template/agent/tools/example.py` is the template for all three forms — `fetch_example` routes known hosts to a specialized handler (`fetch_wiki_article`, domain dispatch) and distills fetched pages through a nested `query()` call (`extract_answer`, extraction); `search_example` recovers missing snippet fields from a fallback source (`fill_missing_snippets`, null-filling).
+
+**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API client wrappers. Extraction uses `query()` from `lup.adapters.wiring` (see [Nested Agent Pattern](#nested-agent-pattern)).

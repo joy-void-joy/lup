@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, Agent, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, Task, AskUserQuestion
 description: Deep trace reading and error classification for selected sessions
 argument-hint: <session_id1> [session_id2 ...]
 ---
@@ -8,9 +8,27 @@ argument-hint: <session_id1> [session_id2 ...]
 
 Build first-hand understanding of what happened in each target session.
 
+## Breadth vs. Depth
+
+For the deep pass (the 5-10 selected target sessions), read the traces directly — first-hand reading is the point of this phase. When the session list is larger, or you need cross-cutting patterns over many sessions, delegate the bulk reading to the `trace-explorer` agent instead of reading every trace in this conversation: it reads traces in its own context window and returns a compact pattern report.
+
+```
+Agent(subagent_type="lup:trace-explorer", prompt="Analyze traces for sessions <ids>; report tool failures, capability gaps, reasoning quality")
+```
+
+Use its report to pick which sessions deserve the direct deep read below.
+
 ## Per-Session Investigation
 
-For each target session:
+Delegate each session to a `lup:trace-explorer` agent — one per session, launched in parallel when investigating multiple sessions:
+
+```
+Agent(subagent_type="lup:trace-explorer", prompt="Investigate session <session_id> following the per-session steps in /lup:fb-investigate. Report: tool call inventory, errors with quoted output, workflow assessment, outcome classification, counterfactuals.")
+```
+
+Before presenting findings, spot-check each report against the trace itself (`uv run lup-devtools trace show <session_id>`) — quoted errors must appear verbatim in the trace, not paraphrased from a truncated read.
+
+The per-session steps (for the subagent, or for investigating a single session directly):
 
 ### 1. Read the trace
 

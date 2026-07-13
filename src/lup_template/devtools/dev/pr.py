@@ -14,9 +14,12 @@ Examples::
 
 import json
 import logging
+from pathlib import PurePosixPath
+from urllib.parse import urlparse
+
 import sh
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lup_template.devtools.dev.branches import (
     detect_base_branch,
@@ -24,13 +27,13 @@ from lup_template.devtools.dev.branches import (
 )
 from lup_template.devtools.dev.worktree import get_tree_dir
 
-from lup_template.devtools.utils import git, gh, output_json
+from lup_template.devtools.utils import git, gh, decode_stderr, output_json
 
 logger = logging.getLogger(__name__)
 
 
 def current_branch() -> str:
-    return str(git("branch", "--show-current")).strip()
+    return git.out("branch", "--show-current")
 
 
 class ReviewInfo(BaseModel):
@@ -43,6 +46,47 @@ class CheckInfo(BaseModel):
     name: str
     status: str
     conclusion: str
+
+
+class GhAuthor(BaseModel):
+    """`author` object inside `gh pr view --json reviews`."""
+
+    login: str = "unknown"
+
+
+class GhReview(BaseModel):
+    """One element of `gh pr view --json reviews`, as gh names the fields."""
+
+    author: GhAuthor | None = None
+    state: str = ""
+    body: str = ""
+
+
+class GhCheck(BaseModel):
+    """One `statusCheckRollup` element: check runs carry `name`/`status`/
+    `conclusion`; legacy status contexts only `context`."""
+
+    name: str = ""
+    context: str = ""
+    status: str = ""
+    conclusion: str = ""
+
+
+class GhPrDetail(BaseModel):
+    """The `gh pr view --json` payload (aliases are gh's camelCase names)."""
+
+    reviews: list[GhReview] = Field(default_factory=list)
+    checks: list[GhCheck] = Field(default_factory=list, alias="statusCheckRollup")
+    review_decision: str = Field(default="", alias="reviewDecision")
+    mergeable: str = ""
+
+
+class GhPrRef(BaseModel):
+    """One row of `gh pr list --json number,title,url`."""
+
+    number: int
+    title: str = ""
+    url: str = ""
 
 
 class PRInfo(BaseModel):
@@ -75,11 +119,16 @@ class SyncBaseResult(BaseModel):
     conflicts: list[str]
 
 
+class ExistingPR(BaseModel):
+    number: int
+    url: str
+
+
 class PushResult(BaseModel):
     branch: str
     pushed: bool
     force: bool
-    existing_pr: dict[str, str | int] | None
+    existing_pr: ExistingPR | None
 
 
 class CreateResult(BaseModel):
@@ -87,26 +136,35 @@ class CreateResult(BaseModel):
     url: str
 
 
-def output_result(result: BaseModel, as_json: bool) -> None:
+type PRResult = (
+    PRStatusResult | MergeResult | SyncBaseResult | PushResult | CreateResult
+)
+
+
+def output_result(result: PRResult, as_json: bool) -> None:
     if as_json:
         output_json(result)
         return
 
-    if isinstance(result, PRStatusResult) and result.pr:
-        format_pr_status(result)
-        return
-
-    for key, value in result.model_dump().items():
-        if isinstance(value, list):
-            typer.echo(f"{key}:")
-            for item in value:
-                typer.echo(f"  - {item}")
-        elif isinstance(value, dict):
-            typer.echo(f"{key}:")
-            for k, v in value.items():
-                typer.echo(f"  {k}: {v}")
-        else:
-            typer.echo(f"{key}: {value}")
+    match result:
+        case PRStatusResult(pr=PRInfo()):
+            format_pr_status(result)
+        case PRStatusResult():
+            typer.echo(f"branch: {result.branch}")
+            typer.echo("pr: no open PR")
+        case _:
+            for key, value in result.model_dump().items():
+                match value:
+                    case list():
+                        typer.echo(f"{key}:")
+                        for item in value:
+                            typer.echo(f"  - {item}")
+                    case dict():
+                        typer.echo(f"{key}:")
+                        for k, v in value.items():
+                            typer.echo(f"  {k}: {v}")
+                    case _:
+                        typer.echo(f"{key}: {value}")
 
 
 def format_pr_status(result: PRStatusResult) -> None:
@@ -122,8 +180,9 @@ def format_pr_status(result: PRStatusResult) -> None:
 
     if pr.reviews:
         typer.echo(f"\n  Reviews ({len(pr.reviews)}):")
+        author_width = max(len(r.author) for r in pr.reviews)
         for r in pr.reviews:
-            typer.echo(f"    {r.author:<20} {r.state}")
+            typer.echo(f"    {r.author:<{author_width}} {r.state}")
 
     if pr.checks:
         typer.echo(f"\n  Checks ({len(pr.checks)}):")
@@ -145,8 +204,7 @@ def format_pr_status(result: PRStatusResult) -> None:
 def find_base_branch() -> str:
     """Auto-detect the base branch by merge-base proximity to HEAD."""
     try:
-        base, _, _ = detect_base_branch()
-        return base
+        return detect_base_branch().name
     except (typer.Exit, SystemExit):
         return get_integration_branch()
 
@@ -158,19 +216,23 @@ def status(
     """Fetch PR review status, checks, and comments for a branch."""
     branch_name = branch or current_branch()
 
-    pr_list_raw = str(
-        gh(
-            "pr",
-            "list",
-            "--head",
-            branch_name,
-            "--state",
-            "open",
-            "--json",
-            "number,title,url",
+    try:
+        rows = json.loads(
+            gh.out(
+                "pr",
+                "list",
+                "--head",
+                branch_name,
+                "--state",
+                "open",
+                "--json",
+                "number,title,url",
+            )
         )
-    ).strip()
-    prs = json.loads(pr_list_raw)
+    except sh.ErrorReturnCode as e:
+        typer.echo(f"Failed to query PRs via gh: {decode_stderr(e)}", err=True)
+        raise typer.Exit(1)
+    prs = [GhPrRef.model_validate(row) for row in rows]
 
     if not prs:
         result = PRStatusResult(branch=branch_name, pr=None)
@@ -180,36 +242,40 @@ def status(
         return
 
     pr_data = prs[0]
-    pr_number = pr_data["number"]
+    pr_number = pr_data.number
 
-    detail_raw = str(
-        gh(
-            "pr",
-            "view",
-            str(pr_number),
-            "--json",
-            "reviews,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision",
+    try:
+        detail = GhPrDetail.model_validate_json(
+            gh.out(
+                "pr",
+                "view",
+                str(pr_number),
+                "--json",
+                "reviews,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision",
+            )
         )
-    ).strip()
-    detail = json.loads(detail_raw)
+    except sh.ErrorReturnCode as e:
+        typer.echo(
+            f"Failed to fetch PR #{pr_number} via gh: {decode_stderr(e)}", err=True
+        )
+        raise typer.Exit(1)
 
     reviews = [
         ReviewInfo(
-            author=r.get("author", {}).get("login", "unknown"),
-            state=r.get("state", ""),
-            body=r.get("body", ""),
+            author=r.author.login if r.author else "unknown",
+            state=r.state,
+            body=r.body,
         )
-        for r in detail.get("reviews", [])
+        for r in detail.reviews
     ]
 
-    raw_checks = detail.get("statusCheckRollup", []) or []
     checks = [
         CheckInfo(
-            name=c.get("name", c.get("context", "unknown")),
-            status=c.get("status", ""),
-            conclusion=c.get("conclusion", ""),
+            name=c.name or c.context or "unknown",
+            status=c.status,
+            conclusion=c.conclusion,
         )
-        for c in raw_checks
+        for c in detail.checks
     ]
 
     checks_passing = (
@@ -224,10 +290,10 @@ def status(
 
     pr_info = PRInfo(
         number=pr_number,
-        title=pr_data["title"],
-        url=pr_data["url"],
-        review_decision=detail.get("reviewDecision", ""),
-        mergeable=detail.get("mergeable", ""),
+        title=pr_data.title,
+        url=pr_data.url,
+        review_decision=detail.review_decision,
+        mergeable=detail.mergeable,
         checks_passing=checks_passing,
         reviews=reviews,
         checks=checks,
@@ -254,13 +320,12 @@ def merge(
         gh("pr", "merge", str(pr_number), "--squash", "--delete-branch")
         typer.echo(f"Merged PR #{pr_number}")
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        typer.echo(f"Merge failed: {stderr}", err=True)
+        typer.echo(f"Merge failed: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)
 
     try:
         tree_dir = get_tree_dir()
-    except SystemExit:
+    except (typer.Exit, SystemExit):
         tree_dir = None
     integration_path = tree_dir / integration if tree_dir else None
     pulled = False
@@ -270,8 +335,9 @@ def merge(
             typer.echo(f"Pulled changes into {integration}")
             pulled = True
         except sh.ErrorReturnCode as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-            typer.echo(f"Warning: pull failed in {integration}: {stderr}", err=True)
+            typer.echo(
+                f"Warning: pull failed in {integration}: {decode_stderr(e)}", err=True
+            )
 
     result = MergeResult(
         pr_number=pr_number,
@@ -296,7 +362,7 @@ def sync_base(
 
     try:
         tree_dir = get_tree_dir()
-    except SystemExit:
+    except (typer.Exit, SystemExit):
         tree_dir = None
     base_path = tree_dir / base_branch if tree_dir else None
 
@@ -307,8 +373,9 @@ def sync_base(
             git("-C", str(base_path), "pull")
             git("-C", str(base_path), "push")
         except sh.ErrorReturnCode as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-            typer.echo(f"Warning: sync of {base_branch} failed: {stderr}", err=True)
+            typer.echo(
+                f"Warning: sync of {base_branch} failed: {decode_stderr(e)}", err=True
+            )
 
     if not as_json:
         typer.echo(f"Merging {base_branch} into {feature}...", err=True)
@@ -322,10 +389,8 @@ def sync_base(
             conflicts=[],
         )
     except sh.ErrorReturnCode:
-        conflict_output = str(
-            git("diff", "--name-only", "--diff-filter=U", _ok_code=[0, 1])
-        ).strip()
-        conflicts = [f for f in conflict_output.splitlines() if f]
+        unmerged = git.lines("diff", "--name-only", "--diff-filter=U", _ok_code=[0, 1])
+        conflicts = [f for f in unmerged if f]
         result = SyncBaseResult(
             feature_branch=feature,
             base_branch=base_branch,
@@ -356,27 +421,25 @@ def push(
             git("push", "-u", "origin", branch_name)
         pushed = True
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        typer.echo(f"Push failed: {stderr}", err=True)
+        typer.echo(f"Push failed: {decode_stderr(e)}", err=True)
         pushed = False
 
     existing_pr = None
     try:
-        pr_raw = str(
-            gh(
-                "pr",
-                "list",
-                "--head",
-                branch_name,
-                "--state",
-                "open",
-                "--json",
-                "number,url",
-            )
-        ).strip()
-        prs = json.loads(pr_raw) if pr_raw else []
+        pr_raw = gh.out(
+            "pr",
+            "list",
+            "--head",
+            branch_name,
+            "--state",
+            "open",
+            "--json",
+            "number,url",
+        )
+        rows = json.loads(pr_raw) if pr_raw else []
+        prs = [GhPrRef.model_validate(row) for row in rows]
         if prs:
-            existing_pr = {"number": prs[0]["number"], "url": prs[0]["url"]}
+            existing_pr = ExistingPR(number=prs[0].number, url=prs[0].url)
     except sh.ErrorReturnCode:
         pass
 
@@ -391,35 +454,53 @@ def push(
         raise typer.Exit(1)
 
 
+def parse_pr_url(stdout: str) -> str:
+    """Extract the PR URL from ``gh pr create`` stdout (last URL-like line)."""
+    for line in reversed(stdout.splitlines()):
+        candidate = line.strip()
+        if urlparse(candidate).scheme in ("http", "https"):
+            return candidate
+    return ""
+
+
 def create(
     base: str,
     title: str,
     body: str,
     as_json: bool,
 ) -> None:
-    """Create a new PR."""
+    """Create a new PR.
+
+    ``gh pr create`` has no ``--json`` flag — on success it prints the new
+    PR's URL to stdout. The PR number is the final path segment of that URL.
+    """
     try:
-        raw = str(
-            gh(
-                "pr",
-                "create",
-                "--base",
-                base,
-                "--title",
-                title,
-                "--body",
-                body,
-                "--json",
-                "number,url",
-            )
-        ).strip()
-        data = json.loads(raw)
-        result = CreateResult(number=data["number"], url=data["url"])
-        output_result(result, as_json)
+        raw = gh.out(
+            "pr",
+            "create",
+            "--base",
+            base,
+            "--title",
+            title,
+            "--body",
+            body,
+        )
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        typer.echo(f"Failed to create PR: {stderr}", err=True)
+        typer.echo(f"Failed to create PR: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)
+
+    url = parse_pr_url(raw)
+    if not url:
+        typer.echo(f"PR created but URL not found in output:\n{raw}", err=True)
+        raise typer.Exit(1)
+
+    number_segment = PurePosixPath(urlparse(url).path).name
+    if not number_segment.isdigit():
+        typer.echo(f"PR created at {url} but could not parse number", err=True)
+        raise typer.Exit(1)
+
+    result = CreateResult(number=int(number_segment), url=url)
+    output_result(result, as_json)
 
 
 def update(
@@ -431,6 +512,5 @@ def update(
         gh("pr", "edit", str(pr_number), "--body", body)
         typer.echo(f"Updated PR #{pr_number}")
     except sh.ErrorReturnCode as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
-        typer.echo(f"Failed to update PR: {stderr}", err=True)
+        typer.echo(f"Failed to update PR: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)

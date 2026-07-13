@@ -1,5 +1,5 @@
 ---
-allowed-tools: Read, Grep, Glob, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*), Agent
+allowed-tools: Read, Grep, Glob, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*), Task
 description: Review a session trace for workflow quality, tool usage, and improvement opportunities
 argument-hint: [session ID, file path, or pasted trace]
 ---

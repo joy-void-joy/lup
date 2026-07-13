@@ -7,19 +7,30 @@ Examples::
     $ uv run lup-devtools feedback analyze --output report.json
 """
 
-# claude: ignore
-
 from collections import defaultdict
 from pathlib import Path
 from collections.abc import Sequence
 from typing import TypedDict
 
-from lup_template.devtools.feedback.state import SessionData, load_sessions_for_versions
+from lup_template.devtools.feedback.models import LoadedSession
+from lup_template.devtools.feedback.state import load_sessions_for_versions
 from lup_template.devtools.trace.traces import (
     CapabilityRequest,
     scan_for_capability_gaps,
 )
-from lup.history import resolve_version
+from lup.telemetry.metrics import MetricsSummary
+from lup.workspace.history import resolve_version
+
+
+class ToolBucket(TypedDict):
+    """One tool's call and error tallies."""
+
+    calls: int
+    errors: int
+
+
+# Open per-tool aggregation buckets, keyed by whatever tools ran.
+type ToolBuckets = dict[str, ToolBucket]
 
 
 class ToolHealth(TypedDict):
@@ -44,72 +55,70 @@ class AnalysisReport(TypedDict):
     capability_gaps: list[CapabilityRequest]
 
 
-def gather_tool_health(sessions: Sequence[SessionData]) -> list[ToolHealth]:
+def gather_tool_health(sessions: Sequence[LoadedSession]) -> list[ToolHealth]:
     """Compute per-tool call counts, error counts, and error rates."""
-    tool_stats: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"calls": 0, "errors": 0}
-    )
+    # Open per-tool aggregation buckets, keyed by whatever tools ran.
+    tool_stats: ToolBuckets = defaultdict(lambda: {"calls": 0, "errors": 0})
 
     for s in sessions:
-        metrics = s.get("tool_metrics", {})
-        by_tool = metrics.get("by_tool", {})
-        for tool_name, data in by_tool.items():
-            tool_stats[tool_name]["calls"] += data.get("call_count", 0)
-            tool_stats[tool_name]["errors"] += data.get("error_count", 0)
+        if s.tool_metrics is None:
+            continue
+        for tool_name, data in s.tool_metrics["by_tool"].items():
+            tool_stats[tool_name]["calls"] += data["call_count"]
+            tool_stats[tool_name]["errors"] += data["error_count"]
 
-    result: list[ToolHealth] = []
-    for name in sorted(tool_stats, key=lambda t: -tool_stats[t]["calls"]):
+    def health_row(name: str) -> ToolHealth:
         stats = tool_stats[name]
         calls = stats["calls"]
         errors = stats["errors"]
-        result.append(
-            {
-                "name": name,
-                "calls": calls,
-                "errors": errors,
-                "error_rate": (errors / calls) if calls > 0 else 0.0,
-            }
-        )
-    return result
+        return {
+            "name": name,
+            "calls": calls,
+            "errors": errors,
+            "error_rate": (errors / calls) if calls > 0 else 0.0,
+        }
+
+    return [
+        health_row(name)
+        for name in sorted(tool_stats, key=lambda t: -tool_stats[t]["calls"])
+    ]
 
 
-def gather_error_patterns(sessions: Sequence[SessionData]) -> list[ErrorPattern]:
+def gather_error_patterns(sessions: Sequence[LoadedSession]) -> list[ErrorPattern]:
     """Find sessions with high error rates, grouped by error type."""
-    result: list[ErrorPattern] = []
 
-    for s in sessions:
-        metrics = s.get("tool_metrics", {})
-        total_errors = metrics.get("total_errors", 0)
-        if not total_errors or total_errors <= 0:
-            continue
-
-        total_calls = metrics.get("total_tool_calls", 0)
-        by_tool = metrics.get("by_tool", {})
-
-        tool_errors: list[tuple[int, str]] = []
-        for tool_name, tool_data in by_tool.items():
-            errs = tool_data.get("error_count", 0)
-            if errs > 0:
-                tool_errors.append((errs, tool_name))
-        tool_errors.sort(reverse=True)
-
-        result.append(
-            {
-                "session_id": s.get("_session_id", ""),
-                "error_count": total_errors,
-                "total_calls": total_calls,
-                "error_rate": (total_errors / total_calls) if total_calls > 0 else 0.0,
-                "top_errors": [f"{name}: {count}" for count, name in tool_errors],
-            }
+    def error_pattern(session_id: str, metrics: MetricsSummary) -> ErrorPattern:
+        total_errors = metrics["total_errors"]
+        total_calls = metrics["total_tool_calls"]
+        tool_errors = sorted(
+            (
+                (errs, tool_name)
+                for tool_name, tool_data in metrics["by_tool"].items()
+                if (errs := tool_data["error_count"]) > 0
+            ),
+            reverse=True,
         )
+        return {
+            "session_id": session_id,
+            "error_count": total_errors,
+            "total_calls": total_calls,
+            "error_rate": (total_errors / total_calls) if total_calls > 0 else 0.0,
+            "top_errors": [f"{name}: {count}" for count, name in tool_errors],
+        }
 
-    result.sort(key=lambda x: -x["error_count"])
-    return result
+    return sorted(
+        (
+            error_pattern(s.source_session_id, metrics)
+            for s in sessions
+            if (metrics := s.tool_metrics) is not None and metrics["total_errors"] > 0
+        ),
+        key=lambda p: -p["error_count"],
+    )
 
 
 def build_report(version: str | None, all_versions: bool) -> AnalysisReport:
     """Build a complete analysis report."""
-    effective, _ = resolve_version(version, all_versions)
+    effective = resolve_version(version, all_versions).versions
     sessions = load_sessions_for_versions(effective)
 
     return {
