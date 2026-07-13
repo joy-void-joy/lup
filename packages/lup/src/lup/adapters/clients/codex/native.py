@@ -7,13 +7,9 @@ there is nothing left to assemble at run time, which is what lets
 a client subclass.
 """
 
-from collections.abc import Callable
-from contextlib import AbstractContextManager
-from pathlib import Path
-
 from pydantic import BaseModel, Field, model_validator
 
-from lup.types import EnvVars, JsonObject, UsageCost
+from lup.types import EnvVars, JsonObject, SessionResource, UsageCost
 
 
 class CodexNativeConfig(BaseModel):
@@ -21,12 +17,12 @@ class CodexNativeConfig(BaseModel):
 
     The thread-start scalars, the fully rendered ``config_overrides``
     lines and subprocess env, the turn-governance knobs, and the
-    session's cleanup guarantee (mirroring the Claude engine's native
-    ``ClaudeAgentOptions``).
+    session-scoped resource factories (mirroring the Claude engine's
+    native ``ClaudeAgentOptions``).
     """
 
-    # ``usage_cost`` and the ``cleanup`` factory are bare callables —
-    # pydantic accepts them only under arbitrary types.
+    # ``usage_cost`` and the ``session_resources`` factories are bare
+    # callables — pydantic accepts them only under arbitrary types.
     model_config = {"arbitrary_types_allowed": True}
 
     model: str
@@ -45,10 +41,10 @@ class CodexNativeConfig(BaseModel):
     max_budget_usd: float | None = None
     usage_cost: UsageCost | None = None
     turn_timeout_seconds: float | None = None
-    cleanup: Callable[[], AbstractContextManager[object]] | None = None
-    realtime_dir: Path | None = None
-    """Where the persistent-mode file relay lives; ``None`` outside
-    persistent mode. The composition builds the mailbox from it."""
+    session_resources: list[SessionResource] = Field(default_factory=list)
+    """Factories for session-scoped resources, entered fresh with each
+    session open and exited when it closes (e.g. the caller's
+    sandbox-container cleanup guard)."""
 
     @model_validator(mode="after")
     def require_priced_budget(self) -> "CodexNativeConfig":

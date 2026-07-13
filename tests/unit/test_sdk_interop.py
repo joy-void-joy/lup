@@ -6,6 +6,8 @@ emission, and lup->SDK hook/option conversion for both engines."""
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from lup.adapters.clients.codex.config import build_mcp_config_overrides
 from tests.unit.codex_hooks_reference import (
     CodexHookConfig,
@@ -37,8 +39,11 @@ from lup.types import SubagentSpec
 
 
 class TestMcpConfigOverrides:
-    def test_default_serve_tools(self) -> None:
-        overrides = build_mcp_config_overrides()
+    def test_one_entry_per_group(self) -> None:
+        overrides = build_mcp_config_overrides(
+            command=["uv", "run", "lup-devtools", "agent", "serve-tools"],
+            servers=["notes", "sandbox"],
+        )
         assert 'mcp_servers.notes.command="uv"' in overrides
         assert 'mcp_servers.sandbox.command="uv"' in overrides
         notes_args = next(
@@ -49,13 +54,15 @@ class TestMcpConfigOverrides:
 
     def test_custom_command(self) -> None:
         overrides = build_mcp_config_overrides(
-            serve_tools_command="python3",
-            serve_tools_args=["-m", "lup.devtools.main", "agent", "serve-tools"],
+            command=["python3", "-m", "lup.devtools.main", "agent", "serve-tools"],
+            servers=["notes"],
         )
         assert 'mcp_servers.notes.command="python3"' in overrides
 
     def test_env_relay(self) -> None:
-        overrides = build_mcp_config_overrides(env={"LUP_SESSION_DIR": "/tmp/s"})
+        overrides = build_mcp_config_overrides(
+            command=["uv"], servers=["notes"], env={"LUP_SESSION_DIR": "/tmp/s"}
+        )
         assert 'mcp_servers.notes.env.LUP_SESSION_DIR="/tmp/s"' in overrides
 
 
@@ -308,9 +315,19 @@ class TestCodexNativeTranslation:
                 model="o4-mini",
                 system_prompt="test",
                 served_tool_groups=["notes"],
+                serve_tools_command=["uv", "run", "lup-devtools"],
             )
         )
         assert any("mcp_servers" in o for o in native.config_overrides)
+
+    def test_served_groups_require_a_serving_command(self) -> None:
+        from lup.adapters.clients.codex.translate import build_codex_native
+        from lup.adapters.options import LupAgentOptions
+
+        with pytest.raises(ValueError, match="serve_tools_command"):
+            build_codex_native(
+                LupAgentOptions(model="o4-mini", served_tool_groups=["notes"])
+            )
 
     def test_no_served_groups_render_no_mcp_overrides(self) -> None:
         from lup.adapters.clients.codex.translate import build_codex_native

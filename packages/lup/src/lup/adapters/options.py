@@ -18,6 +18,7 @@ from lup.types import (
     EnvVars,
     JsonObject,
     PermissionMode,
+    SessionResource,
     SubagentSpec,
     UsageCost,
 )
@@ -67,6 +68,11 @@ class LupAgentOptions(BaseModel):
     derived from ``tool_servers``: the served set is the caller's group
     registry (it can include groups with no in-process server, e.g. a
     sandbox served only externally), so the caller names it."""
+    serve_tools_command: list[str] | None = None
+    """The command line that serves one tool group out of process when
+    ``--server <name>`` is appended (e.g. the caller's devtools stdio
+    server). Required with ``served_tool_groups``: how a caller's groups
+    are served is the caller's contract, not the library's."""
     add_dirs: list[Path] = Field(default_factory=list)
     output_schema: JsonObject | None = None
     """JSON Schema the final response must satisfy (structured output)."""
@@ -94,7 +100,6 @@ class LupAgentOptions(BaseModel):
     ``persist_session`` so persistence and behavior-defaults stay separate axes."""
     sdk_sandbox: bool = True
     """Enable the engine's own OS sandbox where it has one (Claude SDK)."""
-    realtime: bool = False
     on_unsupported: Literal["raise", "drop"] = "raise"
     """What an engine does with intent knobs it cannot honor: refuse the
     construction (sessions fail fast) or clear them with a log line (the
@@ -122,15 +127,13 @@ class LupAgentOptions(BaseModel):
     approval_policy: str | None = None
     mcp_env: EnvVars = Field(default_factory=dict)
     writable_roots: list[Path] = Field(default_factory=list)
-
-    session_id: str | None = None
-    """Session-wiring trio (``session_id``, ``shared_dir``,
-    ``realtime_dir``) mirroring :class:`lup.workspace.context.SessionContext`. Supplied
-    by the session builder rather than derived: the on-disk session layout
-    (where the shared sandbox dir lives, what the session is named) is the
-    caller's to define, not the adapter's."""
-    shared_dir: Path | None = None
-    realtime_dir: Path | None = None
+    session_resources: list[SessionResource] = Field(default_factory=list)
+    """Factories for session-scoped resources, entered fresh with each
+    session open and exited when it closes. Subprocess engines honor them
+    as the parent-side guarantee that what must die with the session dies
+    even if a tool subprocess is killed before its own cleanup (the caller
+    supplies e.g. its sandbox-container cleanup); in-process engines'
+    callers hold their resources directly and ignore this payload."""
 
     @model_validator(mode="after")
     def add_owned_tools_to_allowlist(self) -> "LupAgentOptions":

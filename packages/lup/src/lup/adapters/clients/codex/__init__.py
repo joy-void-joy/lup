@@ -2,8 +2,8 @@
 
 Runs OpenAI models on the Codex app-server. The runtime is a subprocess,
 so tools are served externally (``served_tool_groups``), writes are
-confined natively (``writable_roots``), and persistent mode rides the
-file-relay mailbox. One concern per module; ``create`` is the recipe
+confined natively (``writable_roots``), and session-scoped resources
+enter with each open. One concern per module; ``create`` is the recipe
 that names every slot, composing the governance the runtime lacks
 (budget, turn timeout) over pure thread-driving sessions.
 ``openai-compat`` (:mod:`lup.adapters.clients.codex.compat`) fronts any

@@ -77,9 +77,7 @@ def create_openai_compat(options: LupAgentOptions) -> Client:
     """Build an OpenAI-compatible Codex client from neutral options.
 
     Refuses the same intent knobs as ``codex`` — the translation is
-    :func:`build_openai_compat_native`, which reads the same honored
-    knobs — and shares the whole Codex composition, governance and
-    mailbox included.
+    :func:`build_openai_compat_native`, which reads the same honored knobs.
     """
     return compose_codex(
         refuse_unconsumed("openai-compat", options, build_openai_compat_native)
