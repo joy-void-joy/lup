@@ -53,6 +53,19 @@ TOOL_COLORS = [
 ]
 
 
+def format_duration(seconds: float) -> str:
+    """Format a duration for console display.
+
+    Sub-minute durations keep tenths (``42.3s``); anything longer reads
+    as minutes plus whole seconds (``3m 7s``) — session runs routinely
+    cross the minute mark, where raw seconds stop being scannable.
+    """
+    minutes, remainder = divmod(seconds, 60)
+    if minutes >= 1:
+        return f"{int(minutes)}m {remainder:.0f}s"
+    return f"{seconds:.1f}s"
+
+
 class ColorAssigner:
     """Rotating tool-color state for tool use / result pairing.
 

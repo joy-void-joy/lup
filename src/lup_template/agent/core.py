@@ -251,7 +251,7 @@ def build_session_options(
         allowed_tools=allowed_tools,
         served_tool_groups=served_groups,
         serve_tools_command=SERVE_TOOLS_COMMAND,
-        add_dirs=list(notes.all_dirs),
+        add_dirs=[*notes.all_dirs, *settings.extra_dirs],
         permission_mode=settings.permission_mode,
         max_turns=settings.max_turns,
         max_thinking_tokens=settings.max_thinking_tokens,

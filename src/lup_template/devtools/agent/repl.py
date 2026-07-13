@@ -19,6 +19,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
+from lup.telemetry.display import format_duration
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
 
@@ -159,8 +160,7 @@ def print_response_stats(response: LupResponse, console: "Console") -> float:
     parts: list[str] = []
     cost = 0.0
     if response.result and response.result.duration_ms:
-        secs = response.result.duration_ms / 1000
-        parts.append(f"{secs:.1f}s")
+        parts.append(format_duration(response.result.duration_ms / 1000))
     if response.result and response.result.total_cost_usd:
         cost = response.result.total_cost_usd
         parts.append(f"${cost:.4f}")
