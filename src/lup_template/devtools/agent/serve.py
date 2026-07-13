@@ -34,7 +34,7 @@ def collect_tools_by_server(
     if context is None:
         return {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)}
 
-    from lup.reflect import ReflectionGate
+    from lup.reflect import ReviewGate
 
     sandbox = None
     if context.session_id:
@@ -49,7 +49,7 @@ def collect_tools_by_server(
     toolset = build_session_toolset(
         session_dir=context.session_dir,
         outputs_dir=context.outputs_dir,
-        gate=ReflectionGate(flag_path=context.gate_flag),
+        gate=ReviewGate(flag_path=context.gate_flag),
         include_subagent_tool=True,
         sandbox=sandbox,
         realtime_dir=context.realtime_dir,
