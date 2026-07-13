@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict
 
 if TYPE_CHECKING:
     from lup.mcp import LupMcpTool
-    from lup.reflect import ReflectionGate
+    from lup.reflect import ReviewGate
     from lup.sandbox.container import Sandbox
 
 ServerGroup = Literal["notes", "sandbox", "session", "example"]
@@ -45,7 +45,7 @@ class SessionToolset(TypedDict):
     """Return type of :func:`build_session_toolset`."""
 
     groups: dict[ServerGroup, list["LupMcpTool"]]
-    gate: "ReflectionGate"
+    gate: "ReviewGate"
     output_path: Path
 
 
@@ -65,7 +65,7 @@ def build_session_toolset(
     *,
     session_dir: Path,
     outputs_dir: Path | None,
-    gate: "ReflectionGate | None" = None,
+    gate: "ReviewGate | None" = None,
     include_subagent_tool: bool,
     sandbox: "Sandbox | None" = None,
     realtime_dir: Path | None = None,
@@ -75,7 +75,7 @@ def build_session_toolset(
     Args:
         session_dir: Session directory (``output.json``, review artifacts).
         outputs_dir: Past outputs for reviewer calibration.
-        gate: Shared reflection gate. None creates an in-memory gate (the
+        gate: Shared review gate. None creates an in-memory gate (the
             Claude in-process path); subprocess paths pass a file-backed
             gate so the parent and the tool subprocess agree.
         include_subagent_tool: True on backends without native subagents —

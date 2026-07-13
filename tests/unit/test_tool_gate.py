@@ -5,6 +5,8 @@ until condition A holds. Each preset must deny while locked and let the
 call through once unlocked.
 """
 
+from pathlib import Path
+
 import pytest
 
 from lup.hooks import (
@@ -20,7 +22,13 @@ from lup.realtime.scheduler import (
     create_pending_event_guard,
     create_stop_guard,
 )
-from lup.reflect import ReflectionGate, create_reflection_gate
+from lup.reflect import (
+    ReflectionGate,
+    ReviewGate,
+    ReviewResult,
+    ReviewVerdict,
+    create_reflection_gate,
+)
 from lup.types import JsonObject
 
 
@@ -187,6 +195,90 @@ async def test_reflection_gate_preset() -> None:
         config, "PreToolUse", pre_tool_use("StructuredOutput")
     )
     assert permission_decision(denied_again) == "deny"
+
+
+def review(verdict: ReviewVerdict) -> ReviewResult:
+    return ReviewResult(verdict=verdict, assessment="a")
+
+
+def test_review_gate_opens_on_approve_and_warn() -> None:
+    approve_gate = ReviewGate()
+    assert not approve_gate.reflected
+    approve_gate.record(review(ReviewVerdict.approve))
+    assert approve_gate.reflected
+
+    warn_gate = ReviewGate()
+    warn_gate.record(review(ReviewVerdict.warn))
+    assert warn_gate.reflected
+
+
+def test_review_gate_fail_keeps_closed_and_recloses() -> None:
+    gate = ReviewGate()
+    gate.record(review(ReviewVerdict.fail))
+    assert not gate.reflected
+
+    gate.record(review(ReviewVerdict.approve))
+    assert gate.reflected
+
+    # A later fail re-closes an open gate: the output has known errors now.
+    gate.record(review(ReviewVerdict.fail))
+    assert not gate.reflected
+
+
+def test_review_gate_escape_hatch_after_consecutive_fails() -> None:
+    gate = ReviewGate()
+    gate.record(review(ReviewVerdict.fail))
+    gate.record(review(ReviewVerdict.fail))
+    assert not gate.reflected
+    gate.record(review(ReviewVerdict.fail))
+    assert gate.reflected
+
+
+def test_review_gate_pass_resets_the_fail_streak() -> None:
+    gate = ReviewGate()
+    gate.record(review(ReviewVerdict.fail))
+    gate.record(review(ReviewVerdict.fail))
+    gate.record(review(ReviewVerdict.warn))
+    assert gate.reflected
+    # The streak restarted: two more fails do not trip the escape hatch.
+    gate.record(review(ReviewVerdict.fail))
+    gate.record(review(ReviewVerdict.fail))
+    assert not gate.reflected
+
+
+def test_review_gate_file_backed_state_crosses_instances(tmp_path: Path) -> None:
+    flag = tmp_path / "gate_flag"
+    first = ReviewGate(flag_path=flag)
+    first.record(review(ReviewVerdict.fail))
+    first.record(review(ReviewVerdict.fail))
+
+    # A fresh instance over the same flag (subprocess restart) continues
+    # the same streak and trips the escape hatch on the third fail.
+    second = ReviewGate(flag_path=flag)
+    assert not second.reflected
+    second.record(review(ReviewVerdict.fail))
+    assert second.reflected
+
+    second.reset()
+    assert second.consecutive_fails == 0
+    assert not ReviewGate(flag_path=flag).reflected
+
+
+async def test_reflection_gate_preset_accepts_a_review_gate() -> None:
+    gate = ReviewGate()
+    config = create_reflection_gate(gate=gate, gated_tool="mcp__notes__submit_output")
+
+    gate.record(review(ReviewVerdict.fail))
+    denied = await run_hook(
+        config, "PreToolUse", pre_tool_use("mcp__notes__submit_output")
+    )
+    assert permission_decision(denied) == "deny"
+
+    gate.record(review(ReviewVerdict.approve))
+    allowed = await run_hook(
+        config, "PreToolUse", pre_tool_use("mcp__notes__submit_output")
+    )
+    assert permission_decision(allowed) == "allow"
 
 
 async def test_stop_guard_preset() -> None:

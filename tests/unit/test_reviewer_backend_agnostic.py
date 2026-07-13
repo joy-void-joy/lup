@@ -39,9 +39,12 @@ async def test_reviewer_asks_for_full_options_on_claude(
     recorder = QueryRecorder()
     monkeypatch.setattr(reflect, "query", recorder)
 
-    critique = await reflect.run_reviewer(make_input(), None, model="claude-sonnet-4-6")
+    result = await reflect.run_reviewer(make_input(), None, model="claude-sonnet-4-6")
 
-    assert critique == "critique"
+    # No structured output from the backend -> text critique wrapped as approve.
+    assert result is not None
+    assert result.verdict is reflect.ReviewVerdict.approve
+    assert result.assessment == "critique"
     assert recorder.kwargs["tools"] == ["Read", "Glob", "Grep", "WebFetch"]
     assert recorder.kwargs["max_turns"] == 5
 
