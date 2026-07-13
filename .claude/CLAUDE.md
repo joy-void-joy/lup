@@ -67,6 +67,8 @@ Tools outlast any particular prompt revision, and they compose — each new tool
 
 Compare: `"Search the web for information"` vs. `"Search the web using keyword queries. Use this when the agent needs current information not available in local data, or when verifying claims against external sources. Returns a list of {title, url, snippet} results ordered by relevance."`
 
+**Data over interaction.** When a tool fails or isn't delivering value, don't just remove it — ask what the agent actually needed. Design tools around what the agent needs, not what the underlying technology exposes. Automate data extraction rather than giving the agent interactive tools to fish for it. New tools should follow the enrichment pattern: do the heavy lifting inside the tool, not in the agent's reasoning loop.
+
 ---
 
 ## Architecture
