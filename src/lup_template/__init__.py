@@ -1,34 +1,29 @@
 """Self-improving agent template.
 
-This package provides the core scaffolding for building agents that can
-review their own traces and improve over time.
+This package provides the domain-specific scaffolding for building agents
+that can review their own traces and improve over time. It depends on the
+``lup`` library (``packages/lup/``) for all SDK-agnostic infrastructure.
 
 Structure:
-- lup/agent/: Agent code (feedback loop improves this)
-  - core.py: Main agent orchestration
+- lup_template/agent/: Agent code (feedback loop improves this)
+  - core.py: Main agent orchestration (dispatches to the SDK adapter)
   - config.py: Configuration via pydantic-settings
-  - history.py: Session storage and retrieval
-  - models.py: Output models
-  - subagents.py: Subagent definitions
-  - tool_policy.py: Conditional tool availability
-  - notes_access.py: RO/RW notes directory structure
-  - hooks.py: Hook utilities and composition
-  - tools/metrics.py: Tool call tracking
+  - models.py: Output models (AgentOutput, Factor, AgentSessionResult)
+  - prompts.py: System prompt sections and composition
+  - subagents.py: Subagent definitions (SDK-agnostic SubagentSpec)
+  - tool_policy.py: Conditional tool availability (tag-based filtering)
+  - tools/: Domain MCP tools
+    - example.py: Template MCP tools to customize
+    - reflect.py: Forced self-review tool (reviewer sub-agent)
+    - realtime.py: Real-time tools template (sleep, context, reply)
 
-- lup/environment/: Domain scaffolding (user interaction, game logic, etc.)
-  - client.py: Entry point for running agent sessions
+- lup_template/environment/: Domain scaffolding (user interaction, app flow)
+  - cli/__main__.py: Typer CLI — the ``lup`` entry point (run + loop)
 
-- lup/lib/: Library utilities for self-improving agents.
-  - client.py: Agent SDK client (build_client, query)
-  - history.py: Session storage and retrieval
-  - hooks.py: Hook utilities and composition
-  - metrics.py: Tool call tracking
-  - mcp.py: MCP server creation utilities
-  - notes.py: RO/RW directory structure
-  - paths.py: Centralized version-aware path constants and helpers
-  - realtime.py: Scheduler for persistent agents (sleep/wake, debounce)
-  - reflect.py: Reflection gate (enforce reflect-before-output)
-  - retry.py: Retry decorator with backoff
-  - sandbox.py: Docker-based Python sandbox for isolated code execution
-  - trace.py: Trace logging, color-coded console display
+- lup_template/devtools/: Development CLI (lup-devtools entry point)
+
+Reusable, SDK-agnostic infrastructure (history, hooks, metrics, notes,
+paths, realtime scheduling, reflection gate, retry, sandbox, trace) lives
+in the ``lup`` library — import it directly (e.g. ``from lup.workspace.history
+import save_session``).
 """

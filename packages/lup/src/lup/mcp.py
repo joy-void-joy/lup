@@ -1,27 +1,8 @@
-"""Patched MCP server factory that preserves is_error from tool responses.
-# claude: ignore
+"""MCP server factory with proper is_error propagation.
 
-The Claude Agent SDK's `create_sdk_mcp_server` has bugs that prevent proper error
-propagation:
-
-1. It discards `is_error` from dict responses, only extracting `content`
-2. Its query.py checks `is_error` (snake_case) but MCP's CallToolResult uses
-   `isError` (camelCase)
-
-This module provides a fixed version that works around both issues.
-
-Use `create_mcp_server` instead of `create_sdk_mcp_server` from claude_agent_sdk.
-
-SDK Compatibility
------------------
-Tested against: claude-agent-sdk>=0.1.26
-Last verified: 2026-02-04
-
-Maintenance Notes:
-- Check if these bugs are fixed in future SDK versions
-- If fixed, remove the patched code and alias `create_mcp_server = create_sdk_mcp_server`
-- Update pyproject.toml to require the fixed version minimum
-- Monitor SDK changelog for MCP-related changes
+Creates in-process MCP servers from ``LupMcpTool`` definitions. The
+``create_mcp_server`` function returns an ``LupMcpServerConfig`` that
+each SDK adapter converts to its native server configuration.
 
 Tool naming convention:
     After registration, tools are named: mcp__{server_name}__{tool_name}
@@ -39,34 +20,54 @@ Examples:
         ... async def search(params: SearchInput) -> SearchOutput:
         ...     return SearchOutput(results=["result1", "result2"])
 
-    Create an MCP server from tools and pass to the SDK::
+    Create an MCP server from tools::
 
         >>> tools = [search, another_tool]
-        >>> sdk_tools = extract_sdk_tools(tools)
-        >>> server = create_mcp_server("my-server", tools=sdk_tools)
-        >>> options = ClaudeAgentOptions(mcp_servers={"my-server": server})
+        >>> server = create_mcp_server("my-server", tools=tools)
 """
 
+import asyncio
 import inspect
 import json
 import logging
+import signal
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any, TypedDict, cast, get_type_hints
+from typing import Literal, NotRequired, TypedDict, cast, get_type_hints
 
-from claude_agent_sdk import SdkMcpTool
-from claude_agent_sdk.types import McpSdkServerConfig
 from mcp.server import Server
+from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, ValidationError
+
+from lup.types import Decorator, EnvVars, JsonObject
 
 logger = logging.getLogger(__name__)
 
 
-class ToolResponse(TypedDict, total=False):
-    """Shape of the dict returned by MCP tool handlers."""
+class TextWire(TypedDict):
+    """A text content block as it crosses the MCP tool-result wire."""
 
-    content: list[dict[str, str]]
+    type: Literal["text"]
+    text: str
+
+
+class ImageWire(TypedDict):
+    """A base64 image content block as it crosses the MCP tool-result wire."""
+
+    type: Literal["image"]
+    data: str
+    mimeType: str
+
+
+class ToolResponse(TypedDict, total=False):
+    """The MCP tool-result protocol shape every tool handler returns.
+
+    Cross-backend, not Claude-specific: Codex and OpenAI serve the same
+    ``mcp__server__tool`` protocol, so this dict is the one result shape a
+    handler produces on every engine."""
+
+    content: list[TextWire | ImageWire]
     is_error: bool
 
 
@@ -78,136 +79,187 @@ def mcp_response(text: str, *, is_error: bool = False) -> ToolResponse:
     return response
 
 
-def generate_json_schema(
-    input_schema: type | dict[str, type | str],
-) -> dict[str, object]:
-    """Generate JSON Schema from input_schema (TypedDict, BaseModel, or dict).
-
-    Args:
-        input_schema: Either a dict (simple type mapping or full schema),
-                      a TypedDict class, or a Pydantic BaseModel class.
-
-    Returns:
-        A valid JSON Schema dict for MCP tool registration.
-    """
-    if isinstance(input_schema, dict):
-        if "type" in input_schema and "properties" in input_schema:
-            return cast(dict[str, object], input_schema)
-        type_map: dict[type, str] = {
-            str: "string",
-            int: "integer",
-            float: "number",
-            bool: "boolean",
-            list: "array",
-        }
-        properties: dict[str, dict[str, str]] = {}
-        for param_name, param_type in input_schema.items():
-            if isinstance(param_type, type):
-                properties[param_name] = {"type": type_map.get(param_type, "string")}
-            else:
-                properties[param_name] = {"type": str(param_type)}
-        return {
-            "type": "object",
-            "properties": properties,
-            "required": list(properties.keys()),
-        }
-
-    try:
-        adapter = TypeAdapter(input_schema)
-        return cast(dict[str, object], adapter.json_schema())
-    except TypeError as e:
-        logger.warning(
-            "TypeAdapter doesn't support %s: %s. Using empty schema.",
-            input_schema,
-            e,
-        )
-        return {"type": "object", "properties": {}}
-
-
 class CallToolResultWithAlias(CallToolResult):
     """CallToolResult with snake_case alias for SDK compatibility.
 
-    The Claude Agent SDK's query.py checks `is_error` (snake_case) but MCP's
-    CallToolResult uses `isError` (camelCase). This subclass adds a property
-    alias so both work.
+    Some SDK query runners check ``is_error`` (snake_case) but MCP's
+    CallToolResult uses ``isError`` (camelCase). This subclass adds a
+    property alias so both work.
     """
 
     @property
     def is_error(self) -> bool:
-        """Snake_case alias for isError (SDK compatibility)."""
+        """Snake_case alias for isError."""
         return self.isError
+
+
+# MCP hands an arbitrary JSON args object validated by the per-tool BaseModel.
+type LupToolHandler = Callable[[JsonObject], Awaitable[ToolResponse]]
+
+# A tool's typed implementation: a validated input model in, an output model out.
+type ToolHandler[I: BaseModel, O: BaseModel] = Callable[[I], Awaitable[O]]
+
+
+class LupMcpServerConfig(BaseModel):
+    """SDK-agnostic MCP server configuration.
+
+    Wraps an ``mcp.server.Server`` instance. Each adapter converts
+    this to its native server config at build time.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    name: str
+    server: Server
+    tool_names: list[str] = Field(default_factory=list)
+
+
+class RawStdioServerConfig(TypedDict):
+    """An external MCP server launched as a stdio subprocess."""
+
+    type: NotRequired[Literal["stdio"]]
+    command: str
+    args: NotRequired[list[str]]
+    env: NotRequired[EnvVars]
+
+
+class RawSseServerConfig(TypedDict):
+    """An external MCP server reached over Server-Sent Events."""
+
+    type: Literal["sse"]
+    url: str
+    headers: NotRequired[dict[str, str]]  # lup: ignore[dict-str-payload] — wire
+
+
+class RawHttpServerConfig(TypedDict):
+    """An external MCP server reached over streamable HTTP."""
+
+    type: Literal["http"]
+    url: str
+    headers: NotRequired[dict[str, str]]  # lup: ignore[dict-str-payload] — wire
+
+
+type RawMcpServerConfig = (
+    RawStdioServerConfig | RawSseServerConfig | RawHttpServerConfig
+)
+"""An MCP server the framework does not host: a transport config, no instance."""
+
+type McpServerEntry = LupMcpServerConfig | RawMcpServerConfig
+"""One MCP server in a session: an in-process ``LupMcpServerConfig`` carrying a
+live ``Server`` instance, or a transport config for an external one. An adapter
+narrows by ``isinstance(entry, LupMcpServerConfig)`` — the in-process case has a
+``.server`` to register, the external case is passed to the SDK as-is."""
 
 
 def create_mcp_server(
     name: str,
     version: str = "1.0.0",
-    tools: Sequence[SdkMcpTool[Any]] | None = None,
-) -> McpSdkServerConfig:
+    tools: Sequence["LupMcpTool"] | None = None,
+) -> LupMcpServerConfig:
     """Create an in-process MCP server with proper is_error handling.
-
-    This is a patched version of claude_agent_sdk.create_sdk_mcp_server that
-    properly preserves the `is_error` flag from tool responses.
 
     Args:
         name: Unique identifier for the server.
         version: Server version string.
-        tools: List of SdkMcpTool instances created with the @tool decorator.
+        tools: List of LupMcpTool instances created with the @lup_tool decorator.
 
     Returns:
-        McpSdkServerConfig for use with ClaudeAgentOptions.mcp_servers.
+        LupMcpServerConfig for adapter conversion.
+
+    A server built without tools still registers its handlers and
+    advertises an empty tool list — selecting an unpopulated group is a
+    valid (if useless) session, not a protocol error.
     """
     server = Server(name, version=version)
-    server._tools = tools or []  # type: ignore[attr-defined]
+    registered = list(tools or [])
+    tool_map = {tool_def.name: tool_def for tool_def in registered}
 
-    if tools:
-        tool_map = {tool_def.name: tool_def for tool_def in tools}
-
-        @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
-        async def list_tools() -> list[Tool]:
-            """Return the list of available tools."""
-            tool_list: list[Tool] = []
-            for tool_def in tools:
-                schema = generate_json_schema(tool_def.input_schema)
-                tool_list.append(
-                    Tool(
-                        name=tool_def.name,
-                        description=tool_def.description,
-                        inputSchema=schema,
-                    )
-                )
-            return tool_list
-
-        @server.call_tool()  # type: ignore[untyped-decorator]
-        async def call_tool(name: str, arguments: dict[str, object]) -> CallToolResult:
-            """Execute a tool by name with given arguments."""
-            if name not in tool_map:
-                raise ValueError(f"Tool '{name}' not found")
-
-            tool_def = tool_map[name]
-            result = cast(ToolResponse, await tool_def.handler(arguments))
-
-            is_error = result.get("is_error", False)
-
-            content: list[TextContent | ImageContent] = []
-            if "content" in result:
-                for item in result["content"]:
-                    match item.get("type"):
-                        case "text":
-                            content.append(TextContent(type="text", text=item["text"]))
-                        case "image":
-                            content.append(
-                                ImageContent(
-                                    type="image",
-                                    data=item["data"],
-                                    mimeType=item["mimeType"],
-                                )
-                            )
-
-            return CallToolResultWithAlias(
-                content=cast(list[ContentBlock], content), isError=is_error
+    @server.list_tools()
+    async def list_tools() -> list[Tool]:
+        """Return the list of available tools."""
+        return [
+            Tool(
+                name=tool_def.name,
+                description=tool_def.description,
+                inputSchema=tool_def.input_schema,
             )
+            for tool_def in registered
+        ]
 
-    return McpSdkServerConfig(type="sdk", name=name, instance=server)
+    @server.call_tool()
+    async def call_tool(name: str, arguments: JsonObject) -> CallToolResult:
+        """Execute a tool by name with given arguments."""
+        if name not in tool_map:
+            raise ValueError(f"Tool '{name}' not found")
+
+        tool_def = tool_map[name]
+        result = await tool_def.handler(arguments)
+
+        is_error = "is_error" in result and bool(result["is_error"])
+
+        content: list[
+            ContentBlock
+        ] = []  # lup: ignore[empty-collection] — match-arm fold
+        if "content" in result:
+            for item in result["content"]:
+                match item:
+                    case {"type": "text", "text": str(text)}:
+                        content.append(TextContent(type="text", text=text))
+                    case {"type": "image", "data": str(data), "mimeType": str(mime)}:
+                        content.append(
+                            ImageContent(type="image", data=data, mimeType=mime)
+                        )
+
+        return CallToolResultWithAlias(content=content, isError=is_error)
+
+    return LupMcpServerConfig(
+        name=name,
+        server=server,
+        tool_names=[t.name for t in registered],
+    )
+
+
+def server_tool_names(server: McpServerEntry) -> list[str]:
+    """List the tool names registered on an in-process MCP server.
+
+    Servers built with :func:`create_mcp_server` carry their tool list on
+    the config. Use this to compute the full ``mcp__{server}__{tool}``
+    names the agent will see — e.g. when building a tool allowlist or an
+    inspection display — without maintaining a second tool list that can
+    drift. External server configs (stdio, SSE, HTTP) cannot be
+    introspected without connecting, so they yield an empty list.
+    """
+    match server:
+        case LupMcpServerConfig():
+            return list(server.tool_names)
+        case _:
+            return []
+
+
+def serve_stdio(config: LupMcpServerConfig) -> None:
+    """Serve an in-process MCP server over stdio (blocking).
+
+    The subprocess half of tool serving: backends that cannot host
+    in-process servers launch a tool-server subprocess (``lup-devtools
+    agent serve-tools``), which builds the same
+    :func:`create_mcp_server` config the in-process path registers and
+    exposes it here over a stdio transport — one server construction for
+    every backend. SIGTERM raises ``SystemExit`` so ``atexit`` cleanup
+    (sandbox teardown, metrics flush) runs when the parent stops the
+    subprocess.
+    """
+
+    def terminate(_signum: int, _frame: object) -> None:
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, terminate)
+
+    async def run() -> None:
+        init_options = config.server.create_initialization_options()
+        async with stdio_server() as (read_stream, write_stream):
+            await config.server.run(read_stream, write_stream, init_options)
+
+    asyncio.run(run())
 
 
 class ToolError(Exception):
@@ -217,28 +269,42 @@ class ToolError(Exception):
 class LupMcpTool[I: BaseModel, O: BaseModel]:
     """MCP tool with typed input/output models for introspection.
 
-    Wraps ``SdkMcpTool`` and preserves the original BaseModel classes so that
-    devtools (``lup-devtools agent inspect``) can display full JSON Schemas
-    for both input and output. Also callable directly with a typed model
-    instance, bypassing MCP serialization.
+    Stores the tool definition (name, description, schema, handler) directly.
+    Devtools can inspect ``input_model`` / ``output_model`` for full JSON Schemas.
+    Also callable directly with a typed model instance, bypassing MCP
+    serialization.
+
+    Deliberately a plain generic class, not a ``BaseModel``: as a generic
+    pydantic model this type defeats ``@lup_tool``'s return-type inference —
+    pyright degrades every decorated tool to its raw function type, so
+    ``list[LupMcpTool]`` collection sites (toolsets, subagents, reflect) stop
+    type-checking. Its fields are a validated handler callable and a
+    ``type[I]`` model, none of which need pydantic validation, so BaseModel
+    buys nothing here and costs the decorator inference.
     """
 
     def __init__(
         self,
-        sdk_tool: SdkMcpTool[Any],
+        name: str,
+        description: str,
+        input_schema: JsonObject,
+        handler: LupToolHandler,
+        call_handler: ToolHandler[I, O],
         input_model: type[I],
-        handler: Callable[[I], Awaitable[O]],
         output_model: type[O] | None = None,
         tags: list[str] | None = None,
     ) -> None:
-        self.sdk_tool = sdk_tool
-        self.input_model = input_model
+        self.name = name
+        self.description = description
+        self.input_schema = input_schema
         self.handler = handler
+        self.call_handler = call_handler
+        self.input_model = input_model
         self.output_model = output_model
         self.tags = tags or []
 
     async def __call__(self, params: I) -> O:
-        return await self.handler(params)
+        return await self.call_handler(params)
 
 
 def lup_tool[I: BaseModel, O: BaseModel](
@@ -248,15 +314,11 @@ def lup_tool[I: BaseModel, O: BaseModel](
     *,
     name: str | None = None,
     tags: list[str] | None = None,
-) -> Callable[
-    [Callable[[I], Awaitable[O]]],
-    LupMcpTool[I, O],
-]:
+) -> Decorator[ToolHandler[I, O], LupMcpTool[I, O]]:
     """Decorator for defining MCP tools with typed input/output models.
 
-    Like the SDK's ``@tool`` but infers input/output schemas from type
-    annotations, auto-validates input, auto-serializes BaseModel output,
-    and tracks call metrics (duration, errors).
+    Infers input/output schemas from type annotations, auto-validates input,
+    auto-serializes BaseModel output, and tracks call metrics.
 
     The handler receives a validated model instance, not a raw dict.
     The handler must return a BaseModel, which is auto-serialized via
@@ -277,10 +339,10 @@ def lup_tool[I: BaseModel, O: BaseModel](
     Returns:
         A decorator that wraps the async handler into a ``LupMcpTool``.
     """
-    from lup.metrics import collector
+    from lup.telemetry.metrics import collector
 
     def decorator(
-        handler: Callable[[I], Awaitable[O]],
+        handler: ToolHandler[I, O],
     ) -> LupMcpTool[I, O]:
         tool_name = name or handler.__name__
 
@@ -294,11 +356,15 @@ def lup_tool[I: BaseModel, O: BaseModel](
                 if not params:
                     msg = f"lup_tool '{tool_name}': handler has no parameters to infer input_model from"
                     raise TypeError(msg)
-                param_type = hints.get(params[0].name)
+                param_type = hints.get(  # lup: ignore[dict-get] — reflection hints
+                    params[0].name
+                )
                 if isinstance(param_type, type) and issubclass(param_type, BaseModel):
                     resolved_input = param_type
             if resolved_output is None:
-                return_type = hints.get("return")
+                return_type = hints.get(  # lup: ignore[dict-get] — reflection hints
+                    "return"
+                )
                 if isinstance(return_type, type) and issubclass(return_type, BaseModel):
                     resolved_output = return_type
 
@@ -306,9 +372,9 @@ def lup_tool[I: BaseModel, O: BaseModel](
             msg = f"lup_tool '{tool_name}': cannot infer input_model from annotations"
             raise TypeError(msg)
 
-        final_input = cast(type[I], resolved_input)
+        final_input = cast(type[I], resolved_input)  # lup: ignore[cast] — hint infer
 
-        async def wrapper(args: dict[str, Any]) -> ToolResponse:
+        async def wrapper(args: JsonObject) -> ToolResponse:
             start = time.perf_counter()
             is_error = False
             try:
@@ -342,27 +408,17 @@ def lup_tool[I: BaseModel, O: BaseModel](
                 duration_ms = (time.perf_counter() - start) * 1000
                 collector.record(tool_name, duration_ms, is_error)
 
-        sdk = SdkMcpTool(
+        return LupMcpTool(
             name=tool_name,
             description=description,
             input_schema=final_input.model_json_schema(),
-            handler=cast(Callable[[Any], Awaitable[dict[str, Any]]], wrapper),
-        )
-        return LupMcpTool(
-            sdk_tool=sdk,
+            handler=wrapper,
+            call_handler=handler,
             input_model=final_input,
-            handler=handler,
-            output_model=cast(type[O] | None, resolved_output),
-            tags=tags,
+            output_model=cast(  # lup: ignore[cast] — hint infer
+                type[O] | None, resolved_output
+            ),
+            tags=tags or [],
         )
 
     return decorator
-
-
-def extract_sdk_tools(tools: list[LupMcpTool[Any, Any]]) -> list[SdkMcpTool[Any]]:
-    """Extract SdkMcpTool instances from a list of LupMcpTools.
-
-    Use this when passing tools to ``create_mcp_server`` or
-    ``create_sdk_mcp_server``, which expect ``list[SdkMcpTool]``.
-    """
-    return [t.sdk_tool for t in tools]

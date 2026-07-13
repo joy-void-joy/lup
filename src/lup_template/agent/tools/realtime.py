@@ -1,7 +1,7 @@
 """Real-time MCP tools for persistent agents.
 
 This is a TEMPLATE. These tools show how to wire the Scheduler from
-``lup.lib.realtime`` into an agent session. Customize for your domain.
+``lup.realtime.scheduler`` into an agent session. Customize for your domain.
 
 The pattern:
 1. Create a Scheduler with your environment's action callback
@@ -15,7 +15,7 @@ Core tools:
 - ``reply`` delivers actions to the environment
 - Timing tools (debounce, remind, schedule) are non-blocking
 
-Background agents (see ``lup.lib.background.BackgroundAgent``):
+Background agents (``BackgroundAgentParams`` + each engine's ``Engine.background``):
 - Run companion agents alongside the main session
 - Observer example at the bottom shows conversation summarization
 - Any use case: research, execution, monitoring — not just observation
@@ -28,63 +28,51 @@ import logging
 from collections.abc import Callable
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
-from lup.background import BackgroundAgent
-from lup.mcp import LupMcpTool, ToolError, extract_sdk_tools, lup_tool
-from lup.realtime import (
+from lup.adapters.background.agent import BackgroundAgent
+from lup.adapters.background.params import BackgroundAgentParams
+from lup.adapters.wiring import resolve_engine
+from lup.mcp import LupMcpTool, ToolError, lup_tool
+from lup.realtime.models import (
+    ContextInput,
+    ContextOutput,
     DebounceInput,
+    DebounceOutput,
+    MetaInput,
+    MetaOutput,
     RemindInput,
+    RemindOutput,
+    ReplyInput,
+    ReplyOutput,
     ScheduleActionInput,
-    Scheduler,
+    ScheduleActionOutput,
     SleepInput,
+    SleepOutput,
 )
-from lup.trace import TraceLogger
+from lup.realtime.scheduler import Scheduler
+from lup.telemetry.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
+
+
+MISSING_SLEEP_MESSAGE = (
+    "Your turn ended without calling sleep. This is a persistent session: "
+    "you yield control with the sleep tool, and the environment wakes you "
+    "when something happens. Finish any pending replies, record a meta "
+    "assessment, then call sleep."
+)
+"""Corrective nudge for a turn that ended without sleeping.
+
+TEMPLATE: this domain expects a meta assessment before sleep, so the nudge
+names that step. Pass it to ``run_relay_session(missing_sleep_message=...)``;
+drop the meta wording for domains that don't gate sleep on reflection.
+"""
 
 
 # =====================================================================
 # Additional input models (domain-specific, customize these)
 # =====================================================================
-
-
-class ReplyMessageItem(BaseModel):
-    """A single message in a reply batch."""
-
-    message: str = Field(description="The message content.")
-    delay_seconds: int = Field(
-        default=0,
-        description="Cumulative delay before sending (0 = immediate).",
-    )
-
-
-class ReplyInput(BaseModel):
-    """Input for the reply tool."""
-
-    messages: list[ReplyMessageItem] = Field(
-        description="Messages to send, with optional staggered delays."
-    )
-
-
-class ContextInput(BaseModel):
-    """Input for the context tool."""
-
-    last_events: int = Field(
-        default=5,
-        description="Number of recent read events to include (0 = unread only).",
-    )
-
-
-class MetaInput(BaseModel):
-    """Input for the meta tool."""
-
-    thought: str = Field(
-        description=(
-            "Process self-assessment: pacing, timing, what worked, "
-            "what you'd change. Required before sleep."
-        )
-    )
 
 
 class NotesInput(BaseModel):
@@ -111,47 +99,6 @@ class IdeasInput(BaseModel):
 # =====================================================================
 
 
-class ReplyOutput(BaseModel):
-    """Output for the reply tool."""
-
-    sent: int
-    scheduled: int
-
-
-class ScheduleActionOutput(BaseModel):
-    """Output for the schedule_action tool."""
-
-    delay_seconds: int
-
-
-class DebounceOutput(BaseModel):
-    """Output for the debounce tool."""
-
-    initial_seconds: int
-    quiet_seconds: int
-
-
-class SleepOutput(BaseModel):
-    """Output for the sleep tool."""
-
-    reason: str = Field(default="timer")
-    time: str = Field(default="")
-    fired_reminders: list[str] = Field(default_factory=list)
-
-
-class RemindOutput(BaseModel):
-    """Output for the remind tool."""
-
-    label: str
-    delay_seconds: int
-
-
-class ContextOutput(BaseModel):
-    """Output for the context tool. Accepts domain-specific fields."""
-
-    model_config = ConfigDict(extra="allow")
-
-
 class NotesOutput(BaseModel):
     """Output for the notes tool."""
 
@@ -163,12 +110,6 @@ class IdeasOutput(BaseModel):
 
     message: str
     ideas: list[str] = Field(default_factory=list)
-
-
-class MetaOutput(BaseModel):
-    """Output for the meta tool."""
-
-    status: str = Field(default="recorded")
 
 
 class ObserverNotesOutput(BaseModel):
@@ -190,9 +131,9 @@ def create_realtime_tools(
 ) -> list[LupMcpTool]:
     """Create the standard set of real-time MCP tools.
 
-    This is a TEMPLATE — customize for your domain. The tools are
-    closures bound to the session state via the scheduler and
-    build_context callback.
+    TEMPLATE: customize these tools' wording and context for your domain.
+    The tools are closures bound to the session state via the scheduler
+    and build_context callback.
 
     Args:
         scheduler: The Scheduler instance for this session.
@@ -282,9 +223,9 @@ def create_realtime_tools(
 
         result = await scheduler.sleep(inp.seconds)
         return SleepOutput(
-            reason=result.get("reason", "timer"),
+            reason=result.reason,
             time=datetime.now().strftime("%H:%M:%S"),
-            fired_reminders=result.get("fired_reminders", []),
+            fired_reminders=result.fired_reminders,
         )
 
     @lup_tool(
@@ -383,7 +324,7 @@ def create_realtime_tools(
 # Background agent example: Observer
 # =====================================================================
 #
-# An observer is one use of BackgroundAgent — it maintains running
+# An observer is one use of background agents — it maintains running
 # summaries of the conversation. Other uses: research agents that
 # fetch data, executor agents that run long tasks, etc.
 #
@@ -456,12 +397,11 @@ def create_observer(
     *,
     notes: list[str],
     transcript: list[object],
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-opus-4-6",
 ) -> BackgroundAgent:
     """Create an observer background agent.
 
-    This is a TEMPLATE — customize the system prompt, model, and
-    build_message callback for your domain.
+    TEMPLATE: customize the observer's prompt, model, and build_message.
 
     The observer reads new transcript entries on each wake, formats
     them, and produces a summary note. The main agent includes
@@ -474,7 +414,7 @@ def create_observer(
         model: Model to use for the observer.
 
     Returns:
-        A configured BackgroundAgent (call ``.start()`` to begin).
+        A configured background agent (call ``.start()`` to begin).
     """
     read_index = [0]  # Mutable container for closure
 
@@ -493,12 +433,16 @@ def create_observer(
         last_note = notes[-1] if notes else "(none yet)"
         return f"New messages:\n{msgs_text}\n\nYour last note:\n{last_note}"
 
-    return BackgroundAgent(
-        name="observer",
-        system_prompt=OBSERVER_SYSTEM_PROMPT,
-        tools=extract_sdk_tools(create_observer_tools(notes=notes)),
-        build_message=build_message,
-        start_message="[Observer started — maintain notes about the conversation]",
-        model=model,
-        allowed_tools=["mcp__observer__notes"],
+    from lup_template.agent.config import settings
+
+    return resolve_engine(settings.agent_sdk).background(
+        BackgroundAgentParams(
+            name="observer",
+            system_prompt=OBSERVER_SYSTEM_PROMPT,
+            tools=create_observer_tools(notes=notes),
+            build_message=build_message,
+            start_message="[Observer started — maintain notes about the conversation]",
+            model=model,
+            allowed_tools=["mcp__observer__notes"],
+        )
     )

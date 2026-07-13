@@ -1,5 +1,11 @@
 """Agent version display, changelog, and bump.
 
+The agent version (``[tool.lup] agent_version``) tracks the behavior of the
+agent the feedback loop improves, not the package release. ``changelog``
+answers the question a version bump needs: *what changed in agent behavior
+since the last tag?* — so a reviewer can decide whether the next bump is patch,
+minor, or major, and ``bump`` then writes the new version and tags the commit.
+
 Examples::
 
     $ uv run lup-devtools version
@@ -12,11 +18,13 @@ Examples::
 from typing import Annotated, Literal, TypedDict
 
 import sh
+import tomlkit
 import typer
 
-from lup.paths import AGENT_VERSION
+from lup.workspace.history import parse_semver
+from lup.workspace.paths import agent_version
 
-from lup_template.devtools.utils import git, output_json
+from lup_template.devtools.utils import git, output_json, short_sha
 
 
 ChangelogCategory = Literal["behavior", "data", "infrastructure"]
@@ -50,12 +58,26 @@ DATA_PREFIXES = ("data",)
 
 def get_latest_tag() -> str | None:
     try:
-        return str(git("describe", "--tags", "--abbrev=0", _ok_code=[0])).strip()
+        return git.out("describe", "--tags", "--abbrev=0", _ok_code=[0])
     except sh.ErrorReturnCode:
         return None
 
 
 def classify_commit(message: str) -> ChangelogCategory:
+    """Bucket a commit by the ``type(scope):`` prefix of its message.
+
+    Commits in this repo follow the conventional ``type(scope): description``
+    format (see CLAUDE.md), so the leading type *is* structured metadata, not
+    free prose — reading it is parsing a known field, not guessing intent.
+
+    The three buckets answer the only question a version bump asks of the log:
+    *did the agent's behavior change, did its data change, or neither?*
+    ``feat``/``fix``/``refactor`` change what the agent does (behavior);
+    ``data`` changes generated outputs (data); everything else (``docs``,
+    ``chore``, ``test``, ``meta``) is infrastructure that does not move the
+    agent version. The ontology is deliberately narrow because that is the
+    decision it feeds; a richer taxonomy is `git log` itself.
+    """
     lower = message.lower()
     for prefix in BEHAVIOR_PREFIXES:
         if lower.startswith(prefix):
@@ -68,54 +90,44 @@ def classify_commit(message: str) -> ChangelogCategory:
 
 @app.callback()
 def show(
+    ctx: typer.Context,
     as_json: Annotated[
         bool,
         typer.Option("--json", help="Output as JSON"),
     ] = False,
 ) -> None:
     """Show agent version, latest tag, and commits since last tag."""
-    import click
-
-    if click.get_current_context().invoked_subcommand is not None:
+    if ctx.invoked_subcommand is not None:
         return
 
     latest_tag = get_latest_tag()
 
-    commits_since = 0
-    files_changed: list[str] = []
+    def count_commits(rev_range: str) -> int:
+        try:
+            return int(git.out("rev-list", "--count", rev_range))
+        except sh.ErrorReturnCode:
+            return 0
+
     if latest_tag:
         ref_since = latest_tag
-        try:
-            commits_since = int(
-                str(git("rev-list", "--count", f"{latest_tag}..HEAD")).strip()
-            )
-        except sh.ErrorReturnCode:
-            pass
+        commits_since = count_commits(f"{latest_tag}..HEAD")
     else:
+        commits_since = count_commits("HEAD")
         try:
-            commits_since = int(str(git("rev-list", "--count", "HEAD")).strip())
-        except sh.ErrorReturnCode:
-            pass
-        try:
-            ref_since = (
-                str(git("rev-list", "--max-parents=0", "HEAD", _ok_code=[0]))
-                .strip()
-                .splitlines()[0]
-            )
+            roots = git.lines("rev-list", "--max-parents=0", "HEAD", _ok_code=[0])
+            ref_since = roots[0] if roots else "HEAD"
         except sh.ErrorReturnCode:
             ref_since = "HEAD"
 
     try:
-        diff_output = str(
-            git("diff", "--name-only", f"{ref_since}..HEAD", _ok_code=[0, 128])
-        ).strip()
-        files_changed = [f for f in diff_output.splitlines() if f]
+        rows = git.lines("diff", "--name-only", f"{ref_since}..HEAD", _ok_code=[0, 128])
+        files_changed = [f for f in rows if f]
     except sh.ErrorReturnCode:
-        pass
+        files_changed = []
 
     if as_json:
         info: VersionInfo = {
-            "version": AGENT_VERSION,
+            "version": agent_version(),
             "latest_tag": latest_tag,
             "commits_since_tag": commits_since,
             "files_changed": files_changed,
@@ -123,7 +135,7 @@ def show(
         output_json(info)
         return
 
-    typer.echo(f"\nAgent version: {AGENT_VERSION}")
+    typer.echo(f"\nAgent version: {agent_version()}")
     if latest_tag:
         typer.echo(f"Latest tag: {latest_tag} (+{commits_since} commits)")
     else:
@@ -149,39 +161,33 @@ def changelog_cmd(
     latest_tag = get_latest_tag()
     tag = since or latest_tag
     if not tag:
-        ref = (
-            str(git("rev-list", "--max-parents=0", "HEAD", _ok_code=[0]))
-            .strip()
-            .split("\n")[0]
-        )
-        tag = ref
+        roots = git.lines("rev-list", "--max-parents=0", "HEAD", _ok_code=[0])
+        tag = roots[0] if roots else "HEAD"
 
     try:
-        log_output = str(git("log", "--oneline", f"{tag}..HEAD", _ok_code=[0])).strip()
+        log_lines = git.lines("log", "--oneline", f"{tag}..HEAD", _ok_code=[0])
     except sh.ErrorReturnCode:
         typer.echo(f"Could not read log since {tag}")
         raise typer.Exit(1)
 
-    if not log_output:
+    if not log_lines:
         typer.echo(f"No commits since {tag}")
         return
 
+    entries: list[ChangelogEntry] = [
+        {"sha": sha, "message": message, "category": classify_commit(message)}
+        for sha, _, message in (
+            line.partition(" ")  # lup: ignore[string-split] — log line fields
+            for line in log_lines
+            if line
+        )
+    ]
     report: ChangelogReport = {
         "since_tag": since or latest_tag,
-        "behavior": [],
-        "data": [],
-        "infrastructure": [],
+        "behavior": [e for e in entries if e["category"] == "behavior"],
+        "data": [e for e in entries if e["category"] == "data"],
+        "infrastructure": [e for e in entries if e["category"] == "infrastructure"],
     }
-
-    for line in log_output.split("\n"):
-        if not line.strip():
-            continue
-        parts = line.split(" ", 1)
-        sha = parts[0]
-        message = parts[1] if len(parts) > 1 else ""
-        category = classify_commit(message)
-        entry: ChangelogEntry = {"sha": sha, "message": message, "category": category}
-        report[category].append(entry)
 
     if as_json:
         output_json(report)
@@ -193,17 +199,17 @@ def changelog_cmd(
     if report["behavior"]:
         typer.echo("Behavior changes:")
         for e in report["behavior"]:
-            typer.echo(f"  {e['sha'][:7]} {e['message']}")
+            typer.echo(f"  {short_sha(e['sha'])} {e['message']}")
 
     if report["data"]:
         typer.echo("\nData changes:")
         for e in report["data"]:
-            typer.echo(f"  {e['sha'][:7]} {e['message']}")
+            typer.echo(f"  {short_sha(e['sha'])} {e['message']}")
 
     if report["infrastructure"]:
         typer.echo("\nInfrastructure changes:")
         for e in report["infrastructure"]:
-            typer.echo(f"  {e['sha'][:7]} {e['message']}")
+            typer.echo(f"  {short_sha(e['sha'])} {e['message']}")
 
     total = (
         len(report["behavior"]) + len(report["data"]) + len(report["infrastructure"])
@@ -227,18 +233,18 @@ def bump_cmd(
     ] = False,
 ) -> None:
     """Bump agent version and create a git tag."""
-    from lup.paths import find_project_root, read_agent_version
+    from lup.workspace.paths import find_project_root, read_agent_version
 
     root = find_project_root()
     pyproject = root / "pyproject.toml"
     current = read_agent_version(root)
 
-    parts = current.split(".")
-    if len(parts) != 3:
+    semver = parse_semver(current)
+    if semver is None:
         typer.echo(f"Version {current} is not in X.Y.Z format")
         raise typer.Exit(1)
 
-    major, minor, patch_v = int(parts[0]), int(parts[1]), int(parts[2])
+    major, minor, patch_v = semver.major, semver.minor, semver.patch
 
     if level is None:
         typer.echo(f"Current version: {current}")
@@ -264,14 +270,13 @@ def bump_cmd(
             typer.echo(f"Would tag: v{new_version}")
         return
 
-    content = pyproject.read_text()
-    new_content = content.replace(
-        f'agent_version = "{current}"', f'agent_version = "{new_version}"'
-    )
-    if new_content == content:
-        typer.echo(f"Could not find 'agent_version = \"{current}\"' in pyproject.toml")
-        raise typer.Exit(1)
-    pyproject.write_text(new_content)
+    doc = tomlkit.parse(pyproject.read_text())
+    try:
+        doc["tool"]["lup"]["agent_version"] = new_version
+    except (KeyError, TypeError):
+        typer.echo("No [tool.lup] agent_version table in pyproject.toml")
+        raise typer.Exit(1) from None
+    pyproject.write_text(tomlkit.dumps(doc))
 
     git.add(str(pyproject))
     git.commit("-m", f"chore(version): bump {current} → {new_version}")

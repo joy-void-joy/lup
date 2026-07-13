@@ -12,10 +12,11 @@ Usage:
     from lup_template.agent.config import settings
     print(settings.model)
 """
+# lup: please review the setup code in https://github.com/joy-void-joy/assistant/tree/dev and https://github.com/joy-void-joy/inkwell/tree/dev for setup workflow that should be present in those
+# We should also copy their UI patterns, and have lup host a dashboard
 
 import logging
-import os
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,11 +41,10 @@ class Settings(BaseSettings):
 
         Customize this for your domain's optional dependencies.
         """
-        missing = []
-
-        # TODO: Add checks for your optional API keys
-        # if not self.some_api_key:
-        #     missing.append("SOME_API_KEY")
+        # TEMPLATE: list your domain's optional API keys here, e.g.
+        # "EXAMPLE_API_KEY": self.example_api_key,
+        optional_keys: dict[str, str | None] = {}  # lup: ignore[dict-str-payload]
+        missing = [name for name, value in optional_keys.items() if not value]
 
         if missing:
             logger.warning(
@@ -56,12 +56,14 @@ class Settings(BaseSettings):
     # OPTIONAL API KEYS (tools degrade gracefully without these)
     # ==========================================================================
 
-    # TODO: Add optional API keys for your domain
-    # exa_api_key: str | None = Field(
-    #     default=None,
-    #     validation_alias="EXA_API_KEY",
-    #     description="Exa search API key",
-    # )
+    # TEMPLATE: replace with your domain's keys, one "requires:" tag per
+    # service — tools tagged "requires:example-api" are excluded by
+    # ToolPolicy when this key is missing.
+    example_api_key: str | None = Field(
+        default=None,
+        validation_alias="EXAMPLE_API_KEY",
+        description="Example service API key (placeholder for your domain)",
+    )
 
     # ==========================================================================
     # LLM ROUTING (optional)
@@ -74,19 +76,131 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
+    # SDK SELECTION
+    # ==========================================================================
+
+    agent_sdk: Literal[
+        "claude", "codex", "openai", "openai-compat", "claude-compat"
+    ] = Field(
+        default="claude",
+        validation_alias="AGENT_SDK",
+        description=(
+            "Which engine runs the agent (claude, codex, openai-compat, "
+            "claude-compat; openai is a legacy alias of openai-compat). "
+            "claude-compat keeps the Claude scaffolding on an Anthropic-"
+            "protocol endpoint (OPENAI_BASE_URL). The reviewer and "
+            "background agents follow AGENT_AUX_MODEL, which defaults to an "
+            "engine-native model. Subagent specs pin their own models — the "
+            "template's pin Anthropic ones, so they need Anthropic "
+            "credentials on codex/openai unless overridden."
+        ),
+    )
+
+    openai_base_url: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_BASE_URL",
+        description="Base URL for OpenAI-compatible API (vLLM, Ollama, TGI, etc.)",
+    )
+
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_API_KEY",
+        description="API key for OpenAI-compatible API",
+    )
+
+    openai_model_provider: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_MODEL_PROVIDER",
+        description="Codex model_provider for OpenAI-compatible endpoints",
+    )
+
+    codex_sandbox: str | None = Field(
+        default=None,
+        validation_alias="CODEX_SANDBOX",
+        description="Codex sandbox mode: read_only, workspace_write, danger_full_access",
+    )
+
+    codex_effort: str | None = Field(
+        default=None,
+        validation_alias="CODEX_EFFORT",
+        description="Codex reasoning effort: none, minimal, low, medium, high, xhigh",
+    )
+
+    codex_approval_policy: str | None = Field(
+        default=None,
+        validation_alias="CODEX_APPROVAL_POLICY",
+        description="Codex approval policy for tool use",
+    )
+
+    codex_usd_per_mtok_input: float | None = Field(
+        default=None,
+        validation_alias="CODEX_USD_PER_MTOK_INPUT",
+        description="USD per million input tokens (enables budget enforcement on codex/openai)",
+    )
+
+    codex_usd_per_mtok_output: float | None = Field(
+        default=None,
+        validation_alias="CODEX_USD_PER_MTOK_OUTPUT",
+        description="USD per million output tokens (enables budget enforcement on codex/openai)",
+    )
+
+    codex_usd_per_mtok_cached_input: float | None = Field(
+        default=None,
+        validation_alias="CODEX_USD_PER_MTOK_CACHED_INPUT",
+        description="USD per million cached input tokens (defaults to the input rate)",
+    )
+
+    reasoning_effort: str | None = Field(
+        default=None,
+        validation_alias="AGENT_REASONING_EFFORT",
+        description=(
+            "Backend-agnostic reasoning effort. Valid levels differ by "
+            "backend: Claude accepts low, medium, high, xhigh, max; "
+            "Codex/OpenAI accept none, minimal, low, medium, high, xhigh "
+            "(CODEX_EFFORT overrides this on those backends)."
+        ),
+    )
+
+    permission_mode: (
+        Literal["default", "acceptEdits", "plan", "bypassPermissions"] | None
+    ) = Field(
+        default=None,
+        validation_alias="AGENT_PERMISSION_MODE",
+        description=(
+            "Claude SDK permission mode for the main agent session "
+            "(None = engine default: bypassPermissions on claude, where "
+            "enforcement is the hook layer)"
+        ),
+    )
+
+    # ==========================================================================
     # MODEL SETTINGS
     # ==========================================================================
 
     model: str = Field(
         default="claude-opus-4-6",
         validation_alias="AGENT_MODEL",
-        description="Claude model to use",
+        description="Model to use (provider-specific identifier)",
     )
 
     max_thinking_tokens: int | None = Field(
-        default=128_000 - 1,
+        default=None,
         validation_alias="AGENT_MAX_THINKING_TOKENS",
-        description="Max thinking tokens (None = model default)",
+        description=(
+            "Max thinking tokens (None = engine default: the API maximum "
+            "on claude sessions)"
+        ),
+    )
+
+    aux_model: str | None = Field(
+        default=None,
+        validation_alias="AGENT_AUX_MODEL",
+        description=(
+            "Model for auxiliary agents (reviewer, background agents). "
+            "None resolves per backend: a sonnet-class reviewer on claude, "
+            "the session model on codex/openai — so AGENT_SDK=codex/openai "
+            "runs without Anthropic credentials."
+        ),
     )
 
     # ==========================================================================
@@ -121,10 +235,21 @@ class Settings(BaseSettings):
         description="Maximum agent turns per session (None = unlimited)",
     )
 
-    http_timeout_seconds: int = Field(
-        default=30,
-        validation_alias="AGENT_HTTP_TIMEOUT_SECONDS",
-        description="Timeout for HTTP requests",
+    turn_timeout_seconds: float | None = Field(
+        default=None,
+        validation_alias="AGENT_TURN_TIMEOUT_SECONDS",
+        description=(
+            "Wall-clock cap on a single turn (codex/openai only — a Codex "
+            "turn is otherwise unbounded: no max_turns, no interrupt). "
+            "None = no limit."
+        ),
+    )
+
+    sandbox_enabled: bool = Field(
+        default=True,
+        validation_alias="AGENT_SANDBOX_ENABLED",
+        description="Run code execution tools in a Docker sandbox "
+        "(requires Docker; disable to run the agent without code execution)",
     )
 
     sandbox_timeout_seconds: int = Field(
@@ -133,23 +258,76 @@ class Settings(BaseSettings):
         description="Timeout for sandbox code execution",
     )
 
-    # ==========================================================================
-    # RATE LIMITS / CONCURRENCY
-    # ==========================================================================
-
-    max_concurrent_requests: int = Field(
-        default=5,
-        validation_alias="AGENT_MAX_CONCURRENT_REQUESTS",
-        description="Max concurrent external API requests",
+    sandbox_allow_shell: bool = Field(
+        default=False,
+        validation_alias="AGENT_SANDBOX_ALLOW_SHELL",
+        description="Grant the raw shell (Bash) builtin. Off by default: host "
+        "shell is dropped regardless of the code-execution sandbox "
+        "(execute_code is the sanctioned code path), so it is an explicit opt-in.",
     )
 
 
 # Singleton instance
 settings = Settings.model_validate({})
 
-# Route through OpenRouter when the key is set
-if settings.openrouter_api_key:
-    os.environ.setdefault("ANTHROPIC_BASE_URL", "https://openrouter.ai/api")
-    os.environ.setdefault("ANTHROPIC_AUTH_TOKEN", settings.openrouter_api_key)
-    os.environ.setdefault("ANTHROPIC_API_KEY", "")
-    logger.info("OpenRouter enabled — routing API calls through openrouter.ai")
+
+def aux_model() -> str:
+    """Backend-coherent model for auxiliary agents (reviewer, backgrounds).
+
+    Explicit ``AGENT_AUX_MODEL`` wins. Otherwise Claude sessions get an
+    opus-class reviewer (best results on a subscription) and Codex/OpenAI
+    sessions reuse the session model — the one model the account accepts.
+    """
+    if settings.aux_model:
+        return settings.aux_model
+    return "claude-opus-4-6" if settings.agent_sdk == "claude" else settings.model
+
+
+# Route notes/logs paths into lup.workspace.paths so every consumer (history,
+# devtools, traces) honors the configured locations
+if settings.notes_path != "./notes" or settings.logs_path != "./logs":
+    from pathlib import Path
+
+    from lup.workspace.paths import configure
+
+    configure(
+        notes_dir=Path(settings.notes_path).resolve(),
+        logs_dir=Path(settings.logs_path).resolve(),
+    )
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api"
+"""OpenRouter's Anthropic-protocol endpoint, selected by OPENROUTER_API_KEY."""
+
+
+def compat_base_url() -> str | None:
+    """The compat endpoint settings select, or None for native routing.
+
+    An explicit ``OPENAI_BASE_URL`` wins; otherwise an ``OPENROUTER_API_KEY``
+    alone selects OpenRouter. The endpoint rides on ``LupAgentOptions.base_url``
+    into the compat engines — never on the process environment.
+    """
+    if settings.openai_base_url:
+        return settings.openai_base_url
+    if settings.openrouter_api_key:
+        return OPENROUTER_BASE_URL
+    return None
+
+
+def compat_api_key() -> str | None:
+    """The credential paired with :func:`compat_base_url`."""
+    return settings.openai_api_key or settings.openrouter_api_key
+
+
+def engine_for_settings() -> str:
+    """Map settings to the engine id.
+
+    ``AGENT_SDK=openai`` is the legacy alias of ``openai-compat``, and an
+    ``OPENROUTER_API_KEY`` upgrades the claude engine to ``claude-compat`` —
+    the same Claude scaffolding pointed at OpenRouter's Anthropic-protocol
+    endpoint through options, not ambient env.
+    """
+    if settings.agent_sdk == "openai":
+        return "openai-compat"
+    if settings.agent_sdk == "claude" and settings.openrouter_api_key:
+        return "claude-compat"
+    return settings.agent_sdk

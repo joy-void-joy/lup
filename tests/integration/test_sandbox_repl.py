@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.sandbox import Sandbox
+from lup.sandbox.container import Sandbox
 
 pytestmark = pytest.mark.integration
 
@@ -70,6 +70,44 @@ class TestReplPersistence:
             )
             assert r3["exit_code"] == 0
             assert "match: True" in r3["stdout"]
+
+
+class TestSharedMount:
+    """The documented /shared path actually exchanges files with the host."""
+
+    def test_host_file_readable_at_shared_path(self, tmp_path: Path) -> None:
+        """A file written to the host shared_dir is readable at /shared, the
+        container path the tool description advertises."""
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        (shared / "input.txt").write_text("from-host")
+
+        sandbox = Sandbox(
+            session_id="test-shared-mount", shared_dir=shared, pre_install=None
+        )
+        with sandbox:
+            mounts = {m.container_path: m for m in sandbox.mount_topology()}
+            assert mounts["/shared"].source == str(shared.resolve())
+
+            result = sandbox.run_code("print(open('/shared/input.txt').read(), end='')")
+            assert result["exit_code"] == 0
+            assert result["stdout"] == "from-host"
+
+    def test_sandbox_write_visible_on_host(self, tmp_path: Path) -> None:
+        """A file the sandbox writes under /shared appears on the host."""
+        shared = tmp_path / "shared"
+        shared.mkdir()
+
+        sandbox = Sandbox(
+            session_id="test-shared-write", shared_dir=shared, pre_install=None
+        )
+        with sandbox:
+            result = sandbox.run_code(
+                "open('/shared/output.txt', 'w').write('from-sandbox')"
+            )
+            assert result["exit_code"] == 0
+
+        assert (shared / "output.txt").read_text() == "from-sandbox"
 
 
 class TestInstallPackage:

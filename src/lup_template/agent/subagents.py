@@ -7,48 +7,70 @@ Each subagent has:
 - A specialized prompt (focused on one job)
 - A subset of tools (only what it needs)
 - Its own model (cheaper models for simpler tasks)
+
+Definitions use SubagentSpec (SDK-agnostic). Each backend interprets
+the same spec list:
+
+- Claude: converted to native ``AgentDefinition`` via
+  :func:`~lup.adapters.clients.claude.translate.spec_to_claude`
+- Codex/OpenAI: served as the ``run_subagent`` tool via
+  :func:`~lup.subagents.create_run_subagent_tool`, which dispatches a
+  one-shot query to the backend serving the spec's model
+
+A spec without a ``model`` inherits the session's main model on every
+backend; pinning one (as the specs below do) is a deliberate cost/skill
+choice that holds regardless of ``AGENT_SDK``.
+
+Subagents are one of several agent shapes — ``.claude/PATTERNS.md`` is
+the full catalog. Where the siblings live:
+
+- Nested agents: a one-shot :func:`lup.adapters.wiring.query` inside a
+  tool handler; the reviewer in ``agent/tools/reflect.py`` is the
+  exemplar
+- Background agents: ``lup.adapters.background``
+  (``BackgroundAgentParams`` + each engine's ``Engine.background``), with
+  the observer example in ``agent/tools/realtime.py``
+- Persistent agents: ``lup.realtime.scheduler`` and ``lup.realtime.relay``,
+  with example tools in ``agent/tools/realtime.py``
+- Data augmentation: ``agent/tools/example.py`` (domain dispatch,
+  null-filling, extraction)
 """
 
-from claude_agent_sdk import AgentDefinition
+from lup.adapters.tools.names import GLOB, READ, WEB_FETCH, WEB_SEARCH
+from lup.types import SubagentSpec
 
 # =============================================================================
-# TOOL LISTS (customize for your domain)
+# TEMPLATE: tool lists — grant each subagent only the tools its job needs
 # =============================================================================
-#
-# Use functions (not constants) so tool lists can be computed at runtime
-# based on available API keys, session context, etc.
-#
-# Example with conditional inclusion:
-#   def research_tools() -> list[str]:
-#       from lup_template.agent.config import settings
-#       tools = ["WebSearch", "WebFetch", "Read", "Glob"]
-#       if settings.exa_api_key:
-#           tools.append("mcp__search__search_exa")
-#       return tools
 
 
 def research_tools() -> list[str]:
-    """Tools for research subagents."""
+    """Names of the tools a research subagent is allowed to call.
+
+    A function rather than a constant so that a tool which depends on a
+    configured API key can be added conditionally, keeping that choice
+    beside the rest of the selection. Resolved at import here; to vary it
+    per session, call it from :func:`get_subagent_specs` instead.
+    """
     return [
-        "WebSearch",
-        "WebFetch",
-        "Read",
-        "Glob",
-        # Add domain-specific tools
+        WEB_SEARCH,
+        WEB_FETCH,
+        READ,
+        GLOB,
     ]
 
 
 def analysis_tools() -> list[str]:
-    """Tools for analysis subagents."""
+    """Names of the tools an analysis subagent is allowed to call."""
     return [
-        "Read",
-        "Glob",
-        # Add analysis tools
+        READ,
+        GLOB,
     ]
 
 
 # =============================================================================
-# SUBAGENT DEFINITIONS (customize for your domain)
+# TEMPLATE: subagent definitions — replace researcher/analyzer with your
+# domain's specialists (each spec: prompt, tool subset, pinned model)
 # =============================================================================
 
 
@@ -75,14 +97,15 @@ Research the topic/question given to you. Your output should be thorough and fac
 ```
 """
 
-researcher = AgentDefinition(
+researcher = SubagentSpec(
+    name="researcher",
     description=(
         "Research agent for gathering information. Searches multiple sources, "
         "verifies facts, and returns organized findings."
     ),
     prompt=RESEARCHER_PROMPT,
     tools=research_tools(),
-    model="haiku",  # Use cheaper model for research tasks
+    model="claude-opus-4-6",
 )
 
 
@@ -110,14 +133,15 @@ Analyze the given data/content and extract insights.
 ```
 """
 
-analyzer = AgentDefinition(
+analyzer = SubagentSpec(
+    name="analyzer",
     description=(
         "Analysis agent for examining data and extracting insights. "
         "Identifies patterns, anomalies, and draws conclusions."
     ),
     prompt=ANALYZER_PROMPT,
     tools=analysis_tools(),
-    model="haiku",
+    model="claude-opus-4-6",
 )
 
 
@@ -125,17 +149,12 @@ analyzer = AgentDefinition(
 # EXPORTED SUBAGENTS
 # =============================================================================
 
+ALL_SPECS: list[SubagentSpec] = [researcher, analyzer]
 
-def get_subagents() -> dict[str, AgentDefinition]:
-    """Build subagent definitions at runtime.
 
-    Using a factory function (not a module constant) allows:
-    - Tool lists computed from current settings/API keys
-    - Context-dependent subagent configuration
-    - Runtime reconfiguration between sessions
+def get_subagent_specs() -> list[SubagentSpec]:
+    """Return all subagent specs (SDK-agnostic).
+
+    Each adapter converts these into its native primitive at build time.
     """
-    return {
-        "researcher": researcher,
-        "analyzer": analyzer,
-        # Add more subagents for your domain
-    }
+    return list(ALL_SPECS)

@@ -1,171 +1,90 @@
-"""Conditional tool availability based on configuration.
+"""Decide which tools the agent is allowed to use this session.
 
 This is a TEMPLATE. Customize for your domain.
 
-Key patterns:
-1. Define tool sets as frozensets for fast membership testing
-2. ToolPolicy class computes excluded tools at construction
-3. from_settings() factory for easy initialization
-4. Separate get_mcp_servers() and get_allowed_tools() methods
+A tool may be unavailable because its dependency is unmet — an API key the
+settings don't carry, a mode that forbids it. :class:`ToolPolicy` is the one
+place that decision lives, so a tool that needs a key you haven't configured
+simply never reaches the agent (it can't call a tool that would only fail).
+
+The machinery (tag filtering, group predicates, server assembly, the
+hook-enforced allowlist) lives in :class:`lup.tool_policy.BaseToolPolicy`;
+this subclass only maps the application's settings onto exclusions. See
+the base class for the tag-vs-name rule of thumb.
 
 Usage:
+    from lup.hooks import create_tool_allowlist_hook
     from lup_template.agent.config import settings
     from lup_template.agent.tool_policy import ToolPolicy
 
-    policy = ToolPolicy.from_settings(settings)
-    mcp_servers = policy.get_mcp_servers()
-    allowed_tools = policy.get_allowed_tools()
+    policy = ToolPolicy(settings)
+    mcp_servers = policy.get_mcp_servers(*lup_servers)
+    hooks = create_tool_allowlist_hook(policy.get_allowed_tools(mcp_servers))
 """
 
-from __future__ import annotations
+from typing import TYPE_CHECKING
 
-from typing import TYPE_CHECKING, Any
+from lup.adapters.tools.names import BASH
+from lup.tool_policy import BaseToolPolicy, ExclusionReasons
 
 if TYPE_CHECKING:
     from lup_template.agent.config import Settings
 
 
-# =============================================================================
-# TOOL SETS - Define tools that require specific API keys
-# =============================================================================
-
-# Built-in SDK tools (always available)
-BUILTIN_TOOLS: frozenset[str] = frozenset(
-    {
-        "WebSearch",
-        "WebFetch",
-        "Read",
-        "Write",
-        "Glob",
-        "Grep",
-        "Bash",
-        "Task",
-        "TodoRead",
-        "TodoWrite",
-    }
-)
-
-# Define named tool sets for each API dependency.
-# Each set groups tools that share the same API key requirement.
-# This makes it clear which tools degrade when a key is missing.
-#
-# Example:
-# EXA_TOOLS: frozenset[str] = frozenset({
-#     "mcp__search__search_exa",
-# })
-#
-# FRED_TOOLS: frozenset[str] = frozenset({
-#     "mcp__financial__fred_series",
-#     "mcp__financial__fred_search",
-# })
-
-
-class ToolPolicy:
-    """Centralized policy for tool availability.
+class ToolPolicy(BaseToolPolicy):
+    """Map application settings to tool exclusions.
 
     Determines which tools are available based on:
     - API key availability (from settings)
     - Mode configuration (e.g., restricted mode)
     - Session context (e.g., allow certain tools only in some contexts)
+    - Host shell: raw shell (Bash) is dropped unless ``AGENT_SANDBOX_ALLOW_SHELL``
+      opts it back in — ``execute_code`` in the sandbox is the sanctioned code
+      path, so host shell is never granted implicitly, sandbox present or not.
 
-    Customize ``__init__`` to define your exclusion logic.
+    TEMPLATE: customize ``__init__`` to define your exclusion logic; override
+    ``group_enabled`` to gate groups on your domain's conditions (e.g. a
+    ``live_data`` group only outside restricted mode) and ``get_mcp_servers``
+    to register your domain's servers, e.g.::
+
+        def get_mcp_servers(self, *additional_servers):
+            servers = super().get_mcp_servers(*additional_servers)
+            servers["search"] = search_server
+            if not self.restricted_mode:
+                servers["live_data"] = live_data_server
+            return servers
     """
 
     def __init__(
         self,
-        settings: Settings,
+        settings: "Settings",
         *,
         restricted_mode: bool = False,
+        excluded_tools: ExclusionReasons | None = None,
+        excluded_tags: ExclusionReasons | None = None,
     ) -> None:
-        self.settings = settings
-        self.restricted_mode = restricted_mode
+        tags: ExclusionReasons = dict(excluded_tags or {})
+        names: ExclusionReasons = dict(excluded_tools or {})
 
-        excluded: set[str] = set()
+        # TEMPLATE: map each unmet requirement to its tag and the reason —
+        # replace the example-api check with your domain's keys
+        if not settings.example_api_key:
+            tags["requires:example-api"] = "EXAMPLE_API_KEY is not configured"
 
-        # TODO: Add your exclusion logic
-        # Example:
-        # if not settings.exa_api_key:
-        #     excluded.update(EXA_TOOLS)
-        # if not settings.fred_api_key:
-        #     excluded.update(FRED_TOOLS)
-        # if self.restricted_mode:
-        #     excluded.update(LIVE_DATA_TOOLS)
+        # Raw host shell is disallowed regardless of any code-execution
+        # sandbox: execute_code is the sanctioned code path. Opt it back in
+        # with AGENT_SANDBOX_ALLOW_SHELL.
+        if not settings.sandbox_allow_shell:
+            names[BASH] = (
+                "host shell is off by default (AGENT_SANDBOX_ALLOW_SHELL opts "
+                "it back in); execute_code is the sanctioned code path"
+            )
 
-        self.excluded_tools: frozenset[str] = frozenset(excluded)
+        # TEMPLATE: add more name exclusions for tools you don't own here
 
-    @classmethod
-    def from_settings(
-        cls,
-        settings: Settings,
-        *,
-        restricted_mode: bool = False,
-    ) -> ToolPolicy:
-        """Create a ToolPolicy from application settings.
-
-        Args:
-            settings: Application settings with API keys.
-            restricted_mode: If True, enables additional restrictions.
-
-        Returns:
-            ToolPolicy configured based on settings.
-        """
-        return cls(
-            settings,
+        super().__init__(
             restricted_mode=restricted_mode,
+            excluded_tools=names,
+            excluded_tags=tags,
         )
-
-    def get_mcp_servers(self, *additional_servers: Any) -> dict[str, Any]:
-        """Get MCP server configuration based on policy.
-
-        Args:
-            *additional_servers: Additional MCP servers to include.
-                These should be McpSdkServerConfig objects.
-
-        Returns:
-            Dict mapping server name to server config.
-
-        Customize this to return your domain's MCP servers.
-        """
-        servers: dict[str, Any] = {}
-
-        # Add any additional servers passed in
-        for server in additional_servers:
-            name = getattr(server, "name", str(server))
-            servers[name] = server
-
-        # TODO: Add your MCP servers
-        # Example:
-        # servers["search"] = search_server
-        # servers["financial"] = financial_server
-        #
-        # Conditional inclusion:
-        # if not self.restricted_mode:
-        #     servers["live_data"] = live_data_server
-
-        return servers
-
-    def get_allowed_tools(self) -> list[str]:
-        """Get list of allowed tools based on policy.
-
-        Returns:
-            Sorted list of tool names that are allowed.
-        """
-        # Start with all potential tools
-        tools: set[str] = set()
-
-        # Built-in tools
-        tools.update(BUILTIN_TOOLS)
-
-        # TODO: Add your tool sets
-        # tools.update(EXA_TOOLS)
-        # tools.update(FRED_TOOLS)
-        # tools.update(YOUR_DOMAIN_TOOLS)
-
-        # Remove excluded tools
-        tools -= self.excluded_tools
-
-        return sorted(tools)
-
-    def is_tool_available(self, tool_name: str) -> bool:
-        """Check if a specific tool is available under this policy."""
-        return tool_name not in self.excluded_tools
+        self.settings = settings

@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(ls:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, Task, AskUserQuestion
+allowed-tools: Bash(ls:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, Agent, AskUserQuestion
 description: Review and modify .claude structure, brainstorm improvements interactively
 ---
 

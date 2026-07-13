@@ -1,39 +1,33 @@
 [project]
 name = "lup"
 version = "0.1.0"
-description = "Agent development library for the Claude Agent SDK"
+description = "Agent development library for Claude and Codex agent SDKs"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 authors = [{ name = "Joy Void Joy", email = "joy.void.joy@gmail.com" }]
-keywords = [
-    "agent",
-    "ai",
-    "claude",
-    "llm",
-    "mcp",
-    "sdk",
-    "tools",
-]
+keywords = ["agent", "ai", "claude", "llm", "mcp", "sdk", "tools"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
     "Typing :: Typed",
 ]
 dependencies = [
-    "claude-agent-sdk>=0.1.26",
     "httpx>=0.28.1",
+    "mcp>=1.27.0",
     "pydantic>=2.12.5",
+    "pydantic-settings>=2.14.1",
     "rich>=14.3.1",
     "tenacity>=9.0.0",
 ]
 
 [project.optional-dependencies]
+claude = ["claude-agent-sdk>=0.1.26"]
+codex = ["openai-codex"]
 docker = ["docker>=7.1.0"]
 
 [project.urls]
@@ -48,6 +42,14 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+lup = ["py.typed"]
+
 [tool.pyright]
+# Independent of the workspace-root config: this lets the standalone library
+# type-check on its own (pyright run from this directory), where `src` resolves
+# to packages/lup/src. The root config re-lists this path under its own include
+# for the workspace-wide run; the two configs do not merge or conflict.
 include = ["src"]
-pythonVersion = "3.13"
+pythonVersion = "3.14"
+

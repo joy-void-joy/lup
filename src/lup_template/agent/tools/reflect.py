@@ -4,13 +4,13 @@ This is a TEMPLATE. Customize the input model and reviewer prompt
 for your domain.
 
 Pattern: A tool the agent calls to record its self-assessment before
-producing final output. A :class:`~lup.lib.reflect.ReflectionGate`
-hook enforces this — StructuredOutput (or sleep) is denied until
+producing final output. A :class:`~lup.reflect.ReflectionGate` enforces
+this — submit_output (or sleep, in persistent mode) is rejected until
 the agent has called ``review``.
 
-Optionally runs a reviewer sub-agent (independent ClaudeSDKClient)
+Optionally runs a reviewer sub-agent (an independent one-shot query)
 that critiques the main agent's reasoning with sandboxed file access
-to past outputs and web search.
+to past outputs (Read/Glob/Grep) and WebFetch for known URLs.
 
 Usage in core.py:
     1. Call ``create_reflect_tools(session_dir=..., outputs_dir=...)``
@@ -29,15 +29,21 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-from lup.client import query
+from lup.adapters.wiring import query
+from lup.adapters.tools.names import GLOB, GREP, READ, WEB_FETCH
 from lup.mcp import LupMcpTool, lup_tool
 from lup.reflect import ReflectionGate
+from lup_template.agent.config import (
+    compat_api_key,
+    compat_base_url,
+    engine_for_settings,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Reviewer system prompt (customize for your domain)
+# TEMPLATE: reviewer system prompt — target your domain's failure modes
 # ---------------------------------------------------------------------------
 
 REVIEWER_SYSTEM_PROMPT = """\
@@ -86,7 +92,7 @@ the exact claim, factor, or number you're questioning.
 
 
 # ---------------------------------------------------------------------------
-# Input model (customize for your domain)
+# TEMPLATE: reflection input — add your domain's self-assessment fields
 # ---------------------------------------------------------------------------
 
 
@@ -145,18 +151,41 @@ class ReviewOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+REVIEWER_TOOLS: list[str] = [READ, GLOB, GREP, WEB_FETCH]
+"""What the reviewer may call: file tools over past outputs (Read/Glob/Grep)
+plus WebFetch for known URLs. The reviewer reads and verifies; it does not act."""
+
+REVIEWER_THINKING_BUDGET = 8000
+"""Thinking-token budget for the reviewer's critique — enough to weigh the
+evidence without matching the main agent's full budget."""
+
+REVIEWER_MAX_TURNS = 5
+"""Turn cap for the reviewer: a bounded read-and-critique pass, not an
+open-ended investigation."""
+
+
 async def run_reviewer(
     validated: ReflectInput,
     outputs_dir: Path | None,
     *,
-    model: str = "claude-sonnet-4-6",
+    model: str = "claude-opus-4-6",
 ) -> str | None:
     """Run the reviewer sub-agent and return its critique text.
+
+    The tool never inspects the backend: it asks for the full reviewer setup —
+    file tools over past outputs, a thinking budget, a turn cap — and ``query``
+    keeps what the chosen backend can honor, dropping the rest with a log line.
+    The engine and endpoint come from the same settings helpers the session
+    uses (``engine_for_settings``/``compat_base_url``), and the template wires
+    ``reviewer_model=aux_model()`` (config.py), so the reviewer follows the
+    session's backend — including OpenRouter routing — without Anthropic
+    credentials on ``AGENT_SDK=codex``/``openai``, where it degrades to a
+    one-shot text critique.
 
     Args:
         validated: The reflection input from the main agent.
         outputs_dir: Path to past outputs for historical calibration.
-        model: Model to use for the reviewer (default: claude-sonnet-4-6).
+        model: Model to use for the reviewer (default: claude-opus-4-6).
     """
     prompt_sections = [
         "## Agent Assessment\n\n" + validated.assessment,
@@ -167,20 +196,21 @@ async def run_reviewer(
 
     reviewer_prompt = "\n\n".join(prompt_sections)
 
-    collector = await query(
+    response = await query(
         reviewer_prompt,
         prefix="  ↳ [reviewer] ",
         model=model,
-        system_prompt=REVIEWER_SYSTEM_PROMPT.format(
-            outputs_dir=outputs_dir or "N/A",
-        ),
-        max_thinking_tokens=8000,
+        engine=engine_for_settings(),
+        base_url=compat_base_url(),
+        api_key=compat_api_key(),
+        system_prompt=REVIEWER_SYSTEM_PROMPT.format(outputs_dir=outputs_dir or "N/A"),
+        max_thinking_tokens=REVIEWER_THINKING_BUDGET,
         permission_mode="bypassPermissions",
-        tools=["Read", "Glob", "Grep", "WebFetch"],
-        max_turns=5,
+        tools=REVIEWER_TOOLS,
+        max_turns=REVIEWER_MAX_TURNS,
     )
 
-    return collector.text
+    return response.text
 
 
 # ---------------------------------------------------------------------------
@@ -200,18 +230,20 @@ def create_reflect_tools(
     session_dir: Path,
     outputs_dir: Path | None = None,
     gate: ReflectionGate | None = None,
-    reviewer_model: str = "claude-sonnet-4-6",
+    reviewer_model: str = "claude-opus-4-6",
 ) -> ReflectToolKit:
     """Create the reflection tool(s) and their gate state.
 
     Returns both the tools (for MCP server registration) and the
-    gate (for wiring into :func:`~lup.lib.reflect.create_reflection_gate`).
+    gate (for wiring into :func:`~lup.reflect.create_reflection_gate`).
 
     Args:
         session_dir: Where to save the review output (JSON).
         outputs_dir: Path to past outputs for the reviewer to Read.
             If None, the reviewer won't have historical data access.
         gate: External gate instance to use. Creates a new one if None.
+        reviewer_model: Model for the reviewer sub-agent. The template
+            passes ``aux_model()`` so the reviewer follows the backend.
     """
     gate = gate or ReflectionGate()
 

@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from lup.throttle import Throttle
+from lup.resilience.throttle import Throttle
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_concurrency_limit() -> None:
 
     async def work() -> None:
         nonlocal active, max_active
-        async with throttle:
+        async with throttle.slot():
             active += 1
             max_active = max(max_active, active)
             await asyncio.sleep(0.05)
@@ -34,7 +34,7 @@ async def test_min_interval_enforced() -> None:
     timestamps: list[float] = []
 
     async def work() -> None:
-        async with throttle:
+        async with throttle.slot():
             timestamps.append(time.monotonic())
 
     await asyncio.gather(*[work() for _ in range(5)])
@@ -51,7 +51,7 @@ async def test_no_interval_is_fast() -> None:
     start = time.monotonic()
 
     async def work() -> None:
-        async with throttle:
+        async with throttle.slot():
             pass
 
     await asyncio.gather(*[work() for _ in range(5)])

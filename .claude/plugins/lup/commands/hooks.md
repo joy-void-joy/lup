@@ -28,7 +28,7 @@ The configurable hooks live in `.claude/plugins/lup/hooks/scripts/`:
 - **Neither**: Falls through to ask the user interactively
 - **PROTECTED_PATTERNS** (edits only): Files matching these always defer to user
 - **MAX_REAL_CHANGES** (edits only): Edits with more nontrivial lines than this defer to user
-- **ANTI_PATTERNS / TS_ANTI_PATTERNS** (edits only): Added lines matching these are denied with a reason; an inline `# claude: ignore` escalates to ask instead. `find_swallowed_excepts` adds a structural check for silent `except ...: pass` handlers on top of the line regexes
+- **ANTI_PATTERNS / TS_ANTI_PATTERNS** (edits only): Added lines matching these are denied with a reason; an inline `# lup: ignore` escalates to ask instead. `find_swallowed_excepts` adds a structural check for silent `except ...: pass` handlers on top of the line regexes
 
 ## Your Task
 

@@ -35,7 +35,7 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 ### Reusable Library Code
 
 - `packages/lup/src/lup/` — utilities (trace, hooks, metrics, mcp, retry, notes, history, paths)
-- `lup.paths.AGENT_VERSION` — version tracking pattern
+- `lup.workspace.paths.agent_version()` — version tracking pattern (reads `[tool.lup] agent_version` from pyproject.toml)
 
 ### DevTools CLI
 
@@ -57,7 +57,7 @@ Build a mental inventory of **portable capabilities** organized by category:
 
 1. **Plugin infrastructure**: hooks.json, hook scripts, plugin.json structure
 2. **Permission hooks**: auto-allow patterns for Bash, Edit, WebFetch; pre-push quality gates; test protection
-3. **Slash commands**: which ones are generic (commit, rebase, close, clean-gone, meta, update-docs, debug, refactor) vs lup-specific (init, feedback-loop, bump, update)
+3. **Slash commands**: which ones are generic (commit, rebase, close, clean-gone, meta, merge, debug, refactor) vs lup-specific (init, feedback-loop, bump, update)
 4. **Library utilities**: print_block, TraceLogger, version tracking, retry decorator, cache, hook composition
 5. **CLAUDE.md patterns**: coding standards, git workflow, editing style, debugging philosophy
 6. **DevTools patterns**: CLI structure, sync tracking
@@ -91,7 +91,7 @@ These work in any repo:
 - **Plugin infrastructure**: The `.claude/plugins/lup/` directory structure itself
 - **Permission hooks**: auto_allow_bash (adapt patterns), auto_allow_edits (adapt for target's file types), auto_allow_fetch (adapt URL patterns)
 - **Pre-push quality gates**: Adapt to target's linter/type-checker/test runner
-- **Generic commands**: commit, rebase, close, clean-gone, meta, update-docs, debug, refactor, add-command, modify-command, merge-conflict
+- **Generic commands**: commit, rebase, close, clean-gone, meta, debug, refactor, add-command, modify-command, merge, principle, review, create-investigator
 - **CLAUDE.md patterns**: Git workflow, editing style, asking questions, debugging philosophy
 - **Settings patterns**: permission structure in settings.json
 
@@ -100,7 +100,7 @@ These work in any repo:
 These port well to other Python projects:
 
 - **Library utilities**: hook composition, version tracking, retry, cache
-- **DevTools CLI**: The `lup-devtools` typer app structure — `main.py` composing sub-apps, `pyproject.toml` entry point. Even if the target doesn't need every subcommand, the skeleton (api, dev, git, sync) gives Claude Code reliable tooling instead of ad-hoc scripts.
+- **DevTools CLI**: The `lup-devtools` typer app structure — `main.py` composing sub-apps, `pyproject.toml` entry point. Even if the target doesn't need every subcommand, the skeleton (dev, py, sync, usage, version) gives Claude Code reliable tooling instead of ad-hoc scripts.
 - **Upstream sync**: downstream.json + sync commands (`lup-devtools sync`)
 
 ### Portable if Agent SDK
@@ -111,11 +111,13 @@ If the target repo uses (or will use) the Claude Agent SDK, the **self-improveme
 - **Feedback loop**: feedback collection, trace analysis, metrics aggregation, scoring CSV
 - **Session management**: CLI with `run` + `loop` commands, auto-commit, session storage
 - **DevTools**: The full `lup-devtools` CLI (trace, feedback, dev, version, usage)
-- **Version tracking**: version.py pattern for tracking agent behavior changes
+- **Version tracking**: `[tool.lup] agent_version` in pyproject.toml + `lup-devtools version bump` for tracking agent behavior changes
 - **Commands**: `init`, `feedback-loop`, `bump`, `update` — the self-improvement workflow
 - **TEMPLATE_CLAUDE.md**: Section-level merge into the target's existing CLAUDE.md (add missing sections, leave existing ones)
 
 When the target has Agent SDK code, adapt the scaffolding to wrap their existing agent — don't replace it. The lup patterns (trace logging, scoring, feedback collection) layer on top of whatever agent they already have.
+
+These patterns are **opt-in, not a bundle**: reflection, realtime/persistent mode, the feedback loop, and the commit loop each port only if the target actually needs them (see CLAUDE.md § Scaffolding Is a Menu, Not a Mandate). Don't install a pattern the target won't use — dead scaffolding is worse than a capability you can add later.
 
 ### Skip (never port)
 
@@ -131,19 +133,19 @@ Before deciding what to install, determine **where** it goes. Two options:
 
 Create `.claude/plugins/lup/` as a standalone local plugin in the target repo. This requires:
 
-1. **Plugin directory**: `.claude/plugins/lup/.claude-plugin/plugin.json`
-2. **Local marketplace** in settings.json — add `extraKnownMarketplaces.local` pointing to the target's `.claude/plugins/` directory:
+1. **Plugin directory**: `.claude/plugins/lup/.claude-plugin/plugin.json` — the plugin entry's `name` stays `lup` (so commands keep the `lup:` prefix everywhere).
+2. **Marketplace**: `.claude/plugins/.claude-plugin/marketplace.json` with a **project-unique** `name` (use the target's package/repo name, e.g. `myproject`), listing the `lup` plugin:
    ```json
-   "extraKnownMarketplaces": {
-     "local": { "source": { "source": "directory", "path": "." } }
-   }
+   { "name": "myproject", "plugins": [{ "name": "lup", "source": "./lup" }] }
    ```
-3. **Enable the plugin** in settings.json:
+3. **Register + enable** in settings.json under that same unique name:
    ```json
-   "enabledPlugins": { "lup@local": true }
+   "extraKnownMarketplaces": { "myproject": { "source": { "source": "directory", "path": "./.claude/plugins" } } },
+   "enabledPlugins": { "lup@myproject": true }
    ```
+   On a Python target where `lup-devtools` is installed, `lup-devtools dev plugin name` does steps 2–3 automatically (default name: the target's `[project].name`).
 
-This is the cleanest approach — lup lives in its own namespace, hooks don't collide, commands get the `lup:` prefix.
+**Never name the marketplace `lup` or `local`.** Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name collides across every repo that registers it — an install from one repo silently shadows the others. The plugin entry stays `lup`; only the *marketplace* is named per-project.
 
 ### Option B: Merge into an existing plugin
 
@@ -151,7 +153,7 @@ If the target already has a local plugin (e.g., `.claude/plugins/myproject/`), o
 
 **In non-interactive mode, always use Option A.**
 
-When the target already has `extraKnownMarketplaces.local` and other local plugins, lup installs alongside them naturally — no conflict.
+When the target already has other local plugins, lup installs alongside them under its own project-named marketplace — no conflict.
 
 ## Phase 5: Decide What to Install
 
@@ -161,7 +163,7 @@ Use your judgment based on what you found in Phases 1-3. The analysis should dri
 
 Be conservative — only install what clearly adds value. Typical candidates (but decide based on the actual target):
 
-- **Plugin infrastructure**: plugin.json, hooks.json, settings.json (local marketplace + plugin enablement)
+- **Plugin infrastructure**: plugin.json, hooks.json, settings.json (project-named marketplace + plugin enablement)
 - **Permission hooks** adapted to the target's ecosystem (its build tool, test runner, linter, doc URLs)
 - **Generic commands** that work in any repo (git workflow, CLAUDE.md maintenance, meta, refactor, etc.)
 - **CLAUDE.md**: Perform a **section-level merge** using `TEMPLATE_CLAUDE.md` (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`). Read the template, use the `<!-- section: ... -->` markers to identify independent merge units, adapt for the target's project name and ecosystem, then compare marked sections against the target's existing CLAUDE.md. Add sections that are missing; leave existing sections untouched. If no CLAUDE.md exists, create one from the adapted template.
@@ -197,6 +199,7 @@ For each item being installed:
    - Replace `uv run` with target's equivalent (npm run, cargo, make, etc.) in hooks and commands
    - Adjust file path patterns in hooks for target's directory structure
    - Keep command markdown structure but update tool references and examples
+   - Walk the `TEMPLATE:` markers in ported scaffolding files — each marks a domain decision with a one-line description. Adapt the code a marker points at to the target (and remove the marker), or leave it in place as an open decision the target gathers later with `uv run lup-devtools dev todos`
 3. **Write to the target repo** — create directories as needed
 4. **Never overwrite** existing files without asking (even in non-interactive mode, warn and skip)
 
@@ -208,7 +211,8 @@ For each item being installed:
 |---|---|
 | `from lup_template.*` → `from <target>.*` imports | `lup-devtools` CLI entry point name |
 | `src/lup_template/` → `src/<target>/` paths | `@lup_tool(...)`, `LupMcpTool` |
-| `pyproject.toml` package name | `.claude/plugins/lup/`, `lup@local` |
+| `pyproject.toml` package name | `.claude/plugins/lup/` directory |
+| marketplace `name` (marketplace.json) → `<target>` | plugin entry `name`: `lup` (so `/lup:*` is stable) |
 | Main CLI entry point name | `.lup/` state directory |
 | Logger module paths | `lup-tools`, `lup-sandbox-*`, `lup-mcp-*` |
 | | Naming convention ("Lup" = inner agent) |

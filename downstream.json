@@ -3,6 +3,14 @@
     {
       "name": "lup",
       "url": "https://github.com/joy-void-joy/lup"
+    },
+    {
+      "name": "assistant",
+      "url": "https://github.com/joy-void-joy/assistant"
+    },
+    {
+      "name": "inkwell",
+      "url": "https://github.com/joy-void-joy/inkwell"
     }
   ]
 }

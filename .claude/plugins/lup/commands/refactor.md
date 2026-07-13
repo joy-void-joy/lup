@@ -70,6 +70,18 @@ For each file, **write it fresh** using the Write tool — do not edit the origi
 - **Improve structure** where the original was unclear or poorly organized
 - **Keep the same filename and location**
 
+### Prompt Content Is Code
+
+Prompt strings (system prompts, agent instructions, guidance templates) are code — they have intent, structure, and conventions. When refactoring files containing prompts, apply the same CLAUDE.md principles:
+
+- **DRY**: If the same advice appears in multiple sections, consolidate. Every token in a system prompt is paid on every invocation.
+- **Code as Documentation**: No defensive language added after a single bad outcome. No references to historical performance. Instructions should be structural, not reactive.
+- **Avoid over-engineering**: Every section must earn its token cost. Guidance for rare cases shouldn't bloat the universal prompt that all invocations pay for. Move case-specific strategy into case-specific guidance blocks.
+- **No redundant emphasis**: Saying the same thing 3 times in different sections isn't reinforcement — it's noise. State advice once in the right place.
+- **Structural over behavioral**: "Always do X" is better than "Don't do Y, we've seen this go wrong." Frame instructions as what TO do, not what mistakes to avoid.
+
+Present prompt content changes as a review with findings — prompt changes affect agent behavior and may require a version bump.
+
 ### 6. Verify
 
 After rewriting:

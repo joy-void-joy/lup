@@ -1,3 +1,7 @@
+# lup: ignore[import-re, re-call, string-replace]
+# Renaming IS text surgery over source and config files — every .replace
+# rewrites a known literal in place and the import-statement rewriter is a
+# regex by nature, so those rules are opted out file-wide.
 """Package renaming for downstream project initialization.
 
 Renames the ``lup_template`` Python package to a project-specific name,
@@ -15,7 +19,8 @@ import re
 from pathlib import Path
 import typer
 
-from lup.paths import find_project_root
+from lup.workspace.paths import find_project_root
+from lup_template.devtools.dev.plugin import set_marketplace_name
 from lup_template.devtools.utils import git
 
 PACKAGE_IMPORT_RE = re.compile(
@@ -48,10 +53,16 @@ def is_framework_reference(line: str) -> bool:
     return any(marker in line for marker in FRAMEWORK_MARKERS)
 
 
-def rename_imports_in_file(path: Path, new_name: str) -> list[str]:
+def rename_match(matched: str, new_name: str) -> str:
+    """Rewrite the package name inside one matched piece of source text."""
+    return matched.replace("lup_template", new_name, 1)
+
+
+def rename_imports_in_file(path: Path, new_name: str, dry_run: bool) -> list[str]:
     """Rename ``from lup_template.`` / ``import lup_template`` imports in a single file.
 
-    Returns a list of change descriptions (empty if no changes).
+    Returns a list of change descriptions (empty if no changes); a dry run
+    detects and describes without writing.
     """
     text = path.read_text()
     changes: list[str] = []
@@ -65,17 +76,17 @@ def rename_imports_in_file(path: Path, new_name: str) -> list[str]:
         if is_framework_reference(line):
             return full_match
 
-        replaced = full_match.replace("lup_template", new_name, 1)  # claude: ignore
+        replaced = rename_match(full_match, new_name)
         changes.append(f"  {path}: {full_match!r} -> {replaced!r}")
         return replaced
 
     new_text = PACKAGE_IMPORT_RE.sub(replace_import, text)
-    if new_text != text:
+    if not dry_run and new_text != text:
         path.write_text(new_text)
     return changes
 
 
-def rename_in_pyproject(path: Path, new_name: str) -> list[str]:
+def rename_in_pyproject(path: Path, new_name: str, dry_run: bool) -> list[str]:
     """Update pyproject.toml: package name, CLI entry point, devtools import path."""
     text = path.read_text()
     changes: list[str] = []
@@ -101,12 +112,12 @@ def rename_in_pyproject(path: Path, new_name: str) -> list[str]:
             f"  devtools import path: lup_template.devtools -> {new_name}.devtools"
         )
 
-    if new_text != text:
+    if not dry_run and new_text != text:
         path.write_text(new_text)
     return changes
 
 
-def rename_cli_app_name(cli_path: Path, new_name: str) -> list[str]:
+def rename_cli_app_name(cli_path: Path, new_name: str, dry_run: bool) -> list[str]:
     """Update the Typer app name in the CLI module."""
     if not cli_path.exists():
         return []
@@ -116,8 +127,8 @@ def rename_cli_app_name(cli_path: Path, new_name: str) -> list[str]:
     if old not in text:
         return []
 
-    text = text.replace(old, f'name="{new_name}"', 1)
-    cli_path.write_text(text)
+    if not dry_run:
+        cli_path.write_text(text.replace(old, f'name="{new_name}"', 1))
     return [f"  CLI app name: lup -> {new_name}"]
 
 
@@ -147,50 +158,29 @@ def rename_package(
         typer.echo(f"Error: {new_pkg} already exists", err=True)
         raise typer.Exit(1)
 
-    all_changes: list[str] = []
+    all_changes: list[str] = []  # lup: ignore[empty-collection] — change log
 
-    python_files: list[Path] = []
-    for search_dir in [src_dir, root / "tests"]:
-        if search_dir.is_dir():
-            python_files.extend(search_dir.rglob("*.py"))
+    python_files = [
+        py_file
+        for search_dir in [src_dir, root / "tests"]
+        if search_dir.is_dir()
+        for py_file in search_dir.rglob("*.py")
+    ]
 
     typer.echo("Import renames:" if dry_run else "Renaming imports...")
     for py_file in sorted(python_files):
-        changes = rename_imports_in_file(py_file, new_name) if not dry_run else []
-        if dry_run:
-            text = py_file.read_text()
-            for m in PACKAGE_IMPORT_RE.finditer(text):
-                line_start = text.rfind("\n", 0, m.start()) + 1
-                line_end = text.find("\n", m.end())
-                line = text[line_start : line_end if line_end != -1 else len(text)]
-                if not is_framework_reference(line):
-                    changes.append(
-                        f"  {py_file}: {m.group(0)!r} -> {m.group(0).replace('lup_template', new_name, 1)!r}"  # claude: ignore
-                    )
-        all_changes.extend(changes)
+        all_changes.extend(rename_imports_in_file(py_file, new_name, dry_run))
 
     pyproject = root / "pyproject.toml"
     typer.echo("\npyproject.toml:" if dry_run else "Updating pyproject.toml...")
-    if dry_run:
-        text = pyproject.read_text()
-        if 'name = "lup-template"' in text:
-            all_changes.append(f"  package name: lup-template -> {new_name}")
-        if 'lup = "lup_template.environment.cli.__main__:app"' in text:
-            all_changes.append(f"  CLI entry point: lup -> {new_name}")
-        if 'lup-devtools = "lup_template.devtools.main:app"' in text:
-            all_changes.append(
-                f"  devtools import path: lup_template.devtools -> {new_name}.devtools"
-            )
-    else:
-        all_changes.extend(rename_in_pyproject(pyproject, new_name))
+    all_changes.extend(rename_in_pyproject(pyproject, new_name, dry_run))
 
     cli_path = old_pkg / "environment" / "cli" / "__main__.py"
     typer.echo("\nCLI app name:" if dry_run else "Updating CLI app name...")
-    if dry_run:
-        if cli_path.exists() and 'name="lup"' in cli_path.read_text():
-            all_changes.append(f"  CLI app name: lup -> {new_name}")
-    else:
-        all_changes.extend(rename_cli_app_name(cli_path, new_name))
+    all_changes.extend(rename_cli_app_name(cli_path, new_name, dry_run))
+
+    typer.echo("\nMarketplace:" if dry_run else "Naming the plugin marketplace...")
+    all_changes.extend(f"  {c}" for c in set_marketplace_name(root, new_name, dry_run))
 
     if dry_run:
         typer.echo("\nDirectory rename:")
