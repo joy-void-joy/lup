@@ -184,9 +184,9 @@ def build_session_options(
     policy = ToolPolicy(settings)
 
     hooks = create_permission_hooks(rw_dirs=notes.rw, ro_dirs=notes.ro)
-    policy_servers: dict[str, McpServerEntry] = {}  # lup: ignore[empty-collection]
-    allowed_tools: list[str] = []  # lup: ignore[empty-collection]
-    served_groups: list[str] = []  # lup: ignore[empty-collection]
+    policy_servers: dict[str, McpServerEntry] = {}
+    allowed_tools: list[str] = []
+    served_groups: list[str] = []
     if not toolless:
         # In-process assembly — consumed by hook-enforced engines (claude*).
         toolset = build_session_toolset(

@@ -43,9 +43,7 @@ class Settings(BaseSettings):
         """
         # TEMPLATE: list your domain's optional API keys here, e.g.
         # "EXAMPLE_API_KEY": self.example_api_key,
-        optional_keys: dict[
-            str, str | None
-        ] = {}  # lup: ignore[empty-collection] — TEMPLATE table
+        optional_keys: dict[str, str | None] = {}  # lup: ignore[dict-str-payload]
         missing = [name for name, value in optional_keys.items() if not value]
 
         if missing:

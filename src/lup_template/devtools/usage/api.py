@@ -44,7 +44,10 @@ class ExtraUsage(TypedDict):
     utilization: float
 
 
-class UsageResponse(TypedDict):
+# total=False: the payload is an unvalidated resp.json() from an unversioned
+# OAuth endpoint, so any top-level key may be absent — readers probe with .get
+# and guard a bucket's presence before subscripting its fields.
+class UsageResponse(TypedDict, total=False):
     five_hour: UsageBucket | None
     seven_day: UsageBucket | None
     seven_day_opus: UsageBucket | None

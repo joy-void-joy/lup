@@ -159,7 +159,7 @@ def finding_for(entry: ManifestEntry, note: NoteRef) -> NoteFinding:
 
 def render_concern(entry: ManifestEntry, base: str) -> str:
     branch = entry.branch or "(none)"
-    badges: list[str] = []  # lup: ignore[empty-collection] — badge assembly
+    badges: list[str] = []
     badges.append(
         '<span class="badge ok">verifier: accepted</span>'
         if entry.accepted

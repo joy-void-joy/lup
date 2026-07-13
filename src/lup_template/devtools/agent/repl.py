@@ -156,7 +156,7 @@ def print_response_stats(response: LupResponse, console: "Console") -> float:
     Returns the turn's cost in USD (0.0 when the backend reports none)
     so callers can accumulate a session total.
     """
-    parts: list[str] = []  # lup: ignore[empty-collection] — conditional assembly
+    parts: list[str] = []
     cost = 0.0
     if response.result and response.result.duration_ms:
         secs = response.result.duration_ms / 1000
@@ -259,7 +259,7 @@ async def repl(
 
     # -- prompt_toolkit session --
     session_cost = 0.0
-    pending_images: list[ClipboardImage] = []  # lup: ignore[empty-collection]
+    pending_images: list[ClipboardImage] = []
 
     def rprompt() -> FormattedText:
         parts = [effective_model]

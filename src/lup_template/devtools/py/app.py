@@ -244,11 +244,11 @@ def imports_cmd(
     current_modules = [module]
 
     for current_depth in range(1, depth + 1):
-        next_modules: list[str] = []  # lup: ignore[empty-collection] — BFS frontier
+        next_modules: list[str] = []
         if current_depth > 1:
             typer.echo(f"\n--- Depth {current_depth} ---")
 
-        all_entries: list[ImportEntry] = []  # lup: ignore[empty-collection] — fold
+        all_entries: list[ImportEntry] = []
         for mod_name in current_modules:
             mod_path = find_module_path(mod_name)
             if mod_path is None or not mod_path.exists():

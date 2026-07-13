@@ -1,4 +1,4 @@
-# lup: ignore[any-type, dict-get, empty-collection, tuple-shape]
+# lup: ignore[any-type, dict-get, tuple-shape]
 # Test fixtures and assertions construct these shapes deliberately.
 """Realtime relay wiring: mailbox protocol, served tools, and the wake loop.
 
