@@ -9,9 +9,6 @@ carries. The ``openai-compat`` engine reuses it and appends its
 custom-provider definition afterward.
 """
 
-from collections.abc import Callable
-from contextlib import AbstractContextManager, nullcontext
-
 from lup.adapters.clients.codex.config import (
     build_mcp_config_overrides,
     build_sandbox_config_overrides,
@@ -38,32 +35,6 @@ def codex_effort(reasoning_effort: str | None) -> str | None:
         return None
     mapped = CODEX_EFFORT_MAP.get(reasoning_effort)  # lup: ignore[dict-get]
     return mapped or reasoning_effort
-
-
-def subprocess_sandbox_cleanup(
-    opts: LupAgentOptions,
-) -> Callable[[], AbstractContextManager[object]]:
-    """A factory for the session's sandbox-cleanup guard, entered once per open.
-
-    The Codex/OpenAI tool subprocess may be killed before it can clean up its
-    own container; each opened session enters a fresh guard so the parent
-    removes the container however the subprocess died. A guard is single-use
-    (``@contextmanager``), which is why the translation carries this factory
-    rather than a guard instance. A ``nullcontext`` factory without the docker
-    extra, or when the build names no session.
-    """
-    session_id, shared_dir = opts.session_id, opts.shared_dir
-    if session_id is None or shared_dir is None:
-        return nullcontext
-    try:
-        from lup.sandbox.container import sandbox_cleanup
-    except ImportError:
-        return nullcontext
-
-    def open_guard() -> AbstractContextManager[object]:
-        return sandbox_cleanup(session_id=session_id, shared_dir=shared_dir)
-
-    return open_guard
 
 
 def budget_if_priced(opts: LupAgentOptions) -> float | None:
@@ -93,9 +64,18 @@ def build_codex_native(opts: LupAgentOptions) -> CodexNativeConfig:
     """
     overrides: list[str] = []
     if opts.served_tool_groups:
+        if opts.serve_tools_command is None:
+            raise ValueError(
+                "served_tool_groups needs serve_tools_command — the command "
+                "line that serves one group when '--server <name>' is "
+                "appended. How the caller's groups are served is the "
+                "caller's contract to name."
+            )
         overrides.extend(
             build_mcp_config_overrides(
-                env=dict(opts.mcp_env), servers=opts.served_tool_groups
+                command=opts.serve_tools_command,
+                servers=opts.served_tool_groups,
+                env=dict(opts.mcp_env),
             )
         )
     if opts.writable_roots:
@@ -111,6 +91,5 @@ def build_codex_native(opts: LupAgentOptions) -> CodexNativeConfig:
         max_budget_usd=budget_if_priced(opts),
         usage_cost=opts.usage_cost,
         turn_timeout_seconds=opts.turn_timeout_seconds,
-        cleanup=subprocess_sandbox_cleanup(opts),
-        realtime_dir=opts.realtime_dir if opts.realtime else None,
+        session_resources=opts.session_resources,
     )

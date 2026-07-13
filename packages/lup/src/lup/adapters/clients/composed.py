@@ -13,7 +13,6 @@ verb, never subclassing the client.
 
 from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager
-from typing import TYPE_CHECKING
 
 from lup.adapters.clients.Client import Client
 from lup.adapters.clients.sessions.Session import Session
@@ -22,9 +21,6 @@ from lup.adapters.clients.streams.replay import ReplayStream
 from lup.adapters.clients.streams.Stream import Stream
 from lup.telemetry.trace import TraceLogger
 from lup.types import LupEvent, LupResponse
-
-if TYPE_CHECKING:
-    from lup.realtime.relay import RealtimeMailbox
 
 
 class ComposedClient(Client):
@@ -36,9 +32,6 @@ class ComposedClient(Client):
         streams: The engine's live event stream, when its SDK has one;
             left ``None``, the slot is filled with :class:`ReplayStream`
             over the same sessions.
-        mailbox: The realtime file-relay endpoint, when the engine's
-            translation requested persistent mode — a composed slot, not
-            a caller knob.
     """
 
     def __init__(
@@ -46,11 +39,9 @@ class ComposedClient(Client):
         sessions: Sessions,
         *,
         streams: Stream | None = None,
-        mailbox: "RealtimeMailbox | None" = None,
     ) -> None:
         self.sessions = sessions
         self.streams = streams if streams is not None else ReplayStream(sessions)
-        self.mailbox = mailbox
 
     def session(
         self, *, resume: str | None = None

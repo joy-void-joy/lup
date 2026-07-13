@@ -8,6 +8,7 @@ never imports from SDK packages directly. The hook vocabulary lives in
 """
 
 from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager
 from typing import Literal
 
 from pydantic import BaseModel, Field, SerializeAsAny
@@ -169,6 +170,17 @@ type UsageCost = Callable[[Usage], float]
 Backends that report token counts but no cost take one of these to enforce a
 budget; build it from per-token rates with the shared
 ``lup.adapters.clients.usage.per_mtok_usage_cost`` helper.
+"""
+
+
+type SessionResource = Callable[[], AbstractContextManager[object]]
+"""A factory for one session-scoped resource.
+
+Called once per session open; the returned context is entered with the
+session and exited when it closes. What must live and die with a session
+(a subprocess sandbox's cleanup guarantee) arrives as one of these on
+``LupAgentOptions.session_resources`` — a factory rather than a context,
+because one client can open many sessions.
 """
 
 

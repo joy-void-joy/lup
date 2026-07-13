@@ -348,6 +348,7 @@ class TestOpenAICompatProviderConfig:
                 system_prompt="test",
                 base_url="http://localhost:8000/v1",
                 served_tool_groups=["notes", "sandbox"],
+                serve_tools_command=["uv", "run", "lup-devtools"],
             )
         )
         assert any("mcp_servers.notes" in o for o in native.config_overrides)

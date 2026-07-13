@@ -330,6 +330,7 @@ class TestCodexEngine:
             model="gpt-5.5",
             system_prompt="do it",
             served_tool_groups=["notes", "sandbox"],
+            serve_tools_command=["uv", "run", "lup-devtools", "agent", "serve-tools"],
             reasoning_effort="high",
             turn_timeout_seconds=120.0,
         )
@@ -340,7 +341,6 @@ class TestCodexEngine:
         assert any(o.startswith("mcp_servers.sandbox.") for o in overrides)
         assert native.effort == "high"
         assert native.turn_timeout_seconds == 120.0
-        assert client.mailbox is None
         # The recipe composed the wall clock the runtime lacks.
         assert isinstance(client, ComposedClient)
         assert isinstance(client.sessions, TimeoutSessions)

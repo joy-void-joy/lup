@@ -17,7 +17,6 @@ from lup.adapters.clients.sessions.budget import BudgetedSessions
 from lup.adapters.clients.sessions.Sessions import Sessions
 from lup.adapters.clients.sessions.timeout import TimeoutSessions
 from lup.adapters.options import LupAgentOptions
-from lup.realtime.relay import RealtimeMailbox
 
 
 def create_codex(options: LupAgentOptions) -> Client:
@@ -28,7 +27,7 @@ def create_codex(options: LupAgentOptions) -> Client:
     servers — enforcement here is the runtime's native sandbox) and the
     Claude-only ``coding_harness_preset``/``sdk_sandbox`` shape flags. Subagent
     specs are served through the ``run_subagent`` tool group rather than
-    run natively. Persistent mode surfaces the file-relay mailbox.
+    run natively.
     """
     return compose_codex(refuse_unconsumed("codex", options, build_codex_native))
 
@@ -43,7 +42,7 @@ def compose_codex(native: CodexNativeConfig) -> ComposedClient:
     metering (with the budget refusal) when ``usage_cost`` prices the
     token counts — cumulative, because Codex usage reports thread
     totals. ``openai-compat`` reuses this composition over its own
-    translation, mailbox included.
+    translation.
     """
     sessions: Sessions = CodexSessions(native)
     if native.turn_timeout_seconds is not None:
@@ -55,9 +54,4 @@ def compose_codex(native: CodexNativeConfig) -> ComposedClient:
             max_budget_usd=native.max_budget_usd,
             cumulative=True,
         )
-    mailbox = (
-        RealtimeMailbox(native.realtime_dir)
-        if native.realtime_dir is not None
-        else None
-    )
-    return ComposedClient(sessions, mailbox=mailbox)
+    return ComposedClient(sessions)

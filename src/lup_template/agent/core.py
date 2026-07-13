@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from lup.adapters.options import LupAgentOptions
     from lup.sandbox.container import Sandbox
-    from lup.types import UsageCost
+    from lup.types import SessionResource, UsageCost
 
 from lup_template.agent.config import (
     compat_api_key,
@@ -49,6 +49,11 @@ from lup.types import (
 from lup.workspace.paths import agent_version
 
 logger = logging.getLogger(__name__)
+
+SERVE_TOOLS_COMMAND = ["uv", "run", "lup-devtools", "agent", "serve-tools"]
+"""How this project serves a tool group to subprocess engines: the
+devtools stdio server, one subprocess per group (``--server <name>``
+appended by the engine's translation)."""
 
 
 class CodexScaffold(BaseModel):
@@ -245,6 +250,7 @@ def build_session_options(
         hooks=hooks,
         allowed_tools=allowed_tools,
         served_tool_groups=served_groups,
+        serve_tools_command=SERVE_TOOLS_COMMAND,
         add_dirs=list(notes.all_dirs),
         permission_mode=settings.permission_mode,
         max_turns=settings.max_turns,
@@ -253,7 +259,6 @@ def build_session_options(
         max_budget_usd=settings.max_budget_usd,
         turn_timeout_seconds=settings.turn_timeout_seconds,
         usage_cost=build_usage_cost(),
-        realtime=realtime,
         base_url=compat_base_url(),
         api_key=compat_api_key(),
         model_provider=settings.openai_model_provider,
@@ -261,9 +266,7 @@ def build_session_options(
         approval_policy=settings.codex_approval_policy,
         mcp_env=mcp_env,
         writable_roots=writable_roots,
-        session_id=notes.session.name,
-        shared_dir=notes.session / "sandbox_shared",
-        realtime_dir=realtime_dir,
+        session_resources=build_session_cleanup(notes),
     )
 
 
@@ -388,6 +391,23 @@ def build_session_sandbox(notes: "NotesConfig") -> "Sandbox | None":
     )
 
 
+def build_session_cleanup(notes: "NotesConfig") -> "list[SessionResource]":
+    """The subprocess sandbox's cleanup guarantee, when docker is present.
+
+    A sandbox living in a served-tool subprocess can be killed before its
+    own atexit cleanup runs; the engine enters this factory's context with
+    the session so the container and volume are removed however the
+    subprocess died. Without the docker extra there is nothing to clean.
+    """
+    try:
+        from lup.sandbox.container import sandbox_cleanup
+    except ImportError:
+        return []
+    session_id = notes.session.name
+    shared_dir = notes.session / "sandbox_shared"
+    return [lambda: sandbox_cleanup(session_id=session_id, shared_dir=shared_dir)]
+
+
 class SessionBuild(BaseModel):
     """A constructed session client plus the notes it reports into."""
 
@@ -501,20 +521,31 @@ async def run_persistent_agent(
     directory; a persistent session has no ``submit_output`` finalization, so
     no session JSON is saved.
 
-    The relay transport is for subprocess engines (codex/openai-compat) —
-    they surface a ``client.mailbox``. An in-process engine (Claude — one
-    never-ending turn with a Stop hook, see PATTERNS.md, Persistent Agent)
-    has no relay mailbox, so this entry point raises rather than running
-    there.
+    The relay transport is for subprocess engines (codex/openai-compat),
+    whose served ``session`` tools write the mailbox files the parent
+    polls. An in-process engine (Claude — one never-ending turn with a
+    Stop hook, see PATTERNS.md, Persistent Agent) never writes them, so
+    this entry point refuses to start there.
 
     Returns:
         The completed-turn count.
     """
-    from lup.realtime.relay import run_relay_session
+    from lup.realtime.relay import (
+        REALTIME_DIRNAME,
+        RealtimeMailbox,
+        run_relay_session,
+    )
     from lup.realtime.scheduler import Scheduler
     from lup.reflect import ReflectionGate
 
     from lup_template.agent.tools.realtime import MISSING_SLEEP_MESSAGE
+
+    if engine_for_settings() not in ("codex", "openai-compat"):
+        raise ValueError(
+            "Persistent mode on this engine runs in-process (customization "
+            "step 8; PATTERNS.md 'Persistent Agent'); the relay entry point "
+            "needs AGENT_SDK=codex or openai."
+        )
 
     if session_id is None:
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -526,13 +557,7 @@ async def run_persistent_agent(
 
     build = build_session_client(session_id, realtime=True)
     notes = build.notes
-    mailbox = build.client.mailbox
-    if mailbox is None:
-        raise ValueError(
-            "Persistent mode on this engine runs in-process (customization "
-            "step 8; PATTERNS.md 'Persistent Agent'); the relay entry point "
-            "needs AGENT_SDK=codex or openai."
-        )
+    mailbox = RealtimeMailbox(notes.session / REALTIME_DIRNAME)
 
     async def echo_reply(message: str) -> None:
         print(f"[lup] {message}")

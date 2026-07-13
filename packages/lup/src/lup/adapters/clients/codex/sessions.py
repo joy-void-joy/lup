@@ -11,7 +11,7 @@ is composed over these sessions by the recipe in
 import importlib.util
 import time
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import ExitStack, asynccontextmanager
 from typing import TYPE_CHECKING
 
 from lup.adapters.clients.codex.messages import build_lup_response
@@ -159,8 +159,9 @@ class CodexSessions(Sessions):
 
         import openai_codex as codex
 
-        cleanup = self.native.cleanup
-        with cleanup() if cleanup is not None else nullcontext():
+        with ExitStack() as resources:
+            for resource in self.native.session_resources:
+                resources.enter_context(resource())
             async with codex.AsyncCodex(config=self.codex_config()) as codex_client:
                 thread = await self.open_thread(codex_client, resume=resume)
                 yield self.make_session(thread)
