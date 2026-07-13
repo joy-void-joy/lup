@@ -49,6 +49,22 @@ def test_python_after_separator_is_denied() -> None:
     )
 
 
+def test_piped_inline_code_is_denied() -> None:
+    # An interpreter is gated regardless of its position in a pipeline:
+    # splitting on `|` re-anchors it as its own segment, so the interpreter
+    # deny (anchored at the start of a segment) still fires — including for
+    # non-python interpreters and uv-wrapped invocations.
+    assert decision("grep foo file | perl -e 'print 1'") == "deny"
+    assert decision("uv run pytest | uv run python -c 'x'") == "deny"
+
+
+def test_piped_tmp_script_override_still_wins() -> None:
+    # The tmp-script allow overrides the interpreter deny even mid-pipeline:
+    # the `uv run python tmp/...` segment is allowed, not denied, so a
+    # pipeline of otherwise-allowed segments still auto-allows.
+    assert decision("uv run pytest | uv run python tmp/oneoff.py") == "allow"
+
+
 def test_other_interpreters_are_denied() -> None:
     assert decision("perl -e 'print 1'") == "deny"
     assert decision("ruby script.rb") == "deny"
