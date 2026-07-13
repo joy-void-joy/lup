@@ -205,6 +205,22 @@ def resolve_review_cmd(
     resolve_review.build_review(manifest, base, out, intro)
 
 
+@app.command("resolve-summary")
+def resolve_summary_cmd(
+    manifest: Annotated[
+        Path,
+        typer.Argument(help="Manifest JSON: workflow task output or a bare array"),
+    ],
+) -> None:
+    """Print per-concern verdicts from a /lup:resolve manifest.
+
+    The terminal companion to resolve-review: one block per concern with the
+    committed/accepted flags, verdict reason, and residual, for planning merge
+    order and approval batches before opening the HTML page.
+    """
+    resolve_review.summarize(manifest)
+
+
 # -- conflict commands --
 
 

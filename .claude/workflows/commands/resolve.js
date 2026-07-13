@@ -18,6 +18,9 @@ export const meta = {
 //     notes: [{ file, line, text }],  // the original markers this concern subsumes
 //   }],
 // }
+// Large args payloads can reach the script as a JSON-encoded string instead
+// of a parsed object; a malformed string then fails loudly here rather than
+// silently running zero concerns.
 const input = typeof args === 'string' ? JSON.parse(args) : args || {}
 const base = input.base || 'HEAD'
 const concerns = input.concerns || []
