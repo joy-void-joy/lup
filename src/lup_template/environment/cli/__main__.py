@@ -31,6 +31,7 @@ import sh
 import typer
 
 import lup.workspace.paths
+from lup.telemetry.display import format_duration
 
 from lup_template.agent.config import settings
 from lup_template.agent.core import run_agent
@@ -88,6 +89,10 @@ async def run_session(
     """
     logger.info("Starting session with model: %s", settings.model)
 
+    typer.echo(f"\n{'─' * 60}")
+    typer.echo(task)
+    typer.echo(f"{'─' * 60}\n")
+
     result = await run_agent(
         task,
         session_id=session_id,
@@ -137,7 +142,7 @@ def print_result(result: AgentSessionResult) -> None:
     if result.cost_usd:
         typer.echo(f"Cost: ${result.cost_usd:.4f}")
     if result.duration_seconds:
-        typer.echo(f"Duration: {result.duration_seconds:.1f}s")
+        typer.echo(f"Duration: {format_duration(result.duration_seconds)}")
 
 
 @app.command()
