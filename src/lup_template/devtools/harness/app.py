@@ -24,8 +24,9 @@ from lup.adapters.codex.harness_runtime import (
     PluginCacheConfig,
     codex_capability_probes,
 )
-from lup.harness.contracts import SkillInvocationRenderer
-from lup.harness.models import CapabilityEvidence, ReconciliationMetadata
+from lup.codescan.markers import find_feedback
+from lup.harness.contracts import ProcessLauncher, SkillInvocationRenderer
+from lup.harness.models import CapabilityEvidence, LaunchRequest, ReconciliationMetadata
 from lup.harness.process import LocalProcessLauncher
 from lup.harness.proposals import ReconciliationProposalWriter
 from lup.harness.reconciliation import source_patch_base_digest
@@ -33,14 +34,18 @@ from lup.resolver.contracts import QuestionBroker
 from lup.resolver.core import ResolverCore
 from lup.resolver.models import (
     AnswerBatch,
+    InventoryNote,
     QuestionAnswer,
     QuestionBatch,
-    ResolveInventory,
+    ResolveRequest,
     ResolverConfig,
+    SourceSnapshot,
     VerificationCommand,
 )
 from lup.runtime.contracts import SessionFactory
+from lup.types import EnvVars
 from lup.workspace.paths import project_root
+from lup_template.devtools.dev.comments import scan_tracked
 from lup_template.devtools.harness.generate import (
     DriftReport,
     GenerationRecipe,
@@ -316,13 +321,85 @@ class ConsoleQuestionBroker(QuestionBroker):
         return AnswerBatch(run_id=questions.run_id, answers=answers)
 
 
+def resolver_git(
+    launcher: ProcessLauncher,
+    root: Path,
+    arguments: list[str],
+    *,
+    environment: EnvVars | None = None,
+) -> str:
+    """Run one resolver-owned Git inspection or snapshot operation."""
+    status = launcher.launch(
+        LaunchRequest(
+            arguments=["git", *arguments],
+            cwd=root,
+            environment=environment or {},
+        )
+    )
+    if status.code != 0:
+        raise RuntimeError(
+            f"resolver Git operation failed ({' '.join(arguments)}): {status.stderr}"
+        )
+    lines = status.stdout.splitlines()
+    return lines[0] if len(lines) == 1 else "\n".join(lines)
+
+
+def resolver_source_snapshot(
+    launcher: ProcessLauncher,
+    root: Path,
+    run_root: Path,
+    note_paths: list[Path],
+) -> SourceSnapshot:
+    """Create an unattached source commit containing current review-note files."""
+    branch = resolver_git(launcher, root, ["branch", "--show-current"]) or "HEAD"
+    head = resolver_git(launcher, root, ["rev-parse", "HEAD"])
+    status = launcher.launch(
+        LaunchRequest(
+            arguments=["git", "diff", "--quiet", "HEAD", "--", *map(str, note_paths)],
+            cwd=root,
+        )
+    )
+    if status.code == 0:
+        return SourceSnapshot(branch=branch, commit=head)
+    if status.code != 1:
+        raise RuntimeError(f"resolver source inspection failed: {status.stderr}")
+    run_root.mkdir(parents=True, exist_ok=True)
+    index = (run_root / ".source.index").resolve()
+    environment = {"GIT_INDEX_FILE": str(index)}
+    try:
+        resolver_git(launcher, root, ["read-tree", "HEAD"], environment=environment)
+        resolver_git(
+            launcher,
+            root,
+            ["add", "--", *map(str, note_paths)],
+            environment=environment,
+        )
+        tree = resolver_git(launcher, root, ["write-tree"], environment=environment)
+        commit = resolver_git(
+            launcher,
+            root,
+            [
+                "commit-tree",
+                tree,
+                "-p",
+                head,
+                "-m",
+                "chore(review): resolver source snapshot",
+            ],
+            environment=environment,
+        )
+    finally:
+        if index.exists():
+            index.unlink()
+    return SourceSnapshot(branch=branch, commit=commit)
+
+
 @app.command("resolve")
 def resolve_command(
     adapter: Annotated[str, typer.Option("--adapter", help="claude or codex")],
-    run_id: Annotated[str, typer.Option("--run-id")],
-    inventory: Annotated[
-        Path | None,
-        typer.Option("--inventory", help="ResolveInventory JSON; omit to resume"),
+    run_id: Annotated[
+        str | None,
+        typer.Option("--run-id", help="Stable run id; defaults to the source commit"),
     ] = None,
     human_decision: Annotated[
         bool | None,
@@ -337,6 +414,11 @@ def resolve_command(
     if len(compositions) != 1:
         raise typer.BadParameter("resolve requires exactly one adapter")
     composition = compositions[0]
+    root = project_root()
+    launcher = LocalProcessLauncher()
+    resolved_run_id = run_id or (
+        "resolve-" + resolver_git(launcher, root, ["rev-parse", "--short=12", "HEAD"])
+    )
 
     async def execute() -> None:
         from lup.adapters.claude.runtime import (
@@ -410,13 +492,11 @@ def resolve_command(
 
         core = ResolverCore(
             ResolverConfig(
-                state_root=project_root() / ".lup" / "resolve",
-                workspace=project_root(),
-                worktree_root=(
-                    project_root().parent / f"{project_root().name}-resolve-{run_id}"
-                ),
-                run_id=run_id,
-                integration_branch=f"resolve/{run_id}/review",
+                state_root=root / ".lup" / "resolve",
+                workspace=root,
+                worktree_root=(root.parent / f"{root.name}-resolve-{resolved_run_id}"),
+                run_id=resolved_run_id,
+                integration_branch=f"resolve/{resolved_run_id}/review",
                 verification_commands=[
                     VerificationCommand(
                         name="ruff", arguments=["uv", "run", "ruff", "check", "."]
@@ -434,17 +514,51 @@ def resolve_command(
             reviewer_factory,
             composition.invocation_renderer,
             ConsoleQuestionBroker(),
-            LocalProcessLauncher(),
+            launcher,
         )
-        if inventory is None:
+        if core.repository.exists():
             manifest = await core.resume()
         else:
-            parsed = ResolveInventory.model_validate_json(
-                inventory.read_text(encoding="utf-8")
+            comments = scan_tracked(find_feedback)
+            if not comments:
+                typer.echo("No unresolved # lup: comments.")
+                return
+            note_paths = sorted({Path(comment.file) for comment in comments})
+            source = resolver_source_snapshot(
+                launcher,
+                root,
+                core.repository.root,
+                note_paths,
             )
-            manifest = await core.run(parsed)
-        if human_decision is not None:
-            manifest = core.record_human_acceptance(human_decision)
+            manifest = await core.run(
+                ResolveRequest(
+                    source=source,
+                    notes=[
+                        InventoryNote(
+                            file=Path(comment.file),
+                            line=comment.start_line,
+                            text=comment.text,
+                            context=comment.context,
+                        )
+                        for comment in comments
+                    ],
+                )
+            )
+        if manifest.accepted is None and manifest.final_review is not None:
+            typer.echo(f"Review branch: {manifest.review_branch}")
+            typer.echo(manifest.final_review.model_dump_json(indent=2))
+            accepted = (
+                human_decision
+                if human_decision is not None
+                else await asyncio.to_thread(
+                    typer.confirm,
+                    "Accept this review branch for manual integration?",
+                    default=manifest.final_review.accepted,
+                )
+            )
+            manifest = core.record_human_acceptance(accepted)
+        elif human_decision is not None:
+            raise typer.BadParameter("the resolver run is not awaiting acceptance")
         typer.echo(manifest.model_dump_json(indent=2))
 
     asyncio.run(execute())

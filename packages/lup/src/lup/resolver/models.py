@@ -65,6 +65,12 @@ class ReviewNote(BaseModel):
     text: str
 
 
+class InventoryNote(ReviewNote):
+    """One review note together with the source context used for planning."""
+
+    context: str
+
+
 class AcceptanceCriterion(BaseModel):
     model_config = FROZEN
 
@@ -334,6 +340,30 @@ class ResolveInventory(BaseModel):
         identifiers = [concern.id for concern in self.concerns]
         if len(identifiers) != len(dict.fromkeys(identifiers)):
             raise ValueError("concern ids must be unique")
+        return self
+
+
+class ResolveRequest(BaseModel):
+    """Unorganized review evidence supplied to the shared inventory phase."""
+
+    model_config = FROZEN
+
+    source: SourceSnapshot
+    notes: list[InventoryNote] = Field(min_length=1)
+
+
+class ConcernInventory(BaseModel):
+    """Structured concern plan produced by the read-only inventory turn."""
+
+    model_config = FROZEN
+
+    concerns: list[Concern] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_concerns(self) -> "ConcernInventory":
+        identifiers = [concern.id for concern in self.concerns]
+        if len(identifiers) != len(dict.fromkeys(identifiers)):
+            raise ValueError("planned concern ids must be unique")
         return self
 
 

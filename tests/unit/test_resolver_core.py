@@ -13,21 +13,31 @@ from lup.harness.models import ExitStatus, LaunchRequest, ResolveSpec, SkillInvo
 from lup.harness.process import LocalProcessLauncher
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
 from lup.resolver.contracts import QuestionBroker
-from lup.resolver.core import ResolverCore, ResolverInvariantError
+from lup.resolver.core import (
+    APPROVE,
+    DEFER,
+    ResolverCore,
+    ResolverInvariantError,
+    approval_decisions,
+    approval_question,
+)
 from lup.resolver.models import (
     AnswerBatch,
     AcceptanceCriterion,
     Concern,
+    ConcernInventory,
     ConcernOutcome,
     ConcernProgress,
     ConcernStatus,
     DependencyBase,
     FinalReview,
     IntegrationRecord,
+    InventoryNote,
     MaterialQuestion,
     MergeReport,
     QuestionAnswer,
     ResolveInventory,
+    ResolveRequest,
     ResolverConfig,
     ResolvePhase,
     ResolveState,
@@ -113,6 +123,28 @@ def test_dag_rejects_missing_nodes_and_cycles_and_filters_unapproved_ancestry() 
         [concern("parent", approved=False), concern("child", ["parent"])]
     )
     assert graph.approved() == []
+
+
+def test_persisted_approval_answers_filter_deferred_ancestry() -> None:
+    concerns = [concern("parent"), concern("child", ["parent"])]
+    answers = AnswerBatch(
+        run_id="approval-decisions",
+        answers=[
+            QuestionAnswer(
+                question_id=approval_question(concerns[0]).id,
+                value=DEFER,
+            ),
+            QuestionAnswer(
+                question_id=approval_question(concerns[1]).id,
+                value=APPROVE,
+            ),
+        ],
+    )
+
+    decisions = approval_decisions(concerns, answers)
+
+    assert decisions.directly_approved == ["child"]
+    assert decisions.eligible == []
 
 
 def test_leases_are_unique_bounded_and_releasable(tmp_path: Path) -> None:
@@ -324,6 +356,73 @@ class RecordingQuestionBroker(QuestionBroker):
 class LiteralInvocationRenderer(SkillInvocationRenderer):
     def render(self, invocation: SkillInvocation) -> str:
         return f"{invocation.plugin}:{invocation.skill}"
+
+
+@pytest.mark.asyncio
+async def test_inventory_planner_clusters_every_contextual_note_once(
+    tmp_path: Path,
+) -> None:
+    request = ResolveRequest(
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        notes=[
+            InventoryNote(
+                file=Path("src/module.py"),
+                line=7,
+                text="use the domain type",
+                context="value: int  # lup: use the domain type",
+            )
+        ],
+    )
+
+    def reviewer_response(_root: Path, output_name: str) -> JsonObject:
+        assert output_name == ConcernInventory.__name__
+        return {
+            "concerns": [
+                {
+                    "id": "domain-type",
+                    "title": "Use the domain type",
+                    "spec": "Represent the domain concept explicitly",
+                    "criteria": [
+                        {"id": "typed", "description": "Domain type is explicit"}
+                    ],
+                    "notes": [
+                        {
+                            "file": "src/module.py",
+                            "line": 7,
+                            "text": "use the domain type",
+                        }
+                    ],
+                    "eligible": False,
+                    "integration_approved": False,
+                }
+            ]
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=tmp_path,
+            worktree_root=tmp_path / "worktrees",
+            run_id="inventory",
+            integration_branch="resolve/inventory/review",
+            verification_commands=[
+                VerificationCommand(name="verify", arguments=["git", "diff"])
+            ],
+        ),
+        resolve_spec(),
+        lambda root: ResolverTestFactory(root, reviewer_response),
+        lambda root: ResolverTestFactory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        UnusedQuestionBroker(),
+        RecordingLauncher(),
+    )
+
+    inventory = await core.plan_inventory(request)
+
+    assert inventory.source == request.source
+    assert [item.id for item in inventory.concerns] == ["domain-type"]
+    assert inventory.concerns[0].eligible
+    assert inventory.concerns[0].integration_approved
 
 
 def test_only_orchestrator_creates_commits_and_reads_their_identity(

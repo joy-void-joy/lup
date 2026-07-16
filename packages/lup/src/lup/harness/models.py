@@ -89,7 +89,15 @@ class RequestApproval(BaseModel):
     reason: str
 
 
-type PromptPart = TextPart | SkillInvocation | AskUser | Delegate | RequestApproval
+class ResolverEntry(BaseModel):
+    model_config = FROZEN
+
+    type: Literal["resolver_entry"] = "resolver_entry"
+
+
+type PromptPart = (
+    TextPart | SkillInvocation | AskUser | Delegate | RequestApproval | ResolverEntry
+)
 
 
 class PromptDocument(BaseModel):

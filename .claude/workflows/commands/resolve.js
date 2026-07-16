@@ -4,14 +4,7 @@ export const meta = {
   phases: [{ title: 'Resolve', detail: 'shared Python resolver core' }],
 }
 
-// This adapter artifact owns only native argument handling and process launch.
-// The Python core owns questions, leases, scheduling, worktrees, review,
-// integration, verification, human acceptance, and cleanup.
 const input = typeof args === 'string' ? JSON.parse(args) : args || {}
-if (!input.run_id) {
-  throw new Error('resolve requires run_id')
-}
-
 const command = [
   'uv',
   'run',
@@ -20,11 +13,9 @@ const command = [
   'resolve',
   '--adapter',
   'claude',
-  '--run-id',
-  input.run_id,
 ]
-if (input.inventory) {
-  command.push('--inventory', input.inventory)
+if (input.run_id) {
+  command.push('--run-id', input.run_id)
 }
 if (input.accept === true) {
   command.push('--accept')

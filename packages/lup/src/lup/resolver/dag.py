@@ -1,5 +1,7 @@
 """Deterministic concern-DAG validation and scheduling."""
 
+from collections.abc import Collection
+
 from lup.resolver.models import Concern
 
 
@@ -77,6 +79,10 @@ class ConcernGraph:
             for concern in self.concerns.values()
             if concern.eligible and concern.integration_approved
         }
+        return self.transitively_approved(approved_ids)
+
+    def transitively_approved(self, approved_ids: Collection[str]) -> list[Concern]:
+        """Filter an explicit decision set through complete approved ancestry."""
         return [
             concern
             for batch in self.topological_batches()
