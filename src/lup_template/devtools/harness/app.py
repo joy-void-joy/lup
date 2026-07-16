@@ -28,6 +28,7 @@ from lup.codescan.markers import find_feedback
 from lup.harness.contracts import ProcessLauncher, SkillInvocationRenderer
 from lup.harness.models import CapabilityEvidence, LaunchRequest, ReconciliationMetadata
 from lup.harness.process import LocalProcessLauncher
+from lup.harness.proposals import ReconciliationProposalWriter
 from lup.harness.reconciliation import source_patch_base_digest
 from lup.resolver.contracts import QuestionBroker
 from lup.resolver.core import ResolverCore
@@ -259,6 +260,28 @@ def apply_reconciliation(
     metadata.unlink()
     patch.unlink()
     directory.rmdir()
+
+
+@app.command("propose-reconciliation")
+def propose_reconciliation(
+    patch: Annotated[
+        Path,
+        typer.Argument(help="Git-format patch against canonical Python source"),
+    ],
+) -> None:
+    """Persist a source patch for separate review and stale-base-checked apply."""
+    if not patch.is_file():
+        raise typer.BadParameter(f"source patch does not exist: {patch}")
+    try:
+        record = ReconciliationProposalWriter().write(
+            project_root(), patch.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as error:
+        raise typer.BadParameter("reconciliation source patch is invalid") from error
+    typer.echo(
+        f"Reconciliation proposal {record.proposal_id} persisted; review it, then run "
+        f"`uv run lup-devtools harness apply-reconciliation {record.proposal_id}`"
+    )
 
 
 @app.command("doctor")
