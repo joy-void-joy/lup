@@ -13,14 +13,16 @@ opt-out — is matched here too, and `LineCursor` is the shared line walk that
 lets a scanner absorb a note's continuation lines without index bookkeeping.
 """
 
-import ast
 import re
-import tokenize
 from collections.abc import Callable
-from io import StringIO
 from typing import Self
 
 from pydantic import BaseModel
+
+from lup.policy.kernel import (
+    docstring_lines as python_docstring_lines,
+    python_comment_columns,
+)
 
 # An `ignore` directive is bare (`# lup: ignore`, silences every rule) or typed
 # pyright-style (`# lup: ignore[rule-id, other-rule]`, silences only the named
@@ -73,54 +75,6 @@ def file_level_ignore(text: str, max_lines: int = 10) -> FileIgnore | None:
         if match is not None:
             return FileIgnore(line=i + 1, rule_ids=ignore_rule_ids(match))
     return None
-
-
-def python_comment_columns(text: str) -> dict[int, int] | None:
-    """Map each 1-based line to the column where its real `#` comment starts.
-
-    Tokenizing tells apart a `#` that opens a comment from one inside a string
-    literal, so a scanner can reject markers that are actually code. Returns
-    ``None`` when the source cannot be tokenized (a syntax error in some tracked
-    file), signalling the caller to fall back to line scanning rather than miss
-    a note.
-    """
-    columns: dict[int, int] = {}
-    try:
-        for token in tokenize.generate_tokens(StringIO(text).readline):
-            if token.type == tokenize.COMMENT:
-                line_no, col = token.start
-                columns[line_no] = col
-    except (tokenize.TokenError, IndentationError, SyntaxError):
-        return None
-    return columns
-
-
-def python_docstring_lines(text: str) -> set[int]:
-    """Lines (1-based) covered by a docstring — module, class, function, or
-    the attribute-docstring convention (a bare string statement after a field
-    or alias).
-
-    Every bare string-expression statement is documentation by construction —
-    it has no runtime effect — so it is prose where a note belongs, unlike an
-    ordinary string such as an echoed message (those are operands, not
-    statements). Returns an empty set when the source cannot be parsed; the
-    comment scan still runs.
-    """
-    try:
-        tree = ast.parse(text)
-    except (SyntaxError, ValueError):
-        return set()
-
-    lines: set[int] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Expr)
-            and isinstance(node.value, ast.Constant)
-            and isinstance(node.value.value, str)
-            and node.end_lineno is not None
-        ):
-            lines.update(range(node.lineno, node.end_lineno + 1))
-    return lines
 
 
 class PythonContext(BaseModel):

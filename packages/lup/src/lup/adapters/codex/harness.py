@@ -14,7 +14,6 @@ from lup.harness.models import (
     Delegate,
     Harness,
     HookSet,
-    HookUrlScope,
     Plugin,
     PromptDocument,
     RequestApproval,
@@ -23,7 +22,11 @@ from lup.harness.models import (
     SkillInvocation,
     TextPart,
 )
-from lup.policy.bundle import BUNDLED_POLICY_SOURCE
+from lup.policy.bundle import (
+    policy_kernel_source,
+    render_policy_data,
+    runtime_url_scope,
+)
 
 
 class CodexSkillInvocationRenderer(SkillInvocationRenderer):
@@ -196,17 +199,15 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
 
 
 CODEX_POLICY_DISPATCHER = '''#!/usr/bin/env python3
-"""Generated Codex hook dispatcher over the bundled semantic runtime."""
+"""Generated Codex hook dispatcher over the canonical semantic kernel."""
 
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from policy import Decision, decide_fetch, decide_shell
-
-ALLOWED_FETCH_SCOPES = __ALLOWED_FETCH_SCOPES__
-DENIED_FETCH_SCOPES = __DENIED_FETCH_SCOPES__
+from kernel import KernelDecision, decide_fetch, decide_shell
+from policy_data import ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES
 
 
 def dispatch(payload):
@@ -221,11 +222,11 @@ def dispatch(payload):
             DENIED_FETCH_SCOPES,
         )
     if name == "apply_patch":
-        return Decision(
+        return KernelDecision(
             "ask",
             "opaque patch input requires native parsing before it can be auto-allowed",
         )
-    return Decision("ask", f"unknown tool {name!r} is not covered by policy")
+    return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
 
 
 def main():
@@ -246,13 +247,12 @@ if __name__ == "__main__":
 
 
 class CodexHookRenderer(ArtifactRenderer[HookSet]):
-    """Render trusted plugin hooks and their dependency-free runtime snapshot."""
+    """Render Codex hooks, canonical kernel, and application policy rows."""
 
     def __init__(self, plugin_name: str) -> None:
         self.plugin_name = plugin_name
 
     def render(self, source: HookSet) -> ArtifactTree:
-        dispatcher = configured_dispatcher(CODEX_POLICY_DISPATCHER, source)
         hooks = {
             "hooks": {
                 "PreToolUse": [
@@ -288,15 +288,36 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     path=Path(
                         f".codex/plugins/{self.plugin_name}/hooks/scripts/policy.py"
                     ),
-                    content=dispatcher,
+                    content=CODEX_POLICY_DISPATCHER,
                     semantic_id=source.id,
                     executable=True,
                 ),
                 Artifact(
                     path=Path(
-                        f".codex/plugins/{self.plugin_name}/hooks/runtime/policy.py"
+                        f".codex/plugins/{self.plugin_name}/hooks/runtime/kernel.py"
                     ),
-                    content=BUNDLED_POLICY_SOURCE,
+                    content=policy_kernel_source(),
+                    semantic_id=source.id,
+                ),
+                Artifact(
+                    path=Path(
+                        f".codex/plugins/{self.plugin_name}/hooks/runtime/"
+                        "policy_data.py"
+                    ),
+                    content=render_policy_data(
+                        allowed_fetch_scopes=[
+                            runtime_url_scope(str(scope.origin), scope.path_prefix)
+                            for scope in source.allowed_fetch
+                        ],
+                        denied_fetch_scopes=[
+                            runtime_url_scope(str(scope.origin), scope.path_prefix)
+                            for scope in source.denied_fetch
+                        ],
+                        protected_roots=[
+                            path.as_posix() for path in source.protected_edit_roots
+                        ],
+                        autonomous_agent_identities=[],
+                    ),
                     semantic_id=source.id,
                 ),
                 Artifact(
@@ -308,29 +329,3 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 ),
             ]
         )
-
-
-def configured_dispatcher(template: str, source: HookSet) -> str:
-    """Render application-owned policy scopes into a hermetic native entry."""
-    replacements = {
-        "__ALLOWED_FETCH_SCOPES__": render_fetch_scopes(source.allowed_fetch),
-        "__DENIED_FETCH_SCOPES__": render_fetch_scopes(source.denied_fetch),
-    }
-    rendered = template
-    for marker, value in replacements.items():
-        rendered = rendered.replace(marker, value)  # lup: ignore[string-replace]
-    return rendered
-
-
-def render_fetch_scopes(scopes: list[HookUrlScope]) -> str:
-    """Render scopes in a stable formatter-compatible Python literal."""
-    if not scopes:
-        return "[]  # lup: ignore[empty-collection]"
-    rows = [
-        "    {\n"
-        f'        "origin": {json.dumps(str(scope.origin))},\n'
-        f'        "path_prefix": {json.dumps(scope.path_prefix)},\n'
-        "    },"
-        for scope in scopes
-    ]
-    return "[\n" + "\n".join(rows) + "\n]"

@@ -301,16 +301,23 @@
       "executable": false
     },
     {
-      "path": ".claude/plugins/lup/hooks/runtime/policy.py",
+      "path": ".claude/plugins/lup/hooks/runtime/kernel.py",
       "category": "generated",
-      "sha256": "41600273ad1d152b1481a34121cf798dda3d38837ff7a922922668ed971a626e",
+      "sha256": "ea17402fbdbecdc02fbf02c755fd9f42a3647d3bf12390f8939b98ebc9b29450",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
+      "category": "generated",
+      "sha256": "3bfc324712553b028600180b599a1e8df0005a49a29dc12c8725016d9ba351d2",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "24c8b0415f3e3a177aa9197fc9038be5d77ea04e5b15bfe7c19b5952326aa5d8",
+      "sha256": "f7db9dc943b162131bdb66cabbad415eb0ae21a7e5b6dd5270d3da43bee3c6c3",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

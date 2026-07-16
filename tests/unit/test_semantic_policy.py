@@ -2,8 +2,10 @@
 
 import importlib.util
 from pathlib import Path
+from types import ModuleType
 
 import pytest
+import sh
 from pydantic import AnyHttpUrl
 
 from lup.adapters.claude.native import (
@@ -22,7 +24,14 @@ from lup.adapters.codex.native import (
     CodexDecisionRenderer,
 )
 from lup.policy.chain import UnknownToolPolicy
-from lup.policy.bundle import BUNDLED_POLICY_SOURCE
+from lup.policy.bundle import (
+    bundled_antipattern_rows,
+    policy_kernel_source,
+    render_policy_data,
+    runtime_path_rules,
+    runtime_url_scope,
+)
+from lup.policy.kernel import KernelDecision
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -32,6 +41,59 @@ from lup.policy.models import (
     UnknownTool,
 )
 from lup.policy.rules import EditPolicy, FetchPolicy, PathRule, ShellPolicy, UrlScope
+
+
+def assembled_edit_decision(
+    module: ModuleType,
+    path: str,
+    before: str | None,
+    after: str | None,
+    protected_roots: list[str],
+    *,
+    autonomous: bool = False,
+) -> KernelDecision:
+    """Invoke an isolated kernel with the same generated primitive rows."""
+    suffix = Path(path).suffix.lower()
+    rows_by_suffix = bundled_antipattern_rows()
+    rows = rows_by_suffix[suffix] if suffix in rows_by_suffix else []
+    return module.decide_edit(
+        path,
+        before,
+        after,
+        path_exists=Path(path).exists(),
+        path_rules=runtime_path_rules(protected_roots),
+        antipattern_rows=rows,
+        autonomous=autonomous,
+        python_source=suffix in (".py", ".pyi"),
+    )
+
+
+def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    (runtime / "kernel.py").write_text(policy_kernel_source(), encoding="utf-8")
+    (runtime / "policy_data.py").write_text(
+        render_policy_data(
+            allowed_fetch_scopes=[],
+            denied_fetch_scopes=[],
+            protected_roots=[],
+            autonomous_agent_identities=[],
+        ),
+        encoding="utf-8",
+    )
+    probe = runtime / "probe.py"
+    probe.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).parent))\n"
+        "from kernel import decide_shell\n"
+        "from policy_data import ANTI_PATTERN_ROWS\n"
+        "assert decide_shell('git status').effect == 'allow'\n"
+        "assert '.py' in ANTI_PATTERN_ROWS\n",
+        encoding="utf-8",
+    )
+
+    sh.Command("python3")("-I", "-S", str(probe))
 
 
 def test_equivalent_multi_file_native_edits_decode_identically() -> None:
@@ -128,7 +190,7 @@ def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:
 
 def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) -> None:
     path = tmp_path / "bundled_fetch_policy.py"
-    path.write_text(BUNDLED_POLICY_SOURCE, encoding="utf-8")
+    path.write_text(policy_kernel_source(), encoding="utf-8")
     spec = importlib.util.spec_from_file_location("bundled_fetch_policy", path)
     assert spec is not None and spec.loader is not None
     bundled = importlib.util.module_from_spec(spec)
@@ -137,7 +199,7 @@ def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) ->
         {"origin": "https://docs.example.com:8443", "path_prefix": "/reference/"}
     )
     policy = FetchPolicy(allowed=[scope], denied=[])
-    wire_scope = [{"origin": str(scope.origin), "path_prefix": scope.path_prefix}]
+    wire_scope = [runtime_url_scope(str(scope.origin), scope.path_prefix)]
     cases = {
         "https://docs.example.com:8443/reference/api": "allow",
         "http://docs.example.com:8443/reference/api": "ask",
@@ -170,7 +232,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "bundled_policy.py"
-    path.write_text(BUNDLED_POLICY_SOURCE, encoding="utf-8")
+    path.write_text(policy_kernel_source(), encoding="utf-8")
     spec = importlib.util.spec_from_file_location("bundled_policy", path)
     assert spec is not None and spec.loader is not None
     bundled = importlib.util.module_from_spec(spec)
@@ -240,7 +302,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "bundled_policy.py"
-    path.write_text(BUNDLED_POLICY_SOURCE, encoding="utf-8")
+    path.write_text(policy_kernel_source(), encoding="utf-8")
     spec = importlib.util.spec_from_file_location("bundled_edit_policy", path)
     assert spec is not None and spec.loader is not None
     bundled = importlib.util.module_from_spec(spec)
@@ -290,7 +352,8 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
                 changes=[EditChange(path=Path(file_path), before=before, after=after)]
             )
         )
-        generated = bundled.decide_edit(
+        generated = assembled_edit_decision(
+            bundled,
             file_path,
             before,
             after,
@@ -301,31 +364,43 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
 
 def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
     path = tmp_path / "bundled_editor_policy.py"
-    path.write_text(BUNDLED_POLICY_SOURCE, encoding="utf-8")
+    path.write_text(policy_kernel_source(), encoding="utf-8")
     spec = importlib.util.spec_from_file_location("bundled_editor_policy", path)
     assert spec is not None and spec.loader is not None
     bundled = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bundled)
 
-    assert bundled.decide_edit(
-        ".claude/settings.json", "a", "b", [".claude", "tmp"], "lup:resolve-editor"
+    assert assembled_edit_decision(
+        bundled,
+        ".claude/settings.json",
+        "a",
+        "b",
+        [".claude", "tmp"],
+        autonomous=True,
     ).effect == ("allow")
-    assert bundled.decide_edit(
+    assert assembled_edit_decision(
+        bundled,
         "src/module.py",
         "x = 1",
         "from typing import Any",  # lup: ignore[any-type]
         [".claude", "tmp"],
-        "lup:resolve-editor",
+        autonomous=True,
     ).effect == ("deny")
-    assert bundled.decide_edit(
-        "tmp/scratch.py", "x = 1", "x = 2", [".claude", "tmp"], "lup:resolve-editor"
+    assert assembled_edit_decision(
+        bundled,
+        "tmp/scratch.py",
+        "x = 1",
+        "x = 2",
+        [".claude", "tmp"],
+        autonomous=True,
     ).effect == ("ask")
-    assert bundled.decide_edit(
+    assert assembled_edit_decision(
+        bundled,
         "src/module.py",
         "x = 1",
         "x = 1  # lup" + ": revisit",
         [".claude", "tmp"],
-        "lup:resolve-editor",
+        autonomous=True,
     ).effect == ("ask")
 
 
@@ -333,7 +408,7 @@ def test_edit_policy_uses_full_python_context_for_added_docstrings(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "bundled_docstring_policy.py"
-    path.write_text(BUNDLED_POLICY_SOURCE, encoding="utf-8")
+    path.write_text(policy_kernel_source(), encoding="utf-8")
     spec = importlib.util.spec_from_file_location("bundled_docstring_policy", path)
     assert spec is not None and spec.loader is not None
     bundled = importlib.util.module_from_spec(spec)
@@ -350,12 +425,15 @@ def test_edit_policy_uses_full_python_context_for_added_docstrings(
     )
 
     assert canonical.effect == "allow"
-    assert bundled.decide_edit("src/module.py", before, after, []).effect == "allow"
+    assert (
+        assembled_edit_decision(bundled, "src/module.py", before, after, []).effect
+        == "allow"
+    )
 
 
 def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> None:
     path = tmp_path / "bundled_ast_policy.py"
-    path.write_text(BUNDLED_POLICY_SOURCE, encoding="utf-8")
+    path.write_text(policy_kernel_source(), encoding="utf-8")
     spec = importlib.util.spec_from_file_location("bundled_ast_policy", path)
     assert spec is not None and spec.loader is not None
     bundled = importlib.util.module_from_spec(spec)
@@ -374,4 +452,7 @@ def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> N
     )
 
     assert canonical.effect == "allow"
-    assert bundled.decide_edit("src/scheduler.py", before, after, []).effect == "allow"
+    assert (
+        assembled_edit_decision(bundled, "src/scheduler.py", before, after, []).effect
+        == "allow"
+    )

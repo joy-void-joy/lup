@@ -14,7 +14,6 @@ from lup.harness.models import (
     Delegate,
     Harness,
     HookSet,
-    HookUrlScope,
     Plugin,
     PromptDocument,
     RequestApproval,
@@ -23,7 +22,11 @@ from lup.harness.models import (
     SkillInvocation,
     TextPart,
 )
-from lup.policy.bundle import BUNDLED_POLICY_SOURCE
+from lup.policy.bundle import (
+    policy_kernel_source,
+    render_policy_data,
+    runtime_url_scope,
+)
 
 
 class ClaudeSkillInvocationRenderer(SkillInvocationRenderer):
@@ -235,18 +238,22 @@ return { exit_code: exitCode }
 
 
 CLAUDE_POLICY_DISPATCHER = '''#!/usr/bin/env python3
-"""Generated Claude hook dispatcher over the bundled semantic runtime."""
+"""Generated Claude hook dispatcher over the canonical semantic kernel."""
 
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from policy import Decision, decide_edit, decide_fetch, decide_shell
-
-ALLOWED_FETCH_SCOPES = __ALLOWED_FETCH_SCOPES__
-DENIED_FETCH_SCOPES = __DENIED_FETCH_SCOPES__
-PROTECTED_EDIT_ROOTS = __PROTECTED_EDIT_ROOTS__
+from kernel import KernelDecision, decide_edit, decide_fetch, decide_shell
+from policy_data import (
+    ALLOWED_FETCH_SCOPES,
+    ANTI_PATTERN_ROWS,
+    AUTONOMOUS_AGENT_IDENTITIES,
+    DENIED_FETCH_SCOPES,
+    MAXIMUM_ADDED_LINES,
+    PATH_RULES,
+)
 
 
 def edit_documents(path, old_text, new_text):
@@ -258,10 +265,28 @@ def edit_documents(path, old_text, new_text):
     return current, updated
 
 
+def edit_decision(path_text, before, after, autonomous):
+    path = Path(path_text)
+    suffix = path.suffix.lower()
+    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else ()
+    return decide_edit(
+        path_text,
+        before,
+        after,
+        path_exists=path.exists(),
+        path_rules=PATH_RULES,
+        antipattern_rows=rows,
+        maximum_added_lines=MAXIMUM_ADDED_LINES,
+        autonomous=autonomous,
+        python_source=suffix in (".py", ".pyi"),
+    )
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
+    autonomous = agent_type in AUTONOMOUS_AGENT_IDENTITIES
     if name == "Bash":
         return decide_shell(tool_input["command"])
     if name == "WebFetch":
@@ -276,23 +301,16 @@ def dispatch(payload):
             tool_input["old_string"],
             tool_input["new_string"],
         )
-        return decide_edit(
-            tool_input["file_path"],
-            before,
-            after,
-            PROTECTED_EDIT_ROOTS,
-            agent_type,
-        )
+        return edit_decision(tool_input["file_path"], before, after, autonomous)
     if name == "Write":
         path = Path(tool_input["file_path"])
-        return decide_edit(
+        return edit_decision(
             tool_input["file_path"],
             path.read_text(encoding="utf-8") if path.exists() else None,
             tool_input["content"],
-            PROTECTED_EDIT_ROOTS,
-            agent_type,
+            autonomous,
         )
-    return Decision("ask", "tool is not classified")
+    return KernelDecision("ask", "tool is not classified")
 
 
 def rendered(decision):
@@ -309,7 +327,9 @@ def main():
     try:
         decision = dispatch(json.load(sys.stdin))
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-        decision = Decision("ask", f"Malformed hook input requires approval: {error}")
+        decision = KernelDecision(
+            "ask", f"Malformed hook input requires approval: {error}"
+        )
     json.dump(rendered(decision), sys.stdout)
 
 
@@ -319,13 +339,12 @@ if __name__ == "__main__":
 
 
 class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
-    """Render Claude plugin hooks and the shared dependency-free snapshot."""
+    """Render Claude hooks, canonical kernel, and application policy rows."""
 
     def __init__(self, plugin_name: str) -> None:
         self.plugin_name = plugin_name
 
     def render(self, source: HookSet) -> ArtifactTree:
-        dispatcher = configured_dispatcher(CLAUDE_POLICY_DISPATCHER, source)
         hooks = {
             "description": "Lup semantic permission policy",
             "hooks": {
@@ -357,15 +376,39 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     path=Path(
                         f".claude/plugins/{self.plugin_name}/hooks/scripts/policy.py"
                     ),
-                    content=dispatcher,
+                    content=CLAUDE_POLICY_DISPATCHER,
                     semantic_id=source.id,
                     executable=True,
                 ),
                 Artifact(
                     path=Path(
-                        f".claude/plugins/{self.plugin_name}/hooks/runtime/policy.py"
+                        f".claude/plugins/{self.plugin_name}/hooks/runtime/kernel.py"
                     ),
-                    content=BUNDLED_POLICY_SOURCE,
+                    content=policy_kernel_source(),
+                    semantic_id=source.id,
+                ),
+                Artifact(
+                    path=Path(
+                        f".claude/plugins/{self.plugin_name}/hooks/runtime/"
+                        "policy_data.py"
+                    ),
+                    content=render_policy_data(
+                        allowed_fetch_scopes=[
+                            runtime_url_scope(str(scope.origin), scope.path_prefix)
+                            for scope in source.allowed_fetch
+                        ],
+                        denied_fetch_scopes=[
+                            runtime_url_scope(str(scope.origin), scope.path_prefix)
+                            for scope in source.denied_fetch
+                        ],
+                        protected_roots=[
+                            path.as_posix() for path in source.protected_edit_roots
+                        ],
+                        autonomous_agent_identities=[
+                            "resolve-editor",
+                            "lup:resolve-editor",
+                        ],
+                    ),
                     semantic_id=source.id,
                 ),
                 Artifact(
@@ -377,39 +420,3 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 ),
             ]
         )
-
-
-def configured_dispatcher(template: str, source: HookSet) -> str:
-    """Render application-owned policy scopes into a hermetic native entry."""
-    replacements = {
-        "__ALLOWED_FETCH_SCOPES__": render_fetch_scopes(source.allowed_fetch),
-        "__DENIED_FETCH_SCOPES__": render_fetch_scopes(source.denied_fetch),
-        "__PROTECTED_EDIT_ROOTS__": render_string_list(
-            [path.as_posix() for path in source.protected_edit_roots]
-        ),
-    }
-    rendered = template
-    for marker, value in replacements.items():
-        rendered = rendered.replace(marker, value)  # lup: ignore[string-replace]
-    return rendered
-
-
-def render_fetch_scopes(scopes: list[HookUrlScope]) -> str:
-    """Render scopes in a stable formatter-compatible Python literal."""
-    if not scopes:
-        return "[]  # lup: ignore[empty-collection]"
-    rows = [
-        "    {\n"
-        f'        "origin": {json.dumps(str(scope.origin))},\n'
-        f'        "path_prefix": {json.dumps(scope.path_prefix)},\n'
-        "    },"
-        for scope in scopes
-    ]
-    return "[\n" + "\n".join(rows) + "\n]"
-
-
-def render_string_list(values: list[str]) -> str:
-    """Render strings in a stable formatter-compatible Python literal."""
-    if not values:
-        return "[]  # lup: ignore[empty-collection]"
-    return "[\n" + "\n".join(f"    {json.dumps(value)}," for value in values) + "\n]"
