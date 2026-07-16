@@ -5,6 +5,8 @@ import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
+
 from lup.harness.contracts import ProcessLauncher, SkillInvocationRenderer
 from lup.harness.models import LaunchRequest, ResolveSpec
 from lup.resolver.contracts import QuestionBroker
@@ -15,6 +17,7 @@ from lup.resolver.models import (
     CleanupRecord,
     Concern,
     ConcernEligibility,
+    ConcernInventory,
     ConcernProgress,
     ConcernStatus,
     ConcernExecution,
@@ -29,6 +32,8 @@ from lup.resolver.models import (
     ResolveInventory,
     ResolveManifest,
     ResolvePhase,
+    ResolveRequest,
+    ReviewNote,
     ResolverConfig,
     ResolveState,
     ReviewReport,
@@ -54,6 +59,19 @@ class ResolverInvariantError(RuntimeError):
 
 
 type SessionFactoryRecipe = Callable[[Path], SessionFactory]
+type ResolverInput = ResolveRequest | ResolveInventory
+
+APPROVE = "approve"
+DEFER = "defer"
+
+
+class ApprovalDecisions(BaseModel):
+    """Persisted direct choices and their dependency-safe eligible subset."""
+
+    model_config = ConfigDict(frozen=True)
+
+    directly_approved: list[str]
+    eligible: list[str]
 
 
 def resolver_config_digest(config: ResolverConfig) -> str:
@@ -71,6 +89,36 @@ def failure_messages(error: BaseException) -> list[str]:
             for message in failure_messages(nested)
         ]
     return [str(error)]
+
+
+def approval_question(concern: Concern) -> MaterialQuestion:
+    """Build the persisted human integration gate for one planned concern."""
+    return MaterialQuestion(
+        id=f"integration-approval-{concern.id}",
+        concern_id=concern.id,
+        prompt=f"Include {concern.title!r} in this resolver run?",
+        choices=[APPROVE, DEFER],
+        recommendation=APPROVE,
+    )
+
+
+def approval_decisions(
+    concerns: list[Concern], answers: AnswerBatch
+) -> ApprovalDecisions:
+    """Return direct and dependency-safe approvals from persisted answers."""
+    answer_values = {answer.question_id: answer.value for answer in answers.answers}
+    direct = {
+        concern.id
+        for concern in concerns
+        if concern.eligible
+        and concern.integration_approved
+        and answer_values[approval_question(concern).id] == APPROVE
+    }
+    approved = ConcernGraph(concerns).transitively_approved(direct)
+    return ApprovalDecisions(
+        directly_approved=[concern.id for concern in concerns if concern.id in direct],
+        eligible=[concern.id for concern in approved],
+    )
 
 
 class ResolverCore:
@@ -100,10 +148,48 @@ class ResolverCore:
         self.state_lock = asyncio.Lock()
         self.state: ResolveState | None = None
 
-    async def run(self, inventory: ResolveInventory) -> ResolveManifest:
+    async def run(self, source: ResolverInput) -> ResolveManifest:
         """Run through final review and stop at the human acceptance boundary."""
         with self.repository.exclusive():
+            inventory = (
+                await self.plan_inventory(source)
+                if isinstance(source, ResolveRequest)
+                else source
+            )
             return await self.run_exclusive(inventory)
+
+    async def plan_inventory(self, request: ResolveRequest) -> ResolveInventory:
+        """Organize raw review evidence in one read-only structured turn."""
+        prompt = (
+            "Organize every review note into generalized implementation concerns "
+            "without editing. Cluster by underlying issue, not file. Every note must "
+            "appear exactly once. Give each concern path-safe id, complete acceptance "
+            "criteria, dependencies, material questions, and starting files. Do not "
+            "decide eligibility or integration approval; the resolver asks the user."
+            f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
+        )
+        result = await query(
+            self.reviewer_factory(self.config.workspace),
+            turn_request(TurnInput(text=prompt), ConcernInventory),
+        )
+        concerns = [
+            concern.model_copy(update={"eligible": True, "integration_approved": True})
+            for concern in result.output.concerns
+        ]
+        expected = sorted(
+            ReviewNote.model_validate(
+                note.model_dump(exclude={"context"})
+            ).model_dump_json()
+            for note in request.notes
+        )
+        received = sorted(
+            note.model_dump_json() for concern in concerns for note in concern.notes
+        )
+        if expected != received:
+            raise ResolverInvariantError(
+                "inventory planner must assign every review note exactly once"
+            )
+        return ResolveInventory(source=request.source, concerns=concerns)
 
     async def run_exclusive(self, inventory: ResolveInventory) -> ResolveManifest:
         """Execute a new run while the repository owns its process lease."""
@@ -182,6 +268,11 @@ class ResolverCore:
                     question
                     for concern in state.concerns
                     for question in concern.questions
+                ]
+                + [
+                    approval_question(concern)
+                    for concern in state.concerns
+                    if concern.eligible and concern.integration_approved
                 ],
             )
             state = state.model_copy(
@@ -192,7 +283,12 @@ class ResolverCore:
             )
             state = self.progress_state(
                 state,
-                [concern.id for concern in state.concerns if concern.questions],
+                [
+                    concern.id
+                    for concern in state.concerns
+                    if concern.questions
+                    or (concern.eligible and concern.integration_approved)
+                ],
                 ConcernStatus.WAITING_FOR_ANSWERS,
             )
             self.persist(state)
@@ -204,21 +300,26 @@ class ResolverCore:
             state = state.model_copy(update={"answers": answers})
             self.persist(state)
 
+        answers = state.answers
+        if answers is None:
+            raise ResolverInvariantError("eligibility requires persisted answers")
+        decisions = approval_decisions(state.concerns, answers)
+        decision_ids = decisions.directly_approved
+        approved_ids = decisions.eligible
         graph = ConcernGraph(state.concerns)
-        approved = graph.approved()
-        approved_ids = {concern.id for concern in approved}
+        approved = [concern for concern in state.concerns if concern.id in approved_ids]
         if not state.eligibility:
             eligibility = [
                 ConcernEligibility(
                     concern_id=concern.id,
                     eligible=concern.id in approved_ids,
-                    integration_approved=concern.integration_approved,
+                    integration_approved=concern.id in decision_ids,
                     reason=(
                         "ready"
                         if concern.id in approved_ids
                         else (
                             "an ancestor is deferred or not approved"
-                            if concern.eligible and concern.integration_approved
+                            if concern.id in decision_ids
                             else "deferred or not approved"
                         )
                     ),
@@ -614,7 +715,9 @@ class ResolverCore:
         prompt = (
             "Execute the portable worker skill below. You may edit only the assigned "
             "writable root. Do not create branches or commits; the orchestrator owns "
-            "that authority.\n\n"
+            "that authority. Resolve every acceptance criterion, then remove each "
+            "assigned review-note marker as part of the same change. Never remove a "
+            "marker whose concern remains unresolved.\n\n"
             f"{assignment.rendered_skill_invocation}\n\n"
             f"Assignment:\n{assignment.model_dump_json(indent=2)}"
         )

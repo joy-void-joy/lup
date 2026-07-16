@@ -90,6 +90,29 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
     assert Path(".claude/plugins/lup/hooks/runtime/evidence.json") in artifacts
 
 
+def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None:
+    claude = {
+        artifact.path: artifact.content
+        for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
+    }
+    codex = {
+        artifact.path: artifact.content
+        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+    }
+    command = claude[Path(".claude/plugins/lup/commands/resolve.md")]
+    workflow = claude[Path(".claude/workflows/commands/resolve.js")]
+    skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
+
+    workflow_call = 'Workflow(scriptPath=".claude/workflows/commands/resolve.js", args={})'  # lup: ignore[empty-collection]
+    assert workflow_call in command
+    assert "Triage into concerns" not in command
+    assert "'harness',\n  'resolve',\n  '--adapter',\n  'claude'" in workflow
+    assert "input.inventory" not in workflow
+    assert "requires run_id" not in workflow
+    assert "uv run lup-devtools harness resolve --adapter codex" in skill
+    assert "scheduling" not in skill
+
+
 def test_invocation_renderers_own_complete_spelling_and_escaping() -> None:
     invocation = SkillInvocation(
         plugin="lup",

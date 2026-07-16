@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "b9e23ecea482a0c7c49f80db79c4fd5c235cd5c867904156c311c6fd72206c6f",
+  "source_digest": "b378766684f3247aca2ff1c99e460577d1a3c8da45c958e6f109b8c4ce5e98d6",
   "target_requirements": [
     "claude-code"
   ],
@@ -268,8 +268,8 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "c2c58f3ee10c1bbe43ce398bf0fab4a9731ee91a0854df11bafbda3c44d04dc0",
-      "semantic_id": "claude-baseline:.claude/plugins/lup/commands/resolve.md",
+      "sha256": "a3191d087ddd021737beb73a1f366cc8e46b5352c5ba9d29c7013c0a13038797",
+      "semantic_id": "skill.resolve",
       "executable": false
     },
     {
@@ -331,7 +331,7 @@
     {
       "path": ".claude/workflows/commands/resolve.js",
       "category": "generated",
-      "sha256": "e7665a88f56fb307aa668339f783a9614925d233b8cba6c7ba5777f50fc440c2",
+      "sha256": "13c41ce77590bd8c742d5877325c33dff03f85758b419d9a278367f4a6ee8687",
       "semantic_id": "resolver.lup.entry",
       "executable": false
     }

@@ -16,6 +16,7 @@ from lup.harness.models import (
     Plugin,
     PromptDocument,
     PromptPart,
+    ResolverEntry,
     ResolveSpec,
     Skill,
     SkillInvocation,
@@ -138,10 +139,6 @@ CLAUDE_BASELINE_PATHS = [
     Path(".claude/settings.json"),
     Path(".claude/workflows/commands/resolve.js"),
 ]
-
-CLAUDE_RESOLVER_ENTRY = native_catalog_content(
-    Path(".claude/workflows/commands/resolve.js")
-)
 
 
 class ClaudeParityCurrentTreeReader(CurrentTreeReader):
@@ -291,12 +288,7 @@ def portable_prompt(content: str) -> PromptDocument:
 def skill(seed: SkillSeed, root: Path) -> Skill:
     """Expand one canonical row without introducing native invocation spelling."""
     if seed.name == "resolve":
-        instruction = (
-            "Enter the shared Python resolver through the project devtools entry, "
-            "supplying this adapter's session, invocation, question, process, and "
-            "state-root composition. Do not implement scheduling, leases, review "
-            "rounds, integration, or cleanup in this skill."
-        )
+        instruction = ""
     elif seed.name == "implementer":
         instruction = (
             "Implement exactly the supplied resolver assignment inside its leased "
@@ -332,7 +324,11 @@ def skill(seed: SkillSeed, root: Path) -> Skill:
             if "$ARGUMENTS" in instruction
             else []
         ),
-        prompt=portable_prompt(instruction),
+        prompt=(
+            PromptDocument(parts=[ResolverEntry()])
+            if seed.name == "resolve"
+            else portable_prompt(instruction)
+        ),
     )
 
 

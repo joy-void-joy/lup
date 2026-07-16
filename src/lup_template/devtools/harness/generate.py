@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from lup.adapters.harness import compile_claude, compile_codex
-from lup.adapters.claude.harness import ClaudeHookRenderer
+from lup.adapters.claude.harness import CLAUDE_RESOLVER_ENTRY, ClaudeHookRenderer
 from lup.harness.materialization import AtomicMaterializer
 from lup.harness.models import (
     Artifact,
@@ -23,7 +23,6 @@ from lup.harness.reconciliation import (
 from lup.harness.contracts import CurrentTreeReader, Reconciler
 from lup_template.devtools.harness.catalog import (
     ClaudeParityCurrentTreeReader,
-    CLAUDE_RESOLVER_ENTRY,
     claude_parity_tree,
     portable_harness,
 )
@@ -117,6 +116,7 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
     ]
     support_paths = {
         Path(".claude/plugins/lup/commands/implementer.md"),
+        Path(".claude/plugins/lup/commands/resolve.md"),
         Path(".claude/plugins/lup/commands/resolve-reviewer.md"),
     }
     support_artifacts = [

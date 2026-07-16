@@ -18,6 +18,7 @@ from lup.harness.models import (
     Plugin,
     PromptDocument,
     RequestApproval,
+    ResolverEntry,
     Skill,
     SkillInvocation,
     TextPart,
@@ -58,6 +59,10 @@ class CodexPromptRenderer:
                 case RequestApproval(action=action, reason=reason):
                     rendered.append(
                         f"Request explicit user approval before {action}. Reason: {reason}"
+                    )
+                case ResolverEntry():
+                    rendered.append(
+                        "Run `uv run lup-devtools harness resolve --adapter codex`."
                     )
         text = "".join(rendered)
         return text if text.endswith("\n") else text + "\n"
