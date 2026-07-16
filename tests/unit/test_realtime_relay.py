@@ -12,13 +12,14 @@ exactly like the two processes share one in production.
 
 import asyncio
 import json
+from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from pydantic import BaseModel
 
 
-from lup.adapters.clients.sessions.Session import Session
 from lup.mcp import LupMcpTool, ToolResponse
 from lup.realtime.relay import (
     MISSING_SLEEP_MESSAGE,
@@ -36,8 +37,17 @@ from lup.realtime.relay import (
 )
 from lup.realtime.scheduler import Scheduler
 from lup.reflect import ReflectionGate
+from lup.runtime.contracts import Session, Turn
+from lup.runtime.models import (
+    SessionId,
+    TurnHandle,
+    TurnId,
+    TurnIdentifiers,
+    TurnRequest,
+    TurnResult,
+)
 from lup.telemetry.trace import TraceLogger
-from lup.types import JsonObject, LupResponse
+from lup.types import JsonObject, Usage
 
 
 def tool_map(
@@ -375,6 +385,28 @@ class AgentTurn:
             await asyncio.sleep(self.pause_seconds)
 
 
+class FakeTurn(Turn[None]):
+    """Resolve one scripted relay turn."""
+
+    def __init__(self, conversation: "FakeConversation", index: int) -> None:
+        self.conversation = conversation
+        self.index = index
+
+    async def result(self) -> TurnResult[None]:
+        await self.conversation.play_turn(self.index)
+        return TurnResult[None](
+            output=None,
+            messages=[],
+            blocks=[],
+            usage=Usage(),
+            duration=timedelta(),
+            identifiers=TurnIdentifiers(
+                session=SessionId(value="relay-test"),
+                turn=TurnId(value=str(self.index)),
+            ),
+        )
+
+
 class FakeConversation(Session):
     """Session stand-in that plays scripted turns."""
 
@@ -382,19 +414,15 @@ class FakeConversation(Session):
         self.turns = turns
         self.prompts: list[str] = []
 
-    async def send(
-        self,
-        prompt: str,
-        *,
-        trace_logger: TraceLogger | None = None,
-        prefix: str = "",
-    ) -> LupResponse:
-        self.prompts.append(prompt)
-        await self.turns[len(self.prompts) - 1].play()
-        return LupResponse()
+    async def play_turn(self, index: int) -> None:
+        await self.turns[index].play()
 
-    async def interrupt(self) -> None:
-        raise NotImplementedError
+    async def start[T: BaseModel | None](
+        self, request: TurnRequest[T]
+    ) -> TurnHandle[T]:
+        self.prompts.append(request.input.text)
+        handle = TurnHandle[None](turn=FakeTurn(self, len(self.prompts) - 1))
+        return cast("TurnHandle[T]", handle)  # lup: ignore[cast] — generic test double
 
 
 META = ("meta", {"thought": "assessed"})
@@ -446,16 +474,10 @@ class TestRelaySession:
         in_turn = [False]
 
         class MidTurnConversation(FakeConversation):
-            async def send(
-                self,
-                prompt: str,
-                *,
-                trace_logger: TraceLogger | None = None,
-                prefix: str = "",
-            ) -> LupResponse:
+            async def play_turn(self, index: int) -> None:
                 in_turn[0] = True
                 try:
-                    return await super().send(prompt, trace_logger=trace_logger)
+                    await super().play_turn(index)
                 finally:
                     in_turn[0] = False
 

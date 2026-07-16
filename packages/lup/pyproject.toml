@@ -1,6 +1,6 @@
 [project]
 name = "lup"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agent development library for Claude and Codex agent SDKs"
 readme = "README.md"
 license = "MIT"
@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 claude = ["claude-agent-sdk>=0.1.26"]
-codex = ["openai-codex"]
+codex = ["sh>=2.2.2"]
 docker = ["docker>=7.1.0"]
 
 [project.urls]
@@ -52,4 +52,3 @@ lup = ["py.typed"]
 # for the workspace-wide run; the two configs do not merge or conflict.
 include = ["src"]
 pythonVersion = "3.14"
-

@@ -1,7 +1,7 @@
 ---
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 description: Install lup plugin and scaffolding into a target repo
-argument-hint: [target-repo] [--interactive]
+argument-hint: "[target-repo] [--interactive]"
 ---
 
 # Install Lup into Target Repo
@@ -27,7 +27,7 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 
 - `.claude/plugins/lup/.claude-plugin/plugin.json` — plugin identity
 - `.claude/plugins/lup/hooks/hooks.json` — hook definitions
-- `.claude/plugins/lup/hooks/scripts/*.py` — permission hooks (auto_allow_bash, auto_allow_edits, auto_allow_fetch)
+- `.claude/plugins/lup/hooks/` — generated dispatcher and hermetic semantic policy runtime
 - `.claude/plugins/lup/commands/*.md` — slash commands
 - `.claude/plugins/lup/agents/*.md` — agent definitions
 - `.claude/plugins/lup/TEMPLATE_CLAUDE.md` — CLAUDE.md template
@@ -89,7 +89,7 @@ Based on the analysis, classify each lup capability as:
 These work in any repo:
 
 - **Plugin infrastructure**: The `.claude/plugins/lup/` directory structure itself
-- **Permission hooks**: auto_allow_bash (adapt patterns), auto_allow_edits (adapt for target's file types), auto_allow_fetch (adapt URL patterns)
+- **Permission policy**: configure URL scopes and protected roots in the canonical `HookSet`; change semantic decisions in `lup.policy`, then regenerate
 - **Pre-push quality gates**: Adapt to target's linter/type-checker/test runner
 - **Generic commands**: commit, rebase, close, clean-gone, meta, debug, refactor, add-command, modify-command, merge, principle, review, create-investigator
 - **CLAUDE.md patterns**: Git workflow, editing style, asking questions, debugging philosophy

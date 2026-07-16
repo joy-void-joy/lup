@@ -55,28 +55,44 @@ uv run lup loop "task1" "task2"            # batch with auto-commit
 AGENT_SDK=codex AGENT_MODEL=gpt-5.5 uv run lup run "same task, Codex backend"
 ```
 
-The agent runs on the Claude engine by default; `AGENT_SDK=codex` runs the same agent — same tools, reflection gate, structured output — on the Codex runtime, and open models pick their engine by API protocol: `AGENT_SDK=openai-compat` fronts an OpenAI-protocol endpoint through the Codex runtime, while `AGENT_SDK=claude-compat` keeps the full Claude scaffolding (hooks, permission modes, native subagents) on an Anthropic-protocol endpoint (`OPENAI_BASE_URL`). Budget caps and persistent (sleep/wake) mode work on every engine too: `AGENT_MAX_BUDGET_USD` on the Codex runtime needs `CODEX_USD_PER_MTOK_*` rates in `.env` (the Codex SDK reports tokens, not cost), and persistent mode runs in-process on Claude engines or through the file relay (`lup.realtime.relay`) on the Codex runtime. Sessions persist and resume: `uv run lup run --resume <session>` continues a saved run's conversation.
+The application selects one provider only in its concrete composition root and
+passes a configured `SessionFactory` everywhere else. A turn is started with a
+typed `TurnRequest`; structured output is accepted only through the turn-bound
+`submit_output` tool. Missing or invalid submissions are errors, never empty
+successes. Compatibility endpoints and profiles are immutable adapter config
+transforms rather than alternate runtimes.
 
-### Engine support
+### Runtime capabilities
 
-The portable contract is **tiered**, deliberately. Tier 1 — the core loop every engine gets — is: run → MCP tools → reflection gate → `submit_output` finalization → session JSON, traces, metrics, and resumable sessions, plus subagents (native on Claude engines, the `run_subagent` tool elsewhere), budget caps, and persistent mode. Tier 2 is Claude-native and intentionally unported: in-process hooks, parallel native subagents, permission modes, live streaming, interrupt, and SDK-reported cost. Don't generalize Tier 2 features into the engine abstraction — pass native options through `compose_claude` instead.
+Optional behavior is present in `SessionHandle` and `TurnHandle` or absent as
+`None`; there are no unsupported-operation stubs and completed output is not
+advertised as a live stream. This checked-in evidence targets Claude Agent SDK
+0.2.89 and Codex CLI/app-server 0.144.4; regenerate it with
+`uv run lup-devtools agent capabilities --markdown` when native evidence
+changes.
 
-Nothing below is declared: the matrix is **probed from the engines** (`uv run lup-devtools agent capabilities --markdown`) — option rows construct a client with exactly that knob and record whether the engine refuses it, the streaming row reads which stream component the engine composed (its own live feed, or the post-hoc replay gap-filler), and a regression test keeps this copy current:
+| Capability | claude-sdk-0.2.89 | codex-app-server-0.144.4 |
+|---|---|---|
+| live_events | ✅ | ✅ |
+| interrupt | ✅ | ✅ |
+| steer | — | ✅ |
+| fork | ✅ | ✅ |
+| resume | ✅ | without a fresh dynamic tool |
+| typed_submission | reconnect per turn | thread-start schema only |
+| background | ✅ | ✅ |
 
-| Capability | claude | codex | openai-compat | claude-compat |
-|---|---|---|---|---|
-| streaming | live | post_hoc | post_hoc | live |
-| tools | ✅ | — | — | ✅ |
-| permission_mode | ✅ | — | — | ✅ |
-| max_turns | ✅ | — | — | ✅ |
-| max_thinking_tokens | ✅ | — | — | ✅ |
-| turn_timeout_seconds | — | ✅ | ✅ | — |
-| max_budget_usd | ✅ | — | — | ✅ |
-| background_tools | ✅ | — | — | ✅ |
+The Codex app server currently accepts dynamic tools only on `thread/start`.
+Lup therefore rejects a typed-schema transition or typed resume before input
+instead of silently using a stale schema or losing conversation identity.
 
-(`max_budget_usd` on the Codex runtime flips to ✅ once `CODEX_USD_PER_MTOK_*` rates are configured — the probe shows the rate-less case. `turn_timeout_seconds` is the Codex-side substitute for `max_turns`/interrupt: it cancels a runaway turn client-side after a wall-clock cap. The `tools` row is restrictability, not naming: every engine publishes the names its builtin activity surfaces as (`Engine.builtin_tools()` — on the Codex runtime `command_execution`, `file_change`, and the shared `WebSearch`), but Codex builtins are always on, so the knob that would restrict them is refused. Facts that only surface on a live connection — interrupt and session resume — have no probe row: Claude engines interrupt, both runtimes resume, and an engine that can't raises `UnsupportedOperationError` at the point of use.)
-
-**Security model per engine.** On Claude engines, enforcement is layered: PreToolUse permission hooks (per-tool, per-path), permission modes, and the SDK sandbox — and `claude-compat` carries all of it to open models. When a session runs the Docker code-execution sandbox, the raw shell builtin (`Bash`) is dropped from the tool allowlist by default — `execute_code` is the sanctioned, isolated code path, and host shell is an explicit opt-in (`AGENT_SANDBOX_ALLOW_SHELL=true`). On the Codex runtime there are **no hooks** (config.toml command hooks never fire — live-probed) and no permission modes: enforcement is the runtime's `workspace-write` filesystem sandbox plus in-tool checks (reflection gate, output validation). A Codex agent may run any command the sandbox permits — there is no command-policy or tool-allowlist layer. Domains that depend on fine-grained tool gating belong on the Claude engines until Codex ships working hooks; the hook codegen in `packages/lup/src/lup/adapters/clients/codex/hooks.py` keeps the hook wire format quarantined, ready to re-verify.
+The development harness is generated from one typed catalog. Run
+`uv run lup-devtools harness claude` or `uv run lup-devtools harness codex`;
+the old `lup-devtools claude` launcher was removed. Both generated plugins run
+the same hermetic semantic shell/edit/fetch policy without importing this
+checkout at hook time. See [architecture](docs/architecture.md),
+[harness authoring](docs/harness.md), [resolver lifecycle](docs/resolver.md),
+the [native capability ledger](docs/native-capabilities.md), and the
+[0.2 migration guide](docs/migration-0.2.md).
 
 The intended workflow while using this repository is to:
 
@@ -117,7 +133,7 @@ Every agent session writes its traces, outputs, and session JSONs under `notes/t
 
 ### lib
 
-`packages/lup` is the standalone library — a uv workspace member that any project can depend on without modification. It contains the reusable building blocks: SDK engines (Claude, Codex, OpenAI-compatible) behind one `Client`/`Session` interface (`lup.adapters`), the shared type vocabulary (`lup.types`), MCP tool creation (`lup.mcp`), hook utilities and tool gates (`lup.hooks`), the submit_output finalization tool (`lup.workspace.output`), the reflection gate (`lup.reflect`), trace logging (`lup.telemetry.trace`), session history (`lup.workspace.history`), version-aware paths (`lup.workspace.paths`), the scheduler for persistent agents (`lup.realtime.scheduler`), and the Docker sandbox (`lup.sandbox`). It is configured through function arguments, never by editing its source, and it never gets renamed in downstream projects.
+`packages/lup` is the standalone library — a uv workspace member that any project can depend on without modification. It contains narrow runtime capabilities and typed handles (`lup.runtime`), concrete Claude/Codex configs and factories (`lup.adapters`), semantic policy and native hook boundaries (`lup.policy`), deterministic harness compilation (`lup.harness`), the persisted DAG resolver (`lup.resolver`), MCP tool creation (`lup.mcp`), workspace/history support, scheduling, telemetry, and the Docker sandbox. It is configured through validated component-owned models and explicit factory composition, never a broad options object or global engine registry.
 
 ### agent
 
@@ -147,7 +163,12 @@ The plugin ships four subagents that do context-heavy work in their own window a
 
 ### Hooks
 
-Three PreToolUse hook scripts manage permissions instead of glob rules in settings.json. `auto_allow_bash.py` evaluates each shell segment of a command against an allow/deny rule list — denying python invocations, pre-approving investigative commands like git, grep, and lup-devtools. `auto_allow_edits.py` auto-allows small edits (<=3 real changed lines, ignoring imports, comments, and docstrings) and scans added lines for anti-patterns like `Any` or `# type: ignore`; it also gates Write, so full-file rewrites always go through you. `auto_allow_fetch.py` matches URLs against an allowlist anchored to the URL origin. Everything that doesn't match falls through to the normal permission prompt, and /lup:hooks lets you view and modify the patterns.
+One semantic policy suite drives both generated native dispatchers. It parses
+every shell segment, normalizes URL scopes, evaluates every edit in a batch,
+and applies the canonical marker, protected-path, size, and anti-pattern rules.
+The generated plugin runtimes are hermetic snapshots; `/lup:hooks` changes the
+canonical policy inputs and regenerates both targets. Approval effects that a
+native boundary cannot represent fail closed.
 
 ### Claude commands
 
@@ -190,7 +211,8 @@ To speed up development, many claude commands and meta-commands are built in thi
 
 All development tooling is exposed as the `lup-devtools` CLI (run `uv run lup-devtools --help` for the full tree), aimed at both human use and agent use:
 
-- `agent` — agent introspection and debugging (inspect, serve-tools, chat, repl); the Codex backend launches `serve-tools` as its tool server
+- `agent` — agent introspection and debugging (inspect, serve-tools, repl)
+- `harness` — deterministic Claude/Codex generation, reconciliation, and launch
 - `py` — Python module introspection (info, source, eval, imports, search)
 - `dev` — worktrees, branches, PRs, conflicts, and pre-flight checks
 - `feedback` — feedback state, metrics, and session commits

@@ -46,7 +46,6 @@ class SessionToolset(TypedDict):
 
     groups: dict[ServerGroup, list["LupMcpTool"]]
     gate: "ReviewGate"
-    output_path: Path
 
 
 def tool_group_names(*, realtime: bool) -> list[ServerGroup]:
@@ -66,9 +65,9 @@ def build_session_toolset(
     session_dir: Path,
     outputs_dir: Path | None,
     gate: "ReviewGate | None" = None,
-    include_subagent_tool: bool,
     sandbox: "Sandbox | None" = None,
     realtime_dir: Path | None = None,
+    subagent_tool: "LupMcpTool | None" = None,
 ) -> SessionToolset:
     """Build every MCP tool group for one session.
 
@@ -78,10 +77,6 @@ def build_session_toolset(
         gate: Shared review gate. None creates an in-memory gate (the
             Claude in-process path); subprocess paths pass a file-backed
             gate so the parent and the tool subprocess agree.
-        include_subagent_tool: True on backends without native subagents —
-            the ``run_subagent`` tool then serves the same specs the Claude
-            adapter converts to native ``AgentDefinition``s. False on
-            Claude, which would otherwise expose both mechanisms at once.
         sandbox: Session sandbox whose tools form the ``sandbox`` group.
         realtime_dir: Relay mailbox directory; presence adds the
             ``session`` group (persistent-mode tools), wired with a
@@ -90,15 +85,9 @@ def build_session_toolset(
             library imposes none by default.
 
     Returns:
-        The groups plus the shared gate and the submitted-output path,
-        which hook wiring (reflection gate, completion guard) needs.
+        The groups plus the shared reflection gate.
     """
-    from lup.workspace.output import create_output_tool
-    from lup.subagents import create_run_subagent_tool
-
-    from lup_template.agent.config import aux_model, settings
-    from lup_template.agent.models import AgentOutput
-    from lup_template.agent.subagents import get_subagent_specs
+    from lup_template.agent.config import aux_model
     from lup_template.agent.tools.example import EXAMPLE_TOOLS
     from lup_template.agent.tools.reflect import create_reflect_tools
 
@@ -108,18 +97,9 @@ def build_session_toolset(
         gate=gate,
         reviewer_model=aux_model(),
     )
-    output_kit = create_output_tool(
-        AgentOutput,
-        session_dir=session_dir,
-        gate=reflect_kit["gate"],
-        reflection_tool_name="mcp__notes__review",
-    )
-
-    notes_tools = [*reflect_kit["tools"], *output_kit["tools"]]
-    if include_subagent_tool:
-        notes_tools.append(
-            create_run_subagent_tool(get_subagent_specs(), default_model=settings.model)
-        )
+    notes_tools = list(reflect_kit["tools"])
+    if subagent_tool is not None:
+        notes_tools.append(subagent_tool)
 
     groups: dict[ServerGroup, list[LupMcpTool]] = {NOTES_GROUP: notes_tools}
 
@@ -140,5 +120,4 @@ def build_session_toolset(
     return SessionToolset(
         groups=groups,
         gate=reflect_kit["gate"],
-        output_path=output_kit["output_path"],
     )

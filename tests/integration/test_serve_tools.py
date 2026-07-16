@@ -119,7 +119,6 @@ def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
     groups = build_session_toolset(
         session_dir=session_dir,
         outputs_dir=tmp_path / "outputs",
-        include_subagent_tool=True,
         sandbox=Sandbox(
             session_id="registry-match", shared_dir=session_dir / "sandbox_shared"
         ),

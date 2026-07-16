@@ -44,14 +44,10 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.wiring import query
 from lup.mcp import ToolError, lup_tool
-from lup_template.agent.config import (
-    aux_model,
-    compat_api_key,
-    compat_base_url,
-    engine_for_settings,
-)
+from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.query import query
+from lup_template.agent.config import aux_model
 
 
 # --- Schemas ---
@@ -212,20 +208,24 @@ async def extract_answer(content: str, question: str) -> str:
     The model comes from ``aux_model()`` so the nested call follows the
     session's backend.
     """
-    response = await query(
-        f"Question: {question}\n\nDocument:\n{content}",
+    from lup_template.agent.core import build_auxiliary_factory
+
+    factory = build_auxiliary_factory(
         model=aux_model(),
-        engine=engine_for_settings(),
-        base_url=compat_base_url(),
-        api_key=compat_api_key(),
         system_prompt=(
             "Answer the question using only the document provided. "
             "Reply with the answer alone; say so if the document does "
             "not contain one."
         ),
-        prefix="  ↳ [extract] ",
     )
-    return response.text or "(no answer extracted)"
+    result = await query(
+        factory,
+        turn_request(TurnInput(text=f"Question: {question}\n\nDocument:\n{content}")),
+    )
+    text = "\n\n".join(
+        block.text for block in result.blocks if isinstance(block, TurnTextBlock)
+    )
+    return text or "(no answer extracted)"
 
 
 # --- Tool Implementations ---

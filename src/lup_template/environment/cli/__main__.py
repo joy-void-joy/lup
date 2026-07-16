@@ -32,6 +32,7 @@ import typer
 
 import lup.workspace.paths
 from lup.telemetry.display import format_duration
+from lup.runtime.models import SessionId
 
 from lup_template.agent.config import settings
 from lup_template.agent.core import run_agent
@@ -72,7 +73,7 @@ async def run_session(
     task: str,
     *,
     session_id: str | None = None,
-    resume: str | None = None,
+    resume: SessionId | None = None,
 ) -> AgentSessionResult:
     """Run an agent session with the given task.
 
@@ -82,7 +83,7 @@ async def run_session(
     Args:
         task: The task/prompt for the agent.
         session_id: Optional session identifier.
-        resume: Engine session id to continue (already resolved).
+        resume: Opaque provider session identity to continue.
 
     Returns:
         AgentSessionResult with the agent's output and metadata.
@@ -183,8 +184,12 @@ def run(
     if persistent:
         from lup_template.agent.core import run_persistent_agent
 
-        turns = asyncio.run(run_persistent_agent(task, session_id=session_id))
-        typer.echo(f"\nPersistent session ended after {turns} turn(s).")
+        persistent_result = asyncio.run(
+            run_persistent_agent(task, session_id=session_id)
+        )
+        typer.echo(
+            f"\nPersistent session ended after {persistent_result.turns} turn(s)."
+        )
         return
 
     resume_token = None

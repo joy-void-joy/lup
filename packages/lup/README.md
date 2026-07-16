@@ -1,44 +1,23 @@
 # lup
 
-Agent development library for the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview) and the OpenAI Codex SDK (plus any OpenAI-compatible endpoint). Standalone, domain-neutral utilities for building, running, tracing, and improving SDK agents — configurable through function arguments, with no project-specific code. Importing `lup` pulls in no SDK; install the `claude` and/or `codex` extras for the backend you use.
+Lup 0.2 is a typed capability-composition library for Claude SDK and Codex
+app-server agents. Importing `lup` loads no optional provider SDK.
 
-## Modules
-
-- `lup.adapters` — ALL SDK-specific code, behind one neutral seam. `adapters.engines` holds the `Engine` contract — one backend, complete: `client()`, `background()`, `profiles()`, `builtin_tools()` — with one shipped implementation file per backend beside it, each a lazy front door (the compat engines compose their base). `adapters.options` carries the backend-agnostic `LupAgentOptions`, `adapters.errors` the unsupported-behavior errors, and `adapters.wiring` is the SDK-free door: the `ENGINES` (id → engine) and `MODEL_ROUTES` (model-name regex → engine) routers plus the only doors in — `create_client()` and the one-shot `query()` with structured output. `adapters.clients` holds the purely abstract `Client` and the `ComposedClient` implementation that composes the verb components an engine contributes — `sessions/` (`Session`, `Sessions`, plus the composable governance wrappers `budget` and `timeout`) and `streams/` (`Stream`, with `ReplayStream` filling the stream gap) — so there are no per-engine client subclasses; the shared machinery every composition draws on (consume-tracking `refusal`, `usage` normalization, the `responses` fold, the `display` tap); and each engine's implementation package (`clients/claude/`, `clients/codex/`, one concern per module — `create.py` is each engine's recipe, naming every composed slot) with its compat translation inside (`compat.py`); `adapters.background` holds the `BackgroundDriver` verb, the composing `BackgroundAgent` (wake/debounce machinery in `agent`, the request model in `params`), and each engine's driver; `adapters.tools` the neutral tool-name vocabulary (`names`) and per-engine builtin tables. Backend-committed code can import an engine's door directly (`from lup.adapters.clients.claude.create import create_claude`) instead of routing through `create_client`. The capability table is probed from the engines by devtools, never declared here.
-- `lup.types` — the shared vocabulary (blocks, messages, events, `Usage`, `SubagentSpec`, `LupResponse`).
-- `lup.mcp` — `@lup_tool` decorator for MCP tools with typed Pydantic input/output, plus a patched `create_mcp_server` that preserves `is_error`.
-- `lup.hooks` — composable hook primitives: directory-based permissions, tool allowlists, tool gates (deny until a condition unlocks), nudges, capture hooks.
-- `lup.reflect` — reflection gate for reflect-before-output workflows.
-- `lup.workspace.output` — `submit_output` finalization and the missing-output guard, shared by every backend.
-- `lup.realtime` — persistent-agent machinery, one concern per module: `scheduler` (the `Scheduler` core — sleep/wake, debounce, reminders — with its guard hooks), `models` (shared tool I/O), and `relay` (the file-mailbox relay for subprocess backends, layered on the core).
-- `lup.subagents` — `run_subagent` delegation tool built from `SubagentSpec`s.
-- `lup.sandbox` — Docker-based persistent REPL (`pip install lup[docker]`).
-- `lup.workspace` — the session workspace: `history` (version-aware session storage), `notes` (RO/RW notes layout), `paths` (lazy path configuration), `output` (submit_output finalization), and `context` (`SessionContext` relayed across the subprocess boundary).
-- `lup.telemetry.trace` / `lup.telemetry.display` — markdown trace logging and color-coded console display, over the shared block helpers in `telemetry.blocks`.
-- `lup.telemetry.metrics` / `lup.resilience.retry` / `lup.resilience.throttle` — tool-call metrics, retry with backoff, rate limiting.
-- `lup.codescan` — review-marker scanning (`markers`) and the anti-pattern rule set (`antipatterns`) that development tooling consumes, over a shared scan core (`common`).
-- `lup.adapters.profiles` — the profile seam: `Profile.select(name, client)` returns a client running as the named account; each implementation beside the ABC (`claude`) owns its own storage and resolution.
-
-## Usage
+The package-root API is intentionally small: `SessionFactory`, typed turn
+request/result and capability-handle models, `turn_request()`, and `query()`.
+Narrow capabilities live in `lup.runtime.contracts`; concrete provider config
+and composition roots live in `lup.adapters.claude` and `lup.adapters.codex`.
 
 ```python
-from pydantic import BaseModel, Field
+from pathlib import Path
 
-from lup.adapters.wiring import query
-from lup.mcp import lup_tool
+from pydantic import BaseModel
 
-
-class SearchInput(BaseModel):
-    query: str = Field(description="Search query")
-
-
-class SearchOutput(BaseModel):
-    results: list[str]
-
-
-@lup_tool("Search the knowledge base for matching documents.")
-async def search(params: SearchInput) -> SearchOutput:
-    return SearchOutput(results=lookup(params.query))
+from lup import TurnInput, query, turn_request
+from lup.adapters.codex.runtime import (
+    CodexSessionConfig,
+    create_codex_session_factory,
+)
 
 
 class Summary(BaseModel):
@@ -46,8 +25,30 @@ class Summary(BaseModel):
     points: list[str]
 
 
-response = await query("Summarize the findings", output_type=Summary)
-summary = response.output(Summary)
+factory = create_codex_session_factory(
+    CodexSessionConfig(model="gpt-5.5", cwd=Path.cwd())
+)
+result = await query(
+    factory,
+    turn_request(TurnInput(text="Summarize the findings"), Summary),
+)
+summary = result.output
 ```
 
-Paths resolve lazily: importing `lup` never touches the filesystem. Point session storage somewhere explicit with `lup.workspace.paths.configure(root=..., notes_dir=..., version=...)`.
+`SessionFactory.open()` yields a transparent `SessionHandle`. Await
+`handle.session.start(request)` to receive a `TurnHandle`, then await
+`turn.turn.result()`. Live events, interruption, steering, and forking are
+optional capabilities on those handles; absence is represented by `None`.
+
+Structured results use one portable mechanism: the session binds an exact
+Pydantic schema to a fresh `submit_output` store before native input is
+accepted. Native structured-output modes are disabled. A successful
+`TurnResult[T]` therefore always contains a validated `T`; no submission is a
+typed error.
+
+Other modules provide independently composable runtime decorators, semantic
+policy, deterministic harness generation/reconciliation, the persisted
+resolver, MCP helpers, workspace/history support, scheduling, telemetry, and
+sandboxing. See the repository's
+[architecture guide](../../docs/architecture.md) and
+[0.2 migration guide](../../docs/migration-0.2.md).

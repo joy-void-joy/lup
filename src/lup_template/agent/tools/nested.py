@@ -1,7 +1,7 @@
 """Nested Agent pattern (template).
 
 A nested agent is an MCP tool that, inside its handler, spins up an
-*independent* SDK client via :func:`lup.adapters.wiring.query`, runs it to
+independent configured session via :func:`lup.runtime.query.query`, runs it to
 completion, and folds the scalar result back into a structured tool response.
 
 It differs from a **subagent** (defined upfront in ``get_subagent_specs`` and
@@ -13,21 +13,16 @@ it post-processes ("augments") the nested agent's raw output into the response.
 This is a TEMPLATE. Replace the example with the quick, context-separable work
 your domain needs (generation, parsing, scoring, a second opinion), and add
 ``NESTED_TOOLS`` to a server group in ``toolsets.py`` to serve it. See
-PATTERNS.md § Nested Agent Pattern. ``query`` disables session persistence,
-and the settings helpers (``aux_model``/``engine_for_settings``) keep the
-nested call on the session's backend, like the reviewer in ``reflect.py``.
+PATTERNS.md § Nested Agent Pattern. The application composition root builds
+the auxiliary factory with ``aux_model()``, like the reviewer in ``reflect.py``.
 """
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.wiring import query
 from lup.mcp import lup_tool
-from lup_template.agent.config import (
-    aux_model,
-    compat_api_key,
-    compat_base_url,
-    engine_for_settings,
-)
+from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.query import query
+from lup_template.agent.config import aux_model
 
 
 class CritiqueInput(BaseModel):
@@ -62,16 +57,23 @@ class CritiqueOutput(BaseModel):
 async def critique(params: CritiqueInput) -> CritiqueOutput:
     """Run a nested reviewer and augment its raw text into the response."""
 
-    response = await query(
-        f"Critique the following draft, focusing on {params.focus}. "
-        f"Be specific and concise.\n\n{params.draft}",
-        model=aux_model(),
-        engine=engine_for_settings(),
-        base_url=compat_base_url(),
-        api_key=compat_api_key(),
-        max_turns=1,
+    from lup_template.agent.core import build_auxiliary_factory
+
+    factory = build_auxiliary_factory(model=aux_model())
+    result = await query(
+        factory,
+        turn_request(
+            TurnInput(
+                text=(
+                    f"Critique the following draft, focusing on {params.focus}. "
+                    f"Be specific and concise.\n\n{params.draft}"
+                )
+            )
+        ),
     )
-    text = response.text or ""
+    text = "\n\n".join(
+        block.text for block in result.blocks if isinstance(block, TurnTextBlock)
+    )
     limit = 2000
     # Augment: the tool, not the nested agent, bounds and shapes the output.
     return CritiqueOutput(critique=text[:limit], truncated=len(text) > limit)

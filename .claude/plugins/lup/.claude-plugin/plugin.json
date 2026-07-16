@@ -1,5 +1,7 @@
 {
   "name": "lup",
+  "version": "0.2.0",
   "description": "Self-improvement loop scaffold: feedback collection, trace analysis, and meta-level reflection for any agent domain",
+  "author": {"name": "Lup contributors"},
   "keywords": ["self-improvement", "feedback", "calibration", "meta", "agent-sdk", "scaffold"]
 }

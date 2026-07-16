@@ -1,16 +1,12 @@
-# lup: ignore
-"""The anti-pattern set is single-sourced, and the auditor agrees with the hook.
+# lup: ignore[any-type, typing-union, typing-generics, dict-str-payload, dict-get, bare-object, bare-basemodel, tuple-shape, frozenset-shape, set-shape, empty-collection, cast, import-re, re-call, string-replace, string-split, string-strip, os-shell, os-path, os-file-ops, os-environ, eval-exec, utcnow]
+"""The anti-pattern set is single-sourced for the auditor and policy bundle.
 
-`lup.codescan.antipatterns` is the importable source of truth; the edit hook carries
-a generated copy inline because it cannot import on its hot path. These tests pin
-that the committed mirror equals `lup-devtools dev gen-hook`'s output (so it can
-never drift) and that the auditor flags the two classes the hook cannot catch
-after the fact: a match with no marker, and a marker guarding nothing.
+`lup.codescan.antipatterns` is the importable source of truth. Harness generation
+embeds its rows into the dependency-free policy runtime; these tests pin that
+projection and audit missing, untyped, and spurious suppressions.
 """
 
-import importlib.util
 import re
-from pathlib import Path
 
 from lup.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
@@ -19,33 +15,19 @@ from lup.codescan.antipatterns import (
     audit_text,
     empty_collection_exempt_lines,
 )
-from lup_template.devtools.dev.gen_hook import HOOK_PATH, render_hook_text
-
-spec = importlib.util.spec_from_file_location("auto_allow_edits", HOOK_PATH)
-assert spec is not None and spec.loader is not None
-hook = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(hook)
+from lup.policy.bundle import bundled_antipattern_rows
 
 
 def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str, str]]:
     return [(ap.id, ap.pattern.pattern, ap.message) for ap in patterns]
 
 
-def hook_rows(
-    table: list[tuple[str, re.Pattern[str], str]],
-) -> list[tuple[str, str, str]]:
-    return [(rule_id, pattern.pattern, message) for rule_id, pattern, message in table]
+def test_python_table_matches_generated_bundle() -> None:
+    assert lib_rows(PYTHON_ANTI_PATTERNS) == bundled_antipattern_rows()[".py"]
 
 
-def test_python_table_matches_hook() -> None:
-    """The committed hook equals `dev gen-hook`'s output — regenerate after editing a rule."""
-    assert render_hook_text() == HOOK_PATH.read_text(encoding="utf-8")
-
-
-def test_ts_table_matches_hook() -> None:
-    """The library TS table is identical to the hook's inline copy (ids too)."""
-    hook_table: list[tuple[str, re.Pattern[str], str]] = hook.TS_ANTI_PATTERNS
-    assert lib_rows(TS_ANTI_PATTERNS) == hook_rows(hook_table)
+def test_ts_table_matches_generated_bundle() -> None:
+    assert lib_rows(TS_ANTI_PATTERNS) == bundled_antipattern_rows()[".ts"]
 
 
 def test_rule_ids_are_unique_kebab_case() -> None:
@@ -317,27 +299,6 @@ def test_audit_local_seed_still_flags() -> None:
     findings = audit_text(LOCAL_SEED, PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["missing"]
     assert findings[0].rule_id == "empty-collection"
-
-
-def test_hook_refiner_exempts_init_state_edit(tmp_path: Path) -> None:
-    """The hook composes the post-edit file, so state added inside __init__
-    passes with no marker while a module-level seed still denies."""
-    target = tmp_path / "mod.py"
-    target.write_text(
-        "class Scheduler:\n    def __init__(self) -> None:\n        self.a = 1\n",
-        encoding="utf-8",
-    )
-
-    allowed = hook.anti_pattern_decision(
-        str(target),
-        "        self.a = 1\n",
-        "        self.a = 1\n        self.pending = []\n",
-    )
-    assert allowed is None
-
-    denied = hook.anti_pattern_decision(str(target), "", "items = {}\n")
-    assert denied is not None
-    assert "empty-collection" in str(denied)
 
 
 def test_audit_skips_docstring_prose() -> None:

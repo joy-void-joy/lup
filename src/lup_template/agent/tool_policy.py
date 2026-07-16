@@ -24,7 +24,6 @@ Usage:
 
 from typing import TYPE_CHECKING
 
-from lup.adapters.tools.names import BASH
 from lup.tool_policy import BaseToolPolicy, ExclusionReasons
 
 if TYPE_CHECKING:
@@ -75,7 +74,7 @@ class ToolPolicy(BaseToolPolicy):
         # sandbox: execute_code is the sanctioned code path. Opt it back in
         # with AGENT_SANDBOX_ALLOW_SHELL.
         if not settings.sandbox_allow_shell:
-            names[BASH] = (
+            names["Bash"] = (
                 "host shell is off by default (AGENT_SANDBOX_ALLOW_SHELL opts "
                 "it back in); execute_code is the sanctioned code path"
             )

@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: lup-harness-generate
+        name: regenerate Lup native harness artifacts
+        entry: uv run lup-devtools harness generate all
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -5,13 +5,16 @@
 import pytest
 from pydantic import BaseModel
 
-from lup.adapters.tools.claude import CLAUDE_BUILTIN_TOOLS
 from lup.hooks import LupHookInput, LupHooksConfig, create_tool_allowlist_hook
 from lup.mcp import create_mcp_server, lup_tool
 from lup.tool_policy import BaseToolPolicy
 
 from lup_template.agent.config import settings
 from lup_template.agent.tool_policy import ToolPolicy
+
+CLAUDE_BUILTIN_TOOLS = frozenset(  # lup: ignore[frozenset-shape] — immutable fixture
+    {"Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash", "TodoWrite"}
+)
 
 
 class PingInput(BaseModel):
@@ -111,7 +114,6 @@ class TestGetAllowedTools:
         )
 
         assert "Read" in allowed
-        assert "StructuredOutput" in allowed
         assert "mcp__pingsrv__ping" in allowed
         assert "TodoRead" not in allowed
 

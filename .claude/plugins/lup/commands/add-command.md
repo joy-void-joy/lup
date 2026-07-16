@@ -1,7 +1,7 @@
 ---
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion
 description: Create a new slash command in the lup plugin
-argument-hint: [name] [description]
+argument-hint: "[name] [description]"
 ---
 
 # Add New Command

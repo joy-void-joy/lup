@@ -15,12 +15,14 @@ dropping the knobs.
 """
 
 import logging
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.errors import UnsupportedOptionsError
-from lup.adapters.wiring import create_client
 from lup.mcp import LupMcpTool, ToolError, lup_tool
+from lup.runtime.contracts import SessionFactory
+from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.query import query
 from lup.types import SubagentSpec
 
 logger = logging.getLogger(__name__)
@@ -43,17 +45,14 @@ class RunSubagentOutput(BaseModel):
 def create_run_subagent_tool(
     specs: list[SubagentSpec],
     *,
-    default_model: str,
+    factory_recipe: Callable[[SubagentSpec], SessionFactory],
 ) -> LupMcpTool:
     """Create the run_subagent tool from the shared spec list.
 
     Args:
         specs: SDK-agnostic subagent definitions (the same list an
             engine with native subagents converts to its own primitive).
-        default_model: Resolves specs that pin no model
-            (``SubagentSpec.model is None`` means "inherit the session's
-            model"); the caller supplies it so this module reads no
-            application config.
+        factory_recipe: Explicit application-owned construction for each spec.
 
     Returns:
         A LupMcpTool for backends without native subagent support.
@@ -75,26 +74,18 @@ def create_run_subagent_tool(
                 f"Unknown subagent {validated.name!r}. Available: {sorted(by_name)}"
             )
 
-        model = spec.model or default_model
         try:
-            client = create_client(
-                model=model,
-                system_prompt=spec.prompt,
-                tools=spec.tools or None,
-                max_turns=spec.max_turns,
-                on_unsupported="raise",
-            )
-        except UnsupportedOptionsError as exc:
-            fields = ", ".join(exc.fields)
+            factory = factory_recipe(spec)
+        except (KeyError, LookupError, ValueError) as exc:
             raise ToolError(
-                f"Subagent {spec.name!r} sets fields ({fields}) that a one-shot "
-                f"delegation on the engine for model {model!r} cannot honor. "
-                "Give the spec a model whose engine supports them, or drop "
-                "these fields."
+                f"Subagent {spec.name!r} has no valid configured factory: {exc}"
             ) from exc
 
-        logger.info("Delegating to subagent %r (model=%s)", spec.name, model)
-        response = await client.query(validated.task)
-        return RunSubagentOutput(subagent=spec.name, result=response.text or "")
+        logger.info("Delegating to subagent %r", spec.name)
+        response = await query(factory, turn_request(TurnInput(text=validated.task)))
+        text = "\n\n".join(
+            block.text for block in response.blocks if isinstance(block, TurnTextBlock)
+        )
+        return RunSubagentOutput(subagent=spec.name, result=text)
 
     return run_subagent

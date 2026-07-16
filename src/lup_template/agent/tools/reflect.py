@@ -34,15 +34,10 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.wiring import query
-from lup.adapters.tools.names import GLOB, GREP, READ, WEB_FETCH
 from lup.mcp import LupMcpTool, lup_tool
 from lup.reflect import ReviewGate, ReviewResult, ReviewVerdict
-from lup_template.agent.config import (
-    compat_api_key,
-    compat_base_url,
-    engine_for_settings,
-)
+from lup.runtime.models import TurnInput, turn_request
+from lup.runtime.query import query
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +178,7 @@ class ReviewOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-REVIEWER_TOOLS: list[str] = [READ, GLOB, GREP, WEB_FETCH]
+REVIEWER_TOOLS: list[str] = ["Read", "Glob", "Grep", "WebFetch"]
 """What the reviewer may call: file tools over past outputs (Read/Glob/Grep)
 plus WebFetch for known URLs. The reviewer reads and verifies; it does not act."""
 
@@ -204,16 +199,10 @@ async def run_reviewer(
 ) -> ReviewResult | None:
     """Run the reviewer sub-agent and return its structured verdict.
 
-    The tool never inspects the backend: it asks for the full reviewer setup —
-    file tools over past outputs, a thinking budget, a turn cap — and ``query``
-    keeps what the chosen backend can honor, dropping the rest with a log line.
-    The engine and endpoint come from the same settings helpers the session
-    uses (``engine_for_settings``/``compat_base_url``), and the template wires
-    ``reviewer_model=aux_model()`` (config.py), so the reviewer follows the
-    session's backend — including OpenRouter routing — without Anthropic
-    credentials on ``AGENT_SDK=codex``/``openai``. Where the backend cannot
-    honor structured output, the text critique is wrapped as an approve
-    verdict — degraded review must not block the session.
+    The tool never inspects the provider. The application composition root
+    supplies a typed auxiliary factory using ``aux_model()`` and the same
+    selected route as the main session. The strict ``ReviewResult`` submission
+    contract is therefore identical for every configured adapter.
 
     Args:
         validated: The reflection input from the main agent.
@@ -229,27 +218,18 @@ async def run_reviewer(
 
     reviewer_prompt = "\n\n".join(prompt_sections)
 
-    response = await query(
-        reviewer_prompt,
-        prefix="  ↳ [reviewer] ",
-        model=model,
-        engine=engine_for_settings(),
-        base_url=compat_base_url(),
-        api_key=compat_api_key(),
-        system_prompt=REVIEWER_SYSTEM_PROMPT.format(outputs_dir=outputs_dir or "N/A"),
-        output_type=ReviewResult,
-        max_thinking_tokens=REVIEWER_THINKING_BUDGET,
-        permission_mode="bypassPermissions",
-        tools=REVIEWER_TOOLS,
-        max_turns=REVIEWER_MAX_TURNS,
-    )
+    from lup_template.agent.core import build_auxiliary_factory
 
-    result = response.output(ReviewResult)
-    if result is not None:
-        return result
-    if response.text:
-        return ReviewResult(verdict=ReviewVerdict.approve, assessment=response.text)
-    return None
+    factory = build_auxiliary_factory(
+        model=model,
+        system_prompt=REVIEWER_SYSTEM_PROMPT.format(outputs_dir=outputs_dir or "N/A"),
+        tools=REVIEWER_TOOLS,
+    )
+    result = await query(
+        factory,
+        turn_request(TurnInput(text=reviewer_prompt), ReviewResult),
+    )
+    return result.output
 
 
 # ---------------------------------------------------------------------------

@@ -142,18 +142,13 @@ class BaseToolPolicy:
         Args:
             servers: Registered MCP servers (from :meth:`get_mcp_servers`),
                 keyed by the server name the SDK uses for tool prefixes.
-            builtin_tools: The engine's native built-in tool names (a
-                per-backend table from the engine's module under
-                ``lup.adapters.tools``); empty for backends that expose
-                none.
+            builtin_tools: Native built-in names supplied explicitly by the
+                concrete adapter composition root.
 
         Returns:
             Sorted list of allowed tool names.
         """
-        # StructuredOutput is the SDK's own tool for emitting the final result
-        # under output_format; no template tool defines it, so the allowlist
-        # carries it alongside the engine's builtins.
-        tools: NameSet = {"StructuredOutput", *builtin_tools}
+        tools: NameSet = set(builtin_tools)  # lup: ignore[set-shape]
 
         for server_name, server in servers.items():
             for tool_name in server_tool_names(server):

@@ -1,7 +1,7 @@
 ---
 allowed-tools: Read, Edit, Write, Glob, Grep, AskUserQuestion
 description: Modify an existing slash command based on a description or delta
-argument-hint: [command-name] [delta or description] [--args hint1 hint2]
+argument-hint: "[command-name] [delta or description] [--args hint1 hint2]"
 ---
 
 # Modify Existing Slash Command
