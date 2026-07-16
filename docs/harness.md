@@ -5,9 +5,11 @@ The native Claude and Codex trees are deterministic committed output. Run
 hook regenerates and stops if that changes tracked files; CI runs the read-only
 `uv run lup-devtools harness check all` drift check and never commits changes.
 
-`src/lup_template/devtools/harness/catalog.py` is the canonical Pydantic source
-for portable plugins, skills, agents, guidance, resolver invocations, and hook
-policy declarations. Prompt prose is stored as ordered typed parts. A
+`src/lup_template/devtools/harness/content/` contains the canonical skill,
+agent, guidance, pattern, and template declarations.
+`src/lup_template/devtools/harness/catalog.py` composes them with resolver
+invocations and the application-owned hook policy. Prompt prose is stored as
+ordered typed parts. A
 `SkillInvocationRenderer` owns the complete native invocation spelling; shared
 code never rewrites `/lup:` into another prefix.
 
@@ -50,3 +52,6 @@ the native `/hooks` surface after generation.
 Commit generated `.claude`, `.codex`, `.agents`, and `AGENTS.md` artifacts
 together with catalog changes. CI should run both generation commands and
 require a clean diff.
+
+See `docs/adopter-guide.md` for complete skill, fetch-policy, conflict, and
+source-patch reconciliation walkthroughs.
