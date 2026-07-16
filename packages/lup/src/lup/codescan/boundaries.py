@@ -53,6 +53,7 @@ def path_is_sanctioned(rel_path: Path) -> bool:
         or posix.startswith((".claude/", ".codex/", ".agents/"))
         or posix == "AGENTS.md"
         or posix.startswith("tests/")
+        or posix.startswith("examples/")
         or posix == "src/lup_template/agent/core.py"
         or posix.startswith("src/lup_template/devtools/harness/")
         or posix == "src/lup_template/devtools/setup.py"
