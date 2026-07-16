@@ -55,6 +55,11 @@ from lup_template.devtools.harness.generate import (
     generate as generate_target,
     inspect_generation,
 )
+from lup_template.devtools.harness.evidence import (
+    EvidenceDrift,
+    evidence_drift,
+    sdk_evidence_drift,
+)
 from lup_template.devtools.harness.importer import ClaudeCommandFrontmatterImporter
 
 type NativeCapabilityEvidence = (
@@ -285,15 +290,34 @@ def apply_reconciliation(
 @app.command("doctor")
 def doctor_command(
     target: Annotated[str, typer.Argument(help="claude, codex, or all")] = "all",
+    strict_evidence: Annotated[
+        bool,
+        typer.Option(
+            "--strict-evidence",
+            help="Exit nonzero when an installed component is newer than the "
+            "evidence ledger (the nightly lane's re-probe trigger)",
+        ),
+    ] = False,
 ) -> None:
     """Report installed native runtime evidence without updating either CLI."""
     failed = False
+    drifts: list[EvidenceDrift] = []  # lup: ignore[empty-collection]
     for composition in harness_compositions(target):
         evidence = composition.readiness()
         for item in evidence:
             typer.echo(item.model_dump_json(indent=2))
+            if item.supported:
+                drift = evidence_drift(item.capability, item.version)
+                if drift is not None:
+                    drifts.append(drift)
+        if composition.recipe.label == "claude":
+            sdk_drift = sdk_evidence_drift()
+            if sdk_drift is not None:
+                drifts.append(sdk_drift)
         failed = failed or any(not item.supported for item in evidence)
-    if failed:
+    for drift in drifts:
+        typer.echo(drift.message, err=True)
+    if failed or (strict_evidence and drifts):
         raise typer.Exit(1)
 
 
