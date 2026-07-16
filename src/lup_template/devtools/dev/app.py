@@ -396,7 +396,9 @@ def rules_cmd(
     except RuntimeError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(1) from error
-    typer.echo(f"Lup rule reference {'verified' if check_only else 'written'}: {destination}")
+    typer.echo(
+        f"Lup rule reference {'verified' if check_only else 'written'}: {destination}"
+    )
 
 
 # -- init commands --

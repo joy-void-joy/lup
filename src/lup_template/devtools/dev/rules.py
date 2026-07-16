@@ -137,7 +137,10 @@ def write_rule_reference(path: Path | None = None, *, check: bool = False) -> Pa
     destination = path or project_root() / "docs" / "rules.md"
     expected = render_rule_reference()
     if check:
-        if not destination.is_file() or destination.read_text(encoding="utf-8") != expected:
+        if (
+            not destination.is_file()
+            or destination.read_text(encoding="utf-8") != expected
+        ):
             raise RuntimeError(
                 f"{destination} is stale; run `uv run lup-devtools dev rules`"
             )
