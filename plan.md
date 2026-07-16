@@ -1594,11 +1594,12 @@ proposals and drift is enforced before review.
 
 ### Verification record
 
-The 2026-07-16 completion run produced the following release evidence:
+The 2026-07-16 completion run, refreshed after the post-completion fixes
+below, produced the following release evidence:
 
 - `ruff format --check` and `ruff check` pass;
 - pyright reports zero errors and zero warnings;
-- pytest reports 579 passed and 11 external integration tests deselected;
+- pytest reports 587 passed and 11 external integration tests deselected;
 - the repository anti-pattern audit reports no findings and the native seam
   boundary audit passes;
 - `lup-devtools harness check all` reports zero writes, deletes, conflicts, or
@@ -1614,6 +1615,30 @@ The 2026-07-16 completion run produced the following release evidence:
 Those two notes are not part of this architecture plan and remain visible by
 design; deleting them without resolving their separate concerns would violate
 the repository's review-note policy.
+
+### Post-completion fixes (2026-07-16)
+
+An independent re-verification on a second machine found the original run's
+"579 passed" evidence environment-dependent and two defects behind it. Both
+are fixed and the record above reflects the refreshed run:
+
+- `LocalProcessLauncher` captured child output through a pseudo-terminal, so
+  git colorized and paginated under the host's `LESS`/`PAGER` configuration
+  and resolver diff validation compared escape-polluted paths, failing every
+  concern on such machines. Capture now uses pipes; a launcher contract test
+  and a pager-hostile git fixture pin it.
+- A run killed after the workers loop persisted `DEPENDENCY_BASES`, `REVIEW`,
+  or early `INTEGRATION` could never resume: the re-entered batch loop
+  persisted `phase=WORKERS` backward and every retry failed the phase guard.
+  `ResolverCore.persist` now treats the phase as a monotonic high-water mark;
+  a hard-kill/resume lifecycle test pins recovery through acceptance.
+
+The same pass closed the remaining coverage debts recorded by the area
+audits: direct `None -> A -> A -> B -> None` coverage through the real Claude
+binder and options builder, Codex fail-before-input rebinding rejection and
+`turn/steer` rendering fixtures, live-event joining and steer retargeting
+across recovery attempts, and marker-count ask fixtures on both policy
+engines including under resolve-editor autonomy.
 
 ## Historical implementation review (2026-07-16)
 
