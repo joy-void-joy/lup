@@ -1,6 +1,7 @@
 """Whole-turn timeout, recovery, correction, persistence, and queue tests."""
 
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
 
@@ -19,11 +20,15 @@ from lup.runtime.errors import (
     TurnFailure,
     TurnTimeoutError,
 )
+from lup.runtime.contracts import EventStream, Steer
 from lup.runtime.models import (
+    BlockCompletedEvent,
     SessionId,
+    TurnEvent,
     TurnIdentifiers,
     TurnId,
     TurnInput,
+    TurnTextBlock,
     turn_request,
 )
 from lup.runtime.wrappers import (
@@ -427,7 +432,106 @@ async def test_trace_usage_and_display_observe_one_complete_logical_turn() -> No
     assert [record.succeeded for record in traces] == [True]
     assert [record.usage.input_tokens for record in usages] == [4]
     displayed = displays[0].blocks[0]
-    from lup.runtime.models import TurnTextBlock
-
     assert isinstance(displayed, TurnTextBlock)
     assert displayed.text == "done"
+
+
+class ScriptedEventStream(EventStream):
+    """Yield one labeled block per attempt and signal when fully drained."""
+
+    def __init__(
+        self,
+        label: str,
+        identifiers: TurnIdentifiers,
+        drained: asyncio.Event,
+    ) -> None:
+        self.label = label
+        self.identifiers = identifiers
+        self.drained = drained
+
+    async def iterate(self) -> AsyncIterator[TurnEvent]:
+        yield BlockCompletedEvent(
+            identifiers=self.identifiers,
+            block=TurnTextBlock(text=self.label),
+        )
+        self.drained.set()
+
+    def events(self) -> AsyncIterator[TurnEvent]:
+        return self.iterate()
+
+
+class RecordingSteer(Steer):
+    def __init__(self, name: str, record: list[str]) -> None:
+        self.name = name
+        self.record = record
+
+    async def steer(self, input: TurnInput) -> None:
+        self.record.append(f"{self.name}:{input.text}")
+
+
+@pytest.mark.asyncio
+async def test_retry_joins_live_events_and_retargets_steer() -> None:
+    binder = RecordingBinder()
+    steered: list[str] = []
+    first_drained = asyncio.Event()
+    second_drained = asyncio.Event()
+    sequence = 0
+
+    async def start(_text: str) -> AcceptedTurn:
+        nonlocal sequence
+        sequence += 1
+        turn_sequence = sequence
+        identifiers = TurnIdentifiers(
+            session=SessionId(value="wrapped"),
+            turn=TurnId(value=f"turn-{turn_sequence}"),
+        )
+
+        async def complete() -> CompletedTurn:
+            if turn_sequence == 1:
+                await first_drained.wait()
+                raise ProviderTurnError(TurnFailure(message="retry"))
+            return CompletedTurn()
+
+        drained = first_drained if turn_sequence == 1 else second_drained
+        return AcceptedTurn(
+            identifiers=identifiers,
+            complete=complete,
+            events=ScriptedEventStream(
+                f"attempt-{turn_sequence}", identifiers, drained
+            ),
+            steer=RecordingSteer(f"steer-{turn_sequence}", steered),
+        )
+
+    session = DecoratingSession(
+        ComposedSession(start, binder),
+        timeout=None,
+        budget=None,
+        recovery=RecoveryConfig(retries=1),
+        correction=None,
+        persistence=None,
+    )
+    handle = await session.start(turn_request(TurnInput(text="hello")))
+    events = handle.events
+    steer = handle.steer
+    assert events is not None
+    assert steer is not None
+
+    observed: list[str] = []
+
+    async def consume() -> None:
+        async for event in events.events():
+            match event:
+                case BlockCompletedEvent(block=TurnTextBlock(text=text)):
+                    observed.append(text)
+                case _:
+                    raise AssertionError(f"unexpected live event {event.type}")
+
+    consumer = asyncio.create_task(consume())
+    result = await handle.turn.result()
+    await consumer
+    await steer.steer(TurnInput(text="focus"))
+
+    assert observed == ["attempt-1", "attempt-2"]
+    assert steered == ["steer-2:focus"]
+    assert result.output is None
+    assert second_drained.is_set()
