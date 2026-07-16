@@ -8,6 +8,7 @@ from lup.harness.contracts import ArtifactRenderer, SkillInvocationRenderer
 from lup.harness.generation import argument_text
 from lup.harness.models import (
     Agent,
+    ArgumentsRef,
     AskUser,
     Artifact,
     ArtifactTree,
@@ -66,8 +67,10 @@ class ClaudePromptRenderer:
                 case ResolverEntry():
                     rendered.append(
                         'Invoke Workflow(scriptPath=".claude/workflows/commands/'
-                        'resolve.js", args={}).'  # lup: ignore[empty-collection]
+                        'resolve.js", args={}).'
                     )
+                case ArgumentsRef():
+                    rendered.append("$ARGUMENTS")
         text = "".join(rendered)
         return text if text.endswith("\n") else text + "\n"
 
@@ -80,20 +83,21 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
         self.plugin_name = plugin_name
 
     def render(self, source: Skill) -> ArtifactTree:
-        arguments = (
-            "\n".join(
+        frontmatter = [f"description: {json.dumps(source.description)}"]
+        if source.tools:
+            frontmatter.append("allowed-tools: " + ", ".join(source.tools))
+        if source.argument_hint is not None:
+            frontmatter.append(f"argument-hint: {json.dumps(source.argument_hint)}")
+        elif source.arguments:
+            arguments = "\n".join(
                 f"  - name: {argument.name}\n"
                 f"    description: {json.dumps(argument.description)}\n"
                 f"    required: {str(argument.required).lower()}"
                 for argument in source.arguments
             )
-            if source.arguments
-            else "  []"
-        )
+            frontmatter.append(f"arguments:\n{arguments}")
         content = (
-            "---\n"
-            f"description: {json.dumps(source.description)}\n"
-            f"arguments:\n{arguments}\n"
+            "---\n" + "\n".join(frontmatter) + "\n"
             "---\n\n"
             f"{self.prompts.render(source.prompt)}"
         )
@@ -120,12 +124,14 @@ class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
     def render(self, source: Agent) -> ArtifactTree:
         tools = ", ".join(source.tools)
         model = f"model: {source.model}\n" if source.model is not None else ""
+        color = f"color: {source.color}\n" if source.color is not None else ""
         content = (
             "---\n"
             f"name: {source.name}\n"
             f"description: {json.dumps(source.description)}\n"
             f"tools: {tools}\n"
             f"{model}"
+            f"{color}"
             "---\n\n"
             f"{self.prompts.render(source.prompt)}"
         )

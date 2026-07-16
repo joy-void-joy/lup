@@ -1,7 +1,7 @@
 ---
+description: "Review upstream template commits and apply improvements"
 allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, Skill(lup:commit)
-description: Review upstream template commits and apply improvements
-argument-hint: [focus area]
+argument-hint: "[focus area]"
 ---
 
 # Update from Upstream

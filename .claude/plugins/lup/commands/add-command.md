@@ -1,6 +1,6 @@
 ---
+description: "Create a new slash command in the lup plugin"
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion
-description: Create a new slash command in the lup plugin
 argument-hint: "[name] [description]"
 ---
 
@@ -78,7 +78,7 @@ argument-hint: <hint from phase 1, omit if no arguments>
 After creating the command:
 
 1. Show the user the file contents
-2. Explain how to invoke it: `/lup:<command-name>`
+2. Explain how to invoke it: `the corresponding Lup skillcommand-name>`
 3. Ask if any adjustments are needed
 
 ## Template Examples

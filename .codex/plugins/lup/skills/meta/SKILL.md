@@ -1,6 +1,6 @@
 ---
 name: meta
-description: "Review and improve the harness structure"
+description: "Review and modify .claude structure, brainstorm improvements interactively"
 ---
 
 # Meta: .claude Structure Review & Improvement

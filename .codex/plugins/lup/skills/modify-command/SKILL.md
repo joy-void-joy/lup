@@ -1,6 +1,6 @@
 ---
 name: modify-command
-description: "Modify an existing harness command"
+description: "Modify an existing slash command based on a description or delta"
 ---
 
 # Modify Existing Slash Command

@@ -1,7 +1,7 @@
 ---
+description: "Import a specific pattern from a tracked downstream repo"
 allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, Skill(lup:commit)
-description: Import a specific pattern from a tracked downstream repo
-argument-hint: <project> <pattern description>
+argument-hint: "<project> <pattern description>"
 ---
 
 # Import Pattern from Downstream

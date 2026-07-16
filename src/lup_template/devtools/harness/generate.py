@@ -1,11 +1,16 @@
 """Ownership-safe generation shared by explicit native CLI entry points."""
 
+import json
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
 from lup.adapters.harness import compile_claude, compile_codex
-from lup.adapters.claude.harness import CLAUDE_RESOLVER_ENTRY, ClaudeHookRenderer
+from lup.adapters.claude.harness import (
+    CLAUDE_RESOLVER_ENTRY,
+    ClaudePromptRenderer,
+    ClaudeSkillInvocationRenderer,
+)
 from lup.harness.materialization import AtomicMaterializer
 from lup.harness.models import (
     Artifact,
@@ -21,10 +26,11 @@ from lup.harness.reconciliation import (
     FilesystemCurrentTreeReader,
 )
 from lup.harness.contracts import CurrentTreeReader, Reconciler
-from lup_template.devtools.harness.catalog import (
-    ClaudeParityCurrentTreeReader,
-    claude_parity_tree,
-    portable_harness,
+from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.patterns import DOCUMENT as PATTERNS
+from lup_template.devtools.harness.content.settings import SETTINGS
+from lup_template.devtools.harness.content.template_claude import (
+    DOCUMENT as TEMPLATE_CLAUDE,
 )
 
 
@@ -104,56 +110,54 @@ def current_reader(
 
 
 def claude_generation_recipe(root: Path) -> GenerationRecipe:
-    """Compose the Claude parity renderer, reader, and ownership location."""
+    """Compose the complete Claude tree from canonical typed declarations."""
     source = portable_harness(root=root)
-    baseline = claude_parity_tree(root)
     compiled = compile_claude(source)
-    hook_artifacts = [
-        artifact
-        for plugin in source.plugins
-        if plugin.hooks is not None
-        for artifact in ClaudeHookRenderer(plugin.name).render(plugin.hooks).artifacts
-    ]
-    support_paths = {
-        Path(".claude/plugins/lup/commands/implementer.md"),
-        Path(".claude/plugins/lup/commands/resolve.md"),
-        Path(".claude/plugins/lup/commands/resolve-reviewer.md"),
-    }
-    support_artifacts = [
-        artifact for artifact in compiled.artifacts if artifact.path in support_paths
-    ]
+    prompts = ClaudePromptRenderer(ClaudeSkillInvocationRenderer())
+    content_root = Path(__file__).parent / "content"
     resolver_entry = Artifact(
         path=Path(".claude/workflows/commands/resolve.js"),
         content=CLAUDE_RESOLVER_ENTRY,
         semantic_id="resolver.lup.entry",
     )
-    overrides = {
-        artifact.path: artifact
-        for artifact in [*hook_artifacts, *support_artifacts, resolver_entry]
-    }
+    support_artifacts = [
+        Artifact(
+            path=Path(".claude/PATTERNS.md"),
+            content=prompts.render(PATTERNS),
+            semantic_id="harness.patterns",
+        ),
+        Artifact(
+            path=Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md"),
+            content=prompts.render(TEMPLATE_CLAUDE),
+            semantic_id="harness.template-guidance",
+        ),
+        Artifact(
+            path=Path(".claude/plugins/lup/scripts/file_suggest.sh"),
+            content=(content_root / "assets" / "file_suggest.sh").read_text(
+                encoding="utf-8"
+            ),
+            semantic_id="harness.file-suggestion",
+            executable=True,
+        ),
+        Artifact(
+            path=Path(".claude/settings.json"),
+            content=json.dumps(SETTINGS, indent=2, sort_keys=True),
+            semantic_id="harness.project-settings",
+        ),
+        resolver_entry,
+    ]
     desired = ArtifactTree(
         artifacts=sorted(
-            [
-                *[
-                    artifact
-                    for artifact in baseline.artifacts
-                    if artifact.path not in overrides
-                ],
-                *overrides.values(),
-            ],
+            [*compiled.artifacts, *support_artifacts],
             key=lambda artifact: artifact.path.as_posix(),
         )
     )
     manifest_path = root / ".claude" / ".lup-ownership.json"
     prior = load_manifest(manifest_path)
-    reader = ClaudeParityCurrentTreeReader(
-        current_reader(
-            prior,
-            desired,
-            sensitive_local_only=[Path(".claude/settings.local.json")],
-        ),
+    reader = current_reader(
+        prior,
         desired,
-        bootstrap=prior is None,
+        sensitive_local_only=[Path(".claude/settings.local.json")],
     )
     return GenerationRecipe(
         label="claude",

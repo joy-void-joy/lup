@@ -1,5 +1,3 @@
-# lup: ignore[tuple-shape]
-# Runtime assembly serializes the kernel's deliberately primitive row contracts.
 """Assemble dependency-free policy kernel and application-owned data files."""
 
 import pprint
@@ -12,6 +10,14 @@ from lup.policy.kernel import (
     AntiPatternRow,
     PathRuleRow,
     UrlScopeRow,
+)
+
+type PolicyDataValue = (
+    int
+    | list[str]
+    | list[UrlScopeRow]
+    | list[PathRuleRow]
+    | dict[str, list[AntiPatternRow]]
 )
 
 
@@ -69,8 +75,10 @@ def runtime_path_rules(protected_roots: list[str]) -> list[PathRuleRow]:
     ]
 
 
-def python_literal(value: object) -> str:
+def python_literal(value: PolicyDataValue) -> str:
     """Render deterministic dependency-free Python data."""
+    if isinstance(value, list) and not value:
+        return "()"
     return pprint.pformat(value, width=88, sort_dicts=True)
 
 

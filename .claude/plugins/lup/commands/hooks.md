@@ -1,6 +1,10 @@
 ---
+description: "Inspect and modify the canonical semantic permission policy"
 allowed-tools: Read, Edit, Grep, Glob, AskUserQuestion, Bash
-description: Inspect and modify the canonical semantic permission policy
+arguments:
+  - name: arguments
+    description: "Optional arguments supplied with the skill invocation"
+    required: false
 ---
 
 # Hooks: Semantic Permission Policy

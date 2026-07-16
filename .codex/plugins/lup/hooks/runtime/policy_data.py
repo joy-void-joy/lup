@@ -5,7 +5,7 @@ ALLOWED_FETCH_SCOPES = [('https', 'docs.claude.com', None, '/', ''),
  ('https', 'ai.pydantic.dev', None, '/', ''),
  ('http', 'ai.pydantic.dev', None, '/', '')]
 
-DENIED_FETCH_SCOPES = []
+DENIED_FETCH_SCOPES = ()
 
 PATH_RULES = [('subtree', '.claude', 'protected path requires approval', True),
  ('contains_part', 'tmp', 'scratch path requires approval', False),
@@ -609,6 +609,6 @@ ANTI_PATTERN_ROWS = {'.js': [('as-any',
            '\\bconsole\\.log\\s*\\(',
            'console.log is a debug leftover — remove it or route through a logger')]}
 
-AUTONOMOUS_AGENT_IDENTITIES = []
+AUTONOMOUS_AGENT_IDENTITIES = ()
 
 MAXIMUM_ADDED_LINES = 3

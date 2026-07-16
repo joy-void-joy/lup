@@ -1,6 +1,6 @@
 ---
 name: hooks
-description: "Inspect and modify semantic permission policy"
+description: "Inspect and modify the canonical semantic permission policy"
 ---
 
 # Hooks: Semantic Permission Policy

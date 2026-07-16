@@ -5,8 +5,8 @@
   },
   "plugins": [
     {
+      "description": "Self-improvement harness with feedback, review, and safe resolution flows",
       "name": "lup",
-      "description": "Self-improving agent scaffold with feedback loop, trace analysis, and meta-level reflection",
       "source": "./lup"
     }
   ]

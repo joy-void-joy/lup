@@ -1,6 +1,6 @@
 ---
 name: rebase
-description: "Clean feature history and prepare review"
+description: "Clean up commit history on the feature branch and open/update a PR"
 ---
 
 # Rebase and PR

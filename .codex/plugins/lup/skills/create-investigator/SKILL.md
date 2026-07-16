@@ -1,6 +1,6 @@
 ---
 name: create-investigator
-description: "Create a diagnostic investigator skill"
+description: "Create a new diagnostic/investigator command (like /debug)"
 ---
 
 # Create Investigator Command

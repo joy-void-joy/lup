@@ -473,7 +473,7 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
                         ast.Assign(targets=[ast.Name(id=name)], value=value)
                         | ast.AnnAssign(target=ast.Name(id=name), value=value)
                     ) if is_empty_literal(value):
-                        loops = feeding.get(name)
+                        loops = feeding[name] if name in feeding else None
                         if in_loop:
                             if loops is not None:
                                 mark(value)
@@ -575,7 +575,10 @@ def antipattern_decision(
         if directive is not None and (
             not python_source
             or comment_columns is None
-            or comment_columns.get(number) == directive.start()
+            or (
+                number in comment_columns
+                and comment_columns[number] == directive.start()
+            )
         ):
             return KernelDecision("ask", "edit introduces an antipattern suppression")
     for number in added:

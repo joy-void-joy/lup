@@ -1,6 +1,10 @@
 ---
+description: "Review and modify .claude structure, brainstorm improvements interactively"
 allowed-tools: Bash(ls:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, Agent, AskUserQuestion
-description: Review and modify .claude structure, brainstorm improvements interactively
+arguments:
+  - name: arguments
+    description: "Optional arguments supplied with the skill invocation"
+    required: false
 ---
 
 # Meta: .claude Structure Review & Improvement
@@ -44,7 +48,7 @@ plugins/lup/
 
 ### When to Add to the Plugin
 
-- **Commands**: Reusable workflows invoked via `/lup:command-name`
+- **Commands**: Reusable workflows invoked via `the corresponding Lup skill`
 - **Hooks**: Permission hooks in `hooks/scripts/` — auto-allow, deny, or quality gates
 - **Agents**: Subagent definitions for specialized tasks
 - **Devtools**: Python CLI tools go in `src/lup_template/devtools/` (exposed as `lup-devtools`), not in the plugin

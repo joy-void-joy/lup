@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: "Explore agent architecture and tools"
+description: "Pre-init design exploration \u2014 brainstorm architecture, MCP tools, and agent design"
 ---
 
 # Brainstorm: Agent Design Exploration

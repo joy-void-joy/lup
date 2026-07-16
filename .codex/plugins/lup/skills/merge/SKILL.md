@@ -1,6 +1,6 @@
 ---
 name: merge
-description: "Semantically merge a branch or conflicts"
+description: "Merge a branch or resolve existing merge conflicts"
 ---
 
 # Merge

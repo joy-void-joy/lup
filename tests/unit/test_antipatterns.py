@@ -1,4 +1,4 @@
-# lup: ignore[any-type, typing-union, typing-generics, dict-str-payload, dict-get, bare-object, bare-basemodel, tuple-shape, frozenset-shape, set-shape, empty-collection, cast, import-re, re-call, string-replace, string-split, string-strip, os-shell, os-path, os-file-ops, os-environ, eval-exec, utcnow]
+# lup: ignore[import-re, re-call, set-shape, string-replace, tuple-shape]
 """The anti-pattern set is single-sourced for the auditor and policy bundle.
 
 `lup.codescan.antipatterns` is the importable source of truth. Harness generation

@@ -1,6 +1,6 @@
 ---
+description: "Initialize the self-improvement loop for a specific domain"
 allowed-tools: Bash(uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*), Read, Grep, Glob, Edit, Write, AskUserQuestion
-description: Initialize the self-improvement loop for a specific domain
 ---
 
 # Initialize Self-Improvement Loop
@@ -102,7 +102,7 @@ uv run lup-devtools dev init rename-package <project> --dry-run
 uv run lup-devtools dev init rename-package <project>
 ```
 
-This handles directory rename (`src/lup_template/` -> `src/<project>/`), import updates, pyproject.toml entry points, CLI app name, and the plugin marketplace name -- all in one shot. The marketplace (`.claude/plugins/.claude-plugin/marketplace.json` + settings.json) is named `<project>` so it doesn't collide in the global marketplace namespace, while the plugin entry stays `lup` (so `/lup:*` is identical everywhere). Framework vocabulary (`lup_tool`, `lup-devtools`, `.lup/`, etc.) is preserved automatically.
+This handles directory rename (`src/lup_template/` -> `src/<project>/`), import updates, pyproject.toml entry points, CLI app name, and the plugin marketplace name -- all in one shot. The marketplace (`.claude/plugins/.claude-plugin/marketplace.json` + settings.json) is named `<project>` so it doesn't collide in the global marketplace namespace, while the plugin entry stays `lup` (so `the corresponding Lup skill` is identical everywhere). Framework vocabulary (`lup_tool`, `lup-devtools`, `.lup/`, etc.) is preserved automatically.
 
 ### After renaming:
 

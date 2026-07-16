@@ -1,6 +1,6 @@
 ---
 name: update
-description: "Review and apply upstream improvements"
+description: "Review upstream template commits and apply improvements"
 ---
 
 # Update from Upstream

@@ -1,4 +1,4 @@
-# lup: ignore[any-type, type-ignore, pyright-ignore, noqa, generic-base, dict-str-object, dict-get, tuple-shape, frozenset-shape, set-shape, empty-collection, cast, import-re, re-call, string-replace, string-split, string-strip, bare-except, except-baseexception, suppress, dataclass, namedtuple, os-shell, os-path, os-environ, eval-exec, utcnow]
+# lup: ignore[empty-collection, import-re, re-call, set-shape]
 """Single importable source of truth for the codebase's anti-pattern set.
 
 The generated hermetic edit policy denies an edit whose added lines match one
