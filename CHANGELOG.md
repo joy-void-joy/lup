@@ -22,5 +22,9 @@ Breaking capability-composition release.
 - Removed all legacy engine, client, broad options, profile, background-driver,
   replay-stream, and provider-wide tool-registry modules. There is no legacy
   facade.
+- Fixed `LocalProcessLauncher` to capture through pipes so git output stays
+  plain regardless of the host pager configuration, and made resolver resume
+  treat the persisted phase as a monotonic high-water mark so hard-killed runs
+  recover from every mid-phase kill window.
 
 See [docs/migration-0.2.md](docs/migration-0.2.md).
