@@ -1,31 +1,22 @@
-# lup: ignore[empty-collection]
-# Test fixtures accumulate scripted answers and repo files deliberately.
-"""Live native-boundary smokes, one per historical shipped failure class.
+"""Live smokes for the four historically fragile native boundaries.
 
-The deterministic suite never executes the real ``claude`` or ``codex``
-binaries; every real failure shipped on the 0.2 branch lived in that gap.
-Each test here pins one of those classes against the installed CLIs:
-
-- a fresh Claude session completing one turn (the fresh-session UUID class);
-- a miniature resolver run on a throwaway fixture repository (the
-  pseudo-TTY/pager output-capture class);
-- a Codex ``thread/start`` carrying a dynamic tool (the schema-drift class).
-
-All three cost real LLM calls, so they carry the integration marker and run
-in the scheduled ``native-nightly`` lane with cheap models.
+These tests execute installed provider CLIs and incur real model calls. The
+scheduled native lane supplies credentials and deliberately cheap models.
 """
 
+import os
 from pathlib import Path
 
 import pytest
 import sh
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from lup.adapters.claude.harness import ClaudeSkillInvocationRenderer
 from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
     create_claude_session_factory,
 )
+from lup.adapters.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.adapters.codex.runtime import CodexSessionConfig, create_codex_session_factory
 from lup.harness.process import LocalProcessLauncher
 from lup.resolver.contracts import QuestionBroker
@@ -50,7 +41,7 @@ CODEX_SMOKE_MODEL = "gpt-5.5"
 
 
 async def test_fresh_claude_session_completes_one_turn(tmp_path: Path) -> None:
-    """A fresh (non-resumed) session id must be accepted by the real CLI."""
+    """A fresh native session id survives one complete turn."""
     factory = create_claude_session_factory(
         ClaudeSessionConfig(
             model=CLAUDE_SMOKE_MODEL,
@@ -79,7 +70,7 @@ class SmokeSubmission(BaseModel):
 
 
 async def test_codex_thread_start_carries_a_dynamic_tool(tmp_path: Path) -> None:
-    """Binding typed output must survive the installed app-server schema."""
+    """A typed binding survives the installed app-server schema."""
     factory = create_codex_session_factory(
         CodexSessionConfig(
             model=CODEX_SMOKE_MODEL,
@@ -127,7 +118,7 @@ class ScriptedQuestionBroker(QuestionBroker):
 
 
 def fixture_repository(root: Path) -> Path:
-    """Create a one-file throwaway repository carrying a single review note."""
+    """Create a throwaway repository carrying one review note."""
     repo = root / "fixture-repo"
     repo.mkdir()
     git = sh.Command("git")
@@ -145,7 +136,7 @@ def fixture_repository(root: Path) -> Path:
 
 
 async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) -> None:
-    """The resolver's process boundary must capture plain (unpaged) output."""
+    """The resolver process boundary captures plain, unpaged output."""
     repo = fixture_repository(tmp_path)
     launcher = LocalProcessLauncher()
     run_id = "smoke-run"
@@ -209,3 +200,65 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
     assert manifest.review_branch
     branches = str(sh.Command("git")("branch", "--list", _cwd=repo))
     assert manifest.review_branch in branches
+
+
+class CodexEditFixture(BaseModel):
+    """Paths participating in the blocked-edit smoke."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repository: Path
+    module: Path
+
+
+def codex_edit_fixture(root: Path) -> CodexEditFixture:
+    """Create a repository whose requested edit violates the Lup policy."""
+    repo = root / "codex-edit-fixture"
+    repo.mkdir()
+    sh.Command("git")("init", "--initial-branch=main", _cwd=repo)
+    module = repo / "module.py"
+    module.write_text('VALUE = "safe"\n', encoding="utf-8")
+    return CodexEditFixture(repository=repo, module=module)
+
+
+def test_codex_plugin_blocks_a_forbidden_apply_patch(tmp_path: Path) -> None:
+    """A denied plugin hook keeps the file unchanged and the session alive."""
+    root = Path.cwd()
+    codex_home = tmp_path / "codex-home"
+    CodexPluginInstaller(PluginCacheConfig(codex_home=codex_home)).ensure(
+        root / ".codex" / "plugins" / "lup",
+        root,
+    )
+    fixture = codex_edit_fixture(tmp_path)
+    final_message = tmp_path / "codex-final.txt"
+    environment = {
+        **os.environ,  # lup: ignore[os-environ] — preserve provider credentials
+        "CODEX_HOME": str(codex_home),
+    }
+    prompt = (
+        "Use apply_patch exactly once to add `import re` and a call to "
+        "`re.search` to module.py. Do not use any other tool. The Lup hook must "
+        "reject that anti-pattern; after the rejection reply exactly hook-blocked."
+    )
+
+    sh.Command("codex")(
+        "exec",
+        "--enable",
+        "hooks",
+        "--dangerously-bypass-hook-trust",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--sandbox",
+        "workspace-write",
+        "--model",
+        CODEX_SMOKE_MODEL,
+        "--output-last-message",
+        str(final_message),
+        "--cd",
+        str(fixture.repository),
+        prompt,
+        _env=environment,
+    )
+
+    assert fixture.module.read_text(encoding="utf-8") == 'VALUE = "safe"\n'
+    assert final_message.read_text(encoding="utf-8").strip() == "hook-blocked"
