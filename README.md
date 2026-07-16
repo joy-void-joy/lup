@@ -154,12 +154,13 @@ This repository contains many quality of life improvements over the barebone cla
 
 ### Subagents
 
-The plugin ships four subagents that do context-heavy work in their own window and return a compact report:
+The plugin ships five subagents that do context-heavy work in their own window and return a compact report:
 
 - **trace-explorer** — reads many session traces in bulk and returns cross-cutting patterns (tool failures, capability gaps, reasoning quality)
 - **version-explorer** — retrieves and diffs agent code across version tags
 - **version-reviewer** — holistic review of one agent version: its prompt, its performance data, what to keep and what to change
 - **implementer** — TDD implementer that writes production code to make tests pass but will not touch test files
+- **resolve-editor** — implements one persisted resolver concern inside its isolated leased worktree
 
 ### Hooks
 
