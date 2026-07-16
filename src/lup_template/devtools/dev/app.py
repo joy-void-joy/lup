@@ -15,6 +15,7 @@ import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.plugin as plugin
 import lup_template.devtools.dev.pr as pr
 import lup_template.devtools.dev.resolve_review as resolve_review
+import lup_template.devtools.dev.rules as rules
 import lup_template.devtools.dev.worktree as worktree
 
 app = typer.Typer(no_args_is_help=True)
@@ -380,6 +381,22 @@ def todos_cmd(
     `dev comments`.
     """
     comments.todos(as_json)
+
+
+@app.command("rules")
+def rules_cmd(
+    check_only: Annotated[
+        bool,
+        typer.Option("--check", help="Fail when docs/rules.md is stale"),
+    ] = False,
+) -> None:
+    """Generate the Lup rule and typed-suppression reference."""
+    try:
+        destination = rules.write_rule_reference(check=check_only)
+    except RuntimeError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    typer.echo(f"Lup rule reference {'verified' if check_only else 'written'}: {destination}")
 
 
 # -- init commands --
