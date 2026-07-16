@@ -35,9 +35,15 @@ def collect_tools_by_server(
         return {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)}
 
     from lup.reflect import ReviewGate
+    from lup.runtime.contracts import SessionFactory
+    from lup.subagents import create_run_subagent_tool
+    from lup.types import SubagentSpec
+    from lup_template.agent.core import build_auxiliary_factory
+    from lup_template.agent.config import settings
+    from lup_template.agent.subagents import get_subagent_specs
 
     sandbox = None
-    if context.session_id:
+    if context.session_id and settings.sandbox_enabled:
         from lup.sandbox.container import Sandbox
 
         sandbox = Sandbox(
@@ -46,13 +52,22 @@ def collect_tools_by_server(
         )
         atexit.register(sandbox.stop)
 
+    def subagent_factory(spec: SubagentSpec) -> SessionFactory:
+        return build_auxiliary_factory(
+            model=spec.model or settings.model,
+            system_prompt=spec.prompt,
+            tools=spec.tools,
+        )
+
     toolset = build_session_toolset(
         session_dir=context.session_dir,
         outputs_dir=context.outputs_dir,
         gate=ReviewGate(flag_path=context.gate_flag),
-        include_subagent_tool=True,
         sandbox=sandbox,
         realtime_dir=context.realtime_dir,
+        subagent_tool=create_run_subagent_tool(
+            get_subagent_specs(), factory_recipe=subagent_factory
+        ),
     )
     return toolset["groups"]
 
@@ -76,7 +91,6 @@ def collect_registry_tools() -> dict[ServerGroup, list[LupMcpTool]]:
         toolset = build_session_toolset(
             session_dir=base / "session",
             outputs_dir=None,
-            include_subagent_tool=True,
             sandbox=Sandbox(session_id="toolset-enum", shared_dir=base / "shared"),
             realtime_dir=base / "realtime",
         )

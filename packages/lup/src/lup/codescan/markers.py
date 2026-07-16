@@ -1,4 +1,4 @@
-# lup: ignore
+# lup: ignore[import-re, re-call, empty-collection]
 """Inline marker scanning for the repo's two marker families.
 
 - Review notes (`# lup:` / `// lup:`): actionable feedback left in the code;

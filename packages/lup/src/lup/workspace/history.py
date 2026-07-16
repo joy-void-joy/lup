@@ -90,13 +90,13 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     )
     agent_sdk: str | None = Field(
         default=None,
-        description="Engine that ran the session (its engine id); "
+        description="Provider adapter that ran the session; "
         "None on results predating the stamp",
     )
     sdk_session_id: str | None = Field(
         default=None,
-        description="Engine-native session id — the resume token for "
-        "Client.session(resume=...); None when the engine reported none",
+        description="Provider-native session id — pass it as SessionId to "
+        "SessionFactory.open(); None when the provider reported none",
     )
     timestamp: str
     output: OutputT

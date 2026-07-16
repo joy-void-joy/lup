@@ -34,9 +34,8 @@ plugins/lup/
 ├── hooks/                       # PreToolUse permission hooks
 │   ├── hooks.json               # Hook definitions
 │   └── scripts/                 # Hook implementations
-│       ├── auto_allow_bash.py   # Bash command auto-allow/deny
-│       ├── auto_allow_edits.py  # Edit auto-allow (trivial changes)
-│       └── auto_allow_fetch.py  # WebFetch URL allow/deny
+│       ├── scripts/policy.py    # thin native dispatcher
+│       └── runtime/policy.py    # generated hermetic semantic policy
 ├── agents/                      # Subagent definitions
 └── TEMPLATE_CLAUDE.md           # CLAUDE.md template for new projects
 ```

@@ -1,4 +1,4 @@
-# lup: ignore
+# lup: ignore[import-re, re-call, set-shape, empty-collection, tuple-shape, dict-get, string-split]
 """Shared scanning core for the review-marker and anti-pattern scanners.
 
 Both `lup.codescan.markers` and `lup.codescan.antipatterns` walk a file line by

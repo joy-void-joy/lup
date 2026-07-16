@@ -1,6 +1,4 @@
-# lup: ignore[noqa]
-# Test fixtures and assertions construct these shapes deliberately.
-"""Barrel drift guard: every name in lup.__all__ must resolve."""
+"""The package root stays a deliberately small runtime front door."""
 
 import lup
 
@@ -10,15 +8,22 @@ def test_every_export_resolves() -> None:
     assert missing == []
 
 
-def test_sandbox_resolves_lazily() -> None:
-    from lup.sandbox.container import Sandbox
-
-    assert lup.Sandbox is Sandbox
+def test_root_exports_only_portable_runtime_conveniences() -> None:
+    assert set(lup.__all__) == {  # lup: ignore[set-shape] — exact export comparison
+        "SessionFactory",
+        "SessionHandle",
+        "TurnHandle",
+        "TurnInput",
+        "TurnRequest",
+        "TurnResult",
+        "query",
+        "turn_request",
+    }
 
 
 def test_unknown_attribute_raises() -> None:
     try:
-        lup.does_not_exist  # noqa: B018
+        getattr(lup, "does_not_exist")
     except AttributeError as e:
         assert "does_not_exist" in str(e)
     else:

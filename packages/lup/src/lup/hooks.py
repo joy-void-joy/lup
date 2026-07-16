@@ -1,3 +1,5 @@
+# lup: ignore[native-spelling]
+# Legacy low-level SDK interop remains public during the capability migration.
 """SDK-agnostic hook utilities — the normalized hook seam and its factories.
 
 This module owns the whole hook vocabulary: the normalized
@@ -80,9 +82,8 @@ refusal), or block it (the cross-event stop/redirect decision)."""
 class LupHookInput(BaseModel):
     """A normalized hook event, produced by an adapter from its native payload.
 
-    Adapters translate their backend's hook payload into this model at the
-    seam (see :func:`lup.adapters.clients.claude.build_claude_hook_handler`), so the
-    factories stay backend-neutral. Path-bearing tools
+    Native decoders translate a provider hook payload into this model at the
+    adapter seam, so the factories stay backend-neutral. Path-bearing tools
     (Write/Edit/Read/Glob/Grep) have their target directory resolved once,
     into :attr:`tool_path`, rather than re-extracted from :attr:`tool_input`
     by each factory.
@@ -247,6 +248,56 @@ def create_permission_hooks(
 
     return LupHooksConfig(
         pre_tool_use=[LupHookMatcher(hook=permission_hook, tag="permission")],
+    )
+
+
+def create_git_inspection_hook() -> LupHooksConfig:
+    """Permit workers to inspect Git while reserving mutations for orchestration."""
+    inspection_commands = dict.fromkeys(
+        ["status", "log", "diff", "show", "rev-parse", "ls-files", "grep"]
+    )
+    shell_wrappers = dict.fromkeys(["bash", "dash", "fish", "sh", "zsh"])
+
+    async def git_inspection_hook(event: LupHookInput) -> LupHookOutput:
+        if event.event != "PreToolUse":
+            return LupHookOutput()
+        if (
+            event.tool_name in {"Edit", "Write"}
+            and ".git" in Path(event.tool_path).parts
+        ):
+            return deny_hook("resolver workers cannot edit Git metadata")
+        if event.tool_name != "Bash":
+            return LupHookOutput()
+        match event.tool_input:
+            case {"command": str(command)}:
+                from lup.policy.rules import command_words, parse_shell_segments
+
+                segments = parse_shell_segments(command)
+                if segments is None:
+                    return deny_hook(
+                        "resolver workers cannot use opaque shell composition"
+                    )
+                for segment in segments:
+                    words = command_words(segment.words)
+                    if not words:
+                        return deny_hook("resolver worker command is empty")
+                    executable = Path(words[0]).name
+                    if executable in shell_wrappers:
+                        return deny_hook(
+                            "resolver workers cannot hide commands in a shell wrapper"
+                        )
+                    if executable == "git" and (
+                        len(words) < 2 or words[1] not in inspection_commands
+                    ):
+                        return deny_hook(
+                            "resolver workers may inspect Git but cannot mutate it"
+                        )
+                return allow_hook()
+            case _:
+                return deny_hook("resolver worker shell command is missing")
+
+    return LupHooksConfig(
+        pre_tool_use=[LupHookMatcher(hook=git_inspection_hook, tag="git-inspection")]
     )
 
 
@@ -494,7 +545,7 @@ def create_completion_guard(
 ) -> LupHooksConfig:
     """Create a Stop hook that blocks finishing until output is submitted.
 
-    Output submission happens through a tool (see :mod:`lup.workspace.output`), so a
+    Output submission happens through a turn-bound tool, so a
     backend's native finalization no longer guarantees a result exists. On
     backends with a stop event, this hook pushes the agent back with a
     corrective message when it tries to finish without submitting.

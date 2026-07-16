@@ -1,15 +1,16 @@
 ---
 name: version-reviewer
-description: Use this agent to produce a comprehensive assessment of a single agent version — its prompt, performance, trace patterns, and what worked/failed. Launch this when outcome data arrives for a past version, or when preparing for a prompt rewrite. Always specify the version to review.
+description: |-
+  Use this agent to produce a comprehensive assessment of a single agent version — its prompt, performance, trace patterns, and what worked/failed. Launch this when outcome data arrives for a past version, or when preparing for a prompt rewrite. Always specify the version to review.
 
-<example>
-Context: Feedback loop Phase 4, preparing for a prompt rewrite. Need to understand v0.5.0's strengths before drafting v1.0.0.
-user: "Review version 0.5.0 — focus on what worked well and what the agent struggled with"
-assistant: "I'll launch the version-reviewer agent to build a comprehensive assessment of v0.5.0."
-<commentary>
-The version reviewer reads the exact prompt, scores, and traces for that version and returns a structured report that can be compared with other version reports.
-</commentary>
-</example>
+  <example>
+  Context: Feedback loop Phase 4, preparing for a prompt rewrite. Need to understand v0.5.0's strengths before drafting v1.0.0.
+  user: "Review version 0.5.0 — focus on what worked well and what the agent struggled with"
+  assistant: "I'll launch the version-reviewer agent to build a comprehensive assessment of v0.5.0."
+  <commentary>
+  The version reviewer reads the exact prompt, scores, and traces for that version and returns a structured report that can be compared with other version reports.
+  </commentary>
+  </example>
 
 model: sonnet
 color: yellow

@@ -324,8 +324,8 @@ def compat_base_url() -> str | None:
     """The compat endpoint settings select, or None for native routing.
 
     An explicit ``OPENAI_BASE_URL`` wins; otherwise an ``OPENROUTER_API_KEY``
-    alone selects OpenRouter. The endpoint rides on ``LupAgentOptions.base_url``
-    into the compat engines — never on the process environment.
+    alone selects OpenRouter. The concrete composition root applies it through
+    the provider's typed compatibility transform.
     """
     if settings.openai_base_url:
         return settings.openai_base_url
@@ -337,18 +337,3 @@ def compat_base_url() -> str | None:
 def compat_api_key() -> str | None:
     """The credential paired with :func:`compat_base_url`."""
     return settings.openai_api_key or settings.openrouter_api_key
-
-
-def engine_for_settings() -> str:
-    """Map settings to the engine id.
-
-    ``AGENT_SDK=openai`` is the legacy alias of ``openai-compat``, and an
-    ``OPENROUTER_API_KEY`` upgrades the claude engine to ``claude-compat`` —
-    the same Claude scaffolding pointed at OpenRouter's Anthropic-protocol
-    endpoint through options, not ambient env.
-    """
-    if settings.agent_sdk == "openai":
-        return "openai-compat"
-    if settings.agent_sdk == "claude" and settings.openrouter_api_key:
-        return "claude-compat"
-    return settings.agent_sdk

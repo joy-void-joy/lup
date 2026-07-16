@@ -1,12 +1,11 @@
-# lup: ignore
+# lup: ignore[any-type, type-ignore, pyright-ignore, noqa, generic-base, dict-str-object, dict-get, tuple-shape, frozenset-shape, set-shape, empty-collection, cast, import-re, re-call, string-replace, string-split, string-strip, bare-except, except-baseexception, suppress, dataclass, namedtuple, os-shell, os-path, os-environ, eval-exec, utcnow]
 """Single importable source of truth for the codebase's anti-pattern set.
 
-The edit-permission hook (`.claude/plugins/lup/hooks/scripts/auto_allow_edits.py`)
-denies an edit whose added lines match one of these patterns unless the line
-carries a `# lup: ignore`. The hook cannot import a package on its per-edit
-hot path, so it mirrors these tables; a test asserts the two stay identical, and
-the `lup-devtools dev check --antipatterns` auditor consumes them to scan the
-whole tree after the fact (catching lines that slipped in past the hook and
+The generated hermetic edit policy denies an edit whose added lines match one
+of these patterns unless the line carries a `# lup: ignore`. Harness generation
+projects these rows into its dependency-free runtime; a test asserts that
+projection stays identical, and the `lup-devtools dev check --antipatterns`
+auditor consumes them to scan the whole tree after the fact (catching lines that slipped in past the hook and
 `# lup: ignore` markers that no longer guard anything).
 
 Each rule carries a stable kebab-case ``id``. A directive names rules
@@ -34,7 +33,11 @@ import re
 
 from pydantic import BaseModel
 
-from lup.codescan.boundaries import RULE_ID as SEAM_BOUNDARY_RULE_ID
+from lup.codescan.boundaries import (
+    NATIVE_SPELLING_RULE_ID,
+    RULE_ID as SEAM_BOUNDARY_RULE_ID,
+)
+from lup.codescan.capabilities import RULE_ID as ABC_CAPABILITY_RULE_ID
 from lup.codescan.common import (
     IGNORE_RE,
     PythonContext,
@@ -110,7 +113,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # Flags a string-keyed dict/Mapping only when the VALUE is a scalar/
         # payload type (str, int, float, bool, bytes, complex, or a union that
         # opens with one). Concrete class and callable value types are left
-        # alone: `dict[str, Engine]`, `dict[str, LupMcpTool]`, `dict[str,
+        # alone: `dict[str, SessionFactory]`, `dict[str, LupMcpTool]`, `dict[str,
         # Callable[...]]` are registries/routers whose open, data-driven key
         # set IS the point. The smell is a CLOSED, enumerable key set with a
         # scalar value (config-shaped) — that wants a BaseModel or
@@ -124,7 +127,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "CLOSED, enumerable set — use a BaseModel or dict[Literal[...], V]. When the keys "
         "are open and data-driven (a registry/cache/counter keyed by external data) this is "
         "legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value "
-        "types (dict[str, Engine]) are already accepted; JsonValue covers arbitrary JSON",
+        "types (dict[str, SessionFactory]) are already accepted; JsonValue covers arbitrary JSON",
     ),
     AntiPattern(
         # Flags every `.get(` — the user's explicit broad choice over a narrow
@@ -446,7 +449,7 @@ PY_SUFFIXES = (".py", ".pyi")
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 
 FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
-    {SEAM_BOUNDARY_RULE_ID}
+    {ABC_CAPABILITY_RULE_ID, NATIVE_SPELLING_RULE_ID, SEAM_BOUNDARY_RULE_ID}
 )
 """Rule ids owned by other codescan scanners.
 
@@ -485,10 +488,9 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
     multi-accumulator and match-arm folds, and bare module-level seeds
     still trip the rule: those either want a comprehension or carry
     their marker deliberately. Unparseable source exempts nothing, so both
-    consumers — the edit hook and the tree auditor — fall back to the
-    plain regex verdict. Self-contained over the stdlib ``ast`` module:
-    ``dev gen-hook`` splices this function's source verbatim into the
-    hook's generated refiner region.
+    consumers — the generated policy runtime and the tree auditor — fall back
+    to the plain regex verdict. The function is self-contained over the stdlib
+    ``ast`` module so harness generation can embed its source verbatim.
     """
     try:
         tree = ast.parse(source)

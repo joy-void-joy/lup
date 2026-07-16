@@ -24,7 +24,6 @@ from lup_template.agent.toolsets import (
 def build(
     base: Path,
     *,
-    include_subagent_tool: bool,
     realtime: bool = False,
     with_sandbox: bool = False,
 ) -> SessionToolset:
@@ -34,7 +33,6 @@ def build(
     return build_session_toolset(
         session_dir=base / "session",
         outputs_dir=base / "outputs",
-        include_subagent_tool=include_subagent_tool,
         sandbox=sandbox,
         realtime_dir=(base / "realtime") if realtime else None,
     )
@@ -44,7 +42,6 @@ def test_served_names_match_built_groups(tmp_path: Path) -> None:
     for realtime in (False, True):
         toolset = build(
             tmp_path / str(realtime),
-            include_subagent_tool=True,
             realtime=realtime,
             with_sandbox=True,
         )
@@ -52,26 +49,16 @@ def test_served_names_match_built_groups(tmp_path: Path) -> None:
         assert set(tool_group_names(realtime=realtime)) == built
 
 
-def test_subagent_tool_is_the_only_notes_asymmetry(tmp_path: Path) -> None:
-    claude = build(tmp_path / "claude", include_subagent_tool=False)
-    codex = build(tmp_path / "codex", include_subagent_tool=True)
-
-    claude_names = {tool.name for tool in claude["groups"]["notes"]}
-    codex_names = {tool.name for tool in codex["groups"]["notes"]}
-
-    assert codex_names - claude_names == {"run_subagent"}
-    assert claude_names <= codex_names
-
-
 def test_session_group_requires_realtime_dir(tmp_path: Path) -> None:
-    without = build(tmp_path / "without", include_subagent_tool=True)
-    with_relay = build(tmp_path / "with", include_subagent_tool=True, realtime=True)
+    without = build(tmp_path / "without")
+    with_relay = build(tmp_path / "with", realtime=True)
 
     assert "session" not in without["groups"]
     assert with_relay["groups"]["session"]
 
 
-def test_output_path_is_the_completion_guard_target(tmp_path: Path) -> None:
-    toolset = build(tmp_path, include_subagent_tool=False)
-    assert toolset["output_path"] == tmp_path / "session" / "output.json"
+def test_submit_output_is_owned_by_the_turn_runtime(tmp_path: Path) -> None:
+    toolset = build(tmp_path)
+    note_names = {tool.name for tool in toolset["groups"]["notes"]}
+    assert "submit_output" not in note_names
     assert not toolset["gate"].reflected

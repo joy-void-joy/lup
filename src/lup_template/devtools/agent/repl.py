@@ -11,15 +11,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from lup.adapters.clients.Client import Client
-    from lup.adapters.clients.sessions.Session import Session
-    from lup.types import LupResponse
+    from lup.runtime.contracts import Session, SessionFactory
+    from lup.runtime.models import TurnResult
 
 import sh
 import typer
 from pydantic import BaseModel
 
 from lup.telemetry.display import format_duration
+from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
 
@@ -102,7 +102,7 @@ async def send_interruptible(
     conv: "Session",
     prompt: str,
     console: "Console",
-) -> LupResponse:
+) -> "TurnResult[None]":
     """Send a prompt with Ctrl-C interrupt support.
 
     First Ctrl-C sends an interrupt signal (graceful stop).
@@ -111,14 +111,18 @@ async def send_interruptible(
     loop = asyncio.get_running_loop()
     interrupt_count = 0
 
-    send_task = asyncio.create_task(conv.send(prompt))
+    handle = await conv.start(turn_request(TurnInput(text=prompt)))
+    send_task = asyncio.create_task(handle.turn.result())
 
     def on_sigint() -> None:
         nonlocal interrupt_count
         interrupt_count += 1
         if interrupt_count == 1:
             console.print("\n  [dim]interrupting...[/dim]")
-            asyncio.ensure_future(conv.interrupt())
+            if handle.interrupt is not None:
+                asyncio.ensure_future(handle.interrupt.interrupt())
+            else:
+                send_task.cancel()
         else:
             send_task.cancel()
 
@@ -131,27 +135,27 @@ async def send_interruptible(
         loop.remove_signal_handler(signal.SIGINT)
 
 
-def build_repl_adapter(
+def build_repl_factory(
     model: str | None,
     *,
     no_tools: bool,
     no_prompt: bool,
-) -> Client:
-    """Build the agent client for a REPL session, overrides applied.
+) -> "SessionFactory":
+    """Build the configured provider-neutral factory for a REPL session.
 
     The overrides are assembly knobs on the neutral options
     (``build_session_options``) — realized before translation, on every
     engine alike, never by patching a built client. Session-scoped
     resources (sandbox cleanup) live inside ``client.session()``.
     """
-    from lup_template.agent.core import build_session_client
+    from lup_template.agent.core import build_session_factory
 
-    return build_session_client(
+    return build_session_factory(
         "repl", model=model, toolless=no_tools, bare_prompt=no_prompt
-    ).client
+    ).factory
 
 
-def print_response_stats(response: LupResponse, console: "Console") -> float:
+def print_response_stats(response: "TurnResult[None]", console: "Console") -> float:
     """Print the duration/cost (or token-count) summary line for a turn.
 
     Returns the turn's cost in USD (0.0 when the backend reports none)
@@ -159,15 +163,21 @@ def print_response_stats(response: LupResponse, console: "Console") -> float:
     """
     parts: list[str] = []
     cost = 0.0
-    if response.result and response.result.duration_ms:
-        parts.append(format_duration(response.result.duration_ms / 1000))
-    if response.result and response.result.total_cost_usd:
-        cost = response.result.total_cost_usd
+    text = "\n\n".join(
+        block.text for block in response.blocks if isinstance(block, TurnTextBlock)
+    )
+    if text:
+        console.print(text)
+    if response.duration.total_seconds():
+        parts.append(format_duration(response.duration.total_seconds()))
+    from lup_template.agent.core import build_usage_cost
+
+    usage_cost = build_usage_cost()
+    if usage_cost is not None:
+        cost = usage_cost(response.usage)
         parts.append(f"${cost:.4f}")
-    elif response.result and response.result.usage:
-        # Backends without cost reporting (Codex sans rates) still show
-        # what they can: token counts
-        usage = response.result.usage
+    else:
+        usage = response.usage
         parts.append(f"{usage.input_tokens}in/{usage.output_tokens}out tok")
     if parts:
         console.print(f"  [dim]{' · '.join(parts)}[/dim]")
@@ -192,10 +202,10 @@ async def exec_once(
     from rich.console import Console
 
     console = Console(highlight=False)
-    adapter = build_repl_adapter(model, no_tools=no_tools, no_prompt=no_prompt)
-    async with adapter.session() as conv:
+    factory = build_repl_factory(model, no_tools=no_tools, no_prompt=no_prompt)
+    async with factory.open() as opened:
         try:
-            response = await send_interruptible(conv, prompt, console)
+            response = await send_interruptible(opened.session, prompt, console)
         except Interrupted:
             console.print("  [dim]interrupted[/dim]\n")
             return
@@ -319,10 +329,10 @@ async def repl(
     )
 
     try:
-        adapter = build_repl_adapter(model, no_tools=no_tools, no_prompt=no_prompt)
+        factory = build_repl_factory(model, no_tools=no_tools, no_prompt=no_prompt)
 
         async with stack:
-            async with adapter.session() as conv:
+            async with factory.open() as opened:
                 last_input_sigint = 0.0
 
                 while True:
@@ -365,7 +375,7 @@ async def repl(
                         prompt_text = user_input
                     try:
                         response = await send_interruptible(
-                            conv,
+                            opened.session,
                             prompt_text,
                             console,
                         )

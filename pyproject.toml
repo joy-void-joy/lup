@@ -1,6 +1,6 @@
 [project]
 name = "lup-template"
-version = "0.1.0"
+version = "0.2.0"
 description = "Self-improving agent template with feedback loop, built with the Claude Agent SDK"
 readme = "README.md"
 license = "MIT"
@@ -55,7 +55,7 @@ dev = [
 where = ["src"]
 
 [tool.lup]
-agent_version = "0.1.0"
+agent_version = "0.2.0"
 
 [tool.uv]
 exclude-newer = "3 days"
@@ -65,7 +65,6 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 lup = { workspace = true }
-openai-codex = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python", tag = "rust-v0.139.0" }
 
 [build-system]
 requires = ["setuptools>=61.0"]

@@ -1,0 +1,1 @@
+"""Claude-specific capability implementations and composition roots."""

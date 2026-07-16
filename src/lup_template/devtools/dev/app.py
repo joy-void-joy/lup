@@ -11,7 +11,6 @@ import lup_template.devtools.dev.branches as branches
 import lup_template.devtools.dev.check as check
 import lup_template.devtools.dev.comments as comments
 import lup_template.devtools.dev.conflicts as conflicts
-import lup_template.devtools.dev.gen_hook as gen_hook
 import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.plugin as plugin
 import lup_template.devtools.dev.pr as pr
@@ -289,7 +288,7 @@ def check_cmd(
         bool,
         typer.Option(
             "--antipatterns",
-            help="Audit tracked files for missing/spurious `# lup: ignore` markers "
+            help="Audit repository files for missing/spurious `# lup: ignore` markers "
             "only — the same lup.codescan.antipatterns rules the edit hook enforces",
         ),
     ] = False,
@@ -297,7 +296,7 @@ def check_cmd(
         bool,
         typer.Option(
             "--boundaries",
-            help="Scan for per-engine adapter imports outside the seam only — "
+            help="Scan for native adapter imports outside composition roots only — "
             "the lup.codescan.boundaries guard the full check also runs",
         ),
     ] = False,
@@ -325,18 +324,6 @@ def check_cmd(
         boundaries_mod.report(as_json)
         return
     check.run_checks(fix, no_test)
-
-
-@app.command("gen-hook")
-def gen_hook_cmd() -> None:
-    """Regenerate the edit hook's anti-pattern mirror from lup.codescan.antipatterns.
-
-    The hook cannot import a package on its per-edit hot path, so its
-    ANTI_PATTERNS/TS_ANTI_PATTERNS tables are a committed copy of the single
-    source of truth. This rewrites that copy from the library; run it after
-    changing any rule, and the pinning test guards that it was run.
-    """
-    gen_hook.regenerate()
 
 
 # -- comments command --

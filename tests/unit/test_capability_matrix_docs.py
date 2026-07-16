@@ -1,7 +1,7 @@
-"""The README capability matrix must match the probed engine behavior.
+"""The README capability matrix must match the probed adapter behavior.
 
 This is what turns the parity matrix from prose into a contract: change
-what an engine refuses or supports and this test fails until the README
+what an adapter refuses or supports and this test fails until the README
 table is regenerated, so documentation cannot drift from code.
 """
 
@@ -19,19 +19,17 @@ def test_readme_capability_matrix_is_current() -> None:
     assert expected in readme, (
         "README capability matrix is stale. Regenerate with "
         "`uv run lup-devtools agent capabilities --markdown` and paste it "
-        "into the Engine support section."
+        "into the runtime capability section."
     )
 
 
 def test_probed_matrix_is_consistent() -> None:
-    """Every engine column probes the same rows, and known facts hold."""
+    """Every adapter column probes the same rows, and known facts hold."""
     matrix = canonical_capability_matrix()
 
     assert [entry.name for entry in matrix] == [
-        "claude",
-        "codex",
-        "openai-compat",
-        "claude-compat",
+        "claude-sdk-0.2.89",
+        "codex-app-server-0.144.4",
     ]
     rows = [cell.capability for cell in matrix[0].cells]
     for entry in matrix:
@@ -41,10 +39,8 @@ def test_probed_matrix_is_consistent() -> None:
         entry.name: {cell.capability: cell.value for cell in entry.cells}
         for entry in matrix
     }
-    assert by_name["claude"]["streaming"] == "live"
-    assert by_name["codex"]["streaming"] == "post_hoc"
-    assert by_name["codex"]["max_turns"] is False
-    assert by_name["codex"]["turn_timeout_seconds"] is True
-    assert by_name["claude"]["turn_timeout_seconds"] is False
-    # The whole point of claude-compat: open models keep the Claude tier.
-    assert by_name["claude-compat"] == by_name["claude"]
+    assert by_name["claude-sdk-0.2.89"]["live_events"] is True
+    assert by_name["codex-app-server-0.144.4"]["live_events"] is True
+    assert by_name["claude-sdk-0.2.89"]["interrupt"] is True
+    assert by_name["codex-app-server-0.144.4"]["fork"] is True
+    assert by_name["claude-sdk-0.2.89"]["fork"] is True

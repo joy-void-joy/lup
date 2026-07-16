@@ -1,17 +1,13 @@
-# lup: ignore[set-shape]
-# Test fixtures and assertions construct these shapes deliberately.
-"""The reviewer never inspects the backend (reflect.run_reviewer).
+# lup: ignore[dict-str-object, bare-object, set-shape]
+# Monkeypatch fixtures intentionally accept and record arbitrary call boundaries.
+"""Reviewer composition receives a factory and a strict typed request."""
 
-Backend concerns live only in the adapter layer: ``run_reviewer`` asks for the
-full reviewer setup — file tools, a thinking budget, a turn cap — on every
-backend, and ``query`` (not the template tool) decides what the chosen backend
-can honor. These tests pin that the call shape is identical regardless of the
-reviewer's model, so the tool carries no ``match`` on the backend.
-"""
+from types import SimpleNamespace
 
 import pytest
 
-from lup.types import JsonValue, LupResponse, LupTextBlock
+from lup.reflect import ReviewResult, ReviewVerdict
+from lup_template.agent import core
 from lup_template.agent.tools import reflect
 
 
@@ -24,43 +20,63 @@ def make_input() -> reflect.ReflectInput:
     )
 
 
-class QueryRecorder:
-    def __init__(self) -> None:
-        self.kwargs: dict[str, JsonValue] = {}
-
-    async def __call__(self, prompt: str, **kwargs: JsonValue) -> LupResponse:
-        self.kwargs = {"prompt": prompt, **kwargs}
-        return LupResponse(blocks=[LupTextBlock(text="critique")])
-
-
-async def test_reviewer_asks_for_full_options_on_claude(
+async def test_reviewer_uses_explicit_factory_and_typed_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    recorder = QueryRecorder()
-    monkeypatch.setattr(reflect, "query", recorder)
+    built: dict[str, object] = {}
+    marker = object()
 
-    result = await reflect.run_reviewer(make_input(), None, model="claude-sonnet-4-6")
+    def build(**kwargs: object) -> object:
+        built.update(kwargs)
+        return marker
 
-    # No structured output from the backend -> text critique wrapped as approve.
+    requested: dict[str, object] = {}
+
+    async def query(factory: object, request: object) -> object:
+        requested.update(factory=factory, request=request)
+        return SimpleNamespace(
+            output=ReviewResult(
+                verdict=ReviewVerdict.approve,
+                assessment="critique",
+            )
+        )
+
+    monkeypatch.setattr(core, "build_auxiliary_factory", build)
+    monkeypatch.setattr(reflect, "query", query)
+
+    result = await reflect.run_reviewer(make_input(), None, model="review-model")
+
     assert result is not None
-    assert result.verdict is reflect.ReviewVerdict.approve
     assert result.assessment == "critique"
-    assert recorder.kwargs["tools"] == ["Read", "Glob", "Grep", "WebFetch"]
-    assert recorder.kwargs["max_turns"] == 5
+    assert built["model"] == "review-model"
+    assert built["tools"] == ["Read", "Glob", "Grep", "WebFetch"]
+    assert requested["factory"] is marker
+    request = requested["request"]
+    assert getattr(request, "output_type") is ReviewResult
 
 
-async def test_reviewer_call_shape_is_backend_agnostic(
+async def test_reviewer_factory_shape_does_not_depend_on_model_family(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A non-Claude reviewer gets the same full option set — query() degrades it."""
-    claude = QueryRecorder()
-    monkeypatch.setattr(reflect, "query", claude)
-    await reflect.run_reviewer(make_input(), None, model="claude-sonnet-4-6")
+    calls: list[dict[str, object]] = []
 
-    gpt = QueryRecorder()
-    monkeypatch.setattr(reflect, "query", gpt)
-    await reflect.run_reviewer(make_input(), None, model="gpt-5.5")
+    def build(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return object()
 
-    assert set(claude.kwargs) == set(gpt.kwargs)
-    for claude_only in ("tools", "max_turns", "permission_mode", "max_thinking_tokens"):
-        assert gpt.kwargs[claude_only] == claude.kwargs[claude_only]
+    async def query(_factory: object, _request: object) -> object:
+        return SimpleNamespace(
+            output=ReviewResult(
+                verdict=ReviewVerdict.approve,
+                assessment="ok",
+            )
+        )
+
+    monkeypatch.setattr(core, "build_auxiliary_factory", build)
+    monkeypatch.setattr(reflect, "query", query)
+
+    await reflect.run_reviewer(make_input(), None, model="claude-model")
+    await reflect.run_reviewer(make_input(), None, model="gpt-model")
+
+    assert set(calls[0]) == set(calls[1])
+    assert calls[0]["tools"] == calls[1]["tools"]
