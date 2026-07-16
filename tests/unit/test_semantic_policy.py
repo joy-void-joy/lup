@@ -281,6 +281,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
         ),
         ("src/module.py", "value = 1", "value = 2", "allow"),
         (".claude/settings.json", "{}", '{"ok": true}', "ask"),
+        ("src/module.py", "value = 1", "value = 1  # lup" + ": revisit", "ask"),
     ]
 
     for file_path, before, after, expected in cases:
@@ -318,6 +319,13 @@ def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
     ).effect == ("deny")
     assert bundled.decide_edit(
         "tmp/scratch.py", "x = 1", "x = 2", [".claude", "tmp"], "lup:resolve-editor"
+    ).effect == ("ask")
+    assert bundled.decide_edit(
+        "src/module.py",
+        "x = 1",
+        "x = 1  # lup" + ": revisit",
+        [".claude", "tmp"],
+        "lup:resolve-editor",
     ).effect == ("ask")
 
 
