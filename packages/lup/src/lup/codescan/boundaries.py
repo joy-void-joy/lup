@@ -19,9 +19,11 @@ from lup.codescan.common import (
     file_level_ignore,
     ignore_rule_ids,
 )
+from lup.policy.kernel import KERNEL_IMPORT_ALLOWLIST
 
 RULE_ID = "seam-boundary"
 NATIVE_SPELLING_RULE_ID = "native-spelling"
+KERNEL_IMPORT_RULE_ID = "kernel-imports"
 NATIVE_PREFIXES = ("lup.adapters.claude", "lup.adapters.codex")
 NATIVE_SPELLINGS = {
     "/lup:": "Claude skill invocation",
@@ -125,6 +127,42 @@ def import_violations(text: str) -> list[SourceViolation]:
                 subject=module,
                 text=line.strip(),
                 message=f"neutral module imports native adapter {module}",
+            )
+            for module in modules
+        )
+    return violations
+
+
+def kernel_import_violations(text: str) -> list[SourceViolation]:
+    """Find imports outside the hermetic policy kernel's pinned stdlib set."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    lines = text.splitlines()
+    violations: list[SourceViolation] = []  # lup: ignore[empty-collection]
+    for node in ast.walk(tree):
+        modules: list[str]
+        match node:
+            case ast.Import(names=names):
+                modules = [
+                    item.name
+                    for item in names
+                    if item.name not in KERNEL_IMPORT_ALLOWLIST
+                ]
+            case ast.ImportFrom(module=str(module)) if (
+                module not in KERNEL_IMPORT_ALLOWLIST
+            ):
+                modules = [module]
+            case _:
+                continue
+        line = lines[node.lineno - 1] if node.lineno <= len(lines) else ""
+        violations.extend(
+            SourceViolation(
+                line=node.lineno,
+                subject=module,
+                text=line.strip(),
+                message=f"policy kernel imports non-hermetic module {module}",
             )
             for module in modules
         )
@@ -283,6 +321,11 @@ def audit_boundaries(text: str) -> list[BoundaryAuditFinding]:
     ]
 
 
+def audit_kernel_imports(text: str) -> list[BoundaryAuditFinding]:
+    """Audit the canonical kernel against its pinned dependency allowlist."""
+    return audit_rule(text, KERNEL_IMPORT_RULE_ID, kernel_import_violations(text))
+
+
 def find_boundary_breaches(text: str) -> list[BoundaryBreach]:
     """Find native adapter imports through Python syntax, honoring suppressions."""
     return [
@@ -301,5 +344,14 @@ def find_native_spelling_breaches(text: str) -> list[BoundaryBreach]:
             NATIVE_SPELLING_RULE_ID,
             native_spelling_violations(text),
         )
+        if item.kind == "missing"
+    ]
+
+
+def find_kernel_import_breaches(text: str) -> list[BoundaryBreach]:
+    """Find unsuppressed non-hermetic imports in the policy kernel."""
+    return [
+        BoundaryBreach(line=item.line, module=item.module, text=item.text)
+        for item in audit_kernel_imports(text)
         if item.kind == "missing"
     ]

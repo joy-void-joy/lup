@@ -39,6 +39,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.codescan.common import IGNORE_RE, LineCursor, PythonContext
+from lup.policy.kernel import marker_count as kernel_marker_count
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # Customization todos are shouty and case-sensitive (like TODO:/FIXME:), so
@@ -99,7 +100,7 @@ class MarkerComment(BaseModel):
 
 def marker_count(text: str) -> int:
     """Count markers (feedback or ignore) — drives the hook's add/remove check."""
-    return len(MARKER_RE.findall(text))
+    return kernel_marker_count(text)
 
 
 def inside_inline_code(line: str, pos: int) -> bool:

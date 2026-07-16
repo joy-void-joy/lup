@@ -14,6 +14,7 @@ import typer
 from lup.codescan.boundaries import (
     BoundaryBreach,
     find_boundary_breaches,
+    find_kernel_import_breaches,
     find_native_spelling_breaches,
     path_is_sanctioned,
 )
@@ -39,6 +40,11 @@ def scan_boundaries() -> list[FoundBreach]:
         for breach in [
             *find_boundary_breaches(Path(rel).read_text(encoding="utf-8")),
             *find_native_spelling_breaches(Path(rel).read_text(encoding="utf-8")),
+            *(
+                find_kernel_import_breaches(Path(rel).read_text(encoding="utf-8"))
+                if rel == "packages/lup/src/lup/policy/kernel.py"
+                else ()
+            ),
         ]
     ]
 

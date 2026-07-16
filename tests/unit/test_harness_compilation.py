@@ -86,7 +86,8 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
     hook_config = artifacts[Path(".claude/plugins/lup/hooks/hooks.json")].content
     assert "uv run" not in hook_config
     assert "hooks/scripts/policy.py" in hook_config
-    assert Path(".claude/plugins/lup/hooks/runtime/policy.py") in artifacts
+    assert Path(".claude/plugins/lup/hooks/runtime/kernel.py") in artifacts
+    assert Path(".claude/plugins/lup/hooks/runtime/policy_data.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/evidence.json") in artifacts
 
 
@@ -171,12 +172,12 @@ def test_both_native_trees_compile_deterministically() -> None:
     claude_runtime = next(
         item.content
         for item in claude.artifacts
-        if item.path.as_posix().endswith("hooks/runtime/policy.py")
+        if item.path.as_posix().endswith("hooks/runtime/kernel.py")
     )
     codex_runtime = next(
         item.content
         for item in codex.artifacts
-        if item.path.as_posix().endswith("hooks/runtime/policy.py")
+        if item.path.as_posix().endswith("hooks/runtime/kernel.py")
     )
     assert claude_runtime == codex_runtime
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from lup.codescan.boundaries import (
     audit_boundaries,
+    audit_kernel_imports,
     find_boundary_breaches,
     find_native_spelling_breaches,
     path_is_sanctioned,
@@ -108,6 +109,15 @@ def test_sanctioned_paths() -> None:
     assert path_is_sanctioned(Path("tests/unit/test_adapter_transforms.py"))
     assert path_is_sanctioned(Path("src/lup_template/agent/core.py"))
     assert not path_is_sanctioned(Path("packages/lup/src/lup/subagents.py"))
+
+
+def test_policy_kernel_imports_are_pinned_to_hermetic_stdlib() -> None:
+    clean = "import ast\nimport urllib.parse\n"
+    breach = "import ast\nfrom pydantic import BaseModel\n"
+
+    assert audit_kernel_imports(clean) == []
+    findings = audit_kernel_imports(breach)
+    assert [(item.kind, item.module) for item in findings] == [("missing", "pydantic")]
 
 
 def test_live_tree_has_zero_breaches() -> None:

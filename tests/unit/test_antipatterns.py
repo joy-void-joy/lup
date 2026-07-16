@@ -313,13 +313,12 @@ def test_audit_skips_docstring_prose() -> None:
 
 def test_audit_skips_attribute_docstrings() -> None:
     # A bare string statement after a field or alias is the attribute-docstring
-    # convention — documentation by construction. An *assigned* string is data
-    # and stays scanned.
+    # convention — documentation by construction. Assigned string contents are
+    # data too, so examples inside them are not scanned as executable code.
     prose = 'x: int = 1\n"""Unlike ``Any`` this field is honest."""\n'
     assert audit_text(prose, PYTHON_ANTI_PATTERNS) == []
     data = 'x = "fixture: Any = cast(str, 1)"\n'
-    kinds = {f.rule_id for f in audit_text(data, PYTHON_ANTI_PATTERNS)}
-    assert kinds == {"any-type", "cast"}
+    assert audit_text(data, PYTHON_ANTI_PATTERNS) == []
 
 
 def test_atomic_renames_are_exempt_from_replace_rule() -> None:
@@ -352,7 +351,7 @@ def test_docstring_mention_of_ignore_is_not_a_guard() -> None:
 def test_ignore_inside_string_literal_is_not_a_guard() -> None:
     source = 'fixture = "x: Any = 1  # lup: ignore"\n'
     findings = audit_text(source, PYTHON_ANTI_PATTERNS)
-    assert [f.kind for f in findings] == ["missing"]
+    assert findings == []
 
 
 def test_note_quoting_ignore_is_not_a_guard() -> None:

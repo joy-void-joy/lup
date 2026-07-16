@@ -28,7 +28,6 @@ core — ignore matching, comment-column tokenization, the line cursor — in
 `lup.codescan.common`, which this set's consumers and the auditor import directly.
 """
 
-import ast
 import re
 
 from pydantic import BaseModel
@@ -44,6 +43,7 @@ from lup.codescan.common import (
     file_level_ignore,
     ignore_rule_ids,
 )
+from lup.policy.kernel import empty_collection_exempt_lines, mask_python_string_literals
 
 
 class AntiPattern(BaseModel):
@@ -462,154 +462,6 @@ reports it spurious — while an id no scanner owns still is.
 EMPTY_COLLECTION_RULE_ID = "empty-collection"
 
 
-def empty_collection_exempt_lines(source: str) -> set[int]:
-    """1-based lines whose empty-collection literal is a deliberate default.
-
-    The empty-collection regex is a broad trigger; this refiner reads the
-    AST and exempts the shapes whose whole point is an empty start:
-
-    - ``self.<attr> = []`` (plain or annotated) inside ``__init__`` —
-      instance state that accumulates over the object's life;
-    - an annotated class-body field default (``x: list[str] = []``) — a
-      declared typed default (pydantic copies it per instance);
-    - a call keyword (``f(x=[])``) — an explicitly passed empty value;
-    - a direct assignment in an ``except`` handler body — the
-      degrade-to-empty fallback shape, which by construction is not a
-      mutate-loop seed (a loop nested inside the handler still trips);
-    - a function-local name that no loop mutates — conditional builds,
-      branch defaults, and closure accumulators have no loop to fold,
-      so there is no comprehension to prefer;
-    - a seed whose every feeding loop carries a ``try`` within it — the
-      per-item fault tolerance a comprehension cannot express;
-    - a reassignment to empty inside a loop that also mutates the name —
-      a stateful parse's reset, not a seed.
-
-    Plain fold seeds (``x = []`` then unguarded ``.append`` in a loop),
-    multi-accumulator and match-arm folds, and bare module-level seeds
-    still trip the rule: those either want a comprehension or carry
-    their marker deliberately. Unparseable source exempts nothing, so both
-    consumers — the generated policy runtime and the tree auditor — fall back
-    to the plain regex verdict. The function is self-contained over the stdlib
-    ``ast`` module so harness generation can embed its source verbatim.
-    """
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return set()
-
-    def is_empty_literal(node: ast.expr | None) -> bool:
-        match node:
-            case ast.Dict(keys=[]) | ast.List(elts=[]):
-                return True
-            case ast.Call(func=ast.Name(id="set"), args=[], keywords=[]):
-                return True
-        return False
-
-    def is_self_attribute(node: ast.expr) -> bool:
-        match node:
-            case ast.Attribute(value=ast.Name(id="self")):
-                return True
-        return False
-
-    exempt: set[int] = set()
-
-    def mark(value: ast.expr | None) -> None:
-        if value is not None and is_empty_literal(value):
-            exempt.add(value.lineno)
-
-    def is_loop(node: ast.AST) -> bool:
-        return isinstance(node, ast.For | ast.AsyncFor | ast.While)
-
-    def mutated_name(node: ast.AST) -> str | None:
-        match node:
-            case ast.Call(func=ast.Attribute(value=ast.Name(id=name), attr=attr)) if (
-                attr
-                in {
-                    "append",
-                    "appendleft",
-                    "extend",
-                    "add",
-                    "update",
-                    "insert",
-                    "setdefault",
-                }
-            ):
-                return name
-            case ast.Assign(targets=[ast.Subscript(value=ast.Name(id=name))]):
-                return name
-            case ast.AugAssign(
-                target=ast.Name(id=name) | ast.Subscript(value=ast.Name(id=name))
-            ):
-                return name
-        return None
-
-    def exempt_scope_seeds(scope: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        # For each name: one entry per feeding loop, True when that loop
-        # carries a try (per-item tolerance) somewhere inside it.
-        feeding: dict[str, list[bool]] = {}
-        for loop in ast.walk(scope):
-            if not is_loop(loop):
-                continue
-            tolerant = any(isinstance(inner, ast.Try) for inner in ast.walk(loop))
-            for inner in ast.walk(loop):
-                name = mutated_name(inner)
-                if name is not None:
-                    feeding.setdefault(name, []).append(tolerant)
-
-        def visit(node: ast.AST, in_loop: bool) -> None:
-            for child in ast.iter_child_nodes(node):
-                match child:
-                    case (
-                        ast.FunctionDef()
-                        | ast.AsyncFunctionDef()
-                        | ast.ClassDef()
-                        | ast.Lambda()
-                    ):
-                        continue  # a nested scope judges its own seeds
-                    case (
-                        ast.Assign(targets=[ast.Name(id=name)], value=value)
-                        | ast.AnnAssign(target=ast.Name(id=name), value=value)
-                    ) if is_empty_literal(value):
-                        loops = feeding.get(name)
-                        if in_loop:
-                            if loops is not None:
-                                mark(value)  # a reset inside the loop refilling it
-                        elif loops is None or all(loops):
-                            mark(value)  # loop-free, or every feeding loop tolerant
-                visit(child, in_loop or is_loop(child))
-
-        visit(scope, False)
-
-    for node in ast.walk(tree):
-        match node:
-            case ast.Call(keywords=keywords):
-                for keyword in keywords:
-                    mark(keyword.value)
-            case ast.ExceptHandler(body=handler_body):
-                for stmt in handler_body:
-                    match stmt:
-                        case ast.Assign(value=value) | ast.AnnAssign(value=value):
-                            mark(value)
-            case ast.ClassDef(body=body):
-                for stmt in body:
-                    if isinstance(stmt, ast.AnnAssign):
-                        mark(stmt.value)
-            case ast.FunctionDef() | ast.AsyncFunctionDef():
-                if node.name == "__init__":
-                    for stmt in ast.walk(node):
-                        match stmt:
-                            case ast.Assign(targets=targets, value=value) if all(
-                                is_self_attribute(target) for target in targets
-                            ):
-                                mark(value)
-                            case ast.AnnAssign(target=target, value=value) if (
-                                is_self_attribute(target)
-                            ):
-                                mark(value)
-                exempt_scope_seeds(node)
-    return exempt
-
-
 def patterns_for_suffix(suffix: str) -> list[AntiPattern] | None:
     """The anti-pattern table that applies to a file suffix, or None to skip it.
 
@@ -719,16 +571,18 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
         return match
 
     file_ignore_line = file_ignore.line if file_ignore is not None else 0
+    original_lines = text.splitlines()
+    scanned_lines = mask_python_string_literals(text)
 
     file_live: set[str] = set()
     findings: list[AntiPatternFinding] = []
-    for index, line in enumerate(text.splitlines(), start=1):
+    for index, line in enumerate(original_lines, start=1):
         if index == file_ignore_line:
             continue  # the file-level directive line is not itself audited
         if index in context.docstring_lines:
             continue  # docstring prose is not code, and no comment can guard it
         preview = line.strip()[:80]
-        hits = line_hits(line, patterns)
+        hits = line_hits(scanned_lines[index - 1], patterns)
         if index in exempt:
             hits = [ap for ap in hits if ap.id != EMPTY_COLLECTION_RULE_ID]
         hit_ids = {ap.id for ap in hits}
