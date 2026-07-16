@@ -1,0 +1,53 @@
+name: Native nightly
+
+# Exercises the real `claude` and `codex` binaries against every historical
+# native-failure class (session-id format, pseudo-TTY pager capture, dynamic
+# tool schema drift, blocked-edit hook behavior). Deterministic tests never
+# execute those binaries, so this lane is the only scheduled coverage of the
+# native boundary. Secrets-gated: forks and secretless checkouts skip the
+# live jobs instead of failing them.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      live: ${{ steps.detect.outputs.live }}
+    steps:
+      - id: detect
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ] && [ -n "$OPENAI_API_KEY" ]; then
+            echo "live=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "live=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  native:
+    needs: gate
+    if: needs.gate.outputs.live == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - name: Install native CLIs
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          npm install -g @openai/codex
+      - name: Doctor with evidence-ledger drift check
+        run: uv run lup-devtools harness doctor all --strict-evidence
+      - name: Live integration lane
+        run: uv run pytest -m integration -v
