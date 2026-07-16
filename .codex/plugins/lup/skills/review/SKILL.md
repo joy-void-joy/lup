@@ -1,6 +1,6 @@
 ---
 name: review
-description: "Review a session trace for workflow quality"
+description: "Review a session trace for workflow quality, tool usage, and improvement opportunities"
 ---
 
 # Review: Trace Workflow Analysis

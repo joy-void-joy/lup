@@ -5,7 +5,10 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup.adapters.claude.harness import ClaudeSkillInvocationRenderer
+from lup.adapters.claude.harness import (
+    ClaudePromptRenderer,
+    ClaudeSkillInvocationRenderer,
+)
 from lup.adapters.codex.harness import CodexPromptRenderer, CodexSkillInvocationRenderer
 from lup.adapters.codex.harness_runtime import (
     PluginCacheConfig,
@@ -16,6 +19,7 @@ from lup.adapters.harness import compile_claude, compile_codex
 from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
 from lup.harness.models import (
     Artifact,
+    ArgumentsRef,
     ArtifactTree,
     CurrentArtifact,
     CurrentTree,
@@ -26,18 +30,13 @@ from lup.harness.models import (
     TextPart,
 )
 from lup.harness.ownership import build_manifest, save_manifest
-from lup.harness.proposals import ReconciliationProposalWriter
 from lup.harness.reconciliation import (
     DeterministicReconciler,
     FilesystemCurrentTreeReader,
     content_digest,
     source_patch_base_digest,
 )
-from lup_template.devtools.harness.catalog import (
-    CLAUDE_BASELINE_PATHS,
-    claude_parity_tree,
-    portable_harness,
-)
+from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.generate import (
     GenerationRecipe,
     claude_generation_recipe,
@@ -45,11 +44,6 @@ from lup_template.devtools.harness.generate import (
     current_reader,
     generate,
     inspect_generation,
-)
-from lup_template.devtools.harness.importer import (
-    OVERRIDES_PATH,
-    ClaudeCommandFrontmatterImporter,
-    render_overrides,
 )
 
 
@@ -70,13 +64,16 @@ def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
     assert "$lup:" not in encoded
 
 
-def test_locked_claude_parity_tree_preserves_all_tracked_baseline_artifacts() -> None:
-    tree = claude_parity_tree(Path.cwd())
+def test_claude_tree_renders_every_typed_support_document() -> None:
+    paths = {
+        artifact.path
+        for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
+    }
 
-    assert len(tree.artifacts) == len(CLAUDE_BASELINE_PATHS) == 42
-    assert sorted(artifact.path for artifact in tree.artifacts) == sorted(
-        CLAUDE_BASELINE_PATHS
-    )
+    assert Path(".claude/PATTERNS.md") in paths
+    assert Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md") in paths
+    assert Path(".claude/plugins/lup/scripts/file_suggest.sh") in paths
+    assert Path(".claude/settings.json") in paths
 
 
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
@@ -104,7 +101,9 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
     workflow = claude[Path(".claude/workflows/commands/resolve.js")]
     skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
 
-    workflow_call = 'Workflow(scriptPath=".claude/workflows/commands/resolve.js", args={})'  # lup: ignore[empty-collection]
+    workflow_call = (
+        'Workflow(scriptPath=".claude/workflows/commands/resolve.js", args={})'
+    )
     assert workflow_call in command
     assert "Triage into concerns" not in command
     assert "'harness',\n  'resolve',\n  '--adapter',\n  'claude'" in workflow
@@ -135,6 +134,25 @@ def test_prompt_renderer_preserves_ordinary_trailing_whitespace() -> None:
     assert CodexPromptRenderer(CodexSkillInvocationRenderer()).render(prompt) == (
         "keep these spaces  \n"
     )
+
+
+def test_argument_reference_has_one_semantic_part_and_native_renderings() -> None:
+    prompt = PromptDocument(parts=[ArgumentsRef()])
+
+    assert ClaudePromptRenderer(ClaudeSkillInvocationRenderer()).render(prompt) == (
+        "$ARGUMENTS\n"
+    )
+    assert CodexPromptRenderer(CodexSkillInvocationRenderer()).render(prompt) == (
+        "the arguments supplied with this skill invocation\n"
+    )
+
+
+def test_typed_content_package_contains_no_embedded_base64() -> None:
+    content = Path("src/lup_template/devtools/harness/content")
+    sources = list(content.rglob("*.py"))
+
+    assert len(sources) == 44
+    assert all("base64" not in path.read_text(encoding="utf-8") for path in sources)
 
 
 def test_canonical_text_rejects_provider_invocation_spelling() -> None:
@@ -549,64 +567,6 @@ def test_reconciliation_source_digest_rejects_escaping_paths(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="escapes"):
         source_patch_base_digest(tmp_path, patch)
-
-
-def test_typed_frontmatter_importer_writes_patch_only_for_description(
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / OVERRIDES_PATH
-    source.parent.mkdir(parents=True)
-    source.write_text(render_overrides({}), encoding="utf-8")
-    path = Path(".claude/plugins/lup/commands/review.md")
-    expected = "---\ndescription: Before\nallowed-tools: Read\n---\n\nBody\n"
-    changed = "---\ndescription: After\nallowed-tools: Read\n---\n\nBody\n"
-    current = [
-        CurrentArtifact(
-            path=path,
-            content=changed,
-            category="backpropagation_candidate",
-            sha256=content_digest(changed),
-        )
-    ]
-
-    result = ClaudeCommandFrontmatterImporter().import_changes(
-        tmp_path, current, {path: expected}
-    )
-
-    assert result.imported_paths == [path]
-    assert result.conflicts == []
-    assert result.source_patch is not None
-    assert 'description="After"' in result.source_patch
-    record = ReconciliationProposalWriter().write(tmp_path, result.source_patch)
-    directory = tmp_path / ".lup" / "reconcile" / record.proposal_id
-    assert (directory / "source.patch").is_file()
-    assert (directory / "metadata.json").is_file()
-
-
-def test_typed_frontmatter_importer_rejects_prompt_body_changes(tmp_path: Path) -> None:
-    source = tmp_path / OVERRIDES_PATH
-    source.parent.mkdir(parents=True)
-    source.write_text(render_overrides({}), encoding="utf-8")
-    path = Path(".claude/plugins/lup/commands/review.md")
-    expected = "---\ndescription: Same\n---\n\nBefore\n"
-    changed = "---\ndescription: Same\n---\n\nAfter\n"
-
-    result = ClaudeCommandFrontmatterImporter().import_changes(
-        tmp_path,
-        [
-            CurrentArtifact(
-                path=path,
-                content=changed,
-                category="backpropagation_candidate",
-                sha256=content_digest(changed),
-            )
-        ],
-        {path: expected},
-    )
-
-    assert result.source_patch is None
-    assert result.imported_paths == []
-    assert [conflict.path for conflict in result.conflicts] == [path]
 
 
 def test_unchanged_ownership_manifest_is_not_replaced(tmp_path: Path) -> None:

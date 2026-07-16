@@ -1,6 +1,6 @@
 ---
 name: debug
-description: "Trace an error to its root cause"
+description: "Trace an error through logs to find root cause"
 ---
 
 # Debug: Trace an Error

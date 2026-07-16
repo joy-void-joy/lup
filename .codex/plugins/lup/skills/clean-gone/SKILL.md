@@ -1,6 +1,6 @@
 ---
 name: clean-gone
-description: "Clean merged branches and worktrees"
+description: "Review branches/worktrees and clean up merged ones"
 ---
 
 # Clean Merged Branches

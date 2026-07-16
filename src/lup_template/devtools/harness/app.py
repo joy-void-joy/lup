@@ -28,7 +28,6 @@ from lup.codescan.markers import find_feedback
 from lup.harness.contracts import ProcessLauncher, SkillInvocationRenderer
 from lup.harness.models import CapabilityEvidence, LaunchRequest, ReconciliationMetadata
 from lup.harness.process import LocalProcessLauncher
-from lup.harness.proposals import ReconciliationProposalWriter
 from lup.harness.reconciliation import source_patch_base_digest
 from lup.resolver.contracts import QuestionBroker
 from lup.resolver.core import ResolverCore
@@ -60,7 +59,6 @@ from lup_template.devtools.harness.evidence import (
     evidence_drift,
     sdk_evidence_drift,
 )
-from lup_template.devtools.harness.importer import ClaudeCommandFrontmatterImporter
 
 type NativeCapabilityEvidence = (
     CapabilityEvidence[ClaudeCliEvidence] | CapabilityEvidence[CodexCliEvidence]
@@ -208,33 +206,9 @@ def reconcile_command(
     compositions = harness_compositions(target)
     reports = [inspect_generation(composition.recipe) for composition in compositions]
     unresolved = False
-    for composition, report in zip(compositions, reports, strict=True):
+    for report in reports:
         report_drift(report)
-        conflicts = report.proposal.conflicts
-        if not conflicts:
-            continue
-        if composition.recipe.label != "claude":
-            unresolved = True
-            continue
-        current = composition.recipe.reader.read(composition.recipe.root)
-        desired = {
-            artifact.path: artifact.content
-            for artifact in composition.recipe.desired.artifacts
-        }
-        result = ClaudeCommandFrontmatterImporter().import_changes(
-            composition.recipe.root,
-            current.artifacts,
-            desired,
-        )
-        if result.source_patch is not None:
-            record = ReconciliationProposalWriter().write(
-                composition.recipe.root, result.source_patch
-            )
-            typer.echo(
-                f"{composition.recipe.label}: wrote proposal {record.proposal_id} "
-                f"for {len(result.imported_paths)} recognized change(s)"
-            )
-        unresolved = unresolved or bool(result.conflicts)
+        unresolved = unresolved or bool(report.proposal.conflicts)
     if unresolved:
         typer.echo(
             "Unrecognized changes were preserved as conflicts; no arbitrary prompt "

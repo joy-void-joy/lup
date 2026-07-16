@@ -1,6 +1,6 @@
 ---
 name: add-command
-description: "Create a new Lup harness command"
+description: "Create a new slash command in the lup plugin"
 ---
 
 # Add New Command

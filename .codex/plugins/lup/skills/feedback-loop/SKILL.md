@@ -1,6 +1,6 @@
 ---
 name: feedback-loop
-description: "Run the complete feedback loop"
+description: "Full feedback loop \u2014 orchestrates status, investigation, analysis, reflection, and implementation"
 ---
 
 # Feedback Loop Orchestrator

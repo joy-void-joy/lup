@@ -1,7 +1,7 @@
 ---
+description: "Trace an error through logs to find root cause"
 allowed-tools: Read, Grep, Glob, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)
-description: Trace an error through logs to find root cause
-argument-hint: [error message or fragment]
+argument-hint: "[error message or fragment]"
 ---
 
 # Debug: Trace an Error

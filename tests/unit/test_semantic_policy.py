@@ -276,7 +276,7 @@ def test_edit_policy_checks_every_file_before_allowing_batch() -> None:
             EditChange(
                 path=Path("unsafe.py"),
                 before="value: str",
-                after="value: Any",  # lup: ignore[any-type] — adversarial policy fixture
+                after="value: Any",
             ),
         ]
     )
@@ -326,19 +326,19 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
         (
             "src/module.py",
             "value = 1",
-            "value: Any = 1",  # lup: ignore[any-type]
+            "value: Any = 1",
             "deny",
         ),
         (
             "src/module.py",
             "value = 1",
-            "value = 1  # type: ignore",  # lup: ignore[type-ignore]
+            "value = 1  # type: ignore",
             "deny",
         ),
         (
             "src/module.py",
             "value = 1",
-            "value: dict[str, object] = {}",  # lup: ignore[dict-str-object, empty-collection]
+            "value: dict[str, object] = {}",
             "deny",
         ),
         ("src/module.py", "value = 1", "value = 2", "allow"),
@@ -382,7 +382,7 @@ def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
         bundled,
         "src/module.py",
         "x = 1",
-        "from typing import Any",  # lup: ignore[any-type]
+        "from typing import Any",
         [".claude", "tmp"],
         autonomous=True,
     ).effect == ("deny")
@@ -456,3 +456,19 @@ def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> N
         assembled_edit_decision(bundled, "src/scheduler.py", before, after, []).effect
         == "allow"
     )
+
+
+def test_content_prose_examples_do_not_trip_code_or_marker_gates() -> None:
+    path = Path("src/lup_template/devtools/harness/content/skills/commit.py")
+    before = path.read_text(encoding="utf-8")
+    after = before.replace(
+        "Review all uncommitted changes",
+        "Review all uncommitted changes mentioning Any and # lup: examples",
+        1,
+    )
+
+    decision = EditPolicy(protected=[]).decide(
+        EditBatch(changes=[EditChange(path=path, before=before, after=after)])
+    )
+
+    assert decision.effect == "allow"

@@ -1,6 +1,6 @@
 ---
+description: "Install lup plugin and scaffolding into a target repo"
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
-description: Install lup plugin and scaffolding into a target repo
 argument-hint: "[target-repo] [--interactive]"
 ---
 
@@ -212,7 +212,7 @@ For each item being installed:
 | `from lup_template.*` → `from <target>.*` imports | `lup-devtools` CLI entry point name |
 | `src/lup_template/` → `src/<target>/` paths | `@lup_tool(...)`, `LupMcpTool` |
 | `pyproject.toml` package name | `.claude/plugins/lup/` directory |
-| marketplace `name` (marketplace.json) → `<target>` | plugin entry `name`: `lup` (so `/lup:*` is stable) |
+| marketplace `name` (marketplace.json) → `<target>` | plugin entry `name`: `lup` (so `the corresponding Lup skill` is stable) |
 | Main CLI entry point name | `.lup/` state directory |
 | Logger module paths | `lup-tools`, `lup-sandbox-*`, `lup-mcp-*` |
 | | Naming convention ("Lup" = inner agent) |

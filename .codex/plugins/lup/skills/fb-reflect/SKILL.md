@@ -1,6 +1,6 @@
 ---
 name: fb-reflect
-description: "Reflect on feedback process quality"
+description: "Meta and meta-meta reflection on the feedback loop process itself"
 ---
 
 # Reflect: Process Quality Assessment

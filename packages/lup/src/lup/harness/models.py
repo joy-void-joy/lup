@@ -95,8 +95,20 @@ class ResolverEntry(BaseModel):
     type: Literal["resolver_entry"] = "resolver_entry"
 
 
+class ArgumentsRef(BaseModel):
+    model_config = FROZEN
+
+    type: Literal["arguments_ref"] = "arguments_ref"
+
+
 type PromptPart = (
-    TextPart | SkillInvocation | AskUser | Delegate | RequestApproval | ResolverEntry
+    TextPart
+    | SkillInvocation
+    | AskUser
+    | Delegate
+    | RequestApproval
+    | ResolverEntry
+    | ArgumentsRef
 )
 
 
@@ -121,6 +133,8 @@ class Skill(BaseModel):
     name: str
     description: str = Field(min_length=1, max_length=1024)
     arguments: list[Argument] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    argument_hint: str | None = None
     prompt: PromptDocument
 
     @model_validator(mode="after")
@@ -153,6 +167,7 @@ class Agent(BaseModel):
     prompt: PromptDocument
     tools: list[str] = Field(default_factory=list)
     model: str | None = None
+    color: str | None = None
 
 
 class HookUrlScope(BaseModel):

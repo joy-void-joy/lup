@@ -1,6 +1,6 @@
 ---
 name: close
-description: "Review, merge, and close an approved change"
+description: "Check PR review status, merge if approved, and clean up branches"
 ---
 
 # Close PR

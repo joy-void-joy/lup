@@ -1,6 +1,6 @@
 ---
 name: fb-investigate
-description: "Investigate selected session traces"
+description: "Deep trace reading and error classification for selected sessions"
 ---
 
 # Investigate: Trace Deep-Dive

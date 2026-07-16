@@ -1,6 +1,6 @@
 ---
 name: refactor-tools
-description: "Audit agent tools and subagents"
+description: "Audit SDK agent tools and subagents \u2014 find gaps, overlaps, and refactoring opportunities"
 ---
 
 # Tool Review: Tools, Servers & Pipeline

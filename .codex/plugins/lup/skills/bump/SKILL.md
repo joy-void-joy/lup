@@ -1,6 +1,6 @@
 ---
 name: bump
-description: "Review changes and bump the agent version"
+description: "Review changes since last bump and bump agent version"
 ---
 
 # Version Bump

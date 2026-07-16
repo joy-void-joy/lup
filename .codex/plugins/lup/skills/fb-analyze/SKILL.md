@@ -1,6 +1,6 @@
 ---
 name: fb-analyze
-description: "Analyze feedback-loop capability gaps"
+description: "Aggregate tool health, capability gaps, and reasoning patterns across sessions"
 ---
 
 # Analyze: Tool Health & Capability Gaps

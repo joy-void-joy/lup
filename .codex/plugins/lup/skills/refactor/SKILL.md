@@ -1,6 +1,6 @@
 ---
 name: refactor
-description: "Rewrite a target around current conventions"
+description: "Rewrite a file or folder from scratch while respecting coding conventions"
 ---
 
 # Refactor from Scratch

@@ -1,7 +1,7 @@
 ---
+description: "Review branches/worktrees and clean up merged ones"
 allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion, Skill(lup:commit)
-argument-hint: [branch-name]
-description: Review branches/worktrees and clean up merged ones
+argument-hint: "[branch-name]"
 ---
 
 # Clean Merged Branches

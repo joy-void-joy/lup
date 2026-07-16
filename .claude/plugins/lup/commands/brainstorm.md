@@ -1,6 +1,10 @@
 ---
+description: "Pre-init design exploration \u2014 brainstorm architecture, MCP tools, and agent design"
 allowed-tools: Bash(find:*, ls:*), Read, Grep, Glob, Write, Edit, Agent, WebFetch, WebSearch, AskUserQuestion
-description: Pre-init design exploration — brainstorm architecture, MCP tools, and agent design
+arguments:
+  - name: arguments
+    description: "Optional arguments supplied with the skill invocation"
+    required: false
 ---
 
 # Brainstorm: Agent Design Exploration

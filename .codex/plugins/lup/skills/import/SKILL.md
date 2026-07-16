@@ -1,6 +1,6 @@
 ---
 name: import
-description: "Import an approved downstream pattern"
+description: "Import a specific pattern from a tracked downstream repo"
 ---
 
 # Import Pattern from Downstream

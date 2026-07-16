@@ -8,6 +8,7 @@ from lup.harness.contracts import ArtifactRenderer, SkillInvocationRenderer
 from lup.harness.generation import argument_text
 from lup.harness.models import (
     Agent,
+    ArgumentsRef,
     AskUser,
     Artifact,
     ArtifactTree,
@@ -67,6 +68,8 @@ class CodexPromptRenderer:
                     rendered.append(
                         "Run `uv run lup-devtools harness resolve --adapter codex`."
                     )
+                case ArgumentsRef():
+                    rendered.append("the arguments supplied with this skill invocation")
         text = "".join(rendered)
         return text if text.endswith("\n") else text + "\n"
 

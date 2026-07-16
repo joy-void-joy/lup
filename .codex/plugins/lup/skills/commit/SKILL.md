@@ -1,6 +1,6 @@
 ---
 name: commit
-description: "Create well-scoped atomic commits"
+description: "Review all diffs and create atomic commits"
 ---
 
 # Create Commits

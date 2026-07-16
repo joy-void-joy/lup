@@ -5,7 +5,7 @@ ALLOWED_FETCH_SCOPES = [('https', 'docs.claude.com', None, '/', ''),
  ('https', 'ai.pydantic.dev', None, '/', ''),
  ('http', 'ai.pydantic.dev', None, '/', '')]
 
-DENIED_FETCH_SCOPES = []
+DENIED_FETCH_SCOPES = ()
 
 PATH_RULES = [('subtree', '.claude', 'protected path requires approval', True),
  ('contains_part', 'tmp', 'scratch path requires approval', False),
