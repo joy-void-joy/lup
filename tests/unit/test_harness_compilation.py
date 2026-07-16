@@ -30,6 +30,7 @@ from lup.harness.models import (
     TextPart,
 )
 from lup.harness.ownership import build_manifest, save_manifest
+from lup.harness.proposals import ReconciliationProposalWriter
 from lup.harness.reconciliation import (
     DeterministicReconciler,
     FilesystemCurrentTreeReader,
@@ -526,6 +527,26 @@ def test_reconciliation_source_digest_rejects_a_stale_preimage(
     source.write_text("changed after proposal\n", encoding="utf-8")
 
     assert source_patch_base_digest(tmp_path, patch) != before
+
+
+def test_reconciliation_proposal_persists_reviewable_patch_and_metadata(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.py"
+    source.write_text("old\n", encoding="utf-8")
+    patch = """diff --git a/source.py b/source.py
+--- a/source.py
++++ b/source.py
+@@ -1 +1 @@
+-old
++new
+"""
+
+    record = ReconciliationProposalWriter().write(tmp_path, patch)
+    directory = tmp_path / ".lup" / "reconcile" / record.proposal_id
+
+    assert (directory / "source.patch").read_text(encoding="utf-8") == patch
+    assert (directory / "metadata.json").read_text(encoding="utf-8").endswith("\n")
 
 
 def test_reconciliation_source_digest_tracks_new_file_absence(tmp_path: Path) -> None:
