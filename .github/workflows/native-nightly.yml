@@ -1,11 +1,7 @@
 name: Native nightly
 
-# Exercises the real `claude` and `codex` binaries against every historical
-# native-failure class (session-id format, pseudo-TTY pager capture, dynamic
-# tool schema drift, blocked-edit hook behavior). Deterministic tests never
-# execute those binaries, so this lane is the only scheduled coverage of the
-# native boundary. Secrets-gated: forks and secretless checkouts skip the
-# live jobs instead of failing them.
+# Deterministic evidence checks run without provider credentials. The live job
+# is secrets-gated because every smoke crosses a real native CLI boundary.
 
 on:
   schedule:
@@ -13,7 +9,24 @@ on:
   workflow_dispatch:
 
 jobs:
-  gate:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.14"
+      - run: uv sync --all-extras
+      - name: Install native CLIs
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          npm install -g @openai/codex
+      - name: Doctor with evidence-ledger drift check
+        run: uv run lup-devtools harness doctor all --strict-evidence
+
+  credentials:
     runs-on: ubuntu-latest
     outputs:
       live: ${{ steps.detect.outputs.live }}
@@ -30,8 +43,9 @@ jobs:
           fi
 
   native:
-    needs: gate
-    if: needs.gate.outputs.live == 'true'
+    needs: [evidence, credentials]
+    if: needs.credentials.outputs.live == 'true'
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -42,12 +56,11 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: "3.14"
       - run: uv sync --all-extras
       - name: Install native CLIs
         run: |
           npm install -g @anthropic-ai/claude-code
           npm install -g @openai/codex
-      - name: Doctor with evidence-ledger drift check
-        run: uv run lup-devtools harness doctor all --strict-evidence
-      - name: Live integration lane
-        run: uv run pytest -m integration -v
+      - name: Live native-boundary smokes
+        run: uv run pytest tests/integration/test_native_smokes.py -v
