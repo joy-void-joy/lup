@@ -51,4 +51,6 @@ policy, deterministic harness generation/reconciliation, the persisted
 resolver, MCP helpers, workspace/history support, scheduling, telemetry, and
 sandboxing. See the repository's
 [architecture guide](../../docs/architecture.md) and
-[0.2 migration guide](../../docs/migration-0.2.md).
+[0.2 migration guide](../../docs/migration-0.2.md). Runnable factory,
+wrapper, background, profile, endpoint, route, and policy compositions live in
+the repository [examples](../../examples/README.md).
