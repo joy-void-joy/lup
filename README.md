@@ -90,8 +90,10 @@ The development harness is generated from one typed catalog. Run
 the old `lup-devtools claude` launcher was removed. Both generated plugins run
 the same hermetic semantic shell/edit/fetch policy without importing this
 checkout at hook time. See [architecture](docs/architecture.md),
-[harness authoring](docs/harness.md), [resolver lifecycle](docs/resolver.md),
-the [native capability ledger](docs/native-capabilities.md), and the
+[harness authoring](docs/harness.md), the [adopter guide](docs/adopter-guide.md),
+[runtime examples](examples/README.md), [resolver lifecycle](docs/resolver.md),
+the [generated rule reference](docs/rules.md),
+[native capability ledger](docs/native-capabilities.md), and
 [0.2 migration guide](docs/migration-0.2.md).
 
 The intended workflow while using this repository is to:

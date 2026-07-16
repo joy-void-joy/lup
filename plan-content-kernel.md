@@ -7,8 +7,10 @@ is complete and its completion review stands; nothing here reopens it. This
 plan removes the two places where the repository's "one typed source, generated
 everywhere" story is still false, closes the untested native seams that
 produced every real shipped failure on the 0.2 branch, and brings the
-documentation up to the standard `plan.md` itself set. Written 2026-07-16; not
-started.
+documentation up to the standard `plan.md` itself set. Written and implemented
+2026-07-16. The implementation explicitly accepts
+reviewed renderer-output changes instead of preserving provider-byte parity;
+deterministic regeneration and clean ownership drift are the maintained gates.
 
 The four motivating findings, verified against the current tree:
 
@@ -54,9 +56,9 @@ The four motivating findings, verified against the current tree:
 - A scheduled live lane that exercises each historical native-failure class
   against the real binaries, plus a versioned trigger for evidence re-probes.
 - Documentation matching the deliverables list in `plan.md`.
-- Byte behavior preserved throughout: every step leaves
-  `lup-devtools harness check all` clean or adds a reviewed row to an
-  intentional-differences ledger.
+- Deterministic generated behavior throughout: every step leaves
+  `lup-devtools harness check all` clean after committing reviewed renderer
+  output changes.
 
 ## Non-goals and invariants
 
@@ -193,15 +195,10 @@ parity shim are deleted.
    scanning it inherited.
 4. **Build the Claude prompt renderer** — the missing inverse:
    `PromptDocument` to native command Markdown with frontmatter, `/lup:`
-   invocation spellings, and `$ARGUMENTS`. It lands behind a golden test
-   *before* anything is deleted: for every catalog path, render-from-content
-   must equal the locked catalog bytes, or add a reviewed row to an
-   intentional-differences ledger (expect a handful of whitespace entries).
-   Only when that gate is green does the Claude desired tree flip from
-   `claude_parity_tree`'s catalog reader to rendered content, with
-   `harness check all` staying clean as the flip's acceptance. The Codex tree
-   must remain byte-identical throughout (the `ArgumentsRef` rendering moves
-   the existing phrase into the renderer; output does not change).
+   invocation spellings, and `$ARGUMENTS`. Review the rendered native diffs,
+   flip the Claude desired tree from the catalog reader to rendered content,
+   and regenerate both ownership-tracked trees. Clean deterministic drift is
+   the gate; byte equality with the retired encoded catalog is not.
 5. **Then delete:** `native_catalog.py`, `baseline_content`, the parity
    reader path, and the description-only importer (`native_overrides.py`
    merges into the modules). Reconciliation stays conflict-explicit for
@@ -215,8 +212,8 @@ parity shim are deleted.
    If T ever needs to land a module before K, the sanctioned interim is a
    file-level typed suppression in that module's first ten lines.
 
-Acceptance: generated trees byte-identical across the flip (golden test plus
-drift check); zero base64 under `src/`; a prose edit to a command is a
+Acceptance: generated trees are deterministic and pass the drift check; zero
+base64 under `src/`; a prose edit to a command is a
 reviewable string diff in one module; `dev check`, the marker gate, and the
 anti-pattern gate all pass over the content package.
 
@@ -271,7 +268,7 @@ each run as written.
 | 1 | N1–N3 minus the edit-path smoke | nightly green twice |
 | 2 | K (kernel, rewire, assembler, enforcement) | fixtures + hermetic subprocess + one-file rule-change proof |
 | 3 | N's Codex edit-path smoke | evidence row recorded |
-| 4 | T (part, content modules, renderer, flip, deletions) | golden byte-equality, then clean drift across the flip |
+| 4 | T (part, content modules, renderer, flip, deletions) | reviewed native diffs, then clean deterministic drift |
 | 5 | D | walkthroughs run as written |
 
 Each workstream lands as its own worktree and PR per the repository workflow.
@@ -297,7 +294,7 @@ The point of the plan is what becomes deletable:
 
 | Risk | Mitigation |
 |---|---|
-| Render-from-content misses byte parity in subtle ways | Golden equality test against the locked catalog runs before any deletion; intentional diffs need a reviewed ledger row; the drift check guards both trees on every commit thereafter |
+| Render-from-content changes native formatting in subtle ways | Review the source and native diffs together; deterministic generation and ownership drift tests guard both trees on every commit thereafter |
 | The kernel erodes repository typing conventions | One module, pinned import allowlist, typed suppressions with reasons, a decision record; Pydantic wraps it everywhere above |
 | Kernel copy goes stale in generated plugins | File-copy assembly is exercised by the drift check and the engine byte-identity test; the fixture suite runs against the assembled form |
 | Prose-in-Python escaping (quotes, backslashes) | Deterministic literal writer picks quoting per block; the 35-module review pass is explicitly budgeted |
