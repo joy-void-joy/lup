@@ -461,10 +461,8 @@ def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> N
 def test_content_prose_examples_do_not_trip_code_or_marker_gates() -> None:
     path = Path("src/lup_template/devtools/harness/content/skills/commit.py")
     before = path.read_text(encoding="utf-8")
-    after = before.replace(
-        "Review all uncommitted changes",
-        "Review all uncommitted changes mentioning Any and # lup: examples",
-        1,
+    after = before + (
+        '\nPROSE_GATE_EXAMPLE = """Any and # lup: examples remain prose."""\n'
     )
 
     decision = EditPolicy(protected=[]).decide(
