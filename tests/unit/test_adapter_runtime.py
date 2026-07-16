@@ -5,12 +5,14 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from pydantic import BaseModel
 
 from lup.adapters.claude.runtime import (
     SESSION_THINKING_TOKENS,
     ClaudeConversationState,
     ClaudeFork,
     ClaudeSessionConfig,
+    ClaudeTurnToolBinder,
     build_claude_options,
     claude_usage,
     convert_claude_block,
@@ -19,13 +21,31 @@ from lup.adapters.codex.app_server import CodexAppServer
 from lup.adapters.codex.runtime import (
     CodexConversationState,
     CodexMcpServerConfig,
+    CodexSchemaRebindingError,
     CodexSessionConfig,
+    CodexSteer,
+    CodexTurnToolBinder,
 )
 from lup.hooks import create_permission_hooks
-from lup.types import SubagentSpec
-from lup.runtime.models import TurnTextBlock, TurnToolCallBlock
+from lup.types import JsonObject, JsonValue, SubagentSpec
+from lup.runtime.models import (
+    SubmissionDecision,
+    TurnInput,
+    TurnTextBlock,
+    TurnToolBinding,
+    TurnToolCallBlock,
+)
+from lup.runtime.output import InMemorySubmittedOutputStore
 from lup.runtime.usage import per_mtok_usage_cost
 from lup.types import Usage
+
+
+class FirstOutput(BaseModel):
+    answer: str
+
+
+class SecondOutput(BaseModel):
+    score: int
 
 
 def test_fresh_claude_session_uses_cli_valid_uuid() -> None:
@@ -233,3 +253,161 @@ async def test_claude_latest_turn_fork_preserves_a_typed_session_handle(
 
     async with ClaudeFork(state).fork() as handle:
         assert handle.fork is not None
+
+
+@pytest.mark.asyncio
+async def test_claude_binder_rebinds_schema_store_and_gate_across_turns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import claude_agent_sdk as claude
+
+    disconnects = 0
+
+    class RecordingClient:
+        def __init__(self, options: claude.ClaudeAgentOptions) -> None:
+            self.options = options
+
+        async def connect(self) -> None:
+            return None
+
+        async def disconnect(self) -> None:
+            nonlocal disconnects
+            disconnects += 1
+
+    monkeypatch.setattr(claude, "ClaudeSDKClient", RecordingClient)
+    state = ClaudeConversationState(ClaudeSessionConfig(model="claude"), None)
+    binder = ClaudeTurnToolBinder(state)
+
+    def submission_tool_is_bound() -> bool:
+        options = build_claude_options(
+            state.config,
+            binding=state.binding,
+            resume=None,
+            session_id=state.session_id,
+        )
+        servers = options.mcp_servers
+        assert isinstance(servers, dict)
+        return (
+            "lup-output" in servers
+            and "mcp__lup-output__submit_output" in options.allowed_tools
+        )
+
+    def current_binding() -> TurnToolBinding[BaseModel] | None:
+        return state.binding
+
+    await binder.bind(None)
+    assert current_binding() is None
+    assert disconnects == 0
+    assert not submission_tool_is_bound()
+
+    first_store = InMemorySubmittedOutputStore()
+    await binder.bind(TurnToolBinding(output_type=FirstOutput, store=first_store))
+    await state.connect()
+    first_binding = current_binding()
+    assert first_binding is not None
+    assert first_binding.output_type is FirstOutput
+    assert first_binding.store is first_store
+    assert submission_tool_is_bound()
+
+    gated: list[FirstOutput] = []
+
+    async def gate(value: FirstOutput) -> SubmissionDecision:
+        gated.append(value)
+        return SubmissionDecision(accepted=True)
+
+    refreshed_store = InMemorySubmittedOutputStore()
+    await binder.bind(
+        TurnToolBinding(output_type=FirstOutput, store=refreshed_store, gate=gate)
+    )
+    assert disconnects == 1
+    assert state.client is None
+    refreshed_binding = current_binding()
+    assert refreshed_binding is not None
+    assert refreshed_binding.store is refreshed_store
+    erased_gate = refreshed_binding.gate
+    assert erased_gate is not None
+    decision = await erased_gate(FirstOutput(answer="checked"))
+    assert decision.accepted
+    assert gated == [FirstOutput(answer="checked")]
+
+    await state.connect()
+    await binder.bind(
+        TurnToolBinding(output_type=SecondOutput, store=InMemorySubmittedOutputStore())
+    )
+    assert disconnects == 2
+    second_binding = current_binding()
+    assert second_binding is not None
+    assert second_binding.output_type is SecondOutput
+
+    await state.connect()
+    await binder.bind(None)
+    assert disconnects == 3
+    assert current_binding() is None
+    assert not submission_tool_is_bound()
+
+
+@pytest.mark.asyncio
+async def test_codex_binder_refreshes_same_schema_turns_and_fails_before_input(
+    tmp_path: Path,
+) -> None:
+    state = CodexConversationState(
+        CodexSessionConfig(model="gpt", cwd=tmp_path),
+        CodexAppServer(Path("codex")),
+        None,
+    )
+    binder = CodexTurnToolBinder(state)
+
+    first_store = InMemorySubmittedOutputStore()
+    await binder.bind(TurnToolBinding(output_type=FirstOutput, store=first_store))
+    assert state.schema_digest is not None
+    state.thread_id = "thread-1"
+
+    refreshed_store = InMemorySubmittedOutputStore()
+    await binder.bind(TurnToolBinding(output_type=FirstOutput, store=refreshed_store))
+    assert state.binding is not None
+    assert state.binding.store is refreshed_store
+
+    digest = state.schema_digest
+    with pytest.raises(CodexSchemaRebindingError, match="thread/start"):
+        await binder.bind(
+            TurnToolBinding(
+                output_type=SecondOutput, store=InMemorySubmittedOutputStore()
+            )
+        )
+    with pytest.raises(CodexSchemaRebindingError, match="thread/start"):
+        await binder.bind(None)
+    assert state.binding.store is refreshed_store
+    assert state.schema_digest == digest
+
+
+@pytest.mark.asyncio
+async def test_codex_steer_targets_the_active_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = CodexConversationState(
+        CodexSessionConfig(model="gpt", cwd=tmp_path),
+        CodexAppServer(Path("codex")),
+        None,
+    )
+    state.thread_id = "thread-1"
+    requests: list[JsonObject] = []
+
+    async def request(method: str, params: JsonObject) -> JsonValue:
+        requests.append({"method": method, "params": params})
+        return {}
+
+    monkeypatch.setattr(state.server, "request", request)
+
+    await CodexSteer(state, "turn-9").steer(TurnInput(text="focus on the tests"))
+
+    assert requests == [
+        {
+            "method": "turn/steer",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-9",
+                "input": [{"type": "text", "text": "focus on the tests"}],
+            },
+        }
+    ]
