@@ -19,7 +19,11 @@ def decoded_output(value: bytes | str | None) -> str:
 
 
 class LocalProcessLauncher(ProcessLauncher):
-    """Run an explicitly named executable with captured output and no shell."""
+    """Run an explicitly named executable with captured output and no shell.
+
+    Output is captured through pipes, never a pseudo-terminal, so children
+    that branch on ``isatty`` (pagers, colorizers) emit plain machine output.
+    """
 
     def launch(self, request: LaunchRequest) -> ExitStatus:
         if not request.arguments:
@@ -36,6 +40,7 @@ class LocalProcessLauncher(ProcessLauncher):
             _env=environment,
             _ok_code=range(256),
             _return_cmd=True,
+            _tty_out=False,
         )
         if not isinstance(result, sh.RunningCommand):
             raise RuntimeError(f"process {executable!r} did not return command state")
