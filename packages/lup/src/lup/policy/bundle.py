@@ -1,6 +1,6 @@
 """Assemble dependency-free policy kernel and application-owned data files."""
 
-import pprint
+import json
 import urllib.parse
 from pathlib import Path
 
@@ -10,14 +10,6 @@ from lup.policy.kernel import (
     AntiPatternRow,
     PathRuleRow,
     UrlScopeRow,
-)
-
-type PolicyDataValue = (
-    int
-    | list[str]
-    | list[UrlScopeRow]
-    | list[PathRuleRow]
-    | dict[str, list[AntiPatternRow]]
 )
 
 
@@ -75,11 +67,72 @@ def runtime_path_rules(protected_roots: list[str]) -> list[PathRuleRow]:
     ]
 
 
-def python_literal(value: PolicyDataValue) -> str:
-    """Render deterministic dependency-free Python data."""
-    if isinstance(value, list) and not value:
+def tuple_rows_literal(rows: list[list[str]]) -> str:
+    """Render already-escaped tuple rows in Ruff-stable multiline form."""
+    if not rows:
         return "()"
-    return pprint.pformat(value, width=88, sort_dicts=True)
+    blocks = [
+        "    (\n" + "".join(f"        {value},\n" for value in row) + "    ),"
+        for row in rows
+    ]
+    return "[\n" + "\n".join(blocks) + "\n]"
+
+
+def url_scope_rows_literal(rows: list[UrlScopeRow]) -> str:
+    """Render normalized URL scopes as primitive tuples."""
+    return tuple_rows_literal(
+        [
+            [
+                json.dumps(scheme),
+                json.dumps(host),
+                "None" if port is None else str(port),
+                json.dumps(path_prefix),
+                json.dumps(reason),
+            ]
+            for scheme, host, port, path_prefix, reason in rows
+        ]
+    )
+
+
+def path_rule_rows_literal(rows: list[PathRuleRow]) -> str:
+    """Render protected-path rows as primitive tuples."""
+    return tuple_rows_literal(
+        [
+            [
+                json.dumps(kind),
+                json.dumps(value),
+                json.dumps(reason),
+                str(autonomous),
+            ]
+            for kind, value, reason, autonomous in rows
+        ]
+    )
+
+
+def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
+    """Render suffix-keyed anti-pattern rows in Ruff-stable form."""
+    lines = ["{"]
+    for suffix, patterns in sorted(rows.items()):
+        lines.append(f"    {json.dumps(suffix)}: [")
+        for rule_id, pattern, message in patterns:
+            block = (
+                "        (\n"
+                f"            {json.dumps(rule_id)},\n"
+                f"            {json.dumps(pattern)},\n"
+                f"            {json.dumps(message)},\n"
+                "        ),"
+            )
+            lines.append(block)
+        lines.append("    ],")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def string_rows_literal(rows: list[str]) -> str:
+    """Render a sequence of generated string identities."""
+    if not rows:
+        return "()"
+    return "[\n" + "".join(f"    {json.dumps(row)},\n" for row in rows) + "]"
 
 
 def render_policy_data(
@@ -90,15 +143,17 @@ def render_policy_data(
     autonomous_agent_identities: list[str],
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
-    assignments = (
-        ("ALLOWED_FETCH_SCOPES", allowed_fetch_scopes),
-        ("DENIED_FETCH_SCOPES", denied_fetch_scopes),
-        ("PATH_RULES", runtime_path_rules(protected_roots)),
-        ("ANTI_PATTERN_ROWS", bundled_antipattern_rows()),
-        ("AUTONOMOUS_AGENT_IDENTITIES", autonomous_agent_identities),
-        ("MAXIMUM_ADDED_LINES", 3),
-    )
     body = "\n\n".join(
-        f"{name} = {python_literal(value)}" for name, value in assignments
+        [
+            "ALLOWED_FETCH_SCOPES = " + url_scope_rows_literal(allowed_fetch_scopes),
+            "DENIED_FETCH_SCOPES = " + url_scope_rows_literal(denied_fetch_scopes),
+            "PATH_RULES = "
+            + path_rule_rows_literal(runtime_path_rules(protected_roots)),
+            "ANTI_PATTERN_ROWS = "
+            + antipattern_rows_literal(bundled_antipattern_rows()),
+            "AUTONOMOUS_AGENT_IDENTITIES = "
+            + string_rows_literal(autonomous_agent_identities),
+            "MAXIMUM_ADDED_LINES = 3",
+        ]
     )
     return '"""Generated application-owned policy data."""\n\n' + body + "\n"
