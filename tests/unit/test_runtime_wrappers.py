@@ -516,19 +516,18 @@ async def test_retry_joins_live_events_and_retargets_steer() -> None:
     assert events is not None
     assert steer is not None
 
-    observed: list[str] = []
+    def block_text(event: TurnEvent) -> str:
+        match event:
+            case BlockCompletedEvent(block=TurnTextBlock(text=text)):
+                return text
+        raise AssertionError(f"unexpected live event {event.type}")
 
-    async def consume() -> None:
-        async for event in events.events():
-            match event:
-                case BlockCompletedEvent(block=TurnTextBlock(text=text)):
-                    observed.append(text)
-                case _:
-                    raise AssertionError(f"unexpected live event {event.type}")
+    async def consume() -> list[str]:
+        return [block_text(event) async for event in events.events()]
 
     consumer = asyncio.create_task(consume())
     result = await handle.turn.result()
-    await consumer
+    observed = await consumer
     await steer.steer(TurnInput(text="focus"))
 
     assert observed == ["attempt-1", "attempt-2"]
