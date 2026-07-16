@@ -17,7 +17,9 @@ Breaking capability-composition release.
   semantic policy dispatchers, Codex cache verification, and named launchers.
 - Added the persisted DAG resolver with question brokering, isolated leases and
   worktrees, semantic multi-parent joins, bounded review, integration,
-  verification, final review, and cleanup records.
+  verification, final review, and cleanup records. Native entries scan and
+  organize inline notes through the shared Python core without modifying the
+  user's checkout.
 - Added the project-wide `abc-capability` AST rule and typed suppression audit.
 - Removed all legacy engine, client, broad options, profile, background-driver,
   replay-stream, and provider-wide tool-registry modules. There is no legacy

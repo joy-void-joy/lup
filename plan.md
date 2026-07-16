@@ -1599,7 +1599,7 @@ below, produced the following release evidence:
 
 - `ruff format --check` and `ruff check` pass;
 - pyright reports zero errors and zero warnings;
-- pytest reports 587 passed and 11 external integration tests deselected;
+- pytest reports 591 passed and 11 external integration tests deselected;
 - the repository anti-pattern audit reports no findings and the native seam
   boundary audit passes;
 - `lup-devtools harness check all` reports zero writes, deletes, conflicts, or
@@ -1632,6 +1632,16 @@ are fixed and the record above reflects the refreshed run:
   persisted `phase=WORKERS` backward and every retry failed the phase guard.
   `ResolverCore.persist` now treats the phase as a monotonic high-water mark;
   a hard-kill/resume lifecycle test pins recovery through acceptance.
+- The generated Claude command still contained the retired eight-phase
+  resolver while its workflow expected a caller-built concern inventory; the
+  Codex skill named no executable entry. A typed resolver-entry prompt part now
+  renders one exact native launcher per adapter, and generated-artifact tests
+  reject duplicated scheduling or inventory arguments.
+- The shared entry now scans contextual review notes, captures changed note
+  files in an unattached commit without touching the user's checkout, plans a
+  complete typed concern inventory, and persists explicit approve/defer answers
+  before DAG scheduling. Coverage pins exact note assignment, dependency-safe
+  approval, checkout preservation, and both generated native entry contracts.
 
 The same pass closed the remaining coverage debts recorded by the area
 audits: direct `None -> A -> A -> B -> None` coverage through the real Claude
