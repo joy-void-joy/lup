@@ -43,7 +43,7 @@ from lup.resolver.orchestrator import (
     WorktreeOrchestrator,
     WritableRootLeases,
 )
-from lup.resolver.state import ResolverStateRepository
+from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
 from lup.runtime.contracts import SessionFactory
 from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.query import query
@@ -976,6 +976,20 @@ class ResolverCore:
         return self.manifest(completed)
 
     def persist(self, state: ResolveState) -> None:
+        """Persist while keeping the phase a monotonic high-water mark.
+
+        Resumed runs re-enter completed stages whose persisted evidence makes
+        them no-ops; the re-entered stage may not move the recorded phase
+        backward. Failure recording and explicit failed-state resumption are
+        the only non-forward moves and stay owned by ``save()``.
+        """
+        current = self.state
+        if (
+            current is not None
+            and ResolvePhase.FAILED not in {current.phase, state.phase}
+            and PHASE_ORDER[state.phase] < PHASE_ORDER[current.phase]
+        ):
+            state = state.model_copy(update={"phase": current.phase})
         self.state = state
         self.repository.save(state)
 

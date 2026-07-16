@@ -20,6 +20,9 @@ from lup.resolver.models import (
     WorkerReport,
 )
 
+PHASE_ORDER: dict[ResolvePhase, int] = {
+    phase: index for index, phase in enumerate(ResolvePhase)
+}
 PHASE_TRANSITIONS: dict[ResolvePhase, ResolvePhase] = {
     ResolvePhase.INVENTORY: ResolvePhase.QUESTIONS,
     ResolvePhase.QUESTIONS: ResolvePhase.ELIGIBILITY,

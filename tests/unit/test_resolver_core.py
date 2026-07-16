@@ -742,3 +742,144 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
             )
         )
         assert status.code != 0
+
+
+def test_persist_clamps_phase_to_the_recorded_high_water_mark(tmp_path: Path) -> None:
+    run_id = "phase-clamp"
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id=run_id,
+        phase=ResolvePhase.REVIEW,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("a")],
+        progress=[ConcernProgress(concern_id="a", status=ConcernStatus.VERIFIED)],
+        outcomes=[
+            ConcernOutcome(
+                concern_id="a",
+                branch="resolve/a",
+                commit="a-sha",
+                verified=True,
+            )
+        ],
+    )
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=tmp_path,
+            worktree_root=tmp_path / "worktrees",
+            run_id=run_id,
+            integration_branch="resolve/review",
+            verification_commands=[
+                VerificationCommand(name="tests", arguments=["pytest"])
+            ],
+        ),
+        resolve_spec(),
+        lambda _cwd: UnusedSessionFactory(),
+        lambda _cwd: UnusedSessionFactory(),
+        UnusedInvocationRenderer(),
+        UnusedQuestionBroker(),
+        RecordingLauncher(),
+    )
+    core.persist(state)
+
+    core.persist(state.model_copy(update={"phase": ResolvePhase.WORKERS}))
+
+    assert core.repository.load().phase == ResolvePhase.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_resume_after_a_kill_past_workers_completes_without_backward_phase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "source"
+    workspace.mkdir()
+    launcher = LocalProcessLauncher()
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    git("init", "-b", "source")
+    git("config", "user.email", "resolver@example.test")
+    git("config", "user.name", "Resolver Test")
+    (workspace / "README.md").write_text("base\n", encoding="utf-8")
+    git("add", "README.md")
+    git("commit", "-m", "base")
+    source = SourceSnapshot(
+        branch=git("branch", "--show-current"), commit=git("rev-parse", "HEAD")
+    )
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        assert output_name == WorkerReport.__name__
+        relative = Path("a.txt")
+        (root / relative).write_text("a\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": [relative.as_posix()],
+        }
+
+    def reviewer_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == FinalReview.__name__:
+            return {"accepted": True, "reason": "combined branch verified"}
+        assert output_name == ReviewReport.__name__
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    def build_core() -> ResolverCore:
+        return ResolverCore(
+            ResolverConfig(
+                state_root=tmp_path / "state",
+                workspace=workspace,
+                worktree_root=tmp_path / "resolver-worktrees",
+                run_id="kill-resume",
+                integration_branch="resolve/kill-resume/review",
+                verification_commands=[
+                    VerificationCommand(
+                        name="combined-diff",
+                        arguments=["git", "diff", "--check", "HEAD"],
+                    )
+                ],
+            ),
+            resolve_spec(),
+            lambda root: ResolverTestFactory(root, worker_response),
+            lambda root: ResolverTestFactory(root, reviewer_response),
+            LiteralInvocationRenderer(),
+            RecordingQuestionBroker(),
+            launcher,
+        )
+
+    killed = build_core()
+    monkeypatch.setattr(killed, "persist_failure", lambda error: None)
+    acquire = killed.leases.acquire
+
+    def kill_before_integration(concern_id: str, branch: str) -> WritableRootLease:
+        if concern_id == "integration":
+            raise RuntimeError("killed before the integration lease")
+        return acquire(concern_id, branch)
+
+    monkeypatch.setattr(killed.leases, "acquire", kill_before_integration)
+    with pytest.raises(RuntimeError, match="killed before"):
+        await killed.run(ResolveInventory(source=source, concerns=[concern("a")]))
+    assert killed.repository.load().phase == ResolvePhase.REVIEW
+
+    resumed = build_core()
+    manifest = await resumed.resume()
+
+    assert manifest.final_review == FinalReview(
+        accepted=True, reason="combined branch verified"
+    )
+    assert [outcome.verified for outcome in manifest.outcomes] == [True]
+    assert resumed.repository.load().phase == ResolvePhase.ACCEPTANCE
