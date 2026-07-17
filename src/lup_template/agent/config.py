@@ -289,7 +289,7 @@ class Settings(BaseSettings):
 
 
 # Singleton instance
-settings = Settings.model_validate({})
+settings = Settings()
 
 
 def aux_model() -> str:
