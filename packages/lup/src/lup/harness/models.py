@@ -10,13 +10,13 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
 from pydantic import (
+    AfterValidator,
     AnyHttpUrl,
     BaseModel,
     ConfigDict,
     Discriminator,
     Field,
     StringConstraints,
-    field_validator,
     model_validator,
 )
 
@@ -150,6 +150,12 @@ class Skill(BaseModel):
         return self
 
 
+type AgentColor = Literal[
+    "red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"
+]
+"""The closed agent accent-color palette native runtimes accept."""
+
+
 class Agent(BaseModel):
     model_config = FROZEN
 
@@ -159,7 +165,7 @@ class Agent(BaseModel):
     prompt: PromptDocument
     tools: list[ToolName] = Field(default_factory=list)
     model: str | None = None
-    color: str | None = None
+    color: AgentColor | None = None
 
 
 class HookUrlScope(BaseModel):
@@ -323,35 +329,41 @@ class Harness(BaseModel):
         return self
 
 
+def path_beneath_root(value: Path) -> Path:
+    raw = str(value)
+    portable = PurePosixPath(value.as_posix())
+    if (
+        "\\" in raw
+        or "\0" in raw
+        or value.is_absolute()
+        or ".." in portable.parts
+        or portable == PurePosixPath(".")
+    ):
+        raise ValueError(f"artifact path must stay beneath its root: {value}")
+    return value
+
+
+type ArtifactPath = Annotated[Path, AfterValidator(path_beneath_root)]
+"""A relative path proven unable to escape or alias the root it joins."""
+
+
+def lf_normalized(value: str) -> str:
+    if "\r" in value:
+        raise ValueError("artifact content must use LF newlines")
+    return value if not value or value.endswith("\n") else value + "\n"
+
+
+type NormalizedText = Annotated[str, AfterValidator(lf_normalized)]
+"""LF-only text, normalized to terminate in a newline."""
+
+
 class Artifact(BaseModel):
     model_config = FROZEN
 
-    path: Path
-    content: str
+    path: ArtifactPath
+    content: NormalizedText
     semantic_id: str = Field(min_length=1)
     executable: bool = False
-
-    @field_validator("path")
-    @classmethod
-    def safe_relative_path(cls, value: Path) -> Path:
-        raw = str(value)
-        portable = PurePosixPath(value.as_posix())
-        if (
-            "\\" in raw
-            or "\0" in raw
-            or value.is_absolute()
-            or ".." in portable.parts
-            or portable == PurePosixPath(".")
-        ):
-            raise ValueError(f"artifact path must stay beneath its root: {value}")
-        return value
-
-    @field_validator("content")
-    @classmethod
-    def normalized_content(cls, value: str) -> str:
-        if "\r" in value:
-            raise ValueError("artifact content must use LF newlines")
-        return value if not value or value.endswith("\n") else value + "\n"
 
 
 class ArtifactTree(BaseModel):
