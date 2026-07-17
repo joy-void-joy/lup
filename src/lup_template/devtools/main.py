@@ -55,7 +55,9 @@ app.add_typer(
     harness_app, name="harness", help="Generate and launch Claude or Codex harnesses"
 )
 app.add_typer(setup_app, name="setup", help="Interactive setup wizard")
-app.add_typer(sync_app, name="sync", help="Upstream sync tracking")
+app.add_typer(
+    sync_app, name="sync", help="Track sync.json repos and review their commits"
+)
 app.add_typer(trace_app, name="trace", help="Trace display, search, and analysis")
 app.add_typer(usage_app, name="usage", help="Claude Code usage display")
 app.add_typer(version_app, name="version", help="Agent version, changelog, and bump")
