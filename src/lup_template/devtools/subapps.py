@@ -38,6 +38,4 @@ def subapp_summary() -> str:
 
 def subapp_bullets(indent: str = "") -> str:
     """Format the sub-app roster as Markdown bullet lines with help text."""
-    return "".join(
-        f"{indent}- `{subapp.name}` — {subapp.help}\n" for subapp in SUBAPPS
-    )
+    return "".join(f"{indent}- `{subapp.name}` — {subapp.help}\n" for subapp in SUBAPPS)
