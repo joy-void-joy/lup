@@ -130,8 +130,7 @@ def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
     if patterns is None:
         return []
     return [
-        (rule.id, rule.pattern.pattern, rule.message, rule.context)
-        for rule in patterns
+        (rule.id, rule.pattern.pattern, rule.message, rule.context) for rule in patterns
     ]
 
 
