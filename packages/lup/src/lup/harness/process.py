@@ -27,7 +27,7 @@ class LocalProcessLauncher(ProcessLauncher):
 
     def launch(
         self, request: LaunchRequest
-    ) -> ExitStatus:  # lup: I feel like more types should live in the file that mostly manage it instead of all living in models.py. Do you disagree? Maybe we should move the types to their own files
+    ) -> ExitStatus:
         if not request.arguments:
             raise ValueError("a launch request must name an executable")
         executable, *arguments = request.arguments
