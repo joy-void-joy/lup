@@ -1,5 +1,4 @@
 """Public ``lup-devtools harness`` generation, diagnosis, and launch surface."""
-# lup: Wait, where is the generic hooks folder that specify what can be modified or not, and gets compiled to .claude/plugin/hooks/auto_allow_edit.py for instance?
 
 import asyncio
 import hashlib
