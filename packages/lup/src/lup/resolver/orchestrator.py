@@ -52,15 +52,6 @@ class WritableRootLeases:
         self.leases[concern_id] = lease
         return lease
 
-    def release(self, concern_id: str) -> WritableRootLease:
-        try:
-            lease = self.leases[concern_id]
-        except KeyError as error:
-            raise LeaseViolationError(f"unknown lease {concern_id!r}") from error
-        released = lease.model_copy(update={"active": False})
-        self.leases[concern_id] = released
-        return released
-
     def assert_path(self, concern_id: str, path: Path) -> None:
         try:
             lease = self.leases[concern_id]

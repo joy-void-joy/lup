@@ -147,7 +147,7 @@ def test_persisted_approval_answers_filter_deferred_ancestry() -> None:
     assert decisions.eligible == []
 
 
-def test_leases_are_unique_bounded_and_releasable(tmp_path: Path) -> None:
+def test_leases_are_unique_and_bounded(tmp_path: Path) -> None:
     leases = WritableRootLeases(tmp_path / "agents")
     first = leases.acquire("a", "resolve/a")
     second = leases.acquire("b", "resolve/b")
@@ -158,11 +158,6 @@ def test_leases_are_unique_bounded_and_releasable(tmp_path: Path) -> None:
         leases.assert_path("a", second.root / "module.py")
     with pytest.raises(LeaseViolationError, match="already has"):
         leases.acquire("a", "resolve/a-2")
-
-    released = leases.release("a")
-    assert not released.active
-    with pytest.raises(LeaseViolationError, match="outside"):
-        leases.assert_path("a", first.root / "file.py")
 
 
 def test_dependency_bases_cover_root_single_and_semantic_join() -> None:
