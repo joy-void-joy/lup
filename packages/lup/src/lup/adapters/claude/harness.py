@@ -206,7 +206,10 @@ class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
 
 # lup: We really shouldn't have those python-in-string or js-in-strings. Please export all of those to their own files (I think sandbox also has some of those)
 # lup: I remember that the resolve workflow often crashed and the agent needed to tweak something because of the json parsing. Can you check if that's resolved?
-CLAUDE_RESOLVER_ENTRY = """export const meta = {
+CLAUDE_RESOLVER_ENTRY = """\
+// Generated file — do not edit directly. Rendered from
+// lup.adapters.claude.harness by `uv run lup-devtools harness generate all`.
+export const meta = {
   name: 'resolve',
   description: 'Enter Lup\\'s shared persisted Python resolver.',
   phases: [{ title: 'Resolve', detail: 'shared Python resolver core' }],
@@ -246,7 +249,11 @@ return { exit_code: exitCode }
 
 
 CLAUDE_POLICY_DISPATCHER = '''#!/usr/bin/env python3
-"""Generated Claude hook dispatcher over the canonical semantic kernel."""
+"""Generated Claude hook dispatcher over the canonical semantic kernel.
+
+Rendered from lup.adapters.claude.harness by
+`uv run lup-devtools harness generate all` — do not edit directly.
+"""
 
 import json
 import sys
