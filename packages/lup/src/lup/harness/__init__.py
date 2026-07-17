@@ -22,6 +22,8 @@ generated. Modules map to concerns:
   review instead of applying them.
 - :mod:`lup.harness.process` — the local launcher for native CLIs (doctor
   probes, plugin launches, resolver git and skill runs).
+- :mod:`lup.harness.environment` — the non-interactive shell defaults merged
+  into every agent-spawned command so credential prompts fail fast.
 
 Dependencies point one way: everything may import ``models``; the concern
 modules implement seams from ``contracts`` (whose own imports are type-only);
