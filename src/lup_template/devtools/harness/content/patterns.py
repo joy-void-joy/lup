@@ -149,6 +149,28 @@ which provider owns the injected factory.
 
 ---
 
+## Deferred Tool Schemas (Tool Search)
+
+Claude harnesses (the CLI and the Agent SDK alike) stop loading every tool schema upfront once the combined schemas exceed a threshold — by default 10% of the model's context window (roughly 20k tokens at 200k). Beyond it, tools are **deferred**: the agent sees only names and must load a tool through the `ToolSearch` tool before calling it. This applies to built-in, MCP, and custom SDK tools.
+
+**The failure mode:** an agent assumes a tool it "should" have does not exist — the schema is not in context, and a search with the wrong terms comes back empty (each search returns roughly the top five matches) — so it concludes the capability is missing and gives up without ever calling the tool.
+
+**Configuration:** the `ENABLE_TOOL_SEARCH` environment variable controls deferral per session (`ClaudeAgentOptions(env=...)` in the SDK, shell environment for the CLI). Unset leaves the harness default (deferral on); `true` forces tool search on; `auto` defers past the default threshold; `auto:N` defers past N% of the context window; `false` loads every schema upfront with deferral disabled. `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` disables tool search entirely and cannot be overridden by `ENABLE_TOOL_SEARCH`. This template plumbs `AGENT_TOOL_SEARCH` (default `false`) into every Claude session it opens — the served tool surface is small and curated, so no schema should ever be invisible — and the repo's own dev harness pins `ENABLE_TOOL_SEARCH=false` in `.claude/settings.json` for the same reason.
+
+**Prompt mitigations** when a large surface makes deferral worth keeping:
+
+- Name the available tool *categories* in the system prompt ("you have tools for Slack, GitHub, and Jira — search for them") so the agent searches instead of concluding absence.
+- Give tool families semantic name prefixes (`github_*`, `slack_*`) and write descriptions with the words a caller would actually use — search matches names and descriptions.
+- Instruct the agent to search again with different terms before concluding a capability is missing.
+
+**Native subagents** inherit the parent session's tool-search configuration — there is no per-subagent deferral override — and re-discover deferred tools themselves (search results are not shared with the parent). `AgentDefinition.tools` restricts which tools a subagent may use; it does not preload them.
+
+**The structural fix** is to keep every agent's tool surface small enough that nothing defers: route whole tool families behind one delegating tool whose nested agent holds the family (see [Nested Agent Pattern](#nested-agent-pattern)) — each family's schemas then load next to the work that uses them.
+
+Sources: [tool search (API)](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool.md), [tool search (Agent SDK)](https://code.claude.com/docs/en/agent-sdk/tool-search.md), [managing tool context](https://platform.claude.com/docs/en/agents-and-tools/tool-use/manage-tool-context.md), [SDK MCP](https://code.claude.com/docs/en/agent-sdk/mcp.md), [SDK subagents](https://code.claude.com/docs/en/agent-sdk/subagents.md).
+
+---
+
 ## Data Augmentation Pattern
 
 Tools that fetch external data should **enrich it inside the tool** before returning to the agent. The agent receives structured, domain-aware results — not raw HTML, API responses, or search snippets it has to interpret.
