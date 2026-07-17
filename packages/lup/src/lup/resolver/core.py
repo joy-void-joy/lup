@@ -7,8 +7,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from lup.harness.contracts import ProcessLauncher, SkillInvocationRenderer
-from lup.harness.models import LaunchRequest, ResolveSpec
+from lup.harness.contracts import SkillInvocationRenderer
+from lup.harness.models import ResolveSpec
+from lup.harness.process import LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import QuestionBroker
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.models import (

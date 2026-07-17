@@ -2,8 +2,7 @@
 
 from pathlib import Path
 
-from lup.harness.contracts import ProcessLauncher
-from lup.harness.models import LaunchRequest
+from lup.harness.process import LaunchRequest, ProcessLauncher
 from lup.resolver.models import (
     Concern,
     DependencyBase,

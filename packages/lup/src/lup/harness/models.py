@@ -1,4 +1,10 @@
-"""Validated canonical harness, prompt, artifact, and ownership models."""
+"""Validated canonical harness, prompt, artifact, and ownership models.
+
+Placement policy: only models genuinely shared across the declaration graph —
+renderers, reconcilers, adapters, and devtools — live here. A type consumed by
+essentially one module lives next to that module instead (process launching in
+:mod:`lup.harness.process`, tree validation in :mod:`lup.harness.validation`).
+"""
 
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
@@ -15,7 +21,7 @@ from pydantic import (
 )
 
 from lup.policy.models import PolicyId, UrlPathPrefix
-from lup.types import EnvVars, JsonValue, ToolGrant, ToolName
+from lup.types import JsonValue, ToolGrant, ToolName
 
 FROZEN = ConfigDict(frozen=True)
 
@@ -361,23 +367,6 @@ class ArtifactTree(BaseModel):
         return self
 
 
-class ValidationIssue(BaseModel):
-    model_config = FROZEN
-
-    semantic_id: str
-    message: str
-
-
-class ValidationResult(BaseModel):
-    model_config = FROZEN
-
-    issues: list[ValidationIssue] = Field(default_factory=list)
-
-    @property
-    def valid(self) -> bool:
-        return not self.issues
-
-
 class CapabilityEvidence[C](BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
@@ -385,22 +374,6 @@ class CapabilityEvidence[C](BaseModel):
     supported: bool
     evidence: C
     version: str
-
-
-class LaunchRequest(BaseModel):
-    model_config = FROZEN
-
-    arguments: list[str]
-    cwd: Path
-    environment: EnvVars = Field(default_factory=dict)
-
-
-class ExitStatus(BaseModel):
-    model_config = FROZEN
-
-    code: int
-    stdout: str = ""
-    stderr: str = ""
 
 
 type OwnershipCategory = Literal[

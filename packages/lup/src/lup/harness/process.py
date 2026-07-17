@@ -1,12 +1,38 @@
-"""Concrete local process launching for typed harness boundaries."""
+"""The complete process-launch boundary: request and status models, the
+launcher contract, and the concrete local implementation."""
 
 import os
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 import sh
+from pydantic import BaseModel, ConfigDict, Field
 
-from lup.harness.contracts import ProcessLauncher
-from lup.harness.models import ExitStatus, LaunchRequest
+from lup.types import EnvVars
+
+
+class LaunchRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    arguments: list[str]
+    cwd: Path
+    environment: EnvVars = Field(default_factory=dict)
+
+
+class ExitStatus(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    code: int
+    stdout: str = ""
+    stderr: str = ""
+
+
+class ProcessLauncher(ABC):
+    """Launch one concrete process boundary."""
+
+    @abstractmethod
+    def launch(self, request: LaunchRequest) -> ExitStatus:
+        """Launch with typed arguments and environment."""
 
 
 def decoded_output(value: bytes | str | None) -> str:
@@ -25,9 +51,7 @@ class LocalProcessLauncher(ProcessLauncher):
     that branch on ``isatty`` (pagers, colorizers) emit plain machine output.
     """
 
-    def launch(
-        self, request: LaunchRequest
-    ) -> ExitStatus:
+    def launch(self, request: LaunchRequest) -> ExitStatus:
         if not request.arguments:
             raise ValueError("a launch request must name an executable")
         executable, *arguments = request.arguments
