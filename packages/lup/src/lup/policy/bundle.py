@@ -157,4 +157,10 @@ def render_policy_data(
             "MAXIMUM_ADDED_LINES = 3",
         ]
     )
-    return '"""Generated application-owned policy data."""\n\n' + body + "\n"
+    return (
+        '"""Generated application-owned policy data.\n'
+        "\n"
+        "Rendered from lup.policy.bundle by\n"
+        "`uv run lup-devtools harness generate all` — do not edit directly.\n"
+        '"""\n\n' + body + "\n"
+    )
