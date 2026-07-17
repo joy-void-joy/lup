@@ -5,6 +5,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from lup.resolver.models import (
     AgentRound,
     AnswerBatch,
@@ -115,6 +117,10 @@ class StateTransitionError(RuntimeError):
     """A persisted run cannot make the requested state transition."""
 
 
+class StateCorruptionError(RuntimeError):
+    """A persisted resolver document cannot be decoded as its schema."""
+
+
 def progress_index(progress: list[ConcernProgress]) -> dict[str, ConcernProgress]:
     """Index a complete progress projection while rejecting duplicate ids."""
     indexed = {item.concern_id: item for item in progress}
@@ -173,7 +179,13 @@ class ResolverStateRepository:
         path = self.root / "state.json"
         if not path.exists():
             raise FileNotFoundError(f"resolver state does not exist: {path}")
-        return ResolveState.model_validate_json(path.read_text(encoding="utf-8"))
+        try:
+            return ResolveState.model_validate_json(path.read_text(encoding="utf-8"))
+        except ValidationError as error:
+            raise StateCorruptionError(
+                f"resolver state at {path} cannot be decoded; restore the file "
+                "or remove the run directory to start over"
+            ) from error
 
     def save(self, state: ResolveState) -> None:
         if state.run_id != self.root.name:
