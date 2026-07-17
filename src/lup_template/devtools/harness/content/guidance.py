@@ -12,7 +12,15 @@ import lup.harness.models as models
 DOCUMENT = models.PromptDocument(
     parts=[
         models.TextPart(
-            text=r"""# Lup repository guidance
+            text=r"""<!--
+Generated file — do not edit directly. This is the canonical repository
+guidance from src/lup_template/devtools/harness/content/guidance.py, rendered
+once per platform by `uv run lup-devtools harness generate all`: Claude Code
+reads .claude/CLAUDE.md, Codex reads AGENTS.md, and the duplication between
+the two files is deliberate. See docs/generated-artifacts.md.
+-->
+
+# Lup repository guidance
 
 Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
 
