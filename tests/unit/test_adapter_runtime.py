@@ -25,6 +25,7 @@ from lup.adapters.codex.runtime import (
     CodexSessionConfig,
     CodexSteer,
     CodexTurnToolBinder,
+    decode_usage,
 )
 from lup.hooks import create_permission_hooks
 from lup.types import JsonObject, JsonValue, SubagentSpec
@@ -152,6 +153,32 @@ def test_claude_message_and_usage_translation_has_direct_fixtures() -> None:
     usage = claude_usage({"input_tokens": 20, "output_tokens": 5}, total_cost_usd=0.12)
     assert usage == Usage(input_tokens=20, output_tokens=5, cost_usd=0.12)
     assert per_mtok_usage_cost(input_usd=2, output_usd=4)(usage) == 0.00006
+
+
+def test_input_tokens_are_cache_inclusive_on_both_adapters() -> None:
+    claude_side = claude_usage(
+        {
+            "input_tokens": 10,
+            "output_tokens": 3,
+            "cache_read_input_tokens": 90,
+            "cache_creation_input_tokens": 25,
+        },
+        total_cost_usd=None,
+    )
+    assert claude_side.input_tokens == 125
+    assert claude_side.cache_read_input_tokens == 90
+    assert claude_side.cache_creation_input_tokens == 25
+
+    codex_side = decode_usage(
+        {"inputTokens": 125, "cachedInputTokens": 90, "outputTokens": 3}
+    )
+    assert codex_side.input_tokens == claude_side.input_tokens
+    assert codex_side.cache_read_input_tokens == claude_side.cache_read_input_tokens
+
+    priced = per_mtok_usage_cost(input_usd=10.0, output_usd=0.0, cached_input_usd=1.0)
+    expected = (35 * 10.0 + 90 * 1.0) / 1_000_000
+    assert priced(claude_side) == pytest.approx(expected)
+    assert priced(codex_side) == pytest.approx(expected)
 
 
 @pytest.mark.asyncio
