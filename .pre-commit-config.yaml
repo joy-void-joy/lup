@@ -8,4 +8,3 @@ repos:
         pass_filenames: false
         always_run: true
 
-// lup: I don't feel very confident in the current CI+pre-commit workflow. Can you walk me through it? Maybe we should pause it. What do you think there?
