@@ -9,6 +9,15 @@
 
 Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
 
+## Agent Vocabulary
+
+Two kinds of delegated agents look alike and must not be conflated:
+
+- A **native subagent** ("subagent" for short) is dispatched by the harness: Claude Code's `Agent`/`Task` tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics.
+- A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool.
+
+Guidance that says "subagent" unqualified means the native kind. `.claude/PATTERNS.md` carries the full pattern catalog — subagent, nested, background, deferred tool schemas — and when to reach for each.
+
 ## Development Workflow
 
 ### Git Workflow

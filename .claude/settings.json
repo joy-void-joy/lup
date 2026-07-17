@@ -7,6 +7,9 @@
     "lup@lup-template": true,
     "pyright-lsp@claude-plugins-official": true
   },
+  "env": {
+    "ENABLE_TOOL_SEARCH": "false"
+  },
   "extraKnownMarketplaces": {
     "lup-template": {
       "source": {
