@@ -204,6 +204,13 @@ class HookSet(BaseModel):
     allowed_fetch: list[HookUrlScope] = Field(default_factory=list)
     denied_fetch: list[HookUrlScope] = Field(default_factory=list)
     protected_edit_roots: list[Path] = Field(default_factory=list)
+    human_owned_files: list[Path] = Field(
+        default_factory=list,
+        description=(
+            "Files whose content the human author owns; every edit is surfaced "
+            "as Ask so agents propose changes instead of applying them"
+        ),
+    )
 
 
 class ResolveSpec(BaseModel):

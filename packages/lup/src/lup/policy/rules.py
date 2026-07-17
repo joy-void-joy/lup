@@ -119,6 +119,18 @@ def path_rule_row(rule: PathRule) -> PathRuleRow:
     return (rule.kind, rule.value, rule.reason, rule.allow_autonomous)
 
 
+def human_owned_path_rule(path: str) -> PathRule:
+    """Declare one human-owned file whose edits always require approval."""
+    return PathRule(
+        kind="exact",
+        value=path,
+        reason=(
+            f"{path} is human-authored; propose changes via AskUserQuestion"
+            " instead of editing"
+        ),
+    )
+
+
 def path_rule_matches(path: Path, rule: PathRule) -> bool:
     """Compare a path with one rule through the canonical kernel matcher."""
     return kernel_path_rule_matches(path.as_posix(), path.exists(), path_rule_row(rule))

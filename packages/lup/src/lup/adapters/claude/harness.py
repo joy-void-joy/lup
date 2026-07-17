@@ -422,6 +422,9 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         protected_roots=[
                             path.as_posix() for path in source.protected_edit_roots
                         ],
+                        human_owned_files=[
+                            path.as_posix() for path in source.human_owned_files
+                        ],
                         autonomous_agent_identities=[
                             "resolve-editor",
                             "lup:resolve-editor",
