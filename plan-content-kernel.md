@@ -1,4 +1,3 @@
-# lup: If we're done with both plans, we should delete them. If some things are still not done, let me know
 # Typed content and policy-kernel consolidation plan
 
 ## Status and intent
