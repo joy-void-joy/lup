@@ -66,9 +66,7 @@ def test_generated_permission_script_enforces_rw_and_ro_grants(
         script,
         CodexHookInput(tool_name="Read", tool_input={"file_path": str(ro / "a.txt")}),
     )
-    glob_unscoped = run_script(
-        script, CodexHookInput(tool_name="Glob", tool_input={})
-    )
+    glob_unscoped = run_script(script, CodexHookInput(tool_name="Glob", tool_input={}))
 
     assert write_inside == {"decision": "allow"}
     assert write_readonly["decision"] == "deny"
@@ -86,8 +84,9 @@ def test_generated_reflection_gate_script_opens_only_on_the_flag(
         script_dir=tmp_path / "scripts",
         gate_flag_path=flag,
     )
-    assert configs[0]["matcher"] == "StructuredOutput"
-    script = Path(str(configs[0]["command"]).removeprefix("python3 "))
+    gate = configs[0]
+    assert "matcher" in gate and gate["matcher"] == "StructuredOutput"
+    script = Path(str(gate["command"]).removeprefix("python3 "))
 
     closed = run_script(script, CodexHookInput(tool_name="StructuredOutput"))
     other_tool = run_script(script, CodexHookInput(tool_name="Read"))

@@ -57,9 +57,7 @@ class TestCapabilityProbes:
     def test_present_cli_yields_banner_output_and_version(self, tmp_path: Path) -> None:
         executable = fake_cli(tmp_path, "claude", VERSIONED_CLI)
 
-        version = ClaudeCapabilityProbe(
-            "claude-cli", ["--version"], executable
-        ).probe()
+        version = ClaudeCapabilityProbe("claude-cli", ["--version"], executable).probe()
         plugins = ClaudeCapabilityProbe(
             "plugins", ["plugin", "--help"], executable
         ).probe()
