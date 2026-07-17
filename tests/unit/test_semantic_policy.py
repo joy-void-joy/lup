@@ -593,7 +593,7 @@ def test_edit_policy_uses_full_python_context_for_added_docstrings(
 
     assert canonical.effect == "allow"
     assert (
-        assembled_edit_decision(bundled, "src/module.py", before, after, []).effect
+        assembled_edit_decision(bundled, "src/module.py", before, after, [], []).effect
         == "allow"
     )
 
@@ -620,7 +620,9 @@ def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> N
 
     assert canonical.effect == "allow"
     assert (
-        assembled_edit_decision(bundled, "src/scheduler.py", before, after, []).effect
+        assembled_edit_decision(
+            bundled, "src/scheduler.py", before, after, [], []
+        ).effect
         == "allow"
     )
 
