@@ -44,11 +44,18 @@ for the session-id, pager, dynamic-tool-schema, and blocked-edit boundaries.
 newer component warns locally and fails the nightly strict check, but the live
 job still runs so the drift cannot suppress the evidence needed to review it.
 
-The credentials-gated native job is a real workflow result: a failure stays
-failed, and a skipped job is not release evidence. A release cut requires two
-consecutive scheduled runs with successful `native` jobs and no version drift;
-review the probes and `docs/native-capabilities.md` rather than updating the
-ledger mechanically.
+## Release gate
+
+Beyond the ordinary pull-request checks, cutting a release requires observing
+two consecutive scheduled `native-nightly` runs in which:
+
+- the credentials-gated `native` job completed successfully — a skipped job is
+  not a green run, and a completed failure stays visible and release-blocking;
+- the strict evidence job reported no drift between the installed native
+  versions and `docs/native-capabilities.md`.
+
+Review the probe output together with the evidence ledger rather than updating
+the ledger mechanically.
 
 ## Rule documentation
 
