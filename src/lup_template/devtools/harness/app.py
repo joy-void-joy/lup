@@ -4,31 +4,21 @@
 import asyncio
 import hashlib
 import os
-from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Annotated
 
 import sh
 import typer
-from pydantic import BaseModel, ConfigDict
 
-from lup.adapters.claude.harness import ClaudeSkillInvocationRenderer
-from lup.adapters.claude.harness_runtime import (
-    ClaudeCliEvidence,
-    claude_capability_probes,
-)
 from lup.adapters.claude.profile_store import ClaudeProfileStore
-from lup.adapters.codex.harness import CodexSkillInvocationRenderer
 from lup.adapters.codex.harness_runtime import (
-    CodexCliEvidence,
     CodexPluginInstaller,
     PluginCacheConfig,
-    codex_capability_probes,
 )
 from lup.codescan.markers import find_feedback
-from lup.harness.contracts import ProcessLauncher, SkillInvocationRenderer
+from lup.harness.contracts import ProcessLauncher
 from lup.harness.environment import non_interactive_environment
-from lup.harness.models import CapabilityEvidence, LaunchRequest, ReconciliationMetadata
+from lup.harness.models import LaunchRequest, ReconciliationMetadata
 from lup.harness.process import LocalProcessLauncher
 from lup.harness.proposals import ReconciliationProposalWriter
 from lup.harness.reconciliation import source_patch_base_digest
@@ -49,12 +39,15 @@ from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup_template.devtools.dev.comments import scan_tracked
 from lup_template.devtools.dev.remote_auth import check_remote_auth
+from lup_template.devtools.harness.composition import (
+    NativeHarnessComposition,
+    claude_composition,
+    codex_composition,
+    harness_compositions,
+)
 from lup_template.devtools.harness.generate import (
     DriftReport,
-    GenerationRecipe,
     HarnessGenerationConflict,
-    claude_generation_recipe,
-    codex_generation_recipe,
     generate as generate_target,
     inspect_generation,
 )
@@ -63,51 +56,6 @@ from lup_template.devtools.harness.evidence import (
     evidence_drift,
     sdk_evidence_drift,
 )
-
-type NativeCapabilityEvidence = (
-    CapabilityEvidence[ClaudeCliEvidence] | CapabilityEvidence[CodexCliEvidence]
-)
-type RuntimeReadiness = Callable[[], Sequence[NativeCapabilityEvidence]]
-
-
-class NativeHarnessComposition(BaseModel):
-    """Concrete capabilities supplied to one CLI composition root."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    recipe: GenerationRecipe
-    readiness: RuntimeReadiness
-    invocation_renderer: SkillInvocationRenderer
-
-
-def claude_composition(root: Path) -> NativeHarnessComposition:
-    """Construct the Claude capabilities directly."""
-
-    def readiness() -> Sequence[NativeCapabilityEvidence]:
-        return [
-            probe.probe()
-            for probe in claude_capability_probes(root / ".claude" / "plugins" / "lup")
-        ]
-
-    return NativeHarnessComposition(
-        recipe=claude_generation_recipe(root),
-        readiness=readiness,
-        invocation_renderer=ClaudeSkillInvocationRenderer(),
-    )
-
-
-def codex_composition(root: Path) -> NativeHarnessComposition:
-    """Construct the Codex capabilities directly."""
-
-    def readiness() -> Sequence[NativeCapabilityEvidence]:
-        return [probe.probe() for probe in codex_capability_probes()]
-
-    return NativeHarnessComposition(
-        recipe=codex_generation_recipe(root),
-        readiness=readiness,
-        invocation_renderer=CodexSkillInvocationRenderer(),
-    )
-
 
 app = typer.Typer(no_args_is_help=True, help="Generate and launch a native harness")
 
@@ -133,21 +81,6 @@ def generated(composition: NativeHarnessComposition) -> None:
         )
         raise typer.Exit(1) from error
     report_generation(recipe.label, materialized.changed, materialized.removed)
-
-
-def harness_compositions(value: str) -> list[NativeHarnessComposition]:
-    """Parse a generic CLI selector into already concrete compositions."""
-    constructors: dict[str, Callable[[Path], NativeHarnessComposition]] = {
-        "claude": claude_composition,
-        "codex": codex_composition,
-    }
-    root = project_root()
-    if value == "all":
-        return [constructor(root) for constructor in constructors.values()]
-    constructor = constructors.get(value)  # lup: ignore[dict-get]
-    if constructor is not None:
-        return [constructor(root)]
-    raise typer.BadParameter("target must be claude, codex, or all")
 
 
 def report_drift(report: DriftReport, *, paths: bool = False) -> None:
