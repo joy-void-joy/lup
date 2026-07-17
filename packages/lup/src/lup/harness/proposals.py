@@ -7,6 +7,7 @@ from lup.harness.models import ReconciliationMetadata
 from lup.harness.reconciliation import source_patch_base_digest
 
 
+#lup: Same here, it's not clear what it's doing at top-level. I'm guessing this is for resolver?
 class ReconciliationProposalWriter:
     """Persist one immutable source patch without applying or importing it."""
 

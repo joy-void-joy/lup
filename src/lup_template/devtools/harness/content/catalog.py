@@ -120,3 +120,5 @@ AGENTS = [
     AGENT_VERSION_EXPLORER,
     AGENT_VERSION_REVIEWER,
 ]
+
+# lup: For instance, the CLAUDE.md and AGENTS.md could generate their tool list programatically now

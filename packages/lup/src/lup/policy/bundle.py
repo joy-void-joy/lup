@@ -1,4 +1,5 @@
 """Assemble dependency-free policy kernel and application-owned data files."""
+#lup: Yeah, the files under this folder don't allow me to form a good idea of what is happening, what's the main concern being tackled
 
 import json
 import urllib.parse

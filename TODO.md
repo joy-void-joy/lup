@@ -29,3 +29,5 @@ files and is reachable from `origin/dev` and the pushed feature branches.
    ```bash
    git for-each-ref refs/original --format='%(refname)' | xargs -n1 git update-ref -d
    ```
+
+// lup: Why do we need a TODO.md ? Why was it created? I don't like this, the main agent should have asked me instead of delegating for later without saying this

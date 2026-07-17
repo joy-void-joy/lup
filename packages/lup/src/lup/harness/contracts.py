@@ -15,6 +15,7 @@ from lup.harness.models import (
     ValidationResult,
 )
 
+# lup: Isn't that mainly for resolve? Shouldn't it go there? Or what are we using those ABC for? It's not clear from code+file position
 
 class ArtifactRenderer[S](ABC):
     """Render one cohesive artifact family."""

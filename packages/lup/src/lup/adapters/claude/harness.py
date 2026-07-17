@@ -204,6 +204,7 @@ class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
         )
 
 
+# lup: We really shouldn't have those python-in-string or js-in-strings. Please export all of those to their own files (I think sandbox also has some of those)
 CLAUDE_RESOLVER_ENTRY = """export const meta = {
   name: 'resolve',
   description: 'Enter Lup\\'s shared persisted Python resolver.',
