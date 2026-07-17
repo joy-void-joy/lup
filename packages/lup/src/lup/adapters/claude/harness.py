@@ -211,7 +211,32 @@ CLAUDE_RESOLVER_ENTRY = """export const meta = {
   phases: [{ title: 'Resolve', detail: 'shared Python resolver core' }],
 }
 
-const input = typeof args === 'string' ? JSON.parse(args) : args || {}
+function argsError(got) {
+  return new Error(
+    `resolve args must be a JSON object like {"run_id": "...", "accept": true}; got: ${got}`,
+  )
+}
+
+// The workflow runtime delivers args parsed, JSON-encoded, or double-encoded.
+function normalizeArgs(raw) {
+  let value = raw
+  for (let decode = 0; typeof value === 'string' && decode < 2; decode += 1) {
+    const text = value.trim()
+    if (text === '') return {}
+    try {
+      value = JSON.parse(text)
+    } catch {
+      throw argsError(text)
+    }
+  }
+  if (value === undefined || value === null) return {}
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw argsError(JSON.stringify(value))
+  }
+  return value
+}
+
+const input = normalizeArgs(args)
 const command = [
   'uv',
   'run',
@@ -222,7 +247,7 @@ const command = [
   'claude',
 ]
 if (input.run_id) {
-  command.push('--run-id', input.run_id)
+  command.push('--run-id', String(input.run_id))
 }
 if (input.accept === true) {
   command.push('--accept')
