@@ -1,4 +1,11 @@
-"""Validated canonical harness, prompt, artifact, and ownership models."""
+"""Genuinely shared harness vocabulary: declarations and rendered artifacts.
+
+The canonical declaration graph (``Harness`` down to prompt parts) that the
+application declares and the adapter renderers, devtools generation flows, and
+resolver consume, plus the rendered ``Artifact``/``ArtifactTree`` and probe
+evidence shared by every pipeline stage. A model owned by one concern lives
+beside its managing module instead (see the package docstring).
+"""
 # lup: This file has a lot of model_validator. This makes me think there is something flawed in the design, where we're not using restrictive types (e.g. Litteral) enough.
 
 from pathlib import Path, PurePosixPath
@@ -13,7 +20,7 @@ from pydantic import (
     model_validator,
 )
 
-from lup.types import EnvVars, JsonValue
+from lup.types import JsonValue
 
 FROZEN = ConfigDict(frozen=True)
 
@@ -134,7 +141,9 @@ class Skill(BaseModel):
     name: str
     description: str = Field(min_length=1, max_length=1024)
     arguments: list[Argument] = Field(default_factory=list)
-    tools: list[str] = Field(default_factory=list) #lup: No. Tools has a very clear lingua franca of accepted names, so should be a list[ToolNames] where ToolNames is a litteral, no?
+    tools: list[str] = Field(
+        default_factory=list
+    )  # lup: No. Tools has a very clear lingua franca of accepted names, so should be a list[ToolNames] where ToolNames is a litteral, no?
     argument_hint: str | None = None
     prompt: PromptDocument
 
@@ -399,23 +408,6 @@ class ArtifactTree(BaseModel):
         return self
 
 
-class ValidationIssue(BaseModel):
-    model_config = FROZEN
-
-    semantic_id: str
-    message: str
-
-
-class ValidationResult(BaseModel):
-    model_config = FROZEN
-
-    issues: list[ValidationIssue] = Field(default_factory=list)
-
-    @property
-    def valid(self) -> bool:
-        return not self.issues
-
-
 class CapabilityEvidence[C](BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
@@ -423,116 +415,3 @@ class CapabilityEvidence[C](BaseModel):
     supported: bool
     evidence: C
     version: str
-
-
-class LaunchRequest(BaseModel):
-    model_config = FROZEN
-
-    arguments: list[str]
-    cwd: Path
-    environment: EnvVars = Field(default_factory=dict)
-
-
-class ExitStatus(BaseModel):
-    model_config = FROZEN
-
-    code: int
-    stdout: str = ""
-    stderr: str = ""
-
-
-type OwnershipCategory = Literal[
-    "generated",
-    "backpropagation_candidate",
-    "local_only",
-    "sensitive_local_only",
-    "unknown_conflict",
-    "obsolete_generated",
-]
-
-
-class OwnedArtifact(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    category: OwnershipCategory
-    sha256: str
-    semantic_id: str
-    executable: bool = False
-
-
-class OwnershipManifest(BaseModel):
-    model_config = FROZEN
-
-    schema_version: int
-    generator_version: str
-    source_digest: str
-    target_requirements: list[str]
-    files: list[OwnedArtifact]
-
-
-class CurrentArtifact(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    content: str
-    category: OwnershipCategory
-    sha256: str
-    executable: bool = False
-
-
-class CurrentTree(BaseModel):
-    model_config = FROZEN
-
-    root: Path
-    artifacts: list[CurrentArtifact]
-
-
-class ProposedWrite(BaseModel):
-    model_config = FROZEN
-
-    artifact: Artifact
-    previous_sha256: str | None = None
-    previous_executable: bool | None = None
-
-
-class ProposedDelete(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    prior_ownership_sha256: str
-
-
-class ReconciliationConflict(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    category: OwnershipCategory
-    message: str
-    sensitive: bool = False
-
-
-class ReconciliationProposal(BaseModel):
-    model_config = FROZEN
-
-    id: str
-    root: Path
-    writes: list[ProposedWrite] = Field(default_factory=list)
-    deletes: list[ProposedDelete] = Field(default_factory=list)
-    conflicts: list[ReconciliationConflict] = Field(default_factory=list)
-    base_digest: str
-
-
-class MaterializationResult(BaseModel):
-    model_config = FROZEN
-
-    changed: list[Path]
-    removed: list[Path]
-
-
-class ReconciliationMetadata(BaseModel):
-    model_config = FROZEN
-
-    proposal_id: str
-    base_digest: str
-    source_patch_sha256: str

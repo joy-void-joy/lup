@@ -21,7 +21,9 @@ if TYPE_CHECKING:
     from claude_agent_sdk import types as claude_types
 
 
-def claude_hook_tool_path(tool_name: str, tool_input: JsonObject) -> str: #lup: Again, I'm not comfortable with name being a generic str instead of better typed
+def claude_hook_tool_path(
+    tool_name: str, tool_input: JsonObject
+) -> str:  # lup: Again, I'm not comfortable with name being a generic str instead of better typed
     """Normalize a path-bearing Claude tool request for portable hooks."""
     match tool_name, tool_input:
         case ("Write" | "Edit" | "Read", {"file_path": path}):

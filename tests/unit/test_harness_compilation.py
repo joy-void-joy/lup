@@ -25,8 +25,6 @@ from lup.harness.models import (
     Artifact,
     ArgumentsRef,
     ArtifactTree,
-    CurrentArtifact,
-    CurrentTree,
     Harness,
     InvocationArgument,
     PromptDocument,
@@ -35,12 +33,13 @@ from lup.harness.models import (
     SkillInvocation,
     TextPart,
 )
-from lup.harness.ownership import build_manifest, save_manifest
+from lup.harness.ownership import build_manifest, content_digest, save_manifest
 from lup.harness.proposals import ReconciliationProposalWriter
 from lup.harness.reconciliation import (
+    CurrentArtifact,
+    CurrentTree,
     DeterministicReconciler,
     FilesystemCurrentTreeReader,
-    content_digest,
     source_patch_base_digest,
 )
 from lup.policy.bundle import policy_kernel_source

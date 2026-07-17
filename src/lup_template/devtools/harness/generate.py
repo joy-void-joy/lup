@@ -12,18 +12,18 @@ from lup.adapters.claude.harness import (
     ClaudeSkillInvocationRenderer,
 )
 from lup.harness.materialization import AtomicMaterializer
-from lup.harness.models import (
-    Artifact,
-    ArtifactTree,
-    Harness,
+from lup.harness.models import Artifact, ArtifactTree, Harness
+from lup.harness.ownership import (
     OwnershipManifest,
-    ReconciliationConflict,
-    ReconciliationProposal,
+    build_manifest,
+    load_manifest,
+    save_manifest,
 )
-from lup.harness.ownership import build_manifest, load_manifest, save_manifest
 from lup.harness.reconciliation import (
     DeterministicReconciler,
     FilesystemCurrentTreeReader,
+    ReconciliationConflict,
+    ReconciliationProposal,
 )
 from lup.harness.contracts import CurrentTreeReader, Reconciler
 from lup_template.devtools.harness.catalog import portable_harness

@@ -1,21 +1,29 @@
-"""Narrow harness, artifact, diagnostic, and process capabilities."""
+"""Neutral capability seams composed by neutral harness code.
+
+Each ABC names one narrow operation of the harness domain: the generation
+pipeline stages from rendering canonical declarations through materializing
+files on disk, and the native-CLI probing and launching around them. Neutral
+orchestration — the devtools generation flows and the resolver — composes
+these seams; concrete implementations live in the named adapter packages when
+they are provider-specific and beside the matching concern module in this
+package when they are deterministic. Parameter and result models live with
+their owning concern, which is why every import here is type-only.
+"""
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from lup.harness.models import (
-    ArtifactTree,
-    CapabilityEvidence,
-    CurrentTree,
-    ExitStatus,
-    LaunchRequest,
-    MaterializationResult,
-    ReconciliationProposal,
-    SkillInvocation,
-    ValidationResult,
-)
+if TYPE_CHECKING:
+    from pathlib import Path
 
-# lup: Isn't that mainly for resolve? Shouldn't it go there? Or what are we using those ABC for? It's not clear from code+file position
+    from lup.harness.materialization import MaterializationResult
+    from lup.harness.models import ArtifactTree, CapabilityEvidence, SkillInvocation
+    from lup.harness.process import ExitStatus, LaunchRequest
+    from lup.harness.reconciliation import CurrentTree, ReconciliationProposal
+    from lup.harness.validation import ValidationResult
+
 
 class ArtifactRenderer[S](ABC):
     """Render one cohesive artifact family."""
