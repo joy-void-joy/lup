@@ -25,7 +25,9 @@ class LocalProcessLauncher(ProcessLauncher):
     that branch on ``isatty`` (pagers, colorizers) emit plain machine output.
     """
 
-    def launch(self, request: LaunchRequest) -> ExitStatus: #lup: I feel like more types should live in the file that mostly manage it instead of all living in models.py. Do you disagree? Maybe we should move the types to their own files
+    def launch(
+        self, request: LaunchRequest
+    ) -> ExitStatus:  # lup: I feel like more types should live in the file that mostly manage it instead of all living in models.py. Do you disagree? Maybe we should move the types to their own files
         if not request.arguments:
             raise ValueError("a launch request must name an executable")
         executable, *arguments = request.arguments

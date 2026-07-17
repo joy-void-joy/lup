@@ -433,7 +433,7 @@ data(outputs): add session batch results
 
 ## Directory Structure
 
-```
+``` #lup: Yeah, see. This would be the perfect place to generate these programatically. It's a bit stupid to have these kind of fixed-code implementation when we could do the whole thing without. Can you see everywhere where we do those kind of list in documents, and just directly change their .py generator instead? Would be way better
 packages/
 └── lup/                        # Standalone library (uv workspace member, never renamed)
     ├── pyproject.toml

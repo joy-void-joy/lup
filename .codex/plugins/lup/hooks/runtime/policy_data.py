@@ -53,6 +53,12 @@ PATH_RULES = [
         True,
     ),
     (
+        "exact",
+        "README.md",
+        "README.md is human-authored; propose changes via AskUserQuestion instead of editing",
+        False,
+    ),
+    (
         "name_prefix",
         ".env",
         "protected path requires approval",

@@ -1,5 +1,5 @@
 """Assemble dependency-free policy kernel and application-owned data files."""
-#lup: Yeah, the files under this folder don't allow me to form a good idea of what is happening, what's the main concern being tackled
+# lup: Yeah, the files under this folder don't allow me to form a good idea of what is happening, what's the main concern being tackled
 
 import json
 import urllib.parse
@@ -48,21 +48,27 @@ def runtime_url_scope(origin: str, path_prefix: str, reason: str = "") -> UrlSco
     return parsed.scheme, parsed.hostname, parsed.port, path_prefix, reason
 
 
+def runtime_path_rule(root: str) -> PathRuleRow:
+    """Compile one application root into its primitive protected-path row."""
+    match root:
+        case "tmp":
+            return ("contains_part", root, "scratch path requires approval", False)
+        case "README.md":
+            return (
+                "exact",
+                root,
+                "README.md is human-authored; propose changes via AskUserQuestion"
+                " instead of editing",
+                False,
+            )
+        case _:
+            return ("subtree", root, "protected path requires approval", True)
+
+
 def runtime_path_rules(protected_roots: list[str]) -> list[PathRuleRow]:
     """Compile application roots plus invariant edit guardrails."""
-    configured = [
-        (
-            "contains_part" if root == "tmp" else "subtree",
-            root,
-            "scratch path requires approval"
-            if root == "tmp"
-            else "protected path requires approval",
-            root != "tmp",
-        )
-        for root in protected_roots
-    ]
     return [
-        *configured,
+        *[runtime_path_rule(root) for root in protected_roots],
         ("name_prefix", ".env", "protected path requires approval", True),
         ("new_devtools", "src", "new devtools module requires approval", False),
     ]
