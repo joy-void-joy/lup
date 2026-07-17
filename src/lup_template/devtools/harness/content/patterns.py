@@ -13,6 +13,13 @@ Architectural patterns used in this project. For daily development guidance, see
 
 **Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 4.6 (`claude-opus-4-6`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see CLAUDE.md § Model Selection).
 
+**Vocabulary:** two kinds of delegated agents look alike and must not be conflated:
+
+- A **native subagent** ("subagent" for short) is dispatched by the harness itself: Claude Code's `Agent`/`Task` tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics. See [Subagent Pattern](#subagent-pattern).
+- A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` with an explicit `SessionFactory` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool. See [Nested Agent Pattern](#nested-agent-pattern).
+
+Guidance that says "subagent" unqualified means the native kind; an agent living inside a tool handler is always a nested agent.
+
 ---
 
 ## Persistent Agent Pattern
@@ -42,7 +49,7 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 Agents produce better output when forced to self-assess before committing. Three components:
 
-1. **Reflection tool** (`agent/tools/reflect.py`): Domain-customizable self-assessment — confidence, uncertainties, tool audit, process reflection. Runs a reviewer sub-agent that returns a structured `ReviewResult` verdict (skippable per call; a skip or reviewer failure records an approval so availability never deadlocks).
+1. **Reflection tool** (`agent/tools/reflect.py`): Domain-customizable self-assessment — confidence, uncertainties, tool audit, process reflection. Runs a nested reviewer agent that returns a structured `ReviewResult` verdict (skippable per call; a skip or reviewer failure records an approval so availability never deadlocks).
 2. **Review gate** (`lup.reflect`): `ReviewGate`, a verdict-aware `ReflectionGate` — in-memory, or file-backed (fail counter included) when tools run in a subprocess. Approve and warn open the gate; fail keeps it closed so the agent revises and re-reviews; after 3 consecutive fails it opens anyway (escape hatch). Enforced primarily *inside* the `submit_output` handler (`lup.workspace.output`), which rejects submission with a retriable error until the gate opens; `create_reflection_gate()` adds a PreToolUse hook as hardening where the backend supports it. The plain `ReflectionGate` base remains for act-of-reflecting gates (the realtime `sleep` meta-gate).
 3. **Wiring**: The gate blocks `mcp__notes__submit_output` (one-shot agents) or `sleep` (persistent agents) until reflection occurs. Final output always flows through `submit_output` — the same tool on every SDK backend — which writes `session_dir/output.json` for the orchestration layer to read. A completion guard enforces that the output actually gets submitted: a Stop hook (`create_completion_guard`) blocks finishing on backends with a stop event, and `ensure_output_submitted` (`lup.workspace.output`) sends bounded corrective turns on backends without one — the one-shot counterpart of the relay's missing-sleep message. `run_agent` picks the mechanism from `adapter.capabilities.stop_event`.
 
@@ -56,7 +63,7 @@ Agents produce better output when forced to self-assess before committing. Three
 
 ## Subagent Pattern
 
-SDK-native delegation: the main agent dispatches a focused task to a named role defined upfront, sharing the session's trace and metrics. A subagent extends the main agent's thinking — a specialized lobe with its own prompt, tool subset, and model — where a nested agent (below) isolates work in a separate context.
+SDK-native delegation: the main agent dispatches a focused task to a named role defined upfront, sharing the session's trace and metrics. A **native subagent** extends the main agent's thinking — a specialized lobe with its own prompt, tool subset, and model — where a nested agent (below) isolates work in a separate context.
 
 **Library support:** portable harness agents come from the typed harness catalog.
 Application-time delegation uses `create_run_subagent_tool()` only with an
@@ -67,11 +74,12 @@ reconstructs a native client.
 
 ## Nested Agent Pattern
 
-Distinct from **subagents** (defined upfront and delegated by the harness). A
-nested agent is a tool that receives or builds an explicit independent
-`SessionFactory`, runs one typed query, and folds the result into its response.
+Distinct from **native subagents** (defined upfront and delegated by the
+harness). A **nested agent** — a *tool-subagent* — is a tool that receives or
+builds an explicit independent `SessionFactory`, runs one typed query, and
+folds the result into its response.
 
-| Aspect     | Subagent                          | Nested Agent                        |
+| Aspect     | Native Subagent                   | Nested Agent                        |
 | ---------- | --------------------------------- | ----------------------------------- |
 | Definition | Upfront in `get_subagent_specs()` | On-demand inside a tool handler     |
 | Runtime    | Main agent's session               | Independent factory via `query()`   |
@@ -98,7 +106,7 @@ constructs the factory; unsupported settings are never silently dropped.
 
 **Example:** `src/lup_template/agent/tools/nested.py` is the dedicated copyable template — a minimal `critique` tool (input model → `query()` → augmented output, exported as `NESTED_TOOLS`, unwired by default). For organic usages, see the reviewer inside `agent/tools/reflect.py` (`run_reviewer`, called from the `review` tool) — an independent one-shot `query()` whose critique the tool folds into its structured output — and the `extract` path of `fetch_example` in `agent/tools/example.py` (`extract_answer`), the same shape applied to data augmentation.
 
-**When to use each:** The axis is **context separation**. **Subagents** extend the main agent's thinking — same session, shared context, like a specialized lobe that makes reasoning more efficient. **Nested agents** are for truly separable work — the two contexts shouldn't pollute each other. The main agent doesn't need the nested agent's reasoning chain, just its conclusion. The tool handler acts as a context boundary.
+**When to use each:** The axis is **context separation**. **Native subagents** extend the main agent's thinking — same session, shared context, like a specialized lobe that makes reasoning more efficient. **Nested agents** are for truly separable work — the two contexts shouldn't pollute each other. The main agent doesn't need the nested agent's reasoning chain, just its conclusion. The tool handler acts as a context boundary.
 
 ---
 
@@ -108,7 +116,7 @@ For persistent agents that need parallel processing, a **background agent**
 runs alongside the main agent using an injected configured factory. Immutable
 Pydantic state is supplied on each wake and rapid wakes are debounced.
 
-| Aspect        | Subagent                     | Nested Agent                | Background Agent                |
+| Aspect        | Native Subagent              | Nested Agent                | Background Agent                |
 | ------------- | ---------------------------- | --------------------------- | ------------------------------- |
 | Lifetime      | Per-task (SDK dispatch)      | Per-tool-call               | Session-long                    |
 | Runtime       | Main agent's session         | Independent via `query()`   | Independent configured factory |
