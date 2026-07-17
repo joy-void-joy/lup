@@ -53,5 +53,6 @@ part of probing.
   A subagent spec with a non-empty native tool allowlist is rejected because
   app-server thread configuration cannot prove that per-subagent restriction;
   the restriction is never silently widened.
-- Live authenticated provider smoke tests remain opt-in integration tests and
-  are not inferred from unit fixtures.
+- Live authenticated provider smoke tests remain locally opt-in through the
+  integration marker, run on the credentials-gated nightly lane, and are not
+  inferred from unit fixtures.

@@ -44,8 +44,7 @@ jobs:
 
   native:
     needs: [evidence, credentials]
-    if: needs.credentials.outputs.live == 'true'
-    continue-on-error: true
+    if: ${{ always() && needs.credentials.outputs.live == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -62,5 +61,5 @@ jobs:
         run: |
           npm install -g @anthropic-ai/claude-code
           npm install -g @openai/codex
-      - name: Live native-boundary smokes
-        run: uv run pytest tests/integration/test_native_smokes.py -v
+      - name: Full integration lane
+        run: uv run pytest -m integration -v

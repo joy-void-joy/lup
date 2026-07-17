@@ -34,16 +34,18 @@ to the commit. CI performs the same read-only drift check.
 
 ## Native evidence
 
-Deterministic fixtures run on every change. The scheduled native workflow also
-executes the installed Claude and Codex binaries for the session-id, pager,
-dynamic-tool-schema, and blocked-edit boundaries. `harness doctor` compares
-installed versions with the typed evidence ledger. A newer component warns
-locally and fails the nightly strict check until the live probes and
-`docs/native-capabilities.md` are reviewed again.
+Deterministic fixtures run on every change. The scheduled native workflow runs
+the full integration marker, including the installed Claude and Codex binaries
+for the session-id, pager, dynamic-tool-schema, and blocked-edit boundaries.
+`harness doctor` compares installed versions with the typed evidence ledger. A
+newer component warns locally and fails the nightly strict check, but the live
+job still runs so the drift cannot suppress the evidence needed to review it.
 
-The live lane is intentionally non-blocking while evidence accumulates. A
-release cut should require two consecutive green native runs and review any
-version drift rather than updating the ledger mechanically.
+The credentials-gated native job is a real workflow result: a failure stays
+failed, and a skipped job is not release evidence. A release cut requires two
+consecutive scheduled runs with successful `native` jobs and no version drift;
+review the probes and `docs/native-capabilities.md` rather than updating the
+ledger mechanically.
 
 ## Rule documentation
 
