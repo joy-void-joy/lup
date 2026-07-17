@@ -167,11 +167,13 @@ def test_audit_ignores_type_comment_prose() -> None:
 
 
 def test_audit_catches_directive_comments_wherever_they_sit() -> None:
-    # Comment-context rules see comments intact: a standalone `# pyright:
-    # ignore` or `# noqa` line is a directive to flag, not skippable prose.
+    # Comment-context rules see comments intact: a standalone suppression
+    # comment line (pyright's ignore, flake8's noqa) is a directive to flag,
+    # not skippable prose. The noqa fixture is split so ruff's own
+    # line-oriented directive scan does not read this source as suppressed.
     for line, rule_id in (
         ("# pyright: ignore\n", "pyright-ignore"),
-        ("# noqa\n", "noqa"),
+        ("# " + "noqa\n", "noqa"),
         ("x = 1  # type: ignore\n", "type-ignore"),
     ):
         findings = audit_text(line, PYTHON_ANTI_PATTERNS)
