@@ -1,12 +1,15 @@
 """Cross-native semantic decoding and conservative policy parity tests."""
 
+import ast
 import importlib.util
+import json
 from pathlib import Path
 from types import ModuleType
+from typing import Literal
 
 import pytest
 import sh
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 
 from lup.adapters.claude.native import (
     ClaudeBeforeToolEvent,
@@ -43,6 +46,129 @@ from lup.policy.models import (
 from lup.policy.rules import EditPolicy, FetchPolicy, PathRule, ShellPolicy, UrlScope
 
 
+class DecisionCase(BaseModel):
+    """One primitive input and its expected policy effect."""
+
+    model_config = ConfigDict(frozen=True)
+
+    input: str
+    effect: Literal["allow", "ask", "deny"]
+
+
+class EditDecisionCase(BaseModel):
+    """One edit fixture shared by canonical and assembled policy forms."""
+
+    model_config = ConfigDict(frozen=True)
+
+    path: str
+    before: str | None
+    after: str | None
+    effect: Literal["allow", "ask", "deny"]
+    autonomous: bool = False
+    path_exists: bool = True
+
+
+SHELL_POLICY_CASES = [
+    DecisionCase(input="env MODE=test python script.py", effect="deny"),
+    DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
+    DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="allow"),
+    DecisionCase(input="find . -name '*.py' | xargs grep TODO", effect="allow"),
+    DecisionCase(input="echo x | xargs rm -rf", effect="ask"),
+    DecisionCase(input="cd /tmp/worktree && uv run pytest", effect="allow"),
+    DecisionCase(input="git status\ncurl https://example.com", effect="ask"),
+    DecisionCase(input="find . -name '*.tmp' -delete", effect="ask"),
+    DecisionCase(input="cat x |& rm -rf ~", effect="ask"),
+    DecisionCase(input="cat x ;& rm -rf ~", effect="ask"),
+    DecisionCase(input="echo payload > pyproject.toml", effect="ask"),
+    DecisionCase(input="echo payload >> src/generated.py", effect="ask"),
+    DecisionCase(input="gh pr view 123", effect="allow"),
+    DecisionCase(input="uv run tool --help", effect="allow"),
+]
+
+FETCH_POLICY_CASES = [
+    DecisionCase(input="https://docs.example.com:8443/reference/api", effect="allow"),
+    DecisionCase(
+        input="https://docs.example.com:8443/reference/private/key", effect="deny"
+    ),
+    DecisionCase(input="http://docs.example.com:8443/reference/api", effect="ask"),
+    DecisionCase(input="https://docs.example.com/reference/api", effect="ask"),
+    DecisionCase(input="https://docs.example.com:8443/private", effect="ask"),
+]
+
+EDIT_POLICY_CASES = [
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value: Any = 1",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1  # type: ignore",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value: dict[str, object] = {}",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/module.py", before="value = 1", after="value = 2", effect="allow"
+    ),
+    EditDecisionCase(
+        path=".claude/settings.json", before="{}", after='{"ok": true}', effect="ask"
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1  # lup: revisit",
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path=".claude/settings.json",
+        before="{}",
+        after='{"ok": true}',
+        effect="allow",
+        autonomous=True,
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="from typing import Any",
+        effect="deny",
+        autonomous=True,
+    ),
+    EditDecisionCase(
+        path="tmp/scratch.py",
+        before="value = 1",
+        after="value = 2",
+        effect="ask",
+        autonomous=True,
+    ),
+    EditDecisionCase(
+        path="src/new.py",
+        before=None,
+        after="value = 1",
+        effect="ask",
+        path_exists=False,
+    ),
+    EditDecisionCase(
+        path="src/module.py", before="value = 1", after=None, effect="allow"
+    ),
+]
+
+
+def test_policy_bundle_contains_assembly_but_no_decision_implementation() -> None:
+    source = Path("packages/lup/src/lup/policy/bundle.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    functions = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)]
+
+    assert "BUNDLED_POLICY_SOURCE" not in source
+    assert all(not name.startswith("decide_") for name in functions)
+
+
 def assembled_edit_decision(
     module: ModuleType,
     path: str,
@@ -74,22 +200,64 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
     (runtime / "kernel.py").write_text(policy_kernel_source(), encoding="utf-8")
     (runtime / "policy_data.py").write_text(
         render_policy_data(
-            allowed_fetch_scopes=[],
-            denied_fetch_scopes=[],
-            protected_roots=[],
-            autonomous_agent_identities=[],
+            allowed_fetch_scopes=[
+                runtime_url_scope("https://docs.example.com:8443", "/reference/")
+            ],
+            denied_fetch_scopes=[
+                runtime_url_scope(
+                    "https://docs.example.com:8443",
+                    "/reference/private/",
+                    "sensitive documentation path",
+                )
+            ],
+            protected_roots=[".claude", "tmp", "pyproject.toml"],
+            autonomous_agent_identities=["resolve-editor"],
+        ),
+        encoding="utf-8",
+    )
+    fixtures = runtime / "fixtures.json"
+    fixtures.write_text(
+        json.dumps(
+            {
+                "shell": [item.model_dump() for item in SHELL_POLICY_CASES],
+                "fetch": [item.model_dump() for item in FETCH_POLICY_CASES],
+                "edit": [item.model_dump() for item in EDIT_POLICY_CASES],
+            }
         ),
         encoding="utf-8",
     )
     probe = runtime / "probe.py"
     probe.write_text(
+        "import json\n"
         "import sys\n"
         "from pathlib import Path\n"
         "sys.path.insert(0, str(Path(__file__).parent))\n"
-        "from kernel import decide_shell\n"
-        "from policy_data import ANTI_PATTERN_ROWS\n"
-        "assert decide_shell('git status').effect == 'allow'\n"
-        "assert '.py' in ANTI_PATTERN_ROWS\n",
+        "from kernel import decide_edit, decide_fetch, decide_shell\n"
+        "from policy_data import (\n"
+        "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
+        "    MAXIMUM_ADDED_LINES, PATH_RULES,\n"
+        ")\n"
+        "fixtures = json.loads(\n"
+        "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
+        ")\n"
+        "for case in fixtures['shell']:\n"
+        "    assert decide_shell(case['input']).effect == case['effect'], case\n"
+        "for case in fixtures['fetch']:\n"
+        "    decision = decide_fetch(\n"
+        "        case['input'], ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES\n"
+        "    )\n"
+        "    assert decision.effect == case['effect'], case\n"
+        "for case in fixtures['edit']:\n"
+        "    suffix = Path(case['path']).suffix.lower()\n"
+        "    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else ()\n"
+        "    decision = decide_edit(\n"
+        "        case['path'], case['before'], case['after'],\n"
+        "        path_exists=case['path_exists'], path_rules=PATH_RULES,\n"
+        "        antipattern_rows=rows, maximum_added_lines=MAXIMUM_ADDED_LINES,\n"
+        "        autonomous=case['autonomous'],\n"
+        "        python_source=suffix in ('.py', '.pyi'),\n"
+        "    )\n"
+        "    assert decision.effect == case['effect'], case\n",
         encoding="utf-8",
     )
 
@@ -198,19 +366,25 @@ def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) ->
     scope = UrlScope.model_validate(
         {"origin": "https://docs.example.com:8443", "path_prefix": "/reference/"}
     )
-    policy = FetchPolicy(allowed=[scope], denied=[])
+    denied_scope = UrlScope.model_validate(
+        {
+            "origin": "https://docs.example.com:8443",
+            "path_prefix": "/reference/private/",
+            "reason": "sensitive documentation path",
+        }
+    )
+    policy = FetchPolicy(allowed=[scope], denied=[denied_scope])
     wire_scope = [runtime_url_scope(str(scope.origin), scope.path_prefix)]
-    cases = {
-        "https://docs.example.com:8443/reference/api": "allow",
-        "http://docs.example.com:8443/reference/api": "ask",
-        "https://docs.example.com/reference/api": "ask",
-        "https://docs.example.com:8443/private": "ask",
-    }
+    denied_wire_scope = [
+        runtime_url_scope(
+            str(denied_scope.origin), denied_scope.path_prefix, denied_scope.reason
+        )
+    ]
 
-    for url, expected in cases.items():
-        canonical = policy.decide(FetchUrl(url=AnyHttpUrl(url)))
-        generated = bundled.decide_fetch(url, wire_scope, [])
-        assert canonical.effect == generated.effect == expected
+    for case in FETCH_POLICY_CASES:
+        canonical = policy.decide(FetchUrl(url=AnyHttpUrl(case.input)))
+        generated = bundled.decide_fetch(case.input, wire_scope, denied_wire_scope)
+        assert canonical.effect == generated.effect == case.effect
 
 
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
@@ -238,26 +412,10 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     bundled = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bundled)
     policy = ShellPolicy()
-    cases = {
-        "env MODE=test python script.py": "deny",
-        "uv run --with requests python -c 'x'": "deny",
-        "uv run pytest | uv run python tmp/oneoff.py": "allow",
-        "find . -name '*.py' | xargs grep TODO": "allow",
-        "echo x | xargs rm -rf": "ask",
-        "cd /tmp/worktree && uv run pytest": "allow",
-        "git status\ncurl https://example.com": "ask",
-        "find . -name '*.tmp' -delete": "ask",
-        "cat x |& rm -rf ~": "ask",
-        "cat x ;& rm -rf ~": "ask",
-        "echo payload > pyproject.toml": "ask",
-        "echo payload >> src/generated.py": "ask",
-        "gh pr view 123": "allow",
-        "uv run tool --help": "allow",
-    }
 
-    for command, expected in cases.items():
-        assert policy.decide(ShellCommand(command=command)).effect == expected
-        assert bundled.decide_shell(command).effect == expected
+    for case in SHELL_POLICY_CASES:
+        assert policy.decide(ShellCommand(command=case.input)).effect == case.effect
+        assert bundled.decide_shell(case.input).effect == case.effect
 
 
 def test_edit_policy_checks_every_file_before_allowing_batch() -> None:
@@ -288,14 +446,33 @@ def test_edit_policy_checks_every_file_before_allowing_batch() -> None:
     assert policy.decide(protected).effect == "ask"
 
 
-def test_edit_policy_never_auto_allows_a_full_file_write() -> None:
-    policy = EditPolicy(protected=[])
+def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
+    protected = [
+        PathRule(
+            kind="subtree",
+            value=".claude",
+            reason="protected path requires approval",
+            allow_autonomous=True,
+        ),
+        PathRule(
+            kind="subtree",
+            value="tmp",
+            reason="scratch path requires approval",
+        ),
+    ]
 
-    decision = policy.decide(
-        EditBatch(changes=[EditChange(path=Path("src/new.py"), after="value = 1")])
-    )
-
-    assert decision.effect == "ask"
+    for case in EDIT_POLICY_CASES:
+        policy = EditPolicy(protected=protected, autonomous=case.autonomous)
+        decision = policy.decide(
+            EditBatch(
+                changes=[
+                    EditChange(
+                        path=Path(case.path), before=case.before, after=case.after
+                    )
+                ]
+            )
+        )
+        assert decision.effect == case.effect
 
 
 def test_bundled_edit_policy_matches_canonical_security_outcomes(
@@ -323,43 +500,28 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
         ]
     )
     cases = [
-        (
-            "src/module.py",
-            "value = 1",
-            "value: Any = 1",
-            "deny",
-        ),
-        (
-            "src/module.py",
-            "value = 1",
-            "value = 1  # type: ignore",
-            "deny",
-        ),
-        (
-            "src/module.py",
-            "value = 1",
-            "value: dict[str, object] = {}",
-            "deny",
-        ),
-        ("src/module.py", "value = 1", "value = 2", "allow"),
-        (".claude/settings.json", "{}", '{"ok": true}', "ask"),
-        ("src/module.py", "value = 1", "value = 1  # lup" + ": revisit", "ask"),
+        item
+        for item in EDIT_POLICY_CASES
+        if not item.autonomous and item.before is not None and item.after is not None
     ]
-
-    for file_path, before, after, expected in cases:
+    for case in cases:
         canonical = policy.decide(
             EditBatch(
-                changes=[EditChange(path=Path(file_path), before=before, after=after)]
+                changes=[
+                    EditChange(
+                        path=Path(case.path), before=case.before, after=case.after
+                    )
+                ]
             )
         )
         generated = assembled_edit_decision(
             bundled,
-            file_path,
-            before,
-            after,
+            case.path,
+            case.before,
+            case.after,
             [".claude", "tmp", "pyproject.toml"],
         )
-        assert canonical.effect == generated.effect == expected
+        assert canonical.effect == generated.effect == case.effect
 
 
 def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
@@ -370,38 +532,17 @@ def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
     bundled = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bundled)
 
-    assert assembled_edit_decision(
-        bundled,
-        ".claude/settings.json",
-        "a",
-        "b",
-        [".claude", "tmp"],
-        autonomous=True,
-    ).effect == ("allow")
-    assert assembled_edit_decision(
-        bundled,
-        "src/module.py",
-        "x = 1",
-        "from typing import Any",
-        [".claude", "tmp"],
-        autonomous=True,
-    ).effect == ("deny")
-    assert assembled_edit_decision(
-        bundled,
-        "tmp/scratch.py",
-        "x = 1",
-        "x = 2",
-        [".claude", "tmp"],
-        autonomous=True,
-    ).effect == ("ask")
-    assert assembled_edit_decision(
-        bundled,
-        "src/module.py",
-        "x = 1",
-        "x = 1  # lup" + ": revisit",
-        [".claude", "tmp"],
-        autonomous=True,
-    ).effect == ("ask")
+    cases = [item for item in EDIT_POLICY_CASES if item.autonomous]
+    for case in cases:
+        decision = assembled_edit_decision(
+            bundled,
+            case.path,
+            case.before,
+            case.after,
+            [".claude", "tmp"],
+            autonomous=True,
+        )
+        assert decision.effect == case.effect
 
 
 def test_edit_policy_uses_full_python_context_for_added_docstrings(
