@@ -39,7 +39,9 @@ from lup.codescan.boundaries import (
 from lup.codescan.capabilities import RULE_ID as ABC_CAPABILITY_RULE_ID
 from lup.codescan.common import (
     IGNORE_RE,
+    LineProjections,
     PythonContext,
+    RuleContext,
     file_level_ignore,
     ignore_rule_ids,
 )

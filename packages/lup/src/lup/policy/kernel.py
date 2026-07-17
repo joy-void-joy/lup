@@ -12,7 +12,7 @@ import urllib.parse
 
 type UrlScopeRow = tuple[str, str, int | None, str, str]
 type PathRuleRow = tuple[str, str, str, bool]
-type AntiPatternRow = tuple[str, str, str]
+type AntiPatternRow = tuple[str, str, str, str]
 
 KERNEL_IMPORT_ALLOWLIST = (
     "ast",
@@ -575,12 +575,20 @@ def antipattern_decision(
     rows: list[AntiPatternRow],
     python_source: bool,
 ) -> KernelDecision | None:
-    """Reject newly added unsuppressed anti-patterns and ask on suppressions."""
+    """Reject newly added unsuppressed anti-patterns and ask on suppressions.
+
+    Each row carries the syntactic context it inspects: a "code" rule is
+    matched against token-masked Python (string literals and comments both
+    blanked) so prose never trips it, while a "comment" rule targets comment
+    directives and sees comments intact. Without a tokenizer (non-Python
+    files, fragments that fail to tokenize) every rule scans the raw line.
+    """
     added = added_line_numbers(before, after)
     original_lines = after.splitlines()
     scanned_lines = (
         mask_python_string_literals(after) if python_source else original_lines
     )
+    code_lines = python_code_lines(after) if python_source else original_lines
     exempt = empty_collection_exempt_lines(after) if python_source else set()
     comment_columns = python_comment_columns(after) if python_source else None
     has_file_ignore, disabled_ids = file_ignore(after)
@@ -597,10 +605,14 @@ def antipattern_decision(
         ):
             return KernelDecision("ask", "edit introduces an antipattern suppression")
     for number in added:
-        stripped = scanned_lines[number - 1].strip()
-        if not stripped or (stripped.startswith("#") and "type:" not in stripped):
+        masked = scanned_lines[number - 1].strip()
+        if not python_source and masked.startswith("#") and "type:" not in masked:
             continue
-        for rule_id, pattern, message in rows:
+        code = code_lines[number - 1].strip()
+        for rule_id, pattern, message, context in rows:
+            stripped = code if python_source and context == "code" else masked
+            if not stripped:
+                continue
             if rule_id == "empty-collection" and number in exempt:
                 continue
             if re.search(pattern, stripped) is None:
@@ -614,7 +626,9 @@ def antipattern_decision(
                     return KernelDecision(
                         "ask", "edit introduces an antipattern suppression"
                     )
-            return KernelDecision("deny", message)
+            return KernelDecision(
+                "deny", f"{message} (rule {rule_id} — see docs/rules.md)"
+            )
     return None
 
 
