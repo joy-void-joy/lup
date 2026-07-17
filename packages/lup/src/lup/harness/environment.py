@@ -27,6 +27,8 @@ NON_INTERACTIVE_SHELL_ENV: EnvVars = {
 }
 
 
-def non_interactive_environment(base: Mapping[str, str]) -> EnvVars:
+def non_interactive_environment(
+    base: Mapping[str, str],  # lup: ignore[dict-str-payload] — open env-var map
+) -> EnvVars:
     """Merge the non-interactive defaults beneath an existing environment."""
     return {**NON_INTERACTIVE_SHELL_ENV, **base}
