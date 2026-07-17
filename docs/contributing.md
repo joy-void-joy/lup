@@ -17,9 +17,12 @@ launch them directly and hooks must run without importing the checkout.
 5. Run `uv run lup-devtools dev check` before committing.
 
 The pre-commit hook regenerates and stops when generation changes tracked
-files. This makes omitted generated output visible without silently adding it
-to the commit. Pull-request CI runs formatting, lint, type, unit, anti-pattern,
-native-boundary, and generated-drift checks. The two user-deferred review notes
+files; it triggers only for commits touching generation inputs or the owned
+native trees, so other commits run no generation. This makes omitted generated
+output visible without silently adding it to the commit. Pull-request CI runs
+formatting, lint, type, unit, anti-pattern, native-boundary, and
+generated-drift checks; `docs/quality-pipeline.md` maps what each layer
+uniquely catches. The two user-deferred review notes
 remain visible in the complete local `dev check`; they are not silently removed
 or treated as unrelated CI failures.
 
