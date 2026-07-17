@@ -341,15 +341,13 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "rich" },
+    { name = "sh" },
     { name = "tenacity" },
 ]
 
 [package.optional-dependencies]
 claude = [
     { name = "claude-agent-sdk" },
-]
-codex = [
-    { name = "sh" },
 ]
 docker = [
     { name = "docker" },
@@ -364,7 +362,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "rich", specifier = ">=14.3.1" },
-    { name = "sh", marker = "extra == 'codex'", specifier = ">=2.2.2" },
+    { name = "sh", specifier = ">=2.2.2" },
     { name = "tenacity", specifier = ">=9.0.0" },
 ]
 provides-extras = ["claude", "codex", "docker"]
@@ -374,7 +372,7 @@ name = "lup-template"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "lup", extra = ["claude", "codex", "docker"] },
+    { name = "lup", extra = ["claude", "docker"] },
     { name = "prompt-toolkit" },
     { name = "pydantic-settings" },
     { name = "sh" },
