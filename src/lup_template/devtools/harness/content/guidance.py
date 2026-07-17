@@ -11,6 +11,8 @@ DOCUMENT = models.PromptDocument(
 
 Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
 
+**README.md is human-owned.** The root `README.md` is the one deliberately human-written file in this repository, and the edit policy surfaces every change to it as Ask. Never edit it yourself — propose the exact change via AskUserQuestion and let the user apply or approve it.
+
 ## Development Workflow
 
 ### Git Workflow
@@ -273,7 +275,8 @@ wins over approval, malformed input fails conservatively, redirection and
 substitution are never auto-allowed, and edit decisions include protected
 paths, marker changes, size, and the canonical anti-pattern audit. The resolver
 editor receives only its declared autonomous edit exceptions; temporary paths,
-marker changes, and anti-pattern violations retain their guardrails.
+the human-owned `README.md`, marker changes, and anti-pattern violations retain
+their guardrails.
 
 Use `"""
         ),

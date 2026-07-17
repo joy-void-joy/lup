@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "6e185b2298e5b4344fa773dcff99f5e9949fe9ab4c1ca70e8531eb41b4fa5215",
+  "source_digest": "4409994be366c3d405ee825a61b61df9e587ee4433a67f4eb8295aa64ea2d9a4",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "9f17731b34988445adfa122fdb51a936acad80277e9ffdeb3db6a79b77322ced",
+      "sha256": "73f63a20b8ecdea481f3303f43bccad2c270000673b03121c5f3325dd40087ae",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "96ca9a95112c3b1e7e64794186bf524138eab7e7fb7eba626ab99a1f08ec372c",
+      "sha256": "488fe4d88636142e65b347c5d00f1bd1f4137630626ce44e1f716774f0ff42d9",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -51,7 +51,7 @@
     {
       "path": ".claude/plugins/lup/agents/resolve-editor.md",
       "category": "generated",
-      "sha256": "e776f68b4176481eb5cfae5662be892e7a3d8616b0c35a9e7442d2fc02daae28",
+      "sha256": "7a42a39e2e6e35c828a764749ef6482fd58bbd064e47efaf692d6dd3c0422268",
       "semantic_id": "agent.resolve-editor",
       "executable": false
     },
@@ -310,14 +310,14 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "21fe57f4e3e63012f1db03f5f97a280e64a6eba8e735158bac64508ad12f2776",
+      "sha256": "7cc0207a64d07fb553ab1c4ad97017e321f95a6530c2f6fcc9eb5bef53991d14",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "f7db9dc943b162131bdb66cabbad415eb0ae21a7e5b6dd5270d3da43bee3c6c3",
+      "sha256": "185bfd15fce06dae144df52053cfb79d68a54b8ffb9aa259ee791b6bb3b7c25a",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
