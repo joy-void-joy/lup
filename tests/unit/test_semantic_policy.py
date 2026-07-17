@@ -148,6 +148,19 @@ EDIT_POLICY_CASES = [
         autonomous=True,
     ),
     EditDecisionCase(
+        path="README.md",
+        before="# Lup\n",
+        after="# Lup\n\nAn agent-added paragraph.\n",
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="README.md",
+        before="# Lup\n",
+        after="# Lup, renamed\n",
+        effect="ask",
+        autonomous=True,
+    ),
+    EditDecisionCase(
         path="src/new.py",
         before=None,
         after="value = 1",
@@ -210,7 +223,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                     "sensitive documentation path",
                 )
             ],
-            protected_roots=[".claude", "tmp", "pyproject.toml"],
+            protected_roots=[".claude", "tmp", "pyproject.toml", "README.md"],
             autonomous_agent_identities=["resolve-editor"],
         ),
         encoding="utf-8",
@@ -459,6 +472,12 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
             value="tmp",
             reason="scratch path requires approval",
         ),
+        PathRule(
+            kind="exact",
+            value="README.md",
+            reason="README.md is human-authored; propose changes via "
+            "AskUserQuestion instead of editing",
+        ),
     ]
 
     for case in EDIT_POLICY_CASES:
@@ -497,6 +516,12 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
                 value="tmp",
                 reason="scratch path requires approval",
             ),
+            PathRule(
+                kind="exact",
+                value="README.md",
+                reason="README.md is human-authored; propose changes via "
+                "AskUserQuestion instead of editing",
+            ),
         ]
     )
     cases = [
@@ -519,7 +544,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             case.path,
             case.before,
             case.after,
-            [".claude", "tmp", "pyproject.toml"],
+            [".claude", "tmp", "pyproject.toml", "README.md"],
         )
         assert canonical.effect == generated.effect == case.effect
 
@@ -539,7 +564,7 @@ def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
             case.path,
             case.before,
             case.after,
-            [".claude", "tmp"],
+            [".claude", "tmp", "README.md"],
             autonomous=True,
         )
         assert decision.effect == case.effect
