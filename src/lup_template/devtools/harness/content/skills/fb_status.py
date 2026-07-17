@@ -6,7 +6,7 @@ SKILL = models.Skill(
     id="skill.fb-status",
     name="fb-status",
     description="Feedback loop entry point \u2014 status, targets, and previous session context",
-    tools=["Bash(uv run lup-devtools:*), Read, Grep, Glob, AskUserQuestion"],
+    tools=["Bash(uv run lup-devtools:*)", "Read", "Grep", "Glob", "AskUserQuestion"],
     prompt=models.PromptDocument(
         parts=[
             models.TextPart(
