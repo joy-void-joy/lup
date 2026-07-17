@@ -1,4 +1,18 @@
-"""Public ``lup-devtools harness`` generation, diagnosis, and launch surface."""
+"""Public ``lup-devtools harness`` generation, diagnosis, and launch surface.
+
+CLI composition root for the generated native targets: ``generate``,
+``check``, and the reconciliation commands drive the render -> validate ->
+reconcile -> materialize pipeline in
+:mod:`lup_template.devtools.harness.generate`; ``doctor`` runs the native
+capability probes; ``resolve`` hosts the concern resolver; ``claude`` and
+``codex`` regenerate and then launch the native CLI. The permission policy
+those plugins enforce is declared as data in
+:mod:`lup_template.devtools.harness.catalog` (``HookSet``: protected edit
+roots, fetch scopes, policy ids), decided by :mod:`lup.policy.kernel`, and
+materialized under ``.claude/plugins/lup/hooks/`` and
+``.codex/plugins/lup/hooks/`` (dispatcher script plus copied kernel and
+rendered data rows).
+"""
 
 import asyncio
 import hashlib
