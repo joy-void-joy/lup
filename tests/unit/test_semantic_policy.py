@@ -148,6 +148,26 @@ EDIT_POLICY_CASES = [
         autonomous=True,
     ),
     EditDecisionCase(
+        path="sync.json",
+        before='{"projects": []}',
+        after='{"projects": [{"name": "fleet-app"}]}',
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="downstream.json",
+        before='{"projects": []}',
+        after='{"projects": [{"name": "fleet-app"}]}',
+        effect="ask",
+        path_exists=False,
+    ),
+    EditDecisionCase(
+        path="sync.json",
+        before='{"projects": []}',
+        after='{"projects": [{"name": "fleet-app"}]}',
+        effect="allow",
+        autonomous=True,
+    ),
+    EditDecisionCase(
         path="src/new.py",
         before=None,
         after="value = 1",
@@ -210,7 +230,13 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                     "sensitive documentation path",
                 )
             ],
-            protected_roots=[".claude", "tmp", "pyproject.toml"],
+            protected_roots=[
+                ".claude",
+                "tmp",
+                "pyproject.toml",
+                "sync.json",
+                "downstream.json",
+            ],
             autonomous_agent_identities=["resolve-editor"],
         ),
         encoding="utf-8",
@@ -459,6 +485,18 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
             value="tmp",
             reason="scratch path requires approval",
         ),
+        PathRule(
+            kind="subtree",
+            value="sync.json",
+            reason="protected path requires approval",
+            allow_autonomous=True,
+        ),
+        PathRule(
+            kind="subtree",
+            value="downstream.json",
+            reason="protected path requires approval",
+            allow_autonomous=True,
+        ),
     ]
 
     for case in EDIT_POLICY_CASES:
@@ -497,6 +535,18 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
                 value="tmp",
                 reason="scratch path requires approval",
             ),
+            PathRule(
+                kind="subtree",
+                value="sync.json",
+                reason="protected path requires approval",
+                allow_autonomous=True,
+            ),
+            PathRule(
+                kind="subtree",
+                value="downstream.json",
+                reason="protected path requires approval",
+                allow_autonomous=True,
+            ),
         ]
     )
     cases = [
@@ -519,7 +569,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             case.path,
             case.before,
             case.after,
-            [".claude", "tmp", "pyproject.toml"],
+            [".claude", "tmp", "pyproject.toml", "sync.json", "downstream.json"],
         )
         assert canonical.effect == generated.effect == case.effect
 
