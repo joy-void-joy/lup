@@ -1,15 +1,37 @@
-"""Reusable complete-tree validation capabilities."""
+"""Whole-tree validation of a rendered artifact tree, plus its result types.
+
+Runs between rendering and reconciliation: the native compilation roots in
+:mod:`lup.adapters.harness` validate every complete tree and refuse to
+continue on any issue. ``ValidationResult`` is defined here because
+validators are the only producers; the ``ArtifactValidator`` seam in
+:mod:`lup.harness.contracts` returns it.
+"""
 
 from collections import Counter
 
-from lup.harness.contracts import ArtifactValidator
-from lup.harness.models import (
-    ArtifactTree,
-    ValidationIssue,
-    ValidationResult,
-)
+from pydantic import BaseModel, ConfigDict, Field
 
-# lup: Same
+from lup.harness.contracts import ArtifactValidator
+from lup.harness.models import ArtifactTree
+
+
+class ValidationIssue(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    semantic_id: str
+    message: str
+
+
+class ValidationResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    issues: list[ValidationIssue] = Field(default_factory=list)
+
+    @property
+    def valid(self) -> bool:
+        return not self.issues
+
+
 class DeterministicTreeValidator(ArtifactValidator):
     """Validate path uniqueness, ordering, identifiers, and normalized text."""
 
