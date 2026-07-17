@@ -91,6 +91,7 @@ the old `lup-devtools claude` launcher was removed. Both generated plugins run
 the same hermetic semantic shell/edit/fetch policy without importing this
 checkout at hook time. See [architecture](docs/architecture.md),
 [harness authoring](docs/harness.md), the [adopter guide](docs/adopter-guide.md),
+[typed-content migration audit](docs/typed-content-migration-audit.md),
 [runtime examples](examples/README.md), [resolver lifecycle](docs/resolver.md),
 the [generated rule reference](docs/rules.md),
 [native capability ledger](docs/native-capabilities.md), and

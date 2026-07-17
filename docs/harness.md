@@ -54,4 +54,6 @@ together with catalog changes. CI should run both generation commands and
 require a clean diff.
 
 See `docs/adopter-guide.md` for complete skill, fetch-policy, conflict, and
-source-patch reconciliation walkthroughs.
+source-patch reconciliation walkthroughs. The one-time reviewed differences
+from the retired native catalog are recorded in
+`docs/typed-content-migration-audit.md`.
