@@ -60,8 +60,10 @@ uv run pytest tests/unit/test_harness_compilation.py -q
 
 The Claude renderer emits command Markdown and `$ARGUMENTS`; the Codex
 renderer emits a skill and its native argument phrase. A declaration must not
-branch on a provider name. Use semantic prompt parts such as `ArgumentsRef` or
-`SkillInvocation`, then let each renderer choose its spelling.
+branch on a provider name. Argument declarations and `ArgumentsRef` must occur
+together; model validation rejects either one without the other. Use semantic
+prompt parts such as `ArgumentsRef` or `SkillInvocation`, then let each
+renderer choose its spelling.
 
 ## Change the fetch allowlist
 
