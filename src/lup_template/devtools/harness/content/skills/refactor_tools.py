@@ -132,7 +132,7 @@ Present findings as:
 - [Tools that overlap or could be merged]
 
 ### Ideas
-- [Concrete suggestions for improvement, with rough effort estimates]
+- [Concrete suggestions for improvement, scoped by what each touches — never by time estimates]
 ```
 
 ## Rules

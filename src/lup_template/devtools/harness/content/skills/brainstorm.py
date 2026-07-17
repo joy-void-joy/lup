@@ -165,6 +165,7 @@ Things still to figure out during init or implementation.
 - **Show, don't just tell.** Read template files and show the user what the code looks like.
 - **Be concrete when possible.** "You'd have a tool called `fetch_market_data` that takes a ticker symbol" is better than "you'd have tools for data fetching."
 - **Flag when something is hard.** If the user wants something the template doesn't support well, say so and suggest alternatives.
+- **Scope at agent speed.** Implementation runs at agent pace, not human pace — a complete working version is hours away, not weeks. Don't steer the design toward a cut-down POC to "save time"; design the real thing.
 - **Use AskUserQuestion** for decision points where the user needs to choose between approaches. For open-ended exploration, regular conversation is fine.
 """
             ),
