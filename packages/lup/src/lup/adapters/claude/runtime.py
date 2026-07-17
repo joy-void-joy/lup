@@ -586,7 +586,9 @@ def claude_usage(
 
     return Usage(
         cost_usd=total_cost_usd,
-        input_tokens=count("input_tokens"),
+        input_tokens=count("input_tokens")
+        + count("cache_read_input_tokens")
+        + count("cache_creation_input_tokens"),
         output_tokens=count("output_tokens"),
         cache_read_input_tokens=count("cache_read_input_tokens"),
         cache_creation_input_tokens=count("cache_creation_input_tokens"),

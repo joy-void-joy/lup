@@ -147,7 +147,13 @@ class Usage(BaseModel):
     session JSON.
     """
 
-    input_tokens: int = 0
+    input_tokens: int = Field(
+        default=0,
+        description=(
+            "Complete input token count, cached reads and cache creation"
+            " included; adapters normalize cache-exclusive native counts"
+        ),
+    )
     cost_usd: float | None = Field(
         default=None,
         description="Optional provider-reported complete cost for this usage span",
