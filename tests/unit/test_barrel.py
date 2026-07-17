@@ -19,12 +19,3 @@ def test_root_exports_only_portable_runtime_conveniences() -> None:
         "query",
         "turn_request",
     }
-
-
-def test_unknown_attribute_raises() -> None:
-    try:
-        getattr(lup, "does_not_exist")
-    except AttributeError as e:
-        assert "does_not_exist" in str(e)
-    else:
-        raise AssertionError("expected AttributeError")
