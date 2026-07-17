@@ -1,3 +1,5 @@
+# lup: ignore[native-spelling]
+# This adapter support document deliberately teaches Claude-native spellings.
 """Canonical downstream template guidance."""
 
 import lup.harness.models as models

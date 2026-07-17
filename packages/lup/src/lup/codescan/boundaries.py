@@ -46,7 +46,7 @@ NATIVE_SPELLINGS = {
 
 
 def path_is_sanctioned(rel_path: Path) -> bool:
-    """Whether the path is a native implementation or named composition root."""
+    """Whether a path may import native implementations as a composition root."""
     posix = rel_path.as_posix()
     return (
         "lup/adapters/" in posix
@@ -58,6 +58,14 @@ def path_is_sanctioned(rel_path: Path) -> bool:
         or posix.startswith("src/lup_template/devtools/harness/")
         or posix == "src/lup_template/devtools/setup.py"
         or posix == "src/lup_template/devtools/usage/app.py"
+    )
+
+
+def native_spelling_path_is_sanctioned(rel_path: Path) -> bool:
+    """Whether a path may own provider wire spellings without a suppression."""
+    content_root = "src/lup_template/devtools/harness/content/"
+    return path_is_sanctioned(rel_path) and not rel_path.as_posix().startswith(
+        content_root
     )
 
 
@@ -320,6 +328,22 @@ def audit_boundaries(text: str) -> list[BoundaryAuditFinding]:
             native_spelling_violations(text),
         ),
     ]
+
+
+def audit_path_boundaries(rel_path: Path, text: str) -> list[BoundaryAuditFinding]:
+    """Audit only the boundary rules that apply at one repository path."""
+    findings: list[BoundaryAuditFinding] = []
+    if not path_is_sanctioned(rel_path):
+        findings.extend(audit_rule(text, RULE_ID, import_violations(text)))
+    if not native_spelling_path_is_sanctioned(rel_path):
+        findings.extend(
+            audit_rule(
+                text,
+                NATIVE_SPELLING_RULE_ID,
+                native_spelling_violations(text),
+            )
+        )
+    return findings
 
 
 def audit_kernel_imports(text: str) -> list[BoundaryAuditFinding]:

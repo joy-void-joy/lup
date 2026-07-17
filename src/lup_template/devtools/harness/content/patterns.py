@@ -1,3 +1,5 @@
+# lup: ignore[native-spelling]
+# This portable pattern guide names the hook event it teaches adopters to use.
 """Canonical architectural patterns guidance."""
 
 import lup.harness.models as models

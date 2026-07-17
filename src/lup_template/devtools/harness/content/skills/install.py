@@ -1,3 +1,5 @@
+# lup: ignore[native-spelling]
+# This installer skill documents native manifests and hook vocabulary.
 """Canonical declaration for the install skill."""
 
 import lup.harness.models as models
