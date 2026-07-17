@@ -6,5 +6,16 @@ repos:
         entry: uv run lup-devtools harness generate all
         language: system
         pass_filenames: false
-        always_run: true
-
+        # Matches generation inputs (the harness devtools and the lup library
+        # they compile) plus the owned native trees reconciliation reads.
+        # Commits outside these paths run no generation; the read-only CI
+        # drift gate covers every push. See docs/quality-pipeline.md.
+        files: |
+          (?x)^(
+            src/lup_template/devtools/harness/
+            | packages/lup/src/lup/
+            | \.claude/
+            | \.codex/
+            | \.agents/
+            | AGENTS\.md$
+          )
