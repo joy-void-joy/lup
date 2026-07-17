@@ -28,9 +28,9 @@ from lup.adapters.codex.harness_runtime import (
 from lup.codescan.markers import find_feedback
 from lup.harness.contracts import ProcessLauncher, SkillInvocationRenderer
 from lup.harness.environment import non_interactive_environment
-from lup.harness.models import CapabilityEvidence, LaunchRequest, ReconciliationMetadata
-from lup.harness.process import LocalProcessLauncher
-from lup.harness.proposals import ReconciliationProposalWriter
+from lup.harness.models import CapabilityEvidence
+from lup.harness.process import LaunchRequest, LocalProcessLauncher
+from lup.harness.proposals import ReconciliationMetadata, ReconciliationProposalWriter
 from lup.harness.reconciliation import source_patch_base_digest
 from lup.resolver.contracts import QuestionBroker
 from lup.resolver.core import ResolverCore
