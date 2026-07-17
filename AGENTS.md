@@ -1,5 +1,3 @@
-# lup: Same remark here as CLAUDE.md. It's not clear whether this is compiled or not. What to do there?
-# lup: Also, is it intended that it is redundant with CLAUDE.md?
 # Lup repository guidance
 
 Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
