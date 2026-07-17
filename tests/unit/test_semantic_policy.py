@@ -118,6 +118,12 @@ EDIT_POLICY_CASES = [
         path="src/module.py", before="value = 1", after="value = 2", effect="allow"
     ),
     EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = compute()  # may return Any when unset",
+        effect="allow",
+    ),
+    EditDecisionCase(
         path=".claude/settings.json", before="{}", after='{"ok": true}', effect="ask"
     ),
     EditDecisionCase(
@@ -439,7 +445,9 @@ def test_edit_policy_checks_every_file_before_allowing_batch() -> None:
         ]
     )
 
-    assert policy.decide(batch).effect == "deny"
+    denied = policy.decide(batch)
+    assert denied.effect == "deny"
+    assert "(rule any-type — see docs/rules.md)" in denied.reason
     protected = EditBatch(
         changes=[EditChange(path=Path("pyproject.toml"), after="version = '2'")]
     )
