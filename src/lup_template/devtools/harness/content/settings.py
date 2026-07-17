@@ -23,6 +23,7 @@ SETTINGS: JsonObject = {
             "WebSearch",
             "Skill(lup:hooks)",
             "Read(./.claude/settings.json.local*)",
+            "Read(./sync.json.local)",
             "Read(./downstream.json.local)",
         ],
         "deny": [
