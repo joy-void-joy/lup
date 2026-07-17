@@ -1,5 +1,10 @@
 """Evidence-ledger version-drift trigger tests."""
 
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field
+import yaml
+
 from lup_template.devtools.harness.evidence import (
     EVIDENCE_LEDGER,
     EvidenceEntry,
@@ -9,6 +14,34 @@ from lup_template.devtools.harness.evidence import (
 )
 
 STALE_LEDGER = [EvidenceEntry(capability="codex-cli", version="0.144.4")]
+
+
+class WorkflowStep(BaseModel):
+    """Workflow step fields relevant to native evidence execution."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str | None = None
+    run: str | None = None
+
+
+class WorkflowJob(BaseModel):
+    """Workflow job fields that enforce evidence ordering."""
+
+    model_config = ConfigDict(frozen=True)
+
+    needs: list[str] = Field(default_factory=list)
+    condition: str | None = Field(default=None, alias="if")
+    continue_on_error: bool = Field(default=False, alias="continue-on-error")
+    steps: list[WorkflowStep]
+
+
+class NativeWorkflow(BaseModel):
+    """Validated native-workflow job graph."""
+
+    model_config = ConfigDict(frozen=True)
+
+    jobs: dict[str, WorkflowJob]
 
 
 def test_doctor_flags_an_installed_component_newer_than_the_ledger() -> None:
@@ -57,3 +90,23 @@ def test_shipping_ledger_carries_every_probed_contract() -> None:
     capabilities = [entry.capability for entry in EVIDENCE_LEDGER]
 
     assert capabilities == ["claude-cli", "claude-agent-sdk", "codex-cli"]
+
+
+def test_native_workflow_probes_even_when_strict_evidence_fails() -> None:
+    document = yaml.safe_load(
+        Path(".github/workflows/native-nightly.yml").read_text(encoding="utf-8")
+    )
+    workflow = NativeWorkflow.model_validate(document)
+    evidence = workflow.jobs["evidence"]
+    native = workflow.jobs["native"]
+
+    assert any(
+        step.run == "uv run lup-devtools harness doctor all --strict-evidence"
+        for step in evidence.steps
+    )
+    assert native.needs == ["evidence", "credentials"]
+    assert native.condition is not None
+    assert "always()" in native.condition
+    assert "needs.credentials.outputs.live == 'true'" in native.condition
+    assert native.continue_on_error is False
+    assert any(step.run == "uv run pytest -m integration -v" for step in native.steps)
