@@ -134,7 +134,9 @@ class Skill(BaseModel):
     name: str
     description: str = Field(min_length=1, max_length=1024)
     arguments: list[Argument] = Field(default_factory=list)
-    tools: list[str] = Field(default_factory=list) #lup: No. Tools has a very clear lingua franca of accepted names, so should be a list[ToolNames] where ToolNames is a litteral, no?
+    tools: list[str] = Field(
+        default_factory=list
+    )  # lup: No. Tools has a very clear lingua franca of accepted names, so should be a list[ToolNames] where ToolNames is a litteral, no?
     argument_hint: str | None = None
     prompt: PromptDocument
 

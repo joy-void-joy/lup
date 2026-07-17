@@ -9,6 +9,7 @@ from lup.harness.models import (
     ValidationResult,
 )
 
+
 # lup: Same
 class DeterministicTreeValidator(ArtifactValidator):
     """Validate path uniqueness, ordering, identifiers, and normalized text."""
