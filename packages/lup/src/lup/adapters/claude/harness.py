@@ -4,7 +4,11 @@ import json
 import shlex
 from pathlib import Path
 
-from lup.harness.contracts import ArtifactRenderer, SkillInvocationRenderer
+from lup.harness.contracts import (
+    ArtifactRenderer,
+    PromptRenderer,
+    SkillInvocationRenderer,
+)
 from lup.harness.generation import argument_text
 from lup.harness.models import (
     Agent,
@@ -42,7 +46,7 @@ class ClaudeSkillInvocationRenderer(SkillInvocationRenderer):
         return f"{command} {arguments}" if arguments else command
 
 
-class ClaudePromptRenderer:
+class ClaudePromptRenderer(PromptRenderer):
     """Render semantic prompt operations without a post-render rewrite pass."""
 
     def __init__(self, invocations: SkillInvocationRenderer) -> None:
@@ -78,7 +82,7 @@ class ClaudePromptRenderer:
 class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
     """Render one portable skill as a Claude command Markdown artifact."""
 
-    def __init__(self, prompts: ClaudePromptRenderer, plugin_name: str) -> None:
+    def __init__(self, prompts: PromptRenderer, plugin_name: str) -> None:
         self.prompts = prompts
         self.plugin_name = plugin_name
 
@@ -117,7 +121,7 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
 class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
     """Render one portable agent in Claude's Markdown format."""
 
-    def __init__(self, prompts: ClaudePromptRenderer, plugin_name: str) -> None:
+    def __init__(self, prompts: PromptRenderer, plugin_name: str) -> None:
         self.prompts = prompts
         self.plugin_name = plugin_name
 
@@ -189,7 +193,7 @@ class ClaudePluginManifestRenderer(ArtifactRenderer[Plugin]):
 class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
     """Render project guidance at Claude's adapter-owned repository location."""
 
-    def __init__(self, prompts: ClaudePromptRenderer) -> None:
+    def __init__(self, prompts: PromptRenderer) -> None:
         self.prompts = prompts
 
     def render(self, source: Harness) -> ArtifactTree:
