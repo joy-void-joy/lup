@@ -1,3 +1,5 @@
+# lup: ignore[native-spelling]
+# This structure-review skill inventories native manifest and hook paths.
 """Canonical declaration for the meta skill."""
 
 import lup.harness.models as models

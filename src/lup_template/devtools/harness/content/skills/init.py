@@ -1,3 +1,5 @@
+# lup: ignore[native-spelling]
+# This installer skill documents the native manifest it configures.
 """Canonical declaration for the init skill."""
 
 import lup.harness.models as models

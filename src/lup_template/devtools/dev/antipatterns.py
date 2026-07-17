@@ -25,7 +25,7 @@ from lup.codescan.antipatterns import (
     patterns_for_suffix,
 )
 from lup.codescan.capabilities import audit_capabilities, sources_from_paths
-from lup.codescan.boundaries import audit_boundaries, path_is_sanctioned
+from lup.codescan.boundaries import audit_path_boundaries
 from lup_template.devtools.utils import git, output_json
 
 
@@ -66,8 +66,7 @@ def scan_antipatterns() -> list[FoundAntiPattern]:
     boundary_findings = [
         (path, finding)
         for path in python_paths
-        if not path_is_sanctioned(path)
-        for finding in audit_boundaries(path.read_text(encoding="utf-8"))
+        for finding in audit_path_boundaries(path, path.read_text(encoding="utf-8"))
     ]
     foreign_untyped = {
         (path.as_posix(), finding.line)

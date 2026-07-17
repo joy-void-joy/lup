@@ -10,8 +10,10 @@ from pathlib import Path
 from lup.codescan.boundaries import (
     audit_boundaries,
     audit_kernel_imports,
+    audit_path_boundaries,
     find_boundary_breaches,
     find_native_spelling_breaches,
+    native_spelling_path_is_sanctioned,
     path_is_sanctioned,
 )
 
@@ -109,6 +111,19 @@ def test_sanctioned_paths() -> None:
     assert path_is_sanctioned(Path("tests/unit/test_adapter_transforms.py"))
     assert path_is_sanctioned(Path("src/lup_template/agent/core.py"))
     assert not path_is_sanctioned(Path("packages/lup/src/lup/subagents.py"))
+
+
+def test_portable_content_is_scanned_for_native_spellings() -> None:
+    path = Path("src/lup_template/devtools/harness/content/skills/example.py")
+    text = (
+        "from lup.adapters.claude.runtime import ClaudeSessionFactory\n"
+        'method = "turn/start"\n'
+    )
+
+    assert path_is_sanctioned(path)
+    assert not native_spelling_path_is_sanctioned(path)
+    findings = audit_path_boundaries(path, text)
+    assert [(item.rule_id, item.line) for item in findings] == [("native-spelling", 2)]
 
 
 def test_policy_kernel_imports_are_pinned_to_hermetic_stdlib() -> None:

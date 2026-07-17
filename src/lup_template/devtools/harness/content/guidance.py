@@ -1,3 +1,5 @@
+# lup: ignore[native-spelling]
+# This portable guide discusses native hook vocabulary as its subject matter.
 """Canonical repository guidance."""
 
 import lup.harness.models as models

@@ -13,10 +13,8 @@ import typer
 
 from lup.codescan.boundaries import (
     BoundaryBreach,
-    find_boundary_breaches,
+    audit_path_boundaries,
     find_kernel_import_breaches,
-    find_native_spelling_breaches,
-    path_is_sanctioned,
 )
 from lup_template.devtools.utils import git, output_json
 
@@ -28,25 +26,33 @@ class FoundBreach(BoundaryBreach):
 
 
 def scan_boundaries() -> list[FoundBreach]:
-    """Every seam breach across tracked, non-sanctioned Python files."""
-    return [
-        FoundBreach(file=rel, **breach.model_dump())
-        for rel in str(
-            git("ls-files", "--cached", "--others", "--exclude-standard")
-        ).splitlines()
-        if Path(rel).suffix == ".py"
-        and Path(rel).exists()
-        and not path_is_sanctioned(Path(rel))
-        for breach in [
-            *find_boundary_breaches(Path(rel).read_text(encoding="utf-8")),
-            *find_native_spelling_breaches(Path(rel).read_text(encoding="utf-8")),
-            *(
-                find_kernel_import_breaches(Path(rel).read_text(encoding="utf-8"))
-                if rel == "packages/lup/src/lup/policy/kernel.py"
-                else ()
-            ),
-        ]
-    ]
+    """Every native import, spelling, and kernel-import breach in the tree."""
+    found: list[FoundBreach] = []  # lup: ignore[empty-collection]
+    tracked = str(
+        git("ls-files", "--cached", "--others", "--exclude-standard")
+    ).splitlines()
+    for rel in tracked:
+        path = Path(rel)
+        if path.suffix != ".py" or not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        findings = audit_path_boundaries(path, text)
+        found.extend(
+            FoundBreach(
+                file=rel,
+                line=finding.line,
+                module=finding.module,
+                text=finding.text,
+            )
+            for finding in findings
+            if finding.kind == "missing"
+        )
+        if rel == "packages/lup/src/lup/policy/kernel.py":
+            found.extend(
+                FoundBreach(file=rel, **breach.model_dump())
+                for breach in find_kernel_import_breaches(text)
+            )
+    return found
 
 
 def report(as_json: bool) -> None:
