@@ -10,6 +10,7 @@ from lup.harness.models import (
     ExitStatus,
     LaunchRequest,
     MaterializationResult,
+    PromptDocument,
     ReconciliationProposal,
     SkillInvocation,
     ValidationResult,
@@ -39,6 +40,14 @@ class SkillInvocationRenderer(ABC):
     @abstractmethod
     def render(self, invocation: SkillInvocation) -> str:
         """Render qualification, escaping, and arguments together."""
+
+
+class PromptRenderer(ABC):
+    """Own one native runtime's complete prompt-document spelling."""
+
+    @abstractmethod
+    def render(self, prompt: PromptDocument) -> str:
+        """Render every semantic prompt part into native prompt text."""
 
 
 class CurrentTreeReader(ABC):
