@@ -327,14 +327,27 @@ async def test_claude_binder_rebinds_schema_store_and_gate_across_turns(
     assert disconnects == 0
     assert not submission_tool_is_bound()
 
+    first_gated: list[FirstOutput] = []
+
+    async def first_gate(value: FirstOutput) -> SubmissionDecision:
+        first_gated.append(value)
+        return SubmissionDecision(accepted=True)
+
     first_store = InMemorySubmittedOutputStore()
-    await binder.bind(TurnToolBinding(output_type=FirstOutput, store=first_store))
+    await binder.bind(
+        TurnToolBinding(output_type=FirstOutput, store=first_store, gate=first_gate)
+    )
     await state.connect()
     first_binding = current_binding()
     assert first_binding is not None
     assert first_binding.output_type is FirstOutput
     assert first_binding.store is first_store
     assert submission_tool_is_bound()
+    first_erased = first_binding.gate
+    assert first_erased is not None
+    first_decision = await first_erased(FirstOutput(answer="first"))
+    assert first_decision.accepted
+    assert first_gated == [FirstOutput(answer="first")]
 
     gated: list[FirstOutput] = []
 
@@ -351,6 +364,7 @@ async def test_claude_binder_rebinds_schema_store_and_gate_across_turns(
     refreshed_binding = current_binding()
     assert refreshed_binding is not None
     assert refreshed_binding.store is refreshed_store
+    assert refreshed_binding.gate is not first_binding.gate
     erased_gate = refreshed_binding.gate
     assert erased_gate is not None
     decision = await erased_gate(FirstOutput(answer="checked"))
