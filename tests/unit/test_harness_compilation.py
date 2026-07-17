@@ -18,6 +18,7 @@ from lup.adapters.codex.harness_runtime import (
 from lup.adapters.harness import compile_claude, compile_codex
 from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
 from lup.harness.models import (
+    Argument,
     Artifact,
     ArgumentsRef,
     ArtifactTree,
@@ -26,6 +27,8 @@ from lup.harness.models import (
     Harness,
     InvocationArgument,
     PromptDocument,
+    PromptPart,
+    Skill,
     SkillInvocation,
     TextPart,
 )
@@ -37,6 +40,7 @@ from lup.harness.reconciliation import (
     content_digest,
     source_patch_base_digest,
 )
+from lup.policy.bundle import policy_kernel_source
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.generate import (
     GenerationRecipe,
@@ -148,12 +152,46 @@ def test_argument_reference_has_one_semantic_part_and_native_renderings() -> Non
     )
 
 
-def test_typed_content_package_contains_no_embedded_base64() -> None:
+@pytest.mark.parametrize(
+    ("arguments", "parts"),
+    [
+        ([Argument(name="target", description="Target")], [TextPart(text="body")]),
+        ([], [ArgumentsRef()]),
+    ],
+)
+def test_skill_argument_declarations_require_a_matching_reference(
+    arguments: list[Argument], parts: list[PromptPart]
+) -> None:
+    with pytest.raises(ValueError, match="argument declarations and ArgumentsRef"):
+        Skill(
+            id="skill.invalid",
+            name="invalid",
+            description="Invalid argument declaration",
+            arguments=arguments,
+            prompt=PromptDocument(parts=parts),
+        )
+
+
+def test_typed_content_package_has_expected_module_inventory() -> None:
     content = Path("src/lup_template/devtools/harness/content")
     sources = list(content.rglob("*.py"))
 
     assert len(sources) == 44
+
+
+def test_source_tree_contains_no_embedded_base64() -> None:
+    sources = list(Path("src").rglob("*.py"))
+
+    assert sources
     assert all("base64" not in path.read_text(encoding="utf-8") for path in sources)
+
+
+def test_retired_native_catalog_paths_stay_deleted() -> None:
+    harness = Path("src/lup_template/devtools/harness")
+
+    assert not (harness / "native_catalog.py").exists()
+    assert not (harness / "native_overrides.py").exists()
+    assert not (harness / "importer.py").exists()
 
 
 def test_canonical_text_rejects_provider_invocation_spelling() -> None:
@@ -199,6 +237,7 @@ def test_both_native_trees_compile_deterministically() -> None:
         if item.path.as_posix().endswith("hooks/runtime/kernel.py")
     )
     assert claude_runtime == codex_runtime
+    assert claude_runtime == policy_kernel_source()
 
 
 def test_repository_generated_harness_is_drift_clean() -> None:

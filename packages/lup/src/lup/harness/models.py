@@ -155,6 +155,13 @@ class Skill(BaseModel):
                 raise ValueError(
                     f"skill {self.id!r} has a required argument after an optional one"
                 )
+        references_arguments = any(
+            isinstance(part, ArgumentsRef) for part in self.prompt.parts
+        )
+        if bool(self.arguments) != references_arguments:
+            raise ValueError(
+                f"skill {self.id!r} argument declarations and ArgumentsRef disagree"
+            )
         return self
 
 
