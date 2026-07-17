@@ -1,7 +1,7 @@
 """Provider-independent background queue/debounce scheduling tests."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 import pytest
@@ -41,7 +41,7 @@ class RecordingFactory(SessionFactory):
         return self.session_context()
 
     @asynccontextmanager
-    async def session_context(self) -> AsyncIterator[SessionHandle]:
+    async def session_context(self) -> AsyncGenerator[SessionHandle]:
         binder = RecordingBinder()
 
         async def start(text: str) -> AcceptedTurn:

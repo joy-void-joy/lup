@@ -1,7 +1,7 @@
 """Deterministic resolver DAG, lease, state, and commit-authority tests."""
 
 from collections import Counter
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -326,7 +326,7 @@ class ResolverTestFactory(SessionFactory):
         return self.open_session()
 
     @asynccontextmanager
-    async def open_session(self) -> AsyncIterator[SessionHandle]:
+    async def open_session(self) -> AsyncGenerator[SessionHandle]:
         yield SessionHandle(session=ResolverTestSession(self.root, self.response))
 
 

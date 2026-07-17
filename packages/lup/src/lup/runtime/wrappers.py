@@ -2,7 +2,7 @@
 
 import asyncio
 import hashlib
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -658,7 +658,7 @@ class DecoratingSessionFactory(SessionFactory):
     @asynccontextmanager
     async def open_decorated(
         self, resume: SessionId | None
-    ) -> AsyncIterator[SessionHandle]:
+    ) -> AsyncGenerator[SessionHandle]:
         async with self.inner.open(resume) as handle:
             session: Session = DecoratingSession(
                 handle.session,

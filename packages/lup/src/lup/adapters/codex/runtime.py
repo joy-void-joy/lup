@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -501,7 +501,7 @@ class CodexFork(ForkSession):
         return self.open_fork(at)
 
     @asynccontextmanager
-    async def open_fork(self, at: TurnId | None) -> AsyncIterator[SessionHandle]:
+    async def open_fork(self, at: TurnId | None) -> AsyncGenerator[SessionHandle]:
         if at is not None:
             raise ValueError("Codex thread/fork can only fork the latest thread state")
         thread_id = await self.state.ensure_thread()
@@ -526,7 +526,7 @@ class CodexSessionFactory(SessionFactory):
     @asynccontextmanager
     async def open_session(
         self, resume: SessionId | None
-    ) -> AsyncIterator[SessionHandle]:
+    ) -> AsyncGenerator[SessionHandle]:
         server = CodexAppServer(
             self.config.executable,
             arguments=(
