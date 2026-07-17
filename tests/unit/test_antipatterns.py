@@ -18,8 +18,8 @@ from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel import empty_collection_exempt_lines
 
 
-def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str, str]]:
-    return [(ap.id, ap.pattern.pattern, ap.message) for ap in patterns]
+def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str, str, str]]:
+    return [(ap.id, ap.pattern.pattern, ap.message, ap.context) for ap in patterns]
 
 
 def test_python_table_matches_generated_bundle() -> None:

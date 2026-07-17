@@ -23,10 +23,12 @@ def policy_kernel_source() -> str:
 def bundled_antipattern_rows() -> dict[str, list[AntiPatternRow]]:
     """Compile primitive runtime rows directly from canonical rule objects."""
     python_rows = [
-        (rule.id, rule.pattern.pattern, rule.message) for rule in PYTHON_ANTI_PATTERNS
+        (rule.id, rule.pattern.pattern, rule.message, rule.context)
+        for rule in PYTHON_ANTI_PATTERNS
     ]
     typescript_rows = [
-        (rule.id, rule.pattern.pattern, rule.message) for rule in TS_ANTI_PATTERNS
+        (rule.id, rule.pattern.pattern, rule.message, rule.context)
+        for rule in TS_ANTI_PATTERNS
     ]
     return {
         ".py": python_rows,
@@ -115,12 +117,13 @@ def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
     lines = ["{"]
     for suffix, patterns in sorted(rows.items()):
         lines.append(f"    {json.dumps(suffix)}: [")
-        for rule_id, pattern, message in patterns:
+        for rule_id, pattern, message, context in patterns:
             block = (
                 "        (\n"
                 f"            {json.dumps(rule_id)},\n"
                 f"            {json.dumps(pattern)},\n"
                 f"            {json.dumps(message)},\n"
+                f"            {json.dumps(context)},\n"
                 "        ),"
             )
             lines.append(block)
