@@ -52,8 +52,8 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 Path(".claude"),
                 Path("tmp"),
                 Path("pyproject.toml"),
-                Path("README.md"),
             ],
+            human_owned_files=[Path("README.md")],
         ),
     )
     return Harness(

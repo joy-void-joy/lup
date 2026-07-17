@@ -12,6 +12,7 @@ from lup.policy.kernel import (
     PathRuleRow,
     UrlScopeRow,
 )
+from lup.policy.rules import human_owned_path_rule, path_rule_row
 
 
 def policy_kernel_source() -> str:
@@ -53,22 +54,17 @@ def runtime_path_rule(root: str) -> PathRuleRow:
     match root:
         case "tmp":
             return ("contains_part", root, "scratch path requires approval", False)
-        case "README.md":
-            return (
-                "exact",
-                root,
-                "README.md is human-authored; propose changes via AskUserQuestion"
-                " instead of editing",
-                False,
-            )
         case _:
             return ("subtree", root, "protected path requires approval", True)
 
 
-def runtime_path_rules(protected_roots: list[str]) -> list[PathRuleRow]:
+def runtime_path_rules(
+    protected_roots: list[str], human_owned_files: list[str]
+) -> list[PathRuleRow]:
     """Compile application roots plus invariant edit guardrails."""
     return [
         *[runtime_path_rule(root) for root in protected_roots],
+        *[path_rule_row(human_owned_path_rule(path)) for path in human_owned_files],
         ("name_prefix", ".env", "protected path requires approval", True),
         ("new_devtools", "src", "new devtools module requires approval", False),
     ]
@@ -147,6 +143,7 @@ def render_policy_data(
     allowed_fetch_scopes: list[UrlScopeRow],
     denied_fetch_scopes: list[UrlScopeRow],
     protected_roots: list[str],
+    human_owned_files: list[str],
     autonomous_agent_identities: list[str],
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
@@ -155,7 +152,9 @@ def render_policy_data(
             "ALLOWED_FETCH_SCOPES = " + url_scope_rows_literal(allowed_fetch_scopes),
             "DENIED_FETCH_SCOPES = " + url_scope_rows_literal(denied_fetch_scopes),
             "PATH_RULES = "
-            + path_rule_rows_literal(runtime_path_rules(protected_roots)),
+            + path_rule_rows_literal(
+                runtime_path_rules(protected_roots, human_owned_files)
+            ),
             "ANTI_PATTERN_ROWS = "
             + antipattern_rows_literal(bundled_antipattern_rows()),
             "AUTONOMOUS_AGENT_IDENTITIES = "
