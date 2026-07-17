@@ -12,7 +12,7 @@ from lup.harness.models import (
     ResolveSpec,
     SkillInvocation,
 )
-from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS #lup: Like see, why is this in a content subfolder but this file is top-level? Can you review the full file hierarchy? It seems quite janky
+from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 
 
