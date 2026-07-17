@@ -19,7 +19,7 @@ def test_registry_covers_every_family_with_unique_ids_and_homes() -> None:
     rules = all_rules()
 
     ids = [rule.id for rule in rules]
-    assert len(ids) == len(set(ids))
+    assert len(ids) == len(dict.fromkeys(ids))
     assert {rule.family for rule in rules} == {
         "anti-pattern",
         "boundary",

@@ -555,7 +555,7 @@ Default to **Opus 4.6** (`claude-opus-4-6`) — or **Fable** (`claude-fable-5`) 
 - Use `TypedDict` and Pydantic models for structured data
 - Never manually parse Claude/agent output -- use structured outputs via Pydantic
 - **Never use `# type: ignore`** -- Ask the user how to properly fix type errors
-- **`# lup: ignore` escape hatch** -- When `Any` or other anti-patterns are genuinely needed (untyped library boundaries, MCP), add `# lup: ignore` inline to request user approval. A standalone `# lup: ignore` in the first 10 lines of a file disables anti-pattern checks for the whole file (like `# pyright: ignore` for files).
+- **`# lup: ignore` escape hatch** -- When `Any` or other anti-patterns are genuinely needed (untyped library boundaries, MCP), add `# lup: ignore` inline to request user approval. A standalone `# lup: ignore` in the first 10 lines of a file disables anti-pattern checks for the whole file (like `# pyright: ignore` for files). Every rule id a deny message or ignore directive names is indexed in the generated `docs/rules.md` (`uv run lup-devtools dev rules`) with the `lup.codescan` module that defines it.
 - **Use Pydantic BaseModel instead of dataclasses**
 - **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
 

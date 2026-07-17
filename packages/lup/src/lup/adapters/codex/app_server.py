@@ -124,7 +124,7 @@ class CodexAppServer:
             _err=receive_error,
             _bg=True,
             _encoding="utf-8",
-            _env=environment,  # lup: ignore[private-variable] — sh native keyword
+            _env=environment,
         )
         if not isinstance(running, sh.RunningCommand):
             raise RuntimeError("Codex app-server did not start as a background process")
