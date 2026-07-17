@@ -1,5 +1,11 @@
-"""Assemble dependency-free policy kernel and application-owned data files."""
-#lup: Yeah, the files under this folder don't allow me to form a good idea of what is happening, what's the main concern being tackled
+"""Assembly for generated dispatchers: kernel source plus policy data rows.
+
+Generated native plugins must decide without lup installed, so the adapters'
+hook renderers call this module to read :mod:`lup.policy.kernel` verbatim and
+to erase validated application inputs — hook URL scopes, protected roots, the
+canonical anti-pattern set — into primitive rows rendered as one generated
+data file per plugin. No decision logic lives here; the kernel decides.
+"""
 
 import json
 import urllib.parse

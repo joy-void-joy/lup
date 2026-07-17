@@ -1,10 +1,53 @@
-"""Deterministic ownership proof construction and atomic persistence."""
+"""Ownership proof: which on-disk files the generator owns, hashed and stored.
+
+Defines the ``OwnershipCategory`` vocabulary every later stage uses to talk
+about a file's provenance, and builds, loads, and atomically saves the
+manifest recorded after each successful materialization.
+:mod:`lup.harness.reconciliation` classifies the current tree against this
+proof, and the devtools generation flow persists it.
+"""
 
 import hashlib
 from pathlib import Path
+from typing import Literal
 
-from lup.harness.models import ArtifactTree, Harness, OwnedArtifact, OwnershipManifest
-from lup.harness.reconciliation import content_digest
+from pydantic import BaseModel, ConfigDict
+
+from lup.harness.models import ArtifactTree, Harness
+
+type OwnershipCategory = Literal[
+    "generated",
+    "backpropagation_candidate",
+    "local_only",
+    "sensitive_local_only",
+    "unknown_conflict",
+    "obsolete_generated",
+]
+
+
+class OwnedArtifact(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    path: Path
+    category: OwnershipCategory
+    sha256: str
+    semantic_id: str
+    executable: bool = False
+
+
+class OwnershipManifest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: int
+    generator_version: str
+    source_digest: str
+    target_requirements: list[str]
+    files: list[OwnedArtifact]
+
+
+def content_digest(content: str) -> str:
+    """Hash normalized UTF-8 artifact content."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def source_digest(source: Harness) -> str:
