@@ -7,7 +7,14 @@ SKILL = models.Skill(
     name="update",
     description="Review upstream template commits and apply improvements",
     tools=[
-        "Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, Skill(lup:commit)"
+        "Bash(git:*, uv run lup-devtools:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "AskUserQuestion",
+        "Skill(lup:commit)",
     ],
     argument_hint="[focus area]",
     prompt=models.PromptDocument(

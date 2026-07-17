@@ -1,5 +1,5 @@
 """Concrete debounced background scheduling over a configured session factory."""
-#lup: How is realtime different from runtime?
+# lup: How is realtime different from runtime?
 
 import asyncio
 import logging

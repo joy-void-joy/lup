@@ -14,7 +14,16 @@ SKILL = models.Skill(
         ),
     ],
     tools=[
-        "Bash(find:*, ls:*), Read, Grep, Glob, Write, Edit, Agent, WebFetch, WebSearch, AskUserQuestion"
+        "Bash(find:*, ls:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Write",
+        "Edit",
+        "Agent",
+        "WebFetch",
+        "WebSearch",
+        "AskUserQuestion",
     ],
     prompt=models.PromptDocument(
         parts=[

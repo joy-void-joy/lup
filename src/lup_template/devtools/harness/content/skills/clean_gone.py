@@ -13,7 +13,7 @@ SKILL = models.Skill(
             required=False,
         ),
     ],
-    tools=["Bash(uv run lup-devtools:*), AskUserQuestion, Skill(lup:commit)"],
+    tools=["Bash(uv run lup-devtools:*)", "AskUserQuestion", "Skill(lup:commit)"],
     argument_hint="[branch-name]",
     prompt=models.PromptDocument(
         parts=[

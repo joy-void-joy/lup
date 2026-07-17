@@ -6,7 +6,14 @@ SKILL = models.Skill(
     id="skill.fb-analyze",
     name="fb-analyze",
     description="Aggregate tool health, capability gaps, and reasoning patterns across sessions",
-    tools=["Bash(uv run lup-devtools:*), Read, Grep, Glob, Task, AskUserQuestion"],
+    tools=[
+        "Bash(uv run lup-devtools:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Task",
+        "AskUserQuestion",
+    ],
     prompt=models.PromptDocument(
         parts=[
             models.TextPart(
