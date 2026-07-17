@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from queue import Queue
 
@@ -289,13 +289,3 @@ class CodexAppServer:
                     error=RpcError(code=-32000, message=str(error)),
                 )
             )
-
-
-async def notification_iterator(
-    queue: asyncio.Queue[RpcNotification | None],
-) -> AsyncIterator[RpcNotification]:
-    """Iterate a notification queue until its explicit terminal sentinel."""
-    while (
-        notification := await queue.get()  # lup: ignore[dict-get] — asyncio.Queue
-    ) is not None:
-        yield notification
