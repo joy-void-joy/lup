@@ -56,7 +56,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-"lup_template.devtools.harness.content" = ["assets/*.sh"]
+"lup_template.devtools.harness.content" = ["assets/*.js", "assets/*.sh"]
 
 [tool.lup]
 agent_version = "0.2.0"
