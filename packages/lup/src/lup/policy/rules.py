@@ -129,7 +129,10 @@ def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
     patterns = patterns_for_suffix(change.path.suffix.lower())
     if patterns is None:
         return []
-    return [(rule.id, rule.pattern.pattern, rule.message) for rule in patterns]
+    return [
+        (rule.id, rule.pattern.pattern, rule.message, rule.context)
+        for rule in patterns
+    ]
 
 
 class EditPolicy(DecisionPolicy[EditBatch]):

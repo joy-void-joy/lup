@@ -604,13 +604,14 @@ def antipattern_decision(
             )
         ):
             return KernelDecision("ask", "edit introduces an antipattern suppression")
+    tokenized = comment_columns is not None
     for number in added:
         masked = scanned_lines[number - 1].strip()
-        if not python_source and masked.startswith("#") and "type:" not in masked:
+        if not tokenized and masked.startswith("#") and "type:" not in masked:
             continue
         code = code_lines[number - 1].strip()
         for rule_id, pattern, message, context in rows:
-            stripped = code if python_source and context == "code" else masked
+            stripped = code if tokenized and context == "code" else masked
             if not stripped:
                 continue
             if rule_id == "empty-collection" and number in exempt:
