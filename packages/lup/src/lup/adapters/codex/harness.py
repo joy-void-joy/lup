@@ -4,7 +4,11 @@ import json
 import shlex
 from pathlib import Path
 
-from lup.harness.contracts import ArtifactRenderer, SkillInvocationRenderer
+from lup.harness.contracts import (
+    ArtifactRenderer,
+    PromptRenderer,
+    SkillInvocationRenderer,
+)
 from lup.harness.generation import argument_text
 from lup.harness.models import (
     Agent,
@@ -42,7 +46,7 @@ class CodexSkillInvocationRenderer(SkillInvocationRenderer):
         return f"{mention} {arguments}" if arguments else mention
 
 
-class CodexPromptRenderer:
+class CodexPromptRenderer(PromptRenderer):
     """Render typed operations directly into Codex prompt instructions."""
 
     def __init__(self, invocations: SkillInvocationRenderer) -> None:
@@ -77,7 +81,7 @@ class CodexPromptRenderer:
 class CodexSkillRenderer(ArtifactRenderer[Skill]):
     """Render one portable declaration as a same-named Codex skill."""
 
-    def __init__(self, prompts: CodexPromptRenderer, plugin_name: str) -> None:
+    def __init__(self, prompts: PromptRenderer, plugin_name: str) -> None:
         self.prompts = prompts
         self.plugin_name = plugin_name
 
@@ -105,7 +109,7 @@ class CodexSkillRenderer(ArtifactRenderer[Skill]):
 class CodexAgentRenderer(ArtifactRenderer[Agent]):
     """Render one portable agent as project-scoped custom-agent TOML."""
 
-    def __init__(self, prompts: CodexPromptRenderer) -> None:
+    def __init__(self, prompts: PromptRenderer) -> None:
         self.prompts = prompts
 
     def render(self, source: Agent) -> ArtifactTree:
@@ -181,7 +185,7 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
 class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
     """Render root project guidance at Codex's documented repository location."""
 
-    def __init__(self, prompts: CodexPromptRenderer) -> None:
+    def __init__(self, prompts: PromptRenderer) -> None:
         self.prompts = prompts
 
     def render(self, source: Harness) -> ArtifactTree:
