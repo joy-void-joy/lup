@@ -711,4 +711,3 @@ def codex(
         raise typer.Exit(error.exit_code) from error
 
 
-# lup: This is way too bulky, and doesn't respect the convention of this repo, where we split subconcerns in subfolder
