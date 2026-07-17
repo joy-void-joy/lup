@@ -21,14 +21,19 @@ from lup.policy.kernel import (
     parse_shell_words,
     path_rule_matches as kernel_path_rule_matches,
 )
-from lup.policy.models import Decision, EditBatch, EditChange, FetchUrl, ShellCommand
+from lup.policy.models import (
+    Decision,
+    EditBatch,
+    EditChange,
+    FetchUrl,
+    ShellCommand,
+    UrlPathPrefix,
+)
 
 
 def pydantic_decision(decision: KernelDecision) -> Decision:
     """Restore the validated public decision at the kernel boundary."""
-    return Decision.model_validate(
-        {"effect": decision.effect, "reason": decision.reason}
-    )
+    return Decision(effect=decision.effect, reason=decision.reason)
 
 
 class UrlScope(BaseModel):
@@ -37,7 +42,7 @@ class UrlScope(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     origin: AnyHttpUrl
-    path_prefix: str = "/"
+    path_prefix: UrlPathPrefix = "/"
     reason: str = ""
 
 

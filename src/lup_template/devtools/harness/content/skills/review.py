@@ -14,7 +14,11 @@ SKILL = models.Skill(
         ),
     ],
     tools=[
-        "Read, Grep, Glob, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*), Task"
+        "Read",
+        "Grep",
+        "Glob",
+        "Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)",
+        "Task",
     ],
     argument_hint="[session ID, file path, or pasted trace]",
     prompt=models.PromptDocument(

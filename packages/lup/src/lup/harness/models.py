@@ -1,33 +1,29 @@
 """Validated canonical harness, prompt, artifact, and ownership models."""
-# lup: This file has a lot of model_validator. This makes me think there is something flawed in the design, where we're not using restrictive types (e.g. Litteral) enough.
 
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     AnyHttpUrl,
     BaseModel,
     ConfigDict,
+    Discriminator,
     Field,
+    StringConstraints,
     field_validator,
     model_validator,
 )
 
-from lup.types import EnvVars, JsonValue
+from lup.policy.models import PolicyId, UrlPathPrefix
+from lup.types import EnvVars, JsonValue, ToolGrant, ToolName
 
 FROZEN = ConfigDict(frozen=True)
 
-
-def is_native_name(value: str) -> bool:
-    """Return whether a native declaration name is portable across adapters."""
-    allowed = "abcdefghijklmnopqrstuvwxyz0123456789-_"
-    alphanumeric = "abcdefghijklmnopqrstuvwxyz0123456789"
-    return (
-        bool(value)
-        and all(character in allowed for character in value)
-        and value[0] in alphanumeric
-        and value[-1] in alphanumeric
-    )
+type NativeName = Annotated[
+    str, StringConstraints(pattern=r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
+]
+"""A declaration name portable across adapters: lowercase alphanumerics with
+interior hyphens or underscores."""
 
 
 class TextPart(BaseModel):
@@ -40,31 +36,17 @@ class TextPart(BaseModel):
 class InvocationArgument(BaseModel):
     model_config = FROZEN
 
-    name: str
+    name: NativeName
     value: JsonValue
-
-    @field_validator("name")
-    @classmethod
-    def portable_name(cls, value: str) -> str:
-        if not is_native_name(value):
-            raise ValueError(f"invocation argument name is not portable: {value!r}")
-        return value
 
 
 class SkillInvocation(BaseModel):
     model_config = FROZEN
 
     type: Literal["skill_invocation"] = "skill_invocation"
-    plugin: str
-    skill: str
+    plugin: NativeName
+    skill: NativeName
     arguments: list[InvocationArgument] = Field(default_factory=list)
-
-    @field_validator("plugin", "skill")
-    @classmethod
-    def portable_name(cls, value: str) -> str:
-        if not is_native_name(value):
-            raise ValueError(f"invocation name is not portable: {value!r}")
-        return value
 
 
 class AskUser(BaseModel):
@@ -102,15 +84,16 @@ class ArgumentsRef(BaseModel):
     type: Literal["arguments_ref"] = "arguments_ref"
 
 
-type PromptPart = (
+type PromptPart = Annotated[
     TextPart
     | SkillInvocation
     | AskUser
     | Delegate
     | RequestApproval
     | ResolverEntry
-    | ArgumentsRef
-)
+    | ArgumentsRef,
+    Discriminator("type"),
+]
 
 
 class PromptDocument(BaseModel):
@@ -122,7 +105,7 @@ class PromptDocument(BaseModel):
 class Argument(BaseModel):
     model_config = FROZEN
 
-    name: str
+    name: NativeName
     description: str = Field(min_length=1, max_length=1024)
     required: bool = False
 
@@ -131,25 +114,20 @@ class Skill(BaseModel):
     model_config = FROZEN
 
     id: str
-    name: str
+    name: NativeName
     description: str = Field(min_length=1, max_length=1024)
     arguments: list[Argument] = Field(default_factory=list)
-    tools: list[str] = Field(default_factory=list) #lup: No. Tools has a very clear lingua franca of accepted names, so should be a list[ToolNames] where ToolNames is a litteral, no?
+    tools: list[ToolGrant] = Field(default_factory=list)
     argument_hint: str | None = None
     prompt: PromptDocument
 
     @model_validator(mode="after")
-    def unique_arguments(self) -> "Skill":
+    def coherent_arguments(self) -> "Skill":
         names = [argument.name for argument in self.arguments]
         if len(names) != len(dict.fromkeys(names)):
             raise ValueError(f"skill {self.id!r} has duplicate argument names")
         optional_seen = False
         for argument in self.arguments:
-            if not is_native_name(argument.name):
-                raise ValueError(
-                    f"skill {self.id!r} has non-portable argument name "
-                    f"{argument.name!r}"
-                )
             if not argument.required:
                 optional_seen = True
             elif optional_seen:
@@ -170,10 +148,10 @@ class Agent(BaseModel):
     model_config = FROZEN
 
     id: str
-    name: str
+    name: NativeName
     description: str = Field(min_length=1, max_length=1024)
     prompt: PromptDocument
-    tools: list[str] = Field(default_factory=list)
+    tools: list[ToolName] = Field(default_factory=list)
     model: str | None = None
     color: str | None = None
 
@@ -184,21 +162,14 @@ class HookUrlScope(BaseModel):
     model_config = FROZEN
 
     origin: AnyHttpUrl
-    path_prefix: str = "/"
-
-    @field_validator("path_prefix")
-    @classmethod
-    def absolute_path_prefix(cls, value: str) -> str:
-        if not value.startswith("/"):
-            raise ValueError("hook URL path prefixes must start with a slash")
-        return value
+    path_prefix: UrlPathPrefix = "/"
 
 
 class HookSet(BaseModel):
     model_config = FROZEN
 
     id: str
-    policy_ids: list[str]
+    policy_ids: list[PolicyId]
     allowed_fetch: list[HookUrlScope] = Field(default_factory=list)
     denied_fetch: list[HookUrlScope] = Field(default_factory=list)
     protected_edit_roots: list[Path] = Field(default_factory=list)
@@ -217,7 +188,7 @@ class Plugin(BaseModel):
     model_config = FROZEN
 
     id: str
-    name: str
+    name: NativeName
     version: str
     description: str = Field(min_length=1, max_length=1024)
     skills: list[Skill]
@@ -226,21 +197,12 @@ class Plugin(BaseModel):
 
     @model_validator(mode="after")
     def unique_effective_names(self) -> "Plugin":
-        if not is_native_name(self.name):
-            raise ValueError(f"plugin {self.id!r} has non-portable name {self.name!r}")
         skill_names = [skill.name for skill in self.skills]
         agent_names = [agent.name for agent in self.agents]
         if len(skill_names) != len(dict.fromkeys(skill_names)):
             raise ValueError(f"plugin {self.id!r} has duplicate skill names")
         if len(agent_names) != len(dict.fromkeys(agent_names)):
             raise ValueError(f"plugin {self.id!r} has duplicate agent names")
-        invalid = [
-            name for name in [*skill_names, *agent_names] if not is_native_name(name)
-        ]
-        if invalid:
-            raise ValueError(
-                f"plugin {self.id!r} has non-portable declaration names: {invalid}"
-            )
         return self
 
 
