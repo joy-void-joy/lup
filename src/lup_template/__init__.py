@@ -14,7 +14,7 @@ Structure:
   - tool_policy.py: Conditional tool availability (tag-based filtering)
   - tools/: Domain MCP tools
     - example.py: Template MCP tools to customize
-    - reflect.py: Forced self-review tool (reviewer sub-agent)
+    - reflect.py: Forced self-review tool (nested reviewer agent)
     - realtime.py: Real-time tools template (sleep, context, reply)
 
 - lup_template/environment/: Domain scaffolding (user interaction, app flow)
