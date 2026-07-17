@@ -1,4 +1,10 @@
-"""Immutable decisions and semantic native-boundary events."""
+"""Shared policy vocabulary: semantic events in, allow/ask/deny decisions out.
+
+The native decoders in ``lup.adapters.<provider>.native`` translate wire
+payloads into these events (shell command, fetch URL, edit batch, unknown
+tool); the policies in :mod:`lup.policy.rules` and :mod:`lup.policy.chain`
+consume them and return a :class:`Decision`.
+"""
 
 from pathlib import Path
 from typing import Literal
