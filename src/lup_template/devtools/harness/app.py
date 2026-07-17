@@ -2,7 +2,6 @@
 # lup: Wait, where is the generic hooks folder that specify what can be modified or not, and gets compiled to .claude/plugin/hooks/auto_allow_edit.py for instance?
 
 import asyncio
-import hashlib
 import os
 from pathlib import Path
 from typing import Annotated
@@ -18,10 +17,8 @@ from lup.adapters.codex.harness_runtime import (
 from lup.codescan.markers import find_feedback
 from lup.harness.contracts import ProcessLauncher
 from lup.harness.environment import non_interactive_environment
-from lup.harness.models import LaunchRequest, ReconciliationMetadata
+from lup.harness.models import LaunchRequest
 from lup.harness.process import LocalProcessLauncher
-from lup.harness.proposals import ReconciliationProposalWriter
-from lup.harness.reconciliation import source_patch_base_digest
 from lup.resolver.contracts import QuestionBroker
 from lup.resolver.core import ResolverCore
 from lup.resolver.models import (
@@ -45,13 +42,13 @@ from lup_template.devtools.harness.composition import (
     codex_composition,
     harness_compositions,
 )
-from lup_template.devtools.harness.generate import inspect_generation
 from lup_template.devtools.harness.evidence import (
     EvidenceDrift,
     evidence_drift,
     sdk_evidence_drift,
 )
 import lup_template.devtools.harness.drift as drift
+import lup_template.devtools.harness.reconcile as reconcile
 
 app = typer.Typer(no_args_is_help=True, help="Generate and launch a native harness")
 
@@ -88,19 +85,7 @@ def reconcile_command(
     target: Annotated[str, typer.Argument(help="claude, codex, or all")] = "all",
 ) -> None:
     """Classify local differences without rewriting canonical Python source."""
-    compositions = harness_compositions(target)
-    reports = [inspect_generation(composition.recipe) for composition in compositions]
-    unresolved = False
-    for report in reports:
-        drift.report_drift(report)
-        unresolved = unresolved or bool(report.proposal.conflicts)
-    if unresolved:
-        typer.echo(
-            "Unrecognized changes were preserved as conflicts; no arbitrary prompt "
-            "or script content was reverse-engineered.",
-            err=True,
-        )
-        raise typer.Exit(1)
+    reconcile.classify_targets(target)
 
 
 @app.command("apply-reconciliation")
@@ -108,42 +93,7 @@ def apply_reconciliation(
     proposal_id: Annotated[str, typer.Argument(help="Persisted proposal id")],
 ) -> None:
     """Apply a stale-base-checked source patch, then regenerate both targets."""
-    directory = project_root() / ".lup" / "reconcile" / proposal_id
-    metadata = directory / "metadata.json"
-    patch = directory / "source.patch"
-    if not metadata.is_file() or not patch.is_file():
-        raise typer.BadParameter(f"unknown reconciliation proposal {proposal_id!r}")
-    try:
-        record = ReconciliationMetadata.model_validate_json(
-            metadata.read_text(encoding="utf-8")
-        )
-    except ValueError as error:
-        raise typer.BadParameter("reconciliation metadata is malformed") from error
-    if record.proposal_id != proposal_id:
-        raise typer.BadParameter("reconciliation proposal identity does not match")
-    actual = hashlib.sha256(patch.read_bytes()).hexdigest()
-    if record.source_patch_sha256 != actual:
-        raise typer.BadParameter("reconciliation patch digest is stale or malformed")
-    content = patch.read_text(encoding="utf-8")
-    try:
-        base_digest = source_patch_base_digest(project_root(), content)
-    except (OSError, ValueError) as error:
-        raise typer.BadParameter("reconciliation source patch is malformed") from error
-    if record.base_digest != base_digest:
-        raise typer.BadParameter("reconciliation source base is stale")
-    typer.echo(content)
-    if not typer.confirm("Apply this canonical source patch and regenerate?"):
-        raise typer.Abort()
-    try:
-        sh.Command("git")("apply", "--check", str(patch), _cwd=project_root())
-        sh.Command("git")("apply", str(patch), _cwd=project_root())
-    except sh.ErrorReturnCode as error:
-        raise typer.BadParameter("reconciliation patch no longer applies") from error
-    for composition in harness_compositions("all"):
-        drift.generate_with_report(composition)
-    metadata.unlink()
-    patch.unlink()
-    directory.rmdir()
+    reconcile.apply_proposal(proposal_id)
 
 
 @app.command("propose-reconciliation")
@@ -154,18 +104,7 @@ def propose_reconciliation(
     ],
 ) -> None:
     """Persist a source patch for separate review and stale-base-checked apply."""
-    if not patch.is_file():
-        raise typer.BadParameter(f"source patch does not exist: {patch}")
-    try:
-        record = ReconciliationProposalWriter().write(
-            project_root(), patch.read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeDecodeError, ValueError) as error:
-        raise typer.BadParameter("reconciliation source patch is invalid") from error
-    typer.echo(
-        f"Reconciliation proposal {record.proposal_id} persisted; review it, then run "
-        f"`uv run lup-devtools harness apply-reconciliation {record.proposal_id}`"
-    )
+    reconcile.propose_patch(patch)
 
 
 @app.command("doctor")
