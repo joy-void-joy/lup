@@ -151,10 +151,11 @@ copy of a canonical module.
    runtime decision functions, the dead `SHELL_SEPARATORS` constant, and the
    agent-name set from shared code.
 
-Acceptance: all existing policy fixtures pass unchanged on both forms; the
-bare-interpreter subprocess test passes; `harness check all` is clean; a
-demonstration rule change (made once on a scratch branch) touches exactly one
-implementation file plus fixtures.
+Acceptance: all policy fixtures pass on both forms; the rendered kernel and
+policy-data modules run the shared shell, fetch, and edit battery under the
+bare interpreter; `harness check all` is clean; and a structural source test
+rejects decision implementations in the assembler. A behavior change therefore
+has one source implementation file plus fixtures and regenerated artifacts.
 
 ## Workstream T — typed canonical content
 
@@ -231,8 +232,10 @@ parity shim are deleted.
 Acceptance: generated trees are deterministic and pass the drift check; the
 one-time native migration differences are classified in
 `docs/typed-content-migration-audit.md`; zero base64 remains under `src/`; a
-prose edit to a command is a reviewable string diff in one module; `dev check`,
-the marker gate, and the anti-pattern gate all pass over the content package.
+prose edit to a command is a reviewable string diff in one module; and the
+content package passes marker, anti-pattern, and native-spelling audits. The
+complete repository `dev check` retains its known review-note row for the two
+explicitly deferred notes listed under non-goals; every code-quality row passes.
 
 ## Workstream N — native-boundary lane
 
@@ -287,7 +290,7 @@ each run as written.
 | Order | Work | Gate to proceed |
 |---|---|---|
 | 1 | N1–N3 minus the edit-path smoke | workflow and drift fixtures pass |
-| 2 | K (kernel, rewire, assembler, enforcement) | fixtures + hermetic subprocess + one-file rule-change proof |
+| 2 | K (kernel, rewire, assembler, enforcement) | shared fixtures + hermetic assembled subprocess + structural single-source proof |
 | 3 | T (part, content modules, renderer, flip, deletions) | classified native migration audit, then clean deterministic drift |
 | 4 | N's Codex edit-path smoke | evidence row recorded |
 | 5 | D | walkthroughs run as written |

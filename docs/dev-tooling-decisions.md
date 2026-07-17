@@ -31,7 +31,9 @@ from those declarations; byte parity with a retired catalog is not a contract.
 Consequences: Prompt changes are ordinary string diffs. Semantic parts such as
 `ArgumentsRef` and `SkillInvocation` preserve intent across native spellings.
 Adding a prompt-part variant requires renderer support from every target or a
-clear validation failure naming the semantic object.
+clear validation failure naming the semantic object. Portable content is
+scanned for native wire spellings; a document that teaches a native boundary
+declares a typed, audited exception at its source.
 
 ## ADR-003: Keep reconciliation patch-only and explicit
 

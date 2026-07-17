@@ -22,6 +22,9 @@ deterministic regeneration and ownership drift remain permanent gates.
 - The canonical inventory contains 30 skills and five agents, and both native
   compilers emit all 30 skill artifacts.
 - Canonical serialized content contains no Claude or Codex invocation spelling.
+- The content package participates in the repository native-spelling audit.
+  Documents whose subject matter is a native manifest or hook use an audited,
+  typed suppression instead of inheriting a directory-wide exemption.
 - `ArgumentsRef` and `SkillInvocation` have explicit renderer fixtures for both
   native targets, and model validation rejects an argument declaration without
   a reference or a reference without declared arguments.
