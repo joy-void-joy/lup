@@ -14,7 +14,12 @@ SKILL = models.Skill(
         ),
     ],
     tools=[
-        "Bash(uv run lup-devtools:*, git:*), Read, Glob, Grep, AskUserQuestion, Skill(lup:commit)"
+        "Bash(uv run lup-devtools:*, git:*)",
+        "Read",
+        "Glob",
+        "Grep",
+        "AskUserQuestion",
+        "Skill(lup:commit)",
     ],
     argument_hint="[target-branch]",
     prompt=models.PromptDocument(

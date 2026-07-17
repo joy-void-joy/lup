@@ -1,5 +1,5 @@
 """Assemble dependency-free policy kernel and application-owned data files."""
-#lup: Yeah, the files under this folder don't allow me to form a good idea of what is happening, what's the main concern being tackled
+# lup: Yeah, the files under this folder don't allow me to form a good idea of what is happening, what's the main concern being tackled
 
 import json
 import urllib.parse
@@ -50,7 +50,7 @@ def runtime_url_scope(origin: str, path_prefix: str, reason: str = "") -> UrlSco
 
 def runtime_path_rules(protected_roots: list[str]) -> list[PathRuleRow]:
     """Compile application roots plus invariant edit guardrails."""
-    configured = [
+    configured: list[PathRuleRow] = [
         (
             "contains_part" if root == "tmp" else "subtree",
             root,

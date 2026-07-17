@@ -7,7 +7,13 @@ SKILL = models.Skill(
     name="refactor-tools",
     description="Audit SDK agent tools and subagents \u2014 find gaps, overlaps, and refactoring opportunities",
     tools=[
-        "Read, Grep, Glob, Bash(ls:*, uv run lup-devtools:*), Agent, WebSearch, AskUserQuestion"
+        "Read",
+        "Grep",
+        "Glob",
+        "Bash(ls:*, uv run lup-devtools:*)",
+        "Agent",
+        "WebSearch",
+        "AskUserQuestion",
     ],
     prompt=models.PromptDocument(
         parts=[

@@ -6,7 +6,14 @@ SKILL = models.Skill(
     id="skill.fb-investigate",
     name="fb-investigate",
     description="Deep trace reading and error classification for selected sessions",
-    tools=["Bash(uv run lup-devtools:*), Read, Grep, Glob, Task, AskUserQuestion"],
+    tools=[
+        "Bash(uv run lup-devtools:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Task",
+        "AskUserQuestion",
+    ],
     argument_hint="<session_id1> [session_id2 ...]",
     prompt=models.PromptDocument(
         parts=[

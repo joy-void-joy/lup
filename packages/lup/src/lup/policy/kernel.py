@@ -9,9 +9,19 @@ import re
 import shlex
 import tokenize
 import urllib.parse
+from typing import Literal
 
+type DecisionEffect = Literal["allow", "ask", "deny"]
+type PathRuleKind = Literal[
+    "exact",
+    "subtree",
+    "name_prefix",
+    "new_subtree",
+    "contains_part",
+    "new_devtools",
+]
 type UrlScopeRow = tuple[str, str, int | None, str, str]
-type PathRuleRow = tuple[str, str, str, bool]
+type PathRuleRow = tuple[PathRuleKind, str, str, bool]
 type AntiPatternRow = tuple[str, str, str]
 
 KERNEL_IMPORT_ALLOWLIST = (
@@ -21,6 +31,7 @@ KERNEL_IMPORT_ALLOWLIST = (
     "re",
     "shlex",
     "tokenize",
+    "typing",
     "urllib.parse",
 )
 SHELL_PUNCTUATION = ";&|<>\n"
@@ -71,10 +82,10 @@ FILE_IGNORE_RE = re.compile(
 class KernelDecision:
     """Dependency-free allow, ask, or deny result."""
 
-    effect: str
+    effect: DecisionEffect
     reason: str
 
-    def __init__(self, effect: str, reason: str = "") -> None:
+    def __init__(self, effect: DecisionEffect, reason: str = "") -> None:
         if effect not in ("allow", "ask", "deny"):
             raise ValueError(f"invalid kernel decision effect {effect!r}")
         self.effect = effect
