@@ -583,7 +583,11 @@ def test_generated_claude_hook_maps_agent_type_to_editor_autonomy() -> None:
     }
 
     def decision(agent_type: str | None) -> str:
-        body = dict(payload) if agent_type is None else {**payload, "agent_type": agent_type}
+        body = (
+            dict(payload)
+            if agent_type is None
+            else {**payload, "agent_type": agent_type}
+        )
         result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
         assert isinstance(result, sh.RunningCommand)
         output = ClaudeHookOutput.model_validate_json(result.stdout)
