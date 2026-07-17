@@ -1,9 +1,11 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 import sh
+from pydantic import BaseModel, ConfigDict, Field
 
 from lup.adapters.claude.harness import (
     ClaudePromptRenderer,
@@ -50,6 +52,26 @@ from lup_template.devtools.harness.generate import (
     generate,
     inspect_generation,
 )
+
+
+class ClaudeHookDecision(BaseModel):
+    """Validated decision emitted by the generated Claude dispatcher."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hook_event_name: Literal["PreToolUse"] = Field(alias="hookEventName")
+    permission_decision: Literal["allow", "ask", "deny"] = Field(
+        alias="permissionDecision"
+    )
+    permission_decision_reason: str = Field(alias="permissionDecisionReason")
+
+
+class ClaudeHookOutput(BaseModel):
+    """Generated Claude hook output envelope."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hook_specific_output: ClaudeHookDecision = Field(alias="hookSpecificOutput")
 
 
 def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
@@ -535,6 +557,18 @@ def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     assert isinstance(result, sh.RunningCommand)
     assert result.exit_code == 2
     assert b"interpreters" in result.stderr
+
+
+def test_generated_claude_hook_executes_the_canonical_kernel() -> None:
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    result = sh.Command(str(script))(
+        _in='{"tool_name":"Bash","tool_input":{"command":"python -c 1"}}',
+        _return_cmd=True,
+    )
+    assert isinstance(result, sh.RunningCommand)
+    output = ClaudeHookOutput.model_validate_json(result.stdout)
+    assert output.hook_specific_output.permission_decision == "deny"
+    assert "interpreters" in output.hook_specific_output.permission_decision_reason
 
 
 def test_generated_codex_hook_fails_closed_for_unknown_tools() -> None:
