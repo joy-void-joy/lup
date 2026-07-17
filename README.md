@@ -96,7 +96,8 @@ checkout at hook time. See [architecture](docs/architecture.md),
 [typed-content migration audit](docs/typed-content-migration-audit.md),
 [runtime examples](examples/README.md), [resolver lifecycle](docs/resolver.md),
 the [generated rule reference](docs/rules.md),
-[native capability ledger](docs/native-capabilities.md), and
+[native capability ledger](docs/native-capabilities.md),
+the [sync registry contract](docs/sync.md), and
 [0.2 migration guide](docs/migration-0.2.md).
 
 The intended workflow while using this repository is to:
