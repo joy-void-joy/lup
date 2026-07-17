@@ -12,7 +12,13 @@ import lup.harness.models as models
 DOCUMENT = models.PromptDocument(
     parts=[
         models.TextPart(
-            text=r"""# Design Patterns
+            text=r"""<!--
+Generated file — do not edit directly. Rendered from
+src/lup_template/devtools/harness/content/patterns.py by
+`uv run lup-devtools harness generate all`. See docs/generated-artifacts.md.
+-->
+
+# Design Patterns
 
 Architectural patterns used in this project. For daily development guidance, see [CLAUDE.md](CLAUDE.md).
 
