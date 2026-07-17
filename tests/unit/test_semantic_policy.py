@@ -43,7 +43,14 @@ from lup.policy.models import (
     ShellCommand,
     UnknownTool,
 )
-from lup.policy.rules import EditPolicy, FetchPolicy, PathRule, ShellPolicy, UrlScope
+from lup.policy.rules import (
+    EditPolicy,
+    FetchPolicy,
+    PathRule,
+    ShellPolicy,
+    UrlScope,
+    human_owned_path_rule,
+)
 
 
 class DecisionCase(BaseModel):
@@ -188,6 +195,7 @@ def assembled_edit_decision(
     before: str | None,
     after: str | None,
     protected_roots: list[str],
+    human_owned_files: list[str],
     *,
     autonomous: bool = False,
 ) -> KernelDecision:
@@ -200,7 +208,7 @@ def assembled_edit_decision(
         before,
         after,
         path_exists=Path(path).exists(),
-        path_rules=runtime_path_rules(protected_roots),
+        path_rules=runtime_path_rules(protected_roots, human_owned_files),
         antipattern_rows=rows,
         autonomous=autonomous,
         python_source=suffix in (".py", ".pyi"),
@@ -223,7 +231,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                     "sensitive documentation path",
                 )
             ],
-            protected_roots=[".claude", "tmp", "pyproject.toml", "README.md"],
+            protected_roots=[".claude", "tmp", "pyproject.toml"],
+            human_owned_files=["README.md"],
             autonomous_agent_identities=["resolve-editor"],
         ),
         encoding="utf-8",
@@ -472,12 +481,7 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
             value="tmp",
             reason="scratch path requires approval",
         ),
-        PathRule(
-            kind="exact",
-            value="README.md",
-            reason="README.md is human-authored; propose changes via "
-            "AskUserQuestion instead of editing",
-        ),
+        human_owned_path_rule("README.md"),
     ]
 
     for case in EDIT_POLICY_CASES:
@@ -516,12 +520,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
                 value="tmp",
                 reason="scratch path requires approval",
             ),
-            PathRule(
-                kind="exact",
-                value="README.md",
-                reason="README.md is human-authored; propose changes via "
-                "AskUserQuestion instead of editing",
-            ),
+            human_owned_path_rule("README.md"),
         ]
     )
     cases = [
@@ -544,7 +543,8 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             case.path,
             case.before,
             case.after,
-            [".claude", "tmp", "pyproject.toml", "README.md"],
+            [".claude", "tmp", "pyproject.toml"],
+            ["README.md"],
         )
         assert canonical.effect == generated.effect == case.effect
 
@@ -564,7 +564,8 @@ def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
             case.path,
             case.before,
             case.after,
-            [".claude", "tmp", "README.md"],
+            [".claude", "tmp"],
+            ["README.md"],
             autonomous=True,
         )
         assert decision.effect == case.effect
