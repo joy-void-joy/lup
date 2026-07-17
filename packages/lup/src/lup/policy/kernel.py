@@ -372,6 +372,21 @@ def mask_python_string_literals(source: str) -> list[str]:
     return ["".join(line) for line in lines]
 
 
+def python_code_lines(source: str) -> list[str]:
+    """Blank string and comment tokens while preserving line and column positions."""
+    lines = [list(line) for line in mask_python_string_literals(source)]
+    tokens = python_tokens(source)
+    if tokens is None:
+        return ["".join(line) for line in lines]
+    for token in tokens:
+        if token.type != tokenize.COMMENT:
+            continue
+        start_line, start_column = token.start
+        line = lines[start_line - 1]
+        line[start_column : token.end[1]] = [" "] * (token.end[1] - start_column)
+    return ["".join(line) for line in lines]
+
+
 def marker_count(source: str, python_source: bool = False) -> int:
     """Count review markers, excluding markers inside ordinary Python strings."""
     if not python_source:
