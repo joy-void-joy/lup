@@ -2,7 +2,7 @@
 
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -125,7 +125,7 @@ class CleaningSessionFactory(SessionFactory):
     @asynccontextmanager
     async def open_cleaned(
         self, resume: SessionId | None
-    ) -> AsyncIterator[SessionHandle]:
+    ) -> AsyncGenerator[SessionHandle]:
         try:
             async with self.inner.open(resume) as handle:
                 yield handle

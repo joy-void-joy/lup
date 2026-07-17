@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
@@ -343,7 +343,7 @@ class ClaudeFork(ForkSession):
         return self.open_fork(at)
 
     @asynccontextmanager
-    async def open_fork(self, at: TurnId | None) -> AsyncIterator[SessionHandle]:
+    async def open_fork(self, at: TurnId | None) -> AsyncGenerator[SessionHandle]:
         if at is not None:
             raise ValueError("Claude transcript forking supports the latest turn only")
         import claude_agent_sdk as claude
@@ -377,7 +377,7 @@ class ClaudeSessionFactory(SessionFactory):
     @asynccontextmanager
     async def open_session(
         self, resume: SessionId | None
-    ) -> AsyncIterator[SessionHandle]:
+    ) -> AsyncGenerator[SessionHandle]:
         state = ClaudeConversationState(self.config, resume)
         session = ComposedSession(
             starter=state.start_turn,

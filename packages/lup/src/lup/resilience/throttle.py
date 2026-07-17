@@ -25,7 +25,7 @@ Examples:
 import asyncio
 import time
 import weakref
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 
@@ -74,7 +74,7 @@ class Throttle:
         return state
 
     @asynccontextmanager
-    async def slot(self) -> AsyncIterator[None]:
+    async def slot(self) -> AsyncGenerator[None]:
         """Reserve one request slot for the duration of the ``async with`` body.
 
         Acquires a concurrency permit, waits out any remaining interval since
