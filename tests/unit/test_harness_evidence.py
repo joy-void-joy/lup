@@ -110,3 +110,22 @@ def test_native_workflow_probes_even_when_strict_evidence_fails() -> None:
     assert "needs.credentials.outputs.live == 'true'" in native.condition
     assert native.continue_on_error is False
     assert any(step.run == "uv run pytest -m integration -v" for step in native.steps)
+
+
+def test_pull_request_workflow_runs_quality_and_harness_gates() -> None:
+    document = yaml.safe_load(
+        Path(".github/workflows/harness-drift.yml").read_text(encoding="utf-8")
+    )
+    workflow = NativeWorkflow.model_validate(document)
+    commands = [step.run for step in workflow.jobs["check"].steps if step.run]
+
+    assert commands == [
+        "uv sync --all-extras",
+        "uv run ruff format --check .",
+        "uv run ruff check .",
+        "uv run pyright",
+        "uv run pytest",
+        "uv run lup-devtools dev check --antipatterns",
+        "uv run lup-devtools dev check --boundaries",
+        "uv run lup-devtools harness check all",
+    ]

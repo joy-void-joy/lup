@@ -18,7 +18,10 @@ launch them directly and hooks must run without importing the checkout.
 
 The pre-commit hook regenerates and stops when generation changes tracked
 files. This makes omitted generated output visible without silently adding it
-to the commit. CI performs the same read-only drift check.
+to the commit. Pull-request CI runs formatting, lint, type, unit, anti-pattern,
+native-boundary, and generated-drift checks. The two user-deferred review notes
+remain visible in the complete local `dev check`; they are not silently removed
+or treated as unrelated CI failures.
 
 ## Reviewing generated artifacts
 
