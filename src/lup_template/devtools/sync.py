@@ -112,7 +112,10 @@ def refs_dir() -> Path:
 def load_json(path: Path) -> DownstreamConfig:
     if not path.exists():
         return {"projects": []}
-    return DOWNSTREAM_ADAPTER.validate_python(json.loads(path.read_text()))
+    try:
+        return DOWNSTREAM_ADAPTER.validate_python(json.loads(path.read_text()))
+    except json.JSONDecodeError as error:
+        raise typer.BadParameter(f"{path} is not valid JSON: {error}") from error
 
 
 def save_local(data: DownstreamConfig) -> None:
