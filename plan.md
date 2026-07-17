@@ -1650,6 +1650,26 @@ binder and options builder, Codex fail-before-input rebinding rejection and
 across recovery attempts, and marker-count ask fixtures on both policy
 engines including under resolve-editor autonomy.
 
+### Post-completion fixes (2026-07-17)
+
+A second independent verification pass closed the last two live findings from
+the historical review below and their coverage tail:
+
+- `Usage.input_tokens` is cache-inclusive on both adapters: the Claude
+  translator folds cache reads and cache creation into the total, and one
+  shared fixture prices both adapters identically through
+  `per_mtok_usage_cost`.
+- `sh` is a core `lup` dependency rather than a `codex` extra, matching its
+  module-level imports in the neutral process launcher and both harness
+  runtimes; the empty extra remains a valid install target.
+- The unwired in-memory lease release was deleted; persisted-state
+  deactivation at cleanup is the one release mechanism.
+- New deterministic coverage pins the generated Claude dispatcher's
+  agent-identity autonomy mapping, persistence and retry-start error
+  wrapping, and a reflection gate on both same-schema turns through the real
+  Claude binder. Live confirmation that the native hook payload carries the
+  agent identity remains a nightly-lane concern.
+
 ## Historical implementation review (2026-07-16)
 
 The remainder of this document section is the first post-implementation review
