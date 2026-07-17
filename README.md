@@ -1,6 +1,5 @@
 (All code in this repository has been reviewed by humans, this README has been written by a human)
 
-
 # Lup
 
 A meta repository for speed-boosting your Claude Code development and create self-improving [ClaudeAgentSDK] applications
