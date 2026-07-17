@@ -436,6 +436,65 @@ async def test_trace_usage_and_display_observe_one_complete_logical_turn() -> No
     assert displayed.text == "done"
 
 
+@pytest.mark.asyncio
+async def test_persistence_failure_surfaces_as_typed_turn_error(
+    tmp_path: Path,
+) -> None:
+    binder = RecordingBinder()
+
+    async def start(_text: str) -> AcceptedTurn:
+        async def complete() -> CompletedTurn:
+            return CompletedTurn()
+
+        return accepted(1, complete)
+
+    blocker = tmp_path / "blocker"
+    blocker.write_text("occupied\n", encoding="utf-8")
+    session = DecoratingSession(
+        ComposedSession(start, binder),
+        timeout=None,
+        budget=None,
+        recovery=None,
+        correction=None,
+        persistence=PersistenceConfig(directory=blocker / "turns"),
+    )
+    handle = await session.start(turn_request(TurnInput(text="persist")))
+
+    with pytest.raises(ProviderTurnError):
+        await handle.turn.result()
+
+
+@pytest.mark.asyncio
+async def test_retry_start_failure_is_wrapped_as_provider_error() -> None:
+    binder = RecordingBinder()
+    sequence = 0
+
+    async def start(_text: str) -> AcceptedTurn:
+        nonlocal sequence
+        sequence += 1
+        if sequence == 2:
+            raise RuntimeError("session lost")
+
+        async def complete() -> CompletedTurn:
+            raise ProviderTurnError(TurnFailure(message="retry"))
+
+        return accepted(sequence, complete)
+
+    session = DecoratingSession(
+        ComposedSession(start, binder),
+        timeout=None,
+        budget=None,
+        recovery=RecoveryConfig(retries=1),
+        correction=None,
+        persistence=None,
+    )
+    handle = await session.start(turn_request(TurnInput(text="fragile")))
+
+    with pytest.raises(ProviderTurnError) as caught:
+        await handle.turn.result()
+    assert "session lost" in str(caught.value)
+
+
 class ScriptedEventStream(EventStream):
     """Yield one labeled block per attempt and signal when fully drained."""
 
