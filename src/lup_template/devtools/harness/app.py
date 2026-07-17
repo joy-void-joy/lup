@@ -45,59 +45,15 @@ from lup_template.devtools.harness.composition import (
     codex_composition,
     harness_compositions,
 )
-from lup_template.devtools.harness.generate import (
-    DriftReport,
-    HarnessGenerationConflict,
-    generate as generate_target,
-    inspect_generation,
-)
+from lup_template.devtools.harness.generate import inspect_generation
 from lup_template.devtools.harness.evidence import (
     EvidenceDrift,
     evidence_drift,
     sdk_evidence_drift,
 )
+import lup_template.devtools.harness.drift as drift
 
 app = typer.Typer(no_args_is_help=True, help="Generate and launch a native harness")
-
-
-def report_generation(target: str, changed: list[Path], removed: list[Path]) -> None:
-    typer.echo(
-        f"{target} harness ready: {len(changed)} changed, {len(removed)} removed"
-    )
-
-
-def generated(composition: NativeHarnessComposition) -> None:
-    recipe = composition.recipe
-    report = inspect_generation(recipe)
-    report_drift(report, paths=True)
-    try:
-        materialized = generate_target(recipe)
-    except HarnessGenerationConflict as error:
-        typer.echo(str(error), err=True)
-        typer.echo(
-            "Existing unowned files were preserved. Reconcile them explicitly before "
-            "adopting generated ownership.",
-            err=True,
-        )
-        raise typer.Exit(1) from error
-    report_generation(recipe.label, materialized.changed, materialized.removed)
-
-
-def report_drift(report: DriftReport, *, paths: bool = False) -> None:
-    proposal = report.proposal
-    typer.echo(
-        f"{report.target}: {len(proposal.writes)} writes, "
-        f"{len(proposal.deletes)} deletes, {len(proposal.conflicts)} conflicts, "
-        f"ownership={'present' if report.ownership_present else 'missing'}"
-    )
-    for conflict in proposal.conflicts:
-        label = "sensitive local conflict" if conflict.sensitive else conflict.category
-        typer.echo(f"  {conflict.path}: {label}")
-    if paths:
-        for write in proposal.writes:
-            typer.echo(f"  + {write.artifact.path}")
-        for delete in proposal.deletes:
-            typer.echo(f"  - {delete.path}")
 
 
 def runtime_preflight(composition: NativeHarnessComposition) -> None:
@@ -116,8 +72,7 @@ def generate_command(
     target: Annotated[str, typer.Argument(help="claude, codex, or all")] = "all",
 ) -> None:
     """Deterministically generate owned native artifacts without launching."""
-    for composition in harness_compositions(target):
-        generated(composition)
+    drift.generate_targets(target)
 
 
 @app.command("check")
@@ -125,14 +80,7 @@ def check_command(
     target: Annotated[str, typer.Argument(help="claude, codex, or all")] = "all",
 ) -> None:
     """Read-only ownership and generated-artifact drift check for CI."""
-    reports = [
-        inspect_generation(composition.recipe)
-        for composition in harness_compositions(target)
-    ]
-    for report in reports:
-        report_drift(report)
-    if any(not report.clean for report in reports):
-        raise typer.Exit(1)
+    drift.check_targets(target)
 
 
 @app.command("reconcile")
@@ -144,7 +92,7 @@ def reconcile_command(
     reports = [inspect_generation(composition.recipe) for composition in compositions]
     unresolved = False
     for report in reports:
-        report_drift(report)
+        drift.report_drift(report)
         unresolved = unresolved or bool(report.proposal.conflicts)
     if unresolved:
         typer.echo(
@@ -192,7 +140,7 @@ def apply_reconciliation(
     except sh.ErrorReturnCode as error:
         raise typer.BadParameter("reconciliation patch no longer applies") from error
     for composition in harness_compositions("all"):
-        generated(composition)
+        drift.generate_with_report(composition)
     metadata.unlink()
     patch.unlink()
     directory.rmdir()
@@ -556,7 +504,7 @@ def claude(
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
     composition = claude_composition(project_root())
-    generated(composition)
+    drift.generate_with_report(composition)
     if generate_only:
         return
     runtime_preflight(composition)
@@ -614,7 +562,7 @@ def codex(
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
     composition = codex_composition(project_root())
-    generated(composition)
+    drift.generate_with_report(composition)
     if generate_only:
         return
     runtime_preflight(composition)
