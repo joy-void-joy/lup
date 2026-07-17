@@ -87,6 +87,12 @@ markers = ["integration: tests requiring external services (Docker, APIs)"]
 # root config when invoked here — it does not discover the member config in
 # packages/lup/pyproject.toml — so every include the workspace needs is listed.
 include = ["src", "packages/lup/src", "tests"]
+# Adapter asset scripts are verbatim payloads for the generated plugin tree;
+# their imports resolve only in that runtime layout, not in this workspace.
+exclude = [
+    "packages/lup/src/lup/adapters/claude/assets",
+    "packages/lup/src/lup/adapters/codex/assets",
+]
 pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"

@@ -45,6 +45,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 lup = ["py.typed"]
+"lup.adapters.claude" = ["assets/*.py"]
+"lup.adapters.codex" = ["assets/*.py"]
 
 [tool.pyright]
 # Independent of the workspace-root config: this lets the standalone library
@@ -52,4 +54,7 @@ lup = ["py.typed"]
 # to packages/lup/src. The root config re-lists this path under its own include
 # for the workspace-wide run; the two configs do not merge or conflict.
 include = ["src"]
+# Adapter asset scripts are verbatim payloads for the generated plugin tree;
+# their imports resolve only in that runtime layout, not in this workspace.
+exclude = ["src/lup/adapters/claude/assets", "src/lup/adapters/codex/assets"]
 pythonVersion = "3.14"
