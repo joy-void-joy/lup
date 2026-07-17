@@ -162,5 +162,23 @@ Consequences: Applications compose only the capabilities they need. A third
 adapter implements contracts without joining a shared provider registry, and
 neutral orchestration never probes a backend name.
 
+## ADR-012: Split diagnostics between Ruff and the Lup checker
+
+Context: Ruff does not support third-party linter plugins
+([Ruff FAQ](https://docs.astral.sh/ruff/faq/#can-i-write-my-own-linter-plugins-for-ruff)),
+and Lup's conventions — capability-ABC shape, native-spelling boundaries,
+anti-pattern edits — need project-aware analysis with project-owned rule
+identifiers.
+
+Decision: Ruff owns standard Python diagnostics. The typed Lup checker owns
+repository-specific rules under stable kebab-case identifiers with audited
+`# lup: ignore[rule-id]` suppressions, and `docs/rules.md` is generated from
+the executable rule objects. `# noqa` stays forbidden as a Lup rule of its
+own.
+
+Consequences: The two rule sets do not duplicate diagnostics. Both generated
+hook runtimes and the repository auditor share one semantic checker, and the
+suppression audit reports bare, stale, and spurious ignores.
+
 See the architecture, harness, adopter, contributor, resolver, migration,
 native-evidence, and generated rule guides beside this file.
