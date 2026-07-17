@@ -1,4 +1,11 @@
-"""Ownership-safe generation shared by explicit native CLI entry points."""
+"""Ownership-safe generation shared by explicit native CLI entry points.
+
+Drives the pipeline over one frozen ``GenerationRecipe``: compile the
+canonical catalog through an adapter composition root, validate the rendered
+tree, reconcile it against recorded ownership, materialize a conflict-free
+proposal, and save the manifest. Only the CLI composition root in ``app``
+maps a target name to a recipe.
+"""
 
 import json
 from pathlib import Path
