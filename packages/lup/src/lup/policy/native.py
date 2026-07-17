@@ -1,4 +1,11 @@
-"""Separate native input decoding and output rendering capabilities."""
+"""The wire seams a native adapter implements around the semantic core.
+
+:class:`NativeEventDecoder` turns one provider's raw hook payload into the
+semantic events of :mod:`lup.policy.models`; :class:`NativeDecisionRenderer`
+turns a :class:`~lup.policy.models.Decision` back into that provider's wire
+response. Implementations live in ``lup.adapters.<provider>.native``; nothing
+here decides — the kernel does.
+"""
 
 from abc import ABC, abstractmethod
 

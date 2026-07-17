@@ -1,4 +1,10 @@
-"""Cohesive policy and observation capability contracts."""
+"""The decision seams: one typed semantic event in, one verdict out.
+
+:class:`DecisionPolicy` is implemented by the validated policies in
+:mod:`lup.policy.rules` and composed by :mod:`lup.policy.chain`;
+:class:`Observer` receives events for side-channel auditing with no power
+to change a verdict.
+"""
 
 from abc import ABC, abstractmethod
 
