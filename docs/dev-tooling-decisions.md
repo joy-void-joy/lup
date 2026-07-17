@@ -162,5 +162,25 @@ Consequences: Applications compose only the capabilities they need. A third
 adapter implements contracts without joining a shared provider registry, and
 neutral orchestration never probes a backend name.
 
+## ADR-012: Scope commit-time regeneration to harness inputs
+
+Context: The local pre-commit hook regenerates both native trees, while CI
+already runs formatting, lint, type, unit, anti-pattern, boundary, and
+read-only drift checks on every pull request and push. An always-run hook
+regenerates on commits that cannot change generated output and turns any
+generator fault into a commit-time failure for unrelated work.
+
+Decision: Trigger the hook through an explicit `files:` pattern covering the
+generation inputs — the harness devtools and the `lup` library they compile —
+and the owned native trees reconciliation reads. The per-push CI drift check
+remains the authoritative gate.
+
+Consequences: Ordinary commits run no generation. A commit touching harness
+sources or owned artifacts still regenerates before it lands, and anything
+the pattern misses is caught by `harness check all` in CI. The pattern
+matches the whole `lup` package rather than an enumerated import closure so
+a new generation dependency cannot silently escape it.
+
 See the architecture, harness, adopter, contributor, resolver, migration,
-native-evidence, and generated rule guides beside this file.
+native-evidence, quality-pipeline, and generated rule guides beside this
+file.
