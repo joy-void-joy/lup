@@ -1,4 +1,5 @@
 """Validated canonical harness, prompt, artifact, and ownership models."""
+# lup: This file has a lot of model_validator. This makes me think there is something flawed in the design, where we're not using restrictive types (e.g. Litteral) enough.
 
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -133,7 +134,7 @@ class Skill(BaseModel):
     name: str
     description: str = Field(min_length=1, max_length=1024)
     arguments: list[Argument] = Field(default_factory=list)
-    tools: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list) #lup: No. Tools has a very clear lingua franca of accepted names, so should be a list[ToolNames] where ToolNames is a litteral, no?
     argument_hint: str | None = None
     prompt: PromptDocument
 

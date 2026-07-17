@@ -1,4 +1,5 @@
 """Public ``lup-devtools harness`` generation, diagnosis, and launch surface."""
+#lup: Wait, where is the generic hooks folder that specify what can be modified or not, and gets compiled to .claude/plugin/hooks/auto_allow_edit.py for instance?
 
 import asyncio
 import hashlib
@@ -692,3 +693,5 @@ def codex(
         raise typer.BadParameter("Codex CLI is not installed") from error
     except sh.ErrorReturnCode as error:
         raise typer.Exit(error.exit_code) from error
+
+# lup: This is way too bulky, and doesn't respect the convention of this repo, where we split subconcerns in subfolder

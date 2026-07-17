@@ -22,6 +22,7 @@ from lup.harness.models import (
 )
 
 
+# lup: Same
 class SourcePreimageRow(BaseModel):
     """One named source path and its optional preimage hash."""
 

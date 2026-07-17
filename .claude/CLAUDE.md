@@ -1,3 +1,10 @@
+# lup: Are we rediriving CLAUDE.md from the common files in the harness folder? We should
+# lup: A principle we should teach the agent and embody more with /principle: The agents are AI agents that go very fast. That means that the usual cycle of implementing and prototyping is very different. We don't need to do the usual "simple idea" implementation, we can just implement everything at once with claude/codex, and go very fast.
+# lup: This matters because often time, claude code or codex will say stuff like "This project will take several month', or "This is a multiple days implementation", and they will take 3 hours top.
+# lup: So we need to teach the agents that they dramatically overestimate the time something takes, because of their AI-agentness they can implement things way quicker than they realize, and this importantly change the feedback-implementation cycle, where we don't need to validate something with a POC, because the alpha-beta-v1 can be implemented in the time it would have "normally" taken to implement the POC.
+# lup: Something like embedding the agents in themselves for them to realize that they've been trained on principles and practices that only apply to humans, not to claude and codex AI agents.
+# lup: Something I don't like with comitting .claude, .codex, etc... is that it's really not clear that those are supposed to be compiled by the harness (are they? Can you check?). I feel like maybe we should put them under a dist folder if that's possible? Main reason we're committing them instead of letting the user do it themselves is so they can be installed as a claude/codex plugin directly. Is it well formed for that? Is it worth it?
+
 # Lup repository guidance
 
 Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
