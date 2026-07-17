@@ -1,5 +1,5 @@
 """Public ``lup-devtools harness`` generation, diagnosis, and launch surface."""
-#lup: Wait, where is the generic hooks folder that specify what can be modified or not, and gets compiled to .claude/plugin/hooks/auto_allow_edit.py for instance?
+# lup: Wait, where is the generic hooks folder that specify what can be modified or not, and gets compiled to .claude/plugin/hooks/auto_allow_edit.py for instance?
 
 import asyncio
 import hashlib
@@ -27,6 +27,7 @@ from lup.adapters.codex.harness_runtime import (
 )
 from lup.codescan.markers import find_feedback
 from lup.harness.contracts import ProcessLauncher, SkillInvocationRenderer
+from lup.harness.environment import non_interactive_environment
 from lup.harness.models import CapabilityEvidence, LaunchRequest, ReconciliationMetadata
 from lup.harness.process import LocalProcessLauncher
 from lup.harness.proposals import ReconciliationProposalWriter
@@ -458,6 +459,10 @@ def resolve_command(
             merge_hooks,
         )
 
+        session_environment = non_interactive_environment(
+            os.environ  # lup: ignore[os-environ] — sessions inherit the console
+        )
+
         def worker_factory(cwd: Path) -> SessionFactory:
             if adapter == "claude":
                 return create_claude_session_factory(
@@ -466,6 +471,7 @@ def resolve_command(
                         system_prompt="Execute the persisted Lup resolver assignment.",
                         cwd=cwd,
                         add_dirs=[cwd],
+                        environment=session_environment,
                         hooks=merge_hooks(
                             create_permission_hooks([cwd], []),
                             create_git_inspection_hook(),
@@ -481,6 +487,7 @@ def resolve_command(
                     cwd=cwd,
                     sandbox="workspaceWrite",
                     approval_policy="never",
+                    environment=session_environment,
                     writable_roots=[cwd],
                 )
             )
@@ -495,6 +502,7 @@ def resolve_command(
                         ),
                         cwd=cwd,
                         add_dirs=[cwd],
+                        environment=session_environment,
                         hooks=create_permission_hooks([], [cwd]),
                     )
                 )
@@ -507,6 +515,7 @@ def resolve_command(
                     cwd=cwd,
                     sandbox="readOnly",
                     approval_policy="never",
+                    environment=session_environment,
                 )
             )
 
@@ -621,7 +630,7 @@ def claude(
             *ctx.args,
         ]
     )
-    environment = dict(os.environ)  # lup: ignore[os-environ]
+    environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     if profile is not None:
         environment["CLAUDE_CONFIG_DIR"] = str(
             ClaudeProfileStore().resolve_config_dir(profile)
@@ -669,7 +678,7 @@ def codex(
     if generate_only:
         return
     runtime_preflight(composition)
-    environment = dict(os.environ)  # lup: ignore[os-environ]
+    environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     configured_home = environment["CODEX_HOME"] if "CODEX_HOME" in environment else None
     selected_home = codex_home or (
         Path(configured_home) if configured_home is not None else Path.home() / ".codex"
@@ -693,5 +702,6 @@ def codex(
         raise typer.BadParameter("Codex CLI is not installed") from error
     except sh.ErrorReturnCode as error:
         raise typer.Exit(error.exit_code) from error
+
 
 # lup: This is way too bulky, and doesn't respect the convention of this repo, where we split subconcerns in subfolder
