@@ -6,5 +6,3 @@
     }
   ]
 }
-# lup: Never change downstream.json, modifications should only go in .json.local, .json is for the users of lup who don't need to know about our own downstream
-# lup: Also, is it downstream or upstream, seems confusing? It's just a sync mechanism that look at the difference and integrate them in. Maybe we should change the name?
