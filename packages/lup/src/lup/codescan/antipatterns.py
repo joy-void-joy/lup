@@ -62,7 +62,6 @@ class AntiPattern(BaseModel):
     message: str
 
 
-# lup: I thought we converted #lup: scanning to a full AST, yet this still uses normal regex. I think we should convert it to a linter
 PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="any-type",
