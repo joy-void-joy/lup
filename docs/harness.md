@@ -2,8 +2,10 @@
 
 The native Claude and Codex trees are deterministic committed output. Run
 `uv run lup-devtools harness generate all` before review. The local pre-commit
-hook regenerates and stops if that changes tracked files; CI runs the read-only
-`uv run lup-devtools harness check all` drift check and never commits changes.
+hook regenerates for commits touching harness sources or owned trees and stops
+if that changes tracked files; CI runs the read-only
+`uv run lup-devtools harness check all` drift check on every push and never
+commits changes. `docs/quality-pipeline.md` maps the full pipeline.
 
 `src/lup_template/devtools/harness/content/` contains the canonical skill,
 agent, guidance, pattern, and template declarations.
