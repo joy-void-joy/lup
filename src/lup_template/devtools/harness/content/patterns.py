@@ -4,6 +4,11 @@
 
 import lup.harness.models as models
 
+# lup: Two problems:
+# - With opus4.8, the tool MCP seems to have been overhauled. The agent needs to search the tools themselves instead of directly having all of them in context. This often creates problem because the agent will try to use the tools it think it has, not find them and give up without using those tools. Can you research this? Are there options we can use so the agent can see all of them? Is there a way to prevent this failure mode?
+# - There is often a tension between bitter-lesson (just give all the tools to agents) and task decomposition to avoid context pollution. The best middle ground I've found is to use a lot of nested tools (e.g. instead of giving all the research tools to the main agent, have a central "research" tool, that passes it to a nested agent that has those tools).
+# Look at aib-joy.void.joy-bot to see examples of this pattern
+# lup: Also, while it is good that we split this file, I fear that the main claude/codex agent will not have the subtleties of the vocabulary (esp. around the strong difference between native subagent and nested agent/tool subagent).
 DOCUMENT = models.PromptDocument(
     parts=[
         models.TextPart(
