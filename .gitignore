@@ -217,6 +217,7 @@ notes/*
 worktrees/
 tmp/
 .lup/
+sync.json.local
 downstream.json.local
 .cache/
 refs/
