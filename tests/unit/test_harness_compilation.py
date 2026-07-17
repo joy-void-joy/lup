@@ -1,5 +1,6 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -569,6 +570,29 @@ def test_generated_claude_hook_executes_the_canonical_kernel() -> None:
     output = ClaudeHookOutput.model_validate_json(result.stdout)
     assert output.hook_specific_output.permission_decision == "deny"
     assert "interpreters" in output.hook_specific_output.permission_decision_reason
+
+
+def test_generated_claude_hook_maps_agent_type_to_editor_autonomy() -> None:
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    payload = {
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "packages/lup/src/lup/generated_probe.py",
+            "content": "".join(f"VALUE_{index} = {index}\n" for index in range(8)),
+        },
+    }
+
+    def decision(agent_type: str | None) -> str:
+        body = dict(payload) if agent_type is None else {**payload, "agent_type": agent_type}
+        result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
+        assert isinstance(result, sh.RunningCommand)
+        output = ClaudeHookOutput.model_validate_json(result.stdout)
+        return output.hook_specific_output.permission_decision
+
+    assert decision(None) == "ask"
+    assert decision("implementer") == "ask"
+    assert decision("resolve-editor") == "allow"
+    assert decision("lup:resolve-editor") == "allow"
 
 
 def test_generated_codex_hook_fails_closed_for_unknown_tools() -> None:
