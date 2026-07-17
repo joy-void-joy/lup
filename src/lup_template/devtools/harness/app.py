@@ -48,6 +48,7 @@ from lup.runtime.contracts import SessionFactory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup_template.devtools.dev.comments import scan_tracked
+from lup_template.devtools.dev.remote_auth import check_remote_auth
 from lup_template.devtools.harness.generate import (
     DriftReport,
     GenerationRecipe,
@@ -438,6 +439,12 @@ def resolve_command(
         raise typer.BadParameter("resolve requires exactly one adapter")
     composition = compositions[0]
     root = project_root()
+    if not check_remote_auth():
+        typer.echo(
+            "Continuing local-only: agent git commands that need the remote "
+            "will fail fast instead of prompting.",
+            err=True,
+        )
     launcher = LocalProcessLauncher()
     resolved_run_id = run_id or (
         "resolve-" + resolver_git(launcher, root, ["rev-parse", "--short=12", "HEAD"])
