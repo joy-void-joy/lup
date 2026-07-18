@@ -13,6 +13,7 @@ from pathlib import Path
 from lup.codescan.common import IGNORE_RE, file_level_ignore, ignore_rule_ids
 from lup.codescan.markers import (
     TEMPLATE_MARKER_RE,
+    MarkerComment,
     ScanMode,
     find_feedback,
     find_markers,
@@ -183,3 +184,81 @@ def test_template_continuation_merges_and_stops_at_decoration() -> None:
 def test_decoration_line_ends_a_feedback_note_too() -> None:
     source = "# lup: note inside a banner\n# ----\nx = 1\n"
     assert texts(source, ScanMode.PYTHON) == ["note inside a banner"]
+
+
+def test_defer_note_parses_kind_condition_and_text() -> None:
+    source = "# lup: defer[until v2 ships]: rework the cache layer\n"
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "defer"
+    assert note.condition == "until v2 ships"
+    assert note.text == "rework the cache layer"
+
+
+def test_ordinary_note_has_note_kind_and_no_condition() -> None:
+    source = "# lup: plain feedback\n"
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "note"
+    assert note.condition is None
+
+
+def test_defer_head_requires_brackets() -> None:
+    # Prose that merely starts with "defer" is ordinary feedback; the bracket
+    # syntax (mirroring `# lup: ignore[rule-id]`) is the discriminator.
+    source = "# lup: defer this until later\n# lup: deferred work is tracked inline\n"
+    notes = find_feedback(source, ScanMode.MARKDOWN)
+    assert [note.kind for note in notes] == ["note", "note"]
+
+
+def test_defer_continuation_lines_merge_into_the_message() -> None:
+    source = (
+        "# lup: defer[until the sweep lands]: fold both scanners\n"
+        "# into one shared pass\n"
+        "x = 1\n"
+    )
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "defer"
+    assert note.condition == "until the sweep lands"
+    assert note.text == "fold both scanners into one shared pass"
+
+
+def test_typed_ignore_is_still_skipped_not_classified_as_defer() -> None:
+    source = "x = 1  # lup: ignore[dict-get]\ny = 2  # lup: defer[never]: parked\n"
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "defer"
+    assert note.start_line == 2
+
+
+def test_gitignore_style_hash_comment_carries_a_defer_note() -> None:
+    assert scan_mode_for(Path(".gitignore")) == ScanMode.TEXT
+    source = (
+        "notes/*\n"
+        "!notes/.gitkeep\n"
+        "# lup: defer[until branches merge]: purge notes history\n"
+        "worktrees/\n"
+    )
+    (note,) = find_feedback(source, ScanMode.TEXT)
+    assert note.kind == "defer"
+    assert note.condition == "until branches merge"
+    assert note.text == "purge notes history"
+    assert (note.start_line, note.end_line) == (3, 3)
+
+
+def test_marker_text_reconstitutes_the_defer_head() -> None:
+    source = "# lup: defer[until launch]: tighten the budget\n# lup: plain note\n"
+    deferred, plain = find_feedback(source, ScanMode.MARKDOWN)
+    assert deferred.marker_text() == "defer[until launch]: tighten the budget"
+    assert plain.marker_text() == "plain note"
+
+
+def test_template_todos_are_never_classified_as_deferred() -> None:
+    source = "# TEMPLATE: defer[x]: choose your integrations\n"
+    (todo,) = find_markers(source, ScanMode.PYTHON, marker=TEMPLATE_MARKER_RE)
+    assert todo.kind == "note"
+    assert todo.condition is None
+
+
+def test_defer_classification_survives_model_roundtrip() -> None:
+    source = "# lup: defer[until reviewed]: keep this parked\n"
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    restored = MarkerComment.model_validate_json(note.model_dump_json())
+    assert restored == note
