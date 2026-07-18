@@ -1,13 +1,28 @@
-"""Persistence for explicit, patch-only canonical-source reconciliation."""
+"""Backpropagation persistence: source patches parked on disk for review.
+
+When reconciliation finds local edits worth carrying back into canonical
+sources, the devtools reconcile flow renders them as a git patch and this
+module persists it immutably under ``.lup/reconcile/<id>`` with preimage
+digests. Nothing here applies or imports a patch — a human reviews the
+persisted proposal and applies it explicitly.
+"""
 
 import hashlib
 from pathlib import Path
 
-from lup.harness.models import ReconciliationMetadata
+from pydantic import BaseModel, ConfigDict
+
 from lup.harness.reconciliation import source_patch_base_digest
 
 
-# lup: Same here, it's not clear what it's doing at top-level. I'm guessing this is for resolver?
+class ReconciliationMetadata(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    proposal_id: str
+    base_digest: str
+    source_patch_sha256: str
+
+
 class ReconciliationProposalWriter:
     """Persist one immutable source patch without applying or importing it."""
 

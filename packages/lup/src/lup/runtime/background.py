@@ -1,5 +1,12 @@
-"""Concrete debounced background scheduling over a configured session factory."""
-# lup: How is realtime different from runtime?
+"""Debounced background turns on one persistent session.
+
+A runtime-level consumer of the session capabilities: callers push
+replaceable typed state, wakes inside the debounce window coalesce, and each
+surviving wake becomes one turn on a single long-lived session. Distinct
+from :mod:`lup.realtime`, which owns a persistent agent's full sleep/wake
+lifecycle (scheduler state machine, reminders, subprocess relay) and sits a
+layer above this engine.
+"""
 
 import asyncio
 import logging

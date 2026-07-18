@@ -1,10 +1,11 @@
 """Ownership-safe generation engine beneath the harness CLI.
 
-Recipes compose the desired native tree for one target from the ``catalog``
-declarations; inspection reconciles that tree against the working copy
-without writing; generation materializes the reconciled proposal atomically
-and refreshes the ownership manifest. Console-facing command bodies live in
-``drift`` and ``reconcile``.
+Each frozen ``GenerationRecipe`` compiles the canonical catalog through an
+adapter, validates the rendered tree, reconciles it against recorded
+ownership, materializes a conflict-free proposal, and saves the manifest.
+Inspection exposes the same pipeline without writes. Console-facing command
+bodies live in ``drift`` and ``reconcile``; ``composition`` maps target names
+to concrete recipes.
 """
 
 import json
@@ -19,18 +20,18 @@ from lup.adapters.claude.harness import (
     ClaudeSkillInvocationRenderer,
 )
 from lup.harness.materialization import AtomicMaterializer
-from lup.harness.models import (
-    Artifact,
-    ArtifactTree,
-    Harness,
+from lup.harness.models import Artifact, ArtifactTree, Harness
+from lup.harness.ownership import (
     OwnershipManifest,
-    ReconciliationConflict,
-    ReconciliationProposal,
+    build_manifest,
+    load_manifest,
+    save_manifest,
 )
-from lup.harness.ownership import build_manifest, load_manifest, save_manifest
 from lup.harness.reconciliation import (
     DeterministicReconciler,
     FilesystemCurrentTreeReader,
+    ReconciliationConflict,
+    ReconciliationProposal,
 )
 from lup.harness.contracts import CurrentTreeReader, Reconciler
 from lup_template.devtools.harness.catalog import portable_harness

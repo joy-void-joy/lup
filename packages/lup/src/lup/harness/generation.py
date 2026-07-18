@@ -1,4 +1,9 @@
-"""Shared deterministic artifact-tree helpers."""
+"""Small deterministic helpers shared across pipeline stages.
+
+Invocation-argument serialization for the adapter renderers, tree indexing
+for reconciliation, and the validation-failure error the compilation roots
+in :mod:`lup.adapters.harness` raise.
+"""
 
 import json
 

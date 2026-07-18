@@ -1,10 +1,14 @@
 # lup: ignore[empty-collection, import-re, re-call, set-shape, string-split, tuple-shape]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
-"""Hermetic semantic policy kernel shared by library and generated runtimes.
+"""Hermetic decision core: shell, fetch, and edit verdicts over primitive rows.
 
-Canonical source: packages/lup/src/lup/policy/kernel.py, copied verbatim into
-each plugin's hooks/runtime/ by `uv run lup-devtools harness generate all` —
-edit it there.
+The one place permission logic lives. :mod:`lup.policy.rules` delegates every
+library-side verdict here. The canonical source is
+``packages/lup/src/lup/policy/kernel.py``; :mod:`lup.policy.bundle` reads it
+verbatim so harness generation can ship it as ``hooks/runtime/kernel.py`` in
+each native plugin. Generated dispatchers call it without lup installed, and
+both homes decide identically because both run this source. To stay copyable
+it imports only a pinned stdlib set and no other lup module.
 """
 
 import ast

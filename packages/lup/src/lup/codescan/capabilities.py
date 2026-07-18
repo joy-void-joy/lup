@@ -1,6 +1,13 @@
 # lup: ignore[dict-str-payload, set-shape, empty-collection, string-split]
 # Symbol tables, graph sets, and qualified-name parsing are this AST rule's domain.
-"""Project-wide AST enforcement for Lup capability ABC composition."""
+"""Project-wide AST enforcement for Lup capability ABC composition.
+
+Audits every resolved project import for the ``abc-capability`` shape
+described in ``docs/architecture.md``: one narrow capability per ABC, no
+concrete behavior, no multiple inheritance. The ``lup-devtools dev check
+--antipatterns`` auditor runs :func:`audit_capabilities` across the tree; the
+anti-pattern registry re-exports the rule id so deny messages name it.
+"""
 
 import ast
 from pathlib import Path, PurePosixPath

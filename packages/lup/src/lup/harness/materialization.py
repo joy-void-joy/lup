@@ -1,10 +1,25 @@
-"""Convergent ownership-safe artifact materialization."""
+"""The pipeline's final stage: apply one conflict-free proposal atomically.
+
+Re-verifies every proposed write and deletion against its recorded preimage,
+then replaces owned files atomically. Composed by the devtools generation
+flow through the ``Materializer`` seam; its ``MaterializationResult`` is
+defined here because materializers are the only producers.
+"""
 
 import hashlib
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
+
 from lup.harness.contracts import Materializer
-from lup.harness.models import MaterializationResult, ReconciliationProposal
+from lup.harness.reconciliation import ReconciliationProposal
+
+
+class MaterializationResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    changed: list[Path]
+    removed: list[Path]
 
 
 class MaterializationConflictError(RuntimeError):
