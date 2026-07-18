@@ -18,8 +18,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup.harness.materialization import MaterializationResult
-    from lup.harness.models import ArtifactTree, CapabilityEvidence, SkillInvocation
+    from lup.harness.models import (
+        ArtifactTree,
+        CapabilityEvidence,
+        PromptDocument,
+        SkillInvocation,
+    )
     from lup.harness.reconciliation import CurrentTree, ReconciliationProposal
+
 
 class ArtifactRenderer[S](ABC):
     """Render one cohesive artifact family."""
@@ -35,6 +41,14 @@ class SkillInvocationRenderer(ABC):
     @abstractmethod
     def render(self, invocation: SkillInvocation) -> str:
         """Render qualification, escaping, and arguments together."""
+
+
+class PromptRenderer(ABC):
+    """Own one native runtime's complete prompt-document spelling."""
+
+    @abstractmethod
+    def render(self, prompt: PromptDocument) -> str:
+        """Render every semantic prompt part into native prompt text."""
 
 
 class CurrentTreeReader(ABC):
