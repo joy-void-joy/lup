@@ -101,8 +101,8 @@ class CodexCapabilityProbe(CapabilityProbe[CodexCliEvidence]):
         self.executable = executable
 
     def probe(self) -> CapabilityEvidence[CodexCliEvidence]:
-        command = sh.Command(str(self.executable))
         try:
+            command = sh.Command(str(self.executable))
             output = str(command(*self.arguments))
         except (sh.CommandNotFound, sh.ErrorReturnCode):
             evidence = CodexCliEvidence(

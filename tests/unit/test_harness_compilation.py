@@ -801,3 +801,247 @@ def test_annotated_ownership_manifest_raises_a_typed_recovery_error(
 
     with pytest.raises(OwnershipManifestError, match="repair or remove"):
         load_manifest(path)
+
+
+def test_proven_obsolete_deletion_is_proposed_and_executed(tmp_path: Path) -> None:
+    obsolete = tmp_path / "obsolete.txt"
+    obsolete.write_text("stale output\n", encoding="utf-8")
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("obsolete.txt"),
+                content="stale output\n",
+                category="generated",
+                sha256=content_digest("stale output\n"),
+            )
+        ],
+    )
+
+    proposal = DeterministicReconciler().propose(current, ArtifactTree(artifacts=[]))
+    result = AtomicMaterializer().apply(proposal)
+
+    assert [delete.path for delete in proposal.deletes] == [Path("obsolete.txt")]
+    assert result.removed == [Path("obsolete.txt")]
+    assert not obsolete.exists()
+
+
+def test_deletion_with_changed_ownership_proof_is_refused(tmp_path: Path) -> None:
+    obsolete = tmp_path / "obsolete.txt"
+    obsolete.write_text("stale output\n", encoding="utf-8")
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("obsolete.txt"),
+                content="stale output\n",
+                category="generated",
+                sha256=content_digest("stale output\n"),
+            )
+        ],
+    )
+    proposal = DeterministicReconciler().propose(current, ArtifactTree(artifacts=[]))
+    obsolete.write_text("user edited after the proposal\n", encoding="utf-8")
+
+    with pytest.raises(MaterializationConflictError, match="ownership proof changed"):
+        AtomicMaterializer().apply(proposal)
+    assert obsolete.exists()
+
+
+def test_materialization_rejects_stale_executable_mode(tmp_path: Path) -> None:
+    path = tmp_path / "hook.py"
+    path.write_text("pass\n", encoding="utf-8")
+    path.chmod(0o644)
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("hook.py"),
+                content="pass\n",
+                category="generated",
+                sha256=content_digest("pass\n"),
+                executable=False,
+            )
+        ],
+    )
+    desired = ArtifactTree(
+        artifacts=[
+            Artifact(path=Path("hook.py"), content="updated\n", semantic_id="hook")
+        ]
+    )
+    proposal = DeterministicReconciler().propose(current, desired)
+    path.chmod(0o755)  # mode drift between proposal and apply
+
+    with pytest.raises(MaterializationConflictError, match="stale executable mode"):
+        AtomicMaterializer().apply(proposal)
+    assert path.read_text(encoding="utf-8") == "pass\n"
+
+
+@pytest.mark.parametrize(
+    ("patch", "message"),
+    [
+        (
+            "diff --git a/x.py b/x.py\ndiff --git a/y.py b/y.py\n--- a/y.py\n",
+            "missing its old-file header",
+        ),
+        ("diff --git a/x.py\n--- a/x.py\n", "malformed git source-patch header"),
+        ("diff --git x/a.py y/a.py\n--- x/a.py\n", "repository-relative"),
+        ("diff --git a/x.py b/x.py\n--- a/other.py\n", "does not match its diff"),
+        ("diff --git a/x.py b/x.py\n", "missing its old-file header"),
+        ("just prose\n", "no git file entries"),
+    ],
+    ids=[
+        "header-without-old-file",
+        "truncated-header",
+        "foreign-prefixes",
+        "mismatched-old-file",
+        "trailing-header",
+        "no-entries",
+    ],
+)
+def test_malformed_source_patches_are_rejected(
+    tmp_path: Path, patch: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        source_patch_base_digest(tmp_path, patch)
+
+
+def test_source_digest_rejects_symlinked_preimage_escape(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (outside / "file.py").write_text("secret\n", encoding="utf-8")
+    (root / "link").symlink_to(outside, target_is_directory=True)
+    patch = (
+        "diff --git a/link/file.py b/link/file.py\n"
+        "--- a/link/file.py\n"
+        "+++ b/link/file.py\n"
+    )
+
+    with pytest.raises(ValueError, match="escapes the repository"):
+        source_patch_base_digest(root, patch)
+
+
+def test_declared_sensitive_paths_are_classified_without_content(
+    tmp_path: Path,
+) -> None:
+    path = Path("secrets.env")
+    (tmp_path / path).write_text("API_KEY=hunter2\n", encoding="utf-8")
+
+    tree = FilesystemCurrentTreeReader(None, sensitive_local_only=[path]).read(tmp_path)
+
+    assert [(item.category, item.content) for item in tree.artifacts] == [
+        ("sensitive_local_only", "")
+    ]
+    assert tree.artifacts[0].sha256  # identity still proven for reconciliation
+
+
+def test_missing_root_reads_as_an_empty_tree(tmp_path: Path) -> None:
+    tree = FilesystemCurrentTreeReader(None).read(tmp_path / "ghost")
+
+    assert tree.artifacts == []
+
+
+def test_symlink_escaping_the_root_is_sensitive_and_unread(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("credential\n", encoding="utf-8")
+    (root / "escape.txt").symlink_to(secret)
+
+    tree = FilesystemCurrentTreeReader(None).read(root)
+
+    assert [(item.category, item.content, item.sha256) for item in tree.artifacts] == [
+        ("sensitive_local_only", "", "")
+    ]
+
+
+def test_binary_local_only_file_cannot_claim_local_preservation(
+    tmp_path: Path,
+) -> None:
+    path = Path("local.bin")
+    (tmp_path / path).write_bytes(b"\xff\xfe")
+
+    tree = FilesystemCurrentTreeReader(None, local_only=[path]).read(tmp_path)
+
+    assert tree.artifacts[0].category == "unknown_conflict"
+    assert tree.artifacts[0].content == ""
+
+
+def test_binary_owned_file_requires_explicit_reconciliation(tmp_path: Path) -> None:
+    path = Path("owned.md")
+    manifest = build_manifest(
+        portable_harness(),
+        ArtifactTree(
+            artifacts=[Artifact(path=path, content="text\n", semantic_id="owned")]
+        ),
+        generator_version="test",
+        target_requirements=[],
+    )
+    (tmp_path / path).write_bytes(b"\xff\xfe")
+
+    tree = FilesystemCurrentTreeReader(manifest, managed_paths=[path]).read(tmp_path)
+
+    assert tree.artifacts[0].category == "unknown_conflict"
+    assert tree.artifacts[0].content == ""
+
+
+def test_exact_content_adoption_still_corrects_executable_drift(
+    tmp_path: Path,
+) -> None:
+    content = "#!/bin/sh\n"
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("hook.sh"),
+                content=content,
+                category="unknown_conflict",
+                sha256=content_digest(content),
+                executable=False,
+            )
+        ],
+    )
+    desired = ArtifactTree(
+        artifacts=[
+            Artifact(
+                path=Path("hook.sh"),
+                content=content,
+                semantic_id="hook",
+                executable=True,
+            )
+        ]
+    )
+
+    proposal = DeterministicReconciler().propose(current, desired)
+
+    assert proposal.conflicts == []
+    assert [
+        (write.previous_sha256, write.previous_executable) for write in proposal.writes
+    ] == [(content_digest(content), False)]
+    assert proposal.writes[0].artifact.executable
+
+
+def test_proposal_rewrite_is_idempotent_but_tampering_refuses(tmp_path: Path) -> None:
+    source = tmp_path / "source.py"
+    source.write_text("old\n", encoding="utf-8")
+    patch = (
+        "diff --git a/source.py b/source.py\n"
+        "--- a/source.py\n"
+        "+++ b/source.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new"  # no trailing newline: the writer must normalize it
+    )
+
+    writer = ReconciliationProposalWriter()
+    record = writer.write(tmp_path, patch)
+    assert writer.write(tmp_path, patch) == record  # identical re-write is a no-op
+
+    patch_path = tmp_path / ".lup" / "reconcile" / record.proposal_id / "source.patch"
+    assert patch_path.read_text(encoding="utf-8").endswith("\n")
+    patch_path.write_text("tampered\n", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="collision"):
+        writer.write(tmp_path, patch)
