@@ -49,6 +49,9 @@ from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
+from lup_template.devtools.harness.content.template_codex import (
+    DOCUMENT as TEMPLATE_CODEX,
+)
 from lup_template.devtools.harness.generate import (
     GenerationRecipe,
     claude_generation_recipe,
@@ -106,6 +109,37 @@ def test_claude_tree_renders_every_typed_support_document() -> None:
     assert Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md") in paths
     assert Path(".claude/plugins/lup/scripts/file_suggest.sh") in paths
     assert Path(".claude/settings.json") in paths
+
+
+def test_codex_tree_renders_the_agents_flavored_template() -> None:
+    paths = {
+        artifact.path
+        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+    }
+
+    assert Path(".codex/plugins/lup/TEMPLATE_AGENTS.md") in paths
+
+
+def test_template_flavors_share_sections_and_differ_natively() -> None:
+    claude_render = ClaudePromptRenderer(ClaudeSkillInvocationRenderer()).render(
+        TEMPLATE_CLAUDE
+    )
+    codex_render = CodexPromptRenderer(CodexSkillInvocationRenderer()).render(
+        TEMPLATE_CODEX
+    )
+
+    def sections(render: str) -> list[str]:
+        return [
+            line for line in render.splitlines() if line.startswith("<!-- section: ")
+        ]
+
+    assert sections(claude_render)[0] == "<!-- section: CLAUDE.md -->"
+    assert sections(codex_render)[0] == "<!-- section: AGENTS.md -->"
+    assert sections(claude_render)[1:] == sections(codex_render)[1:]
+    assert "/lup:init" in claude_render and "$lup:" not in claude_render
+    assert "$lup:init" in codex_render and "/lup:" not in codex_render
+    assert "AskUserQuestion" in claude_render
+    assert "AskUserQuestion" not in codex_render
 
 
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
@@ -205,7 +239,7 @@ def test_typed_content_package_has_expected_module_inventory() -> None:
     content = Path("src/lup_template/devtools/harness/content")
     sources = list(content.rglob("*.py"))
 
-    assert len(sources) == 45
+    assert len(sources) == 46
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:
