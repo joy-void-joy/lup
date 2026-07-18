@@ -11,7 +11,7 @@ import hashlib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from lup.harness.models import ArtifactTree, Harness
 
@@ -50,6 +50,10 @@ def content_digest(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+class OwnershipManifestError(RuntimeError):
+    """Persisted ownership proof cannot be decoded as its schema."""
+
+
 def source_digest(source: Harness) -> str:
     """Hash canonical declarations independently from rendered native output."""
     encoded = source.model_dump_json(exclude_none=True)
@@ -86,7 +90,13 @@ def load_manifest(path: Path) -> OwnershipManifest | None:
     """Load prior ownership proof if it exists."""
     if not path.exists():
         return None
-    return OwnershipManifest.model_validate_json(path.read_text(encoding="utf-8"))
+    try:
+        return OwnershipManifest.model_validate_json(path.read_text(encoding="utf-8"))
+    except ValidationError as error:
+        raise OwnershipManifestError(
+            f"ownership manifest at {path} cannot be decoded; repair or remove "
+            "it, then regenerate"
+        ) from error
 
 
 def save_manifest(path: Path, manifest: OwnershipManifest) -> None:
