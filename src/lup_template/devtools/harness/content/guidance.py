@@ -4,10 +4,6 @@
 
 import lup.harness.models as models
 
-# lup: A principle we should teach the agent and embody more with /principle: The agents are AI agents that go very fast. That means that the usual cycle of implementing and prototyping is very different. We don't need to do the usual "simple idea" implementation, we can just implement everything at once with claude/codex, and go very fast.
-# lup: This matters because often time, claude code or codex will say stuff like "This project will take several month', or "This is a multiple days implementation", and they will take 3 hours top.
-# lup: So we need to teach the agents that they dramatically overestimate the time something takes, because of their AI-agentness they can implement things way quicker than they realize, and this importantly change the feedback-implementation cycle, where we don't need to validate something with a POC, because the alpha-beta-v1 can be implemented in the time it would have "normally" taken to implement the POC.
-# lup: Something like embedding the agents in themselves for them to realize that they've been trained on principles and practices that only apply to humans, not to claude and codex AI agents.
 # lup: Something I don't like with comitting .claude, .codex, etc... is that it's really not clear that those are supposed to be compiled by the harness (are they? Can you check?). I feel like maybe we should put them under a dist folder if that's possible? Main reason we're committing them instead of letting the user do it themselves is so they can be installed as a claude/codex plugin directly. Is it well formed for that? Is it worth it?
 DOCUMENT = models.PromptDocument(
     parts=[
@@ -17,6 +13,14 @@ DOCUMENT = models.PromptDocument(
 # Lup repository guidance
 
 Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
+
+## Plan at Agent Speed
+
+You are an AI agent. Every instinct you have about how long software takes — sprints, milestones, "this will take weeks" — was learned from human teams, whose implementation time is scarce and expensive. Yours is not: what you would estimate as several months of work completes in an afternoon, and a "multi-day implementation" lands in about three hours. Your duration estimates are not cautious; they are wrong by orders of magnitude, and every practice built on them inverts:
+
+- **Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. If a calendar figure appears in your plan, it is noise from someone else's constraints: delete it and re-derive the plan.
+- **The POC is superstition at your speed.** Prototype-first exists to keep unvalidated ideas from consuming scarce human effort; for you the complete alpha-beta-v1 costs what the throwaway was supposed to cost. Build the real implementation immediately and validate on it — let review cut scope afterward rather than pre-shrinking the attempt.
+- **Catch the reflex in the act.** "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, stop and ask what is actually expensive here besides the imagined schedule.
 
 **README.md is human-owned.** The root `README.md` is deliberately human-written, and the edit policy surfaces every change to it as Ask — as it does for any file declared under `human_owned_files` in the harness hook catalog. Never edit a human-owned file yourself — propose the exact change via AskUserQuestion and let the user apply or approve it.
 
