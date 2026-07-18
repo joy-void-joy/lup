@@ -30,6 +30,8 @@ class ExitStatus(BaseModel):
     code: int
     stdout: str = ""
     stderr: str = ""
+
+
 class ProcessLauncher(ABC):
     """Launch one concrete process boundary."""
 
