@@ -56,4 +56,6 @@ require a clean diff.
 See `docs/adopter-guide.md` for complete skill, fetch-policy, conflict, and
 source-patch reconciliation walkthroughs. The one-time reviewed differences
 from the retired native catalog are recorded in
-`docs/typed-content-migration-audit.md`.
+`docs/typed-content-migration-audit.md`. `docs/platform-differentiation.md`
+maps every intended Claude/Codex difference and records the parity decision
+for each generated artifact family.
