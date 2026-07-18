@@ -4,7 +4,12 @@
 
 import lup.harness.models as models
 
-# lup: Something I don't like with comitting .claude, .codex, etc... is that it's really not clear that those are supposed to be compiled by the harness (are they? Can you check?). I feel like maybe we should put them under a dist folder if that's possible? Main reason we're committing them instead of letting the user do it themselves is so they can be installed as a claude/codex plugin directly. Is it well formed for that? Is it worth it?
+from lup_template.devtools.harness.content.catalog import (
+    agent_roster_text,
+    skill_roster_parts,
+)
+from lup_template.devtools.subapps import subapp_summary
+
 DOCUMENT = models.PromptDocument(
     parts=[
         models.TextPart(
@@ -270,8 +275,17 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
-Sub-apps: `agent`, `dev`, `feedback`, `harness`, `py`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
-
+"""
+        ),
+        models.TextPart(
+            text="Sub-apps: "
+            + subapp_summary()
+            + ". Run `uv run lup-devtools --help` for the full command tree — the"
+            " list above is rendered from the typed sub-app roster in"
+            " `src/lup_template/devtools/subapps.py`.\n"
+        ),
+        models.TextPart(
+            text=r"""
 `lup-devtools harness claude` and `harness codex` regenerate, reconcile, and
 launch the native plugins. `lup-devtools usage` reports Claude usage. Profiles
 (named Claude config dirs) are managed with `lup-devtools setup profile`.
@@ -281,6 +295,24 @@ verified local plugin directory; Codex installs a separately cached copy and
 verifies its digest before launch. Personal cache and trust state are never
 committed.
 
+### Lup Skills & Agents
+
+Both lists below are rendered from the typed declarations in
+`src/lup_template/devtools/harness/content/catalog.py` — change the catalog,
+then regenerate.
+
+**Skills:**
+
+"""
+        ),
+        *skill_roster_parts(),
+        models.TextPart(
+            text=r"""
+**Agents:**
+
+"""
+            + agent_roster_text()
+            + r"""
 ### Permission Hooks
 
 Permissions come from the canonical semantic policies in `lup.policy` and the

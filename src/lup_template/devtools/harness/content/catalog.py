@@ -1,5 +1,7 @@
 """Explicit aggregation of canonical harness content declarations."""
 
+import lup.harness.models as models
+
 from lup_template.devtools.harness.content.skills.add_command import (
     SKILL as SKILL_ADD_COMMAND,
 )
@@ -121,4 +123,22 @@ AGENTS = [
     AGENT_VERSION_REVIEWER,
 ]
 
-# lup: For instance, the CLAUDE.md and AGENTS.md could generate their tool list programatically now
+def skill_roster_parts() -> list[models.PromptPart]:
+    """Format the declared skills as portable bullet-list document parts."""
+    return [
+        part
+        for skill in sorted(SKILLS, key=lambda skill: skill.name)
+        for part in (
+            models.TextPart(text="- "),
+            models.SkillInvocation(plugin="lup", skill=skill.name),
+            models.TextPart(text=f" — {skill.description}\n"),
+        )
+    ]
+
+
+def agent_roster_text() -> str:
+    """Format the declared agents as Markdown bullet lines."""
+    return "".join(
+        f"- `{agent.name}` — {agent.description}\n"
+        for agent in sorted(AGENTS, key=lambda agent: agent.name)
+    )
