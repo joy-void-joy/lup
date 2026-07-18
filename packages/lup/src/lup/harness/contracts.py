@@ -1,4 +1,4 @@
-"""Narrow harness, artifact, diagnostic, and process capabilities."""
+"""Narrow harness, artifact, and diagnostic capabilities."""
 
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -7,12 +7,9 @@ from lup.harness.models import (
     ArtifactTree,
     CapabilityEvidence,
     CurrentTree,
-    ExitStatus,
-    LaunchRequest,
     MaterializationResult,
     ReconciliationProposal,
     SkillInvocation,
-    ValidationResult,
 )
 
 # lup: Isn't that mainly for resolve? Shouldn't it go there? Or what are we using those ABC for? It's not clear from code+file position
@@ -24,14 +21,6 @@ class ArtifactRenderer[S](ABC):
     @abstractmethod
     def render(self, source: S) -> ArtifactTree:
         """Render source into a complete in-memory artifact tree."""
-
-
-class ArtifactValidator(ABC):
-    """Validate a complete in-memory artifact tree."""
-
-    @abstractmethod
-    def validate(self, tree: ArtifactTree) -> ValidationResult:
-        """Return every deterministic validation issue."""
 
 
 class SkillInvocationRenderer(ABC):
@@ -74,11 +63,3 @@ class CapabilityProbe[C](ABC):
     @abstractmethod
     def probe(self) -> CapabilityEvidence[C]:
         """Return evidence without invoking an unsupported operation."""
-
-
-class ProcessLauncher(ABC):
-    """Launch one concrete process boundary."""
-
-    @abstractmethod
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        """Launch with typed arguments and environment."""

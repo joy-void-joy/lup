@@ -7,7 +7,15 @@ SKILL = models.Skill(
     name="fb-implement",
     description="Implement prioritized changes from feedback loop analysis",
     tools=[
-        "Bash(git:*, uv run lup-devtools:*, uv run lup:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, WebSearch, WebFetch"
+        "Bash(git:*, uv run lup-devtools:*, uv run lup:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "AskUserQuestion",
+        "WebSearch",
+        "WebFetch",
     ],
     prompt=models.PromptDocument(
         parts=[

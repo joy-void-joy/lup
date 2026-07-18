@@ -8,9 +8,9 @@ never imports from SDK packages directly. The hook vocabulary lives in
 """
 
 from collections.abc import Callable, Sequence
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +42,58 @@ type Decorator[T, R] = Callable[[T], R]
 at a signature (``-> Decorator[Handler, Tool]``) where a bare ``Callable`` of
 a callable reads as noise. ``R`` need not be ``T`` — a decorator may return a
 different type than it wraps (a builder, a registration object)."""
+
+
+# ---------------------------------------------------------------------------
+# Tool vocabulary
+# ---------------------------------------------------------------------------
+
+type KnownToolName = Literal[
+    "Agent",
+    "AskUserQuestion",
+    "Bash",
+    "BashOutput",
+    "Edit",
+    "ExitPlanMode",
+    "Glob",
+    "Grep",
+    "KillShell",
+    "ListMcpResources",
+    "MultiEdit",
+    "NotebookEdit",
+    "Read",
+    "ReadMcpResource",
+    "Skill",
+    "SlashCommand",
+    "StructuredOutput",
+    "Task",
+    "TodoWrite",
+    "WebFetch",
+    "WebSearch",
+    "Workflow",
+    "Write",
+]
+"""The well-known built-in tool names — the framework's lingua franca.
+
+Claude Code's tool vocabulary is adopted as the neutral spelling: adapters
+translate their backend's native tool identities onto these names, so hooks,
+policies, and harness declarations all read one vocabulary."""
+
+type McpToolName = Annotated[
+    str, StringConstraints(pattern=r"^mcp__[A-Za-z0-9_-]+(?:__[A-Za-z0-9_-]+)*$")
+]
+"""A dynamically registered MCP tool: ``mcp__<server>`` or ``mcp__<server>__<tool>``."""
+
+type ToolName = KnownToolName | McpToolName
+"""One tool identity: a well-known built-in or a registered ``mcp__*`` tool."""
+
+type ScopedToolGrant = Annotated[
+    str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_]*\([^()]+\)$")
+]
+"""A tool grant narrowed by a parenthesized specifier, e.g. ``Bash(git:*)``."""
+
+type ToolGrant = ToolName | ScopedToolGrant
+"""One entry of a declared tool grant list: a whole tool or a scoped rule."""
 
 
 # ---------------------------------------------------------------------------

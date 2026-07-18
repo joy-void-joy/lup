@@ -6,7 +6,7 @@ SKILL = models.Skill(
     id="skill.commit",
     name="commit",
     description="Review all diffs and create atomic commits",
-    tools=["Bash(git:*), Read, Glob, Grep"],
+    tools=["Bash(git:*)", "Read", "Glob", "Grep"],
     prompt=models.PromptDocument(
         parts=[
             models.TextPart(

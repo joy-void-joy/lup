@@ -16,7 +16,14 @@ SKILL = models.Skill(
         ),
     ],
     tools=[
-        "Bash(ls:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, Agent, AskUserQuestion"
+        "Bash(ls:*, uv run lup-devtools:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "Agent",
+        "AskUserQuestion",
     ],
     prompt=models.PromptDocument(
         parts=[
