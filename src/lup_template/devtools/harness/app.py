@@ -575,7 +575,7 @@ def resolve_command(
                         InventoryNote(
                             file=Path(comment.file),
                             line=comment.start_line,
-                            text=comment.text,
+                            text=comment.marker_text(),
                             context=comment.context,
                         )
                         for comment in comments
