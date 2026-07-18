@@ -15,7 +15,6 @@ from pydantic import BaseModel, ConfigDict
 
 from lup.adapters.harness import compile_claude, compile_codex
 from lup.adapters.claude.harness import (
-    CLAUDE_RESOLVER_ENTRY,
     ClaudePromptRenderer,
     ClaudeSkillInvocationRenderer,
 )
@@ -125,7 +124,7 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
     content_root = Path(__file__).parent / "content"
     resolver_entry = Artifact(
         path=Path(".claude/workflows/commands/resolve.js"),
-        content=CLAUDE_RESOLVER_ENTRY,
+        content=(content_root / "assets" / "resolve.js").read_text(encoding="utf-8"),
         semantic_id="resolver.lup.entry",
     )
     support_artifacts = [
