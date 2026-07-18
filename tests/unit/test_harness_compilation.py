@@ -33,7 +33,13 @@ from lup.harness.models import (
     SkillInvocation,
     TextPart,
 )
-from lup.harness.ownership import build_manifest, content_digest, save_manifest
+from lup.harness.ownership import (
+    OwnershipManifestError,
+    build_manifest,
+    content_digest,
+    load_manifest,
+    save_manifest,
+)
 from lup.harness.proposals import ReconciliationProposalWriter
 from lup.harness.reconciliation import (
     CurrentArtifact,
@@ -730,3 +736,24 @@ def test_unchanged_ownership_manifest_is_not_replaced(tmp_path: Path) -> None:
     save_manifest(path, manifest)
 
     assert path.stat().st_ino == inode
+
+
+def test_annotated_ownership_manifest_raises_a_typed_recovery_error(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / ".lup-ownership.json"
+    assert load_manifest(path) is None
+    manifest = build_manifest(
+        portable_harness(),
+        ArtifactTree(artifacts=[]),
+        generator_version="test",
+        target_requirements=[],
+    )
+    save_manifest(path, manifest)
+    assert load_manifest(path) == manifest
+
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("# a trailing annotation\n")
+
+    with pytest.raises(OwnershipManifestError, match="repair or remove"):
+        load_manifest(path)

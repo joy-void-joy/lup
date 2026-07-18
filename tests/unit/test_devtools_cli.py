@@ -20,6 +20,7 @@ from typer.testing import CliRunner
 
 from lup_template.devtools.dev import pr
 from lup_template.devtools.main import app
+from lup_template.devtools.sync import load_json
 
 runner = CliRunner()
 
@@ -125,3 +126,15 @@ def test_merge_prints_text_result_when_tree_dir_lookup_exits(
     out = capsys.readouterr().out
     assert "merged: True" in out
     assert "integration_branch: dev" in out
+
+
+def test_annotated_downstream_config_raises_a_typed_recovery_error(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "downstream.json"
+    assert load_json(path) == {"projects": []}
+
+    path.write_text('{"projects": []}\n# a trailing annotation\n', encoding="utf-8")
+
+    with pytest.raises(typer.BadParameter, match="not valid JSON"):
+        load_json(path)

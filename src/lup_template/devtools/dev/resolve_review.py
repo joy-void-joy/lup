@@ -85,7 +85,10 @@ def load_manifest(path: Path) -> list[ManifestEntry]:
     ``{"manifest": [...]}``, and the task-output envelope
     ``{"result": {"manifest": [...]}}``.
     """
-    parsed = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise typer.BadParameter(f"{path} is not valid JSON: {e}") from e
     match parsed:
         case list():
             raw = parsed
