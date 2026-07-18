@@ -13,8 +13,12 @@ uv run lup-devtools harness resolve --adapter codex
 ```
 
 `--run-id` selects a stable run for explicit recovery. Without it, the command
-uses the current source commit. The generated Claude workflow and Codex skill
-only launch these composition roots; they contain no resolver phases.
+uses the current source commit. `--accept`/`--reject` records the human
+decision on a run awaiting acceptance. The generated Claude workflow and Codex
+skill only launch these composition roots; they contain no resolver phases.
+The Claude workflow forwards the same contract as
+`{"run_id": …, "accept": …}` workflow args; Codex, which has no workflow
+mechanism, invokes the command directly.
 
 State lives at `<state-root>/<run-id>/` as an atomic schema-versioned
 `state.json` plus concerns, questions, answers, leases, dependency bases,
