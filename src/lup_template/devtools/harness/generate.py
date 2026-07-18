@@ -1,4 +1,11 @@
-"""Ownership-safe generation shared by explicit native CLI entry points."""
+"""Ownership-safe generation engine beneath the harness CLI.
+
+Recipes compose the desired native tree for one target from the ``catalog``
+declarations; inspection reconciles that tree against the working copy
+without writing; generation materializes the reconciled proposal atomically
+and refreshes the ownership manifest. Console-facing command bodies live in
+``drift`` and ``reconcile``.
+"""
 
 import json
 from pathlib import Path

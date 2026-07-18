@@ -15,6 +15,19 @@ ordered typed parts. A
 `SkillInvocationRenderer` owns the complete native invocation spelling; shared
 code never rewrites `/lup:` into another prefix.
 
+Each module in `src/lup_template/devtools/harness/` owns one subapp concern:
+
+- `app.py` — typer command wiring only; every body lives elsewhere
+- `catalog.py` — declaration-graph root assembling `content/` into a `Harness`
+- `content/` — the declaration leaves (skills, agents, documents, assets)
+- `composition.py` — composition roots wiring concrete Claude/Codex capabilities
+- `generate.py` — recipes, drift inspection, and atomic materialization
+- `drift.py` — console drift reporting for `generate` and `check`
+- `reconcile.py` — drift classification and the source-patch propose/apply flow
+- `doctor.py` — runtime evidence reporting against the `evidence.py` ledger
+- `resolve.py` — persisted-resolver glue: broker, snapshots, session factories
+- `launch.py` — runtime preflight and the native `claude`/`codex` launchers
+
 Concrete renderers build independent artifact families. Tree builders compose
 them, then validators check the result. Generate and launch with:
 

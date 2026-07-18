@@ -1,0 +1,112 @@
+"""Native launch flows: runtime preflight, then the Claude and Codex launchers.
+
+Each launcher regenerates its target's artifacts, verifies every claimed
+native requirement against a live probe, and hands the terminal to the
+native CLI with the non-interactive environment applied.
+"""
+
+import os
+from pathlib import Path
+
+import sh
+import typer
+
+from lup.adapters.claude.profile_store import ClaudeProfileStore
+from lup.adapters.codex.harness_runtime import (
+    CodexPluginInstaller,
+    PluginCacheConfig,
+)
+from lup.harness.environment import non_interactive_environment
+from lup.workspace.paths import project_root
+from lup_template.devtools.harness.composition import (
+    NativeHarnessComposition,
+    claude_composition,
+    codex_composition,
+)
+from lup_template.devtools.harness.drift import generate_with_report
+
+
+def runtime_preflight(composition: NativeHarnessComposition) -> None:
+    """Verify each claimed native requirement immediately before launch."""
+    target = composition.recipe.label
+    evidence = composition.readiness()
+    for item in evidence:
+        state = "ready" if item.supported else "missing"
+        typer.echo(f"{target} {item.capability}: {state} ({item.version})")
+    if any(not item.supported for item in evidence):
+        raise typer.BadParameter(f"{target} runtime preflight failed")
+
+
+def launch_claude(
+    extra_args: list[str],
+    profile: str | None,
+    model: str | None,
+    generate_only: bool,
+) -> None:
+    """Generate/reconcile Claude artifacts and launch the verified local plugin."""
+    composition = claude_composition(project_root())
+    generate_with_report(composition)
+    if generate_only:
+        return
+    runtime_preflight(composition)
+    arguments: list[str] = []
+    if model is not None:
+        arguments.extend(["--model", model])
+    arguments.extend(
+        [
+            "--plugin-dir",
+            str(project_root() / ".claude" / "plugins" / "lup"),
+            *extra_args,
+        ]
+    )
+    environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
+    if profile is not None:
+        environment["CLAUDE_CONFIG_DIR"] = str(
+            ClaudeProfileStore().resolve_config_dir(profile)
+        )
+    try:
+        sh.Command("claude")(*arguments, _fg=True, _env=environment)
+    except sh.CommandNotFound as error:
+        raise typer.BadParameter("Claude Code CLI is not installed") from error
+    except sh.ErrorReturnCode as error:
+        raise typer.Exit(error.exit_code) from error
+
+
+def launch_codex(
+    extra_args: list[str],
+    codex_home: Path | None,
+    profile: str | None,
+    model: str | None,
+    generate_only: bool,
+    force_install: bool,
+) -> None:
+    """Generate/reconcile Codex artifacts and launch without updating the CLI."""
+    composition = codex_composition(project_root())
+    generate_with_report(composition)
+    if generate_only:
+        return
+    runtime_preflight(composition)
+    environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
+    configured_home = environment["CODEX_HOME"] if "CODEX_HOME" in environment else None
+    selected_home = codex_home or (
+        Path(configured_home) if configured_home is not None else Path.home() / ".codex"
+    )
+    cache = CodexPluginInstaller(PluginCacheConfig(codex_home=selected_home)).ensure(
+        project_root() / ".codex" / "plugins" / "lup",
+        project_root(),
+        force=force_install,
+    )
+    typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
+    arguments: list[str] = []
+    if profile is not None:
+        arguments.extend(["--profile", profile])
+    if model is not None:
+        arguments.extend(["--model", model])
+    arguments.extend(extra_args)
+    environment["CODEX_HOME"] = str(selected_home)
+    try:
+        sh.Command("codex")(*arguments, _fg=True, _env=environment)
+    except sh.CommandNotFound as error:
+        raise typer.BadParameter("Codex CLI is not installed") from error
+    except sh.ErrorReturnCode as error:
+        raise typer.Exit(error.exit_code) from error
