@@ -15,7 +15,7 @@ SKILL = models.Skill(
             required=False,
         ),
     ],
-    tools=["Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion"],
+    tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "AskUserQuestion"],
     argument_hint="[target-repo] [--interactive]",
     prompt=models.PromptDocument(
         parts=[

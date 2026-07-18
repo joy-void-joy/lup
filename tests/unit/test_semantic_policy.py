@@ -357,8 +357,9 @@ def test_native_decision_renderers_preserve_or_fail_closed_on_ask() -> None:
 def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:
     policy = FetchPolicy(
         allowed=[
-            UrlScope.model_validate(
-                {"origin": "https://docs.example.com", "path_prefix": "/reference/"}
+            UrlScope(
+                origin=AnyHttpUrl("https://docs.example.com"),
+                path_prefix="/reference/",
             )
         ],
         denied=[],
@@ -385,15 +386,14 @@ def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) ->
     assert spec is not None and spec.loader is not None
     bundled = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bundled)
-    scope = UrlScope.model_validate(
-        {"origin": "https://docs.example.com:8443", "path_prefix": "/reference/"}
+    scope = UrlScope(
+        origin=AnyHttpUrl("https://docs.example.com:8443"),
+        path_prefix="/reference/",
     )
-    denied_scope = UrlScope.model_validate(
-        {
-            "origin": "https://docs.example.com:8443",
-            "path_prefix": "/reference/private/",
-            "reason": "sensitive documentation path",
-        }
+    denied_scope = UrlScope(
+        origin=AnyHttpUrl("https://docs.example.com:8443"),
+        path_prefix="/reference/private/",
+        reason="sensitive documentation path",
     )
     policy = FetchPolicy(allowed=[scope], denied=[denied_scope])
     wire_scope = [runtime_url_scope(str(scope.origin), scope.path_prefix)]

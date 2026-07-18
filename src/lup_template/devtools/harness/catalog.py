@@ -13,6 +13,8 @@ documented surface.
 
 from pathlib import Path
 
+from pydantic import AnyHttpUrl
+
 from lup.harness.models import (
     Harness,
     HookSet,
@@ -40,19 +42,12 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         agents=AGENTS,
         hooks=HookSet(
             id="hooks.lup-policy",
-            policy_ids=[
-                "fetch",
-                "shell",
-                "edit",
-                "unknown-tool",
-            ],  # lup: Wait what's that? It's really not understandable just like that. Sounds like the BaseModel doesn't have legible fields
+            policy_ids=["fetch", "shell", "edit", "unknown-tool"],
             allowed_fetch=[
-                HookUrlScope.model_validate({"origin": "https://docs.claude.com"}),
-                HookUrlScope.model_validate({"origin": "http://docs.claude.com"}),
-                HookUrlScope.model_validate({"origin": "https://ai.pydantic.dev"}),
-                HookUrlScope.model_validate(
-                    {"origin": "http://ai.pydantic.dev"}
-                ),  # lup: Why use model_validate instead of the constructor directly?
+                HookUrlScope(origin=AnyHttpUrl("https://docs.claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("http://docs.claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("https://ai.pydantic.dev")),
+                HookUrlScope(origin=AnyHttpUrl("http://ai.pydantic.dev")),
             ],
             protected_edit_roots=[
                 Path(".claude"),

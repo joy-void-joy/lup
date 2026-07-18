@@ -9,7 +9,13 @@ SKILL = models.Skill(
     name="init",
     description="Initialize the self-improvement loop for a specific domain",
     tools=[
-        "Bash(uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*), Read, Grep, Glob, Edit, Write, AskUserQuestion"
+        "Bash(uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "AskUserQuestion",
     ],
     prompt=models.PromptDocument(
         parts=[

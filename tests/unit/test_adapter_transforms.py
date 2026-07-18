@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import AnyHttpUrl, SecretStr
 
 from lup.adapters.claude.config import (
     ClaudeCompatibilityTransform,
@@ -55,12 +56,10 @@ def test_claude_profile_precedence_and_immutability(tmp_path: Path) -> None:
 def test_claude_compatible_endpoint_owns_auth_and_aliases() -> None:
     original = ClaudeSessionConfig(model="served-model", environment={"KEEP": "1"})
     transformed = ClaudeCompatibilityTransform(
-        ClaudeCompatibleEndpoint.model_validate(
-            {
-                "base_url": "http://localhost:8000/v1",
-                "api_key": "secret",
-                "auth_style": "api_key",
-            }
+        ClaudeCompatibleEndpoint(
+            base_url=AnyHttpUrl("http://localhost:8000/v1"),
+            api_key=SecretStr("secret"),
+            auth_style="api_key",
         )
     ).apply(original)
 
@@ -97,12 +96,10 @@ def test_codex_compatible_endpoint_uses_structured_provider_config(
 ) -> None:
     original = CodexSessionConfig(model="local", cwd=tmp_path)
     transformed = CodexCompatibilityTransform(
-        CodexCompatibleEndpoint.model_validate(
-            {
-                "identifier": "local_provider",
-                "base_url": "http://localhost:8000/v1",
-                "api_key": "secret",
-            }
+        CodexCompatibleEndpoint(
+            identifier="local_provider",
+            base_url=AnyHttpUrl("http://localhost:8000/v1"),
+            api_key=SecretStr("secret"),
         )
     ).apply(original)
 

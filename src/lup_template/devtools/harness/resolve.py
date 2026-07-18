@@ -13,10 +13,8 @@ from pathlib import Path
 import typer
 
 from lup.codescan.markers import find_feedback
-from lup.harness.contracts import ProcessLauncher
 from lup.harness.environment import non_interactive_environment
-from lup.harness.models import LaunchRequest
-from lup.harness.process import LocalProcessLauncher
+from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
 from lup.resolver.contracts import QuestionBroker
 from lup.resolver.core import ResolverCore
 from lup.resolver.models import (

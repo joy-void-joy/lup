@@ -6,7 +6,7 @@ SKILL = models.Skill(
     id="skill.close",
     name="close",
     description="Check PR review status, merge if approved, and clean up branches",
-    tools=["Bash(uv run lup-devtools:*), AskUserQuestion, Skill(lup:commit)"],
+    tools=["Bash(uv run lup-devtools:*)", "AskUserQuestion", "Skill(lup:commit)"],
     prompt=models.PromptDocument(
         parts=[
             models.TextPart(

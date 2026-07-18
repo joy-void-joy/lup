@@ -8,9 +8,14 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from lup.harness.contracts import ProcessLauncher, SkillInvocationRenderer
-from lup.harness.models import ExitStatus, LaunchRequest, ResolveSpec, SkillInvocation
-from lup.harness.process import LocalProcessLauncher
+from lup.harness.contracts import SkillInvocationRenderer
+from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.process import (
+    ExitStatus,
+    LaunchRequest,
+    LocalProcessLauncher,
+    ProcessLauncher,
+)
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
 from lup.resolver.contracts import QuestionBroker
 from lup.resolver.core import (

@@ -13,7 +13,7 @@ SKILL = models.Skill(
             required=False,
         ),
     ],
-    tools=["Read, Write, Edit, Glob, Grep, AskUserQuestion"],
+    tools=["Read", "Write", "Edit", "Glob", "Grep", "AskUserQuestion"],
     argument_hint="[name] [description]",
     prompt=models.PromptDocument(
         parts=[

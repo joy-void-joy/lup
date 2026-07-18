@@ -13,7 +13,7 @@ from lup.hooks import (
     LupHookOutput,
     LupHooksConfig,
 )
-from lup.types import JsonObject
+from lup.types import JsonObject, ToolName
 from lup.workspace.paths import extract_glob_dir
 
 if TYPE_CHECKING:
@@ -21,9 +21,7 @@ if TYPE_CHECKING:
     from claude_agent_sdk import types as claude_types
 
 
-def claude_hook_tool_path(
-    tool_name: str, tool_input: JsonObject
-) -> str:  # lup: Again, I'm not comfortable with name being a generic str instead of better typed
+def claude_hook_tool_path(tool_name: ToolName, tool_input: JsonObject) -> str:
     """Normalize a path-bearing Claude tool request for portable hooks."""
     match tool_name, tool_input:
         case ("Write" | "Edit" | "Read", {"file_path": path}):
