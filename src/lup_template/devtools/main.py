@@ -29,6 +29,7 @@ Examples::
 import typer
 
 from lup_template.devtools.agent import app as agent_app
+from lup_template.devtools.dashboard.app import app as dashboard_app
 from lup_template.devtools.py.app import app as py_app
 from lup_template.devtools.dev.app import app as dev_app
 from lup_template.devtools.feedback.app import app as feedback_app
@@ -48,6 +49,7 @@ app = typer.Typer(
 
 SUBAPP_TYPERS = {
     "agent": agent_app,
+    "dashboard": dashboard_app,
     "dev": dev_app,
     "feedback": feedback_app,
     "harness": harness_app,

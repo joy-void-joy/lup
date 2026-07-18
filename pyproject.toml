@@ -25,6 +25,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "fastapi>=0.139.0",
     "lup[claude,codex,docker]",
     "prompt-toolkit>=3.0.52",
     "pydantic-settings>=2.12.0",
@@ -32,6 +33,7 @@ dependencies = [
     "tomlkit>=0.15.0",
     "typer>=0.21.1",
     "tzlocal>=5.4.3",
+    "uvicorn[standard]>=0.49.0",
 ]
 
 [project.scripts]
@@ -58,6 +60,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "lup_template.devtools.dev" = ["*.css"]
+"lup_template.devtools.dashboard" = ["assets/*.html"]
 "lup_template.devtools.harness.content" = ["assets/*.js", "assets/*.sh"]
 
 [tool.lup]

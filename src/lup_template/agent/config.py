@@ -12,8 +12,6 @@ Usage:
     from lup_template.agent.config import settings
     print(settings.model)
 """
-# lup: please review the setup code in https://github.com/joy-void-joy/assistant/tree/dev and https://github.com/joy-void-joy/inkwell/tree/dev for setup workflow that should be present in those
-# We should also copy their UI patterns, and have lup host a dashboard
 
 import logging
 import os

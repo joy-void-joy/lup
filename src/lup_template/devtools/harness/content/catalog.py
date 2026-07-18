@@ -123,6 +123,7 @@ AGENTS = [
     AGENT_VERSION_REVIEWER,
 ]
 
+
 def skill_roster_parts() -> list[models.PromptPart]:
     """Format the declared skills as portable bullet-list document parts."""
     return [
