@@ -599,6 +599,32 @@ def test_generated_claude_hook_maps_agent_type_to_editor_autonomy() -> None:
     assert decision("lup:resolve-editor") == "allow"
 
 
+def test_generated_claude_hook_asks_for_human_owned_readme_edits() -> None:
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    payload = {
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": str(Path("README.md").resolve()),
+            "content": "# Rewritten by an agent\n",
+        },
+    }
+
+    def decision(agent_type: str | None) -> ClaudeHookDecision:
+        body = (
+            dict(payload)
+            if agent_type is None
+            else {**payload, "agent_type": agent_type}
+        )
+        result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
+        assert isinstance(result, sh.RunningCommand)
+        return ClaudeHookOutput.model_validate_json(result.stdout).hook_specific_output
+
+    assert decision(None).permission_decision == "ask"
+    autonomous = decision("resolve-editor")
+    assert autonomous.permission_decision == "ask"
+    assert "human-authored" in autonomous.permission_decision_reason
+
+
 def test_generated_codex_hook_fails_closed_for_unknown_tools() -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     result = sh.Command(str(script))(
