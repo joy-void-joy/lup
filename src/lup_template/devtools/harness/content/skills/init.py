@@ -125,12 +125,12 @@ This handles directory rename (`src/lup_template/` -> `src/<project>/`), import 
 
 ### After renaming:
 
-1. **Merge CLAUDE.md from template** -- Perform a section-level merge using `TEMPLATE_CLAUDE.md` (located at `.claude/plugins/lup/TEMPLATE_CLAUDE.md`):
-   1. Read `TEMPLATE_CLAUDE.md` and replace `<project>` placeholders with the actual project name
-   2. Read the existing `.claude/CLAUDE.md`
+1. **Merge the guidance file from its template** -- Perform a section-level merge into the platform guidance file using its matching template flavor: `.claude/CLAUDE.md` from `.claude/plugins/lup/TEMPLATE_CLAUDE.md` under Claude Code, the repository-root `AGENTS.md` from `.codex/plugins/lup/TEMPLATE_AGENTS.md` under Codex (merge both when the project commits both harness trees):
+   1. Read the template and replace `<project>` placeholders with the actual project name
+   2. Read the existing guidance file
    3. Use the `<!-- section: ... -->` markers in the template to identify independent merge units
-   4. Compare sections: for each marked section, check if the existing CLAUDE.md already has that section (by heading match)
-   5. Add missing sections from the template into the existing CLAUDE.md
+   4. Compare sections: for each marked section, check if the existing guidance file already has that section (by heading match)
+   5. Add missing sections from the template into the existing guidance file
    6. Leave existing sections untouched -- don't overwrite content the project already has
 
 2. **Initialize upstream sync**:

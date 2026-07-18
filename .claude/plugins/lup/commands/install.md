@@ -31,6 +31,7 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 - `.claude/plugins/lup/commands/*.md` — slash commands
 - `.claude/plugins/lup/agents/*.md` — agent definitions
 - `.claude/plugins/lup/TEMPLATE_CLAUDE.md` — CLAUDE.md template
+- `.codex/plugins/lup/TEMPLATE_AGENTS.md` — AGENTS.md template (Codex flavor of the same sections)
 
 ### Reusable Library Code
 
@@ -113,7 +114,7 @@ If the target repo uses (or will use) the Claude Agent SDK, the **self-improveme
 - **DevTools**: The full `lup-devtools` CLI (trace, feedback, dev, version, usage)
 - **Version tracking**: `[tool.lup] agent_version` in pyproject.toml + `lup-devtools version bump` for tracking agent behavior changes
 - **Commands**: `init`, `feedback-loop`, `bump`, `update` — the self-improvement workflow
-- **TEMPLATE_CLAUDE.md**: Section-level merge into the target's existing CLAUDE.md (add missing sections, leave existing ones)
+- **Template guidance**: Section-level merge into the target's existing guidance file — CLAUDE.md from TEMPLATE_CLAUDE.md, AGENTS.md from TEMPLATE_AGENTS.md (add missing sections, leave existing ones)
 
 When the target has Agent SDK code, adapt the scaffolding to wrap their existing agent — don't replace it. The lup patterns (trace logging, scoring, feedback collection) layer on top of whatever agent they already have.
 
@@ -166,7 +167,7 @@ Be conservative — only install what clearly adds value. Typical candidates (bu
 - **Plugin infrastructure**: plugin.json, hooks.json, settings.json (project-named marketplace + plugin enablement)
 - **Permission hooks** adapted to the target's ecosystem (its build tool, test runner, linter, doc URLs)
 - **Generic commands** that work in any repo (git workflow, CLAUDE.md maintenance, meta, refactor, etc.)
-- **CLAUDE.md**: Perform a **section-level merge** using `TEMPLATE_CLAUDE.md` (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`). Read the template, use the `<!-- section: ... -->` markers to identify independent merge units, adapt for the target's project name and ecosystem, then compare marked sections against the target's existing CLAUDE.md. Add sections that are missing; leave existing sections untouched. If no CLAUDE.md exists, create one from the adapted template.
+- **Guidance file**: Perform a **section-level merge** using the platform template — `TEMPLATE_CLAUDE.md` (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`) into the target's CLAUDE.md, or `TEMPLATE_AGENTS.md` (`.codex/plugins/lup/TEMPLATE_AGENTS.md`) into its AGENTS.md. Read the template, use the `<!-- section: ... -->` markers to identify independent merge units, adapt for the target's project name and ecosystem, then compare marked sections against the target's existing guidance file. Add sections that are missing; leave existing sections untouched. If no guidance file exists, create one from the adapted template.
 - **If Agent SDK detected**: Also install the self-improvement scaffolding — this is lup's core value. The feedback loop commands, lib utilities (trace, scoring, metrics, hooks, version), devtools CLI pattern, session/trace directory structure, downstream.json for sync. Adapt to layer on top of the target's existing agent, not replace it.
 
 **Constraints** in non-interactive mode:
@@ -225,7 +226,7 @@ For each item being installed:
 4. `.claude/plugins/lup/commands/` — selected commands
 5. `src/<project>/devtools/` — devtools CLI skeleton (if Python target, adapt import paths but keep `lup-devtools` as the CLI entry point name)
 6. `.claude/settings.json` — create or merge
-7. `.claude/CLAUDE.md` — section-level merge from TEMPLATE_CLAUDE.md (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
+7. The guidance file — section-level merge from its platform template: `.claude/CLAUDE.md` from TEMPLATE_CLAUDE.md, or `AGENTS.md` from TEMPLATE_AGENTS.md (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
 8. **Initialize upstream sync**: Run `uv run lup-devtools sync mark-synced lup` to baseline the sync state so `/lup:update` only shows commits after installation
 
 ## Phase 7: Verify & Report
