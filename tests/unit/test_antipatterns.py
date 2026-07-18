@@ -18,8 +18,8 @@ from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel import empty_collection_exempt_lines
 
 
-def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str, str]]:
-    return [(ap.id, ap.pattern.pattern, ap.message) for ap in patterns]
+def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str, str, str]]:
+    return [(ap.id, ap.pattern.pattern, ap.message, ap.context) for ap in patterns]
 
 
 def test_python_table_matches_generated_bundle() -> None:
@@ -131,6 +131,53 @@ def test_audit_keeps_foreign_ids_out_of_file_level_verdicts() -> None:
 def test_audit_skips_plain_comment_lines() -> None:
     findings = audit_text("# a comment mentioning Any in prose\n", PYTHON_ANTI_PATTERNS)
     assert findings == []
+
+
+def test_comment_context_covers_exactly_the_directive_rules() -> None:
+    """Only comment-directive rules scan comments; every other rule sees code."""
+    python_comment = {ap.id for ap in PYTHON_ANTI_PATTERNS if ap.context == "comment"}
+    ts_comment = {ap.id for ap in TS_ANTI_PATTERNS if ap.context == "comment"}
+    assert python_comment == {"type-ignore", "pyright-ignore", "noqa"}
+    assert ts_comment == {
+        "ts-ignore",
+        "ts-expect-error",
+        "ts-nocheck",
+        "eslint-disable",
+        "eslint-disable-block",
+        "tslint-disable",
+    }
+
+
+def test_audit_ignores_identifiers_quoted_in_trailing_comments() -> None:
+    # Prose in a trailing comment is comment text, not code: the token-masked
+    # code scan no longer false-positives on it as the raw line scan did.
+    clean = (
+        "x = compute()  # may return Any when unset\n"
+        "entry = lookup(key)  # like registry.get(key)\n"
+        "value = parse(raw)  # a tuple[int, str] semantically\n"
+    )
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_ignores_type_comment_prose() -> None:
+    # A legacy `# type: List[Any]` comment carries no `ignore` directive and
+    # is masked for code rules, so neither any-type nor typing-generics trips.
+    prose = "# type: List[Any] was this field's old shape\n"
+    assert audit_text(prose, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_catches_directive_comments_wherever_they_sit() -> None:
+    # Comment-context rules see comments intact: a standalone suppression
+    # comment line (pyright's ignore, flake8's noqa) is a directive to flag,
+    # not skippable prose. The noqa fixture is split so ruff's own
+    # line-oriented directive scan does not read this source as suppressed.
+    for line, rule_id in (
+        ("# pyright: ignore\n", "pyright-ignore"),
+        ("# " + "noqa\n", "noqa"),
+        ("x = 1  # type: ignore\n", "type-ignore"),
+    ):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert [(f.kind, f.rule_id) for f in findings] == [("missing", rule_id)], line
 
 
 # ── empty-collection AST refiner ──────────────────────────────────────────
