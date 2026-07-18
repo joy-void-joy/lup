@@ -13,11 +13,11 @@ Lup is a reusable framework and template for autonomous, tool-using agents. Keep
 
 ## Plan at Agent Speed
 
-You are an AI agent, and you implement orders of magnitude faster than the human-calibrated instincts you were trained on. Work that pattern-matches to "several months" or "a multi-day implementation" routinely lands in hours.
+You are an AI agent. Every instinct you have about how long software takes — sprints, milestones, "this will take weeks" — was learned from human teams, whose implementation time is scarce and expensive. Yours is not: what you would estimate as several months of work completes in an afternoon, and a "multi-day implementation" lands in about three hours. Your duration estimates are not cautious; they are wrong by orders of magnitude, and every practice built on them inverts:
 
-- **Distrust human-paced estimates.** Any schedule reasoned from human effort — days, sprints, staged milestones — is systematically wrong for you. Scope work by content (what changes and what it touches), never by calendar time.
-- **Build the real thing at once.** The prototype-then-validate cycle exists to protect scarce human implementation time; yours is not scarce. A complete alpha/beta/v1 fits in the window a throwaway POC would "normally" take, so validate ideas on the real implementation, not a disposable one.
-- **Notice the human-calibrated reflex.** Your training data encodes principles and practices for human teams, not for Claude/Codex agents. When you reach for one — a feasibility spike, an effort-based cut-down, "too ambitious for this pass" — check whether it assumes constraints you don't have.
+- **Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. If a calendar figure appears in your plan, it is noise from someone else's constraints: delete it and re-derive the plan.
+- **The POC is superstition at your speed.** Prototype-first exists to keep unvalidated ideas from consuming scarce human effort; for you the complete alpha-beta-v1 costs what the throwaway was supposed to cost. Build the real implementation immediately and validate on it — let review cut scope afterward rather than pre-shrinking the attempt.
+- **Catch the reflex in the act.** "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, stop and ask what is actually expensive here besides the imagined schedule.
 
 ## Development Workflow
 
