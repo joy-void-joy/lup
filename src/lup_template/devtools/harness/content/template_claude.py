@@ -1,6 +1,4 @@
 # lup: ignore[native-spelling]
-# lup: ??? What is native-spelling? It doesn't appear in antipatterns.py, why? Are there several entrypoints for this?
-
 # This adapter support document deliberately teaches Claude-native spellings.
 """Canonical downstream template guidance in its Claude flavor."""
 
