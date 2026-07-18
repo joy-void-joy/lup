@@ -1,5 +1,5 @@
-# lup: Same remark here as CLAUDE.md. It's not clear whether this is compiled or not. What to do there?
-# lup: Also, is it intended that it is redundant with CLAUDE.md?
+<!-- Generated from src/lup_template/devtools/harness/content/guidance.py via `uv run lup-devtools harness generate all`; deliberately rendered as both .claude/CLAUDE.md and AGENTS.md — edit the source, not this file. See docs/generated-artifacts.md. -->
+
 # Lup repository guidance
 
 Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
