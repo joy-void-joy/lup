@@ -1,9 +1,10 @@
-"""Validated canonical harness, prompt, artifact, and ownership models.
+"""Genuinely shared harness vocabulary: declarations and rendered artifacts.
 
-Placement policy: only models genuinely shared across the declaration graph —
-renderers, reconcilers, adapters, and devtools — live here. A type consumed by
-essentially one module lives next to that module instead (process launching in
-:mod:`lup.harness.process`, tree validation in :mod:`lup.harness.validation`).
+The canonical declaration graph (``Harness`` down to prompt parts) that the
+application declares and the adapter renderers, devtools generation flows, and
+resolver consume, plus the rendered ``Artifact``/``ArtifactTree`` and probe
+evidence shared by every pipeline stage. A model owned by one concern lives
+beside its managing module instead (see the package docstring).
 """
 
 from pathlib import Path, PurePosixPath
@@ -185,6 +186,13 @@ class HookSet(BaseModel):
     allowed_fetch: list[HookUrlScope] = Field(default_factory=list)
     denied_fetch: list[HookUrlScope] = Field(default_factory=list)
     protected_edit_roots: list[Path] = Field(default_factory=list)
+    human_owned_files: list[Path] = Field(
+        default_factory=list,
+        description=(
+            "Files whose content the human author owns; every edit is surfaced "
+            "as Ask so agents propose changes instead of applying them"
+        ),
+    )
 
 
 class ResolveSpec(BaseModel):
@@ -386,100 +394,3 @@ class CapabilityEvidence[C](BaseModel):
     supported: bool
     evidence: C
     version: str
-
-
-type OwnershipCategory = Literal[
-    "generated",
-    "backpropagation_candidate",
-    "local_only",
-    "sensitive_local_only",
-    "unknown_conflict",
-    "obsolete_generated",
-]
-
-
-class OwnedArtifact(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    category: OwnershipCategory
-    sha256: str
-    semantic_id: str
-    executable: bool = False
-
-
-class OwnershipManifest(BaseModel):
-    model_config = FROZEN
-
-    schema_version: int
-    generator_version: str
-    source_digest: str
-    target_requirements: list[str]
-    files: list[OwnedArtifact]
-
-
-class CurrentArtifact(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    content: str
-    category: OwnershipCategory
-    sha256: str
-    executable: bool = False
-
-
-class CurrentTree(BaseModel):
-    model_config = FROZEN
-
-    root: Path
-    artifacts: list[CurrentArtifact]
-
-
-class ProposedWrite(BaseModel):
-    model_config = FROZEN
-
-    artifact: Artifact
-    previous_sha256: str | None = None
-    previous_executable: bool | None = None
-
-
-class ProposedDelete(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    prior_ownership_sha256: str
-
-
-class ReconciliationConflict(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    category: OwnershipCategory
-    message: str
-    sensitive: bool = False
-
-
-class ReconciliationProposal(BaseModel):
-    model_config = FROZEN
-
-    id: str
-    root: Path
-    writes: list[ProposedWrite] = Field(default_factory=list)
-    deletes: list[ProposedDelete] = Field(default_factory=list)
-    conflicts: list[ReconciliationConflict] = Field(default_factory=list)
-    base_digest: str
-
-
-class MaterializationResult(BaseModel):
-    model_config = FROZEN
-
-    changed: list[Path]
-    removed: list[Path]
-
-
-class ReconciliationMetadata(BaseModel):
-    model_config = FROZEN
-
-    proposal_id: str
-    base_digest: str
-    source_patch_sha256: str

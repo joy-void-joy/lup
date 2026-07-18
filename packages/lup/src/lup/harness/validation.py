@@ -1,5 +1,11 @@
-"""The complete tree-validation boundary: issue and result models, the
-validator contract, and the deterministic implementation."""
+"""Whole-tree validation of a rendered artifact tree, plus its result types.
+
+Runs between rendering and reconciliation: the native compilation roots in
+:mod:`lup.adapters.harness` validate every complete tree and refuse to
+continue on any issue. ``ValidationResult`` is defined here because
+validators are the only producers; this module also owns the
+``ArtifactValidator`` seam they implement.
+"""
 
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -25,7 +31,6 @@ class ValidationResult(BaseModel):
     def valid(self) -> bool:
         return not self.issues
 
-
 class ArtifactValidator(ABC):
     """Validate a complete in-memory artifact tree."""
 
@@ -34,8 +39,6 @@ class ArtifactValidator(ABC):
         """Return every deterministic validation issue."""
 
 
-
-# lup: Same
 class DeterministicTreeValidator(ArtifactValidator):
     """Validate path uniqueness, ordering, identifiers, and normalized text."""
 

@@ -4,8 +4,13 @@ Each command delegates to the module owning its concern: ``drift`` for
 generation and checking, ``reconcile`` for local-difference workflows,
 ``doctor`` for runtime evidence, ``resolve`` for the persisted resolver,
 and ``launch`` for the native launchers.
+The generated plugins' permission policy is declared as data in
+:mod:`lup_template.devtools.harness.catalog` (``HookSet``: protected edit
+roots, fetch scopes, policy ids), decided by :mod:`lup.policy.kernel`, and
+materialized under ``.claude/plugins/lup/hooks/`` and
+``.codex/plugins/lup/hooks/`` (dispatcher script plus copied kernel and
+rendered data rows).
 """
-# lup: Wait, where is the generic hooks folder that specify what can be modified or not, and gets compiled to .claude/plugin/hooks/auto_allow_edit.py for instance?
 
 from pathlib import Path
 from typing import Annotated

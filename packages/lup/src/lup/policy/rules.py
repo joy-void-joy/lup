@@ -1,4 +1,12 @@
-"""Pydantic policy adapters over the dependency-free semantic kernel."""
+"""Library-side validated policies that erase into kernel rows to decide.
+
+Each policy (shell, fetch, edit) validates its configuration as pydantic
+surfaces — URL scopes, path rules, the canonical anti-pattern set — then
+flattens them into primitive rows and delegates every verdict to
+:mod:`lup.policy.kernel`. :mod:`lup.policy.bundle` performs the same erasure
+at generation time, which is how this layer and the generated dispatchers
+stay decision-identical; the shared fixture suite asserts exactly that.
+"""
 
 from pathlib import Path
 from typing import Literal

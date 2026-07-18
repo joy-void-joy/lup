@@ -47,3 +47,54 @@ submission cannot be represented as a successful typed result.
 Applications choose factories explicitly. Immutable `ModelRoute` values may
 select configured recipes, but model names never trigger optional SDK imports
 at module import time and unknown models fail closed.
+
+## Harness generation flow
+
+`lup-devtools harness generate|check|claude|codex` walks one pipeline from
+typed Python to launched native plugins:
+
+1. **Typed declarations** — `devtools/harness/content/` holds skill, agent,
+   and guidance declarations; `devtools/harness/catalog.py` composes them
+   with the application-owned `HookSet` into one canonical
+   `lup.harness.models.Harness`.
+2. **Renderers** — `lup.adapters.claude.harness` and
+   `lup.adapters.codex.harness` implement the `ArtifactRenderer` seams from
+   `lup.harness.contracts`; the compilation roots in `lup.adapters.harness`
+   compose them into a complete `ArtifactTree`.
+3. **Validation** — `lup.harness.validation` checks the whole rendered tree
+   (path uniqueness, ordering, identifiers, normalized text) and generation
+   refuses to continue on any issue.
+4. **Reconciliation** — `lup.harness.ownership` records which on-disk files
+   the generator owns; `lup.harness.reconciliation` classifies the current
+   tree under that proof and proposes writes, proven deletions, and explicit
+   conflicts. Local edits worth carrying back to canonical sources are
+   persisted as reviewable patches by `lup.harness.proposals`, never applied.
+5. **Materialization** — `lup.harness.materialization` re-verifies every
+   preimage and applies a conflict-free proposal atomically, then the
+   ownership manifest is saved.
+6. **Launch** — `lup.adapters.*.harness_runtime` probes native CLI
+   capabilities, and `lup.harness.process` launches the native CLI with the
+   non-interactive defaults from `lup.harness.environment`.
+
+## Permission policy flow
+
+The generated plugins enforce permissions without importing lup, yet decide
+identically to the library:
+
+1. **Canonical sources** — the `HookSet` in `devtools/harness/catalog.py`
+   (protected edit roots, allowed fetch scopes, policy ids) and the
+   anti-pattern rule set in `lup.codescan.antipatterns`.
+2. **Library layer** — `lup.policy.rules` validates those inputs as pydantic
+   surfaces and erases them into primitive rows; `lup.policy.kernel` — the
+   hermetic, stdlib-only decision core — computes every shell, fetch, and
+   edit verdict; `lup.policy.chain` composes policies deny-before-ask; the
+   adapters' `native` modules decode wire payloads into
+   `lup.policy.models` events and render decisions back.
+3. **Assembly** — `lup.policy.bundle` reads the kernel source verbatim and
+   renders the erased rows as data files; the adapter hook renderers emit
+   `hooks/hooks.json`, the dispatcher `hooks/scripts/policy.py`, and
+   `hooks/runtime/{kernel.py,policy_data.py}` under `.claude/plugins/lup/`
+   and `.codex/plugins/lup/`.
+4. **Equivalence** — the shared fixture suite runs the same cases through
+   the library policies and the assembled runtime and requires identical
+   verdicts.

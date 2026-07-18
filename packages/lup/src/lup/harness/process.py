@@ -1,5 +1,10 @@
-"""The complete process-launch boundary: request and status models, the
-launcher contract, and the concrete local implementation."""
+"""Local native-executable launching and its request/status vocabulary.
+
+Defines the ``ProcessLauncher`` seam and implements it for everything that
+must run a native CLI: devtools harness launch and doctor flows and the
+resolver's git and skill invocations. Its request and status models live here
+because launchers are their only producers.
+"""
 
 import os
 from abc import ABC, abstractmethod
@@ -25,8 +30,6 @@ class ExitStatus(BaseModel):
     code: int
     stdout: str = ""
     stderr: str = ""
-
-
 class ProcessLauncher(ABC):
     """Launch one concrete process boundary."""
 

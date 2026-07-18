@@ -12,8 +12,7 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.harness.models import ReconciliationMetadata
-from lup.harness.proposals import ReconciliationProposalWriter
+from lup.harness.proposals import ReconciliationMetadata, ReconciliationProposalWriter
 from lup.harness.reconciliation import source_patch_base_digest
 from lup.workspace.paths import project_root
 from lup_template.devtools.harness.composition import harness_compositions
