@@ -11,6 +11,10 @@ from lup.adapters.claude.harness import (
     ClaudePromptRenderer,
     ClaudeSkillInvocationRenderer,
 )
+from lup.adapters.codex.harness import (
+    CodexPromptRenderer,
+    CodexSkillInvocationRenderer,
+)
 from lup.harness.materialization import AtomicMaterializer
 from lup.harness.models import (
     Artifact,
@@ -31,6 +35,9 @@ from lup_template.devtools.harness.content.patterns import DOCUMENT as PATTERNS
 from lup_template.devtools.harness.content.settings import SETTINGS
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
+)
+from lup_template.devtools.harness.content.template_codex import (
+    DOCUMENT as TEMPLATE_CODEX,
 )
 
 
@@ -175,7 +182,21 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
 def codex_generation_recipe(root: Path) -> GenerationRecipe:
     """Compose the Codex renderers, reader, and ownership location."""
     source = portable_harness(root=root)
-    desired = compile_codex(source)
+    prompts = CodexPromptRenderer(CodexSkillInvocationRenderer())
+    support_artifacts = [
+        Artifact(
+            path=Path(".codex/plugins/lup/TEMPLATE_AGENTS.md"),
+            content=prompts.render(TEMPLATE_CODEX),
+            semantic_id="harness.template-guidance",
+        ),
+    ]
+    compiled = compile_codex(source)
+    desired = ArtifactTree(
+        artifacts=sorted(
+            [*compiled.artifacts, *support_artifacts],
+            key=lambda artifact: artifact.path.as_posix(),
+        )
+    )
     manifest_path = root / ".codex" / ".lup-ownership.json"
     prior = load_manifest(manifest_path)
     return GenerationRecipe(
