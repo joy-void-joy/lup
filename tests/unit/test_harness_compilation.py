@@ -46,6 +46,9 @@ from lup.harness.reconciliation import (
 )
 from lup.policy.bundle import policy_kernel_source
 from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.template_claude import (
+    DOCUMENT as TEMPLATE_CLAUDE,
+)
 from lup_template.devtools.harness.generate import (
     GenerationRecipe,
     claude_generation_recipe,
@@ -124,8 +127,7 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
         for artifact in compile_claude(harness).artifacts
     }
     codex = {
-        artifact.path: artifact.content
-        for artifact in compile_codex(harness).artifacts
+        artifact.path: artifact.content for artifact in compile_codex(harness).artifacts
     }
     command = claude[Path(".claude/plugins/lup/commands/resolve.md")]
     workflow = CLAUDE_RESOLVER_ENTRY
@@ -203,7 +205,7 @@ def test_typed_content_package_has_expected_module_inventory() -> None:
     content = Path("src/lup_template/devtools/harness/content")
     sources = list(content.rglob("*.py"))
 
-    assert len(sources) == 44
+    assert len(sources) == 45
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:
