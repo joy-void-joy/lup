@@ -29,6 +29,15 @@ You are an AI agent. Every instinct you have about how long software takes — s
 
 **README.md is human-owned.** The root `README.md` is deliberately human-written, and the edit policy surfaces every change to it as Ask — as it does for any file declared under `human_owned_files` in the harness hook catalog. Never edit a human-owned file yourself — propose the exact change via AskUserQuestion and let the user apply or approve it.
 
+## Agent Vocabulary
+
+Two kinds of delegated agents look alike and must not be conflated:
+
+- A **native subagent** ("subagent" for short) is dispatched by the harness: Claude Code's `Agent`/`Task` tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics.
+- A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool.
+
+Guidance that says "subagent" unqualified means the native kind. `.claude/PATTERNS.md` carries the full pattern catalog — subagent, nested, background, deferred tool schemas — and when to reach for each.
+
 ## Development Workflow
 
 ### Git Workflow
