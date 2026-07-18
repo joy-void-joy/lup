@@ -275,7 +275,7 @@ def run_resolve(adapter: str, run_id: str | None, human_decision: bool | None) -
                         InventoryNote(
                             file=Path(comment.file),
                             line=comment.start_line,
-                            text=comment.text,
+                            text=comment.marker_text(),
                             context=comment.context,
                         )
                         for comment in comments

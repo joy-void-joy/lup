@@ -8,7 +8,7 @@ from lup.codescan.markers import find_feedback
 
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
 from lup_template.devtools.dev.boundaries import scan_boundaries
-from lup_template.devtools.dev.comments import scan_tracked
+from lup_template.devtools.dev.comments import FoundComment, scan_tracked
 from lup_template.devtools.utils import git, uv
 
 
@@ -17,6 +17,31 @@ class CheckOutcome(BaseModel):
 
     name: str
     passed: bool
+
+
+def comments_gate_lines(found: list[FoundComment]) -> list[str]:
+    """The comments gate's FAIL header and detail lines.
+
+    Deferred notes keep the gate red — committed parked work stays visible
+    pressure — but their `deferred[<wake condition>]` lines render after the
+    unresolved ones, so the red is legible at a glance.
+    """
+    unresolved = [comment for comment in found if comment.kind != "defer"]
+    deferred = [comment for comment in found if comment.kind == "defer"]
+    counts = f"{len(unresolved)} unresolved"
+    if deferred:
+        counts += f", {len(deferred)} deferred"
+    lines = [f"claude comments: FAIL ({counts})"]
+    lines.extend(
+        f"  {comment.file}:{comment.start_line}-{comment.end_line}"
+        for comment in unresolved
+    )
+    lines.extend(
+        f"  deferred[{comment.condition}] "
+        f"{comment.file}:{comment.start_line}-{comment.end_line}"
+        for comment in deferred
+    )
+    return lines
 
 
 def run_checks(fix: bool, no_test: bool) -> None:
@@ -88,9 +113,8 @@ def run_checks(fix: bool, no_test: bool) -> None:
 
     found = scan_tracked(find_feedback)
     if found:
-        typer.echo(f"claude comments: FAIL ({len(found)} unresolved)")
-        for comment in found:
-            typer.echo(f"  {comment.file}:{comment.start_line}-{comment.end_line}")
+        for line in comments_gate_lines(found):
+            typer.echo(line)
         results.append(CheckOutcome(name="claude comments", passed=False))
     else:
         typer.echo("claude comments: ok")
