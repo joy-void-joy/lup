@@ -1,10 +1,14 @@
 # lup: ignore[empty-collection, import-re, re-call, set-shape, string-split, tuple-shape]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
-"""Hermetic semantic policy kernel shared by library and generated runtimes.
+"""Hermetic decision core: shell, fetch, and edit verdicts over primitive rows.
 
-Canonical source: packages/lup/src/lup/policy/kernel.py, copied verbatim into
-each plugin's hooks/runtime/ by `uv run lup-devtools harness generate all` —
-edit it there.
+The one place permission logic lives. :mod:`lup.policy.rules` delegates every
+library-side verdict here. The canonical source is
+``packages/lup/src/lup/policy/kernel.py``; :mod:`lup.policy.bundle` reads it
+verbatim so harness generation can ship it as ``hooks/runtime/kernel.py`` in
+each native plugin. Generated dispatchers call it without lup installed, and
+both homes decide identically because both run this source. To stay copyable
+it imports only a pinned stdlib set and no other lup module.
 """
 
 import ast
@@ -14,10 +18,20 @@ import re
 import shlex
 import tokenize
 import urllib.parse
+from typing import Literal
 
+type DecisionEffect = Literal["allow", "ask", "deny"]
+type PathRuleKind = Literal[
+    "exact",
+    "subtree",
+    "name_prefix",
+    "new_subtree",
+    "contains_part",
+    "new_devtools",
+]
 type UrlScopeRow = tuple[str, str, int | None, str, str]
-type PathRuleRow = tuple[str, str, str, bool]
-type AntiPatternRow = tuple[str, str, str]
+type PathRuleRow = tuple[PathRuleKind, str, str, bool]
+type AntiPatternRow = tuple[str, str, str, str]
 
 KERNEL_IMPORT_ALLOWLIST = (
     "ast",
@@ -26,6 +40,7 @@ KERNEL_IMPORT_ALLOWLIST = (
     "re",
     "shlex",
     "tokenize",
+    "typing",
     "urllib.parse",
 )
 SHELL_PUNCTUATION = ";&|<>\n"
@@ -76,10 +91,10 @@ FILE_IGNORE_RE = re.compile(
 class KernelDecision:
     """Dependency-free allow, ask, or deny result."""
 
-    effect: str
+    effect: DecisionEffect
     reason: str
 
-    def __init__(self, effect: str, reason: str = "") -> None:
+    def __init__(self, effect: DecisionEffect, reason: str = "") -> None:
         if effect not in ("allow", "ask", "deny"):
             raise ValueError(f"invalid kernel decision effect {effect!r}")
         self.effect = effect
@@ -377,6 +392,21 @@ def mask_python_string_literals(source: str) -> list[str]:
     return ["".join(line) for line in lines]
 
 
+def python_code_lines(source: str) -> list[str]:
+    """Blank string and comment tokens while preserving line and column positions."""
+    lines = [list(line) for line in mask_python_string_literals(source)]
+    tokens = python_tokens(source)
+    if tokens is None:
+        return ["".join(line) for line in lines]
+    for token in tokens:
+        if token.type != tokenize.COMMENT:
+            continue
+        start_line, start_column = token.start
+        line = lines[start_line - 1]
+        line[start_column : token.end[1]] = [" "] * (token.end[1] - start_column)
+    return ["".join(line) for line in lines]
+
+
 def marker_count(source: str, python_source: bool = False) -> int:
     """Count review markers, excluding markers inside ordinary Python strings."""
     if not python_source:
@@ -565,12 +595,20 @@ def antipattern_decision(
     rows: list[AntiPatternRow],
     python_source: bool,
 ) -> KernelDecision | None:
-    """Reject newly added unsuppressed anti-patterns and ask on suppressions."""
+    """Reject newly added unsuppressed anti-patterns and ask on suppressions.
+
+    Each row carries the syntactic context it inspects: a "code" rule is
+    matched against token-masked Python (string literals and comments both
+    blanked) so prose never trips it, while a "comment" rule targets comment
+    directives and sees comments intact. Without a tokenizer (non-Python
+    files, fragments that fail to tokenize) every rule scans the raw line.
+    """
     added = added_line_numbers(before, after)
     original_lines = after.splitlines()
     scanned_lines = (
         mask_python_string_literals(after) if python_source else original_lines
     )
+    code_lines = python_code_lines(after) if python_source else original_lines
     exempt = empty_collection_exempt_lines(after) if python_source else set()
     comment_columns = python_comment_columns(after) if python_source else None
     has_file_ignore, disabled_ids = file_ignore(after)
@@ -586,11 +624,16 @@ def antipattern_decision(
             )
         ):
             return KernelDecision("ask", "edit introduces an antipattern suppression")
+    tokenized = comment_columns is not None
     for number in added:
-        stripped = scanned_lines[number - 1].strip()
-        if not stripped or (stripped.startswith("#") and "type:" not in stripped):
+        masked = scanned_lines[number - 1].strip()
+        if not tokenized and masked.startswith("#") and "type:" not in masked:
             continue
-        for rule_id, pattern, message in rows:
+        code = code_lines[number - 1].strip()
+        for rule_id, pattern, message, context in rows:
+            stripped = code if tokenized and context == "code" else masked
+            if not stripped:
+                continue
             if rule_id == "empty-collection" and number in exempt:
                 continue
             if re.search(pattern, stripped) is None:
@@ -604,7 +647,9 @@ def antipattern_decision(
                     return KernelDecision(
                         "ask", "edit introduces an antipattern suppression"
                     )
-            return KernelDecision("deny", message)
+            return KernelDecision(
+                "deny", f"{message} (rule {rule_id} — see docs/rules.md)"
+            )
     return None
 
 

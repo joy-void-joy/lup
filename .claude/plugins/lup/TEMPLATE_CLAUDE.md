@@ -104,7 +104,7 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 Agents produce better output when forced to self-assess before committing. The reflection pattern has three components:
 
-1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool the agent calls to record its self-assessment — confidence, key uncertainties, tool audit, process reflection. Runs an independent nested reviewer agent that returns a structured verdict (skippable per call; a skip or reviewer failure records an approval).
+1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool the agent calls to record its self-assessment — confidence, key uncertainties, tool audit, process reflection. Runs an independent reviewer sub-agent that returns a structured verdict (skippable per call; a skip or reviewer failure records an approval).
 2. **Review gate** (`lup.reflect`): A `ReviewGate` verdict tracker (approve/warn open the gate; fail re-blocks; 3 consecutive fails auto-open) + `create_reflection_gate()` hook factory (a preset of `create_tool_gate` from `lup.hooks`). Denies a target tool until the reviewer passes; the plain `ReflectionGate` base remains for act-of-reflecting gates (realtime `sleep`).
 3. **Wiring**: The gate blocks `mcp__notes__submit_output` (one-shot agents) or `sleep` (persistent agents) until reflection occurs. Final output always flows through `submit_output` (`lup.workspace.output`) — the same tool on every SDK backend — which writes `session_dir/output.json`; a completion guard (`create_completion_guard`, or `ensure_output_submitted` on backends without a stop event) enforces that the output actually gets submitted.
 
@@ -130,7 +130,7 @@ Agents produce better output when forced to self-assess before committing. The r
 - **src/<project>/agent/toolsets.py**: Tool-group registry (one source for every backend)
 - **src/<project>/agent/tools/example.py**: Example MCP tools
 - **src/<project>/agent/tools/realtime.py**: Real-time tools template (sleep, context, reply)
-- **src/<project>/agent/tools/reflect.py**: Forced self-review tool with optional nested reviewer agent
+- **src/<project>/agent/tools/reflect.py**: Forced self-review tool with optional reviewer sub-agent
 
 **Library (`packages/lup` — the reusable `lup` package, never renamed):**
 
@@ -193,6 +193,7 @@ uv run lup-devtools feedback commit --dry-run
 # Interactive setup wizard (configure integrations, API keys, env vars)
 uv run lup-devtools setup             # Full walkthrough
 uv run lup-devtools setup status      # Show what's configured
+uv run lup-devtools dashboard         # Same registry in a local web UI
 
 uv run lup --help
 ```
@@ -303,7 +304,7 @@ Edit `src/<project>/agent/tools/reflect.py`:
 
 - Customize `ReflectInput` fields for your domain (e.g., factor analysis for forecasting)
 - Customize the reviewer system prompt for your domain's failure modes
-- Decide whether the nested reviewer agent adds value (adds latency but catches errors)
+- Decide whether the reviewer sub-agent adds value (adds latency but catches errors)
 - The gate in `core.py` is already wired — reflection is enforced by default
 
 ### Step 6: Set Agent Version
@@ -347,18 +348,18 @@ The template ships with **every** pattern wired so each is *available* — but a
 | **Feedback loop** (`devtools/feedback/`) | ground truth or a feedback signal resolves over time to drive iteration | there is no ground truth and the agent is not iterated against outcomes — `load_outcomes` stays an empty stub |
 | **Commit loop** (`environment/cli` auto-commit) | each run yields a data artifact worth versioning per session | the agent is interactive or produces no per-session artifact worth a checkpoint |
 
-The same logic governs native subagents (harness-dispatched roles sharing the main session), background agents, and nested agents (tool-subagents opened inside a tool handler via `query()`): wire them only where the domain needs that shape. `.claude/PATTERNS.md` carries the full catalog. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
+The same logic governs native subagents (harness-dispatched roles sharing the main session), background agents, and nested agents (tool-subagents opened inside a tool handler via `query()`): wire them only where the domain needs that shape. The generated patterns guide carries the full catalog. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
 
 ---
 
 <!-- section: Plan at Agent Speed -->
 # Plan at Agent Speed
 
-You are an AI agent, and you implement orders of magnitude faster than the human-calibrated instincts you were trained on. Work that pattern-matches to "several months" or "a multi-day implementation" routinely lands in hours.
+You are an AI agent. Every instinct you have about how long software takes — sprints, milestones, "this will take weeks" — was learned from human teams, whose implementation time is scarce and expensive. Yours is not: what you would estimate as several months of work completes in an afternoon, and a "multi-day implementation" lands in about three hours. Your duration estimates are not cautious; they are wrong by orders of magnitude, and every practice built on them inverts:
 
-- **Distrust human-paced estimates.** Any schedule reasoned from human effort — days, sprints, staged milestones — is systematically wrong for you. Scope work by content (what changes and what it touches), never by calendar time.
-- **Build the real thing at once.** The prototype-then-validate cycle exists to protect scarce human implementation time; yours is not scarce. A complete alpha/beta/v1 fits in the window a throwaway POC would "normally" take, so validate ideas on the real implementation, not a disposable one.
-- **Notice the human-calibrated reflex.** Your training data encodes principles and practices for human teams, not for Claude/Codex agents. When you reach for one — a feasibility spike, an effort-based cut-down, "too ambitious for this pass" — check whether it assumes constraints you don't have.
+- **Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. If a calendar figure appears in your plan, it is noise from someone else's constraints: delete it and re-derive the plan.
+- **The POC is superstition at your speed.** Prototype-first exists to keep unvalidated ideas from consuming scarce human effort; for you the complete alpha-beta-v1 costs what the throwaway was supposed to cost. Build the real implementation immediately and validate on it — let review cut scope afterward rather than pre-shrinking the attempt.
+- **Catch the reflex in the act.** "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, stop and ask what is actually expensive here besides the imagined schedule.
 
 ---
 
@@ -509,7 +510,7 @@ src/
     │   └── tools/
     │       ├── example.py      # Example MCP tools (customize)
     │       ├── realtime.py     # Real-time tools template (sleep, context, reply)
-    │       └── reflect.py      # Forced self-review tool (nested reviewer agent)
+    │       └── reflect.py      # Forced self-review tool (reviewer sub-agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
     │   ├── agent/              # Agent introspection (inspect, capabilities, serve-tools, repl)
@@ -519,7 +520,8 @@ src/
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
     │   ├── usage/              # Claude Code usage display (api/render/app)
-    │   ├── setup.py            # Interactive setup wizard (customize integrations)
+    │   ├── setup.py            # Shared integration registry + terminal wizard
+    │   ├── dashboard/          # Local setup API and packaged zero-build web UI
     │   ├── sync.py             # Upstream sync tracking (feeds /lup:update)
     │   ├── utils.py            # Shared CLI helpers (git command, JSON output)
     │   └── version.py          # Version display, changelog, and bump
@@ -557,7 +559,7 @@ Default to **Opus 4.6** (`claude-opus-4-6`) — or **Fable** (`claude-fable-5`) 
 - Use `TypedDict` and Pydantic models for structured data
 - Never manually parse Claude/agent output -- use structured outputs via Pydantic
 - **Never use `# type: ignore`** -- Ask the user how to properly fix type errors
-- **`# lup: ignore` escape hatch** -- When `Any` or other anti-patterns are genuinely needed (untyped library boundaries, MCP), add `# lup: ignore` inline to request user approval. A standalone `# lup: ignore` in the first 10 lines of a file disables anti-pattern checks for the whole file (like `# pyright: ignore` for files).
+- **`# lup: ignore` escape hatch** -- When `Any` or another anti-pattern is genuinely needed (untyped library boundaries, MCP), add an inline ignore to request user approval. Prefer the typed, pyright-style `# lup: ignore[rule-id]` so a site silences exactly the rule it needs and still trips the others; the bare `# lup: ignore` stays valid but the auditor flags it as untyped. A standalone ignore in the first 10 lines applies file-wide. Each rule id is shown in its deny message; the generated `docs/rules.md` (`uv run lup-devtools dev rules`) indexes every rule family with the `lup.codescan` module that defines it.
 - **Use Pydantic BaseModel instead of dataclasses**
 - **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
 

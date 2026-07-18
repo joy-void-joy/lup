@@ -1,3 +1,5 @@
+<!-- Generated from src/lup_template/devtools/harness/content/template_codex.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+
 # AGENTS.md Template
 
 This file exports portable sections from the upstream AGENTS.md as a scaffold for downstream projects. It contains conventions, workflow patterns, and coding standards that apply to any project using lup.
@@ -191,6 +193,7 @@ uv run lup-devtools feedback commit --dry-run
 # Interactive setup wizard (configure integrations, API keys, env vars)
 uv run lup-devtools setup             # Full walkthrough
 uv run lup-devtools setup status      # Show what's configured
+uv run lup-devtools dashboard         # Same registry in a local web UI
 
 uv run lup --help
 ```
@@ -345,7 +348,18 @@ The template ships with **every** pattern wired so each is *available* — but a
 | **Feedback loop** (`devtools/feedback/`) | ground truth or a feedback signal resolves over time to drive iteration | there is no ground truth and the agent is not iterated against outcomes — `load_outcomes` stays an empty stub |
 | **Commit loop** (`environment/cli` auto-commit) | each run yields a data artifact worth versioning per session | the agent is interactive or produces no per-session artifact worth a checkpoint |
 
-The same logic governs subagents, background, and nested agents: wire them only where the domain needs that shape. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
+The same logic governs native subagents (harness-dispatched roles sharing the main session), background agents, and nested agents (tool-subagents opened inside a tool handler via `query()`): wire them only where the domain needs that shape. The generated patterns guide carries the full catalog. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
+
+---
+
+<!-- section: Plan at Agent Speed -->
+# Plan at Agent Speed
+
+You are an AI agent. Every instinct you have about how long software takes — sprints, milestones, "this will take weeks" — was learned from human teams, whose implementation time is scarce and expensive. Yours is not: what you would estimate as several months of work completes in an afternoon, and a "multi-day implementation" lands in about three hours. Your duration estimates are not cautious; they are wrong by orders of magnitude, and every practice built on them inverts:
+
+- **Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. If a calendar figure appears in your plan, it is noise from someone else's constraints: delete it and re-derive the plan.
+- **The POC is superstition at your speed.** Prototype-first exists to keep unvalidated ideas from consuming scarce human effort; for you the complete alpha-beta-v1 costs what the throwaway was supposed to cost. Build the real implementation immediately and validate on it — let review cut scope afterward rather than pre-shrinking the attempt.
+- **Catch the reflex in the act.** "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, stop and ask what is actually expensive here besides the imagined schedule.
 
 ---
 
@@ -506,7 +520,8 @@ src/
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
     │   ├── usage/              # Claude Code usage display (api/render/app)
-    │   ├── setup.py            # Interactive setup wizard (customize integrations)
+    │   ├── setup.py            # Shared integration registry + terminal wizard
+    │   ├── dashboard/          # Local setup API and packaged zero-build web UI
     │   ├── sync.py             # Upstream sync tracking (feeds $lup:update)
     │   ├── utils.py            # Shared CLI helpers (git command, JSON output)
     │   └── version.py          # Version display, changelog, and bump
@@ -544,7 +559,7 @@ Default to **Opus 4.6** (`claude-opus-4-6`) — or **Fable** (`claude-fable-5`) 
 - Use `TypedDict` and Pydantic models for structured data
 - Never manually parse Claude/agent output -- use structured outputs via Pydantic
 - **Never use `# type: ignore`** -- Ask the user how to properly fix type errors
-- **`# lup: ignore` escape hatch** -- When `Any` or other anti-patterns are genuinely needed (untyped library boundaries, MCP), add `# lup: ignore` inline to request user approval. A standalone `# lup: ignore` in the first 10 lines of a file disables anti-pattern checks for the whole file (like `# pyright: ignore` for files).
+- **`# lup: ignore` escape hatch** -- When `Any` or another anti-pattern is genuinely needed (untyped library boundaries, MCP), add an inline ignore to request user approval. Prefer the typed, pyright-style `# lup: ignore[rule-id]` so a site silences exactly the rule it needs and still trips the others; the bare `# lup: ignore` stays valid but the auditor flags it as untyped. A standalone ignore in the first 10 lines applies file-wide. Each rule id is shown in its deny message; the generated `docs/rules.md` (`uv run lup-devtools dev rules`) indexes every rule family with the `lup.codescan` module that defines it.
 - **Use Pydantic BaseModel instead of dataclasses**
 - **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
 
