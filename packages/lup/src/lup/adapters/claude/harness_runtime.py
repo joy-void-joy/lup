@@ -31,8 +31,8 @@ class ClaudeCapabilityProbe(CapabilityProbe[ClaudeCliEvidence]):
         self.executable = executable
 
     def probe(self) -> CapabilityEvidence[ClaudeCliEvidence]:
-        command = sh.Command(str(self.executable))
         try:
+            command = sh.Command(str(self.executable))
             output = str(command(*self.arguments))
         except (sh.CommandNotFound, sh.ErrorReturnCode):
             return CapabilityEvidence(
