@@ -11,6 +11,7 @@ SETTINGS: JsonObject = {
         "lup@lup-template": True,
         "pyright-lsp@claude-plugins-official": True,
     },
+    "env": {"ENABLE_TOOL_SEARCH": "false"},
     "extraKnownMarketplaces": {
         "lup-template": {"source": {"path": "./.claude/plugins", "source": "directory"}}
     },

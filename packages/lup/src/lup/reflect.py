@@ -6,7 +6,8 @@ This module provides the domain-neutral gate mechanism:
 - ``ReflectionGate``: Flag-based state tracker for whether the agent
   has reflected in the current cycle.
 - ``ReviewVerdict`` / ``ReviewResult``: Structured outcome vocabulary
-  for a reviewer sub-agent (approve / warn / fail).
+  for a reviewer (approve / warn / fail) however it is wired — the
+  template runs it as a nested agent inside the reflection tool.
 - ``ReviewGate``: Verdict-aware ``ReflectionGate`` — the flag opens on
   reviewer approval instead of on the mere act of reflecting, with a
   consecutive-fail escape hatch so a harsh reviewer cannot deadlock.
@@ -103,7 +104,7 @@ class ReflectionGate:
 
 
 class ReviewVerdict(StrEnum):
-    """Outcome of a reviewer sub-agent's evaluation."""
+    """Outcome of a reviewer's evaluation."""
 
     approve = "approve"
     warn = "warn"
@@ -111,7 +112,7 @@ class ReviewVerdict(StrEnum):
 
 
 class ReviewResult(BaseModel):
-    """Structured output from a reviewer sub-agent."""
+    """Structured output from a reviewer."""
 
     verdict: ReviewVerdict = Field(
         description=(

@@ -218,6 +218,11 @@ def provider_factory(
             effort=normalize_claude_effort(settings.reasoning_effort),
             cwd=cwd,
             add_dirs=add_dirs or list(settings.extra_dirs),
+            environment=(
+                {"ENABLE_TOOL_SEARCH": settings.tool_search}
+                if settings.tool_search is not None
+                else {}
+            ),
             sandbox=ClaudeSandboxConfig() if session_defaults else None,
             hooks=hooks,
             submission_gate_resolver=submission_gate,

@@ -285,7 +285,7 @@ Once the scaffolding is generated, guide the user to:
 - `src/<project>/agent/subagents.py` -- Specialized subagents
 - `src/<project>/agent/tool_policy.py` -- Tool availability and MCP servers
 - `src/<project>/agent/core.py` -- Options building and orchestration
-- `src/<project>/agent/tools/reflect.py` -- Reflection tool and reviewer sub-agent
+- `src/<project>/agent/tools/reflect.py` -- Reflection tool and nested reviewer agent
 - `src/<project>/agent/prompts.py` -- System prompt templates
 - `src/<project>/environment/cli/__main__.py` -- CLI with loop + auto-commit
 - `src/<project>/devtools/setup.py` -- Setup wizard (integrations, env vars)

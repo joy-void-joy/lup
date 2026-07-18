@@ -61,12 +61,12 @@ The lup template supports these architecture patterns — use this knowledge to 
 ### Agent Patterns
 - **One-shot agent**: Single task → structured output. Simplest. Good for: analysis, generation, classification.
 - **Persistent agent**: Long-running, sleep/wake cycle. Good for: monitoring, games, conversations, real-time systems. Uses `lup.realtime` Scheduler.
-- **Multi-agent**: Main agent delegates to specialized subagents. Good for: complex workflows with distinct phases.
+- **Multi-agent**: Main agent delegates to specialized native subagents. Good for: complex workflows with distinct phases.
 
 ### Key Capabilities
 - **MCP tools**: Custom tools the agent can call. Defined as Python functions with Pydantic input schemas.
 - **Subagents**: Specialized agents for subtasks (research, review, analysis). Each can have different models, tools, prompts.
-- **Reflection**: Self-assessment before producing output. Reviewer sub-agent catches errors. Customizable per domain.
+- **Reflection**: Self-assessment before producing output. A nested reviewer agent catches errors. Customizable per domain.
 - **Structured output**: Pydantic models for agent output — type-safe, validated.
 - **Tool policy**: Conditional tool availability based on config, API keys, or runtime state.
 - **Feedback loop**: Trace collection, metrics, and iterative improvement infrastructure.
@@ -149,7 +149,7 @@ What the agent produces. Key fields and their meaning.
 
 ## Reflection
 - Whether to use reflection gate
-- Whether to use reviewer sub-agent
+- Whether to use the nested reviewer agent
 - Domain-specific reflection fields
 
 ## Success & Feedback
