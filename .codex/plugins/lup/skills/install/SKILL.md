@@ -42,11 +42,17 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 The `lup-devtools` CLI (`src/lup_template/devtools/`) gives Claude Code structured commands for development tasks that would otherwise require ad-hoc bash one-liners. Without it, Claude resorts to `python -c "..."` snippets or manual shell pipelines for trace analysis, feedback collection, and session management — which are fragile and unrepeatable. The devtools encode these workflows as proper CLI commands with argument parsing, output formatting, and error handling.
 
 - `src/lup_template/devtools/main.py` — root typer app composing sub-apps (entry point: `lup-devtools`)
-  - `trace/` — trace display, search, and analysis
-  - `feedback/` — feedback state, metrics, and commits
-  - `dev/` — worktree management, branch analysis, pre-flight checks
-  - `version.py` — version, changelog, and bump operations
-  - `sync.py` — upstream sync tracking
+  - `agent` — Agent introspection and debugging
+  - `dashboard` — Host the local setup dashboard
+  - `dev` — Worktrees, branches, and pre-flight checks
+  - `feedback` — Feedback state, metrics, and commits
+  - `harness` — Generate and launch Claude or Codex harnesses
+  - `py` — Python module introspection
+  - `setup` — Interactive setup wizard
+  - `sync` — Track sync.json repos and review their commits
+  - `trace` — Trace display, search, and analysis
+  - `usage` — Claude Code usage display
+  - `version` — Agent version, changelog, and bump
 
 ### Configuration Patterns
 
@@ -110,7 +116,7 @@ If the target repo uses (or will use) the Claude Agent SDK, the **self-improveme
 - **Agent scaffolding**: core.py pattern (orchestration), subagents.py, models.py (structured output), prompts.py, tool_policy.py, config.py (pydantic-settings)
 - **Feedback loop**: feedback collection, trace analysis, metrics aggregation, scoring CSV
 - **Session management**: CLI with `run` + `loop` commands, auto-commit, session storage
-- **DevTools**: The full `lup-devtools` CLI (trace, feedback, dev, version, usage)
+- **DevTools**: The full `lup-devtools` CLI (`agent`, `dashboard`, `dev`, `feedback`, `harness`, `py`, `setup`, `sync`, `trace`, `usage`, `version`)
 - **Version tracking**: `[tool.lup] agent_version` in pyproject.toml + `lup-devtools version bump` for tracking agent behavior changes
 - **Commands**: `init`, `feedback-loop`, `bump`, `update` — the self-improvement workflow
 - **Template guidance**: Section-level merge into the target's existing guidance file — CLAUDE.md from TEMPLATE_CLAUDE.md, AGENTS.md from TEMPLATE_AGENTS.md (add missing sections, leave existing ones)
