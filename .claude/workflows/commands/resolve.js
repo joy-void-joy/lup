@@ -1,3 +1,5 @@
+// Generated file — do not edit directly. Rendered from
+// lup.adapters.claude.harness by `uv run lup-devtools harness generate all`.
 export const meta = {
   name: 'resolve',
   description: 'Enter Lup\'s shared persisted Python resolver.',
