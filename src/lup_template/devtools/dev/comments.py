@@ -3,7 +3,8 @@
 Backs two `lup-devtools dev` commands (wired in
 `lup_template.devtools.dev.app`):
 
-- `dev comments` lists unresolved `# lup:` / `// lup:` feedback notes;
+- `dev comments` lists unresolved `# lup:` / `// lup:` feedback notes, with
+  deferred (`defer[<wake condition>]:`) notes in their own section;
   `report`, `commit_prompts`, and `clear_markers` back its default listing
   and its `--commit` / `--clear` modes.
 - `dev todos` lists `TEMPLATE:` customization markers — the template's
@@ -24,7 +25,6 @@ from pathlib import Path
 
 import sh
 import typer
-from pydantic import BaseModel
 
 from lup.codescan.markers import (
     MARKER_RE,
@@ -37,13 +37,10 @@ from lup.codescan.markers import (
 from lup_template.devtools.utils import decode_stderr, git, output_json
 
 
-class FoundComment(BaseModel):
+class FoundComment(MarkerComment):
+    """One scanned note located in its tracked file, with read context."""
+
     file: str
-    start_line: int
-    end_line: int
-    read_start: int
-    read_end: int
-    text: str
     context: str
 
 
@@ -152,7 +149,8 @@ def commit_prompts() -> None:
     files = sorted({comment.file for comment in found})
     git("add", "--", *files)
     body = "\n".join(
-        f"{comment.file}:{comment.start_line} {comment.text}" for comment in found
+        f"{comment.file}:{comment.start_line} {comment.marker_text()}"
+        for comment in found
     )
     subject = f"chore(review): {len(found)} inline feedback prompt(s)"
     try:
@@ -163,22 +161,42 @@ def commit_prompts() -> None:
     typer.echo(f"Committed {len(found)} prompt(s) across {len(files)} file(s).")
 
 
+def location_line(comment: FoundComment) -> str:
+    """One note's span and read window, the listing's per-note header."""
+    return (
+        f"{comment.file}:{comment.start_line}-{comment.end_line}  "
+        f"(read {comment.read_start}-{comment.read_end})"
+    )
+
+
 def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
-    """Print one scan's results as a listing or JSON (same shape either way)."""
+    """Print one scan's results as a listing or JSON (same shape either way).
+
+    Deferred notes are listed in their own section, each with its wake
+    condition, so parked work never blends into the open feedback above it.
+    """
     if as_json:
         output_json([comment.model_dump() for comment in found])
         return
     if not found:
         typer.echo(empty)
         return
+    deferred = [comment for comment in found if comment.kind == "defer"]
     for comment in found:
-        typer.echo(
-            f"{comment.file}:{comment.start_line}-{comment.end_line}  "
-            f"(read {comment.read_start}-{comment.read_end})"
-        )
+        if comment.kind == "defer":
+            continue
+        typer.echo(location_line(comment))
         typer.echo(f"    {comment.text}")
+    if deferred:
+        typer.echo("\nDeferred — parked until each wake condition is met:")
+        for comment in deferred:
+            typer.echo(location_line(comment))
+            typer.echo(f"    defer[{comment.condition}] {comment.text}")
     files = {comment.file for comment in found}
-    typer.echo(f"\n{len(found)} comment(s) in {len(files)} file(s)")
+    summary = f"\n{len(found)} comment(s) in {len(files)} file(s)"
+    if deferred:
+        summary += f" ({len(deferred)} deferred)"
+    typer.echo(summary)
 
 
 def report(as_json: bool, commit: bool) -> None:
