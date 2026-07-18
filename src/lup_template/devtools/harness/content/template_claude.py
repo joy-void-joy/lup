@@ -10,11 +10,7 @@ import lup.harness.models as models
 DOCUMENT = models.PromptDocument(
     parts=[
         models.TextPart(
-            text=r"""<!--
-Generated file — do not edit directly. Rendered from
-src/lup_template/devtools/harness/content/template_claude.py by
-`uv run lup-devtools harness generate all`. See docs/generated-artifacts.md.
--->
+            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/template_claude.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
 
 # CLAUDE.md Template
 

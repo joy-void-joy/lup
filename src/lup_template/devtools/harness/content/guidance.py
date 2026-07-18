@@ -12,13 +12,7 @@ import lup.harness.models as models
 DOCUMENT = models.PromptDocument(
     parts=[
         models.TextPart(
-            text=r"""<!--
-Generated file — do not edit directly. This is the canonical repository
-guidance from src/lup_template/devtools/harness/content/guidance.py, rendered
-once per platform by `uv run lup-devtools harness generate all`: Claude Code
-reads .claude/CLAUDE.md, Codex reads AGENTS.md, and the duplication between
-the two files is deliberate. See docs/generated-artifacts.md.
--->
+            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/guidance.py via `uv run lup-devtools harness generate all`; deliberately rendered as both .claude/CLAUDE.md and AGENTS.md — edit the source, not this file. See docs/generated-artifacts.md. -->
 
 # Lup repository guidance
 
