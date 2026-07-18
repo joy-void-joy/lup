@@ -1,10 +1,11 @@
+// Generated file — do not edit directly. Rendered from
+// lup.adapters.claude.harness by `uv run lup-devtools harness generate all`.
 export const meta = {
   name: 'resolve',
   description: 'Enter Lup\'s shared persisted Python resolver.',
   phases: [{ title: 'Resolve', detail: 'shared Python resolver core' }],
 }
 
-// lup: I remember that the resolve workflow often crashed and the agent needed to tweak something because of the json parsing. Can you check if that's resolved?
 const input = typeof args === 'string' ? JSON.parse(args) : args || {}
 const command = [
   'uv',

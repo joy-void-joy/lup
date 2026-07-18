@@ -110,6 +110,9 @@ class CodexAgentRenderer(ArtifactRenderer[Agent]):
 
     def render(self, source: Agent) -> ArtifactTree:
         rows = [
+            "# Generated file — do not edit directly. Rendered from the portable",
+            f"# agent declaration {source.id} by "
+            "`uv run lup-devtools harness generate all`.",
             f"name = {json.dumps(source.name)}",
             f"description = {json.dumps(source.description)}",
             (
@@ -194,7 +197,12 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
                 ),
                 Artifact(
                     path=Path(".codex/config.toml"),
-                    content="[features]\nhooks = true\n",
+                    content=(
+                        "# Generated file — do not edit directly. Rendered from\n"
+                        "# lup.adapters.codex.harness by "
+                        "`uv run lup-devtools harness generate all`.\n"
+                        "[features]\nhooks = true\n"
+                    ),
                     semantic_id="harness.project-config",
                 ),
             ]
@@ -202,7 +210,11 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
 
 
 CODEX_POLICY_DISPATCHER = '''#!/usr/bin/env python3
-"""Generated Codex hook dispatcher over the canonical semantic kernel."""
+"""Generated Codex hook dispatcher over the canonical semantic kernel.
+
+Rendered from lup.adapters.codex.harness by
+`uv run lup-devtools harness generate all` — do not edit directly.
+"""
 
 import json
 import sys

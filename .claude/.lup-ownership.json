@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "6e185b2298e5b4344fa773dcff99f5e9949fe9ab4c1ca70e8531eb41b4fa5215",
+  "source_digest": "21f1cbc8bdf24f41a6f7d9d5154b0f6ff5f4ce4881e4e0258150544d8b08a7c2",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,14 +9,14 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "9f17731b34988445adfa122fdb51a936acad80277e9ffdeb3db6a79b77322ced",
+      "sha256": "c0a1849389fe15292b1a9a10b1d914a45f4871055b3af63626c97115f64c244b",
       "semantic_id": "harness.guidance",
       "executable": false
     },
     {
       "path": ".claude/PATTERNS.md",
       "category": "generated",
-      "sha256": "fd61ec9ad7b3e982e80d2ea41a603941e71a4325ac0b127c852e4f6f06a60c26",
+      "sha256": "6518df918bd611e9843a6fb0c39588a1041e3432a46a3f86c10638fd5f2fd2eb",
       "semantic_id": "harness.patterns",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "96ca9a95112c3b1e7e64794186bf524138eab7e7fb7eba626ab99a1f08ec372c",
+      "sha256": "97c192e404d16f9317f8fd06a925cb9eca96b9569c07baa4059334e6e39f3c62",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -303,28 +303,28 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel.py",
       "category": "generated",
-      "sha256": "4444129437d790155ef2dd769c085e6dbfdec6001bb53fa1cccf80ff3ec3b5b7",
+      "sha256": "1b289b152af2f1643ebef992e1afadbbf2cec81b7b9ed675987e0f667264edc0",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "21fe57f4e3e63012f1db03f5f97a280e64a6eba8e735158bac64508ad12f2776",
+      "sha256": "82a3c41747d75d350f2ae105645d0f6a81b55305e33e2e40e98d531e130ebb55",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "f7db9dc943b162131bdb66cabbad415eb0ae21a7e5b6dd5270d3da43bee3c6c3",
+      "sha256": "a5a7a5de94488d132477410548a6815f62cf40d5d4a5bc8271feaed924286a3b",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".claude/plugins/lup/scripts/file_suggest.sh",
       "category": "generated",
-      "sha256": "29631a1a31e95511c0d36b09bd642177c833f4e1e3445f9d5fd067654ba4ea09",
+      "sha256": "8408833a0d8e4fc13cc8d35b2bf421ef86880087327bcce0530667c8786dc358",
       "semantic_id": "harness.file-suggestion",
       "executable": true
     },
@@ -338,11 +338,9 @@
     {
       "path": ".claude/workflows/commands/resolve.js",
       "category": "generated",
-      "sha256": "13c41ce77590bd8c742d5877325c33dff03f85758b419d9a278367f4a6ee8687",
+      "sha256": "3c9124370e10079f66871f9763c326345403e45e3dbfc22c0dda9d3d69534aa3",
       "semantic_id": "resolver.lup.entry",
       "executable": false
     }
   ]
 }
-
-# lup: What is this file? Why is it committed? Sounds a bit suspicious
