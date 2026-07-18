@@ -1,4 +1,3 @@
-# lup: Like, this file and catalog/generate are not very clear what they do. They should have the responsability for one part of the app/subapps.
 """Typed native-evidence ledger backing the doctor's version-drift trigger.
 
 `docs/native-capabilities.md` records the CLI and SDK versions each native
