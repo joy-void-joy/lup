@@ -2,16 +2,21 @@
 
 import json
 import shutil
+from importlib import resources
 from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from lup.adapters.claude.harness import CLAUDE_RESOLVER_ENTRY
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
 from lup.types import JsonObject, JsonValue
 
 DRIVER = Path(__file__).parent / "assets" / "resolve_entry_driver.js"
+RESOLVER_ENTRY = (
+    resources.files("lup_template.devtools.harness.content")
+    .joinpath("assets/resolve.js")
+    .read_text("utf-8")
+)
 BASE_COMMAND = [
     "uv",
     "run",
@@ -46,7 +51,7 @@ class EntryRun(BaseModel):
 
 def run_entry(tmp_path: Path, envelope: JsonObject) -> EntryRun:
     entry = tmp_path / "resolve.js"
-    entry.write_text(CLAUDE_RESOLVER_ENTRY, encoding="utf-8")
+    entry.write_text(RESOLVER_ENTRY, encoding="utf-8")
     status = LocalProcessLauncher().launch(
         LaunchRequest(
             arguments=["bun", str(DRIVER), str(entry), json.dumps(envelope)],
@@ -61,7 +66,7 @@ def test_committed_workflow_entry_matches_the_canonical_source() -> None:
     committed = Path(".claude/workflows/commands/resolve.js").read_text(
         encoding="utf-8"
     )
-    assert committed == CLAUDE_RESOLVER_ENTRY
+    assert committed == RESOLVER_ENTRY
 
 
 @needs_bun

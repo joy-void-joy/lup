@@ -2,6 +2,7 @@
 
 import json
 import shlex
+from importlib import resources
 from pathlib import Path
 
 from lup.harness.contracts import (
@@ -208,189 +209,12 @@ class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
         )
 
 
-# lup: We really shouldn't have those python-in-string or js-in-strings. Please export all of those to their own files (I think sandbox also has some of those)
-# lup: I remember that the resolve workflow often crashed and the agent needed to tweak something because of the json parsing. Can you check if that's resolved?
-CLAUDE_RESOLVER_ENTRY = """\
-// Generated file — do not edit directly. Rendered from
-// lup.adapters.claude.harness by `uv run lup-devtools harness generate all`.
-export const meta = {
-  name: 'resolve',
-  description: 'Enter Lup\\'s shared persisted Python resolver.',
-  phases: [{ title: 'Resolve', detail: 'shared Python resolver core' }],
-}
-
-function argsError(got) {
-  return new Error(
-    `resolve args must be a JSON object like {"run_id": "...", "accept": true}; got: ${got}`,
-  )
-}
-
-// The workflow runtime delivers args parsed, JSON-encoded, or double-encoded.
-function normalizeArgs(raw) {
-  let value = raw
-  for (let decode = 0; typeof value === 'string' && decode < 2; decode += 1) {
-    const text = value.trim()
-    if (text === '') return {}
-    try {
-      value = JSON.parse(text)
-    } catch {
-      throw argsError(text)
-    }
-  }
-  if (value === undefined || value === null) return {}
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    throw argsError(JSON.stringify(value))
-  }
-  return value
-}
-
-const input = normalizeArgs(args)
-const command = [
-  'uv',
-  'run',
-  'lup-devtools',
-  'harness',
-  'resolve',
-  '--adapter',
-  'claude',
-]
-if (input.run_id) {
-  command.push('--run-id', String(input.run_id))
-}
-if (input.accept === true) {
-  command.push('--accept')
-} else if (input.accept === false) {
-  command.push('--reject')
-}
-
-const child = Bun.spawn(command, {
-  cwd: process.cwd(),
-  stdin: 'inherit',
-  stdout: 'inherit',
-  stderr: 'inherit',
-})
-const exitCode = await child.exited
-if (exitCode !== 0) {
-  throw new Error(`shared resolver exited with status ${exitCode}`)
-}
-return { exit_code: exitCode }
-"""
-
-
-CLAUDE_POLICY_DISPATCHER = '''#!/usr/bin/env python3
-"""Generated Claude hook dispatcher over the canonical semantic kernel.
-
-Rendered from lup.adapters.claude.harness by
-`uv run lup-devtools harness generate all` — do not edit directly.
-"""
-
-import json
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from kernel import KernelDecision, decide_edit, decide_fetch, decide_shell
-from policy_data import (
-    ALLOWED_FETCH_SCOPES,
-    ANTI_PATTERN_ROWS,
-    AUTONOMOUS_AGENT_IDENTITIES,
-    DENIED_FETCH_SCOPES,
-    MAXIMUM_ADDED_LINES,
-    PATH_RULES,
+CLAUDE_POLICY_DISPATCHER = (
+    resources.files("lup.adapters.claude")
+    .joinpath("assets/policy_dispatcher.py")
+    .read_text("utf-8")
 )
-
-
-def edit_documents(path, old_text, new_text):
-    current = Path(path).read_text(encoding="utf-8")
-    if current.count(old_text) != 1:
-        raise ValueError("Edit preimage must occur exactly once")
-    position = current.find(old_text)
-    updated = current[:position] + new_text + current[position + len(old_text) :]
-    return current, updated
-
-
-def workspace_path(path_text):
-    path = Path(path_text)
-    if not path.is_absolute():
-        return path_text
-    root = Path.cwd().resolve()
-    resolved = path.resolve()
-    if resolved.is_relative_to(root):
-        return resolved.relative_to(root).as_posix()
-    return path_text
-
-
-def edit_decision(path_text, before, after, autonomous):
-    path = Path(path_text)
-    suffix = path.suffix.lower()
-    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else ()
-    return decide_edit(
-        workspace_path(path_text),
-        before,
-        after,
-        path_exists=path.exists(),
-        path_rules=PATH_RULES,
-        antipattern_rows=rows,
-        maximum_added_lines=MAXIMUM_ADDED_LINES,
-        autonomous=autonomous,
-        python_source=suffix in (".py", ".pyi"),
-    )
-
-
-def dispatch(payload):
-    name = payload["tool_name"]
-    tool_input = payload["tool_input"]
-    agent_type = payload["agent_type"] if "agent_type" in payload else ""
-    autonomous = agent_type in AUTONOMOUS_AGENT_IDENTITIES
-    if name == "Bash":
-        return decide_shell(tool_input["command"])
-    if name == "WebFetch":
-        return decide_fetch(
-            tool_input["url"],
-            ALLOWED_FETCH_SCOPES,
-            DENIED_FETCH_SCOPES,
-        )
-    if name == "Edit":
-        before, after = edit_documents(
-            tool_input["file_path"],
-            tool_input["old_string"],
-            tool_input["new_string"],
-        )
-        return edit_decision(tool_input["file_path"], before, after, autonomous)
-    if name == "Write":
-        path = Path(tool_input["file_path"])
-        return edit_decision(
-            tool_input["file_path"],
-            path.read_text(encoding="utf-8") if path.exists() else None,
-            tool_input["content"],
-            autonomous,
-        )
-    return KernelDecision("ask", "tool is not classified")
-
-
-def rendered(decision):
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": decision.effect,
-            "permissionDecisionReason": decision.reason,
-        }
-    }
-
-
-def main():
-    try:
-        decision = dispatch(json.load(sys.stdin))
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-        decision = KernelDecision(
-            "ask", f"Malformed hook input requires approval: {error}"
-        )
-    json.dump(rendered(decision), sys.stdout)
-
-
-if __name__ == "__main__":
-    main()
-'''
+"""Hermetic hook dispatcher script, shipped verbatim into the plugin tree."""
 
 
 class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
