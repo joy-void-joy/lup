@@ -9,6 +9,7 @@ import sh
 from pydantic import BaseModel, ConfigDict, Field
 
 from lup.adapters.claude.harness import (
+    CLAUDE_RESOLVER_ENTRY,
     ClaudePromptRenderer,
     ClaudeSkillInvocationRenderer,
 )
@@ -117,16 +118,17 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
 
 
 def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None:
+    harness = portable_harness()
     claude = {
         artifact.path: artifact.content
-        for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
+        for artifact in compile_claude(harness).artifacts
     }
     codex = {
         artifact.path: artifact.content
-        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+        for artifact in compile_codex(harness).artifacts
     }
     command = claude[Path(".claude/plugins/lup/commands/resolve.md")]
-    workflow = claude[Path(".claude/workflows/commands/resolve.js")]
+    workflow = CLAUDE_RESOLVER_ENTRY
     skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
 
     workflow_call = (
@@ -134,10 +136,12 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
     )
     assert workflow_call in command
     assert "Triage into concerns" not in command
+    assert '"run_id"' in command and '"accept"' in command
     assert "'harness',\n  'resolve',\n  '--adapter',\n  'claude'" in workflow
     assert "input.inventory" not in workflow
     assert "requires run_id" not in workflow
     assert "uv run lup-devtools harness resolve --adapter codex" in skill
+    assert "--run-id" in skill and "--accept" in skill
     assert "scheduling" not in skill
 
 
