@@ -24,7 +24,7 @@ SUBAPPS = [
     SubApp(name="harness", help="Generate and launch Claude or Codex harnesses"),
     SubApp(name="py", help="Python module introspection"),
     SubApp(name="setup", help="Interactive setup wizard"),
-    SubApp(name="sync", help="Upstream sync tracking"),
+    SubApp(name="sync", help="Track sync.json repos and review their commits"),
     SubApp(name="trace", help="Trace display, search, and analysis"),
     SubApp(name="usage", help="Claude Code usage display"),
     SubApp(name="version", help="Agent version, changelog, and bump"),

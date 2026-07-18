@@ -51,7 +51,7 @@ The `lup-devtools` CLI (`src/lup_template/devtools/`) gives Claude Code structur
 ### Configuration Patterns
 
 - `.claude/settings.json` — settings structure
-- `downstream.json` — upstream sync tracking
+- `sync.json` — registry of repos tracked for sync
 
 Build a mental inventory of **portable capabilities** organized by category:
 
@@ -101,7 +101,7 @@ These port well to other Python projects:
 
 - **Library utilities**: hook composition, version tracking, retry, cache
 - **DevTools CLI**: The `lup-devtools` typer app structure — `main.py` composing sub-apps, `pyproject.toml` entry point. Even if the target doesn't need every subcommand, the skeleton (dev, py, sync, usage, version) gives Claude Code reliable tooling instead of ad-hoc scripts.
-- **Upstream sync**: downstream.json + sync commands (`lup-devtools sync`)
+- **Upstream sync**: sync.json + sync commands (`lup-devtools sync`)
 
 ### Portable if Agent SDK
 
@@ -167,7 +167,7 @@ Be conservative — only install what clearly adds value. Typical candidates (bu
 - **Permission hooks** adapted to the target's ecosystem (its build tool, test runner, linter, doc URLs)
 - **Generic commands** that work in any repo (git workflow, CLAUDE.md maintenance, meta, refactor, etc.)
 - **Guidance file**: Perform a **section-level merge** using the platform template — `TEMPLATE_CLAUDE.md` (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`) into the target's CLAUDE.md, or `TEMPLATE_AGENTS.md` (`.codex/plugins/lup/TEMPLATE_AGENTS.md`) into its AGENTS.md. Read the template, use the `<!-- section: ... -->` markers to identify independent merge units, adapt for the target's project name and ecosystem, then compare marked sections against the target's existing guidance file. Add sections that are missing; leave existing sections untouched. If no guidance file exists, create one from the adapted template.
-- **If Agent SDK detected**: Also install the self-improvement scaffolding — this is lup's core value. The feedback loop commands, lib utilities (trace, scoring, metrics, hooks, version), devtools CLI pattern, session/trace directory structure, downstream.json for sync. Adapt to layer on top of the target's existing agent, not replace it.
+- **If Agent SDK detected**: Also install the self-improvement scaffolding — this is lup's core value. The feedback loop commands, lib utilities (trace, scoring, metrics, hooks, version), devtools CLI pattern, session/trace directory structure, sync.json for upstream sync. Adapt to layer on top of the target's existing agent, not replace it.
 
 **Constraints** in non-interactive mode:
 
