@@ -1,5 +1,7 @@
 (All code in this repository has been reviewed by humans, this README has been written by a human)
 
+# lup: Please instruct in CLAUDE.md (AGENTS.md etc) that touching README.md should be defered and ask the human first. In addition, please add to the auto-allow-edit hooks to be Ask.
+
 # Lup
 
 A meta repository for speed-boosting your Claude Code development and create self-improving [ClaudeAgentSDK] applications
