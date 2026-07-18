@@ -43,7 +43,14 @@ from lup.policy.models import (
     ShellCommand,
     UnknownTool,
 )
-from lup.policy.rules import EditPolicy, FetchPolicy, PathRule, ShellPolicy, UrlScope
+from lup.policy.rules import (
+    EditPolicy,
+    FetchPolicy,
+    PathRule,
+    ShellPolicy,
+    UrlScope,
+    human_owned_path_rule,
+)
 
 
 class DecisionCase(BaseModel):
@@ -148,6 +155,19 @@ EDIT_POLICY_CASES = [
         autonomous=True,
     ),
     EditDecisionCase(
+        path="README.md",
+        before="# Lup\n",
+        after="# Lup\n\nAn agent-added paragraph.\n",
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="README.md",
+        before="# Lup\n",
+        after="# Lup, renamed\n",
+        effect="ask",
+        autonomous=True,
+    ),
+    EditDecisionCase(
         path="src/new.py",
         before=None,
         after="value = 1",
@@ -175,6 +195,7 @@ def assembled_edit_decision(
     before: str | None,
     after: str | None,
     protected_roots: list[str],
+    human_owned_files: list[str],
     *,
     autonomous: bool = False,
 ) -> KernelDecision:
@@ -187,7 +208,7 @@ def assembled_edit_decision(
         before,
         after,
         path_exists=Path(path).exists(),
-        path_rules=runtime_path_rules(protected_roots),
+        path_rules=runtime_path_rules(protected_roots, human_owned_files),
         antipattern_rows=rows,
         autonomous=autonomous,
         python_source=suffix in (".py", ".pyi"),
@@ -211,6 +232,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                 )
             ],
             protected_roots=[".claude", "tmp", "pyproject.toml"],
+            human_owned_files=["README.md"],
             autonomous_agent_identities=["resolve-editor"],
         ),
         encoding="utf-8",
@@ -459,6 +481,7 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
             value="tmp",
             reason="scratch path requires approval",
         ),
+        human_owned_path_rule("README.md"),
     ]
 
     for case in EDIT_POLICY_CASES:
@@ -497,6 +520,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
                 value="tmp",
                 reason="scratch path requires approval",
             ),
+            human_owned_path_rule("README.md"),
         ]
     )
     cases = [
@@ -520,6 +544,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             case.before,
             case.after,
             [".claude", "tmp", "pyproject.toml"],
+            ["README.md"],
         )
         assert canonical.effect == generated.effect == case.effect
 
@@ -540,6 +565,7 @@ def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
             case.before,
             case.after,
             [".claude", "tmp"],
+            ["README.md"],
             autonomous=True,
         )
         assert decision.effect == case.effect
@@ -567,7 +593,7 @@ def test_edit_policy_uses_full_python_context_for_added_docstrings(
 
     assert canonical.effect == "allow"
     assert (
-        assembled_edit_decision(bundled, "src/module.py", before, after, []).effect
+        assembled_edit_decision(bundled, "src/module.py", before, after, [], []).effect
         == "allow"
     )
 
@@ -594,7 +620,9 @@ def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> N
 
     assert canonical.effect == "allow"
     assert (
-        assembled_edit_decision(bundled, "src/scheduler.py", before, after, []).effect
+        assembled_edit_decision(
+            bundled, "src/scheduler.py", before, after, [], []
+        ).effect
         == "allow"
     )
 

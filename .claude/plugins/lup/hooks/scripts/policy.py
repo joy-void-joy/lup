@@ -30,12 +30,23 @@ def edit_documents(path, old_text, new_text):
     return current, updated
 
 
+def workspace_path(path_text):
+    path = Path(path_text)
+    if not path.is_absolute():
+        return path_text
+    root = Path.cwd().resolve()
+    resolved = path.resolve()
+    if resolved.is_relative_to(root):
+        return resolved.relative_to(root).as_posix()
+    return path_text
+
+
 def edit_decision(path_text, before, after, autonomous):
     path = Path(path_text)
     suffix = path.suffix.lower()
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else ()
     return decide_edit(
-        path_text,
+        workspace_path(path_text),
         before,
         after,
         path_exists=path.exists(),
