@@ -10,12 +10,23 @@ from lup.harness.models import (
     ResolveSpec,
     SkillInvocation,
 )
-from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS #lup: Like see, why is this in a content subfolder but this file is top-level? Can you review the full file hierarchy? It seems quite janky
+from lup_template.devtools.harness.content.catalog import (
+    AGENTS,
+    SKILLS,
+)  # lup: Like see, why is this in a content subfolder but this file is top-level? Can you review the full file hierarchy? It seems quite janky
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 
 
 def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harness:
-    """Build the canonical declaration graph consumed by every adapter."""
+    """Build the canonical declaration graph consumed by every adapter.
+
+    Deliberately one declaration, not one per platform: every intended
+    Claude/Codex difference is a rendering decision in the adapters
+    (``compile_claude`` / ``compile_codex``) or a support artifact in the
+    generation recipes, mapped in ``docs/platform-differentiation.md``.
+    Per-platform declarations overriding a shared default were rejected
+    because they would let semantic content fork silently.
+    """
     del root
     plugin = Plugin(
         id="plugin.lup",
@@ -28,12 +39,19 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         agents=AGENTS,
         hooks=HookSet(
             id="hooks.lup-policy",
-            policy_ids=["fetch", "shell", "edit", "unknown-tool"], #lup: Wait what's that? It's really not understandable just like that. Sounds like the BaseModel doesn't have legible fields
+            policy_ids=[
+                "fetch",
+                "shell",
+                "edit",
+                "unknown-tool",
+            ],  # lup: Wait what's that? It's really not understandable just like that. Sounds like the BaseModel doesn't have legible fields
             allowed_fetch=[
                 HookUrlScope.model_validate({"origin": "https://docs.claude.com"}),
                 HookUrlScope.model_validate({"origin": "http://docs.claude.com"}),
                 HookUrlScope.model_validate({"origin": "https://ai.pydantic.dev"}),
-                HookUrlScope.model_validate({"origin": "http://ai.pydantic.dev"}), #lup: Why use model_validate instead of the constructor directly?
+                HookUrlScope.model_validate(
+                    {"origin": "http://ai.pydantic.dev"}
+                ),  # lup: Why use model_validate instead of the constructor directly?
             ],
             protected_edit_roots=[
                 Path(".claude"),
