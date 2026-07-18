@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Generated Codex hook dispatcher over the canonical semantic kernel."""
+"""Generated Codex hook dispatcher over the canonical semantic kernel.
+
+Rendered from lup.adapters.codex.harness by
+`uv run lup-devtools harness generate all` — do not edit directly.
+"""
 
 import json
 import sys

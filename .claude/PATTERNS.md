@@ -1,3 +1,5 @@
+<!-- Generated from src/lup_template/devtools/harness/content/patterns.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+
 # Design Patterns
 
 Architectural patterns used in this project. For daily development guidance, see [CLAUDE.md](CLAUDE.md).

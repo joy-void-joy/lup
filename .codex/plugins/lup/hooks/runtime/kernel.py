@@ -1,6 +1,11 @@
 # lup: ignore[empty-collection, import-re, re-call, set-shape, string-split, tuple-shape]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
-"""Hermetic semantic policy kernel shared by library and generated runtimes."""
+"""Hermetic semantic policy kernel shared by library and generated runtimes.
+
+Canonical source: packages/lup/src/lup/policy/kernel.py, copied verbatim into
+each plugin's hooks/runtime/ by `uv run lup-devtools harness generate all` —
+edit it there.
+"""
 
 import ast
 import io
