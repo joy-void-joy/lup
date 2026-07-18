@@ -171,6 +171,25 @@ EDIT_POLICY_CASES = [
         before="# Lup\n",
         after="# Lup, renamed\n",
         effect="ask",
+    ),
+    EditDecisionCase(
+        path="sync.json",
+        before='{"projects": []}',
+        after='{"projects": [{"name": "fleet-app"}]}',
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="downstream.json",
+        before='{"projects": []}',
+        after='{"projects": [{"name": "fleet-app"}]}',
+        effect="ask",
+        path_exists=False,
+    ),
+    EditDecisionCase(
+        path="sync.json",
+        before='{"projects": []}',
+        after='{"projects": [{"name": "fleet-app"}]}',
+        effect="allow",
         autonomous=True,
     ),
     EditDecisionCase(
@@ -237,7 +256,13 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                     "sensitive documentation path",
                 )
             ],
-            protected_roots=[".claude", "tmp", "pyproject.toml"],
+            protected_roots=[
+                ".claude",
+                "tmp",
+                "pyproject.toml",
+                "sync.json",
+                "downstream.json",
+            ],
             human_owned_files=["README.md"],
             autonomous_agent_identities=["resolve-editor"],
         ),
@@ -490,6 +515,18 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
             reason="scratch path requires approval",
         ),
         human_owned_path_rule("README.md"),
+        PathRule(
+            kind="subtree",
+            value="sync.json",
+            reason="protected path requires approval",
+            allow_autonomous=True,
+        ),
+        PathRule(
+            kind="subtree",
+            value="downstream.json",
+            reason="protected path requires approval",
+            allow_autonomous=True,
+        ),
     ]
 
     for case in EDIT_POLICY_CASES:
@@ -529,6 +566,18 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
                 reason="scratch path requires approval",
             ),
             human_owned_path_rule("README.md"),
+            PathRule(
+                kind="subtree",
+                value="sync.json",
+                reason="protected path requires approval",
+                allow_autonomous=True,
+            ),
+            PathRule(
+                kind="subtree",
+                value="downstream.json",
+                reason="protected path requires approval",
+                allow_autonomous=True,
+            ),
         ]
     )
     cases = [
@@ -551,7 +600,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             case.path,
             case.before,
             case.after,
-            [".claude", "tmp", "pyproject.toml"],
+            [".claude", "tmp", "pyproject.toml", "sync.json", "downstream.json"],
             ["README.md"],
         )
         assert canonical.effect == generated.effect == case.effect

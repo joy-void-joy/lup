@@ -1,7 +1,7 @@
 # lup: ignore[dict-get]
 # Every read here probes ProjectEntry/config payloads whose keys are all
 # optional, so dict-get is opted out file-wide.
-"""Track upstream repos and review commits since last sync.
+"""Track repos to sync with and review their commits since the last sync.
 
 These commands are the read/fetch half of ``/lup:update`` — the workflow that
 pulls improvements *from* the lup template (and other tracked upstreams) *into*
@@ -19,16 +19,27 @@ clone-or-fetch on demand. Each materialized upstream also gets a stable
 ``refs/<name>`` symlink so other commands (e.g. ``/lup:import``) can browse it
 by name without re-resolving cache paths.
 
-Two config files declare what to track:
+Two registry files declare what to track:
 
-- downstream.json (committed): declares upstream repos with URLs.
-  Ships with the lup template GitHub URL by default.
-- downstream.json.local (gitignored): local paths, sync state, and overrides.
-  Overrides downstream.json entries by project name, or adds local-only projects.
-  Set "ignore": true to skip a project (useful when you ARE the upstream).
+- sync.json (committed): the template's registry default, shipping only the
+  lup entry so a fresh project can immediately pull template improvements.
+  It is template scaffold: agents must never modify it — every personal
+  registration belongs in sync.json.local, and the edit policy asks before
+  any change to the tracked file.
+- sync.json.local (gitignored): personal registrations — local paths, sync
+  state, overrides by project name, and local-only projects. Set
+  "ignore": true to skip a project (useful when you ARE the upstream).
 
-The script merges both: .local entries override .json entries by name.
-Projects with a URL but no local path are auto-cloned to .cache/downstream/.
+The registry is direction-neutral: "sync" names the mechanism, not a
+direction. Seen from a project built on the template, the shipped lup entry
+is an upstream to pull improvements from; seen from the lup repo itself,
+sync.json.local registers the downstream fleet whose commits /lup:update
+reviews. Same tooling, opposite seats. A repo still carrying the legacy
+names downstream.json / downstream.json.local is read as a fallback with a
+deprecation warning; migrate by renaming the files.
+
+The script merges both: .local entries override sync.json entries by name.
+Projects with a URL but no local path are auto-cloned to .cache/sync/.
 
 Examples::
 
@@ -60,7 +71,7 @@ logger = logging.getLogger(__name__)
 
 @with_config(ConfigDict(extra="allow"))
 class ProjectEntry(TypedDict, total=False):
-    """One tracked upstream project, merged from downstream.json(.local).
+    """One tracked project, merged from sync.json(.local).
 
     A ``TypedDict``, not a ``BaseModel``: per CLAUDE.md, ``TypedDict`` types
     the JSON-shaped config we read from and write back to disk verbatim, while
@@ -79,8 +90,8 @@ class ProjectEntry(TypedDict, total=False):
 
 
 @with_config(ConfigDict(extra="allow"))
-class DownstreamConfig(TypedDict):
-    """Top-level shape of downstream.json and downstream.json.local.
+class SyncConfig(TypedDict):
+    """Top-level shape of sync.json and sync.json.local.
 
     Same rationale as :class:`ProjectEntry`: a ``TypedDict`` mirroring the
     on-disk JSON document, validated on read with extras preserved.
@@ -89,36 +100,46 @@ class DownstreamConfig(TypedDict):
     projects: list[ProjectEntry]
 
 
-DOWNSTREAM_ADAPTER = TypeAdapter(DownstreamConfig)
+SYNC_CONFIG_ADAPTER = TypeAdapter(SyncConfig)
 PROJECT_ENTRY_ADAPTER = TypeAdapter(ProjectEntry)
 
 
-def downstream_file() -> Path:
-    return project_root() / "downstream.json"
+def registry_path(name: str, legacy_name: str) -> Path:
+    """Resolve a registry file, falling back to its legacy downstream name."""
+    preferred = project_root() / name
+    legacy = project_root() / legacy_name
+    if preferred.exists() or not legacy.exists():
+        return preferred
+    logger.warning("%s is deprecated; rename it to %s", legacy_name, name)
+    return legacy
+
+
+def sync_file() -> Path:
+    return registry_path("sync.json", "downstream.json")
 
 
 def local_file() -> Path:
-    return project_root() / "downstream.json.local"
+    return registry_path("sync.json.local", "downstream.json.local")
 
 
 def cache_dir() -> Path:
-    return project_root() / ".cache" / "downstream"
+    return project_root() / ".cache" / "sync"
 
 
 def refs_dir() -> Path:
     return project_root() / "refs"
 
 
-def load_json(path: Path) -> DownstreamConfig:
+def load_json(path: Path) -> SyncConfig:
     if not path.exists():
         return {"projects": []}
     try:
-        return DOWNSTREAM_ADAPTER.validate_python(json.loads(path.read_text()))
+        return SYNC_CONFIG_ADAPTER.validate_python(json.loads(path.read_text()))
     except json.JSONDecodeError as error:
         raise typer.BadParameter(f"{path} is not valid JSON: {error}") from error
 
 
-def save_local(data: DownstreamConfig) -> None:
+def save_local(data: SyncConfig) -> None:
     local_file().write_text(json.dumps(data, indent=2) + "\n")
 
 
@@ -126,9 +147,9 @@ def ensure_ref_symlink(name: str, target: str) -> None:
     """Point the stable ``refs/<name>`` symlink at a project's working copy.
 
     ``refs/`` (gitignored) is a directory of by-name shortcuts into the
-    upstream repos this project tracks, wherever each one actually lives —
-    a user-configured path, or a clone under ``.cache/downstream/``. It exists
-    so commands and humans can reach an upstream as ``refs/<name>`` without
+    repos this project tracks for sync, wherever each one actually lives —
+    a user-configured path, or a clone under ``.cache/sync/``. It exists
+    so commands and humans can reach a tracked repo as ``refs/<name>`` without
     knowing or re-deriving its real location (e.g. ``/lup:import`` does
     ``cd refs/<project> && git log``). Every time a project is materialized the
     link is re-pointed at its current path; a pre-existing non-symlink at that
@@ -149,8 +170,8 @@ def ensure_ref_symlink(name: str, target: str) -> None:
 
 
 def load_projects() -> list[ProjectEntry]:
-    """Load and merge projects from downstream.json + downstream.json.local."""
-    base = load_json(downstream_file())
+    """Load and merge projects from sync.json + sync.json.local."""
+    base = load_json(sync_file())
     local = load_json(local_file())
 
     merged: dict[str, ProjectEntry] = {}  # lup: ignore[empty-collection] — merge fold
@@ -252,7 +273,7 @@ def ensure_local(
     report(
         f"Project '{name}' has no local path or URL configured.\n"
         "Either:\n"
-        "  1. Add a URL to downstream.json\n"
+        "  1. Add a URL for it in sync.json.local\n"
         f"  2. Run: uv run lup-devtools sync setup {name} /path/to/repo"
     )
     raise typer.Exit(1)
@@ -287,7 +308,7 @@ def status_cmd() -> None:
     projects = load_projects()
 
     if not projects:
-        typer.echo("No projects tracked. Check downstream.json or run 'setup'.")
+        typer.echo("No projects tracked. Check sync.json(.local) or run 'setup'.")
         raise typer.Exit(1)
 
     def project_row(p: ProjectEntry) -> list[str]:
@@ -431,7 +452,7 @@ def setup_project(
         typer.Option("--branch", "-b", help="Branch to track (default: remote HEAD)"),
     ] = "",
 ) -> None:
-    """Set the local path for a project (writes to downstream.json.local)."""
+    """Set the local path for a project (writes to sync.json.local)."""
     resolved = Path(path).resolve()
     if not resolved.exists():
         typer.echo(f"Path does not exist: {resolved}")

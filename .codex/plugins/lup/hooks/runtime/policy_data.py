@@ -63,6 +63,18 @@ PATH_RULES = [
         False,
     ),
     (
+        "subtree",
+        "sync.json",
+        "protected path requires approval",
+        True,
+    ),
+    (
+        "subtree",
+        "downstream.json",
+        "protected path requires approval",
+        True,
+    ),
+    (
         "name_prefix",
         ".env",
         "protected path requires approval",
