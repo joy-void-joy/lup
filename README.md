@@ -1,7 +1,5 @@
 (All code in this repository has been reviewed by humans, this README has been written by a human)
 
-# lup: Please instruct in CLAUDE.md (AGENTS.md etc) that touching README.md should be defered and ask the human first. In addition, please add to the auto-allow-edit hooks to be Ask.
-
 # Lup
 
 A meta repository for speed-boosting your Claude Code development and create self-improving [ClaudeAgentSDK] applications
@@ -96,7 +94,8 @@ checkout at hook time. See [architecture](docs/architecture.md),
 [typed-content migration audit](docs/typed-content-migration-audit.md),
 [runtime examples](examples/README.md), [resolver lifecycle](docs/resolver.md),
 the [generated rule reference](docs/rules.md),
-[native capability ledger](docs/native-capabilities.md), and
+[native capability ledger](docs/native-capabilities.md),
+the [sync registry contract](docs/sync.md), and
 [0.2 migration guide](docs/migration-0.2.md).
 
 The intended workflow while using this repository is to:
