@@ -1,0 +1,156 @@
+# lup: ignore[native-spelling]
+# This adapter support document deliberately teaches Codex-native spellings.
+"""Canonical downstream template guidance in its Codex AGENTS.md flavor."""
+
+import lup.harness.models as models
+from lup_template.devtools.harness.content.template_sections import (
+    DIRECTORY_STRUCTURE_THROUGH_TOOLS,
+    INNER_AGENT_BULLET,
+    PERMISSION_HOOKS,
+    PRINCIPLES_THROUGH_WORKTREE_STEP,
+    SELF_IMPROVEMENT_THROUGH_END,
+    SETUP_THROUGH_NAMING,
+    TOOLING_INTRO,
+    WORKFLOW_THROUGH_COMMIT_FORMAT,
+)
+
+DOCUMENT = models.PromptDocument(
+    parts=[
+        models.TextPart(
+            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/template_codex.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+
+# AGENTS.md Template
+
+This file exports portable sections from the upstream AGENTS.md as a scaffold for downstream projects. It contains conventions, workflow patterns, and coding standards that apply to any project using lup.
+
+**How it's used:** `"""
+        ),
+        models.SkillInvocation(plugin="lup", skill="init"),
+        models.TextPart(text=r"""` and `"""),
+        models.SkillInvocation(plugin="lup", skill="install"),
+        models.TextPart(
+            text=r"""` perform a **section-level merge** — they use the `<!-- section: ... -->` markers below to identify independent merge units, compare them against the target's existing AGENTS.md, add sections that are missing, and leave existing sections untouched. Placeholders like `<project>` are replaced with the actual project name.
+
+---
+
+<!-- section: AGENTS.md -->
+# AGENTS.md
+
+This file provides guidance to Codex — and any agent that reads `AGENTS.md` — when working with code in this repository.
+
+**Note:** Modifying `AGENTS.md` means modifying the repository-root `AGENTS.md` (this file).
+
+"""
+        ),
+        *SETUP_THROUGH_NAMING,
+        models.TextPart(
+            text=r"""- **Codex** = the meta-agent (the Codex CLI) that modifies the codebase, runs commands, and manages the development workflow
+"""
+        ),
+        *INNER_AGENT_BULLET,
+        models.TextPart(
+            text=r""""Lup" is the framework's name for the inner agent, not a project-specific term. Use "Codex" when referring to the outer development agent and "Lup" when referring to the inner SDK agent, regardless of the project's package name."""
+        ),
+        *PRINCIPLES_THROUGH_WORKTREE_STEP,
+        models.TextPart(
+            text=r"""`lup-devtools harness codex` regenerates the artifacts and installs the digest-verified plugin copy"""
+        ),
+        *WORKFLOW_THROUGH_COMMIT_FORMAT,
+        models.TextPart(
+            text=r"""## Editing Style
+
+**Prefer small, atomic edits.** The permission policy cannot inspect patch contents (`apply_patch` input is opaque to it), so edits fall through to a fail-closed approval — disciplined, single-concern patches are what keeps that review tractable and the history auditable.
+
+- Split large changes into multiple small patches, one logical change each
+- Separate concerns -- move imports in one patch, change logic in another
+- Rename identifiers exhaustively and run `uv run pyright` to verify nothing dangles
+
+"""
+        ),
+        *DIRECTORY_STRUCTURE_THROUGH_TOOLS,
+        models.TextPart(
+            text=r"""## Pyright Diagnostics
+
+There is no editor-integrated language server in this environment. Run `uv run pyright` after every substantive change and act on what it reports -- it is the reference for definitions, usages, and dangling references. For navigation, prefer structured word-boundary searches and confirm findings against pyright output rather than guessing at references.
+
+"""
+        ),
+        *TOOLING_INTRO,
+        models.TextPart(
+            text=r"""`lup-devtools harness codex` regenerates and verifies the Codex artifacts,
+installs a separately cached copy of the plugin after a digest check, and
+launches the Codex CLI. `CODEX_HOME` selects the account/config home.
+`lup-devtools usage` reports Claude usage; profiles are managed with
+`lup-devtools setup profile`.
+
+Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `$lup:*` is identical everywhere. Codex resolves the marketplace from the repository's `.agents/plugins/marketplace.json` and installs the plugin into its own cache, verifying the digest before every launch; `lup-devtools dev plugin name` (run by `"""
+        ),
+        models.SkillInvocation(plugin="lup", skill="init"),
+        models.TextPart(text=r"""` and `"""),
+        models.SkillInvocation(plugin="lup", skill="install"),
+        models.TextPart(
+            text=r"""`) wires the per-project name.
+
+"""
+        ),
+        *PERMISSION_HOOKS,
+        models.TextPart(
+            text=r"""## Settings & Configuration
+
+Project Codex configuration is the generated `.codex/config.toml`. Personal overrides belong in `.codex/config.local.toml` (gitignored) — never edit the generated file.
+
+---
+
+<!-- section: Process & Communication -->
+# Process & Communication
+
+## Asking Questions
+
+**Ask questions as explicit, numbered options** rather than burying them in prose. This applies to:
+
+- Clarifying requirements or ambiguous instructions
+- Offering choices between implementation approaches
+- Confirming before destructive or irreversible actions
+- Proposing changes or improvements
+- Any situation where you need user input before proceeding
+
+Even for open-ended questions, present concrete options plus an explicit free-form alternative, so the user can answer with a single short choice.
+
+**When proposing changes:**
+
+- **Propose, don't assume**: Ask before making changes
+- **Show context**: Show relevant current state before proposing
+- **Explain rationale**: Every suggestion should include why it would help
+- **Offer alternatives**: Present options when multiple valid approaches exist
+
+**When in doubt, ask.** Err on the side of asking questions rather than making assumptions.
+
+## Skills
+
+**After every skill invocation**, reflect on how it was actually used vs. documented:
+
+1. **Compare intent vs usage**: Did the skill serve its documented purpose, or was it adapted?
+2. **Notice patterns**: When the user corrects your approach or redirects focus, that's a signal the skill should evolve.
+3. **Proactively propose updates**: Suggest skill improvements as explicit options.
+
+**Evolution signals:**
+
+- User provides external docs -> Add doc-fetching or reference to the skill
+- User corrects your approach -> Update the skill to prevent future errors
+- User asks for something the skill should cover -> Expand scope
+- User ignores sections -> Consider simplifying
+
+## External Resources
+
+When questions involve the Claude Agent SDK or the Claude API used by the inner agent, fetch the docs directly:
+
+- `https://docs.claude.com/en/agent-sdk/<topic>`
+- `https://docs.claude.com/en/api/<topic>`
+
+When the user provides documentation links, incorporate that knowledge into AGENTS.md or relevant skills.
+
+"""
+        ),
+        *SELF_IMPROVEMENT_THROUGH_END,
+    ]
+)
