@@ -1,5 +1,3 @@
-# lup: Both plans said that we needed to have differences between Claude and Codex file generation. e.g. lup:resolve is different under claude (using claude's native workflow) and under codex (that doessn't have anything similar? Please check this) . Or the fact that .md compilation should happen differently between claude and codex. I don't see where this platform differenciation is
-# lup: On that note, can you check whether we have good claude/codex parity, while respecting theiir native format? That all is reflected between claude and codex
 """Root of the project-owned harness declaration graph.
 
 The declaration leaves — skills, agents, prompt documents, settings, and
@@ -27,9 +25,16 @@ from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 
 
-# lup: Sounds weird? Should be declared per platform instead? Unless you mean something like default harness that the other two overrides?
 def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harness:
-    """Build the canonical declaration graph consumed by every adapter."""
+    """Build the canonical declaration graph consumed by every adapter.
+
+    Deliberately one declaration, not one per platform: every intended
+    Claude/Codex difference is a rendering decision in the adapters
+    (``compile_claude`` / ``compile_codex``) or a support artifact in the
+    generation recipes, mapped in ``docs/platform-differentiation.md``.
+    Per-platform declarations overriding a shared default were rejected
+    because they would let semantic content fork silently.
+    """
     del root
     plugin = Plugin(
         id="plugin.lup",

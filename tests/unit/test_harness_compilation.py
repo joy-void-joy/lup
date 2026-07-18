@@ -1,6 +1,7 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
 import json
+from importlib import resources
 from pathlib import Path
 from typing import Literal
 
@@ -50,6 +51,12 @@ from lup.harness.reconciliation import (
 )
 from lup.policy.bundle import policy_kernel_source
 from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.template_claude import (
+    DOCUMENT as TEMPLATE_CLAUDE,
+)
+from lup_template.devtools.harness.content.template_codex import (
+    DOCUMENT as TEMPLATE_CODEX,
+)
 from lup_template.devtools.harness.generate import (
     GenerationRecipe,
     claude_generation_recipe,
@@ -109,6 +116,37 @@ def test_claude_tree_renders_every_typed_support_document() -> None:
     assert Path(".claude/settings.json") in paths
 
 
+def test_codex_tree_renders_the_agents_flavored_template() -> None:
+    paths = {
+        artifact.path
+        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+    }
+
+    assert Path(".codex/plugins/lup/TEMPLATE_AGENTS.md") in paths
+
+
+def test_template_flavors_share_sections_and_differ_natively() -> None:
+    claude_render = ClaudePromptRenderer(ClaudeSkillInvocationRenderer()).render(
+        TEMPLATE_CLAUDE
+    )
+    codex_render = CodexPromptRenderer(CodexSkillInvocationRenderer()).render(
+        TEMPLATE_CODEX
+    )
+
+    def sections(render: str) -> list[str]:
+        return [
+            line for line in render.splitlines() if line.startswith("<!-- section: ")
+        ]
+
+    assert sections(claude_render)[0] == "<!-- section: CLAUDE.md -->"
+    assert sections(codex_render)[0] == "<!-- section: AGENTS.md -->"
+    assert sections(claude_render)[1:] == sections(codex_render)[1:]
+    assert "/lup:init" in claude_render and "$lup:" not in claude_render
+    assert "$lup:init" in codex_render and "/lup:" not in codex_render
+    assert "AskUserQuestion" in claude_render
+    assert "AskUserQuestion" not in codex_render
+
+
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
     recipe = claude_generation_recipe(Path.cwd())
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
@@ -122,16 +160,20 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
 
 
 def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None:
+    harness = portable_harness()
     claude = {
         artifact.path: artifact.content
-        for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
+        for artifact in compile_claude(harness).artifacts
     }
     codex = {
-        artifact.path: artifact.content
-        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+        artifact.path: artifact.content for artifact in compile_codex(harness).artifacts
     }
     command = claude[Path(".claude/plugins/lup/commands/resolve.md")]
-    workflow = claude[Path(".claude/workflows/commands/resolve.js")]
+    workflow = (
+        resources.files("lup_template.devtools.harness.content")
+        .joinpath("assets/resolve.js")
+        .read_text("utf-8")
+    )
     skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
 
     workflow_call = (
@@ -139,10 +181,12 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
     )
     assert workflow_call in command
     assert "Triage into concerns" not in command
+    assert '"run_id"' in command and '"accept"' in command
     assert "'harness',\n  'resolve',\n  '--adapter',\n  'claude'" in workflow
     assert "input.inventory" not in workflow
     assert "requires run_id" not in workflow
     assert "uv run lup-devtools harness resolve --adapter codex" in skill
+    assert "--run-id" in skill and "--accept" in skill
     assert "scheduling" not in skill
 
 
@@ -204,7 +248,7 @@ def test_typed_content_package_has_expected_module_inventory() -> None:
     content = Path("src/lup_template/devtools/harness/content")
     sources = list(content.rglob("*.py"))
 
-    assert len(sources) == 44
+    assert len(sources) == 46
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:
