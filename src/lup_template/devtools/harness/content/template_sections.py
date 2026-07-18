@@ -200,6 +200,7 @@ uv run lup-devtools feedback commit --dry-run
 # Interactive setup wizard (configure integrations, API keys, env vars)
 uv run lup-devtools setup             # Full walkthrough
 uv run lup-devtools setup status      # Show what's configured
+uv run lup-devtools dashboard         # Same registry in a local web UI
 
 uv run lup --help
 ```
@@ -566,7 +567,8 @@ src/
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
     │   ├── usage/              # Claude Code usage display (api/render/app)
-    │   ├── setup.py            # Interactive setup wizard (customize integrations)
+    │   ├── setup.py            # Shared integration registry + terminal wizard
+    │   ├── dashboard/          # Local setup API and packaged zero-build web UI
     │   ├── sync.py             # Upstream sync tracking (feeds """
     ),
     models.SkillInvocation(plugin="lup", skill="update"),

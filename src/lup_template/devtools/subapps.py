@@ -19,6 +19,7 @@ class SubApp(BaseModel):
 
 SUBAPPS = [
     SubApp(name="agent", help="Agent introspection and debugging"),
+    SubApp(name="dashboard", help="Host the local setup dashboard"),
     SubApp(name="dev", help="Worktrees, branches, and pre-flight checks"),
     SubApp(name="feedback", help="Feedback state, metrics, and commits"),
     SubApp(name="harness", help="Generate and launch Claude or Codex harnesses"),
