@@ -705,11 +705,9 @@ def decide_edit(
     autonomous: bool = False,
     python_source: bool = False,
 ) -> KernelDecision:
-    """Apply marker, anti-pattern, path, full-write, deletion, and size gates."""
+    """Apply anti-pattern, path, marker, full-write, deletion, and size gates."""
     previous = before or ""
     updated = after or ""
-    if marker_count(previous, python_source) != marker_count(updated, python_source):
-        return KernelDecision("ask", "edit changes inline review markers")
     if after is not None:
         antipattern = antipattern_decision(
             before, after, antipattern_rows, python_source
@@ -722,6 +720,8 @@ def decide_edit(
     )
     if protected is not None and not (autonomous and protected[3]):
         return KernelDecision("ask", protected[2])
+    if marker_count(previous, python_source) != marker_count(updated, python_source):
+        return KernelDecision("ask", "edit changes inline review markers")
     if before is None:
         if autonomous:
             return KernelDecision("allow", "reviewed autonomous full write")

@@ -86,7 +86,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel.py",
       "category": "generated",
-      "sha256": "ed6de9ebf43b5c014041dc24e896fb32e2d3adb8726769a2215555cc52bb7d2b",
+      "sha256": "034d3755fe77b87b3850f51553db28624b4b1bb669e12ba994b7f19faf59762f",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
