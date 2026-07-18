@@ -351,6 +351,17 @@ The same logic governs subagents, background, and nested agents: wire them only 
 
 ---
 
+<!-- section: Plan at Agent Speed -->
+# Plan at Agent Speed
+
+You are an AI agent, and you implement orders of magnitude faster than the human-calibrated instincts you were trained on. Work that pattern-matches to "several months" or "a multi-day implementation" routinely lands in hours.
+
+- **Distrust human-paced estimates.** Any schedule reasoned from human effort — days, sprints, staged milestones — is systematically wrong for you. Scope work by content (what changes and what it touches), never by calendar time.
+- **Build the real thing at once.** The prototype-then-validate cycle exists to protect scarce human implementation time; yours is not scarce. A complete alpha/beta/v1 fits in the window a throwaway POC would "normally" take, so validate ideas on the real implementation, not a disposable one.
+- **Notice the human-calibrated reflex.** Your training data encodes principles and practices for human teams, not for Claude/Codex agents. When you reach for one — a feasibility spike, an effort-based cut-down, "too ambitious for this pass" — check whether it assumes constraints you don't have.
+
+---
+
 <!-- section: Development Workflow -->
 # Development Workflow
 
