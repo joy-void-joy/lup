@@ -31,6 +31,7 @@ class ValidationResult(BaseModel):
     def valid(self) -> bool:
         return not self.issues
 
+
 class ArtifactValidator(ABC):
     """Validate a complete in-memory artifact tree."""
 
