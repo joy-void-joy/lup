@@ -16,6 +16,7 @@ from lup.workspace.context import (
     SessionContext,
     read_session_context,
 )
+from lup.workspace.notes import session_gate_flag
 
 
 @pytest.fixture(autouse=True)
@@ -58,3 +59,15 @@ def test_minimal_context_keeps_absent_fields_none(
 
 def test_process_outside_a_session_reads_none() -> None:
     assert read_session_context() is None
+
+
+def test_gate_flag_lives_outside_agent_writable_roots(tmp_path: Path) -> None:
+    # The codex sandbox grants the workspace and /tmp; a flag the agent
+    # could write itself would make the reflection gate forgeable.
+    flag = session_gate_flag("s1")
+
+    assert not flag.is_relative_to(tmp_path)
+    assert not flag.is_relative_to(Path.cwd())
+    assert not flag.is_relative_to(Path("/tmp"))
+    assert flag.is_relative_to(Path.home())
+    assert flag.name == "s1.reflection"
