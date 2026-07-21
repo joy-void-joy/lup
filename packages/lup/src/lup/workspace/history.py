@@ -169,7 +169,7 @@ def session_backend(session_dir: Path) -> str | None:
     (sessions predating it) — display code renders that as unknown
     rather than guessing a backend.
     """
-    for filepath in sorted(session_dir.glob("*.json"), reverse=True):
+    for filepath in sorted(session_dir.glob("[0-9]*.json"), reverse=True):
         try:
             data = json.loads(filepath.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
@@ -199,7 +199,9 @@ def load_session_records(session_id: str) -> list[SessionRecord]:
     sessions: list[SessionRecord] = []
 
     for session_dir in iter_session_dirs(session_id=session_id):
-        for filepath in sorted(session_dir.glob("*.json")):
+        # Only timestamp-named files are session records (save_session's
+        # format); sibling artifacts like review.json share the directory.
+        for filepath in sorted(session_dir.glob("[0-9]*.json")):
             try:
                 data = json.loads(filepath.read_text(encoding="utf-8"))
                 sessions.append(SessionRecord.model_validate(data))
