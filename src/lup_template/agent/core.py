@@ -77,7 +77,7 @@ from lup.types import (
     UsageCost,
 )
 from lup.workspace.history import save_session
-from lup.workspace.notes import NotesConfig, setup_notes
+from lup.workspace.notes import NotesConfig, session_gate_flag, setup_notes
 from lup.workspace.paths import agent_version
 from lup_template.agent.config import (
     compat_api_key,
@@ -511,7 +511,11 @@ def build_session_factory(
 
         policy = ToolPolicy(settings)
         realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
-        gate = ReviewGate(flag_path=notes.trace_log.with_suffix(".reflection"))
+        # The flag lives outside the sandbox's writable roots (workspace,
+        # /tmp) so only the host-side tool server can open the gate.
+        gate_flag = session_gate_flag(notes.session.name)
+        gate_flag.unlink(missing_ok=True)
+        gate = ReviewGate(flag_path=gate_flag)
         submission_gate = reflection_submission_gate(gate)
         context = SessionContext(
             session_dir=notes.session,
