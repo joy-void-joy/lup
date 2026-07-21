@@ -53,6 +53,7 @@ from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
 from lup.runtime.contracts import SessionFactory
 from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.query import query
+from lup.runtime.wrappers import CorrectionConfig, DecoratingSessionFactory
 
 
 class ResolverInvariantError(RuntimeError):
@@ -61,6 +62,23 @@ class ResolverInvariantError(RuntimeError):
 
 type SessionFactoryRecipe = Callable[[Path], SessionFactory]
 type ResolverInput = ResolveRequest | ResolveInventory
+
+
+def corrective(recipe: SessionFactoryRecipe) -> SessionFactoryRecipe:
+    """Give each opened session corrective structured-output reprompts.
+
+    Every resolver turn ends in a typed submission; a model that answers in
+    prose instead of calling the submission tool would otherwise fail the
+    whole run on its first miss.
+    """
+
+    def factory(root: Path) -> SessionFactory:
+        return DecoratingSessionFactory(
+            recipe(root), correction=CorrectionConfig(cycles=2)
+        )
+
+    return factory
+
 
 APPROVE = "approve"
 DEFER = "defer"
@@ -137,8 +155,8 @@ class ResolverCore:
     ) -> None:
         self.config = config
         self.spec = spec
-        self.worker_factory = worker_factory
-        self.reviewer_factory = reviewer_factory
+        self.worker_factory = corrective(worker_factory)
+        self.reviewer_factory = corrective(reviewer_factory)
         self.invocation_renderer = invocation_renderer
         self.question_broker = question_broker
         self.process_launcher = process_launcher
