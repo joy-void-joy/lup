@@ -46,6 +46,7 @@ from lup.resolver.models import (
     ResolverConfig,
     ResolvePhase,
     ResolveState,
+    ReviewNote,
     ReviewReport,
     SourceSnapshot,
     QuestionBatch,
@@ -419,15 +420,7 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
                     "criteria": [
                         {"id": "typed", "description": "Domain type is explicit"}
                     ],
-                    "notes": [
-                        {
-                            "file": "src/module.py",
-                            "line": 7,
-                            "text": "use the domain type",
-                        }
-                    ],
-                    "eligible": False,
-                    "integration_approved": False,
+                    "note_indexes": [0],
                 }
             ]
         }
@@ -457,6 +450,11 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
     assert [item.id for item in inventory.concerns] == ["domain-type"]
     assert inventory.concerns[0].eligible
     assert inventory.concerns[0].integration_approved
+    # Notes are materialized from the request by position — context stripped,
+    # content authoritative, never echoed by the planner.
+    assert inventory.concerns[0].notes == [
+        ReviewNote(file=Path("src/module.py"), line=7, text="use the domain type")
+    ]
 
 
 def test_only_orchestrator_creates_commits_and_reads_their_identity(

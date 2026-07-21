@@ -181,8 +181,10 @@ class ResolverCore:
         """Organize raw review evidence in one read-only structured turn."""
         prompt = (
             "Organize every review note into generalized implementation concerns "
-            "without editing. Cluster by underlying issue, not file. Every note must "
-            "appear exactly once. Give each concern path-safe id, complete acceptance "
+            "without editing. Cluster by underlying issue, not file. Reference "
+            "notes through note_indexes using each note's zero-based position in "
+            "the evidence below; every index must appear exactly once across all "
+            "concerns. Give each concern path-safe id, complete acceptance "
             "criteria, dependencies, material questions, and starting files. Do not "
             "decide eligibility or integration approval; the resolver asks the user."
             f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
@@ -191,23 +193,29 @@ class ResolverCore:
             self.reviewer_factory(self.config.workspace),
             turn_request(TurnInput(text=prompt), ConcernInventory),
         )
-        concerns = [
-            concern.model_copy(update={"eligible": True, "integration_approved": True})
-            for concern in result.output.concerns
-        ]
-        expected = sorted(
-            ReviewNote.model_validate(
-                note.model_dump(exclude={"context"})
-            ).model_dump_json()
-            for note in request.notes
+        assigned = sorted(
+            index
+            for planned in result.output.concerns
+            for index in planned.note_indexes
         )
-        received = sorted(
-            note.model_dump_json() for concern in concerns for note in concern.notes
-        )
-        if expected != received:
+        if assigned != list(range(len(request.notes))):
             raise ResolverInvariantError(
                 "inventory planner must assign every review note exactly once"
             )
+        concerns = [
+            Concern(
+                notes=[
+                    ReviewNote.model_validate(
+                        request.notes[index].model_dump(exclude={"context"})
+                    )
+                    for index in planned.note_indexes
+                ],
+                eligible=True,
+                integration_approved=True,
+                **planned.model_dump(exclude={"note_indexes"}),
+            )
+            for planned in result.output.concerns
+        ]
         return ResolveInventory(source=request.source, concerns=concerns)
 
     async def run_exclusive(self, inventory: ResolveInventory) -> ResolveManifest:
