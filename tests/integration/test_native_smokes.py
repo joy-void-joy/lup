@@ -248,13 +248,14 @@ def test_codex_plugin_blocks_a_forbidden_apply_patch(tmp_path: Path) -> None:
         "reject that anti-pattern; after the rejection reply exactly hook-blocked."
     )
 
+    # No --ignore-user-config: plugins (and their hooks) are recorded in the
+    # isolated home's config.toml, which that flag would silently discard.
     sh.Command("codex")(
         "exec",
         "--enable",
         "hooks",
         "--dangerously-bypass-hook-trust",
         "--ephemeral",
-        "--ignore-user-config",
         "--sandbox",
         "workspace-write",
         "--model",
