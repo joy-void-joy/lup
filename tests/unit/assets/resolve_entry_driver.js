@@ -23,9 +23,9 @@ const bunStub = {
 const delivered = envelope.delivery === 'absent' ? undefined : envelope.value
 try {
   const result = await run(delivered, bunStub)
-  console.log(JSON.stringify({ ok: true, result, spawned }))
+  console.log(JSON.stringify({ ok: true, result, spawned })) // lup: ignore[console-log] — stdout is the driver's protocol
 } catch (error) {
-  console.log(
+  console.log( // lup: ignore[console-log] — stdout is the driver's protocol
     JSON.stringify({ ok: false, message: String(error.message ?? error), spawned }),
   )
 }
