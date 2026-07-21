@@ -17,7 +17,7 @@ from lup.adapters.claude.runtime import (
     claude_usage,
     convert_claude_block,
 )
-from lup.adapters.codex.app_server import CodexAppServer
+from lup.adapters.codex.app_server import CodexAppServer, RpcMessage
 from lup.adapters.codex.runtime import (
     CodexConversationState,
     CodexMcpServerConfig,
@@ -135,6 +135,35 @@ def test_codex_thread_config_contains_project_mcp_and_writable_roots(
         },
         "sandbox_workspace_write": {"writable_roots": [str(tmp_path / "session")]},
     }
+
+
+async def test_mcp_elicitation_accepts_composed_servers_declines_others(
+    tmp_path: Path,
+) -> None:
+    config = CodexSessionConfig(
+        model="gpt",
+        cwd=tmp_path,
+        mcp_servers={"notes": CodexMcpServerConfig(command="uv")},
+    )
+    state = CodexConversationState(config, CodexAppServer(Path("codex")), None)
+
+    def elicitation(server: str) -> RpcMessage:
+        return RpcMessage(
+            id=7,
+            method="mcpServer/elicitation/request",
+            params={
+                "threadId": "t1",
+                "turnId": "u1",
+                "serverName": server,
+                "_meta": {"codex_approval_kind": "mcp_tool_call"},
+            },
+        )
+
+    accepted = await state.handle_server_request(elicitation("notes"))
+    declined = await state.handle_server_request(elicitation("stranger"))
+
+    assert accepted == {"action": "accept"}
+    assert declined == {"action": "decline"}
 
 
 def test_claude_message_and_usage_translation_has_direct_fixtures() -> None:
