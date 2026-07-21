@@ -169,6 +169,9 @@ class CodexPluginInstaller:
         before = plugin_cache_evidence(source_root, self.config)
         if before.ready and not force:
             return before
+        # The CLI refuses to resolve a CODEX_HOME that does not exist yet;
+        # the installer owns the cache location, so it creates it.
+        self.config.codex_home.mkdir(parents=True, exist_ok=True)
         environment = {
             **os.environ,  # lup: ignore[os-environ] — exact child-process inheritance
             "CODEX_HOME": str(self.config.codex_home),
