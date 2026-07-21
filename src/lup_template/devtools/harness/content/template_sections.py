@@ -473,7 +473,7 @@ Use conventional commit syntax: `type(scope): description`
 - `docs` -- Documentation only (README, standalone docs)
 - `test` -- Adding or updating tests
 - `chore` -- Maintenance (dependencies, build config, etc.)
-- `meta` -- Changes to `.claude/` files (CLAUDE.md, settings, scripts, commands)
+- `meta` -- Changes to native harness files (guidance, settings, scripts, commands)
 - `data` -- Generated data and outputs
 
 **Examples:**
@@ -769,29 +769,48 @@ Run `uv run lup-devtools --help` for the full command tree.
     ),
 ]
 
-PERMISSION_HOOKS: list[models.PromptPart] = [
-    models.TextPart(
-        text=r"""## Permission Hooks
+CLAUDE_POLICY_SCOPE = r"""The policy checks every shell segment, URL scope, and edit in a batch. Denial
+wins over approval, malformed input fails conservatively, redirection and
+substitution are never auto-allowed, and edit decisions include protected
+paths, marker changes, size, and the canonical anti-pattern audit."""
+
+CODEX_POLICY_SCOPE = r"""The policy checks every shell segment and URL scope in a batch. Denial
+wins over approval, malformed input fails conservatively, redirection and
+substitution are never auto-allowed, and native `apply_patch` edits — opaque
+to the policy — always fall through to fail-closed approval."""
+
+
+def permission_hooks(policy_scope: str) -> list[models.PromptPart]:
+    """Render the permission-hooks section around one flavor-owned scope claim.
+
+    The canonical-policy framing is identical on both platforms; how native
+    edits are decided is not — Claude Code edits are inspected in-policy,
+    Codex `apply_patch` input is opaque and fails closed — so each template
+    passes its own scope paragraph.
+    """
+    return [
+        models.TextPart(
+            text=r"""## Permission Hooks
 
 Permissions come from the canonical semantic policies in `lup.policy` and the
 application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 
-The policy checks every shell segment, URL scope, and edit in a batch. Denial
-wins over approval, malformed input fails conservatively, redirection and
-substitution are never auto-allowed, and edit decisions include protected
-paths, marker changes, size, and the canonical anti-pattern audit. Use
+"""
+            + policy_scope
+            + r""" Use
 `"""
-    ),
-    models.SkillInvocation(plugin="lup", skill="hooks"),
-    models.TextPart(
-        text=r"""` to update canonical inputs, regenerate both plugins, and run the
+        ),
+        models.SkillInvocation(plugin="lup", skill="hooks"),
+        models.TextPart(
+            text=r"""` to update canonical inputs, regenerate both plugins, and run the
 shared canonical/bundled fixture suite.
 
 """
-    ),
-]
+        ),
+    ]
+
 
 SELF_IMPROVEMENT_THROUGH_END: list[models.PromptPart] = [
     models.TextPart(

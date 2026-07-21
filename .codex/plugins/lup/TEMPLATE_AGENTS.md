@@ -424,7 +424,7 @@ Use conventional commit syntax: `type(scope): description`
 - `docs` -- Documentation only (README, standalone docs)
 - `test` -- Adding or updating tests
 - `chore` -- Maintenance (dependencies, build config, etc.)
-- `meta` -- Changes to `.claude/` files (CLAUDE.md, settings, scripts, commands)
+- `meta` -- Changes to native harness files (guidance, settings, scripts, commands)
 - `data` -- Generated data and outputs
 
 **Examples:**
@@ -723,10 +723,10 @@ application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 
-The policy checks every shell segment, URL scope, and edit in a batch. Denial
+The policy checks every shell segment and URL scope in a batch. Denial
 wins over approval, malformed input fails conservatively, redirection and
-substitution are never auto-allowed, and edit decisions include protected
-paths, marker changes, size, and the canonical anti-pattern audit. Use
+substitution are never auto-allowed, and native `apply_patch` edits — opaque
+to the policy — always fall through to fail-closed approval. Use
 `$lup:hooks` to update canonical inputs, regenerate both plugins, and run the
 shared canonical/bundled fixture suite.
 
