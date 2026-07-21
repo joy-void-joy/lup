@@ -5,6 +5,7 @@ scheduled native lane supplies credentials and deliberately cheap models.
 """
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -225,6 +226,12 @@ def test_codex_plugin_blocks_a_forbidden_apply_patch(tmp_path: Path) -> None:
     """A denied plugin hook keeps the file unchanged and the session alive."""
     root = Path.cwd()
     codex_home = tmp_path / "codex-home"
+    # The isolated home keeps plugin state out of the user's config but must
+    # still carry credentials — codex reads auth only from its CODEX_HOME.
+    auth = Path.home() / ".codex" / "auth.json"
+    if auth.exists():
+        codex_home.mkdir(parents=True)
+        shutil.copy(auth, codex_home / "auth.json")
     CodexPluginInstaller(PluginCacheConfig(codex_home=codex_home)).ensure(
         root / ".codex" / "plugins" / "lup",
         root,

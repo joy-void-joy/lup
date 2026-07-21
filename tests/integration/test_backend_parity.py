@@ -14,6 +14,8 @@ until review has been called, so output implies reflection ordered
 correctly end to end.
 """
 
+import uuid
+
 import pytest
 
 from lup_template.agent.config import settings
@@ -31,10 +33,13 @@ async def test_both_backends_complete_the_core_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     results = {}
+    # A fresh session id per run: reused ids accumulate persisted turn and
+    # session state under notes/ across nightly runs and contaminate replay.
+    stamp = uuid.uuid4().hex[:8]
     for sdk, model in (("claude", "claude-haiku-4-5-20251001"), ("codex", "gpt-5.5")):
         monkeypatch.setattr(settings, "agent_sdk", sdk)
         monkeypatch.setattr(settings, "model", model)
-        results[sdk] = await run_agent(TASK, session_id=f"parity-{sdk}")
+        results[sdk] = await run_agent(TASK, session_id=f"parity-{sdk}-{stamp}")
 
     for sdk, result in results.items():
         assert result.output.summary, f"{sdk}: empty output summary"
@@ -61,12 +66,12 @@ async def test_both_backends_complete_the_core_loop(
     )
 
     for sdk in results:
-        loaded = load_session_records(f"parity-{sdk}")
+        loaded = load_session_records(f"parity-{sdk}-{stamp}")
         assert loaded, (
             f"{sdk}: session JSON not retrievable through lup.workspace.history"
         )
         assert loaded[0].agent_sdk == sdk, f"{sdk}: stamp lost in persistence"
-        session_dirs = list(iter_session_dirs(session_id=f"parity-{sdk}"))
+        session_dirs = list(iter_session_dirs(session_id=f"parity-{sdk}-{stamp}"))
         assert session_dirs and session_backend(session_dirs[0]) == sdk, (
             f"{sdk}: trace tooling cannot detect the backend"
         )
