@@ -81,19 +81,24 @@ class TestCapabilityProbes:
 
 def write_plugin_source(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "plugin.json").write_text('{"name": "lup"}\n', encoding="utf-8")
+    manifest_dir = root / ".codex-plugin"
+    manifest_dir.mkdir(exist_ok=True)
+    (manifest_dir / "plugin.json").write_text(
+        '{"name": "lup", "version": "9.9.9"}\n', encoding="utf-8"
+    )
     (root / "hook.py").write_text("DECISION = 'ask'\n", encoding="utf-8")
 
 
 class TestPluginInstallGate:
     def cache_root(self, config: PluginCacheConfig) -> Path:
+        # Mirrors codex's layout: the cache segment is the manifest version.
         return (
             config.codex_home
             / "plugins"
             / "cache"
             / config.marketplace
             / config.plugin
-            / config.version
+            / "9.9.9"
         )
 
     def test_verified_cache_short_circuits_without_invoking_codex(
@@ -131,6 +136,7 @@ class TestPluginInstallGate:
 
         assert evidence.ready
         assert log.read_text(encoding="utf-8").splitlines() == [
+            "plugin marketplace",
             "plugin remove",
             "plugin add",
         ]
