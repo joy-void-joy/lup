@@ -400,6 +400,12 @@ def create_claude_session_factory(
     return ClaudeSessionFactory(config)
 
 
+# The fully qualified name of the turn-bound submission tool as Claude Code
+# sees it. Compositions that install their own tool-allowlist hooks must
+# include it, or the hook denies the very tool the turn requires.
+SUBMISSION_TOOL = "mcp__lup-output__submit_output"
+
+
 def build_submission_server(
     binding: TurnToolBinding[BaseModel],
 ) -> LupMcpServerConfig:
@@ -449,7 +455,7 @@ def build_claude_options(
     allowed = list(config.allowed_tools)
     if binding is not None:
         servers["lup-output"] = build_submission_server(binding)
-        allowed.append("mcp__lup-output__submit_output")
+        allowed.append(SUBMISSION_TOOL)
 
     def native_server(server: McpServerEntry) -> "claude_types.McpServerConfig":
         match server:
