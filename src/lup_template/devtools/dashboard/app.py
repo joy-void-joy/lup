@@ -114,7 +114,7 @@ def save_integration(command: str, update: IntegrationUpdate) -> DashboardState:
             status_code=409,
             detail=f"Run `uv run lup-devtools setup {command}` for this workflow",
         )
-    unknown = set(update.values) - allowed  # lup: ignore[set-shape] — field-name difference
+    unknown = set(update.values) - allowed  # lup: ignore[set-shape] — key diff
     if unknown:
         names = ", ".join(sorted(unknown))
         raise HTTPException(status_code=400, detail=f"Fields not allowed: {names}")
@@ -131,11 +131,11 @@ def create_dashboard() -> FastAPI:
         .read_text("utf-8")
     )
 
-    @dashboard.get("/", response_class=HTMLResponse)
+    @dashboard.get("/", response_class=HTMLResponse)  # lup: ignore[dict-get] — route
     async def dashboard_home() -> HTMLResponse:
         return HTMLResponse(html)
 
-    @dashboard.get("/api/setup")
+    @dashboard.get("/api/setup")  # lup: ignore[dict-get] — route decorator
     async def setup_status() -> DashboardState:
         return dashboard_state()
 

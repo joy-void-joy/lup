@@ -27,7 +27,9 @@ from tests.unit.codex_hooks_reference import (
 )
 
 
-def run_script(script: Path, payload: CodexHookInput) -> dict[str, str]:
+def run_script(
+    script: Path, payload: CodexHookInput
+) -> dict[str, str]:  # lup: ignore[dict-str-payload] — dispatcher JSON
     output = str(sh.Command("python3")("-I", str(script), _in=json.dumps(payload)))
     return json.loads(output)
 

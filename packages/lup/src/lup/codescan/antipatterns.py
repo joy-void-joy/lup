@@ -155,6 +155,12 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # Flags every `.get(` — the user's explicit broad choice over a narrow
         # rule. On payload/TypedDict-shaped data use typed attribute access; on
         # a genuinely open dict (a registry or cache) it is one comment.
+        # lup: defer[when new dict-get false-positive ignores accumulate]: refute
+        # whole-file dict-get findings by receiver type — ask pyright
+        # (textDocument/definition on the matched attribute) whether it resolves
+        # into the mapping family's stubs, and drop confirmed non-mapping sites
+        # (HTTP clients, route decorators). Audit-side only; the hook kernel
+        # keeps this broad line rule because edit fragments have no types.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
         message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "

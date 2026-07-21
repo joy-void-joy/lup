@@ -20,7 +20,7 @@ async def test_dashboard_serves_packaged_wizard(isolated_dashboard: None) -> Non
     async with AsyncClient(
         transport=ASGITransport(app=create_dashboard()), base_url="http://dashboard"
     ) as client:
-        response = await client.get("/")
+        response = await client.get("/")  # lup: ignore[dict-get] — HTTP client
 
     assert response.status_code == 200
     assert "Project setup" in response.text
@@ -34,7 +34,7 @@ async def test_dashboard_projects_cli_registry_status(
     async with AsyncClient(
         transport=ASGITransport(app=create_dashboard()), base_url="http://dashboard"
     ) as client:
-        response = await client.get("/api/setup")
+        response = await client.get("/api/setup")  # lup: ignore[dict-get] — HTTP client
     state = DashboardState.model_validate(response.json())
 
     assert response.status_code == 200

@@ -61,7 +61,8 @@ SUBAPP_TYPERS = {
     "version": version_app,
 }
 
-if set(SUBAPP_TYPERS) != {subapp.name for subapp in SUBAPPS}:  # lup: ignore[set-shape] — roster equality
+declared = {subapp.name for subapp in SUBAPPS}
+if set(SUBAPP_TYPERS) != declared:  # lup: ignore[set-shape] — roster equality
     raise ValueError("lup-devtools sub-app roster and Typer wiring disagree")
 
 for subapp in SUBAPPS:
