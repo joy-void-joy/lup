@@ -56,6 +56,7 @@ renderers and the policy bundle).
 | `.claude/CLAUDE.md`, `AGENTS.md` | `content/guidance.py` |
 | `.claude/PATTERNS.md` | `content/patterns.py` |
 | `.claude/plugins/lup/TEMPLATE_CLAUDE.md` | `content/template_claude.py` |
+| `.codex/plugins/lup/TEMPLATE_AGENTS.md` | `content/template_codex.py` |
 | `.claude/settings.json` | `content/settings.py` |
 | `.claude/plugins/lup/scripts/file_suggest.sh` | `content/assets/file_suggest.sh` (verbatim copy) |
 | `.claude/plugins/lup/commands/<skill>.md`, `.codex/plugins/lup/skills/<skill>/SKILL.md` | `content/skills/<skill>.py` |
