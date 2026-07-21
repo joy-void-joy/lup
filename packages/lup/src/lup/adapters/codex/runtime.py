@@ -68,9 +68,9 @@ class CodexSessionConfig(BaseModel):
     def reject_unhandled_approvals(self) -> "CodexSessionConfig":
         if self.approval_policy not in {None, "never"}:
             raise ValueError(
-                "this app-server adapter handles dynamic-tool calls only; "
-                "approval_policy must be 'never' until native approval requests "
-                "are implemented"
+                "this app-server adapter handles dynamic-tool calls and MCP "
+                "elicitations only; approval_policy must be 'never' until "
+                "exec/patch approval requests are implemented"
             )
         return self
 
@@ -119,6 +119,20 @@ class DynamicToolCall(BaseModel):
     call_id: str = Field(alias="callId")
     tool: str
     arguments: JsonValue
+
+
+class McpElicitationRequest(BaseModel):
+    """One approval elicitation for an MCP server tool call.
+
+    Codex treats session-scoped MCP servers as untrusted and elicits an
+    approval (``mcpServer/elicitation/request``, with
+    ``_meta.codex_approval_kind = "mcp_tool_call"``) before every call.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    thread_id: str = Field(alias="threadId")
+    server_name: str = Field(alias="serverName")
 
 
 class TokenUsageBreakdown(BaseModel):
@@ -401,6 +415,8 @@ class CodexConversationState:
         )
 
     async def handle_server_request(self, message: RpcMessage) -> JsonValue:
+        if message.method == "mcpServer/elicitation/request":
+            return self.resolve_mcp_elicitation(message)
         if message.method != "item/tool/call":
             raise RuntimeError(f"unsupported app-server request {message.method!r}")
         call = DynamicToolCall.model_validate(message.params)
@@ -427,6 +443,19 @@ class CodexConversationState:
             "contentItems": [{"type": "inputText", "text": response.message}],
             "success": response.accepted,
         }
+
+    def resolve_mcp_elicitation(self, message: RpcMessage) -> JsonValue:
+        """Accept tool-call elicitations for servers this session composed.
+
+        The composition that opened this session declared its ``mcp_servers``,
+        so calls to those servers are pre-authorized; an elicitation naming
+        any other server declines. Without this, every project tool call is
+        reported to the model as "user rejected MCP tool call".
+        """
+        request = McpElicitationRequest.model_validate(message.params)
+        if request.server_name in self.config.mcp_servers:
+            return {"action": "accept"}
+        return {"action": "decline"}
 
     def handle_notification(self, notification: RpcNotification) -> None:
         if self.channel is not None:
