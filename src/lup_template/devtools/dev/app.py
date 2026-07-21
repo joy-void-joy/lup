@@ -353,14 +353,22 @@ def comments_cmd(
             help="Strip the file:line markers given (only on a resolve/* worktree branch)",
         ),
     ] = False,
+    wake: Annotated[
+        bool,
+        typer.Option(
+            "--wake",
+            help="With --clear: also strip defer[...] notes whose wake condition is met",
+        ),
+    ] = False,
 ) -> None:
     """List unresolved `# lup:` feedback comments, or clear specific ones.
 
     With --clear, removes each `file:line` marker named as an argument; used at
-    fork time to strip a concern's own notes from an editor's worktree.
+    fork time to strip a concern's own notes from an editor's worktree. Deferred
+    notes are skipped unless --wake is passed as well.
     """
     if clear:
-        comments.clear_markers(targets or [])
+        comments.clear_markers(targets or [], wake=wake)
         return
     comments.report(as_json, commit)
 

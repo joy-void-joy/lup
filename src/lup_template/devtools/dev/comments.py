@@ -74,7 +74,7 @@ def find_todos(text: str, mode: str) -> list[MarkerComment]:
     return find_markers(text, mode, marker=TEMPLATE_MARKER_RE)
 
 
-def clear_markers(targets: list[str]) -> None:
+def clear_markers(targets: list[str], *, wake: bool = False) -> None:
     """Remove specific feedback markers named as `file:line` targets.
 
     The execute workflow calls this at fork time to strip a concern's own
@@ -82,6 +82,10 @@ def clear_markers(targets: list[str]) -> None:
     generalized spec without ever seeing — or being able to cheat by
     deleting — its markers. A standalone comment line is dropped whole; an
     inline trailing marker keeps its code and loses only the comment.
+
+    A `defer[...]` note is parked work, not open feedback: a target that
+    lands on one is skipped unless *wake* is set, so a concern sweeping its
+    own notes can never strip a deferral whose condition it does not meet.
 
     Refuses to run unless HEAD is a disposable `resolve/*` branch, so a note
     can never be silently stripped from a real checkout — there, a note is
@@ -132,6 +136,13 @@ def clear_markers(targets: list[str]) -> None:
             comment = spans.get(line_no)  # lup: ignore[dict-get] — span lookup
             if comment is None:
                 typer.echo(f"No marker at {rel}:{line_no}", err=True)
+                continue
+            if comment.kind == "defer" and not wake:
+                typer.echo(
+                    f"Skipping deferred note at {rel}:{line_no} — parked work "
+                    "is cleared only with --wake once its condition is met",
+                    err=True,
+                )
                 continue
             strip_span(lines, comment)
             removed += 1
