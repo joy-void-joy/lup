@@ -51,7 +51,7 @@ def test_minimal_context_keeps_absent_fields_none(
 ) -> None:
     context = SessionContext(session_dir=Path("/notes/sessions/s2"))
 
-    assert set(context.to_env()) == {SESSION_DIR_ENV}
+    assert set(context.to_env()) == {SESSION_DIR_ENV}  # lup: ignore[set-shape] — key equality
     apply_env(monkeypatch, context)
 
     assert read_session_context() == context

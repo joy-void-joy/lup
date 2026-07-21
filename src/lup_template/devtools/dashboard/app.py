@@ -114,7 +114,7 @@ def save_integration(command: str, update: IntegrationUpdate) -> DashboardState:
             status_code=409,
             detail=f"Run `uv run lup-devtools setup {command}` for this workflow",
         )
-    unknown = set(update.values) - allowed
+    unknown = set(update.values) - allowed  # lup: ignore[set-shape] — field-name difference
     if unknown:
         names = ", ".join(sorted(unknown))
         raise HTTPException(status_code=400, detail=f"Fields not allowed: {names}")
