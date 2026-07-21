@@ -523,11 +523,17 @@ def test_native_override_does_not_silently_reown_backpropagation(
 def test_codex_cache_digest_requires_an_exact_separate_copy(tmp_path: Path) -> None:
     source = tmp_path / "source"
     home = tmp_path / "home"
-    installed = home / "plugins" / "cache" / "lup-repository" / "lup" / "local"
+    # codex caches an installed plugin under its manifest version segment.
+    installed = home / "plugins" / "cache" / "lup-repository" / "lup" / "9.9.9"
     source.mkdir()
     installed.mkdir(parents=True)
-    (source / "plugin.txt").write_text("same\n", encoding="utf-8")
-    (installed / "plugin.txt").write_text("same\n", encoding="utf-8")
+    for root in (source, installed):
+        manifest_dir = root / ".codex-plugin"
+        manifest_dir.mkdir()
+        (manifest_dir / "plugin.json").write_text(
+            '{"name": "lup", "version": "9.9.9"}\n', encoding="utf-8"
+        )
+        (root / "plugin.txt").write_text("same\n", encoding="utf-8")
     config = PluginCacheConfig(codex_home=home)
 
     assert plugin_cache_evidence(source, config).ready
