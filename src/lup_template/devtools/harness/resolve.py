@@ -192,7 +192,7 @@ def run_resolve(adapter: str, run_id: str | None, human_decision: bool | None) -
                         "Execute the persisted Lup resolver assignment."
                     ),
                     cwd=cwd,
-                    sandbox="workspaceWrite",
+                    sandbox="workspace-write",
                     approval_policy="never",
                     environment=session_environment,
                     writable_roots=[cwd],
@@ -220,7 +220,7 @@ def run_resolve(adapter: str, run_id: str | None, human_decision: bool | None) -
                         "Independently review the persisted resolver change."
                     ),
                     cwd=cwd,
-                    sandbox="readOnly",
+                    sandbox="read-only",
                     approval_policy="never",
                     environment=session_environment,
                 )

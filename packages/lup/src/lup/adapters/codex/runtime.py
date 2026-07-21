@@ -56,7 +56,7 @@ class CodexSessionConfig(BaseModel):
     named_profile: str | None = None
     model_provider: str | None = None
     provider_config: JsonObject | None = None
-    sandbox: Literal["readOnly", "workspaceWrite", "dangerFullAccess"] | None = None
+    sandbox: Literal["read-only", "workspace-write", "danger-full-access"] | None = None
     approval_policy: Literal["untrusted", "on-request", "never"] | None = None
     effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None = None
     environment: EnvVars = Field(default_factory=dict)

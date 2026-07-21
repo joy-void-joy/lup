@@ -76,7 +76,7 @@ async def test_codex_thread_start_carries_a_dynamic_tool(tmp_path: Path) -> None
             model=CODEX_SMOKE_MODEL,
             developer_instructions="Follow the submission instruction exactly.",
             cwd=tmp_path,
-            sandbox="readOnly",
+            sandbox="read-only",
             approval_policy="never",
         )
     )

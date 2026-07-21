@@ -265,7 +265,7 @@ def provider_factory(
             cwd=cwd,
             sandbox=(
                 normalize_codex_sandbox(settings.codex_sandbox)
-                or ("workspaceWrite" if session_defaults else None)
+                or ("workspace-write" if session_defaults else None)
             ),
             approval_policy=(
                 normalize_codex_approval(settings.codex_approval_policy)
@@ -311,16 +311,19 @@ def normalize_claude_effort(
 
 def normalize_codex_sandbox(
     value: str | None,
-) -> Literal["readOnly", "workspaceWrite", "dangerFullAccess"] | None:
+) -> Literal["read-only", "workspace-write", "danger-full-access"] | None:
     """Translate the documented environment spelling once at composition."""
     aliases = {
         None: None,
-        "read_only": "readOnly",
-        "workspace_write": "workspaceWrite",
-        "danger_full_access": "dangerFullAccess",
-        "readOnly": "readOnly",
-        "workspaceWrite": "workspaceWrite",
-        "dangerFullAccess": "dangerFullAccess",
+        "read_only": "read-only",
+        "workspace_write": "workspace-write",
+        "danger_full_access": "danger-full-access",
+        "read-only": "read-only",
+        "workspace-write": "workspace-write",
+        "danger-full-access": "danger-full-access",
+        "readOnly": "read-only",
+        "workspaceWrite": "workspace-write",
+        "dangerFullAccess": "danger-full-access",
     }
     try:
         return aliases[value]
