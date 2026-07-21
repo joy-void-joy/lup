@@ -424,7 +424,7 @@ Use conventional commit syntax: `type(scope): description`
 - `docs` -- Documentation only (README, standalone docs)
 - `test` -- Adding or updating tests
 - `chore` -- Maintenance (dependencies, build config, etc.)
-- `meta` -- Changes to `.claude/` files (CLAUDE.md, settings, scripts, commands)
+- `meta` -- Changes to native harness files (guidance, settings, scripts, commands)
 - `data` -- Generated data and outputs
 
 **Examples:**

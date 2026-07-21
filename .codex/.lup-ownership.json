@@ -65,7 +65,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "b49f502579e7ea8bb26f46c7a223f4b3704dc78be3088fd5b76ef7f47b7b7d41",
+      "sha256": "cfe7c09c4ca2f340db7f4881970fba6c5d823df1af02aad370385cdcef238b97",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },

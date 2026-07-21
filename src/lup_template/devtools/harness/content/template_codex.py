@@ -4,14 +4,15 @@
 
 import lup.harness.models as models
 from lup_template.devtools.harness.content.template_sections import (
+    CODEX_POLICY_SCOPE,
     DIRECTORY_STRUCTURE_THROUGH_TOOLS,
     INNER_AGENT_BULLET,
-    PERMISSION_HOOKS,
     PRINCIPLES_THROUGH_WORKTREE_STEP,
     SELF_IMPROVEMENT_THROUGH_END,
     SETUP_THROUGH_NAMING,
     TOOLING_INTRO,
     WORKFLOW_THROUGH_COMMIT_FORMAT,
+    permission_hooks,
 )
 
 DOCUMENT = models.PromptDocument(
@@ -93,7 +94,7 @@ Each repo names its plugin **marketplace** after the project — the plugin entr
 
 """
         ),
-        *PERMISSION_HOOKS,
+        *permission_hooks(CODEX_POLICY_SCOPE),
         models.TextPart(
             text=r"""## Settings & Configuration
 
