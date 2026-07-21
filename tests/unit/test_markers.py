@@ -209,6 +209,43 @@ def test_defer_head_requires_brackets() -> None:
     assert [note.kind for note in notes] == ["note", "note"]
 
 
+def test_defer_condition_may_contain_bracketed_rule_ids() -> None:
+    # The condition syntax mirrors `ignore[rule-id]`, so conditions naming
+    # such directives are expected input and must survive the round trip.
+    source = "# lup: defer[when ignore[dict-get] sites migrate]: refine the rule\n"
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "defer"
+    assert note.condition == "when ignore[dict-get] sites migrate"
+    assert note.text == "refine the rule"
+    assert note.marker_text() == (
+        "defer[when ignore[dict-get] sites migrate]: refine the rule"
+    )
+
+
+def test_defer_head_ends_at_the_first_bracket_colon_delimiter() -> None:
+    source = "# lup: defer[until v2]: see ignore[dict-get]: both sites\n"
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "defer"
+    assert note.condition == "until v2"
+    assert note.text == "see ignore[dict-get]: both sites"
+
+
+def test_defer_with_empty_condition_stays_an_ordinary_note() -> None:
+    source = "# lup: defer[]: no wake condition given\n# lup: defer[ ]: blank\n"
+    notes = find_feedback(source, ScanMode.MARKDOWN)
+    assert [note.kind for note in notes] == ["note", "note"]
+
+
+def test_defer_head_without_a_colon_stays_an_ordinary_note() -> None:
+    # The documented grammar is `defer[<condition>]: <text>`; a head that
+    # never closes with `]:` degrades to an ordinary red note rather than
+    # a silently mangled condition.
+    source = "# lup: defer[until v2] rework the cache\n"
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "note"
+    assert note.condition is None
+
+
 def test_defer_continuation_lines_merge_into_the_message() -> None:
     source = (
         "# lup: defer[until the sweep lands]: fold both scanners\n"

@@ -47,10 +47,14 @@ from lup.policy.kernel import marker_count as kernel_marker_count
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # A deferral note parks work until a stated wake condition is met:
 # `# lup: defer[<wake condition>]: <text>`. The bracket syntax deliberately
-# mirrors the typed `# lup: ignore[rule-id]` escape hatch. The head is matched
-# against a note's text (the part after the marker), so the `ignore` keyword —
-# which never reaches note classification — is untouched.
-DEFER_HEAD_RE = re.compile(r"^defer\s*\[(?P<condition>[^\]]*)\]\s*:?\s*", re.IGNORECASE)
+# mirrors the typed `# lup: ignore[rule-id]` escape hatch — which means a
+# condition may itself contain brackets (`defer[when ignore[dict-get] sites
+# migrate]: ...`), so the head ends at the first `]` that is followed by a
+# colon, and the colon is required. A head that never closes with `]:` is
+# malformed and the note stays an ordinary (red, visible) review note. The
+# head is matched against a note's text (the part after the marker), so the
+# `ignore` keyword — which never reaches note classification — is untouched.
+DEFER_HEAD_RE = re.compile(r"^defer\s*\[(?P<condition>.+?)\]\s*:\s*", re.IGNORECASE)
 # Customization todos are shouty and case-sensitive (like TODO:/FIXME:), so
 # prose about "the template" never matches. The comment prefix is optional
 # because a docstring todo carries no `#`; group 1 still captures the
@@ -255,16 +259,21 @@ def classify_deferral(note: MarkerComment) -> MarkerComment:
 
     A matching note comes back with kind ``defer``, its wake condition parsed
     out, and ``text`` reduced to the message after the head. Any other note —
-    including prose that merely starts with the word "defer" — is returned
-    unchanged as an ordinary ``note``.
+    including prose that merely starts with the word "defer", a head whose
+    condition is empty, or a head that never closes with `]:` — is returned
+    unchanged as an ordinary ``note``, so a malformed deferral degrades to
+    visible open feedback instead of a silently mangled condition.
     """
     head = DEFER_HEAD_RE.match(note.text)
     if head is None:
         return note
+    condition = head.group("condition").strip()
+    if not condition:
+        return note
     return note.model_copy(
         update={
             "kind": "defer",
-            "condition": head.group("condition").strip(),
+            "condition": condition,
             "text": note.text[head.end() :],
         }
     )
