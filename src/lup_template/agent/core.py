@@ -490,12 +490,18 @@ def build_session_factory(
             if name != EXAMPLE_GROUP
         ]
         tool_servers = dict(policy.get_mcp_servers(*servers))
+        from lup.adapters.claude.runtime import SUBMISSION_TOOL
+
         allowed_tools = policy.get_allowed_tools(
             tool_servers,
             builtin_tools=frozenset(  # lup: ignore[frozenset-shape] — immutable policy input
                 {"Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash"}
             ),
         )
+        # The turn-bound submission tool is registered by the adapter, not the
+        # template toolsets; without this the allowlist hook denies the very
+        # tool that finalizes the turn.
+        allowed_tools.append(SUBMISSION_TOOL)
         hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
         submission_gate = reflection_submission_gate(toolset["gate"])
     elif not toolless:
