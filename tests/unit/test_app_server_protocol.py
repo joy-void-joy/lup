@@ -27,7 +27,7 @@ from lup.types import JsonObject
 
 def sent_lines(server: CodexAppServer) -> list[JsonObject]:
     """Decode every JSON-RPC line the server wrote to its stdin queue."""
-    lines: list[JsonObject] = []
+    lines: list[JsonObject] = []  # lup: ignore[empty-collection] — queue drain
     while not server.input.empty():
         line = server.input.get_nowait()
         if line is not None:
