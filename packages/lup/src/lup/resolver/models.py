@@ -135,8 +135,8 @@ class AnswerBatch(BaseModel):
         return self
 
 
-class Concern(BaseModel):
-    """One generalized concern and its complete dependency/acceptance inputs."""
+class ConcernShape(BaseModel):
+    """Planning fields shared by a planned concern and its materialization."""
 
     model_config = FROZEN
 
@@ -144,15 +144,12 @@ class Concern(BaseModel):
     title: str
     spec: str
     files: list[Path] = Field(default_factory=list)
-    notes: list[ReviewNote] = Field(default_factory=list)
     criteria: list[AcceptanceCriterion] = Field(min_length=1)
     dependencies: list[str] = Field(default_factory=list)
     questions: list[MaterialQuestion] = Field(default_factory=list)
-    eligible: bool = True
-    integration_approved: bool = False
 
     @model_validator(mode="after")
-    def references_are_local_and_unique(self) -> "Concern":
+    def references_are_local_and_unique(self) -> "ConcernShape":
         if Path(self.id).name != self.id or self.id in {"integration", "review"}:
             raise ValueError(f"concern id {self.id!r} is reserved or not path-safe")
         if any(question.concern_id != self.id for question in self.questions):
@@ -167,6 +164,24 @@ class Concern(BaseModel):
         if self.id in self.dependencies:
             raise ValueError(f"concern {self.id!r} cannot depend on itself")
         return self
+
+
+class Concern(ConcernShape):
+    """One generalized concern and its complete dependency/acceptance inputs."""
+
+    notes: list[ReviewNote] = Field(default_factory=list)
+    eligible: bool = True
+    integration_approved: bool = False
+
+
+class PlannedConcern(ConcernShape):
+    """One planned concern referencing review notes by zero-based position.
+
+    The planner never echoes note content — positional references make copy
+    fidelity a mechanical property instead of a model obligation.
+    """
+
+    note_indexes: list[int] = Field(min_length=1)
 
 
 class ConcernEligibility(BaseModel):
@@ -353,11 +368,16 @@ class ResolveRequest(BaseModel):
 
 
 class ConcernInventory(BaseModel):
-    """Structured concern plan produced by the read-only inventory turn."""
+    """Structured concern plan produced by the read-only inventory turn.
+
+    Concerns reference the request's notes by position; the resolver
+    materializes them into :class:`Concern` objects with the authoritative
+    note content, so nothing the planner writes can drift from the evidence.
+    """
 
     model_config = FROZEN
 
-    concerns: list[Concern] = Field(min_length=1)
+    concerns: list[PlannedConcern] = Field(min_length=1)
 
     @model_validator(mode="after")
     def unique_concerns(self) -> "ConcernInventory":
