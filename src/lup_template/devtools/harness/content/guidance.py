@@ -332,8 +332,10 @@ plugin. Do not edit generated dispatcher or runtime files directly.
 The policy classifies each shell command against the vocabulary in
 `lup.policy.shell_rules`, every URL scope, and each edit in a batch. Denial
 wins over approval, malformed input fails conservatively, command substitution
-and file-writing redirection are never auto-allowed (stream discards to
-`/dev/null` and fd duplication are stripped as safe), and edit decisions
+is denied with a rewrite hint, file-writing redirection is never auto-allowed
+(stream discards to `/dev/null` and fd duplication are stripped as safe),
+`for`/`while`/`until` loops classify their condition and body recursively with
+literal for-words instantiated into the body, and edit decisions
 include protected paths, marker changes, size, and the canonical anti-pattern
 audit. An edit that exceeds the size gate alone is deferred — the hook emits no
 decision so auto-accept mode applies while the hard gates stay explicit. The
