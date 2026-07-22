@@ -35,6 +35,11 @@ class OrderedPolicyChain[E](DecisionPolicy[E]):
         )
         if asked is not None:
             return asked
+        deferred = next(
+            (decision for decision in decisions if decision.effect == "defer"), None
+        )
+        if deferred is not None:
+            return deferred
         if decisions:
             return Decision(effect="allow")
         return Decision(effect="ask", reason="no policy classified this event")

@@ -16,7 +16,13 @@ import lup.policy.kernel as kernel
 from lup.policy.kernel import (
     AntiPatternRow,
     PathRuleRow,
+    ShellRuleRow,
     UrlScopeRow,
+)
+from lup.policy.shell_rules import (
+    BASE_SHELL_RULES,
+    ShellCommandRule,
+    erase_shell_rules,
 )
 from lup.policy.rules import human_owned_path_rule, path_rule_row
 
@@ -76,6 +82,11 @@ def runtime_path_rules(
         ("name_prefix", ".env", "protected path requires approval", True),
         ("new_devtools", "src", "new devtools module requires approval", False),
     ]
+
+
+def runtime_shell_rules(extension: list[ShellCommandRule]) -> list[ShellRuleRow]:
+    """Compile the baseline shell vocabulary plus an application extension."""
+    return erase_shell_rules([*BASE_SHELL_RULES, *extension])
 
 
 def tuple_rows_literal(rows: list[list[str]]) -> str:
@@ -147,6 +158,33 @@ def string_rows_literal(rows: list[str]) -> str:
     return "[\n" + "".join(f"    {json.dumps(row)},\n" for row in rows) + "]"
 
 
+def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
+    """Render erased shell rules as Ruff-stable dict literals."""
+    if not rows:
+        return "[]"
+    lines = ["["]
+    for row in rows:
+        lines.append("    {")
+        lines.append(f'        "command": {json.dumps(row["command"])},')
+        lines.append(f'        "subcommand": {json.dumps(row["subcommand"])},')
+        lines.append(f'        "operation": {json.dumps(row["operation"])},')
+        lines.append(f'        "effect": {json.dumps(row["effect"])},')
+        for name, flags in (
+            ("ask_flags", row["ask_flags"]),
+            ("value_flags", row["value_flags"]),
+        ):
+            if flags:
+                lines.append(f'        "{name}": [')
+                lines.extend(f"            {json.dumps(flag)}," for flag in flags)
+                lines.append("        ],")
+            else:
+                lines.append(f'        "{name}": [],')
+        lines.append(f'        "reason": {json.dumps(row["reason"])},')
+        lines.append("    },")
+    lines.append("]")
+    return "\n".join(lines)
+
+
 def render_policy_data(
     *,
     allowed_fetch_scopes: list[UrlScopeRow],
@@ -154,6 +192,7 @@ def render_policy_data(
     protected_roots: list[str],
     human_owned_files: list[str],
     autonomous_agent_identities: list[str],
+    shell_rule_extension: list[ShellCommandRule] | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
     body = "\n\n".join(
@@ -166,6 +205,8 @@ def render_policy_data(
             ),
             "ANTI_PATTERN_ROWS = "
             + antipattern_rows_literal(bundled_antipattern_rows()),
+            "SHELL_RULES = "
+            + shell_rule_rows_literal(runtime_shell_rules(shell_rule_extension or [])),
             "AUTONOMOUS_AGENT_IDENTITIES = "
             + string_rows_literal(autonomous_agent_identities),
             "MAXIMUM_ADDED_LINES = 3",

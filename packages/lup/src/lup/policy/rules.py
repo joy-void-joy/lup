@@ -29,6 +29,11 @@ from lup.policy.kernel import (
     parse_shell_words,
     path_rule_matches as kernel_path_rule_matches,
 )
+from lup.policy.shell_rules import (
+    BASE_SHELL_RULES,
+    ShellCommandRule,
+    erase_shell_rules,
+)
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -101,7 +106,7 @@ def command_words(words: list[str]) -> list[str]:
 def parse_shell_segments(command: str) -> list[ShellSegment] | None:
     """Expose validated segment models for compatibility consumers."""
     segments = parse_shell_words(command)
-    if segments is None:
+    if isinstance(segments, KernelDecision):
         return None
     return [ShellSegment(words=words) for words in segments]
 
@@ -109,11 +114,14 @@ def parse_shell_segments(command: str) -> list[ShellSegment] | None:
 class ShellPolicy(DecisionPolicy[ShellCommand]):
     """Delegate shell classification to the shared hermetic kernel."""
 
+    def __init__(self, rules: list[ShellCommandRule] | None = None) -> None:
+        self.rules = erase_shell_rules(BASE_SHELL_RULES if rules is None else rules)
+
     def decide(self, event: ShellCommand) -> Decision:
-        return pydantic_decision(decide_shell(event.command))
+        return pydantic_decision(decide_shell(event.command, self.rules))
 
     def decide_segment(self, segment: ShellSegment) -> Decision:
-        return pydantic_decision(decide_shell_segment(segment.words))
+        return pydantic_decision(decide_shell_segment(segment.words, self.rules))
 
 
 class PathRule(BaseModel):
@@ -180,6 +188,9 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         asked = next((item for item in decisions if item.effect == "ask"), None)
         if asked is not None:
             return asked
+        deferred = next((item for item in decisions if item.effect == "defer"), None)
+        if deferred is not None:
+            return deferred
         return Decision(effect="allow", reason="every edit in the batch is safe")
 
     def decide_change(self, change: EditChange) -> Decision:
