@@ -22,6 +22,7 @@ from pydantic import (
 )
 
 from lup.policy.models import PolicyId, UrlPathPrefix
+from lup.policy.shell_rules import ShellCommandRule
 from lup.types import JsonValue, ToolGrant, ToolName
 
 FROZEN = ConfigDict(frozen=True)
@@ -191,6 +192,13 @@ class HookSet(BaseModel):
         description=(
             "Files whose content the human author owns; every edit is surfaced "
             "as Ask so agents propose changes instead of applying them"
+        ),
+    )
+    shell_rules: list[ShellCommandRule] = Field(
+        default_factory=list,
+        description=(
+            "Application-specific shell command rules appended to the baseline "
+            "vocabulary; extend a downstream toolchain here, not in the kernel"
         ),
     )
 

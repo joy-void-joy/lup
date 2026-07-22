@@ -299,6 +299,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                             path.as_posix() for path in source.human_owned_files
                         ],
                         autonomous_agent_identities=[],
+                        shell_rule_extension=list(source.shell_rules),
                     ),
                     semantic_id=source.id,
                 ),

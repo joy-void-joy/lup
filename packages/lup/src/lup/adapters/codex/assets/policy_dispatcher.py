@@ -11,14 +11,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from kernel import KernelDecision, decide_fetch, decide_shell
-from policy_data import ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES
+from policy_data import ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES, SHELL_RULES
 
 
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
     if name == "Bash":
-        return decide_shell(tool_input["command"])
+        return decide_shell(tool_input["command"], SHELL_RULES)
     if name == "web_fetch":
         return decide_fetch(
             tool_input["url"],
@@ -39,7 +39,7 @@ def main():
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         sys.stderr.write(f"Malformed hook input requires approval: {error}")
         raise SystemExit(2) from error
-    if decision.effect == "allow":
+    if decision.effect in ("allow", "defer"):
         return
     sys.stderr.write(decision.reason)
     raise SystemExit(2)
