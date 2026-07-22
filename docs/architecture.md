@@ -82,12 +82,14 @@ The generated plugins enforce permissions without importing lup, yet decide
 identically to the library:
 
 1. **Canonical sources** — the `HookSet` in `devtools/harness/catalog.py`
-   (protected edit roots, allowed fetch scopes, policy ids) and the
-   anti-pattern rule set in `lup.codescan.antipatterns`.
+   (protected edit roots, allowed fetch scopes, policy ids, shell-rule
+   extensions), the anti-pattern rule set in `lup.codescan.antipatterns`, and
+   the baseline shell vocabulary in `lup.policy.shell_rules`.
 2. **Library layer** — `lup.policy.rules` validates those inputs as pydantic
    surfaces and erases them into primitive rows; `lup.policy.kernel` — the
-   hermetic, stdlib-only decision core — computes every shell, fetch, and
-   edit verdict; `lup.policy.chain` composes policies deny-before-ask; the
+   hermetic, stdlib-only decision core — interprets those rows to reach every
+   shell, fetch, and edit verdict; `lup.policy.chain` composes policies
+   deny-before-ask; the
    adapters' `native` modules decode wire payloads into
    `lup.policy.models` events and render decisions back.
 3. **Assembly** — `lup.policy.bundle` reads the kernel source verbatim and

@@ -124,7 +124,7 @@ Use `"""
 
 ### Editing Style
 
-**Prefer small, atomic edits.** A PreToolUse hook counts "real" changed lines (ignoring imports, comments, whitespace, blank lines, docstrings, string literals, type annotations, and TypedDict/BaseModel bodies) and auto-allows edits with <=3 real changes per change block. Pure deletions and single-line `replace_all` renames are auto-allowed; multi-line `replace_all` falls through to the size gate. Anti-pattern detection runs before any auto-allow, and `Write` (full-file rewrites) never auto-allows.
+**Prefer small, atomic edits.** A PreToolUse hook counts "real" changed lines (ignoring imports, comments, whitespace, blank lines, docstrings, string literals, type annotations, and TypedDict/BaseModel bodies) and auto-allows edits with <=3 real changes per change block. Pure deletions and single-line `replace_all` renames are auto-allowed; multi-line `replace_all` falls through to the size gate. Anti-pattern detection runs before any auto-allow, and `Write` (full-file rewrites) never auto-allows. An edit that trips only the size gate is *deferred* rather than surfaced — the hook emits no decision, so auto-accept mode applies it while other modes still prompt; protected paths, anti-patterns, marker changes, and full-file writes stay explicit approvals in every mode.
 
 - Split large changes into multiple small edits (<=3 real lines per Edit call)
 - Separate concerns — imports in one edit, logic in another
@@ -329,13 +329,17 @@ application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated dispatcher or runtime files directly.
 
-The policy checks every shell segment, URL scope, and edit in a batch. Denial
-wins over approval, malformed input fails conservatively, redirection and
-substitution are never auto-allowed, and edit decisions include protected
-paths, marker changes, size, and the canonical anti-pattern audit. The resolver
-editor receives only its declared autonomous edit exceptions; temporary paths,
-human-owned files such as `README.md`, marker changes, and anti-pattern
-violations retain their guardrails.
+The policy classifies each shell command against the vocabulary in
+`lup.policy.shell_rules`, every URL scope, and each edit in a batch. Denial
+wins over approval, malformed input fails conservatively, command substitution
+and file-writing redirection are never auto-allowed (stream discards to
+`/dev/null` and fd duplication are stripped as safe), and edit decisions
+include protected paths, marker changes, size, and the canonical anti-pattern
+audit. An edit that exceeds the size gate alone is deferred — the hook emits no
+decision so auto-accept mode applies while the hard gates stay explicit. The
+resolver editor receives only its declared autonomous edit exceptions;
+temporary paths, human-owned files such as `README.md`, marker changes, and
+anti-pattern violations retain their guardrails.
 
 Use `"""
         ),

@@ -99,6 +99,33 @@ Inspect `hooks/runtime/policy_data.py` in both generated trees. The rows should
 change while `hooks/runtime/kernel.py` remains identical: configuration is
 generated data, policy control flow is one copied module.
 
+## Change the shell classification
+
+The shell auto-allow vocabulary is data too. The baseline lives in
+`lup.policy.shell_rules` (`BASE_SHELL_RULES`) as a readable table: a read-only
+command allows unless a listed `ask_flags` writer flag appears, and a
+subcommand command (`git`, `gh`) allows only the subcommands and operations it
+lists. To teach the fleet a downstream toolchain, append rules through the
+`HookSet` in `catalog.py` — never edit the kernel:
+
+```python
+shell_rules=[
+    ShellCommandRule(name="cargo", default_effect="ask", subcommands=[
+        ShellSubcommandRule(name="check"),
+        ShellSubcommandRule(name="build"),
+        ShellSubcommandRule(name="test"),
+    ]),
+]
+```
+
+The extension is concatenated onto the baseline and erased into the same
+`SHELL_RULES` rows the kernel interprets. Add a universal command (one every
+repo should trust) to `BASE_SHELL_RULES` instead. Regenerate and run the
+policy fixtures exactly as for the fetch allowlist. Destructive forms should
+stay `ask`: guard a writer flag with `ask_flags`, or a destructive
+sub-operation with an `ask` `ShellOperationRule`, rather than widening a
+`default_effect`.
+
 ## Understand a reconciliation conflict
 
 `harness reconcile` compares the current files, the desired render, and the
