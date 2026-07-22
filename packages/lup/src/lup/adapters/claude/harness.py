@@ -293,6 +293,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             "resolve-editor",
                             "lup:resolve-editor",
                         ],
+                        shell_rule_extension=list(source.shell_rules),
                     ),
                     semantic_id=source.id,
                 ),

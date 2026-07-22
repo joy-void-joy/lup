@@ -177,16 +177,18 @@ class ClaudeDecisionOutput(BaseModel):
     hook_event_name: Literal["PreToolUse"] = Field(
         default="PreToolUse", alias="hookEventName"
     )
-    permission_decision: Literal["allow", "ask", "deny"] = Field(
-        alias="permissionDecision"
+    permission_decision: Literal["allow", "ask", "deny"] | None = Field(
+        default=None, alias="permissionDecision"
     )
     reason: str = Field(default="", alias="permissionDecisionReason")
 
 
 class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
-    """Render all semantic effects through Claude's native approval result."""
+    """Render semantic effects; defer omits the decision so the client mode applies."""
 
     def render(self, decision: Decision) -> ClaudeDecisionOutput:
+        if decision.effect == "defer":
+            return ClaudeDecisionOutput(permissionDecisionReason=decision.reason)
         return ClaudeDecisionOutput(
             permissionDecision=decision.effect,
             permissionDecisionReason=decision.reason,
