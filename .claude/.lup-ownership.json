@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "f46b68ceb6ea852871da2bc9e30e07e5679032cbe461cef484798835de248c55",
+  "source_digest": "1cc17a0f7ae44c1a4f4dde04e6fbc36ed4271be18de6147c4583eed91fdb63d8",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "1004d3f93e8d246c6de28c06af2b78839c9042a0ff8e1583fd383da3ec90b417",
+      "sha256": "57714e5ec0d4652afce54467e337a436ff3570cbd508be2d22a8c9ff1c8c80b2",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "50fee17e5e1d28ff914ac46774f262452981c33e60c6231c76f8096138629df7",
+      "sha256": "cd0f9d7596969c20b148b7cf0e299030ebaada6bfa8b8b7f1cd296425c4cb723",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -303,14 +303,14 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel.py",
       "category": "generated",
-      "sha256": "4f17206c57023ea9dc01259dde89d91a60158995cfb9b83c5a149e3c3e436f12",
+      "sha256": "17dea1d8d27c82337834ce907a20d400d1a1b34586e1f6b6f7be50cd36429015",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "d5caebd25ad183bd5123303b2d5155b2379a53c4b0ab012261ce1c368c75e902",
+      "sha256": "b19b03aeac1e60ae0cc2849c4108bce97e697197768c1a2b2940eec6713f0a50",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

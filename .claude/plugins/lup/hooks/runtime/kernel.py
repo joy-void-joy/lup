@@ -332,6 +332,54 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
     return KernelDecision("allow", "read-only sed script")
 
 
+def safe_awk_program(program: str) -> bool:
+    """Accept only awk programs with no exec, command input, or write path.
+
+    ``system`` and ``getline`` reach commands and files, ``@`` covers gawk's
+    include/load directives and indirect calls, and a pipe that is not ``||``
+    feeds or reads a command. A bare ``>`` (not ``>=``) only writes when the
+    program can also ``print``; without a print there is no write path, so
+    comparison-only programs like ``$3 > 5`` stay read-only.
+    """
+    if any(token in program for token in ("system", "getline", "@")):
+        return False
+    if re.search(r"(?<!\|)\|(?!\|)", program) is not None:
+        return False
+    redirects = re.search(r">(?!=)", program) is not None
+    return not (redirects and "print" in program)
+
+
+def decide_awk_words(words: list[str]) -> KernelDecision:
+    """Allow only read-only awk: separator and variable flags plus a safe program."""
+    positional: list[str] = []
+    value_expected = False
+    options_ended = False
+    for word in words[1:]:
+        if value_expected:
+            value_expected = False
+            continue
+        if options_ended or not word.startswith("-") or word == "-":
+            positional.append(word)
+            options_ended = True
+            continue
+        if word == "--":
+            options_ended = True
+            continue
+        if word in ("-F", "-v"):
+            value_expected = True
+            continue
+        if word.startswith(("-F", "-v")) and not word.startswith("--"):
+            continue
+        return KernelDecision("ask", f"awk option {word!r} is not classified")
+    if value_expected:
+        return KernelDecision("ask", "awk option flag has no value")
+    if not positional:
+        return KernelDecision("ask", "awk has no program")
+    if not safe_awk_program(positional[0]):
+        return KernelDecision("ask", "awk program is not classified as read-only")
+    return KernelDecision("allow", "read-only awk program")
+
+
 def xargs_payload(words: list[str]) -> list[str]:
     """Return the command xargs would run, skipping only xargs's own options."""
     value_options = ("-I", "-i", "-n", "-d", "-P", "-s", "-L", "-a", "-E", "-e")
@@ -414,6 +462,8 @@ def decide_shell_segment(
         return decide_shell_segment(payload, rows)
     if executable == "sed":
         return decide_sed_words(words)
+    if executable in ("awk", "gawk", "mawk"):
+        return decide_awk_words(words)
     if executable == "uvx":
         if len(words) > 1 and posixpath.basename(words[1]) in INTERPRETERS:
             return KernelDecision("deny", "inline code is not allowed")
