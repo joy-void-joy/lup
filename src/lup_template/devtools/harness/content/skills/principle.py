@@ -82,11 +82,13 @@ Read every relevant file and categorize findings into three buckets:
    - Read each command's instructions, guidelines, and anti-patterns
    - Check if commands encode workflows that violate the principle
 
-### Layer C: Hook Scripts & Enforcement
+### Layer C: Semantic Policy & Enforcement
 
-4. **Hook scripts** (`.claude/plugins/lup/hooks/scripts/*.py`)
-   - Check if any hook logic contradicts the principle
-   - Consider if a new hook could enforce the principle mechanically
+4. **Canonical policy** (`packages/lup/src/lup/policy/` plus the `HookSet` in
+   `src/lup_template/devtools/harness/catalog.py`; everything under
+   `.claude/plugins/lup/hooks/` is generated from these — never edit it directly)
+   - Check if any policy rule contradicts the principle
+   - Consider if a new policy rule could enforce the principle mechanically
 
 ### Layer D: Code Template
 
