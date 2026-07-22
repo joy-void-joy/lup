@@ -724,8 +724,9 @@ compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 
 The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary and every URL scope in a batch. Denial
-wins over approval, malformed input fails conservatively, command substitution and
-file-writing redirection are never auto-allowed, and native `apply_patch` edits — opaque
+wins over approval, malformed input fails conservatively, command substitution is
+denied with a rewrite hint, file-writing redirection is never auto-allowed, loops
+classify their condition and body recursively, and native `apply_patch` edits — opaque
 to the policy — always fall through to fail-closed approval. Use
 `$lup:hooks` to update canonical inputs, regenerate both plugins, and run the
 shared canonical/bundled fixture suite.

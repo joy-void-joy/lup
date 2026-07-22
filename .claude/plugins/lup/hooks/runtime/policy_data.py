@@ -1522,6 +1522,15 @@ SHELL_RULES = [
         "reason": "",
     },
     {
+        "command": "sleep",
+        "subcommand": "",
+        "operation": "",
+        "effect": "allow",
+        "ask_flags": [],
+        "value_flags": [],
+        "reason": "",
+    },
+    {
         "command": "pwd",
         "subcommand": "",
         "operation": "",
