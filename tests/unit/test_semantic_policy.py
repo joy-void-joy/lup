@@ -59,7 +59,7 @@ class DecisionCase(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     input: str
-    effect: Literal["allow", "ask", "deny"]
+    effect: Literal["allow", "ask", "deny", "defer"]
 
 
 class EditDecisionCase(BaseModel):
@@ -70,7 +70,7 @@ class EditDecisionCase(BaseModel):
     path: str
     before: str | None
     after: str | None
-    effect: Literal["allow", "ask", "deny"]
+    effect: Literal["allow", "ask", "deny", "defer"]
     autonomous: bool = False
     path_exists: bool = True
 
@@ -90,6 +90,77 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo payload >> src/generated.py", effect="ask"),
     DecisionCase(input="gh pr view 123", effect="allow"),
     DecisionCase(input="uv run tool --help", effect="allow"),
+    # Redirections: discards and fd duplication are stripped; file writes ask.
+    DecisionCase(input="grep x f 2>&1", effect="allow"),
+    DecisionCase(input="grep x f > /dev/null", effect="allow"),
+    DecisionCase(input="cat f 2>/dev/null", effect="allow"),
+    DecisionCase(input="ls >&2", effect="allow"),
+    DecisionCase(input="echo x > out.txt", effect="ask"),
+    DecisionCase(input="cat <<EOF", effect="ask"),
+    # Quote-aware substitution: inert inside single quotes, live otherwise.
+    DecisionCase(input="git commit -m 'fixes $(bug)'", effect="allow"),
+    DecisionCase(input="echo $(whoami)", effect="ask"),
+    DecisionCase(input="echo `id`", effect="ask"),
+    # Read-side process substitution classifies its inner command recursively;
+    # the write side and unclassified inner commands still ask.
+    DecisionCase(input="diff <(git status) <(git log)", effect="allow"),
+    DecisionCase(input="diff <(sudo id) f", effect="ask"),
+    DecisionCase(input="diff <(cat $(x)) f", effect="ask"),
+    DecisionCase(input="cat >(tee f)", effect="ask"),
+    # Expanded read-only vocabulary with writer-flag guards.
+    DecisionCase(input="sort f", effect="allow"),
+    DecisionCase(input="sort -o out f", effect="ask"),
+    DecisionCase(input="sed -n '1,5p' f", effect="allow"),
+    DecisionCase(input="sed -i 's/a/b/' f", effect="ask"),
+    DecisionCase(input="sed 's/x/y/e' f", effect="ask"),
+    DecisionCase(input="jq . f", effect="allow"),
+    DecisionCase(input="cut -f1 f", effect="allow"),
+    DecisionCase(input="diff a b", effect="allow"),
+    DecisionCase(input="rg TODO", effect="allow"),
+    # Git: read-only and reversible-local allow; destructive forms ask.
+    DecisionCase(input="git rev-parse HEAD", effect="allow"),
+    DecisionCase(input="git ls-files", effect="allow"),
+    DecisionCase(input="git blame f", effect="allow"),
+    DecisionCase(input="git stash push", effect="allow"),
+    DecisionCase(input="git reset --soft HEAD~1", effect="allow"),
+    DecisionCase(input="git branch -D topic", effect="ask"),
+    DecisionCase(input="git worktree remove wt", effect="ask"),
+    DecisionCase(input="git stash drop", effect="ask"),
+    DecisionCase(input="git reset --hard", effect="ask"),
+    DecisionCase(input="git clean -fd", effect="ask"),
+    DecisionCase(input="git push --force", effect="ask"),
+    DecisionCase(input="git checkout -- file", effect="ask"),
+    DecisionCase(input="git config core.pager=x", effect="ask"),
+    # Global value flags are consumed, never read as the subcommand; globals
+    # that change execution behavior ask.
+    DecisionCase(input="git -C /other status", effect="allow"),
+    DecisionCase(input="git -C status push", effect="ask"),
+    DecisionCase(input="git -c core.pager=touch log", effect="ask"),
+    DecisionCase(input="git --exec-path=/tmp/x status", effect="ask"),
+    # Exec-bearing and file-writing flags on allowed subcommands ask.
+    DecisionCase(input="git rebase --exec 'touch x' HEAD~2", effect="ask"),
+    DecisionCase(input="git fetch --upload-pack=/tmp/x origin", effect="ask"),
+    DecisionCase(input="git grep -Ovim pattern", effect="ask"),
+    DecisionCase(input="git log --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git reflog", effect="allow"),
+    DecisionCase(input="git reflog expire --expire=now --all", effect="ask"),
+    DecisionCase(input="sort --compress-program=/tmp/x f", effect="ask"),
+    # gh: read-only operations allow; mutating forms ask.
+    DecisionCase(input="gh run view 1", effect="allow"),
+    DecisionCase(input="gh repo view", effect="allow"),
+    DecisionCase(input="gh pr close 1", effect="ask"),
+    DecisionCase(input="gh api -X POST /repos", effect="ask"),
+    # Adversarial hardening: no auto-allowed code execution or injection.
+    DecisionCase(input="sudo cat /etc/shadow", effect="ask"),
+    DecisionCase(input="LD_PRELOAD=./x.so ls", effect="ask"),
+    DecisionCase(input="GIT_SSH_COMMAND=./x git fetch origin", effect="ask"),
+    DecisionCase(input="git fetch ext::sh -c id", effect="ask"),
+    DecisionCase(input="uv run --with evil pytest", effect="ask"),
+    DecisionCase(input="uv run ./pytest", effect="ask"),
+    DecisionCase(input="uv run /tmp/tool --help", effect="ask"),
+    DecisionCase(input="printf . | xargs find . -delete", effect="ask"),
+    DecisionCase(input="find . -execdir sh -c id ;", effect="ask"),
+    DecisionCase(input="sort f && python -c 'x'", effect="deny"),
 ]
 
 FETCH_POLICY_CASES = [
@@ -202,6 +273,27 @@ EDIT_POLICY_CASES = [
     EditDecisionCase(
         path="src/module.py", before="value = 1", after=None, effect="allow"
     ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1\nalpha = 2\nbeta = 3\ngamma = 4\ndelta = 5",
+        effect="defer",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1\n\n# note one\n\n# note two\n\n# note three\n\n# four",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="import x",
+        after=(
+            "import x\n\n\nclass Config(BaseModel):\n    name: str\n"
+            "    size: int\n    tags: list[str]\n    active: bool"
+        ),
+        effect="allow",
+    ),
 ]
 
 
@@ -288,13 +380,14 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from kernel import decide_edit, decide_fetch, decide_shell\n"
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
-        "    MAXIMUM_ADDED_LINES, PATH_RULES,\n"
+        "    MAXIMUM_ADDED_LINES, PATH_RULES, SHELL_RULES,\n"
         ")\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
         ")\n"
         "for case in fixtures['shell']:\n"
-        "    assert decide_shell(case['input']).effect == case['effect'], case\n"
+        "    result = decide_shell(case['input'], SHELL_RULES)\n"
+        "    assert result.effect == case['effect'], case\n"
         "for case in fixtures['fetch']:\n"
         "    decision = decide_fetch(\n"
         "        case['input'], ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES\n"
@@ -468,7 +561,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
 
     for case in SHELL_POLICY_CASES:
         assert policy.decide(ShellCommand(command=case.input)).effect == case.effect
-        assert bundled.decide_shell(case.input).effect == case.effect
+        assert bundled.decide_shell(case.input, policy.rules).effect == case.effect
 
 
 def test_edit_policy_checks_every_file_before_allowing_batch() -> None:
