@@ -127,6 +127,7 @@ READ_ONLY_COMMANDS = (
     "which",
     "true",
     "false",
+    "sleep",
     "pwd",
     "id",
     "whoami",
