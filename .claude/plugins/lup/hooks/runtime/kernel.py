@@ -551,7 +551,10 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                     and command[position + 1] == "("
                 ):
                     return KernelDecision(
-                        "ask", "command substitution is never auto-allowed"
+                        "deny",
+                        "command substitution is denied — run the inner command"
+                        " in its own call and splice its literal output, or"
+                        " read it through <(...) or a pipe",
                     )
                 word.append(inner)
                 position += 1
@@ -570,10 +573,15 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             flush()
             position += 1
             continue
-        if character == "`":
-            return KernelDecision("ask", "command substitution is never auto-allowed")
-        if character == "$" and position + 1 < length and command[position + 1] == "(":
-            return KernelDecision("ask", "command substitution is never auto-allowed")
+        if character == "`" or (
+            character == "$" and position + 1 < length and command[position + 1] == "("
+        ):
+            return KernelDecision(
+                "deny",
+                "command substitution is denied — run the inner command in its"
+                " own call and splice its literal output, or read it through"
+                " <(...) or a pipe",
+            )
         if character == ">" and position + 1 < length and command[position + 1] == "(":
             return KernelDecision(
                 "ask", "writing process substitution is never auto-allowed"
@@ -697,12 +705,203 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
     return segments
 
 
+def loop_leader(segment: list[str]) -> str:
+    """The segment's effective first word, looking through a leading ``do``."""
+    if segment and segment[0] == "do" and len(segment) > 1:
+        return segment[1]
+    return segment[0] if segment else ""
+
+
+def find_loop_end(segments: list[list[str]], start: int) -> int | None:
+    """Locate the bare ``done`` segment closing the loop opened at ``start``."""
+    depth = 1
+    for index in range(start + 1, len(segments)):
+        if segments[index] == ["done"]:
+            depth -= 1
+            if depth == 0:
+                return index
+        elif loop_leader(segments[index]) in ("for", "while", "until"):
+            depth += 1
+    return None
+
+
+def variable_reference_end(word: str, position: int, name: str) -> int | None:
+    """The index just past a ``$name``/``${name}`` reference at ``position``."""
+    rest = word[position + 1 :]
+    if rest.startswith("{" + name + "}"):
+        return position + len(name) + 3
+    if rest.startswith(name):
+        follow = position + 1 + len(name)
+        if follow >= len(word) or not (word[follow].isalnum() or word[follow] == "_"):
+            return follow
+    return None
+
+
+def references_variable(word: str, name: str) -> bool:
+    """Detect a live ``$name`` or ``${name}`` reference inside one shell word."""
+    return any(
+        character == "$" and variable_reference_end(word, position, name) is not None
+        for position, character in enumerate(word)
+    )
+
+
+def substitute_variable(word: str, name: str, value: str) -> str:
+    """Replace every ``$name``/``${name}`` reference in one word with ``value``."""
+    pieces: list[str] = []
+    position = 0
+    while True:
+        found = word.find("$", position)
+        if found == -1:
+            pieces.append(word[position:])
+            return "".join(pieces)
+        end = variable_reference_end(word, found, name)
+        if end is None:
+            pieces.append(word[position : found + 1])
+            position = found + 1
+            continue
+        pieces.append(word[position:found])
+        pieces.append(value)
+        position = end
+
+
+def literal_loop_word(word: str) -> bool:
+    """A word whose runtime expansion is exactly its lexed text."""
+    return not word.startswith(("~", "/dev/fd/")) and not any(
+        character in "$*?[" for character in word
+    )
+
+
+def argument_safe_words(words: list[str], rows: list[ShellRuleRow]) -> bool:
+    """True when the command's row allows regardless of argument content.
+
+    A loop variable bound to a non-literal word list can expand to any word,
+    including a flag-shaped one, so only a single unguarded command-level
+    allow row qualifies — flag-guarded rows and the specially parsed
+    executables do not.
+    """
+    executable = posixpath.basename(words[0])
+    if executable in INTERPRETERS or executable in ("sed", "git", "uv", "uvx", "xargs"):
+        return False
+    matches = [row for row in rows if row["command"] == executable]
+    return (
+        len(matches) == 1
+        and not matches[0]["subcommand"]
+        and matches[0]["effect"] == "allow"
+        and not matches[0]["ask_flags"]
+    )
+
+
+def decide_for_body(
+    name: str,
+    loop_words: list[str],
+    body: list[list[str]],
+    rows: list[ShellRuleRow],
+    depth: int,
+) -> list[KernelDecision]:
+    """Classify a ``for`` body once per literal loop word, or gated when opaque.
+
+    A literal word list instantiates the body exactly, so a word landing in a
+    guarded flag position is judged as the flag it becomes. A non-literal list
+    (globs, expansions) can become any word, so every segment referencing the
+    variable must name an argument-safe command before one placeholder pass.
+    """
+    if len(loop_words) > 16:
+        return [KernelDecision("ask", "loop word list is too long to instantiate")]
+
+    def instantiations(values: list[str]) -> list[KernelDecision]:
+        return [
+            decision
+            for value in values
+            for decision in decide_segment_list(
+                [
+                    [substitute_variable(word, name, value) for word in segment]
+                    for segment in body
+                ],
+                rows,
+                depth + 1,
+            )
+        ]
+
+    if all(literal_loop_word(word) for word in loop_words):
+        return instantiations(loop_words or ["x"])
+    for segment in body:
+        if any(references_variable(word, name) for word in segment):
+            words = command_words(segment)
+            if not words or not argument_safe_words(words, rows):
+                return [
+                    KernelDecision(
+                        "ask",
+                        "loop words are not literal, so a variable argument"
+                        " could become a guarded flag",
+                    )
+                ]
+    return instantiations(["x"])
+
+
+def decide_loop(
+    segments: list[list[str]], start: int, rows: list[ShellRuleRow], depth: int
+) -> tuple[list[KernelDecision], int] | KernelDecision:
+    """Classify one loop construct, returning its decisions and the next index."""
+    if depth >= 2:
+        return KernelDecision("ask", "loops nest too deeply")
+    end = find_loop_end(segments, start)
+    if end is None:
+        return KernelDecision("ask", "loop construct does not parse")
+    interior = segments[start + 1 : end]
+    do_index = next(
+        (position for position, seg in enumerate(interior) if seg[0] == "do"), None
+    )
+    if do_index is None:
+        return KernelDecision("ask", "loop construct does not parse")
+    body = [seg for seg in [interior[do_index][1:], *interior[do_index + 1 :]] if seg]
+    if not body:
+        return KernelDecision("ask", "loop body is empty")
+    condition = interior[:do_index]
+    match segments[start]:
+        case ["for", name, "in", *loop_words] if name.isidentifier():
+            if condition:
+                return KernelDecision("ask", "loop construct does not parse")
+            return decide_for_body(name, loop_words, body, rows, depth), end + 1
+        case ["for", *_rest]:
+            return KernelDecision("ask", "loop form is not classified")
+        case [_keyword, *condition_head]:
+            conditions = [seg for seg in [condition_head, *condition] if seg]
+            if not conditions:
+                return KernelDecision("ask", "loop condition is empty")
+            decisions = [
+                *decide_segment_list(conditions, rows, depth + 1),
+                *decide_segment_list(body, rows, depth + 1),
+            ]
+            return decisions, end + 1
+    return KernelDecision("ask", "loop construct does not parse")
+
+
+def decide_segment_list(
+    segments: list[list[str]], rows: list[ShellRuleRow], depth: int = 0
+) -> list[KernelDecision]:
+    """Classify a segment list, grouping loop constructs recursively."""
+    decisions: list[KernelDecision] = []
+    index = 0
+    while index < len(segments):
+        segment = segments[index]
+        if segment[0] in ("for", "while", "until"):
+            outcome = decide_loop(segments, index, rows, depth)
+            if isinstance(outcome, KernelDecision):
+                return [*decisions, outcome]
+            grouped, index = outcome
+            decisions.extend(grouped)
+            continue
+        decisions.append(decide_shell_segment(segment, rows))
+        index += 1
+    return decisions
+
+
 def decide_shell(command: str, rows: list[ShellRuleRow]) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(command)
     if isinstance(segments, KernelDecision):
         return segments
-    decisions = [decide_shell_segment(segment, rows) for segment in segments]
+    decisions = decide_segment_list(segments, rows)
     denied = next((item for item in decisions if item.effect == "deny"), None)
     if denied is not None:
         return denied
