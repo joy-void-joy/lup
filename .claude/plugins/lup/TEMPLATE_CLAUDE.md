@@ -751,9 +751,9 @@ application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 
-The policy checks every shell segment, URL scope, and edit in a batch. Denial
-wins over approval, malformed input fails conservatively, redirection and
-substitution are never auto-allowed, and edit decisions include protected
+The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary, every URL scope, and each edit in a batch. Denial
+wins over approval, malformed input fails conservatively, command substitution and
+file-writing redirection are never auto-allowed, and edit decisions include protected
 paths, marker changes, size, and the canonical anti-pattern audit. Use
 `/lup:hooks` to update canonical inputs, regenerate both plugins, and run the
 shared canonical/bundled fixture suite.

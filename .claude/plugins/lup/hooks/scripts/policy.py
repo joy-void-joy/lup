@@ -18,6 +18,7 @@ from policy_data import (
     DENIED_FETCH_SCOPES,
     MAXIMUM_ADDED_LINES,
     PATH_RULES,
+    SHELL_RULES,
 )
 
 
@@ -64,7 +65,7 @@ def dispatch(payload):
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = agent_type in AUTONOMOUS_AGENT_IDENTITIES
     if name == "Bash":
-        return decide_shell(tool_input["command"])
+        return decide_shell(tool_input["command"], SHELL_RULES)
     if name == "WebFetch":
         return decide_fetch(
             tool_input["url"],
@@ -90,6 +91,8 @@ def dispatch(payload):
 
 
 def rendered(decision):
+    if decision.effect == "defer":
+        return {}
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

@@ -15,12 +15,11 @@ import ast
 import io
 import posixpath
 import re
-import shlex
 import tokenize
 import urllib.parse
-from typing import Literal
+from typing import Literal, TypedDict
 
-type DecisionEffect = Literal["allow", "ask", "deny"]
+type DecisionEffect = Literal["allow", "ask", "deny", "defer"]
 type PathRuleKind = Literal[
     "exact",
     "subtree",
@@ -33,19 +32,38 @@ type UrlScopeRow = tuple[str, str, int | None, str, str]
 type PathRuleRow = tuple[PathRuleKind, str, str, bool]
 type AntiPatternRow = tuple[str, str, str, str]
 
+
+class ShellRuleRow(TypedDict):
+    """One erased shell-command rule the kernel matches by executable name.
+
+    ``subcommand`` and ``operation`` are ``""`` at the levels a rule does not
+    constrain; ``ask_flags`` downgrades an ``allow`` to ``ask`` when one of the
+    named flags appears among the command's remaining words. On the
+    command-level row of a subcommand-gated command, ``ask_flags`` guard the
+    global options before the subcommand and ``value_flags`` name globals that
+    consume the following word (``git -C <path>``), so a flag value is never
+    read as the subcommand.
+    """
+
+    command: str
+    subcommand: str
+    operation: str
+    effect: DecisionEffect
+    ask_flags: list[str]
+    value_flags: list[str]
+    reason: str
+
+
 KERNEL_IMPORT_ALLOWLIST = (
     "ast",
     "io",
     "posixpath",
     "re",
-    "shlex",
     "tokenize",
     "typing",
     "urllib.parse",
 )
-SHELL_PUNCTUATION = ";&|<>\n"
 PASS_THROUGH_WORDS = (
-    "sudo",
     "env",
     "command",
     "exec",
@@ -54,18 +72,37 @@ PASS_THROUGH_WORDS = (
     "setsid",
     "stdbuf",
 )
-READ_ONLY_COMMANDS = (
-    "ls",
-    "tree",
-    "grep",
-    "cat",
-    "echo",
-    "test",
-    "file",
-    "wc",
-    "head",
-    "tail",
-    "find",
+DANGEROUS_ENV_NAMES = (
+    "PATH",
+    "IFS",
+    "ENV",
+    "BASH_ENV",
+    "CDPATH",
+    "SHELL",
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "PAGER",
+    "EDITOR",
+    "VISUAL",
+    "NODE_OPTIONS",
+    "PERL5LIB",
+    "PERL5OPT",
+    "RUBYLIB",
+    "RUBYOPT",
+)
+DANGEROUS_ENV_PREFIXES = ("LD_", "DYLD_", "PYTHON", "GIT_", "BASH_FUNC_")
+SED_SAFE_SHORT_FLAGS = "nErsuz"
+SED_SAFE_LONG_OPTIONS = (
+    "--quiet",
+    "--silent",
+    "--regexp-extended",
+    "--separate",
+    "--null-data",
+)
+SED_ADDRESS = r"(?:\d+|\$|/(?:[^/\\]|\\.)*/)"
+SED_COMMAND_RE = re.compile(
+    rf"(?:{SED_ADDRESS}(?:,{SED_ADDRESS})?\s*)?"
+    r"(?:[pdnq=]|[sy]/(?:[^/\\]|\\.)*/(?:[^/\\]|\\.)*/[0-9gipmIM]*)"
 )
 INTERPRETERS = (
     "python",
@@ -95,7 +132,7 @@ class KernelDecision:
     reason: str
 
     def __init__(self, effect: DecisionEffect, reason: str = "") -> None:
-        if effect not in ("allow", "ask", "deny"):
+        if effect not in ("allow", "ask", "deny", "defer"):
             raise ValueError(f"invalid kernel decision effect {effect!r}")
         self.effect = effect
         self.reason = reason
@@ -137,8 +174,227 @@ def is_repository_tmp_script(word: str) -> bool:
     return not normalized.startswith("/") and normalized.split("/")[0] == "tmp"
 
 
-def decide_shell_segment(segment: list[str]) -> KernelDecision:
-    """Classify one parsed shell segment."""
+def dangerous_env_name(name: str) -> bool:
+    """Recognize an environment variable that can redirect a command's execution."""
+    return name in DANGEROUS_ENV_NAMES or any(
+        name.startswith(prefix) for prefix in DANGEROUS_ENV_PREFIXES
+    )
+
+
+def has_dangerous_assignment(segment: list[str]) -> bool:
+    """Detect a security-sensitive variable set on the leading assignment prefix."""
+    for word in segment:
+        name, separator, _value = word.partition("=")
+        if separator and name.isidentifier():
+            if dangerous_env_name(name):
+                return True
+            continue
+        if posixpath.basename(word) in PASS_THROUGH_WORDS:
+            continue
+        return False
+    return False
+
+
+def flag_matches(word: str, flags: list[str]) -> bool:
+    """Match a word against a rule's ask-flags, allowing clusters and ``=`` forms."""
+    for flag in flags:
+        if word == flag:
+            return True
+        if flag.startswith("--") and word.startswith(flag + "="):
+            return True
+        if (
+            len(flag) == 2
+            and flag.startswith("-")
+            and word.startswith("-")
+            and not word.startswith("--")
+            and flag[1] in word[1:]
+        ):
+            return True
+    return False
+
+
+def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision:
+    """Return a row's effect, downgrading an allow to ask on a guarded flag."""
+    if row["effect"] == "allow" and row["ask_flags"]:
+        guarded = next(
+            (word for word in arguments if flag_matches(word, row["ask_flags"])),
+            None,
+        )
+        if guarded is not None:
+            return KernelDecision(
+                "ask", row["reason"] or f"{guarded} requires approval"
+            )
+    return KernelDecision(row["effect"], row["reason"])
+
+
+def split_subcommand(
+    executable: str, arguments: list[str], default: ShellRuleRow | None
+) -> tuple[str, list[str]] | KernelDecision:
+    """Find the subcommand word, honoring global value-taking and guarded flags."""
+    ask_flags = default["ask_flags"] if default else []
+    value_flags = default["value_flags"] if default else []
+    position = 0
+    while position < len(arguments):
+        word = arguments[position]
+        if not word.startswith("-"):
+            return word, arguments[position + 1 :]
+        if flag_matches(word, ask_flags):
+            return KernelDecision(
+                "ask", f"{executable} global flag {word} requires approval"
+            )
+        position += 2 if word in value_flags else 1
+    return "", []
+
+
+def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDecision:
+    """Classify a command against the erased vocabulary rows by name and depth."""
+    executable = posixpath.basename(words[0])
+    matches = [row for row in rows if row["command"] == executable]
+    if not matches:
+        return KernelDecision("ask", f"command {executable!r} is not classified")
+    arguments = words[1:]
+    if not any(row["subcommand"] for row in matches):
+        return apply_command_row(
+            next(row for row in matches if not row["subcommand"]), arguments
+        )
+    default = next((row for row in matches if not row["subcommand"]), None)
+    split = split_subcommand(executable, arguments, default)
+    if isinstance(split, KernelDecision):
+        return split
+    subword, remainder = split
+    subrows = [row for row in matches if subword and row["subcommand"] == subword]
+    if not subrows:
+        if default is None:
+            return KernelDecision("ask", f"{executable} {subword} is not classified")
+        return apply_command_row(default, arguments)
+    if any(row["operation"] for row in subrows):
+        opword = next((word for word in remainder if not word.startswith("-")), "")
+        oprows = [row for row in subrows if opword and row["operation"] == opword]
+        if oprows:
+            return apply_command_row(oprows[0], remainder)
+        subdefault = next((row for row in subrows if not row["operation"]), None)
+        if subdefault is not None:
+            return apply_command_row(subdefault, remainder)
+        return KernelDecision(
+            "ask", f"{executable} {subword} {opword} is not classified"
+        )
+    return apply_command_row(subrows[0], remainder)
+
+
+def safe_sed_script(script: str) -> bool:
+    """Accept only address-guarded print, delete, transliterate, and substitute."""
+    guarded = rf"\s*{SED_COMMAND_RE.pattern}\s*"
+    return all(
+        re.fullmatch(guarded, piece) is not None
+        for piece in re.split(r"[;\n]+", script)
+        if piece and not piece.isspace()
+    )
+
+
+def decide_sed_words(words: list[str]) -> KernelDecision:
+    """Allow only read-only sed: safe flags plus a safe script grammar."""
+    scripts: list[str] = []
+    positional: list[str] = []
+    script_expected = False
+    script_from_options = False
+    for word in words[1:]:
+        if script_expected:
+            scripts.append(word)
+            script_expected = False
+            continue
+        if word.startswith("--"):
+            name, separator, value = word.partition("=")
+            if name == "--expression":
+                if separator:
+                    scripts.append(value)
+                script_expected = not separator
+                script_from_options = True
+                continue
+            if name in SED_SAFE_LONG_OPTIONS and not separator:
+                continue
+            return KernelDecision("ask", f"sed option {name!r} is not classified")
+        if word.startswith("-") and len(word) > 1:
+            flags = word[1:]
+            if flags.endswith("e"):
+                script_expected = True
+                script_from_options = True
+                flags = flags[:-1]
+            if any(flag not in SED_SAFE_SHORT_FLAGS for flag in flags):
+                return KernelDecision("ask", f"sed option {word!r} is not classified")
+            continue
+        positional.append(word)
+    if script_expected:
+        return KernelDecision("ask", "sed expression flag has no script")
+    if not script_from_options and positional:
+        scripts.append(positional.pop(0))
+    if not all(safe_sed_script(script) for script in scripts):
+        return KernelDecision("ask", "sed script is not classified as read-only")
+    return KernelDecision("allow", "read-only sed script")
+
+
+def xargs_payload(words: list[str]) -> list[str]:
+    """Return the command xargs would run, skipping only xargs's own options."""
+    value_options = ("-I", "-i", "-n", "-d", "-P", "-s", "-L", "-a", "-E", "-e")
+    position = 1
+    while position < len(words) and words[position].startswith("-"):
+        option = words[position]
+        if "=" in option or (len(option) > 2 and not option.startswith("--")):
+            position += 1
+        elif option in value_options:
+            position += 2
+        else:
+            position += 1
+    return words[position:]
+
+
+def decide_uv(words: list[str]) -> KernelDecision:
+    """Classify a uv invocation, gating dependency and inline-code forms."""
+    subcommand = words[1]
+    if subcommand in ("add", "sync"):
+        return KernelDecision(
+            "ask", "dependency changes fetch and execute external code"
+        )
+    if subcommand in ("remove", "lock"):
+        return KernelDecision("allow")
+    if subcommand == "run" and len(words) > 2:
+        run_words = uv_run_words(words)
+        if not run_words:
+            return KernelDecision("ask", "uv run has no command")
+        run_command = posixpath.basename(run_words[0])
+        bare_target = "/" not in run_words[0]
+        script = (
+            run_words[1]
+            if bare_target and run_command in INTERPRETERS and len(run_words) > 1
+            else run_words[0]
+        )
+        if is_repository_tmp_script(script):
+            return KernelDecision("allow", "declared temporary script")
+        if run_command in INTERPRETERS or run_command in ("-c", "-m", "--script"):
+            return KernelDecision("deny", "inline code is not allowed")
+        risky = ("--with", "--with-editable", "--with-requirements", "--env-file")
+        if any(
+            word == option or word.startswith(option + "=")
+            for word in words[2:]
+            for option in risky
+        ):
+            return KernelDecision(
+                "ask", "uv run --with fetches and executes external code"
+            )
+        if bare_target and run_command in ("pyright", "pytest", "ruff", "lup-devtools"):
+            return KernelDecision("allow")
+        if bare_target and len(run_words) == 2 and run_words[1] == "--help":
+            return KernelDecision("allow", "command help is read-only")
+    return KernelDecision("ask", f"uv {words[1]} is not classified")
+
+
+def decide_shell_segment(
+    segment: list[str], rows: list[ShellRuleRow]
+) -> KernelDecision:
+    """Classify one parsed shell segment against the vocabulary and handlers."""
+    if has_dangerous_assignment(segment):
+        return KernelDecision(
+            "ask", "a security-sensitive environment assignment requires approval"
+        )
     words = command_words(segment)
     if not words:
         return KernelDecision("ask", "shell segment has no command")
@@ -147,117 +403,306 @@ def decide_shell_segment(segment: list[str]) -> KernelDecision:
         return KernelDecision(
             "deny", "bare interpreters and inline code are not allowed"
         )
-    if executable in READ_ONLY_COMMANDS:
-        if executable == "find" and any(
-            word in ("-exec", "-ok", "-delete") for word in words
-        ):
-            return KernelDecision("ask", "find requests a mutating action")
-        return KernelDecision("allow")
-    if executable == "cd":
-        return KernelDecision("allow", "directory navigation")
+    if executable == "git" and any("ext::" in word for word in words):
+        return KernelDecision(
+            "ask", "the git ext transport can execute commands — requires approval"
+        )
     if executable == "xargs":
-        payload = [word for word in words[1:] if not word.startswith("-")]
+        payload = xargs_payload(words)
         if not payload:
             return KernelDecision("ask", "xargs payload is not classified")
-        return decide_shell_segment(payload)
-    if (
-        executable == "git"
-        and len(words) > 1
-        and words[1]
-        in (
-            "status",
-            "log",
-            "diff",
-            "show",
-            "branch",
-            "worktree",
-            "stash",
-            "remote",
-            "fetch",
-            "tag",
-            "add",
-            "commit",
-            "mv",
-        )
-    ):
-        return KernelDecision("allow")
-    if (
-        executable == "gh"
-        and len(words) > 2
-        and words[1] in ("pr", "issue")
-        and words[2] in ("list", "view", "diff", "status")
-    ):
-        return KernelDecision("allow")
+        return decide_shell_segment(payload, rows)
+    if executable == "sed":
+        return decide_sed_words(words)
     if executable == "uvx":
         if len(words) > 1 and posixpath.basename(words[1]) in INTERPRETERS:
             return KernelDecision("deny", "inline code is not allowed")
         return KernelDecision("ask", "uvx command is not classified")
     if executable == "uv" and len(words) > 1:
-        if words[1] in ("add", "sync"):
+        return decide_uv(words)
+    return decide_command_rows(words, rows)
+
+
+class ShellToken:
+    """One lexed shell token: a word, an operator, or a ``<(...)`` inner command."""
+
+    kind: Literal["word", "op", "procsub"]
+    text: str
+
+    def __init__(self, kind: Literal["word", "op", "procsub"], text: str) -> None:
+        self.kind = kind
+        self.text = text
+
+
+def read_process_substitution(command: str, position: int) -> tuple[str | None, int]:
+    """Scan a balanced ``<(...)`` body, honoring quotes, returning its inner text."""
+    start = position
+    depth = 1
+    length = len(command)
+    while position < length:
+        character = command[position]
+        if character == "'":
+            closing = command.find("'", position + 1)
+            if closing == -1:
+                return None, position
+            position = closing + 1
+            continue
+        if character == '"':
+            position += 1
+            while position < length and command[position] != '"':
+                position += 2 if command[position] == "\\" else 1
+            if position >= length:
+                return None, position
+            position += 1
+            continue
+        if character == "\\":
+            position += 2
+            continue
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth == 0:
+                return command[start:position], position + 1
+        position += 1
+    return None, position
+
+
+def read_redirection(command: str, position: int) -> tuple[str, int]:
+    """Read a maximal redirection operator, returning its text and end position."""
+    start = position
+    length = len(command)
+    if command[position] == "&":
+        position += 1
+    core = command[position]
+    position += 1
+    if position < length and command[position] == core:
+        position += 1
+        if core == "<" and position < length and command[position] == "<":
+            position += 1
+    if position < length and command[position] == "&":
+        position += 1
+        while position < length and (
+            command[position].isdigit() or command[position] == "-"
+        ):
+            position += 1
+    return command[start:position], position
+
+
+def read_control(command: str, position: int) -> tuple[str, int]:
+    """Read a maximal control operator, returning its text and end position."""
+    character = command[position]
+    length = len(command)
+    if character == "&":
+        if position + 1 < length and command[position + 1] == "&":
+            return "&&", position + 2
+        return "&", position + 1
+    if character == "|":
+        if position + 1 < length and command[position + 1] == "|":
+            return "||", position + 2
+        if position + 1 < length and command[position + 1] == "&":
+            return "|&", position + 2
+        return "|", position + 1
+    if character == ";":
+        if command[position : position + 3] == ";;&":
+            return ";;&", position + 3
+        if command[position : position + 2] in (";;", ";&"):
+            return command[position : position + 2], position + 2
+        return ";", position + 1
+    return character, position + 1
+
+
+def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
+    """Lex a command into words and operators, refusing opaque or unsafe syntax."""
+    tokens: list[ShellToken] = []
+    word: list[str] = []
+    started = False
+    length = len(command)
+    position = 0
+
+    def flush() -> None:
+        nonlocal started
+        if started:
+            tokens.append(ShellToken("word", "".join(word)))
+            word.clear()
+            started = False
+
+    while position < length:
+        character = command[position]
+        if character == "'":
+            closing = command.find("'", position + 1)
+            if closing == -1:
+                return KernelDecision("ask", "shell quoting does not parse")
+            word.extend(command[position + 1 : closing])
+            started = True
+            position = closing + 1
+            continue
+        if character == '"':
+            position += 1
+            while position < length and command[position] != '"':
+                inner = command[position]
+                if inner == "\\" and position + 1 < length:
+                    word.append(command[position + 1])
+                    position += 2
+                    continue
+                if inner == "`" or (
+                    inner == "$"
+                    and position + 1 < length
+                    and command[position + 1] == "("
+                ):
+                    return KernelDecision(
+                        "ask", "command substitution is never auto-allowed"
+                    )
+                word.append(inner)
+                position += 1
+            if position >= length:
+                return KernelDecision("ask", "shell quoting does not parse")
+            started = True
+            position += 1
+            continue
+        if character == "\\":
+            if position + 1 < length and command[position + 1] != "\n":
+                word.append(command[position + 1])
+                started = True
+            position += 2
+            continue
+        if character in " \t\r":
+            flush()
+            position += 1
+            continue
+        if character == "`":
+            return KernelDecision("ask", "command substitution is never auto-allowed")
+        if character == "$" and position + 1 < length and command[position + 1] == "(":
+            return KernelDecision("ask", "command substitution is never auto-allowed")
+        if character == ">" and position + 1 < length and command[position + 1] == "(":
             return KernelDecision(
-                "ask", "dependency changes fetch and execute external code"
+                "ask", "writing process substitution is never auto-allowed"
             )
-        if words[1] in ("remove", "lock"):
-            return KernelDecision("allow")
-        if words[1] == "run" and len(words) > 2:
-            run_words = uv_run_words(words)
-            if not run_words:
-                return KernelDecision("ask", "uv run has no command")
-            run_command = posixpath.basename(run_words[0])
-            script = (
-                run_words[1]
-                if run_command in INTERPRETERS and len(run_words) > 1
-                else run_words[0]
-            )
-            if is_repository_tmp_script(script):
-                return KernelDecision("allow", "declared temporary script")
-            if run_command in ("pyright", "pytest", "ruff", "lup-devtools"):
-                return KernelDecision("allow")
-            if len(run_words) == 2 and run_words[1] == "--help":
-                return KernelDecision("allow", "command help is read-only")
-            if run_command in INTERPRETERS or run_command in (
-                "-c",
-                "-m",
-                "--script",
-            ):
-                return KernelDecision("deny", "inline code is not allowed")
-    return KernelDecision("ask", f"command {executable!r} is not classified")
+        if character == "<" and position + 1 < length and command[position + 1] == "(":
+            if started:
+                return KernelDecision(
+                    "ask", "process substitution inside a word is not classified"
+                )
+            inner, end = read_process_substitution(command, position + 2)
+            if inner is None:
+                return KernelDecision("ask", "process substitution does not parse")
+            tokens.append(ShellToken("procsub", inner))
+            position = end
+            continue
+        if character == "#" and not started:
+            newline = command.find("\n", position)
+            if newline == -1:
+                break
+            position = newline
+            continue
+        if character in "<>" or (
+            character == "&" and position + 1 < length and command[position + 1] == ">"
+        ):
+            fd = ""
+            if started and word and all(digit.isdigit() for digit in word):
+                fd = "".join(word)
+                word.clear()
+                started = False
+            else:
+                flush()
+            operator, position = read_redirection(command, position)
+            tokens.append(ShellToken("op", fd + operator))
+            continue
+        if character in ";&|\n":
+            flush()
+            operator, position = read_control(command, position)
+            tokens.append(ShellToken("op", operator))
+            continue
+        if character in "()":
+            return KernelDecision("ask", "shell grouping is not classified")
+        word.append(character)
+        started = True
+        position += 1
+    flush()
+    return tokens
 
 
-def parse_shell_words(command: str) -> list[list[str]] | None:
-    """Parse shell words into independent segments, rejecting opaque syntax."""
-    if any(marker in command for marker in ("$(", "<(", ">(", "`")):
-        return None
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=SHELL_PUNCTUATION)
-    lexer.whitespace_split = True
-    lexer.whitespace = " \t\r"
-    lexer.commenters = ""
-    try:
-        tokens = list(lexer)
-    except ValueError:
-        return None
+def is_control_operator(text: str) -> bool:
+    """Return whether an operator token separates command segments."""
+    return text in (";", "&", "&&", "||", "|", "|&", "\n", ";;", ";&", ";;&")
+
+
+def resolve_redirection(
+    tokens: list[ShellToken], index: int
+) -> tuple[KernelDecision | None, int]:
+    """Classify one redirection, consuming its target and stripping safe forms."""
+    operator = tokens[index].text
+    if "<<" in operator and "<<<" not in operator:
+        return KernelDecision("ask", "heredoc input requires approval"), index + 1
+    if "&" in operator and (operator[-1].isdigit() or operator[-1] == "-"):
+        return None, index + 1
+    target = index + 1
+    if target >= len(tokens) or tokens[target].kind != "word":
+        return (
+            KernelDecision("ask", "file redirection is never auto-allowed"),
+            index + 1,
+        )
+    if "<" in operator:
+        return None, target + 1
+    if posixpath.normpath(tokens[target].text) == "/dev/null":
+        return None, target + 1
+    return (
+        KernelDecision("ask", "file redirection is never auto-allowed"),
+        target + 1,
+    )
+
+
+def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelDecision:
+    """Group lexed tokens into command segments, resolving safe redirections.
+
+    A read-side process substitution contributes a ``/dev/fd`` placeholder to
+    its enclosing segment and its inner command joins the segment list, so the
+    caller classifies it exactly like a piped command.
+    """
+    tokens = tokenize_shell(command)
+    if isinstance(tokens, KernelDecision):
+        return tokens
     segments: list[list[str]] = []
     current: list[str] = []
-    for token in tokens:
-        if token and all(character in SHELL_PUNCTUATION for character in token):
-            if "<" in token or ">" in token:
-                return None
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.kind == "word":
+            current.append(token.text)
+            index += 1
+            continue
+        if token.kind == "procsub":
+            if depth >= 2:
+                return KernelDecision("ask", "process substitution nests too deeply")
+            inner = parse_shell_words(token.text, depth + 1)
+            if isinstance(inner, KernelDecision):
+                return inner
+            segments.extend(inner)
+            current.append("/dev/fd/63")
+            index += 1
+            continue
+        if is_control_operator(token.text):
             if current:
                 segments.append(current)
                 current = []
-        else:
-            current.append(token)
+            index += 1
+            continue
+        verdict, index = resolve_redirection(tokens, index)
+        if verdict is not None:
+            return verdict
     if current:
         segments.append(current)
-    return segments or None
+    if not segments:
+        return KernelDecision("ask", "shell command has no executable segment")
+    return segments
 
 
-def decide_shell(command: str) -> KernelDecision:
+def decide_shell(command: str, rows: list[ShellRuleRow]) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(command)
-    if segments is None:
-        return KernelDecision("ask", "shell command has no executable segment")
-    decisions = [decide_shell_segment(segment) for segment in segments]
+    if isinstance(segments, KernelDecision):
+        return segments
+    decisions = [decide_shell_segment(segment, rows) for segment in segments]
     denied = next((item for item in decisions if item.effect == "deny"), None)
     if denied is not None:
         return denied
@@ -572,6 +1017,62 @@ def added_lines(before: str | None, after: str | None) -> list[str]:
     return added
 
 
+def is_record_class(node: ast.ClassDef) -> bool:
+    """Recognize a declarative record whose field lines are not real changes."""
+    records = ("BaseModel", "TypedDict", "Enum", "IntEnum", "StrEnum", "NamedTuple")
+    return any(
+        (isinstance(base, ast.Name) and base.id in records)
+        or (isinstance(base, ast.Attribute) and base.attr in records)
+        for base in node.bases
+    )
+
+
+def non_real_lines(source: str) -> set[int]:
+    """Return line numbers that do not count toward the small-change gate.
+
+    Blank lines, comments, string and docstring bodies (already blanked by
+    ``python_code_lines``), imports, and the field declarations of a pydantic
+    or ``TypedDict`` record are boilerplate rather than logic.
+    """
+    code = python_code_lines(source)
+    excluded = {
+        number
+        for number, line in enumerate(code, start=1)
+        if not line or line.isspace()
+    }
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return excluded
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import | ast.ImportFrom) and node.end_lineno:
+            excluded.update(range(node.lineno, node.end_lineno + 1))
+        if isinstance(node, ast.ClassDef) and is_record_class(node):
+            for statement in node.body:
+                if (
+                    isinstance(statement, ast.AnnAssign | ast.Assign)
+                    and statement.end_lineno
+                ):
+                    excluded.update(range(statement.lineno, statement.end_lineno + 1))
+    return excluded
+
+
+def real_added_line_count(
+    before: str | None, after: str | None, python_source: bool
+) -> int:
+    """Count added lines that carry real code, ignoring boilerplate."""
+    added = added_line_numbers(before, after)
+    lines = (after or "").splitlines()
+    if not python_source:
+        return sum(
+            1
+            for number in added
+            if lines[number - 1] and not lines[number - 1].isspace()
+        )
+    excluded = non_real_lines(after or "")
+    return sum(1 for number in added if number not in excluded)
+
+
 def ignore_rule_ids(match: re.Match[str]) -> tuple[str, ...] | None:
     """Return typed ids, or ``None`` for a bare suppression."""
     raw = match.group("ids")
@@ -728,8 +1229,8 @@ def decide_edit(
         return KernelDecision("ask", "full-file writes require approval")
     if after is None or after == "":
         return KernelDecision("allow", "pure deletion")
-    if len(added_lines(before, after)) > maximum_added_lines:
+    if real_added_line_count(before, after, python_source) > maximum_added_lines:
         if autonomous:
             return KernelDecision("allow", "reviewed autonomous edit")
-        return KernelDecision("ask", "edit exceeds the small-change gate")
+        return KernelDecision("defer", "edit exceeds the small-change gate")
     return KernelDecision("allow", "small safe edit")
