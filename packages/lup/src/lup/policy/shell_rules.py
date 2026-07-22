@@ -110,8 +110,6 @@ READ_ONLY_COMMANDS = (
     "diff",
     "cmp",
     "jq",
-    "yq",
-    "xmllint",
     "stat",
     "basename",
     "dirname",
@@ -347,6 +345,19 @@ BASE_SHELL_RULES: list[ShellCommandRule] = [
         name="sort",
         ask_flags=["-o", "--output", "--compress-program"],
         reason="a sort flag that writes a file or runs a program requires approval",
+    ),
+    ShellCommandRule(
+        name="yq",
+        ask_flags=["-i", "--inplace", "--in-place", "-s", "--split-exp"],
+        reason="a yq flag that edits files in place or splits into files requires approval",
+    ),
+    ShellCommandRule(
+        # xmllint reads every option with one or two leading dashes, so both
+        # spellings are guarded; a two-char "-o" guard would cluster-match
+        # benign words like -noout, and no bare "-o" option exists.
+        name="xmllint",
+        ask_flags=["--output", "-output", "--shell", "-shell"],
+        reason="an xmllint flag that writes files or opens a shell requires approval",
     ),
     ShellCommandRule(
         name="find",
