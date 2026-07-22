@@ -97,16 +97,34 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="ls >&2", effect="allow"),
     DecisionCase(input="echo x > out.txt", effect="ask"),
     DecisionCase(input="cat <<EOF", effect="ask"),
-    # Quote-aware substitution: inert inside single quotes, live otherwise.
+    # Quote-aware substitution: inert inside single quotes; live substitution
+    # is denied with a rewrite hint toward a separate call, <(...), or a pipe.
     DecisionCase(input="git commit -m 'fixes $(bug)'", effect="allow"),
-    DecisionCase(input="echo $(whoami)", effect="ask"),
-    DecisionCase(input="echo `id`", effect="ask"),
+    DecisionCase(input="echo $(whoami)", effect="deny"),
+    DecisionCase(input="echo `id`", effect="deny"),
     # Read-side process substitution classifies its inner command recursively;
-    # the write side and unclassified inner commands still ask.
+    # the write side still asks and a substituting inner command is denied.
     DecisionCase(input="diff <(git status) <(git log)", effect="allow"),
     DecisionCase(input="diff <(sudo id) f", effect="ask"),
-    DecisionCase(input="diff <(cat $(x)) f", effect="ask"),
+    DecisionCase(input="diff <(cat $(x)) f", effect="deny"),
     DecisionCase(input="cat >(tee f)", effect="ask"),
+    # Loops classify their condition and body recursively; literal for-words
+    # instantiate the body, and opaque word lists gate guarded arguments.
+    DecisionCase(input="sleep 5", effect="allow"),
+    DecisionCase(input='for f in a.py b.py; do wc -l "$f"; done', effect="allow"),
+    DecisionCase(input='for f in *.py; do wc -l "$f"; done', effect="allow"),
+    DecisionCase(input="until grep -q Ready dev.log; do sleep 1; done", effect="allow"),
+    DecisionCase(input="while true; do date; done", effect="allow"),
+    DecisionCase(
+        input='for a in x y; do for b in z; do echo "$a$b"; done; done',
+        effect="allow",
+    ),
+    DecisionCase(input="for x in -i; do sed \"$x\" 's/a/b/' f; done", effect="ask"),
+    DecisionCase(input='for f in *.txt; do sort "$f"; done', effect="ask"),
+    DecisionCase(input='for f in a; do python "$f"; done', effect="deny"),
+    DecisionCase(input='for f in a; do wc "$f"', effect="ask"),
+    DecisionCase(input="while do done", effect="ask"),
+    DecisionCase(input='for f a; do wc "$f"; done', effect="ask"),
     # Expanded read-only vocabulary with writer-flag guards.
     DecisionCase(input="sort f", effect="allow"),
     DecisionCase(input="sort -o out f", effect="ask"),
@@ -545,7 +563,7 @@ def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
         ).effect
         == "deny"
     )
-    assert policy.decide(ShellCommand(command="echo $(dangerous)")).effect == "ask"
+    assert policy.decide(ShellCommand(command="echo $(dangerous)")).effect == "deny"
 
 
 def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
