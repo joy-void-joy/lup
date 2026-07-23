@@ -179,6 +179,20 @@ class HookUrlScope(BaseModel):
     path_prefix: UrlPathPrefix = "/"
 
 
+class HookSandbox(BaseModel):
+    """OS sandbox declaration compiled into native settings and launchers.
+
+    Fetch-scope hostnames join extra_domains as the network allowlist, and
+    human-owned files become OS-level write denials, so one declaration
+    feeds both the semantic policy and the kernel-enforced boundary.
+    """
+
+    model_config = FROZEN
+
+    extra_domains: list[str] = Field(default_factory=list)
+    credential_paths: list[str] = Field(default_factory=list)
+
+
 class HookSet(BaseModel):
     model_config = FROZEN
 
@@ -201,6 +215,7 @@ class HookSet(BaseModel):
             "vocabulary; extend a downstream toolchain here, not in the kernel"
         ),
     )
+    sandbox: HookSandbox | None = None
 
 
 class ResolveSpec(BaseModel):

@@ -39,7 +39,7 @@ from lup.harness.reconciliation import (
 from lup.harness.contracts import CurrentTreeReader, Reconciler
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.patterns import DOCUMENT as PATTERNS
-from lup_template.devtools.harness.content.settings import SETTINGS
+from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
@@ -155,7 +155,9 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
         ),
         Artifact(
             path=Path(".claude/settings.json"),
-            content=json.dumps(SETTINGS, indent=2, sort_keys=True),
+            content=json.dumps(
+                project_settings(source.plugins[0].hooks), indent=2, sort_keys=True
+            ),
             semantic_id="harness.project-settings",
         ),
         resolver_entry,

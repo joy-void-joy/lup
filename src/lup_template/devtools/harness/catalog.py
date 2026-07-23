@@ -15,6 +15,7 @@ from pydantic import AnyHttpUrl
 
 from lup.harness.models import (
     Harness,
+    HookSandbox,
     HookSet,
     HookUrlScope,
     Plugin,
@@ -68,6 +69,17 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 Path("downstream.json"),
             ],
             human_owned_files=[Path("README.md")],
+            sandbox=HookSandbox(
+                extra_domains=[
+                    "github.com",
+                    "api.github.com",
+                    "*.githubusercontent.com",
+                    "pypi.org",
+                    "files.pythonhosted.org",
+                    "api.anthropic.com",
+                ],
+                credential_paths=["~/.ssh", "~/.aws/credentials"],
+            ),
         ),
     )
     return Harness(
