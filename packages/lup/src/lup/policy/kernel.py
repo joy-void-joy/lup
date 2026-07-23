@@ -113,6 +113,12 @@ INTERPRETERS = (
     "deno",
     "bun",
     "php",
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "ksh",
+    "fish",
 )
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 IGNORE_RE = re.compile(
@@ -122,6 +128,14 @@ IGNORE_RE = re.compile(
 FILE_IGNORE_RE = re.compile(
     r"^\s*(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?\s*$",
     re.IGNORECASE,
+)
+ESCALATE_RE = re.compile(
+    r"^\s*#[ \t]*lup[ \t]*:[ \t]*escalate\b[ \t]*:?[ \t]*(?P<why>[^\n]*)(?:\n|$)",
+    re.IGNORECASE,
+)
+ESCALATE_HINT = (
+    " — reshape the command into the allowed vocabulary, or resubmit with a"
+    " leading '# lup: escalate: <why>' line to request approval"
 )
 
 
@@ -251,7 +265,7 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
     executable = posixpath.basename(words[0])
     matches = [row for row in rows if row["command"] == executable]
     if not matches:
-        return KernelDecision("ask", f"command {executable!r} is not classified")
+        return KernelDecision("deny", f"command {executable!r} is not classified")
     arguments = words[1:]
     if not any(row["subcommand"] for row in matches):
         return apply_command_row(
@@ -265,7 +279,7 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
     subrows = [row for row in matches if subword and row["subcommand"] == subword]
     if not subrows:
         if default is None:
-            return KernelDecision("ask", f"{executable} {subword} is not classified")
+            return KernelDecision("deny", f"{executable} {subword} is not classified")
         return apply_command_row(default, arguments)
     if any(row["operation"] for row in subrows):
         opword = next((word for word in remainder if not word.startswith("-")), "")
@@ -276,7 +290,7 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
         if subdefault is not None:
             return apply_command_row(subdefault, remainder)
         return KernelDecision(
-            "ask", f"{executable} {subword} {opword} is not classified"
+            "deny", f"{executable} {subword} {opword} is not classified"
         )
     return apply_command_row(subrows[0], remainder)
 
@@ -312,7 +326,7 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
                 continue
             if name in SED_SAFE_LONG_OPTIONS and not separator:
                 continue
-            return KernelDecision("ask", f"sed option {name!r} is not classified")
+            return KernelDecision("deny", f"sed option {name!r} is not classified")
         if word.startswith("-") and len(word) > 1:
             flags = word[1:]
             if flags.endswith("e"):
@@ -320,15 +334,15 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
                 script_from_options = True
                 flags = flags[:-1]
             if any(flag not in SED_SAFE_SHORT_FLAGS for flag in flags):
-                return KernelDecision("ask", f"sed option {word!r} is not classified")
+                return KernelDecision("deny", f"sed option {word!r} is not classified")
             continue
         positional.append(word)
     if script_expected:
-        return KernelDecision("ask", "sed expression flag has no script")
+        return KernelDecision("deny", "sed expression flag has no script")
     if not script_from_options and positional:
         scripts.append(positional.pop(0))
     if not all(safe_sed_script(script) for script in scripts):
-        return KernelDecision("ask", "sed script is not classified as read-only")
+        return KernelDecision("deny", "sed script is not classified as read-only")
     return KernelDecision("allow", "read-only sed script")
 
 
@@ -370,13 +384,13 @@ def decide_awk_words(words: list[str]) -> KernelDecision:
             continue
         if word.startswith(("-F", "-v")) and not word.startswith("--"):
             continue
-        return KernelDecision("ask", f"awk option {word!r} is not classified")
+        return KernelDecision("deny", f"awk option {word!r} is not classified")
     if value_expected:
-        return KernelDecision("ask", "awk option flag has no value")
+        return KernelDecision("deny", "awk option flag has no value")
     if not positional:
-        return KernelDecision("ask", "awk has no program")
+        return KernelDecision("deny", "awk has no program")
     if not safe_awk_program(positional[0]):
-        return KernelDecision("ask", "awk program is not classified as read-only")
+        return KernelDecision("deny", "awk program is not classified as read-only")
     return KernelDecision("allow", "read-only awk program")
 
 
@@ -407,7 +421,7 @@ def decide_uv(words: list[str]) -> KernelDecision:
     if subcommand == "run" and len(words) > 2:
         run_words = uv_run_words(words)
         if not run_words:
-            return KernelDecision("ask", "uv run has no command")
+            return KernelDecision("deny", "uv run has no command")
         run_command = posixpath.basename(run_words[0])
         bare_target = "/" not in run_words[0]
         script = (
@@ -432,7 +446,7 @@ def decide_uv(words: list[str]) -> KernelDecision:
             return KernelDecision("allow")
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")
-    return KernelDecision("ask", f"uv {words[1]} is not classified")
+    return KernelDecision("deny", f"uv {words[1]} is not classified")
 
 
 def decide_shell_segment(
@@ -445,7 +459,7 @@ def decide_shell_segment(
         )
     words = command_words(segment)
     if not words:
-        return KernelDecision("ask", "shell segment has no command")
+        return KernelDecision("deny", "shell segment has no command")
     executable = posixpath.basename(words[0])
     if executable in INTERPRETERS:
         return KernelDecision(
@@ -458,7 +472,7 @@ def decide_shell_segment(
     if executable == "xargs":
         payload = xargs_payload(words)
         if not payload:
-            return KernelDecision("ask", "xargs payload is not classified")
+            return KernelDecision("deny", "xargs payload is not classified")
         return decide_shell_segment(payload, rows)
     if executable == "sed":
         return decide_sed_words(words)
@@ -467,7 +481,7 @@ def decide_shell_segment(
     if executable == "uvx":
         if len(words) > 1 and posixpath.basename(words[1]) in INTERPRETERS:
             return KernelDecision("deny", "inline code is not allowed")
-        return KernelDecision("ask", "uvx command is not classified")
+        return KernelDecision("deny", "uvx command is not classified")
     if executable == "uv" and len(words) > 1:
         return decide_uv(words)
     return decide_command_rows(words, rows)
@@ -582,7 +596,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
         if character == "'":
             closing = command.find("'", position + 1)
             if closing == -1:
-                return KernelDecision("ask", "shell quoting does not parse")
+                return KernelDecision("deny", "shell quoting does not parse")
             word.extend(command[position + 1 : closing])
             started = True
             position = closing + 1
@@ -609,7 +623,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                 word.append(inner)
                 position += 1
             if position >= length:
-                return KernelDecision("ask", "shell quoting does not parse")
+                return KernelDecision("deny", "shell quoting does not parse")
             started = True
             position += 1
             continue
@@ -639,11 +653,11 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
         if character == "<" and position + 1 < length and command[position + 1] == "(":
             if started:
                 return KernelDecision(
-                    "ask", "process substitution inside a word is not classified"
+                    "deny", "process substitution inside a word is not classified"
                 )
             inner, end = read_process_substitution(command, position + 2)
             if inner is None:
-                return KernelDecision("ask", "process substitution does not parse")
+                return KernelDecision("deny", "process substitution does not parse")
             tokens.append(ShellToken("procsub", inner))
             position = end
             continue
@@ -672,7 +686,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             tokens.append(ShellToken("op", operator))
             continue
         if character in "()":
-            return KernelDecision("ask", "shell grouping is not classified")
+            return KernelDecision("deny", "shell grouping is not classified")
         word.append(character)
         started = True
         position += 1
@@ -691,7 +705,7 @@ def resolve_redirection(
     """Classify one redirection, consuming its target and stripping safe forms."""
     operator = tokens[index].text
     if "<<" in operator and "<<<" not in operator:
-        return KernelDecision("ask", "heredoc input requires approval"), index + 1
+        return KernelDecision("deny", "heredoc input is not classified"), index + 1
     if "&" in operator and (operator[-1].isdigit() or operator[-1] == "-"):
         return None, index + 1
     target = index + 1
@@ -731,7 +745,7 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
             continue
         if token.kind == "procsub":
             if depth >= 2:
-                return KernelDecision("ask", "process substitution nests too deeply")
+                return KernelDecision("deny", "process substitution nests too deeply")
             inner = parse_shell_words(token.text, depth + 1)
             if isinstance(inner, KernelDecision):
                 return inner
@@ -751,7 +765,7 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
     if current:
         segments.append(current)
     if not segments:
-        return KernelDecision("ask", "shell command has no executable segment")
+        return KernelDecision("deny", "shell command has no executable segment")
     return segments
 
 
@@ -856,7 +870,7 @@ def decide_for_body(
     variable must name an argument-safe command before one placeholder pass.
     """
     if len(loop_words) > 16:
-        return [KernelDecision("ask", "loop word list is too long to instantiate")]
+        return [KernelDecision("deny", "loop word list is too long to instantiate")]
 
     def instantiations(values: list[str]) -> list[KernelDecision]:
         return [
@@ -880,7 +894,7 @@ def decide_for_body(
             if not words or not argument_safe_words(words, rows):
                 return [
                     KernelDecision(
-                        "ask",
+                        "deny",
                         "loop words are not literal, so a variable argument"
                         " could become a guarded flag",
                     )
@@ -893,31 +907,31 @@ def decide_loop(
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one loop construct, returning its decisions and the next index."""
     if depth >= 2:
-        return KernelDecision("ask", "loops nest too deeply")
+        return KernelDecision("deny", "loops nest too deeply")
     end = find_loop_end(segments, start)
     if end is None:
-        return KernelDecision("ask", "loop construct does not parse")
+        return KernelDecision("deny", "loop construct does not parse")
     interior = segments[start + 1 : end]
     do_index = next(
         (position for position, seg in enumerate(interior) if seg[0] == "do"), None
     )
     if do_index is None:
-        return KernelDecision("ask", "loop construct does not parse")
+        return KernelDecision("deny", "loop construct does not parse")
     body = [seg for seg in [interior[do_index][1:], *interior[do_index + 1 :]] if seg]
     if not body:
-        return KernelDecision("ask", "loop body is empty")
+        return KernelDecision("deny", "loop body is empty")
     condition = interior[:do_index]
     match segments[start]:
         case ["for", name, "in", *loop_words] if name.isidentifier():
             if condition:
-                return KernelDecision("ask", "loop construct does not parse")
+                return KernelDecision("deny", "loop construct does not parse")
             return decide_for_body(name, loop_words, body, rows, depth), end + 1
         case ["for", *_rest]:
-            return KernelDecision("ask", "loop form is not classified")
+            return KernelDecision("deny", "loop form is not classified")
         case [_keyword, *condition_head]:
             conditions = [seg for seg in [condition_head, *condition] if seg]
             if not conditions:
-                return KernelDecision("ask", "loop condition is empty")
+                return KernelDecision("deny", "loop condition is empty")
             decisions = [
                 *decide_segment_list(conditions, rows, depth + 1),
                 *decide_segment_list(body, rows, depth + 1),
@@ -946,7 +960,7 @@ def decide_segment_list(
     return decisions
 
 
-def decide_shell(command: str, rows: list[ShellRuleRow]) -> KernelDecision:
+def classify_shell(command: str, rows: list[ShellRuleRow]) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(command)
     if isinstance(segments, KernelDecision):
@@ -959,6 +973,32 @@ def decide_shell(command: str, rows: list[ShellRuleRow]) -> KernelDecision:
     if asked is not None:
         return asked
     return KernelDecision("allow", "every shell segment is declared safe")
+
+
+def decide_shell(command: str, rows: list[ShellRuleRow]) -> KernelDecision:
+    """Classify one command, honoring an escalation marker and hinting denies.
+
+    A leading ``# lup: escalate: <why>`` line promotes a classified deny or
+    ask to an approval question carrying the agent's stated reason, so the
+    human sees intent at the moment of judgment. A deny without a marker names
+    the escalation recipe: unjudged work bounces back to the agent, which
+    reshapes it into the allowed vocabulary or deliberately promotes it.
+    """
+    marker = ESCALATE_RE.match(command)
+    if marker is not None:
+        why = marker.group("why").strip()
+        if not why:
+            return KernelDecision(
+                "deny", "escalation requires a stated reason" + ESCALATE_HINT
+            )
+        inner = classify_shell(command[marker.end() :], rows)
+        if inner.effect == "allow":
+            return inner
+        return KernelDecision("ask", f"escalated ({why}): {inner.reason}")
+    decision = classify_shell(command, rows)
+    if decision.effect == "deny":
+        return KernelDecision("deny", decision.reason + ESCALATE_HINT)
+    return decision
 
 
 def url_matches_scope(
