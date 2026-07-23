@@ -1014,3 +1014,245 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
     )
     assert [outcome.verified for outcome in manifest.outcomes] == [True]
     assert resumed.repository.load().phase == ResolvePhase.ACCEPTANCE
+
+
+def failure_leg_workspace(tmp_path: Path, launcher: LocalProcessLauncher) -> Path:
+    workspace = tmp_path / "source"
+    workspace.mkdir()
+
+    def git(*arguments: str) -> None:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        if status.code != 0:
+            raise AssertionError(status.stderr)
+
+    git("init", "-b", "source")
+    git("config", "user.email", "resolver@example.test")
+    git("config", "user.name", "Resolver Test")
+    (workspace / "README.md").write_text("base\n", encoding="utf-8")
+    git("add", "README.md")
+    git("commit", "-m", "base")
+    return workspace
+
+
+def failure_leg_core(
+    tmp_path: Path,
+    workspace: Path,
+    launcher: LocalProcessLauncher,
+    run_id: str,
+    worker_response: Callable[[Path, str], JsonObject],
+    reviewer_response: Callable[[Path, str], JsonObject],
+    max_revision_rounds: int = 2,
+) -> ResolverCore:
+    return ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id=run_id,
+            integration_branch=f"resolve/{run_id}/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff", arguments=["git", "diff", "--check", "HEAD"]
+                )
+            ],
+            max_revision_rounds=max_revision_rounds,
+        ),
+        resolve_spec(),
+        lambda root: ResolverTestFactory(root, worker_response),
+        lambda root: ResolverTestFactory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        RecordingQuestionBroker(),
+        launcher,
+    )
+
+
+def snapshot(workspace: Path, launcher: LocalProcessLauncher) -> SourceSnapshot:
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    return SourceSnapshot(
+        branch=git("branch", "--show-current"), commit=git("rev-parse", "HEAD")
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_crash_persists_the_failure_and_raises_a_group(
+    tmp_path: Path,
+) -> None:
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(_root: Path, _output_name: str) -> JsonObject:
+        raise RuntimeError("worker exploded")
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("the reviewer must not run after a worker crash")
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "worker-crash",
+        worker_response,
+        reviewer_response,
+    )
+
+    with pytest.raises(ExceptionGroup) as raised:
+        await core.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    assert [str(error) for error in raised.value.exceptions] == ["worker exploded"]
+    persisted = core.repository.load()
+    progress = {item.concern_id: item for item in persisted.progress}
+    assert progress["a"].status == ConcernStatus.FAILED
+    assert progress["a"].reason == "worker exploded"
+    assert any("worker exploded" in failure for failure in persisted.failures)
+
+
+@pytest.mark.asyncio
+async def test_revision_exhaustion_soft_fails_and_blocks_dependents(
+    tmp_path: Path,
+) -> None:
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_calls: Counter[str] = Counter()
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "integration join reviewed"}
+        assert output_name == WorkerReport.__name__
+        identifier = root.name
+        worker_calls[identifier] += 1
+        relative = Path(f"{identifier}.txt")
+        (root / relative).write_text(
+            f"{identifier} round {worker_calls[identifier]}\n", encoding="utf-8"
+        )
+        return {
+            "concern_id": identifier,
+            "changed": True,
+            "summary": f"implemented {identifier}",
+            "files_changed": [relative.as_posix()],
+        }
+
+    def reviewer_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == FinalReview.__name__:
+            return {"accepted": True, "reason": "verified without the failed concern"}
+        assert output_name == ReviewReport.__name__
+        identifier = root.name
+        if identifier == "a":
+            return {
+                "concern_id": "a",
+                "accepted": False,
+                "generalized": False,
+                "reason": "never good enough",
+                "residual": ["still wrong"],
+            }
+        return {
+            "concern_id": identifier,
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": [f"{identifier}-done"],
+        }
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "revision-exhaustion",
+        worker_response,
+        reviewer_response,
+        max_revision_rounds=1,
+    )
+
+    manifest = await core.run(
+        ResolveInventory(
+            source=snapshot(workspace, launcher),
+            concerns=[concern("a"), concern("b"), concern("c", ["a"])],
+        )
+    )
+
+    outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
+    assert outcomes["a"].verified is False
+    assert outcomes["a"].failure == "revision limit exhausted"
+    assert outcomes["b"].verified is True
+    assert outcomes["c"].verified is False
+    assert outcomes["c"].failure == "a dependency did not produce a verified commit"
+    assert worker_calls == {"a": 2, "b": 1}
+    persisted = core.repository.load()
+    progress = {item.concern_id: item for item in persisted.progress}
+    assert progress["a"].status == ConcernStatus.FAILED
+    assert progress["c"].status == ConcernStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_unresolved_semantic_join_fails_the_dependent_concern(
+    tmp_path: Path,
+) -> None:
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {
+                "completed": False,
+                "summary": "conflicting intents in shared.txt",
+                "unresolved_paths": ["shared.txt"],
+            }
+        assert output_name == WorkerReport.__name__
+        identifier = root.name
+        (root / "shared.txt").write_text(f"{identifier} version\n", encoding="utf-8")
+        return {
+            "concern_id": identifier,
+            "changed": True,
+            "summary": f"implemented {identifier}",
+            "files_changed": ["shared.txt"],
+        }
+
+    def reviewer_response(root: Path, output_name: str) -> JsonObject:
+        assert output_name == ReviewReport.__name__
+        identifier = root.name
+        return {
+            "concern_id": identifier,
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": [f"{identifier}-done"],
+        }
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "join-conflict",
+        worker_response,
+        reviewer_response,
+    )
+
+    with pytest.raises(ExceptionGroup) as raised:
+        await core.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher),
+                concerns=[concern("a"), concern("b"), concern("c", ["a", "b"])],
+            )
+        )
+
+    assert len(raised.value.exceptions) == 1
+    joined_failure = raised.value.exceptions[0]
+    assert isinstance(joined_failure, ResolverInvariantError)
+    assert "semantic join failed for c" in str(joined_failure)
+    persisted = core.repository.load()
+    progress = {item.concern_id: item for item in persisted.progress}
+    assert progress["a"].status == ConcernStatus.VERIFIED
+    assert progress["b"].status == ConcernStatus.VERIFIED
+    assert progress["c"].status == ConcernStatus.FAILED
+    assert "semantic join failed for c" in (progress["c"].reason or "")
