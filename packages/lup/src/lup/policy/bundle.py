@@ -171,6 +171,7 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
         lines.append(f'        "effect": {json.dumps(row["effect"])},')
         for name, flags in (
             ("ask_flags", row["ask_flags"]),
+            ("allow_flags", row["allow_flags"]),
             ("value_flags", row["value_flags"]),
         ):
             if flags:

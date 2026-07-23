@@ -42,7 +42,10 @@ class ShellRuleRow(TypedDict):
     command-level row of a subcommand-gated command, ``ask_flags`` guard the
     global options before the subcommand and ``value_flags`` name globals that
     consume the following word (``git -C <path>``), so a flag value is never
-    read as the subcommand.
+    read as the subcommand. ``allow_flags`` name a pure read-only form of a
+    non-allow row (``ssh-add -l``): the row de-escalates to allow only when
+    every remaining word is exactly one of the named flags, so clusters,
+    ``=`` values, paths, and unresolved expansions never qualify.
     """
 
     command: str
@@ -50,6 +53,7 @@ class ShellRuleRow(TypedDict):
     operation: str
     effect: DecisionEffect
     ask_flags: list[str]
+    allow_flags: list[str]
     value_flags: list[str]
     reason: str
 
@@ -277,7 +281,15 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
 
     On a flag-guarded row an unresolved expansion could become the guarded
     flag at runtime, so opaque words deny toward an explicit literal binding.
+    A non-allow row with ``allow_flags`` de-escalates only when every
+    argument is exactly one of those flags — the command's declared pure
+    read-only form.
     """
+    if row["effect"] != "allow" and row["allow_flags"] and arguments:
+        if all(word in row["allow_flags"] for word in arguments):
+            return KernelDecision(
+                "allow", "every argument is a declared read-only flag"
+            )
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
             (word for word in arguments if opaque_argument(word)),
