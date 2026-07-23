@@ -156,16 +156,58 @@ class KernelDecision:
         self.reason = reason
 
 
-def command_words(words: list[str]) -> list[str]:
-    """Skip assignments and transparent wrappers to the effective command."""
-    for position, word in enumerate(words):
+def timeout_payload(segment: list[str], position: int) -> int:
+    """Skip timeout's own options and duration to its wrapped command."""
+    value_options = ("-k", "--kill-after", "-s", "--signal")
+    while position < len(segment) and segment[position].startswith("-"):
+        option = segment[position]
+        position += 2 if option in value_options else 1
+    return position + 1
+
+
+def nice_payload(segment: list[str], position: int) -> int:
+    """Skip nice's adjustment options to its wrapped command."""
+    while position < len(segment) and segment[position].startswith("-"):
+        option = segment[position]
+        position += 2 if option == "-n" else 1
+    return position
+
+
+def effective_command(segment: list[str]) -> tuple[list[str], bool]:
+    """Skip assignments and transparent wrappers, noting dangerous assignments.
+
+    Wrappers that take values (``timeout 5``, ``nice -n 10``) consume them, so
+    the returned words start at the command the shell finally executes. A bare
+    ``env`` with nothing to wrap is itself the command.
+    """
+    dangerous = False
+    position = 0
+    while position < len(segment):
+        word = segment[position]
         name, separator, _value = word.partition("=")
         if separator and name.isidentifier():
+            dangerous = dangerous or dangerous_env_name(name)
+            position += 1
             continue
-        if posixpath.basename(word) in PASS_THROUGH_WORDS:
+        executable = posixpath.basename(word)
+        if executable == "env" and position + 1 == len(segment):
+            return segment[position:], dangerous
+        if executable in PASS_THROUGH_WORDS:
+            position += 1
             continue
-        return words[position:]
-    return []
+        if executable == "timeout":
+            position = timeout_payload(segment, position + 1)
+            continue
+        if executable == "nice":
+            position = nice_payload(segment, position + 1)
+            continue
+        return segment[position:], dangerous
+    return [], dangerous
+
+
+def command_words(words: list[str]) -> list[str]:
+    """Skip assignments and transparent wrappers to the effective command."""
+    return effective_command(words)[0]
 
 
 def uv_run_words(words: list[str]) -> list[str]:
@@ -199,20 +241,6 @@ def dangerous_env_name(name: str) -> bool:
     )
 
 
-def has_dangerous_assignment(segment: list[str]) -> bool:
-    """Detect a security-sensitive variable set on the leading assignment prefix."""
-    for word in segment:
-        name, separator, _value = word.partition("=")
-        if separator and name.isidentifier():
-            if dangerous_env_name(name):
-                return True
-            continue
-        if posixpath.basename(word) in PASS_THROUGH_WORDS:
-            continue
-        return False
-    return False
-
-
 def flag_matches(word: str, flags: list[str]) -> bool:
     """Match a word against a rule's ask-flags, allowing clusters and ``=`` forms."""
     for flag in flags:
@@ -231,9 +259,30 @@ def flag_matches(word: str, flags: list[str]) -> bool:
     return False
 
 
+def opaque_argument(word: str) -> bool:
+    """A word whose runtime expansion could inject a guarded flag."""
+    if word.startswith("$"):
+        return True
+    return "}" in word and ("{-" in word or ",-" in word)
+
+
 def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision:
-    """Return a row's effect, downgrading an allow to ask on a guarded flag."""
+    """Return a row's effect, downgrading an allow to ask on a guarded flag.
+
+    On a flag-guarded row an unresolved expansion could become the guarded
+    flag at runtime, so opaque words deny toward an explicit literal binding.
+    """
     if row["effect"] == "allow" and row["ask_flags"]:
+        opaque = next(
+            (word for word in arguments if opaque_argument(word)),
+            None,
+        )
+        if opaque is not None:
+            return KernelDecision(
+                "deny",
+                f"argument {opaque!r} could expand into a guarded flag — bind"
+                " it to a literal value first",
+            )
         guarded = next(
             (word for word in arguments if flag_matches(word, row["ask_flags"])),
             None,
@@ -463,11 +512,11 @@ def decide_shell_segment(
         return KernelDecision("deny", "shell segment has no command")
     if segment[0] == "[[":
         return KernelDecision("allow", "test expression is read-only")
-    if has_dangerous_assignment(segment):
+    words, dangerous = effective_command(segment)
+    if dangerous:
         return KernelDecision(
             "ask", "a security-sensitive environment assignment requires approval"
         )
-    words = command_words(segment)
     if not words:
         return KernelDecision("deny", "shell segment has no command")
     executable = posixpath.basename(words[0])
@@ -872,6 +921,8 @@ def resolve_redirection(
         return None, target + 1
     if posixpath.normpath(tokens[target].text) == "/dev/null":
         return None, target + 1
+    if is_repository_tmp_script(tokens[target].text):
+        return None, target + 1
     return (
         KernelDecision("ask", "file redirection is never auto-allowed"),
         target + 1,
@@ -1043,12 +1094,88 @@ def argument_safe_words(words: list[str], rows: list[ShellRuleRow]) -> bool:
     )
 
 
+type ShellBinding = tuple[str, str | None]
+"""One frozen variable binding: name to literal value, or None when opaque."""
+
+
+def bind_name(
+    bindings: tuple[ShellBinding, ...], name: str, value: str | None
+) -> tuple[ShellBinding, ...]:
+    """Rebind one name immutably, shadowing any earlier binding of it."""
+    kept = tuple(pair for pair in bindings if pair[0] != name)
+    return (*kept, (name, value))
+
+
+def pure_assignment_names(segment: list[str]) -> list[tuple[str, str | None]] | None:
+    """The (name, literal value) pairs of an assignment-only segment."""
+    pairs: list[tuple[str, str | None]] = []
+    for word in segment:
+        name, separator, value = word.partition("=")
+        if not separator or not name.isidentifier():
+            return None
+        pairs.append((name, value if literal_loop_word(value) else None))
+    return pairs
+
+
+def read_bindings(
+    words: list[str], bindings: tuple[ShellBinding, ...]
+) -> tuple[ShellBinding, ...] | KernelDecision:
+    """Bindings extended by the read builtin's targets as opaque values."""
+    names: list[str] = []
+    for word in words[1:]:
+        if word == "-r":
+            continue
+        if word.startswith("-"):
+            return KernelDecision("deny", f"read option {word!r} is not classified")
+        if not word.isidentifier():
+            return KernelDecision("deny", "read target is not a plain variable")
+        names.append(word)
+    for name in names or ["REPLY"]:
+        if dangerous_env_name(name):
+            return KernelDecision(
+                "ask", "binding a security-sensitive variable requires approval"
+            )
+        bindings = bind_name(bindings, name, None)
+    return bindings
+
+
+def resolve_segment_bindings(
+    segment: list[str],
+    bindings: tuple[ShellBinding, ...],
+    rows: list[ShellRuleRow],
+    gate_opaque: bool,
+) -> list[str] | KernelDecision:
+    """Substitute literal bindings and gate opaque ones by argument safety.
+
+    A literal binding instantiates its references exactly, so guarded flags
+    are judged as the words they become. An opaque binding (``read``, a
+    non-literal assignment) can expand to any word, so a referencing segment
+    must name an argument-safe command.
+    """
+    resolved = segment
+    for name, value in bindings:
+        if not any(references_variable(word, name) for word in resolved):
+            continue
+        if value is not None:
+            resolved = [substitute_variable(word, name, value) for word in resolved]
+            continue
+        if not gate_opaque:
+            continue
+        words = command_words(resolved)
+        if not words or not argument_safe_words(words, rows):
+            return KernelDecision(
+                "deny", "an opaquely bound variable could become a guarded flag"
+            )
+    return resolved
+
+
 def decide_for_body(
     name: str,
     loop_words: list[str],
     body: list[list[str]],
     rows: list[ShellRuleRow],
     depth: int,
+    bindings: tuple[ShellBinding, ...] = (),
 ) -> list[KernelDecision]:
     """Classify a ``for`` body once per literal loop word, or gated when opaque.
 
@@ -1071,6 +1198,7 @@ def decide_for_body(
                 ],
                 rows,
                 depth + 1,
+                bindings,
             )
         ]
 
@@ -1091,9 +1219,17 @@ def decide_for_body(
 
 
 def decide_loop(
-    segments: list[list[str]], start: int, rows: list[ShellRuleRow], depth: int
+    segments: list[list[str]],
+    start: int,
+    rows: list[ShellRuleRow],
+    depth: int,
+    bindings: tuple[ShellBinding, ...] = (),
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
-    """Classify one loop construct, returning its decisions and the next index."""
+    """Classify one loop construct, returning its decisions and the next index.
+
+    A while/until condition and body classify as one sequential list, so a
+    ``read`` in the condition binds for the body without shared mutation.
+    """
     if depth >= 2:
         return KernelDecision("deny", "loops nest too deeply")
     end = find_loop_end(segments, start)
@@ -1113,19 +1249,21 @@ def decide_loop(
         case ["for", name, "in", *loop_words] if name.isidentifier():
             if condition:
                 return KernelDecision("deny", "loop construct does not parse")
-            return decide_for_body(name, loop_words, body, rows, depth), end + 1
+            return (
+                decide_for_body(name, loop_words, body, rows, depth, bindings),
+                end + 1,
+            )
         case ["for", *_rest]:
             return KernelDecision("deny", "loop form is not classified")
         case [_keyword, *condition_head]:
             conditions = [seg for seg in [condition_head, *condition] if seg]
             if not conditions:
                 return KernelDecision("deny", "loop condition is empty")
-            decisions = [
-                *decide_segment_list(conditions, rows, depth + 1),
-                *decide_segment_list(body, rows, depth + 1),
-            ]
+            decisions = decide_segment_list(
+                [*conditions, *body], rows, depth + 1, bindings
+            )
             return decisions, end + 1
-    return KernelDecision("ask", "loop construct does not parse")
+    return KernelDecision("deny", "loop construct does not parse")
 
 
 CASE_TERMINATORS = (";;", ";&", ";;&")
@@ -1155,7 +1293,11 @@ def find_conditional_end(segments: list[list[str]], start: int) -> int | None:
 
 
 def decide_conditional(
-    segments: list[list[str]], start: int, rows: list[ShellRuleRow], depth: int
+    segments: list[list[str]],
+    start: int,
+    rows: list[ShellRuleRow],
+    depth: int,
+    bindings: tuple[ShellBinding, ...] = (),
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one ``if`` construct: conditions and branches recursively."""
     if depth >= 2:
@@ -1170,11 +1312,15 @@ def decide_conditional(
             interior.append(stripped)
     if not interior:
         return KernelDecision("deny", "conditional is empty")
-    return decide_segment_list(interior, rows, depth + 1), end + 1
+    return decide_segment_list(interior, rows, depth + 1, bindings), end + 1
 
 
 def decide_case(
-    segments: list[list[str]], start: int, rows: list[ShellRuleRow], depth: int
+    segments: list[list[str]],
+    start: int,
+    rows: list[ShellRuleRow],
+    depth: int,
+    bindings: tuple[ShellBinding, ...] = (),
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one ``case`` construct: patterns are match data, bodies recurse."""
     if depth >= 2:
@@ -1211,13 +1357,22 @@ def decide_case(
         return KernelDecision("deny", "case construct does not parse")
     if not body:
         return [], end + 1
-    return decide_segment_list(body, rows, depth + 1), end + 1
+    return decide_segment_list(body, rows, depth + 1, bindings), end + 1
 
 
 def decide_segment_list(
-    segments: list[list[str]], rows: list[ShellRuleRow], depth: int = 0
+    segments: list[list[str]],
+    rows: list[ShellRuleRow],
+    depth: int = 0,
+    bindings: tuple[ShellBinding, ...] = (),
 ) -> list[KernelDecision]:
-    """Classify a segment list, grouping structured constructs recursively."""
+    """Classify a segment list, grouping structured constructs recursively.
+
+    Bindings are frozen pairs: an assignment or read rebinds by producing a
+    new tuple for the segments that follow, recursion receives the current
+    value, and nothing mutates across scopes. A reference the walk cannot
+    resolve to a literal stays a live ``$`` word for the guarded-flag gates.
+    """
     segments = list(segments)
     decisions: list[KernelDecision] = []
     index = 0
@@ -1238,19 +1393,52 @@ def decide_segment_list(
         if not segment:
             index += 1
             continue
+        structural = segment[0] in ("for", "while", "until", "if", "case")
+        resolved = resolve_segment_bindings(
+            segment, bindings, rows, gate_opaque=not structural
+        )
+        if isinstance(resolved, KernelDecision):
+            return [*decisions, resolved]
+        segment = resolved
         segments[index] = segment
-        outcome: tuple[list[KernelDecision], int] | KernelDecision | None = None
-        if segment[0] in ("for", "while", "until"):
-            outcome = decide_loop(segments, index, rows, depth)
-        elif segment[0] == "if":
-            outcome = decide_conditional(segments, index, rows, depth)
-        elif segment[0] == "case":
-            outcome = decide_case(segments, index, rows, depth)
-        if outcome is not None:
+        if structural:
+            match segment[0]:
+                case "for" | "while" | "until":
+                    outcome = decide_loop(segments, index, rows, depth, bindings)
+                case "if":
+                    outcome = decide_conditional(
+                        segments, index, rows, depth, bindings
+                    )
+                case _:
+                    outcome = decide_case(segments, index, rows, depth, bindings)
             if isinstance(outcome, KernelDecision):
                 return [*decisions, outcome]
             grouped, index = outcome
             decisions.extend(grouped)
+            continue
+        assignments = pure_assignment_names(segment)
+        if assignments is not None:
+            if any(dangerous_env_name(name) for name, _value in assignments):
+                decisions.append(
+                    KernelDecision(
+                        "ask",
+                        "a security-sensitive environment assignment requires"
+                        " approval",
+                    )
+                )
+                index += 1
+                continue
+            for name, value in assignments:
+                bindings = bind_name(bindings, name, value)
+            index += 1
+            continue
+        words, _dangerous = effective_command(segment)
+        if words and posixpath.basename(words[0]) == "read":
+            extended = read_bindings(words, bindings)
+            if isinstance(extended, KernelDecision):
+                return [*decisions, extended]
+            bindings = extended
+            index += 1
             continue
         decisions.append(decide_shell_segment(segment, rows))
         index += 1

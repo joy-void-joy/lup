@@ -132,6 +132,7 @@ READ_ONLY_COMMANDS = (
     "hostname",
     "uname",
     "printenv",
+    "env",
     "ps",
     "free",
     "uptime",
