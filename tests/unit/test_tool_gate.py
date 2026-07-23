@@ -1,4 +1,4 @@
-"""Behavior tests for create_tool_gate and its four presets.
+"""Behavior tests for create_tool_gate, its four presets, and the completion guard.
 
 The gate pattern: deny tool B (or Stop) with an agent-readable message
 until condition A holds. Each preset must deny while locked and let the
@@ -14,6 +14,7 @@ from lup.hooks import (
     LupHookInput,
     LupHookOutput,
     LupHooksConfig,
+    create_completion_guard,
     create_tool_gate,
 )
 from lup.realtime.scheduler import (
@@ -346,6 +347,46 @@ async def test_meta_before_sleep_guard_preset() -> None:
     scheduler.on_agent_action()
     denied_again = await run_hook(config, "PreToolUse", pre_tool_use("mcp__s__sleep"))
     assert permission_decision(denied_again) == "deny"
+
+
+# ---------------------------------------------------------------------------
+# Completion guard
+# ---------------------------------------------------------------------------
+
+
+async def test_completion_guard_blocks_until_output_exists() -> None:
+    submitted = {"done": False}
+    config = create_completion_guard(lambda: submitted["done"])
+
+    blocked = await run_hook(config, "Stop", stop_input(False))
+    assert blocked.decision == "block"
+    assert "mcp__notes__submit_output" in blocked.reason
+
+    submitted["done"] = True
+    passed = await run_hook(config, "Stop", stop_input(False))
+    assert passed == LupHookOutput()
+
+
+async def test_completion_guard_gives_up_after_max_blocks() -> None:
+    config = create_completion_guard(lambda: False, max_blocks=2)
+
+    first = await run_hook(config, "Stop", stop_input(False))
+    assert first.decision == "block"
+    assert "attempt 1/2" in first.reason
+    second = await run_hook(config, "Stop", stop_input(False))
+    assert second.decision == "block"
+    assert "attempt 2/2" in second.reason
+
+    # A confused agent must not loop forever: the guard releases the stop
+    # and the orchestration layer surfaces the missing output instead.
+    released = await run_hook(config, "Stop", stop_input(False))
+    assert released == LupHookOutput()
+
+
+async def test_completion_guard_passes_through_non_stop_events() -> None:
+    config = create_completion_guard(lambda: False)
+    out = await run_hook(config, "Stop", pre_tool_use("Anything"))
+    assert out == LupHookOutput()
 
 
 # ---------------------------------------------------------------------------

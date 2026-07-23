@@ -1,9 +1,11 @@
-# lup: ignore
+# lup: ignore[import-re, re-call, empty-collection]
 """Inline marker scanning for the repo's two marker families.
 
 - Review notes (`# lup:` / `// lup:`): actionable feedback left in the code;
   the `ignore` keyword — inline or standalone file-level — is the
-  anti-pattern escape hatch, never a note and never a reason to hide one. The
+  anti-pattern escape hatch, never a note and never a reason to hide one. A
+  `defer[<wake condition>]:` head marks the note as parked work rather than
+  open feedback; the scanner classifies it and parses the condition out. The
   `lup-devtools dev comments` scanner uses this to list unresolved feedback;
   the edit-permission hook mirrors `MARKER_RE` to prompt whenever an edit
   adds or removes a marker.
@@ -35,12 +37,24 @@ documentation examples are not flagged.
 import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from lup.codescan.common import IGNORE_RE, LineCursor, PythonContext
+from lup.policy.kernel import marker_count as kernel_marker_count
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
+# A deferral note parks work until a stated wake condition is met:
+# `# lup: defer[<wake condition>]: <text>`. The bracket syntax deliberately
+# mirrors the typed `# lup: ignore[rule-id]` escape hatch — which means a
+# condition may itself contain brackets (`defer[when ignore[dict-get] sites
+# migrate]: ...`), so the head ends at the first `]` that is followed by a
+# colon, and the colon is required. A head that never closes with `]:` is
+# malformed and the note stays an ordinary (red, visible) review note. The
+# head is matched against a note's text (the part after the marker), so the
+# `ignore` keyword — which never reaches note classification — is untouched.
+DEFER_HEAD_RE = re.compile(r"^defer\s*\[(?P<condition>.+?)\]\s*:\s*", re.IGNORECASE)
 # Customization todos are shouty and case-sensitive (like TODO:/FIXME:), so
 # prose about "the template" never matches. The comment prefix is optional
 # because a docstring todo carries no `#`; group 1 still captures the
@@ -87,19 +101,49 @@ def scan_mode_for(path: Path) -> str:
             return ScanMode.TEXT
 
 
+# The closed vocabulary of review-note flavors: an ordinary actionable note,
+# or deferred work parked behind an explicit wake condition.
+type NoteKind = Literal["note", "defer"]
+
+
 class MarkerComment(BaseModel):
-    """One actionable note: the source span plus a window worth reading."""
+    """One actionable note: the source span plus a window worth reading.
+
+    ``kind`` classifies the note; a ``defer`` note carries its wake
+    ``condition`` parsed out of the `defer[...]` head, and ``text`` holds only
+    the message that follows it. An ordinary note has no condition.
+    """
 
     start_line: int
     end_line: int
     read_start: int
     read_end: int
     text: str
+    kind: NoteKind = "note"
+    condition: str | None = None
+
+    @model_validator(mode="after")
+    def coherent_kind(self) -> Self:
+        match (self.kind, self.condition):
+            case ("defer", None) | ("defer", ""):
+                raise ValueError("a defer note requires a wake condition")
+            case ("note", str()):
+                raise ValueError("an ordinary note carries no wake condition")
+            case _:
+                return self
+
+    def marker_text(self) -> str:
+        """The note body as written after its marker, defer head included."""
+        match self.kind:
+            case "defer":
+                return f"defer[{self.condition}]: {self.text}"
+            case "note":
+                return self.text
 
 
 def marker_count(text: str) -> int:
     """Count markers (feedback or ignore) — drives the hook's add/remove check."""
-    return len(MARKER_RE.findall(text))
+    return kernel_marker_count(text)
 
 
 def inside_inline_code(line: str, pos: int) -> bool:
@@ -220,6 +264,31 @@ def find_markers(
     return MarkerScan(text, mode, marker=marker, ignore=ignore).notes()
 
 
+def classify_deferral(note: MarkerComment) -> MarkerComment:
+    """Split a `defer[<wake condition>]:` head off one review note, if present.
+
+    A matching note comes back with kind ``defer``, its wake condition parsed
+    out, and ``text`` reduced to the message after the head. Any other note —
+    including prose that merely starts with the word "defer", a head whose
+    condition is empty, or a head that never closes with `]:` — is returned
+    unchanged as an ordinary ``note``, so a malformed deferral degrades to
+    visible open feedback instead of a silently mangled condition.
+    """
+    head = DEFER_HEAD_RE.match(note.text)
+    if head is None:
+        return note
+    condition = head.group("condition").strip()
+    if not condition:
+        return note
+    return note.model_copy(
+        update={
+            "kind": "defer",
+            "condition": condition,
+            "text": note.text[head.end() :],
+        }
+    )
+
+
 def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     """Extract `# lup:` review notes from a file's text.
 
@@ -227,6 +296,9 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     are skipped — they are the anti-pattern escape hatch, not feedback. That
     covers the standalone file-level `# lup: ignore` too: it disables
     anti-pattern checks (see `lup.codescan.antipatterns`), never note gathering,
-    so feedback in an opted-out file still surfaces.
+    so feedback in an opted-out file still surfaces. Each surviving note is
+    then classified through :func:`classify_deferral`, so deferred work carries
+    its wake condition as data.
     """
-    return find_markers(text, mode, marker=MARKER_RE, ignore=IGNORE_RE)
+    notes = find_markers(text, mode, marker=MARKER_RE, ignore=IGNORE_RE)
+    return [classify_deferral(note) for note in notes]

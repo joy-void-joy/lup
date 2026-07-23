@@ -15,7 +15,7 @@ Core tools:
 - ``reply`` delivers actions to the environment
 - Timing tools (debounce, remind, schedule) are non-blocking
 
-Background agents (``BackgroundAgentParams`` + each engine's ``Engine.background``):
+Background agents (:class:`lup.runtime.background.BackgroundAgent`):
 - Run companion agents alongside the main session
 - Observer example at the bottom shows conversation summarization
 - Any use case: research, execution, monitoring — not just observation
@@ -30,9 +30,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from lup.adapters.background.agent import BackgroundAgent
-from lup.adapters.background.params import BackgroundAgentParams
-from lup.adapters.wiring import resolve_engine
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime.models import (
     ContextInput,
@@ -51,6 +48,9 @@ from lup.realtime.models import (
     SleepOutput,
 )
 from lup.realtime.scheduler import Scheduler
+from lup.runtime.background import BackgroundAgent
+from lup.runtime.errors import TurnError
+from lup.runtime.models import TurnInput, TurnResult, turn_request
 from lup.telemetry.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
@@ -116,6 +116,18 @@ class ObserverNotesOutput(BaseModel):
     """Output for the observer notes tool."""
 
     count: int
+
+
+class ObserverState(BaseModel):
+    """Immutable transcript delta supplied by the environment on wake."""
+
+    messages: list[str]
+
+
+class ObserverSummary(BaseModel):
+    """Typed replacement summary produced by the background turn."""
+
+    content: str
 
 
 # =====================================================================
@@ -396,53 +408,44 @@ def create_observer_tools(
 def create_observer(
     *,
     notes: list[str],
-    transcript: list[object],
     model: str = "claude-opus-4-6",
-) -> BackgroundAgent:
+) -> BackgroundAgent[ObserverState, ObserverSummary]:
     """Create an observer background agent.
 
     TEMPLATE: customize the observer's prompt, model, and build_message.
 
-    The observer reads new transcript entries on each wake, formats
-    them, and produces a summary note. The main agent includes
-    ``notes[-1]`` in its context tool output.
+    The environment supplies an :class:`ObserverState` on each wake. The
+    background turn returns a typed replacement summary; no provider-specific
+    client or tool driver is reconstructed here.
 
     Args:
         notes: Shared list for observer summaries.
-        transcript: Shared transcript the observer reads from.
-            Items should have ``role`` and ``content`` attributes.
         model: Model to use for the observer.
 
     Returns:
         A configured background agent (call ``.start()`` to begin).
     """
-    read_index = [0]  # Mutable container for closure
+    from lup_template.agent.core import build_auxiliary_factory
 
-    def build_message() -> str | None:
-        start = read_index[0]
-        end = len(transcript)
-        if end <= start:
-            return None
-        read_index[0] = end
-        msgs = transcript[start:end]
-
-        msgs_text = "\n".join(
-            f"[{getattr(m, 'role', 'unknown')}] {getattr(m, 'content', str(m))}"
-            for m in msgs
-        )
+    def state_to_request(state: ObserverState):
+        msgs_text = "\n".join(state.messages)
         last_note = notes[-1] if notes else "(none yet)"
-        return f"New messages:\n{msgs_text}\n\nYour last note:\n{last_note}"
-
-    from lup_template.agent.config import settings
-
-    return resolve_engine(settings.agent_sdk).background(
-        BackgroundAgentParams(
-            name="observer",
-            system_prompt=OBSERVER_SYSTEM_PROMPT,
-            tools=create_observer_tools(notes=notes),
-            build_message=build_message,
-            start_message="[Observer started — maintain notes about the conversation]",
-            model=model,
-            allowed_tools=["mcp__observer__notes"],
+        return turn_request(
+            TurnInput(
+                text=f"New messages:\n{msgs_text}\n\nYour last note:\n{last_note}"
+            ),
+            ObserverSummary,
         )
+
+    async def record(result: TurnResult[ObserverSummary]) -> None:
+        notes.append(result.output.content)
+
+    async def report(error: TurnError) -> None:
+        logger.error("Observer turn failed: %s", error.failure.message)
+
+    return BackgroundAgent(
+        build_auxiliary_factory(model=model, system_prompt=OBSERVER_SYSTEM_PROMPT),
+        state_to_request,
+        record,
+        report,
     )

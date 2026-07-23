@@ -1,6 +1,6 @@
 ---
+description: "Audit SDK agent tools and subagents \u2014 find gaps, overlaps, and refactoring opportunities"
 allowed-tools: Read, Grep, Glob, Bash(ls:*, uv run lup-devtools:*), Agent, WebSearch, AskUserQuestion
-description: Audit SDK agent tools and subagents — find gaps, overlaps, and refactoring opportunities
 ---
 
 # Tool Review: Tools, Servers & Pipeline
@@ -123,7 +123,7 @@ Present findings as:
 - [Tools that overlap or could be merged]
 
 ### Ideas
-- [Concrete suggestions for improvement, with rough effort estimates]
+- [Concrete suggestions for improvement, scoped by what each touches — never by time estimates]
 ```
 
 ## Rules

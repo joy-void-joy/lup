@@ -1,7 +1,7 @@
 ---
+description: "Propagate a general principle across the entire repo"
 allowed-tools: Bash(uv run lup-devtools:*), Read, Write, Edit, Glob, Grep, AskUserQuestion, Agent
-description: Propagate a general principle across the entire repo
-argument-hint: <principle description>
+argument-hint: "<principle description>"
 ---
 
 # Propagate Principle
@@ -46,8 +46,8 @@ Read every relevant file and categorize findings into three buckets:
    - Check every section: does it align with or contradict the principle?
    - Look for existing principles that overlap or conflict
 
-2. **TEMPLATE_CLAUDE.md** (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`)
-   - Same checks — this is what new projects inherit
+2. **Template guidance** (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`, `.codex/plugins/lup/TEMPLATE_AGENTS.md`)
+   - Same checks — this is what new projects inherit; the two flavors share their portable sections
 
 ### Layer B: Commands & Workflows
 
@@ -55,11 +55,13 @@ Read every relevant file and categorize findings into three buckets:
    - Read each command's instructions, guidelines, and anti-patterns
    - Check if commands encode workflows that violate the principle
 
-### Layer C: Hook Scripts & Enforcement
+### Layer C: Semantic Policy & Enforcement
 
-4. **Hook scripts** (`.claude/plugins/lup/hooks/scripts/*.py`)
-   - Check if any hook logic contradicts the principle
-   - Consider if a new hook could enforce the principle mechanically
+4. **Canonical policy** (`packages/lup/src/lup/policy/` plus the `HookSet` in
+   `src/lup_template/devtools/harness/catalog.py`; everything under
+   `.claude/plugins/lup/hooks/` is generated from these — never edit it directly)
+   - Check if any policy rule contradicts the principle
+   - Consider if a new policy rule could enforce the principle mechanically
 
 ### Layer D: Code Template
 
@@ -95,11 +97,11 @@ Present findings and proposed changes one layer at a time. For each layer:
 
 ### Layer order:
 
-**Group 1: CLAUDE.md + TEMPLATE_CLAUDE.md**
+**Group 1: CLAUDE.md + template guidance**
 
 - CLAUDE.md is the source of truth. Changes here set the direction for everything else.
 - Consider: new section, additions to existing sections, anti-pattern entries, removal of contradictions.
-- Mirror relevant changes into TEMPLATE_CLAUDE.md so new projects inherit the principle.
+- Mirror relevant changes into the template flavors (TEMPLATE_CLAUDE.md, TEMPLATE_AGENTS.md); their portable sections share one canonical source, so a portable change lands in both.
 - Keep template sections general — domain-specific details belong in CLAUDE.md only.
 
 **Group 2: Command files**

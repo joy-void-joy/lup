@@ -8,14 +8,9 @@ Each subagent has:
 - A subset of tools (only what it needs)
 - Its own model (cheaper models for simpler tasks)
 
-Definitions use SubagentSpec (SDK-agnostic). Each backend interprets
-the same spec list:
-
-- Claude: converted to native ``AgentDefinition`` via
-  :func:`~lup.adapters.clients.claude.translate.spec_to_claude`
-- Codex/OpenAI: served as the ``run_subagent`` tool via
-  :func:`~lup.subagents.create_run_subagent_tool`, which dispatches a
-  one-shot query to the backend serving the spec's model
+Definitions use ``SubagentSpec`` as portable data. The application injects a
+typed factory recipe into :func:`lup.subagents.create_run_subagent_tool`; the
+tool then performs a one-shot query without selecting a provider itself.
 
 A spec without a ``model`` inherits the session's main model on every
 backend; pinning one (as the specs below do) is a deliberate cost/skill
@@ -24,11 +19,10 @@ choice that holds regardless of ``AGENT_SDK``.
 Subagents are one of several agent shapes — ``.claude/PATTERNS.md`` is
 the full catalog. Where the siblings live:
 
-- Nested agents: a one-shot :func:`lup.adapters.wiring.query` inside a
+- Nested agents: a one-shot :func:`lup.runtime.query.query` inside a
   tool handler; the reviewer in ``agent/tools/reflect.py`` is the
   exemplar
-- Background agents: ``lup.adapters.background``
-  (``BackgroundAgentParams`` + each engine's ``Engine.background``), with
+- Background agents: :class:`lup.runtime.background.BackgroundAgent`, with
   the observer example in ``agent/tools/realtime.py``
 - Persistent agents: ``lup.realtime.scheduler`` and ``lup.realtime.relay``,
   with example tools in ``agent/tools/realtime.py``
@@ -36,7 +30,6 @@ the full catalog. Where the siblings live:
   null-filling, extraction)
 """
 
-from lup.adapters.tools.names import GLOB, READ, WEB_FETCH, WEB_SEARCH
 from lup.types import SubagentSpec
 
 # =============================================================================
@@ -53,18 +46,18 @@ def research_tools() -> list[str]:
     per session, call it from :func:`get_subagent_specs` instead.
     """
     return [
-        WEB_SEARCH,
-        WEB_FETCH,
-        READ,
-        GLOB,
+        "WebSearch",
+        "WebFetch",
+        "Read",
+        "Glob",
     ]
 
 
 def analysis_tools() -> list[str]:
     """Names of the tools an analysis subagent is allowed to call."""
     return [
-        READ,
-        GLOB,
+        "Read",
+        "Glob",
     ]
 
 

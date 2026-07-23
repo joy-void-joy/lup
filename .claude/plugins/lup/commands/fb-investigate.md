@@ -1,7 +1,7 @@
 ---
+description: "Deep trace reading and error classification for selected sessions"
 allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, Task, AskUserQuestion
-description: Deep trace reading and error classification for selected sessions
-argument-hint: <session_id1> [session_id2 ...]
+argument-hint: "<session_id1> [session_id2 ...]"
 ---
 
 # Investigate: Trace Deep-Dive

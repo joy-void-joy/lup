@@ -3,12 +3,14 @@
 """Round-trip test of the serve-tools subprocess with session-context env.
 
 This is the wiring the Codex/OpenAI adapters depend on: tools are
-constructed in a separate process from relayed env vars, the reflection
-gate crosses the process boundary through a flag file, and the output
-and metrics artifacts land in the session directory where the parent
-process reads them. No LLM involved.
+constructed in a separate process from relayed env vars, the reflection gate
+crosses the process boundary through a flag file, and review plus metrics
+artifacts land in the session directory where the parent process reads them.
+Typed output is bound per turn by the runtime, not served by this process. No
+LLM is involved.
 """
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -25,8 +27,12 @@ from lup.workspace.context import (
     SESSION_ID_ENV,
 )
 from lup.realtime.relay import MetaEvent, RealtimeMailbox, ReplyEvent
+from lup.runtime.contracts import SessionFactory
 from lup.sandbox.container import Sandbox
+from lup.subagents import create_run_subagent_tool
+from lup.types import SubagentSpec
 
+from lup_template.agent.subagents import get_subagent_specs
 from lup_template.agent.toolsets import (
     EXAMPLE_GROUP,
     build_session_toolset,
@@ -34,6 +40,12 @@ from lup_template.agent.toolsets import (
 )
 
 pytestmark = pytest.mark.integration
+SUBPROCESS_TIMEOUT_SECONDS = 20
+
+
+def unused_subagent_factory(_spec: SubagentSpec) -> SessionFactory:
+    """Keep delegation construction real without executing a model session."""
+    raise AssertionError("the registry-name test must not invoke a subagent")
 
 
 async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
@@ -48,45 +60,44 @@ async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
             SESSION_DIR_ENV: str(session_dir),
             GATE_FLAG_ENV: str(gate_flag),
             OUTPUTS_DIR_ENV: str(tmp_path / "outputs"),
+            "AGENT_SANDBOX_ENABLED": "false",
         },
     )
 
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
-            await session.initialize()
+            await asyncio.wait_for(
+                session.initialize(), timeout=SUBPROCESS_TIMEOUT_SECONDS
+            )
 
-            listed = await session.list_tools()
+            listed = await asyncio.wait_for(
+                session.list_tools(), timeout=SUBPROCESS_TIMEOUT_SECONDS
+            )
             names = {tool.name for tool in listed.tools}
-            assert {"review", "submit_output"} <= names
+            assert names == {"review", "run_subagent"}
             # The example placeholder ships fabricated data and is served to no
             # live agent by default — matching the Claude path. It is reachable
             # only via an explicit --server example.
             assert "search_example" not in names
             assert "fetch_example" not in names
 
-            premature = await session.call_tool("submit_output", {"summary": "early"})
-            assert premature.isError is True
-            assert not (session_dir / "output.json").exists()
-
-            reviewed = await session.call_tool(
-                "review",
-                {
-                    "assessment": "wiring test",
-                    "confidence": 0.9,
-                    "tool_audit": "none used",
-                    "process_reflection": "n/a",
-                    "skip_reviewer": True,
-                },
+            reviewed = await asyncio.wait_for(
+                session.call_tool(
+                    "review",
+                    {
+                        "assessment": "wiring test",
+                        "confidence": 0.9,
+                        "tool_audit": "none used",
+                        "process_reflection": "n/a",
+                        "skip_reviewer": True,
+                    },
+                ),
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
             assert reviewed.isError is False
             assert gate_flag.exists()
 
-            accepted = await session.call_tool(
-                "submit_output", {"summary": "done", "confidence": 0.8}
-            )
-            assert accepted.isError is False
-
-    assert (session_dir / "output.json").exists()
+    assert (session_dir / "review.json").exists()
     assert (session_dir / "metrics.json").exists()
 
 
@@ -119,11 +130,13 @@ def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
     groups = build_session_toolset(
         session_dir=session_dir,
         outputs_dir=tmp_path / "outputs",
-        include_subagent_tool=True,
         sandbox=Sandbox(
             session_id="registry-match", shared_dir=session_dir / "sandbox_shared"
         ),
         realtime_dir=realtime_dir,
+        subagent_tool=create_run_subagent_tool(
+            get_subagent_specs(), factory_recipe=unused_subagent_factory
+        ),
     )["groups"]
 
     for group in (*tool_group_names(realtime=True), EXAMPLE_GROUP):
@@ -158,14 +171,19 @@ async def test_serve_tools_realtime_session_group(tmp_path: Path) -> None:
             GATE_FLAG_ENV: str(tmp_path / "gate_flag"),
             OUTPUTS_DIR_ENV: str(tmp_path / "outputs"),
             REALTIME_DIR_ENV: str(realtime_dir),
+            "AGENT_SANDBOX_ENABLED": "false",
         },
     )
 
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
-            await session.initialize()
+            await asyncio.wait_for(
+                session.initialize(), timeout=SUBPROCESS_TIMEOUT_SECONDS
+            )
 
-            listed = await session.list_tools()
+            listed = await asyncio.wait_for(
+                session.list_tools(), timeout=SUBPROCESS_TIMEOUT_SECONDS
+            )
             names = {tool.name for tool in listed.tools}
             assert {
                 "reply",
@@ -177,16 +195,29 @@ async def test_serve_tools_realtime_session_group(tmp_path: Path) -> None:
                 "meta",
             } == names
 
-            premature = await session.call_tool("sleep", {"seconds": 60})
+            premature = await asyncio.wait_for(
+                session.call_tool("sleep", {"seconds": 60}),
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
+            )
             assert premature.isError is True
 
-            replied = await session.call_tool(
-                "reply", {"messages": [{"message": "hello from the subprocess"}]}
+            replied = await asyncio.wait_for(
+                session.call_tool(
+                    "reply",
+                    {"messages": [{"message": "hello from the subprocess"}]},
+                ),
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
             assert replied.isError is False
 
-            await session.call_tool("meta", {"thought": "relay wiring test"})
-            recorded = await session.call_tool("sleep", {"seconds": 60})
+            await asyncio.wait_for(
+                session.call_tool("meta", {"thought": "relay wiring test"}),
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
+            )
+            recorded = await asyncio.wait_for(
+                session.call_tool("sleep", {"seconds": 60}),
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
+            )
             assert recorded.isError is False
 
     mailbox = RealtimeMailbox(realtime_dir)

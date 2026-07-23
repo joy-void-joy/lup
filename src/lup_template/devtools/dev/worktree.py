@@ -18,11 +18,12 @@ from lup_template.devtools.utils import (
 
 
 # Gitignored paths that `git worktree add` does not carry over but a working
-# worktree still needs (local secrets/settings, logs, downstream `refs/`
+# worktree still needs (local secrets/settings, logs, sync `refs/`
 # symlinks); `create` copies them into the new worktree unless --no-copy-data.
 GITIGNORED_EXTRAS = [
     ".env.local",
-    "downstream.json.local",
+    "sync.json.local",
+    "downstream.json.local",  # legacy sync.json.local name, still read via fallback
     ".claude/settings.local.json",
     "logs",
     "refs",

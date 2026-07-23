@@ -1,7 +1,7 @@
 ---
+description: "Import a specific pattern from a tracked downstream repo"
 allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, Skill(lup:commit)
-description: Import a specific pattern from a tracked downstream repo
-argument-hint: <project> <pattern description>
+argument-hint: "<project> <pattern description>"
 ---
 
 # Import Pattern from Downstream
@@ -14,7 +14,7 @@ Import a specific pattern, feature, or approach from a tracked downstream reposi
 
 ### Parse Arguments
 
-The first word is the **project name** (must match a tracked project in `downstream.json`). Everything after is the **pattern description** — a natural language description of what to import.
+The first word is the **project name** (must match a tracked project in `sync.json` or `sync.json.local`). Everything after is the **pattern description** — a natural language description of what to import.
 
 **Examples:**
 

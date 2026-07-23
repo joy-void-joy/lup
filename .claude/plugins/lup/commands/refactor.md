@@ -1,7 +1,7 @@
 ---
+description: "Rewrite a file or folder from scratch while respecting coding conventions"
 allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Write, Edit, Glob, Grep, AskUserQuestion
-description: Rewrite a file or folder from scratch while respecting coding conventions
-argument-hint: <path>
+argument-hint: "<path>"
 ---
 
 # Refactor from Scratch

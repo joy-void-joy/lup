@@ -1,0 +1,113 @@
+"""Claude-specific profile and compatible-endpoint transforms."""
+
+from pathlib import Path
+from typing import Literal
+
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
+
+from lup.adapters.claude.runtime import ClaudeSessionConfig
+from lup.runtime.config import ConfigTransform, ProfileResolver
+
+CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
+PLACEHOLDER_CREDENTIAL = "dummy"
+
+
+class ClaudeProfileSelection(BaseModel):
+    """One complete Claude account/configuration home."""
+
+    model_config = ConfigDict(frozen=True)
+
+    config_directory: Path
+
+
+class ClaudeProfileRegistry(BaseModel):
+    """Immutable account selection state supplied by an application."""
+
+    model_config = ConfigDict(frozen=True)
+
+    profiles: dict[str, ClaudeProfileSelection] = Field(default_factory=dict)
+    active: str | None = None
+    default: ClaudeProfileSelection = Field(
+        default_factory=lambda: ClaudeProfileSelection(
+            config_directory=Path.home() / ".claude"
+        )
+    )
+
+
+class ClaudeConfigDirectoryTransform(ConfigTransform[ClaudeSessionConfig]):
+    """Select a Claude config home without mutating the source config."""
+
+    def __init__(self, selection: ClaudeProfileSelection) -> None:
+        self.selection = selection
+
+    def apply(self, config: ClaudeSessionConfig) -> ClaudeSessionConfig:
+        environment = dict(config.environment)
+        environment[CLAUDE_CONFIG_DIR] = str(self.selection.config_directory)
+        return config.model_copy(update={"environment": environment})
+
+
+class ClaudeProfileResolver(ProfileResolver[ClaudeSessionConfig]):
+    """Resolve explicit, active, then default Claude account selection."""
+
+    def __init__(self, registry: ClaudeProfileRegistry) -> None:
+        self.registry = registry
+
+    def resolve(self, name: str | None) -> ConfigTransform[ClaudeSessionConfig]:
+        selected = name or self.registry.active
+        if selected is None:
+            return ClaudeConfigDirectoryTransform(self.registry.default)
+        try:
+            profile = self.registry.profiles[selected]
+        except KeyError as error:
+            raise KeyError(f"unknown Claude profile {selected!r}") from error
+        return ClaudeConfigDirectoryTransform(profile)
+
+
+class ClaudeCompatibleEndpoint(BaseModel):
+    """All configuration owned by an Anthropic-compatible endpoint."""
+
+    model_config = ConfigDict(frozen=True)
+
+    base_url: AnyHttpUrl
+    api_key: SecretStr | None = None
+    auth_style: Literal["auth_token", "api_key"] = "auth_token"
+    map_model_aliases: bool = True
+
+
+class ClaudeCompatibilityTransform(ConfigTransform[ClaudeSessionConfig]):
+    """Point Claude scaffolding at one compatible endpoint."""
+
+    def __init__(self, endpoint: ClaudeCompatibleEndpoint) -> None:
+        self.endpoint = endpoint
+
+    def apply(self, config: ClaudeSessionConfig) -> ClaudeSessionConfig:
+        environment = dict(config.environment)
+        environment["ANTHROPIC_BASE_URL"] = str(self.endpoint.base_url)
+        credential = (
+            self.endpoint.api_key.get_secret_value()
+            if self.endpoint.api_key is not None
+            else PLACEHOLDER_CREDENTIAL
+        )
+        if self.endpoint.auth_style == "auth_token":
+            environment["ANTHROPIC_AUTH_TOKEN"] = credential
+            environment["ANTHROPIC_API_KEY"] = ""
+        else:
+            environment["ANTHROPIC_API_KEY"] = credential
+            environment["ANTHROPIC_AUTH_TOKEN"] = ""
+        if self.endpoint.map_model_aliases:
+            environment.update(
+                {
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL": config.model,
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL": config.model,
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": config.model,
+                }
+            )
+        environment.update(
+            {
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                "DISABLE_TELEMETRY": "1",
+                "DISABLE_ERROR_REPORTING": "1",
+                "DISABLE_BUG_COMMAND": "1",
+            }
+        )
+        return config.model_copy(update={"environment": environment})

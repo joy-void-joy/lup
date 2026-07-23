@@ -1,6 +1,6 @@
 [project]
 name = "lup-template"
-version = "0.1.0"
+version = "0.2.0"
 description = "Self-improving agent template with feedback loop, built with the Claude Agent SDK"
 readme = "README.md"
 license = "MIT"
@@ -25,6 +25,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "fastapi>=0.139.0",
     "lup[claude,codex,docker]",
     "prompt-toolkit>=3.0.52",
     "pydantic-settings>=2.12.0",
@@ -32,6 +33,7 @@ dependencies = [
     "tomlkit>=0.15.0",
     "typer>=0.21.1",
     "tzlocal>=5.4.3",
+    "uvicorn[standard]>=0.49.0",
 ]
 
 [project.scripts]
@@ -48,14 +50,21 @@ dev = [
     "pyright>=1.1.408",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.1.0",
+    "pyyaml>=6.0.3",
     "ruff>=0.14.14",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"lup_template.devtools.dev" = ["*.css"]
+"lup_template.devtools.dashboard" = ["assets/*.html"]
+"lup_template.devtools.harness.content" = ["assets/*.js", "assets/*.sh"]
+
 [tool.lup]
-agent_version = "0.1.0"
+agent_version = "0.2.0"
 
 [tool.uv]
 exclude-newer = "3 days"
@@ -65,7 +74,6 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 lup = { workspace = true }
-openai-codex = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python", tag = "rust-v0.139.0" }
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -84,6 +92,12 @@ markers = ["integration: tests requiring external services (Docker, APIs)"]
 # root config when invoked here — it does not discover the member config in
 # packages/lup/pyproject.toml — so every include the workspace needs is listed.
 include = ["src", "packages/lup/src", "tests"]
+# Adapter asset scripts are verbatim payloads for the generated plugin tree;
+# their imports resolve only in that runtime layout, not in this workspace.
+exclude = [
+    "packages/lup/src/lup/adapters/claude/assets",
+    "packages/lup/src/lup/adapters/codex/assets",
+]
 pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"

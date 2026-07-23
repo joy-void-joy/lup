@@ -114,3 +114,14 @@ def setup_notes(
         rw=[session_path, output_path],
         ro=collect_ro_dirs(),
     )
+
+
+def session_gate_flag(session_id: str) -> Path:
+    """Cross-process reflection-flag path outside every agent-writable root.
+
+    The Codex sandbox grants the workspace, ``/tmp``, and ``$TMPDIR``; gate
+    state the submission resolver trusts must live where only host-side
+    processes (the tool server and the adapter) can write — a flag the
+    sandboxed agent could create itself would make the gate forgeable.
+    """
+    return Path.home() / ".cache" / "lup" / "gates" / f"{session_id}.reflection"

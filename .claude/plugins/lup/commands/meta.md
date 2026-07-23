@@ -1,6 +1,10 @@
 ---
+description: "Review and modify .claude structure, brainstorm improvements interactively"
 allowed-tools: Bash(ls:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, Agent, AskUserQuestion
-description: Review and modify .claude structure, brainstorm improvements interactively
+arguments:
+  - name: arguments
+    description: "Optional arguments supplied with the skill invocation"
+    required: false
 ---
 
 # Meta: .claude Structure Review & Improvement
@@ -34,18 +38,18 @@ plugins/lup/
 ├── hooks/                       # PreToolUse permission hooks
 │   ├── hooks.json               # Hook definitions
 │   └── scripts/                 # Hook implementations
-│       ├── auto_allow_bash.py   # Bash command auto-allow/deny
-│       ├── auto_allow_edits.py  # Edit auto-allow (trivial changes)
-│       └── auto_allow_fetch.py  # WebFetch URL allow/deny
+│       ├── scripts/policy.py    # thin native dispatcher
+│       └── runtime/policy.py    # generated hermetic semantic policy
 ├── agents/                      # Subagent definitions
 └── TEMPLATE_CLAUDE.md           # CLAUDE.md template for new projects
+                                 # (.codex/plugins/lup/TEMPLATE_AGENTS.md is its Codex flavor)
 ```
 
 **Note:** Python CLI tooling (API inspection, trace analysis, feedback collection, worktree management, etc.) lives in `src/lup_template/devtools/` and is exposed as the `lup-devtools` CLI entry point. See the lup-devtools section in CLAUDE.md.
 
 ### When to Add to the Plugin
 
-- **Commands**: Reusable workflows invoked via `/lup:command-name`
+- **Commands**: Reusable workflows invoked via `the corresponding Lup skill`
 - **Hooks**: Permission hooks in `hooks/scripts/` — auto-allow, deny, or quality gates
 - **Agents**: Subagent definitions for specialized tasks
 - **Devtools**: Python CLI tools go in `src/lup_template/devtools/` (exposed as `lup-devtools`), not in the plugin

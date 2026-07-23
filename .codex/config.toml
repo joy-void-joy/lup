@@ -1,0 +1,4 @@
+# Generated file — do not edit directly. Rendered from
+# lup.adapters.codex.harness by `uv run lup-devtools harness generate all`.
+[features]
+hooks = true

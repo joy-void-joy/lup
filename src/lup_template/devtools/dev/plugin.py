@@ -114,7 +114,10 @@ def apply_marketplace_json(root: Path, name: str, dry_run: bool) -> list[str]:
     path = marketplace_file(root)
     if not path.exists():
         raise typer.BadParameter(f"No marketplace.json at {path}")
-    data = MARKETPLACE_ADAPTER.validate_python(json.loads(path.read_text()))
+    try:
+        data = MARKETPLACE_ADAPTER.validate_python(json.loads(path.read_text()))
+    except json.JSONDecodeError as error:
+        raise typer.BadParameter(f"{path} is not valid JSON: {error}") from error
     old = data.get("name")
     if old == name:
         return []
@@ -126,11 +129,14 @@ def apply_marketplace_json(root: Path, name: str, dry_run: bool) -> list[str]:
 
 def apply_settings_json(root: Path, name: str, dry_run: bool) -> list[str]:
     path = settings_file(root)
-    settings = (
-        SETTINGS_ADAPTER.validate_python(json.loads(path.read_text()))
-        if path.exists()
-        else SettingsJson()
-    )
+    try:
+        settings = (
+            SETTINGS_ADAPTER.validate_python(json.loads(path.read_text()))
+            if path.exists()
+            else SettingsJson()
+        )
+    except json.JSONDecodeError as error:
+        raise typer.BadParameter(f"{path} is not valid JSON: {error}") from error
     changes: list[str] = []  # lup: ignore[empty-collection] — change log
 
     known = settings.get("extraKnownMarketplaces") or {}

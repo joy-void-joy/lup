@@ -12,8 +12,6 @@ Usage:
     from lup_template.agent.config import settings
     print(settings.model)
 """
-# lup: please review the setup code in https://github.com/joy-void-joy/assistant/tree/dev and https://github.com/joy-void-joy/inkwell/tree/dev for setup workflow that should be present in those
-# We should also copy their UI patterns, and have lup host a dashboard
 
 import logging
 import os
@@ -163,6 +161,20 @@ class Settings(BaseSettings):
         ),
     )
 
+    tool_search: str | None = Field(
+        default="false",
+        validation_alias="AGENT_TOOL_SEARCH",
+        description=(
+            "Claude tool-schema deferral (ENABLE_TOOL_SEARCH): false loads "
+            "every schema upfront, true forces tool search, auto/auto:N "
+            "defer past a context threshold, None inherits the harness "
+            "default. Defaults to false because the template serves a small "
+            "curated surface where a deferred (invisible) tool risks the "
+            "agent concluding the capability is missing — see PATTERNS.md "
+            "§ Deferred Tool Schemas. Claude sessions only."
+        ),
+    )
+
     permission_mode: (
         Literal["default", "acceptEdits", "plan", "bypassPermissions"] | None
     ) = Field(
@@ -289,7 +301,7 @@ class Settings(BaseSettings):
 
 
 # Singleton instance
-settings = Settings.model_validate({})
+settings = Settings()
 
 
 def aux_model() -> str:
@@ -324,8 +336,8 @@ def compat_base_url() -> str | None:
     """The compat endpoint settings select, or None for native routing.
 
     An explicit ``OPENAI_BASE_URL`` wins; otherwise an ``OPENROUTER_API_KEY``
-    alone selects OpenRouter. The endpoint rides on ``LupAgentOptions.base_url``
-    into the compat engines — never on the process environment.
+    alone selects OpenRouter. The concrete composition root applies it through
+    the provider's typed compatibility transform.
     """
     if settings.openai_base_url:
         return settings.openai_base_url
@@ -337,18 +349,3 @@ def compat_base_url() -> str | None:
 def compat_api_key() -> str | None:
     """The credential paired with :func:`compat_base_url`."""
     return settings.openai_api_key or settings.openrouter_api_key
-
-
-def engine_for_settings() -> str:
-    """Map settings to the engine id.
-
-    ``AGENT_SDK=openai`` is the legacy alias of ``openai-compat``, and an
-    ``OPENROUTER_API_KEY`` upgrades the claude engine to ``claude-compat`` —
-    the same Claude scaffolding pointed at OpenRouter's Anthropic-protocol
-    endpoint through options, not ambient env.
-    """
-    if settings.agent_sdk == "openai":
-        return "openai-compat"
-    if settings.agent_sdk == "claude" and settings.openrouter_api_key:
-        return "claude-compat"
-    return settings.agent_sdk
