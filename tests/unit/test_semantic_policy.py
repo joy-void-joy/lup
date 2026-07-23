@@ -246,6 +246,26 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="cat <<EOF\nplain body\nEOF", effect="allow"),
     DecisionCase(input="cat <<EOF\n$(id)\nEOF", effect="deny"),
     DecisionCase(input="grep x <<< 'needle haystack'", effect="allow"),
+    # Frozen variable bindings: assignments and read rebind for the segments
+    # that follow; literal values instantiate references, opaque ones gate
+    # guarded rows, and unresolved expansions deny toward explicit binding.
+    DecisionCase(input="x=5", effect="allow"),
+    DecisionCase(input="f=notes.txt; sort $f", effect="allow"),
+    DecisionCase(input="f=-o; sort $f x", effect="ask"),
+    DecisionCase(input="PATH=/tmp", effect="ask"),
+    DecisionCase(
+        input='while read -r line; do echo "$line"; done < f', effect="allow"
+    ),
+    DecisionCase(input='while read -r line; do sort "$line"; done', effect="deny"),
+    DecisionCase(input="sort $UNBOUND f", effect="deny"),
+    DecisionCase(input="sort {-o,x} f", effect="deny"),
+    # Value-consuming wrappers recurse to the wrapped command; repo-relative
+    # tmp/ is a writable scratch target.
+    DecisionCase(input="timeout 5 uv run pytest", effect="allow"),
+    DecisionCase(input="nice -n 10 uv run pytest", effect="allow"),
+    DecisionCase(input="timeout 5 rm -rf x", effect="ask"),
+    DecisionCase(input="env", effect="allow"),
+    DecisionCase(input="uv run pytest > tmp/out.txt", effect="allow"),
 ]
 
 FETCH_POLICY_CASES = [
