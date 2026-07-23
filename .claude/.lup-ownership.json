@@ -16,7 +16,7 @@
     {
       "path": ".claude/PATTERNS.md",
       "category": "generated",
-      "sha256": "d924cebb92078f092bbcb67429f8b6e2b7d94b95b62bc2a6ece5a2cec2430dce",
+      "sha256": "379f7f2c0ceb2857edd21552a8c98f5f3039b0d1d435f8b3b9de06cb8a02ec20",
       "semantic_id": "harness.patterns",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "0427c15393cd556ed84930fe9aa1c9771bc369f957f4b82fe7040cf621c03e0e",
+      "sha256": "da4a7e975f361a4da863bc5d2ad7efdc6df8c4df25beb1d2be8f67c9bc7a40c8",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
