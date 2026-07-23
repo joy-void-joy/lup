@@ -1195,9 +1195,13 @@ def is_control_operator(text: str) -> bool:
 
 
 def resolve_redirection(
-    tokens: list[ShellToken], index: int
+    tokens: list[ShellToken], index: int, heredoc_fed: bool = False
 ) -> tuple[KernelDecision | None, int]:
-    """Classify one redirection, consuming its target and stripping safe forms."""
+    """Classify one redirection, consuming its target and stripping safe forms.
+
+    A file write fed by a heredoc is authoring a file through the shell, so
+    it denies toward the Edit tool and tmp/*.py scripts instead of asking.
+    """
     operator = tokens[index].text
     if "<<" in operator and "<<<" not in operator:
         target = index + 1
@@ -1218,6 +1222,15 @@ def resolve_redirection(
         return None, target + 1
     if is_repository_tmp_script(tokens[target].text):
         return None, target + 1
+    if heredoc_fed:
+        return (
+            KernelDecision(
+                "deny",
+                "authoring a file through a heredoc bypasses the edit policy"
+                " — write a tmp/*.py script or use the Edit tool",
+            ),
+            target + 1,
+        )
     return (
         KernelDecision("ask", "file redirection is never auto-allowed"),
         target + 1,
@@ -1236,6 +1249,10 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
     tokens = tokenize_shell(command)
     if isinstance(tokens, KernelDecision):
         return tokens
+    heredoc_fed = any(
+        token.kind == "op" and "<<" in token.text and "<<<" not in token.text
+        for token in tokens
+    )
     segments: list[list[str]] = []
     current: list[str] = []
     index = 0
@@ -1290,7 +1307,7 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
                 current = []
             index += 1
             continue
-        verdict, index = resolve_redirection(tokens, index)
+        verdict, index = resolve_redirection(tokens, index, heredoc_fed)
         if verdict is not None:
             return verdict
     if current:
