@@ -805,6 +805,26 @@ def decide_uv(words: list[str]) -> KernelDecision:
     return unjudged(f"uv {words[1]} is not classified")
 
 
+def git_checkout_pathspec(words: list[str]) -> KernelDecision | None:
+    """Recognize ``git checkout <ref> -- <path>...`` — a ref-sourced restore.
+
+    Content comes from a named commit, so committed state is recoverable
+    through the reflog; the branch-switch and index-sourced ``checkout --
+    <path>`` forms fall through to their redirect rows, and opaque words
+    deny toward explicit literal bindings.
+    """
+    if len(words) < 5 or words[1] != "checkout" or words[3] != "--":
+        return None
+    ref = words[2]
+    if ref.startswith("-") or opaque_argument(ref):
+        return None
+    if any(opaque_argument(word) for word in words[4:]):
+        return None
+    return KernelDecision(
+        "allow", "checkout from a named ref restores committed file state"
+    )
+
+
 def decide_shell_segment(
     segment: list[str],
     rows: list[ShellRuleRow],
@@ -834,6 +854,10 @@ def decide_shell_segment(
         return KernelDecision(
             "ask", "the git ext transport can execute commands — requires approval"
         )
+    if executable == "git":
+        pathspec = git_checkout_pathspec(words)
+        if pathspec is not None:
+            return pathspec
     if executable == "xargs":
         payload = xargs_payload(words)
         if not payload:
