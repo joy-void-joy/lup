@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "08f1bc6ab22d80304786c56ff544f19287280865c469aae1d4509a635ebb2326",
+      "sha256": "42a6e36406dbe4cb436c6a7c838a20f07cee51d7d120b8812c4404e4a02d6b61",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },

@@ -104,7 +104,7 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 Agents produce better output when forced to self-assess before committing. The reflection pattern has three components:
 
-1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool the agent calls to record its self-assessment — confidence, key uncertainties, tool audit, process reflection. Runs an independent reviewer sub-agent that returns a structured verdict (skippable per call; a skip or reviewer failure records an approval).
+1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool the agent calls to record its self-assessment — confidence, key uncertainties, tool audit, process reflection. Runs an independent nested reviewer agent that returns a structured verdict (skippable per call; a skip or reviewer failure records an approval).
 2. **Review gate** (`lup.reflect`): A `ReviewGate` verdict tracker (approve/warn open the gate; fail re-blocks; 3 consecutive fails auto-open) + `create_reflection_gate()` hook factory (a preset of `create_tool_gate` from `lup.hooks`). Denies a target tool until the reviewer passes; the plain `ReflectionGate` base remains for act-of-reflecting gates (realtime `sleep`).
 3. **Wiring**: The gate rides inside submission — `reflection_submission_gate` adapts the `ReviewGate` to the `SubmissionGate` on the turn's `TurnToolBinding`, rejecting gated submissions with a retriable message until the reviewer passes (persistent agents gate `sleep` instead). Final output always flows through the turn-bound submission tool, whose `submit_output` handler (`lup.runtime.output`) validates against the turn's output model and persists through the bound `SubmittedOutputStore`; `ResilientTurn` sends bounded corrective cycles (`CorrectionConfig`) when a turn ends without a submission, and a turn that still produces none raises `StructuredOutputError`. `create_completion_guard` (`lup.hooks`) remains as optional Stop-hook hardening on backends that expose stop hooks.
 
@@ -130,7 +130,7 @@ Agents produce better output when forced to self-assess before committing. The r
 - **src/<project>/agent/toolsets.py**: Tool-group registry (one source for every backend)
 - **src/<project>/agent/tools/example.py**: Example MCP tools
 - **src/<project>/agent/tools/realtime.py**: Real-time tools template (sleep, context, reply)
-- **src/<project>/agent/tools/reflect.py**: Forced self-review tool with optional reviewer sub-agent
+- **src/<project>/agent/tools/reflect.py**: Forced self-review tool with optional nested reviewer agent
 
 **Library (`packages/lup` — the reusable `lup` package, never renamed):**
 
@@ -304,7 +304,7 @@ Edit `src/<project>/agent/tools/reflect.py`:
 
 - Customize `ReflectInput` fields for your domain (e.g., factor analysis for forecasting)
 - Customize the reviewer system prompt for your domain's failure modes
-- Decide whether the reviewer sub-agent adds value (adds latency but catches errors)
+- Decide whether the nested reviewer agent adds value (adds latency but catches errors)
 - The gate in `core.py` is already wired — reflection is enforced by default
 
 ### Step 6: Set Agent Version
@@ -348,7 +348,7 @@ The template ships with **every** pattern wired so each is *available* — but a
 | **Feedback loop** (`devtools/feedback/`) | ground truth or a feedback signal resolves over time to drive iteration | there is no ground truth and the agent is not iterated against outcomes — `load_outcomes` stays an empty stub |
 | **Commit loop** (`environment/cli` auto-commit) | each run yields a data artifact worth versioning per session | the agent is interactive or produces no per-session artifact worth a checkpoint |
 
-The same logic governs native subagents (harness-dispatched roles sharing the main session), background agents, and nested agents (tool-subagents opened inside a tool handler via `query()`): wire them only where the domain needs that shape. The generated patterns guide carries the full catalog. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
+The same logic governs native subagents (harness-dispatched roles sharing the main session), background agents, and nested agents (tool-subagents opened inside a tool handler via `query()`): wire them only where the domain needs that shape. `.claude/PATTERNS.md` carries the full catalog. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
 
 ---
 
@@ -510,7 +510,7 @@ src/
     │   └── tools/
     │       ├── example.py      # Example MCP tools (customize)
     │       ├── realtime.py     # Real-time tools template (sleep, context, reply)
-    │       └── reflect.py      # Forced self-review tool (reviewer sub-agent)
+    │       └── reflect.py      # Forced self-review tool (nested reviewer agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
     │   ├── agent/              # Agent introspection (inspect, capabilities, serve-tools, repl)
