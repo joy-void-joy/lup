@@ -112,16 +112,35 @@ def parse_shell_segments(command: str) -> list[ShellSegment] | None:
 
 
 class ShellPolicy(DecisionPolicy[ShellCommand]):
-    """Delegate shell classification to the shared hermetic kernel."""
+    """Delegate shell classification to the shared hermetic kernel.
 
-    def __init__(self, rules: list[ShellCommandRule] | None = None) -> None:
+    URL scopes feed the kernel's curl screen, so shell reads and WebFetch
+    consult one declared origin table.
+    """
+
+    def __init__(
+        self,
+        rules: list[ShellCommandRule] | None = None,
+        allowed_urls: list[UrlScope] | None = None,
+        denied_urls: list[UrlScope] | None = None,
+    ) -> None:
         self.rules = erase_shell_rules(BASE_SHELL_RULES if rules is None else rules)
+        self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
+        self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
 
     def decide(self, event: ShellCommand) -> Decision:
-        return pydantic_decision(decide_shell(event.command, self.rules))
+        return pydantic_decision(
+            decide_shell(
+                event.command, self.rules, self.allowed_scopes, self.denied_scopes
+            )
+        )
 
     def decide_segment(self, segment: ShellSegment) -> Decision:
-        return pydantic_decision(decide_shell_segment(segment.words, self.rules))
+        return pydantic_decision(
+            decide_shell_segment(
+                segment.words, self.rules, self.allowed_scopes, self.denied_scopes
+            )
+        )
 
 
 class PathRule(BaseModel):

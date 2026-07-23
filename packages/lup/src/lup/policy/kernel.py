@@ -99,11 +99,7 @@ SED_SAFE_LONG_OPTIONS = (
     "--separate",
     "--null-data",
 )
-SED_ADDRESS = r"(?:\d+|\$|/(?:[^/\\]|\\.)*/)"
-SED_COMMAND_RE = re.compile(
-    rf"(?:{SED_ADDRESS}(?:,{SED_ADDRESS})?\s*)?"
-    r"(?:[pdnq=]|[sy]/(?:[^/\\]|\\.)*/(?:[^/\\]|\\.)*/[0-9gipmIM]*)"
-)
+SED_SUBSTITUTE_FLAG_CHARS = "0123456789gpiImM"
 INTERPRETERS = (
     "python",
     "python3",
@@ -348,22 +344,149 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
     return apply_command_row(subrows[0], remainder)
 
 
-def safe_sed_script(script: str) -> bool:
-    """Accept only address-guarded print, delete, transliterate, and substitute."""
-    guarded = rf"\s*{SED_COMMAND_RE.pattern}\s*"
-    return all(
-        re.fullmatch(guarded, piece) is not None
-        for piece in re.split(r"[;\n]+", script)
-        if piece and not piece.isspace()
+def scan_sed_delimited(script: str, position: int, parts: int) -> int | None:
+    """Scan ``parts`` sections after the delimiter at ``position``.
+
+    The delimiter is whatever character sits at ``position``; backslash
+    escapes are honored inside sections.
+    """
+    if position >= len(script):
+        return None
+    delimiter = script[position]
+    if delimiter.isalnum() or delimiter in " \t\n;\\":
+        return None
+    cursor = position + 1
+    seen = 0
+    while cursor < len(script) and seen < parts:
+        character = script[cursor]
+        if character == "\\":
+            cursor += 2
+            continue
+        if character == delimiter:
+            seen += 1
+        cursor += 1
+    return cursor if seen == parts else None
+
+
+def scan_sed_address(script: str, position: int) -> int | None:
+    """Scan one address: a line-number form, ``$``, or a regex form."""
+    character = script[position]
+    if character == "$":
+        return position + 1
+    if character.isdigit():
+        cursor = position + 1
+        while cursor < len(script) and script[cursor].isdigit():
+            cursor += 1
+        if cursor < len(script) and script[cursor] == "~":
+            cursor += 1
+            while cursor < len(script) and script[cursor].isdigit():
+                cursor += 1
+        return cursor
+    if character == "+":
+        cursor = position + 1
+        while cursor < len(script) and script[cursor].isdigit():
+            cursor += 1
+        return cursor if cursor > position + 1 else None
+    end = (
+        scan_sed_delimited(script, position, 1)
+        if character == "/"
+        else scan_sed_delimited(script, position + 1, 1)
+        if character == "\\" and position + 1 < len(script)
+        else None
     )
+    if end is None:
+        return None
+    while end < len(script) and script[end] in "IM":
+        end += 1
+    return end
+
+
+def scan_sed_command(script: str, position: int) -> int | None:
+    """Scan one address-guarded command, returning the position after it.
+
+    Accepted commands read the input and write standard output only: print,
+    delete, hold-space, branching, labels, blocks, line numbering, text
+    insertion, file reading, transliteration, and flag-screened substitution.
+    The write and execute forms (``w``, ``W``, ``e``, ``s///e``, ``s///w``)
+    fall out as unrecognized trailing characters.
+    """
+    length = len(script)
+    address = scan_sed_address(script, position)
+    if address is not None:
+        position = address
+        while position < length and script[position] in " \t":
+            position += 1
+        if position < length and script[position] == ",":
+            position += 1
+            while position < length and script[position] in " \t":
+                position += 1
+            if position >= length:
+                return None
+            second = scan_sed_address(script, position)
+            if second is None:
+                return None
+            position = second
+    while position < length and script[position] in " \t!":
+        position += 1
+    if position >= length:
+        return None
+    command = script[position]
+    if command in "pPdDnNgGhHxz=F{}":
+        return position + 1
+    if command in "qQl":
+        cursor = position + 1
+        while cursor < length and (script[cursor].isdigit() or script[cursor] == " "):
+            cursor += 1
+        return cursor
+    if command in "btT:":
+        cursor = position + 1
+        while cursor < length and script[cursor] in " \t":
+            cursor += 1
+        while cursor < length and (script[cursor].isalnum() or script[cursor] == "_"):
+            cursor += 1
+        return cursor
+    if command in "aicrR":
+        newline = script.find("\n", position)
+        return length if newline == -1 else newline
+    if command == "s":
+        end = scan_sed_delimited(script, position + 1, 2)
+        if end is None:
+            return None
+        while end < length and script[end] in SED_SUBSTITUTE_FLAG_CHARS:
+            end += 1
+        return end
+    if command == "y":
+        return scan_sed_delimited(script, position + 1, 2)
+    return None
+
+
+def safe_sed_script(script: str) -> bool:
+    """Accept only scripts whose every command reads input and prints output."""
+    length = len(script)
+    position = 0
+    while position < length:
+        if script[position] in " \t\n;":
+            position += 1
+            continue
+        end = scan_sed_command(script, position)
+        if end is None:
+            return False
+        position = end
+    return True
 
 
 def decide_sed_words(words: list[str]) -> KernelDecision:
-    """Allow only read-only sed: safe flags plus a safe script grammar."""
+    """Allow only read-only sed: safe flags plus a safe script grammar.
+
+    ``--sandbox`` makes sed itself reject the write and execute commands, so
+    the script screen is skipped under it; in-place editing and script files
+    stay denied toward the Edit tool and inline scripts.
+    """
     scripts: list[str] = []
     positional: list[str] = []
     script_expected = False
     script_from_options = False
+    sandbox = False
     for word in words[1:]:
         if script_expected:
             scripts.append(word)
@@ -371,6 +494,17 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
             continue
         if word.startswith("--"):
             name, separator, value = word.partition("=")
+            if name in ("--in-place", "--inplace"):
+                return KernelDecision(
+                    "deny", "in-place sed bypasses the edit policy — use Edit"
+                )
+            if name == "--file":
+                return KernelDecision(
+                    "deny", "sed script files are not screened — inline the script"
+                )
+            if name == "--sandbox" and not separator:
+                sandbox = True
+                continue
             if name == "--expression":
                 if separator:
                     scripts.append(value)
@@ -382,6 +516,14 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
             return KernelDecision("deny", f"sed option {name!r} is not classified")
         if word.startswith("-") and len(word) > 1:
             flags = word[1:]
+            if "i" in flags:
+                return KernelDecision(
+                    "deny", "in-place sed bypasses the edit policy — use Edit"
+                )
+            if "f" in flags:
+                return KernelDecision(
+                    "deny", "sed script files are not screened — inline the script"
+                )
             if flags.endswith("e"):
                 script_expected = True
                 script_from_options = True
@@ -394,7 +536,7 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
         return KernelDecision("deny", "sed expression flag has no script")
     if not script_from_options and positional:
         scripts.append(positional.pop(0))
-    if not all(safe_sed_script(script) for script in scripts):
+    if not sandbox and not all(safe_sed_script(script) for script in scripts):
         return KernelDecision("deny", "sed script is not classified as read-only")
     return KernelDecision("allow", "read-only sed script")
 
@@ -445,6 +587,148 @@ def decide_awk_words(words: list[str]) -> KernelDecision:
     if not safe_awk_program(positional[0]):
         return KernelDecision("deny", "awk program is not classified as read-only")
     return KernelDecision("allow", "read-only awk program")
+
+
+def decide_find_words(
+    words: list[str],
+    rows: list[ShellRuleRow],
+    allowed_scopes: list[UrlScopeRow] | None = None,
+    denied_scopes: list[UrlScopeRow] | None = None,
+) -> KernelDecision:
+    """Classify find, recursing into -exec payloads with {} as a path word.
+
+    Expansions of ``{}`` inherit find's ``./``-prefixed paths, so the payload
+    is judged with a literal path word in each placeholder position. The
+    interactive ``-ok`` forms would hang a non-interactive shell.
+    """
+    remaining = [words[0]]
+    position = 1
+    while position < len(words):
+        word = words[position]
+        if word in ("-ok", "-okdir"):
+            return KernelDecision(
+                "deny", "find -ok prompts on a tty — use -exec instead"
+            )
+        if word in ("-exec", "-execdir"):
+            terminator = next(
+                (
+                    index
+                    for index in range(position + 1, len(words))
+                    if words[index] in (";", "+")
+                ),
+                None,
+            )
+            if terminator is None:
+                return KernelDecision("deny", "find -exec payload does not terminate")
+            payload = [
+                "./x" if piece == "{}" else piece
+                for piece in words[position + 1 : terminator]
+            ]
+            if not payload:
+                return KernelDecision("deny", "find -exec payload is empty")
+            verdict = decide_shell_segment(payload, rows, allowed_scopes, denied_scopes)
+            if verdict.effect != "allow":
+                return verdict
+            position = terminator + 1
+            continue
+        remaining.append(word)
+        position += 1
+    return decide_command_rows(remaining, rows)
+
+
+CURL_SAFE_FLAGS = (
+    "-s",
+    "--silent",
+    "-S",
+    "--show-error",
+    "-f",
+    "--fail",
+    "--fail-with-body",
+    "-i",
+    "--include",
+    "-I",
+    "--head",
+    "-v",
+    "--verbose",
+    "--compressed",
+    "--no-progress-meter",
+    "-g",
+    "--globoff",
+    "-4",
+    "-6",
+)
+CURL_VALUE_FLAGS = (
+    "-H",
+    "--header",
+    "-m",
+    "--max-time",
+    "--connect-timeout",
+    "--retry",
+    "-A",
+    "--user-agent",
+    "-e",
+    "--referer",
+    "-r",
+    "--range",
+)
+
+
+def decide_curl_words(
+    words: list[str],
+    allowed_scopes: list[UrlScopeRow],
+    denied_scopes: list[UrlScopeRow],
+) -> KernelDecision:
+    """Allow only read-method curl against the declared fetch scopes.
+
+    Every positional word must be a URL the fetch policy allows; unlisted
+    origins stay an approval question and denied origins deny. Flags that
+    write files, send data, or carry credentials are not classified.
+    """
+    urls: list[str] = []
+    expect_value = False
+    expect_method = False
+    method = "GET"
+    for word in words[1:]:
+        if expect_value:
+            expect_value = False
+            continue
+        if expect_method:
+            method = word
+            expect_method = False
+            continue
+        if word in ("-X", "--request"):
+            expect_method = True
+            continue
+        if word.startswith("--request="):
+            method = word.partition("=")[2]
+            continue
+        if word in CURL_SAFE_FLAGS:
+            continue
+        if word in CURL_VALUE_FLAGS:
+            expect_value = True
+            continue
+        if (
+            word.startswith("--")
+            and "=" in word
+            and word.partition("=")[0] in CURL_VALUE_FLAGS
+        ):
+            continue
+        if word.startswith("-"):
+            return KernelDecision("deny", f"curl option {word!r} is not classified")
+        urls.append(word)
+    if expect_value or expect_method:
+        return KernelDecision("deny", "curl option has no value")
+    if method not in ("GET", "HEAD"):
+        return KernelDecision(
+            "ask", f"curl {method} can change remote state — requires approval"
+        )
+    if not urls:
+        return KernelDecision("deny", "curl has no URL")
+    for url in urls:
+        verdict = decide_fetch(url, allowed_scopes, denied_scopes)
+        if verdict.effect != "allow":
+            return verdict
+    return KernelDecision("allow", "read-only curl within declared scopes")
 
 
 def xargs_payload(words: list[str]) -> list[str]:
@@ -503,7 +787,10 @@ def decide_uv(words: list[str]) -> KernelDecision:
 
 
 def decide_shell_segment(
-    segment: list[str], rows: list[ShellRuleRow]
+    segment: list[str],
+    rows: list[ShellRuleRow],
+    allowed_scopes: list[UrlScopeRow] | None = None,
+    denied_scopes: list[UrlScopeRow] | None = None,
 ) -> KernelDecision:
     """Classify one parsed shell segment against the vocabulary and handlers."""
     while segment and segment[0] == "!":
@@ -532,7 +819,11 @@ def decide_shell_segment(
         payload = xargs_payload(words)
         if not payload:
             return KernelDecision("deny", "xargs payload is not classified")
-        return decide_shell_segment(payload, rows)
+        return decide_shell_segment(payload, rows, allowed_scopes, denied_scopes)
+    if executable == "curl":
+        return decide_curl_words(words, allowed_scopes or [], denied_scopes or [])
+    if executable == "find":
+        return decide_find_words(words, rows, allowed_scopes, denied_scopes)
     if executable == "sed":
         return decide_sed_words(words)
     if executable in ("awk", "gawk", "mawk"):
@@ -1176,6 +1467,8 @@ def decide_for_body(
     rows: list[ShellRuleRow],
     depth: int,
     bindings: tuple[ShellBinding, ...] = (),
+    allowed_scopes: list[UrlScopeRow] | None = None,
+    denied_scopes: list[UrlScopeRow] | None = None,
 ) -> list[KernelDecision]:
     """Classify a ``for`` body once per literal loop word, or gated when opaque.
 
@@ -1199,6 +1492,8 @@ def decide_for_body(
                 rows,
                 depth + 1,
                 bindings,
+                allowed_scopes,
+                denied_scopes,
             )
         ]
 
@@ -1224,6 +1519,8 @@ def decide_loop(
     rows: list[ShellRuleRow],
     depth: int,
     bindings: tuple[ShellBinding, ...] = (),
+    allowed_scopes: list[UrlScopeRow] | None = None,
+    denied_scopes: list[UrlScopeRow] | None = None,
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one loop construct, returning its decisions and the next index.
 
@@ -1250,7 +1547,16 @@ def decide_loop(
             if condition:
                 return KernelDecision("deny", "loop construct does not parse")
             return (
-                decide_for_body(name, loop_words, body, rows, depth, bindings),
+                decide_for_body(
+                    name,
+                    loop_words,
+                    body,
+                    rows,
+                    depth,
+                    bindings,
+                    allowed_scopes,
+                    denied_scopes,
+                ),
                 end + 1,
             )
         case ["for", *_rest]:
@@ -1260,7 +1566,12 @@ def decide_loop(
             if not conditions:
                 return KernelDecision("deny", "loop condition is empty")
             decisions = decide_segment_list(
-                [*conditions, *body], rows, depth + 1, bindings
+                [*conditions, *body],
+                rows,
+                depth + 1,
+                bindings,
+                allowed_scopes,
+                denied_scopes,
             )
             return decisions, end + 1
     return KernelDecision("deny", "loop construct does not parse")
@@ -1298,6 +1609,8 @@ def decide_conditional(
     rows: list[ShellRuleRow],
     depth: int,
     bindings: tuple[ShellBinding, ...] = (),
+    allowed_scopes: list[UrlScopeRow] | None = None,
+    denied_scopes: list[UrlScopeRow] | None = None,
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one ``if`` construct: conditions and branches recursively."""
     if depth >= 2:
@@ -1312,7 +1625,12 @@ def decide_conditional(
             interior.append(stripped)
     if not interior:
         return KernelDecision("deny", "conditional is empty")
-    return decide_segment_list(interior, rows, depth + 1, bindings), end + 1
+    return (
+        decide_segment_list(
+            interior, rows, depth + 1, bindings, allowed_scopes, denied_scopes
+        ),
+        end + 1,
+    )
 
 
 def decide_case(
@@ -1321,6 +1639,8 @@ def decide_case(
     rows: list[ShellRuleRow],
     depth: int,
     bindings: tuple[ShellBinding, ...] = (),
+    allowed_scopes: list[UrlScopeRow] | None = None,
+    denied_scopes: list[UrlScopeRow] | None = None,
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one ``case`` construct: patterns are match data, bodies recurse."""
     if depth >= 2:
@@ -1357,7 +1677,12 @@ def decide_case(
         return KernelDecision("deny", "case construct does not parse")
     if not body:
         return [], end + 1
-    return decide_segment_list(body, rows, depth + 1, bindings), end + 1
+    return (
+        decide_segment_list(
+            body, rows, depth + 1, bindings, allowed_scopes, denied_scopes
+        ),
+        end + 1,
+    )
 
 
 def decide_segment_list(
@@ -1365,6 +1690,8 @@ def decide_segment_list(
     rows: list[ShellRuleRow],
     depth: int = 0,
     bindings: tuple[ShellBinding, ...] = (),
+    allowed_scopes: list[UrlScopeRow] | None = None,
+    denied_scopes: list[UrlScopeRow] | None = None,
 ) -> list[KernelDecision]:
     """Classify a segment list, grouping structured constructs recursively.
 
@@ -1404,13 +1731,35 @@ def decide_segment_list(
         if structural:
             match segment[0]:
                 case "for" | "while" | "until":
-                    outcome = decide_loop(segments, index, rows, depth, bindings)
+                    outcome = decide_loop(
+                        segments,
+                        index,
+                        rows,
+                        depth,
+                        bindings,
+                        allowed_scopes,
+                        denied_scopes,
+                    )
                 case "if":
                     outcome = decide_conditional(
-                        segments, index, rows, depth, bindings
+                        segments,
+                        index,
+                        rows,
+                        depth,
+                        bindings,
+                        allowed_scopes,
+                        denied_scopes,
                     )
                 case _:
-                    outcome = decide_case(segments, index, rows, depth, bindings)
+                    outcome = decide_case(
+                        segments,
+                        index,
+                        rows,
+                        depth,
+                        bindings,
+                        allowed_scopes,
+                        denied_scopes,
+                    )
             if isinstance(outcome, KernelDecision):
                 return [*decisions, outcome]
             grouped, index = outcome
@@ -1422,8 +1771,7 @@ def decide_segment_list(
                 decisions.append(
                     KernelDecision(
                         "ask",
-                        "a security-sensitive environment assignment requires"
-                        " approval",
+                        "a security-sensitive environment assignment requires approval",
                     )
                 )
                 index += 1
@@ -1440,17 +1788,26 @@ def decide_segment_list(
             bindings = extended
             index += 1
             continue
-        decisions.append(decide_shell_segment(segment, rows))
+        decisions.append(
+            decide_shell_segment(segment, rows, allowed_scopes, denied_scopes)
+        )
         index += 1
     return decisions
 
 
-def classify_shell(command: str, rows: list[ShellRuleRow]) -> KernelDecision:
+def classify_shell(
+    command: str,
+    rows: list[ShellRuleRow],
+    allowed_scopes: list[UrlScopeRow] | None = None,
+    denied_scopes: list[UrlScopeRow] | None = None,
+) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(command)
     if isinstance(segments, KernelDecision):
         return segments
-    decisions = decide_segment_list(segments, rows)
+    decisions = decide_segment_list(
+        segments, rows, 0, (), allowed_scopes, denied_scopes
+    )
     denied = next((item for item in decisions if item.effect == "deny"), None)
     if denied is not None:
         return denied
@@ -1460,7 +1817,12 @@ def classify_shell(command: str, rows: list[ShellRuleRow]) -> KernelDecision:
     return KernelDecision("allow", "every shell segment is declared safe")
 
 
-def decide_shell(command: str, rows: list[ShellRuleRow]) -> KernelDecision:
+def decide_shell(
+    command: str,
+    rows: list[ShellRuleRow],
+    allowed_scopes: list[UrlScopeRow] | None = None,
+    denied_scopes: list[UrlScopeRow] | None = None,
+) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
     A leading ``# lup: escalate: <why>`` line promotes a classified deny or
@@ -1476,11 +1838,13 @@ def decide_shell(command: str, rows: list[ShellRuleRow]) -> KernelDecision:
             return KernelDecision(
                 "deny", "escalation requires a stated reason" + ESCALATE_HINT
             )
-        inner = classify_shell(command[marker.end() :], rows)
+        inner = classify_shell(
+            command[marker.end() :], rows, allowed_scopes, denied_scopes
+        )
         if inner.effect == "allow":
             return inner
         return KernelDecision("ask", f"escalated ({why}): {inner.reason}")
-    decision = classify_shell(command, rows)
+    decision = classify_shell(command, rows, allowed_scopes, denied_scopes)
     if decision.effect == "deny":
         return KernelDecision("deny", decision.reason + ESCALATE_HINT)
     return decision
