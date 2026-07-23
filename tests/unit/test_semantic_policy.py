@@ -100,10 +100,47 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="ls >&2", effect="allow"),
     DecisionCase(input="echo x > out.txt", effect="ask"),
     DecisionCase(input="cat <<EOF", effect="deny"),
-    # Quote-aware substitution: inert inside single quotes; live substitution
-    # is denied with a rewrite hint toward a separate call, <(...), or a pipe.
+    # The session scratchpad is a write-allowed root like repo-relative tmp/;
+    # reassigning TMPDIR is a security-sensitive assignment, and a suffix
+    # that climbs out of the root falls back to the redirection ask.
+    DecisionCase(input="echo x > $TMPDIR/out.txt", effect="allow"),
+    DecisionCase(input='sort f > "${TMPDIR}/sorted.txt"', effect="allow"),
+    DecisionCase(input="echo x > /tmp/claude-1000/scratch/out.txt", effect="allow"),
+    DecisionCase(input="cat <<'EOF' > $TMPDIR/notes.md\nbody\nEOF", effect="allow"),
+    DecisionCase(input="echo x > $TMPDIR/../etc/crontab", effect="ask"),
+    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="ask"),
+    DecisionCase(input="echo x > /tmp/other/file", effect="ask"),
+    DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
+    DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
+    # Removal confined to the disposable roots is as safe as writing them;
+    # any long flag, opaque word, or outside target keeps the rm ask.
+    DecisionCase(input="rm tmp/oneoff.py", effect="allow"),
+    DecisionCase(input="rm -rf tmp/scratch", effect="allow"),
+    DecisionCase(input="rm -f $TMPDIR/out.txt", effect="allow"),
+    DecisionCase(input="rm /tmp/claude-1000/scratch/f", effect="allow"),
+    DecisionCase(input="rm tmp/x src/y", effect="ask"),
+    DecisionCase(input="rm tmp/../src/x.py", effect="ask"),
+    DecisionCase(input="rm --no-preserve-root -rf tmp", effect="ask"),
+    DecisionCase(input="rm -rf /", effect="ask"),
+    # Quote-aware substitution: inert inside single quotes; a live $(...)
+    # classifies recursively — the inner command joins the batch, and the
+    # opaque result only rides on an argument-safe outer command. Command
+    # position, deep nesting, and backticks stay conservative.
     DecisionCase(input="git commit -m 'fixes $(bug)'", effect="allow"),
-    DecisionCase(input="echo $(whoami)", effect="deny"),
+    DecisionCase(input="echo $(whoami)", effect="allow"),
+    DecisionCase(input="cat $(git rev-parse --git-dir)/HEAD", effect="allow"),
+    DecisionCase(input="wc -l $(git diff --name-only)", effect="allow"),
+    DecisionCase(input='echo "today is $(date)"', effect="allow"),
+    DecisionCase(input="[[ -n $(git status --porcelain) ]]", effect="allow"),
+    DecisionCase(input="echo $(echo $(ls))", effect="allow"),
+    DecisionCase(input="F=$(ls); echo $F", effect="allow"),
+    DecisionCase(input="echo $(git push)", effect="ask"),
+    DecisionCase(input="echo $(rm -rf /)", effect="ask"),
+    DecisionCase(input="git log $(cat names.txt)", effect="deny"),
+    DecisionCase(input="F=$(ls); sed $F 's/a/b/' f", effect="deny"),
+    DecisionCase(input="$(which ls) -la", effect="deny"),
+    DecisionCase(input="echo $(echo $(echo $(ls)))", effect="deny"),
+    DecisionCase(input="echo $(ls", effect="deny"),
     DecisionCase(input="echo `id`", effect="deny"),
     # Read-side process substitution classifies its inner command recursively;
     # the write side still asks and a substituting inner command is denied.
@@ -195,6 +232,14 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git pull", effect="allow"),
     DecisionCase(input="git clone https://x.test/r.git", effect="ask"),
     DecisionCase(input="git restore f", effect="ask"),
+    # The ref-sourced restore twin of the checkout pathspec form allows;
+    # index-sourced and opaque forms keep the row's ask.
+    DecisionCase(input="git restore --source=HEAD -- docs/rules.md", effect="allow"),
+    DecisionCase(input="git restore --source=HEAD docs/rules.md", effect="allow"),
+    DecisionCase(input="git restore --staged --source=HEAD f", effect="allow"),
+    DecisionCase(input="git restore --source=$REF f", effect="ask"),
+    DecisionCase(input="git restore --source=HEAD", effect="ask"),
+    DecisionCase(input="git restore -s HEAD f", effect="ask"),
     DecisionCase(input="git switch main", effect="allow"),
     DecisionCase(input="git checkout main", effect="deny"),
     DecisionCase(input="git bisect start", effect="deny"),
@@ -333,7 +378,11 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
-    DecisionCase(input="echo $(whoami)", effect="deny", sandboxed=True),
+    DecisionCase(input="echo $(whoami)", effect="allow", sandboxed=True),
+    DecisionCase(input="echo $(frobnicate)", effect="deny"),
+    DecisionCase(input="echo $(frobnicate)", effect="defer", sandboxed=True),
+    DecisionCase(input="git log $(cat names.txt)", effect="defer", sandboxed=True),
+    DecisionCase(input="echo `id`", effect="deny", sandboxed=True),
     DecisionCase(
         input="# lup: escalate: unknown tool\nfrobnicate",
         effect="ask",
