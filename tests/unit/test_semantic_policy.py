@@ -15,8 +15,10 @@ from lup.adapters.claude.native import (
     ClaudeBeforeToolEvent,
     ClaudeEditBatchOperation,
     ClaudeEventDecoder,
+    ClaudeHookPayload,
     ClaudeUnknownOperation,
     ClaudeDecisionRenderer,
+    parse_claude_before_tool,
 )
 from lup.adapters.codex.native import (
     CodexBeforeToolEvent,
@@ -60,6 +62,7 @@ class DecisionCase(BaseModel):
 
     input: str
     effect: Literal["allow", "ask", "deny", "defer"]
+    sandboxed: bool = False
 
 
 class EditDecisionCase(BaseModel):
@@ -253,9 +256,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="f=notes.txt; sort $f", effect="allow"),
     DecisionCase(input="f=-o; sort $f x", effect="ask"),
     DecisionCase(input="PATH=/tmp", effect="ask"),
-    DecisionCase(
-        input='while read -r line; do echo "$line"; done < f', effect="allow"
-    ),
+    DecisionCase(input='while read -r line; do echo "$line"; done < f', effect="allow"),
     DecisionCase(input='while read -r line; do sort "$line"; done', effect="deny"),
     DecisionCase(input="sort $UNBOUND f", effect="deny"),
     DecisionCase(input="sort {-o,x} f", effect="deny"),
@@ -268,9 +269,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="uv run pytest > tmp/out.txt", effect="allow"),
     # find -exec payloads recurse; the sed scanner reads the full stdout-only
     # grammar; curl is screened to read methods against the fetch scopes.
-    DecisionCase(
-        input="find src -name '*.py' -exec grep -l TODO {} +", effect="allow"
-    ),
+    DecisionCase(input="find src -name '*.py' -exec grep -l TODO {} +", effect="allow"),
     DecisionCase(input="find . -exec rm {} \\;", effect="ask"),
     DecisionCase(input="find . -ok cat {} \\;", effect="deny"),
     DecisionCase(input="sed 's|/old/path|/new/path|g' f", effect="allow"),
@@ -283,6 +282,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="curl -s https://example.com/api", effect="ask"),
     DecisionCase(input="curl -X POST https://example.com", effect="ask"),
     DecisionCase(input="curl -o f https://example.com", effect="deny"),
+    # Sandboxed executions: machinery bail-outs defer to the OS boundary,
+    # judged decisions hold, and escalation still promotes to a question.
+    DecisionCase(input="frobnicate --weird", effect="deny"),
+    DecisionCase(input="frobnicate --weird", effect="defer", sandboxed=True),
+    DecisionCase(input="sed --frob 's/a/b/' f", effect="defer", sandboxed=True),
+    DecisionCase(input="sort $UNBOUND f", effect="defer", sandboxed=True),
+    DecisionCase(input="foo() { cat x; }", effect="defer", sandboxed=True),
+    DecisionCase(input="case $m in a) echo a;;", effect="defer", sandboxed=True),
+    DecisionCase(input="git push --force", effect="ask", sandboxed=True),
+    DecisionCase(input="sed -i 's/a/b/' f", effect="deny", sandboxed=True),
+    DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
+    DecisionCase(input="echo $(whoami)", effect="deny", sandboxed=True),
+    DecisionCase(
+        input="# lup: escalate: unknown tool\nfrobnicate",
+        effect="ask",
+        sandboxed=True,
+    ),
 ]
 
 FETCH_POLICY_CASES = [
@@ -508,7 +524,9 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
         ")\n"
         "for case in fixtures['shell']:\n"
-        "    result = decide_shell(case['input'], SHELL_RULES)\n"
+        "    result = decide_shell(\n"
+        "        case['input'], SHELL_RULES, sandboxed=case['sandboxed']\n"
+        "    )\n"
         "    assert result.effect == case['effect'], case\n"
         "for case in fixtures['fetch']:\n"
         "    decision = decide_fetch(\n"
@@ -698,10 +716,36 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     bundled = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bundled)
     policy = ShellPolicy()
+    sandboxed_policy = ShellPolicy(sandbox_active=True)
 
     for case in SHELL_POLICY_CASES:
-        assert policy.decide(ShellCommand(command=case.input)).effect == case.effect
-        assert bundled.decide_shell(case.input, policy.rules).effect == case.effect
+        active = sandboxed_policy if case.sandboxed else policy
+        assert active.decide(ShellCommand(command=case.input)).effect == case.effect
+        bundled_effect = bundled.decide_shell(
+            case.input, policy.rules, sandboxed=case.sandboxed
+        ).effect
+        assert bundled_effect == case.effect
+
+
+def test_sandbox_escape_reenters_the_deny_lattice() -> None:
+    policy = ShellPolicy(sandbox_active=True)
+    confined = policy.decide(ShellCommand(command="frobnicate --weird"))
+    assert confined.effect == "defer"
+    escaped = policy.decide(
+        ShellCommand(command="frobnicate --weird", unsandboxed=True)
+    )
+    assert escaped.effect == "deny"
+    assert "escalate" in escaped.reason
+
+
+def test_claude_decoder_marks_unsandboxed_escapes() -> None:
+    payload = ClaudeHookPayload(
+        tool_name="Bash",
+        tool_input={"command": "ls", "dangerouslyDisableSandbox": True},
+    )
+    decoded = ClaudeEventDecoder().decode(parse_claude_before_tool(payload))
+    assert isinstance(decoded.tool, ShellCommand)
+    assert decoded.tool.unsandboxed
 
 
 def test_edit_policy_checks_every_file_before_allowing_batch() -> None:
