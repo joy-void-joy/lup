@@ -9,20 +9,27 @@ Tokenizing and parsing the Python source answers that question once, here, so
 neither scanner re-implements the other's mechanics.
 
 The `# lup: ignore` escape hatch — inline, or as a standalone file-level
-opt-out — is matched here too, and `LineCursor` is the shared line walk that
+opt-out — is matched here too, `LineProjections` holds the token-masked line
+views a context-aware rule scans, and `LineCursor` is the shared line walk that
 lets a scanner absorb a note's continuation lines without index bookkeeping.
 """
 
 import re
 from collections.abc import Callable
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel
 
 from lup.policy.kernel import (
     docstring_lines as python_docstring_lines,
+    mask_python_string_literals,
+    python_code_lines,
     python_comment_columns,
+    python_tokens,
 )
+
+type RuleContext = Literal["code", "comment"]
+"""The syntactic surface a scan rule inspects: masked code, or comment text."""
 
 # An `ignore` directive is bare (`# lup: ignore`, silences every rule) or typed
 # pyright-style (`# lup: ignore[rule-id, other-rule]`, silences only the named
@@ -104,6 +111,36 @@ class PythonContext(BaseModel):
     def is_note_context(self, line_no: int, col: int) -> bool:
         """Whether (`line_no`, `col`) sits in a comment or inside a docstring."""
         return self.comment_at(line_no, col) or line_no in self.docstring_lines
+
+
+class LineProjections(BaseModel):
+    """Per-context views of one file's lines for syntax-aware rule scanning.
+
+    ``code`` blanks string-literal and comment tokens — the surface a
+    "code"-context rule scans, so identifiers quoted in prose never trip it.
+    ``commented`` blanks only string literals, keeping comments visible for
+    "comment"-context directive rules. When the text does not tokenize as
+    Python — a non-Python file or an incomplete fragment — both views fall
+    back to the raw lines and ``tokenized`` is False, so a scanner can keep
+    the conservative whole-line scan.
+    """
+
+    tokenized: bool
+    code: list[str]
+    commented: list[str]
+
+    @classmethod
+    def parse(cls, text: str) -> Self:
+        return cls(
+            tokenized=python_tokens(text) is not None,
+            code=python_code_lines(text),
+            commented=mask_python_string_literals(text),
+        )
+
+    def scan_text(self, line_no: int, context: RuleContext) -> str:
+        """The stripped text a rule of `context` scans at 1-based `line_no`."""
+        lines = self.code if context == "code" else self.commented
+        return lines[line_no - 1].strip()
 
 
 class LineCursor:

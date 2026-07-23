@@ -1,4 +1,12 @@
-"""Pydantic policy adapters over the dependency-free semantic kernel."""
+"""Library-side validated policies that erase into kernel rows to decide.
+
+Each policy (shell, fetch, edit) validates its configuration as pydantic
+surfaces — URL scopes, path rules, the canonical anti-pattern set — then
+flattens them into primitive rows and delegates every verdict to
+:mod:`lup.policy.kernel`. :mod:`lup.policy.bundle` performs the same erasure
+at generation time, which is how this layer and the generated dispatchers
+stay decision-identical; the shared fixture suite asserts exactly that.
+"""
 
 from pathlib import Path
 from typing import Literal
@@ -21,14 +29,24 @@ from lup.policy.kernel import (
     parse_shell_words,
     path_rule_matches as kernel_path_rule_matches,
 )
-from lup.policy.models import Decision, EditBatch, EditChange, FetchUrl, ShellCommand
+from lup.policy.shell_rules import (
+    BASE_SHELL_RULES,
+    ShellCommandRule,
+    erase_shell_rules,
+)
+from lup.policy.models import (
+    Decision,
+    EditBatch,
+    EditChange,
+    FetchUrl,
+    ShellCommand,
+    UrlPathPrefix,
+)
 
 
 def pydantic_decision(decision: KernelDecision) -> Decision:
     """Restore the validated public decision at the kernel boundary."""
-    return Decision.model_validate(
-        {"effect": decision.effect, "reason": decision.reason}
-    )
+    return Decision(effect=decision.effect, reason=decision.reason)
 
 
 class UrlScope(BaseModel):
@@ -37,7 +55,7 @@ class UrlScope(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     origin: AnyHttpUrl
-    path_prefix: str = "/"
+    path_prefix: UrlPathPrefix = "/"
     reason: str = ""
 
 
@@ -88,19 +106,47 @@ def command_words(words: list[str]) -> list[str]:
 def parse_shell_segments(command: str) -> list[ShellSegment] | None:
     """Expose validated segment models for compatibility consumers."""
     segments = parse_shell_words(command)
-    if segments is None:
+    if isinstance(segments, KernelDecision):
         return None
     return [ShellSegment(words=words) for words in segments]
 
 
 class ShellPolicy(DecisionPolicy[ShellCommand]):
-    """Delegate shell classification to the shared hermetic kernel."""
+    """Delegate shell classification to the shared hermetic kernel.
+
+    URL scopes feed the kernel's curl screen, so shell reads and WebFetch
+    consult one declared origin table.
+    """
+
+    def __init__(
+        self,
+        rules: list[ShellCommandRule] | None = None,
+        allowed_urls: list[UrlScope] | None = None,
+        denied_urls: list[UrlScope] | None = None,
+        sandbox_active: bool = False,
+    ) -> None:
+        self.rules = erase_shell_rules(BASE_SHELL_RULES if rules is None else rules)
+        self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
+        self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
+        self.sandbox_active = sandbox_active
 
     def decide(self, event: ShellCommand) -> Decision:
-        return pydantic_decision(decide_shell(event.command))
+        return pydantic_decision(
+            decide_shell(
+                event.command,
+                self.rules,
+                self.allowed_scopes,
+                self.denied_scopes,
+                sandboxed=self.sandbox_active and not event.unsandboxed,
+            )
+        )
 
     def decide_segment(self, segment: ShellSegment) -> Decision:
-        return pydantic_decision(decide_shell_segment(segment.words))
+        return pydantic_decision(
+            decide_shell_segment(
+                segment.words, self.rules, self.allowed_scopes, self.denied_scopes
+            )
+        )
 
 
 class PathRule(BaseModel):
@@ -119,6 +165,18 @@ def path_rule_row(rule: PathRule) -> PathRuleRow:
     return (rule.kind, rule.value, rule.reason, rule.allow_autonomous)
 
 
+def human_owned_path_rule(path: str) -> PathRule:
+    """Declare one human-owned file whose edits always require approval."""
+    return PathRule(
+        kind="exact",
+        value=path,
+        reason=(
+            f"{path} is human-authored; propose changes via AskUserQuestion"
+            " instead of editing"
+        ),
+    )
+
+
 def path_rule_matches(path: Path, rule: PathRule) -> bool:
     """Compare a path with one rule through the canonical kernel matcher."""
     return kernel_path_rule_matches(path.as_posix(), path.exists(), path_rule_row(rule))
@@ -129,7 +187,9 @@ def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
     patterns = patterns_for_suffix(change.path.suffix.lower())
     if patterns is None:
         return []
-    return [(rule.id, rule.pattern.pattern, rule.message) for rule in patterns]
+    return [
+        (rule.id, rule.pattern.pattern, rule.message, rule.context) for rule in patterns
+    ]
 
 
 class EditPolicy(DecisionPolicy[EditBatch]):
@@ -153,6 +213,9 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         asked = next((item for item in decisions if item.effect == "ask"), None)
         if asked is not None:
             return asked
+        deferred = next((item for item in decisions if item.effect == "defer"), None)
+        if deferred is not None:
+            return deferred
         return Decision(effect="allow", reason="every edit in the batch is safe")
 
     def decide_change(self, change: EditChange) -> Decision:

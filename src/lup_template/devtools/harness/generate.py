@@ -1,4 +1,12 @@
-"""Ownership-safe generation shared by explicit native CLI entry points."""
+"""Ownership-safe generation engine beneath the harness CLI.
+
+Each frozen ``GenerationRecipe`` compiles the canonical catalog through an
+adapter, validates the rendered tree, reconciles it against recorded
+ownership, materializes a conflict-free proposal, and saves the manifest.
+Inspection exposes the same pipeline without writes. Console-facing command
+bodies live in ``drift`` and ``reconcile``; ``composition`` maps target names
+to concrete recipes.
+"""
 
 import json
 from pathlib import Path
@@ -7,30 +15,36 @@ from pydantic import BaseModel, ConfigDict
 
 from lup.adapters.harness import compile_claude, compile_codex
 from lup.adapters.claude.harness import (
-    CLAUDE_RESOLVER_ENTRY,
     ClaudePromptRenderer,
     ClaudeSkillInvocationRenderer,
 )
-from lup.harness.materialization import AtomicMaterializer
-from lup.harness.models import (
-    Artifact,
-    ArtifactTree,
-    Harness,
-    OwnershipManifest,
-    ReconciliationConflict,
-    ReconciliationProposal,
+from lup.adapters.codex.harness import (
+    CodexPromptRenderer,
+    CodexSkillInvocationRenderer,
 )
-from lup.harness.ownership import build_manifest, load_manifest, save_manifest
+from lup.harness.materialization import AtomicMaterializer
+from lup.harness.models import Artifact, ArtifactTree, Harness
+from lup.harness.ownership import (
+    OwnershipManifest,
+    build_manifest,
+    load_manifest,
+    save_manifest,
+)
 from lup.harness.reconciliation import (
     DeterministicReconciler,
     FilesystemCurrentTreeReader,
+    ReconciliationConflict,
+    ReconciliationProposal,
 )
 from lup.harness.contracts import CurrentTreeReader, Reconciler
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.patterns import DOCUMENT as PATTERNS
-from lup_template.devtools.harness.content.settings import SETTINGS
+from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
+)
+from lup_template.devtools.harness.content.template_codex import (
+    DOCUMENT as TEMPLATE_CODEX,
 )
 
 
@@ -117,7 +131,7 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
     content_root = Path(__file__).parent / "content"
     resolver_entry = Artifact(
         path=Path(".claude/workflows/commands/resolve.js"),
-        content=CLAUDE_RESOLVER_ENTRY,
+        content=(content_root / "assets" / "resolve.js").read_text(encoding="utf-8"),
         semantic_id="resolver.lup.entry",
     )
     support_artifacts = [
@@ -141,7 +155,9 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
         ),
         Artifact(
             path=Path(".claude/settings.json"),
-            content=json.dumps(SETTINGS, indent=2, sort_keys=True),
+            content=json.dumps(
+                project_settings(source.plugins[0].hooks), indent=2, sort_keys=True
+            ),
             semantic_id="harness.project-settings",
         ),
         resolver_entry,
@@ -175,7 +191,21 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
 def codex_generation_recipe(root: Path) -> GenerationRecipe:
     """Compose the Codex renderers, reader, and ownership location."""
     source = portable_harness(root=root)
-    desired = compile_codex(source)
+    prompts = CodexPromptRenderer(CodexSkillInvocationRenderer())
+    support_artifacts = [
+        Artifact(
+            path=Path(".codex/plugins/lup/TEMPLATE_AGENTS.md"),
+            content=prompts.render(TEMPLATE_CODEX),
+            semantic_id="harness.template-guidance",
+        ),
+    ]
+    compiled = compile_codex(source)
+    desired = ArtifactTree(
+        artifacts=sorted(
+            [*compiled.artifacts, *support_artifacts],
+            key=lambda artifact: artifact.path.as_posix(),
+        )
+    )
     manifest_path = root / ".codex" / ".lup-ownership.json"
     prior = load_manifest(manifest_path)
     return GenerationRecipe(

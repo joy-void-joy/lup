@@ -1,12 +1,43 @@
-"""Concrete local process launching for typed harness boundaries."""
+"""Local native-executable launching and its request/status vocabulary.
+
+Defines the ``ProcessLauncher`` seam and implements it for everything that
+must run a native CLI: devtools harness launch and doctor flows and the
+resolver's git and skill invocations. Its request and status models live here
+because launchers are their only producers.
+"""
 
 import os
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 import sh
+from pydantic import BaseModel, ConfigDict, Field
 
-from lup.harness.contracts import ProcessLauncher
-from lup.harness.models import ExitStatus, LaunchRequest
+from lup.types import EnvVars
+
+
+class LaunchRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    arguments: list[str]
+    cwd: Path
+    environment: EnvVars = Field(default_factory=dict)
+
+
+class ExitStatus(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    code: int
+    stdout: str = ""
+    stderr: str = ""
+
+
+class ProcessLauncher(ABC):
+    """Launch one concrete process boundary."""
+
+    @abstractmethod
+    def launch(self, request: LaunchRequest) -> ExitStatus:
+        """Launch with typed arguments and environment."""
 
 
 def decoded_output(value: bytes | str | None) -> str:
@@ -25,7 +56,7 @@ class LocalProcessLauncher(ProcessLauncher):
     that branch on ``isatty`` (pagers, colorizers) emit plain machine output.
     """
 
-    def launch(self, request: LaunchRequest) -> ExitStatus: #lup: I feel like more types should live in the file that mostly manage it instead of all living in models.py. Do you disagree? Maybe we should move the types to their own files
+    def launch(self, request: LaunchRequest) -> ExitStatus:
         if not request.arguments:
             raise ValueError("a launch request must name an executable")
         executable, *arguments = request.arguments

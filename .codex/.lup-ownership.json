@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "6e185b2298e5b4344fa773dcff99f5e9949fe9ab4c1ca70e8531eb41b4fa5215",
+  "source_digest": "b037c97b569942fad4becc20a9335cc6780785ac8856b08dc341d2a64af88f8f",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -16,42 +16,42 @@
     {
       "path": ".codex/agents/implementer.toml",
       "category": "generated",
-      "sha256": "66e526aaf1fd7267a25ce85cac798ecf6f18d7c31f7f5e594615d8a9248e839d",
+      "sha256": "2eb7e8c8ac2453ecc1b12de33c7fc811bc618aeb0d224112c9bfc7d7b0e6113e",
       "semantic_id": "agent.implementer",
       "executable": false
     },
     {
       "path": ".codex/agents/resolve-editor.toml",
       "category": "generated",
-      "sha256": "c70389ad775d2a544005ef337c012db11179a0272919c150abf35d53c9bb0ae0",
+      "sha256": "893a870f36fd4b8a485f94fe740608195860ddf77024885cfb7106239b6f6e3e",
       "semantic_id": "agent.resolve-editor",
       "executable": false
     },
     {
       "path": ".codex/agents/trace-explorer.toml",
       "category": "generated",
-      "sha256": "ec5f5be9bf08a941d06d87f224f4bd73bb21b3d7c9e0f6460edad7493feec75e",
+      "sha256": "4ea4e4a546110a96964e15dffe84221e546892d927afd003c7307938f3496265",
       "semantic_id": "agent.trace-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-explorer.toml",
       "category": "generated",
-      "sha256": "0d2fd31228efcabd03a32e57aa7a89d004227e2adfe89ea508dcb07ebc79b030",
+      "sha256": "d14621889df6667b30ae1edf19e611fdda424e29312de904ceac6156997e47a0",
       "semantic_id": "agent.version-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-reviewer.toml",
       "category": "generated",
-      "sha256": "1b2da828583ef2ce6a0ade768ff02f69092de0a26285030c638bd7dbe7deea18",
+      "sha256": "beef8a922b52eec7e450562f23bd4177997d2170605612a241cc741d07d4d9b7",
       "semantic_id": "agent.version-reviewer",
       "executable": false
     },
     {
       "path": ".codex/config.toml",
       "category": "generated",
-      "sha256": "d37497c3278121598a663564ab38b53f658969717f78decb661ddd11c66551ea",
+      "sha256": "0b91f20555e940b7ef6b672f8f9df459aa8fca480b233e96d445671bf17a677f",
       "semantic_id": "harness.project-config",
       "executable": false
     },
@@ -60,6 +60,13 @@
       "category": "generated",
       "sha256": "7267bde583a80a1cd6b8d845608493ae93aa1080f32cd3dab0bd6710c6edfae4",
       "semantic_id": "plugin.lup",
+      "executable": false
+    },
+    {
+      "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
+      "category": "generated",
+      "sha256": "fafde98880ee541fab6dee24a04ffe7c3617ae9b61d0197ac756b4cdbfcdc801",
+      "semantic_id": "harness.template-guidance",
       "executable": false
     },
     {
@@ -79,21 +86,21 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel.py",
       "category": "generated",
-      "sha256": "4444129437d790155ef2dd769c085e6dbfdec6001bb53fa1cccf80ff3ec3b5b7",
+      "sha256": "765dcca6e45b50baf8341345a347c1bab061d9840d380c956d3b4d88e56ca922",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "b9eed44ad97b59083da9196c308b2b9cc9b5feb6b4550156de70c635a06cabac",
+      "sha256": "34f745064300bdc38e08b83e907bcefbc9dc5e0d806f358ea93cd08235a9deb9",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "e3f8357a60dd1eb43c40f7c1222e8fe6b25545acb98b43f07a9f98421b3e224a",
+      "sha256": "7e440c5bd93f585ad7317f33a7d71e6d90f5fa2aafc0f7cf1a17c4621ab6ecde",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -107,7 +114,7 @@
     {
       "path": ".codex/plugins/lup/skills/brainstorm/SKILL.md",
       "category": "generated",
-      "sha256": "472e8f2a67ade1867e9e71c380cbccc65481600935a9e8cabcc1ed044f1c0b9f",
+      "sha256": "0b5ca4ff6bd1b516eb650a320abff6d72fe3cff8e7b1ca9580d516e4b5e71cea",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -198,7 +205,7 @@
     {
       "path": ".codex/plugins/lup/skills/hooks/SKILL.md",
       "category": "generated",
-      "sha256": "d0a8cc2701e7d4e30a6f1eaa1ff0d20112afced6865abf4b0b38c94222cae204",
+      "sha256": "af79994605a34963cb3b11bad2b337852e81e14ad1a68ce0daced46024fce883",
       "semantic_id": "skill.hooks",
       "executable": false
     },
@@ -212,21 +219,21 @@
     {
       "path": ".codex/plugins/lup/skills/import/SKILL.md",
       "category": "generated",
-      "sha256": "2d85b094efcfa67883f750c7716f6e829152c8eec53eb6eb71fc96f0da4d2911",
+      "sha256": "df58df9d14b2730ddba31a79a8c7843912e8f38e6f13d0a98d3c453fab5e4e2b",
       "semantic_id": "skill.import",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "ff55382c60ee449760a449c6a9154a1f03aeb2e8428e314a118e70da86c1d807",
+      "sha256": "fd5bc4d75ae79b9b5e9fe96286ab142b5136db96f1c0d0556b35575d2f4c099c",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "38ecf309c2ff8ee2a7e78dfe64bc23729d2d55169cfddb2f814d69033c1e3ca1",
+      "sha256": "5fb573de64824e5631ec292da315b11ea28d1e84a2fbb855d11a1d9c151d4d78",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -240,7 +247,7 @@
     {
       "path": ".codex/plugins/lup/skills/meta/SKILL.md",
       "category": "generated",
-      "sha256": "375c5df0eddd1c2b4b3b835acf28abf1cc942f95532285ce6b73bb44c39b839f",
+      "sha256": "de90483e43b61062081a4c766037a1dde6fb747982656a9488c8d350d7daea23",
       "semantic_id": "skill.meta",
       "executable": false
     },
@@ -254,7 +261,7 @@
     {
       "path": ".codex/plugins/lup/skills/principle/SKILL.md",
       "category": "generated",
-      "sha256": "6a561805b8b280ecc81a51d2c6589b060fae820e9ec436290e68fa40d0a9e59d",
+      "sha256": "db121bf5bd9ac47bafd6b9bdefcd9bea8e5c451fd5ace5903c9bc12338c93489",
       "semantic_id": "skill.principle",
       "executable": false
     },
@@ -268,7 +275,7 @@
     {
       "path": ".codex/plugins/lup/skills/refactor-tools/SKILL.md",
       "category": "generated",
-      "sha256": "49e354fe7b996886f919a3f92d80c87fa763a4b8e12838bc83512fa836effecb",
+      "sha256": "22d9058d972251bd4f69b07e2b076b0fb6cb60116523905b60fa8031dfd364c6",
       "semantic_id": "skill.refactor-tools",
       "executable": false
     },
@@ -289,7 +296,7 @@
     {
       "path": ".codex/plugins/lup/skills/resolve/SKILL.md",
       "category": "generated",
-      "sha256": "71c39efa9ca5885253c088cb2ea32b7ce987ebeb5f0d016d702fbae62ae272c8",
+      "sha256": "55077faaced5449514777f55dc35b61d89a15f426d3bc73217d3e445c79bd205",
       "semantic_id": "skill.resolve",
       "executable": false
     },
@@ -303,14 +310,14 @@
     {
       "path": ".codex/plugins/lup/skills/update/SKILL.md",
       "category": "generated",
-      "sha256": "cdd75d6957da5c1bca82fec3b57d2d1a612730894ee478c95b0b6b8d8a55db87",
+      "sha256": "7c50645d0bb9a60bfda31809561fc726731eb1c155d6accc94a7a1d39fef32e0",
       "semantic_id": "skill.update",
       "executable": false
     },
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "ee5371f82cf0cb9e96fa2b79d67e9b4fc65ca1502f134436c3e00ee8a5333053",
+      "sha256": "214a9fe3cae0e5a527c034bdc212dab5d593ee96a9ae8dce7452ed9f0cd2cdc1",
       "semantic_id": "harness.guidance",
       "executable": false
     }

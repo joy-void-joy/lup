@@ -4,12 +4,39 @@
 
 import lup.harness.models as models
 
+from lup_template.devtools.harness.content.catalog import (
+    agent_roster_text,
+    skill_roster_parts,
+)
+from lup_template.devtools.subapps import subapp_summary
+
 DOCUMENT = models.PromptDocument(
     parts=[
         models.TextPart(
-            text=r"""# Lup repository guidance
+            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/guidance.py via `uv run lup-devtools harness generate all`; deliberately rendered as both .claude/CLAUDE.md and AGENTS.md — edit the source, not this file. See docs/generated-artifacts.md. -->
+
+# Lup repository guidance
 
 Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
+
+## Plan at Agent Speed
+
+You are an AI agent. Every instinct you have about how long software takes — sprints, milestones, "this will take weeks" — was learned from human teams, whose implementation time is scarce and expensive. Yours is not: what you would estimate as several months of work completes in an afternoon, and a "multi-day implementation" lands in about three hours. Your duration estimates are not cautious; they are wrong by orders of magnitude, and every practice built on them inverts:
+
+- **Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. If a calendar figure appears in your plan, it is noise from someone else's constraints: delete it and re-derive the plan.
+- **The POC is superstition at your speed.** Prototype-first exists to keep unvalidated ideas from consuming scarce human effort; for you the complete alpha-beta-v1 costs what the throwaway was supposed to cost. Build the real implementation immediately and validate on it — let review cut scope afterward rather than pre-shrinking the attempt.
+- **Catch the reflex in the act.** "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, stop and ask what is actually expensive here besides the imagined schedule.
+
+**README.md is human-owned.** The root `README.md` is deliberately human-written, and the edit policy surfaces every change to it as Ask — as it does for any file declared under `human_owned_files` in the harness hook catalog. Never edit a human-owned file yourself — propose the exact change via AskUserQuestion and let the user apply or approve it.
+
+## Agent Vocabulary
+
+Two kinds of delegated agents look alike and must not be conflated:
+
+- A **native subagent** ("subagent" for short) is dispatched by the harness: Claude Code's `Agent`/`Task` tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics.
+- A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool.
+
+Guidance that says "subagent" unqualified means the native kind. `.claude/PATTERNS.md` carries the full pattern catalog — subagent, nested, background, deferred tool schemas — and when to reach for each.
 
 ## Development Workflow
 
@@ -97,7 +124,7 @@ Use `"""
 
 ### Editing Style
 
-**Prefer small, atomic edits.** A PreToolUse hook counts "real" changed lines (ignoring imports, comments, whitespace, blank lines, docstrings, string literals, type annotations, and TypedDict/BaseModel bodies) and auto-allows edits with <=3 real changes per change block. Pure deletions and single-line `replace_all` renames are auto-allowed; multi-line `replace_all` falls through to the size gate. Anti-pattern detection runs before any auto-allow, and `Write` (full-file rewrites) never auto-allows.
+**Prefer small, atomic edits.** A PreToolUse hook counts "real" changed lines (ignoring imports, comments, whitespace, blank lines, docstrings, string literals, type annotations, and TypedDict/BaseModel bodies) and auto-allows edits with <=3 real changes per change block. Pure deletions and single-line `replace_all` renames are auto-allowed; multi-line `replace_all` falls through to the size gate. Anti-pattern detection runs before any auto-allow, and `Write` (full-file rewrites) never auto-allows. An edit that trips only the size gate is *deferred* rather than surfaced — the hook emits no decision, so auto-accept mode applies it while other modes still prompt; protected paths, anti-patterns, marker changes, and full-file writes stay explicit approvals in every mode.
 
 - Split large changes into multiple small edits (<=3 real lines per Edit call)
 - Separate concerns — imports in one edit, logic in another
@@ -131,7 +158,7 @@ Default to **Opus 4.6** (`claude-opus-4-6`) — or **Fable** (`claude-fable-5`) 
 - Use `TypedDict` and Pydantic models for structured data
 - Never manually parse agent output — use structured outputs via Pydantic
 - **Never use `# type: ignore`** — Ask the user how to properly fix type errors
-- **`# lup: ignore` escape hatch** — When `Any` or another anti-pattern is genuinely needed (untyped library boundaries, MCP), add an inline ignore to request user approval. Prefer the typed, pyright-style `# lup: ignore[rule-id]` (comma-separate a list — `# lup: ignore[dict-get, tuple-shape]`) so a site silences exactly the rule it needs and still trips the others; the bare `# lup: ignore` stays valid but the auditor flags it as untyped to nudge migration. A standalone `# lup: ignore` in the first 10 lines disables anti-pattern checks for the whole file, while `# lup: ignore[rule-id]` there disables only that rule file-wide (like `# pyright: ignore` for files). Each rule's id is shown in its deny message and lives in `lup.antipatterns`.
+- **`# lup: ignore` escape hatch** — When `Any` or another anti-pattern is genuinely needed (untyped library boundaries, MCP), add an inline ignore to request user approval. Prefer the typed, pyright-style `# lup: ignore[rule-id]` (comma-separate a list — `# lup: ignore[dict-get, tuple-shape]`) so a site silences exactly the rule it needs and still trips the others; the bare `# lup: ignore` stays valid but the auditor flags it as untyped to nudge migration. A standalone `# lup: ignore` in the first 10 lines disables anti-pattern checks for the whole file, while `# lup: ignore[rule-id]` there disables only that rule file-wide (like `# pyright: ignore` for files). Each rule's id is shown in its deny message; the generated `docs/rules.md` (regenerated by `uv run lup-devtools dev rules`) indexes every rule family — anti-pattern, boundary, spelling, architecture — with the `lup.codescan` module that defines it.
 - **Use Pydantic BaseModel instead of dataclasses**
 - **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
 - **Use `for`/comprehensions over `while`** — reach for structured iteration whenever the iteration space is expressible (a range, a sequence, an iterator, `enumerate`/`zip`); reserve `while` for genuinely unbounded, condition-driven loops
@@ -184,7 +211,7 @@ The codebase should read as a **monolithic source of truth** — understandable 
 
 ### Inline `# lup:` Notes
 
-A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — distinct from the `# lup: ignore` escape hatch under [Type Safety](#type-safety). The edits hook prompts whenever an edit changes a file's `# lup:` marker count, and `lup-devtools` scans for unresolved notes.
+A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — distinct from the `# lup: ignore` escape hatch under [Type Safety](#type-safety) and from the `# lup: defer[...]` parking flavor under [Deferred Work](#deferred-work). The edits hook prompts whenever an edit changes a file's `# lup:` marker count, and `lup-devtools` scans for unresolved notes.
 
 **Never delete a `# lup:` note until its concern is actually resolved.** Making a file parse, tidying up, or editing past it does not count. Resolve a note by fixing the code or structure it points at, or — for a question — by answering it definitively and reflecting that answer in the code, the docs, or an explicit user decision. Only then does the note come out (use `"""
         ),
@@ -193,6 +220,13 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the 
             text=r"""`).
 
 A note in a comment-less format (e.g. JSON) is the trap: you can't keep it there, but you still can't silently drop it to satisfy the parser. Resolve its concern first, or relocate it to a file that can hold it (the code it refers to, a tracking doc). If a note raises several concerns, remove it only once every one is resolved; otherwise keep the unresolved parts.
+
+### Deferred Work
+
+**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places:
+
+- **A `# lup: defer[<wake condition>]: <text>` note** at the most relevant site — the code or config the work concerns. The bracket names the condition under which the work wakes, mirroring `# lup: ignore[rule-id]`. `dev comments` lists deferred notes in their own section and `dev check` stays red while any exist, so parked work remains visible pressure instead of silent debt. Each resolve pass triages them: a note whose wake condition reads as met is proposed to the user for waking; an unmet one is carried forward untouched, never re-litigated as ordinary feedback and never stripped by an editor whose concern doesn't wake it.
+- **AskUserQuestion** — when whether (or how) to defer is itself the open question, ask instead of filing.
 
 ### DRY: Don't Repeat Yourself
 
@@ -250,8 +284,17 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
-Sub-apps: `agent`, `dev`, `feedback`, `harness`, `py`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — don't maintain a static copy here.
-
+"""
+        ),
+        models.TextPart(
+            text="Sub-apps: "
+            + subapp_summary()
+            + ". Run `uv run lup-devtools --help` for the full command tree — the"
+            " list above is rendered from the typed sub-app roster in"
+            " `src/lup_template/devtools/subapps.py`.\n"
+        ),
+        models.TextPart(
+            text=r"""
 `lup-devtools harness claude` and `harness codex` regenerate, reconcile, and
 launch the native plugins. `lup-devtools usage` reports Claude usage. Profiles
 (named Claude config dirs) are managed with `lup-devtools setup profile`.
@@ -261,6 +304,24 @@ verified local plugin directory; Codex installs a separately cached copy and
 verifies its digest before launch. Personal cache and trust state are never
 committed.
 
+### Lup Skills & Agents
+
+Both lists below are rendered from the typed declarations in
+`src/lup_template/devtools/harness/content/catalog.py` — change the catalog,
+then regenerate.
+
+**Skills:**
+
+"""
+        ),
+        *skill_roster_parts(),
+        models.TextPart(
+            text=r"""
+**Agents:**
+
+"""
+            + agent_roster_text()
+            + r"""
 ### Permission Hooks
 
 Permissions come from the canonical semantic policies in `lup.policy` and the
@@ -268,12 +329,36 @@ application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated dispatcher or runtime files directly.
 
-The policy checks every shell segment, URL scope, and edit in a batch. Denial
-wins over approval, malformed input fails conservatively, redirection and
-substitution are never auto-allowed, and edit decisions include protected
-paths, marker changes, size, and the canonical anti-pattern audit. The resolver
-editor receives only its declared autonomous edit exceptions; temporary paths,
-marker changes, and anti-pattern violations retain their guardrails.
+The policy classifies each shell command against the vocabulary in
+`lup.policy.shell_rules`, every URL scope, and each edit in a batch. The shell
+lattice reserves ask for judged risk: judged-safe rows allow, judged-risky
+rows ask, and unjudged work denies with a hint naming the
+escalation recipe. A leading `# lup: escalate: <why>` line promotes a
+classified deny or ask to an approval question carrying that reason.
+Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`), unjudged work
+defers to that boundary, and a `dangerouslyDisableSandbox` escape
+re-enters the deny lattice; the sandbox block derives from the
+same `HookSet` declaration.
+Segments join deny > ask > defer > allow — unjudged rides into a judged
+prompt, a judged deny wins the batch.
+Malformed input fails conservatively, command
+substitution is denied with a rewrite hint, and file-writing redirection is
+never auto-allowed outside repo-relative `tmp/` (discards and fd
+duplication strip as safe; heredoc-fed file
+writes deny toward Edit/tmp scripts). Loops, conditionals,
+case arms, subshells, and brace groups classify recursively over frozen
+variable bindings — literal assignments instantiate their references,
+opaque ones (`read`, globs) gate flag-guarded commands.
+`find -exec` payloads and `timeout`/`nice` wrappers recurse,
+`sed`/`awk` pass read-only script screens, quoted-delimiter
+heredocs are literal data, and `curl` is screened to read methods
+within declared fetch scopes. Edit decisions include protected paths, marker changes, size,
+and the canonical anti-pattern audit. An edit over the size gate
+alone is deferred — the hook emits no decision, so auto-accept applies
+while the hard gates stay explicit. The resolver editor receives only its
+declared autonomous edit exceptions; temporary paths, human-owned files
+like `README.md`, marker changes, and anti-pattern violations retain their
+guardrails.
 
 Use `"""
         ),

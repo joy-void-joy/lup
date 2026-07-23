@@ -14,7 +14,14 @@ SKILL = models.Skill(
         ),
     ],
     tools=[
-        "Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, Skill(lup:commit)"
+        "Bash(git:*, uv run lup-devtools:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "AskUserQuestion",
+        "Skill(lup:commit)",
     ],
     argument_hint="<project> <pattern description>",
     prompt=models.PromptDocument(
@@ -38,7 +45,7 @@ Import a specific pattern, feature, or approach from a tracked downstream reposi
 
 ### Parse Arguments
 
-The first word is the **project name** (must match a tracked project in `downstream.json`). Everything after is the **pattern description** — a natural language description of what to import.
+The first word is the **project name** (must match a tracked project in `sync.json` or `sync.json.local`). Everything after is the **pattern description** — a natural language description of what to import.
 
 **Examples:**
 

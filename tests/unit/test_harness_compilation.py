@@ -1,6 +1,7 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
 import json
+from importlib import resources
 from pathlib import Path
 from typing import Literal
 
@@ -25,8 +26,6 @@ from lup.harness.models import (
     Artifact,
     ArgumentsRef,
     ArtifactTree,
-    CurrentArtifact,
-    CurrentTree,
     Harness,
     InvocationArgument,
     PromptDocument,
@@ -35,16 +34,30 @@ from lup.harness.models import (
     SkillInvocation,
     TextPart,
 )
-from lup.harness.ownership import build_manifest, save_manifest
+from lup.harness.ownership import (
+    OwnershipManifestError,
+    build_manifest,
+    content_digest,
+    load_manifest,
+    save_manifest,
+)
 from lup.harness.proposals import ReconciliationProposalWriter
 from lup.harness.reconciliation import (
+    CurrentArtifact,
+    CurrentTree,
     DeterministicReconciler,
     FilesystemCurrentTreeReader,
-    content_digest,
     source_patch_base_digest,
 )
 from lup.policy.bundle import policy_kernel_source
 from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.settings import project_settings
+from lup_template.devtools.harness.content.template_claude import (
+    DOCUMENT as TEMPLATE_CLAUDE,
+)
+from lup_template.devtools.harness.content.template_codex import (
+    DOCUMENT as TEMPLATE_CODEX,
+)
 from lup_template.devtools.harness.generate import (
     GenerationRecipe,
     claude_generation_recipe,
@@ -104,6 +117,37 @@ def test_claude_tree_renders_every_typed_support_document() -> None:
     assert Path(".claude/settings.json") in paths
 
 
+def test_codex_tree_renders_the_agents_flavored_template() -> None:
+    paths = {
+        artifact.path
+        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+    }
+
+    assert Path(".codex/plugins/lup/TEMPLATE_AGENTS.md") in paths
+
+
+def test_template_flavors_share_sections_and_differ_natively() -> None:
+    claude_render = ClaudePromptRenderer(ClaudeSkillInvocationRenderer()).render(
+        TEMPLATE_CLAUDE
+    )
+    codex_render = CodexPromptRenderer(CodexSkillInvocationRenderer()).render(
+        TEMPLATE_CODEX
+    )
+
+    def sections(render: str) -> list[str]:
+        return [
+            line for line in render.splitlines() if line.startswith("<!-- section: ")
+        ]
+
+    assert sections(claude_render)[0] == "<!-- section: CLAUDE.md -->"
+    assert sections(codex_render)[0] == "<!-- section: AGENTS.md -->"
+    assert sections(claude_render)[1:] == sections(codex_render)[1:]
+    assert "/lup:init" in claude_render and "$lup:" not in claude_render
+    assert "$lup:init" in codex_render and "/lup:" not in codex_render
+    assert "AskUserQuestion" in claude_render
+    assert "AskUserQuestion" not in codex_render
+
+
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
     recipe = claude_generation_recipe(Path.cwd())
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
@@ -117,16 +161,20 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
 
 
 def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None:
+    harness = portable_harness()
     claude = {
         artifact.path: artifact.content
-        for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
+        for artifact in compile_claude(harness).artifacts
     }
     codex = {
-        artifact.path: artifact.content
-        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+        artifact.path: artifact.content for artifact in compile_codex(harness).artifacts
     }
     command = claude[Path(".claude/plugins/lup/commands/resolve.md")]
-    workflow = claude[Path(".claude/workflows/commands/resolve.js")]
+    workflow = (
+        resources.files("lup_template.devtools.harness.content")
+        .joinpath("assets/resolve.js")
+        .read_text("utf-8")
+    )
     skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
 
     workflow_call = (
@@ -134,10 +182,12 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
     )
     assert workflow_call in command
     assert "Triage into concerns" not in command
+    assert '"run_id"' in command and '"accept"' in command
     assert "'harness',\n  'resolve',\n  '--adapter',\n  'claude'" in workflow
     assert "input.inventory" not in workflow
     assert "requires run_id" not in workflow
     assert "uv run lup-devtools harness resolve --adapter codex" in skill
+    assert "--run-id" in skill and "--accept" in skill
     assert "scheduling" not in skill
 
 
@@ -199,7 +249,7 @@ def test_typed_content_package_has_expected_module_inventory() -> None:
     content = Path("src/lup_template/devtools/harness/content")
     sources = list(content.rglob("*.py"))
 
-    assert len(sources) == 44
+    assert len(sources) == 46
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:
@@ -474,11 +524,17 @@ def test_native_override_does_not_silently_reown_backpropagation(
 def test_codex_cache_digest_requires_an_exact_separate_copy(tmp_path: Path) -> None:
     source = tmp_path / "source"
     home = tmp_path / "home"
-    installed = home / "plugins" / "cache" / "lup-repository" / "lup" / "local"
+    # codex caches an installed plugin under its manifest version segment.
+    installed = home / "plugins" / "cache" / "lup-repository" / "lup" / "9.9.9"
     source.mkdir()
     installed.mkdir(parents=True)
-    (source / "plugin.txt").write_text("same\n", encoding="utf-8")
-    (installed / "plugin.txt").write_text("same\n", encoding="utf-8")
+    for root in (source, installed):
+        manifest_dir = root / ".codex-plugin"
+        manifest_dir.mkdir()
+        (manifest_dir / "plugin.json").write_text(
+            '{"name": "lup", "version": "9.9.9"}\n', encoding="utf-8"
+        )
+        (root / "plugin.txt").write_text("same\n", encoding="utf-8")
     config = PluginCacheConfig(codex_home=home)
 
     assert plugin_cache_evidence(source, config).ready
@@ -599,6 +655,32 @@ def test_generated_claude_hook_maps_agent_type_to_editor_autonomy() -> None:
     assert decision("lup:resolve-editor") == "allow"
 
 
+def test_generated_claude_hook_asks_for_human_owned_readme_edits() -> None:
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    payload = {
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": str(Path("README.md").resolve()),
+            "content": "# Rewritten by an agent\n",
+        },
+    }
+
+    def decision(agent_type: str | None) -> ClaudeHookDecision:
+        body = (
+            dict(payload)
+            if agent_type is None
+            else {**payload, "agent_type": agent_type}
+        )
+        result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
+        assert isinstance(result, sh.RunningCommand)
+        return ClaudeHookOutput.model_validate_json(result.stdout).hook_specific_output
+
+    assert decision(None).permission_decision == "ask"
+    autonomous = decision("resolve-editor")
+    assert autonomous.permission_decision == "ask"
+    assert "human-authored" in autonomous.permission_decision_reason
+
+
 def test_generated_codex_hook_fails_closed_for_unknown_tools() -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     result = sh.Command(str(script))(
@@ -705,3 +787,285 @@ def test_unchanged_ownership_manifest_is_not_replaced(tmp_path: Path) -> None:
     save_manifest(path, manifest)
 
     assert path.stat().st_ino == inode
+
+
+def test_annotated_ownership_manifest_raises_a_typed_recovery_error(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / ".lup-ownership.json"
+    assert load_manifest(path) is None
+    manifest = build_manifest(
+        portable_harness(),
+        ArtifactTree(artifacts=[]),
+        generator_version="test",
+        target_requirements=[],
+    )
+    save_manifest(path, manifest)
+    assert load_manifest(path) == manifest
+
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("# a trailing annotation\n")
+
+    with pytest.raises(OwnershipManifestError, match="repair or remove"):
+        load_manifest(path)
+
+
+def test_proven_obsolete_deletion_is_proposed_and_executed(tmp_path: Path) -> None:
+    obsolete = tmp_path / "obsolete.txt"
+    obsolete.write_text("stale output\n", encoding="utf-8")
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("obsolete.txt"),
+                content="stale output\n",
+                category="generated",
+                sha256=content_digest("stale output\n"),
+            )
+        ],
+    )
+
+    proposal = DeterministicReconciler().propose(current, ArtifactTree(artifacts=[]))
+    result = AtomicMaterializer().apply(proposal)
+
+    assert [delete.path for delete in proposal.deletes] == [Path("obsolete.txt")]
+    assert result.removed == [Path("obsolete.txt")]
+    assert not obsolete.exists()
+
+
+def test_deletion_with_changed_ownership_proof_is_refused(tmp_path: Path) -> None:
+    obsolete = tmp_path / "obsolete.txt"
+    obsolete.write_text("stale output\n", encoding="utf-8")
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("obsolete.txt"),
+                content="stale output\n",
+                category="generated",
+                sha256=content_digest("stale output\n"),
+            )
+        ],
+    )
+    proposal = DeterministicReconciler().propose(current, ArtifactTree(artifacts=[]))
+    obsolete.write_text("user edited after the proposal\n", encoding="utf-8")
+
+    with pytest.raises(MaterializationConflictError, match="ownership proof changed"):
+        AtomicMaterializer().apply(proposal)
+    assert obsolete.exists()
+
+
+def test_materialization_rejects_stale_executable_mode(tmp_path: Path) -> None:
+    path = tmp_path / "hook.py"
+    path.write_text("pass\n", encoding="utf-8")
+    path.chmod(0o644)
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("hook.py"),
+                content="pass\n",
+                category="generated",
+                sha256=content_digest("pass\n"),
+                executable=False,
+            )
+        ],
+    )
+    desired = ArtifactTree(
+        artifacts=[
+            Artifact(path=Path("hook.py"), content="updated\n", semantic_id="hook")
+        ]
+    )
+    proposal = DeterministicReconciler().propose(current, desired)
+    path.chmod(0o755)  # mode drift between proposal and apply
+
+    with pytest.raises(MaterializationConflictError, match="stale executable mode"):
+        AtomicMaterializer().apply(proposal)
+    assert path.read_text(encoding="utf-8") == "pass\n"
+
+
+@pytest.mark.parametrize(
+    ("patch", "message"),
+    [
+        (
+            "diff --git a/x.py b/x.py\ndiff --git a/y.py b/y.py\n--- a/y.py\n",
+            "missing its old-file header",
+        ),
+        ("diff --git a/x.py\n--- a/x.py\n", "malformed git source-patch header"),
+        ("diff --git x/a.py y/a.py\n--- x/a.py\n", "repository-relative"),
+        ("diff --git a/x.py b/x.py\n--- a/other.py\n", "does not match its diff"),
+        ("diff --git a/x.py b/x.py\n", "missing its old-file header"),
+        ("just prose\n", "no git file entries"),
+    ],
+    ids=[
+        "header-without-old-file",
+        "truncated-header",
+        "foreign-prefixes",
+        "mismatched-old-file",
+        "trailing-header",
+        "no-entries",
+    ],
+)
+def test_malformed_source_patches_are_rejected(
+    tmp_path: Path, patch: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        source_patch_base_digest(tmp_path, patch)
+
+
+def test_source_digest_rejects_symlinked_preimage_escape(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (outside / "file.py").write_text("secret\n", encoding="utf-8")
+    (root / "link").symlink_to(outside, target_is_directory=True)
+    patch = (
+        "diff --git a/link/file.py b/link/file.py\n"
+        "--- a/link/file.py\n"
+        "+++ b/link/file.py\n"
+    )
+
+    with pytest.raises(ValueError, match="escapes the repository"):
+        source_patch_base_digest(root, patch)
+
+
+def test_declared_sensitive_paths_are_classified_without_content(
+    tmp_path: Path,
+) -> None:
+    path = Path("secrets.env")
+    (tmp_path / path).write_text("API_KEY=hunter2\n", encoding="utf-8")
+
+    tree = FilesystemCurrentTreeReader(None, sensitive_local_only=[path]).read(tmp_path)
+
+    assert [(item.category, item.content) for item in tree.artifacts] == [
+        ("sensitive_local_only", "")
+    ]
+    assert tree.artifacts[0].sha256  # identity still proven for reconciliation
+
+
+def test_missing_root_reads_as_an_empty_tree(tmp_path: Path) -> None:
+    tree = FilesystemCurrentTreeReader(None).read(tmp_path / "ghost")
+
+    assert tree.artifacts == []
+
+
+def test_symlink_escaping_the_root_is_sensitive_and_unread(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("credential\n", encoding="utf-8")
+    (root / "escape.txt").symlink_to(secret)
+
+    tree = FilesystemCurrentTreeReader(None).read(root)
+
+    assert [(item.category, item.content, item.sha256) for item in tree.artifacts] == [
+        ("sensitive_local_only", "", "")
+    ]
+
+
+def test_binary_local_only_file_cannot_claim_local_preservation(
+    tmp_path: Path,
+) -> None:
+    path = Path("local.bin")
+    (tmp_path / path).write_bytes(b"\xff\xfe")
+
+    tree = FilesystemCurrentTreeReader(None, local_only=[path]).read(tmp_path)
+
+    assert tree.artifacts[0].category == "unknown_conflict"
+    assert tree.artifacts[0].content == ""
+
+
+def test_binary_owned_file_requires_explicit_reconciliation(tmp_path: Path) -> None:
+    path = Path("owned.md")
+    manifest = build_manifest(
+        portable_harness(),
+        ArtifactTree(
+            artifacts=[Artifact(path=path, content="text\n", semantic_id="owned")]
+        ),
+        generator_version="test",
+        target_requirements=[],
+    )
+    (tmp_path / path).write_bytes(b"\xff\xfe")
+
+    tree = FilesystemCurrentTreeReader(manifest, managed_paths=[path]).read(tmp_path)
+
+    assert tree.artifacts[0].category == "unknown_conflict"
+    assert tree.artifacts[0].content == ""
+
+
+def test_exact_content_adoption_still_corrects_executable_drift(
+    tmp_path: Path,
+) -> None:
+    content = "#!/bin/sh\n"
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("hook.sh"),
+                content=content,
+                category="unknown_conflict",
+                sha256=content_digest(content),
+                executable=False,
+            )
+        ],
+    )
+    desired = ArtifactTree(
+        artifacts=[
+            Artifact(
+                path=Path("hook.sh"),
+                content=content,
+                semantic_id="hook",
+                executable=True,
+            )
+        ]
+    )
+
+    proposal = DeterministicReconciler().propose(current, desired)
+
+    assert proposal.conflicts == []
+    assert [
+        (write.previous_sha256, write.previous_executable) for write in proposal.writes
+    ] == [(content_digest(content), False)]
+    assert proposal.writes[0].artifact.executable
+
+
+def test_proposal_rewrite_is_idempotent_but_tampering_refuses(tmp_path: Path) -> None:
+    source = tmp_path / "source.py"
+    source.write_text("old\n", encoding="utf-8")
+    patch = (
+        "diff --git a/source.py b/source.py\n"
+        "--- a/source.py\n"
+        "+++ b/source.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new"  # no trailing newline: the writer must normalize it
+    )
+
+    writer = ReconciliationProposalWriter()
+    record = writer.write(tmp_path, patch)
+    assert writer.write(tmp_path, patch) == record  # identical re-write is a no-op
+
+    patch_path = tmp_path / ".lup" / "reconcile" / record.proposal_id / "source.patch"
+    assert patch_path.read_text(encoding="utf-8").endswith("\n")
+    patch_path.write_text("tampered\n", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="collision"):
+        writer.write(tmp_path, patch)
+
+
+def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
+    hooks = portable_harness().plugins[0].hooks
+    assert hooks is not None
+    settings = project_settings(hooks)
+    sandbox = settings["sandbox"]
+    assert isinstance(sandbox, dict)
+    filesystem = sandbox["filesystem"]
+    network = sandbox["network"]
+    assert isinstance(filesystem, dict) and isinstance(network, dict)
+    assert filesystem["denyWrite"] == ["README.md"]
+    domains = network["allowedDomains"]
+    assert isinstance(domains, list)
+    assert "code.claude.com" in domains
+    assert "github.com" in domains
+    assert "sandbox" not in project_settings(None)

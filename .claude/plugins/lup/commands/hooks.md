@@ -18,8 +18,13 @@ $ARGUMENTS
 ## Sources of truth
 
 - `packages/lup/src/lup/policy/` owns semantic fetch, shell, edit, aggregation,
-  and native-boundary contracts.
-- `packages/lup/src/lup/codescan/antipatterns.py` owns anti-pattern rules.
+  and native-boundary contracts; the shell auto-allow vocabulary is the
+  readable table in `policy/shell_rules.py`, erased to kernel rows like the
+  fetch scopes and anti-pattern set.
+- `packages/lup/src/lup/codescan/` owns the rule families — anti-patterns
+  (`antipatterns.py`), boundary/spelling seams (`boundaries.py`), capability
+  architecture (`capabilities.py`) — indexed by `registry.py` and rendered
+  into `docs/rules.md` by `uv run lup-devtools dev rules`.
 - `src/lup_template/devtools/harness/catalog.py` owns application URL scopes,
   protected roots, policy IDs, and other composition inputs.
 - `tests/unit/test_semantic_policy.py` is the shared canonical/bundled fixture

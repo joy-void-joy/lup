@@ -65,7 +65,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from lup.workspace.paths import path_is_under
-from lup.types import JsonObject
+from lup.types import JsonObject, ToolName
 
 type LupHookEvent = Literal["PreToolUse", "PostToolUse", "Stop"]
 """The canonical hook-event names — the neutral seam every backend maps onto.
@@ -302,7 +302,7 @@ def create_git_inspection_hook() -> LupHooksConfig:
 
 
 def create_tool_allowlist_hook(
-    allowed_tools: list[str],
+    allowed_tools: list[ToolName],
 ) -> LupHooksConfig:
     """Create a PreToolUse hook that restricts the agent to an allowed tool set.
 
@@ -339,7 +339,7 @@ def create_tool_allowlist_hook(
 
 
 def create_nudge_hook(
-    nudges: dict[str, NudgeCheck],
+    nudges: dict[ToolName, NudgeCheck],
 ) -> LupHooksConfig:
     """Create a PostToolUse hook that nudges the agent toward better alternatives.
 
@@ -385,7 +385,7 @@ def create_nudge_hook(
 
 
 def create_capture_hook[T](
-    tool_name: str,
+    tool_name: ToolName,
     extract: Callable[[LupHookInput], list[T]],
     # A model would revalidate-copy the live captured list — pair stays a tuple.
 ) -> tuple[LupHooksConfig, list[T]]:  # lup: ignore[tuple-shape] — destructured pair
@@ -422,10 +422,10 @@ def create_capture_hook[T](
 
 def create_tool_gate(
     *,
-    gated_tool: str | Sequence[str] | None = None,
+    gated_tool: ToolName | Sequence[ToolName] | None = None,
     message: str | Callable[[], str],
     unlocked: Callable[[LupHookInput], bool] | None = None,
-    on_unlock_tool: str | None = None,
+    on_unlock_tool: ToolName | None = None,
     event: Literal["PreToolUse", "Stop"] = "PreToolUse",
     style: Literal["deny", "block"] = "deny",
     allow_when_unlocked: bool = False,
@@ -540,7 +540,7 @@ def create_tool_gate(
 def create_completion_guard(
     output_exists: Callable[[], bool],
     *,
-    output_tool_name: str = "mcp__notes__submit_output",
+    output_tool_name: ToolName = "mcp__notes__submit_output",
     max_blocks: int = 3,
 ) -> LupHooksConfig:
     """Create a Stop hook that blocks finishing until output is submitted.

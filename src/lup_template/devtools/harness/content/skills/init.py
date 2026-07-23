@@ -9,7 +9,13 @@ SKILL = models.Skill(
     name="init",
     description="Initialize the self-improvement loop for a specific domain",
     tools=[
-        "Bash(uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*), Read, Grep, Glob, Edit, Write, AskUserQuestion"
+        "Bash(uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "AskUserQuestion",
     ],
     prompt=models.PromptDocument(
         parts=[
@@ -125,12 +131,12 @@ This handles directory rename (`src/lup_template/` -> `src/<project>/`), import 
 
 ### After renaming:
 
-1. **Merge CLAUDE.md from template** -- Perform a section-level merge using `TEMPLATE_CLAUDE.md` (located at `.claude/plugins/lup/TEMPLATE_CLAUDE.md`):
-   1. Read `TEMPLATE_CLAUDE.md` and replace `<project>` placeholders with the actual project name
-   2. Read the existing `.claude/CLAUDE.md`
+1. **Merge the guidance file from its template** -- Perform a section-level merge into the platform guidance file using its matching template flavor: `.claude/CLAUDE.md` from `.claude/plugins/lup/TEMPLATE_CLAUDE.md` under Claude Code, the repository-root `AGENTS.md` from `.codex/plugins/lup/TEMPLATE_AGENTS.md` under Codex (merge both when the project commits both harness trees):
+   1. Read the template and replace `<project>` placeholders with the actual project name
+   2. Read the existing guidance file
    3. Use the `<!-- section: ... -->` markers in the template to identify independent merge units
-   4. Compare sections: for each marked section, check if the existing CLAUDE.md already has that section (by heading match)
-   5. Add missing sections from the template into the existing CLAUDE.md
+   4. Compare sections: for each marked section, check if the existing guidance file already has that section (by heading match)
+   5. Add missing sections from the template into the existing guidance file
    6. Leave existing sections untouched -- don't overwrite content the project already has
 
 2. **Initialize upstream sync**:
@@ -232,6 +238,7 @@ Customize the interactive setup wizard for the domain's integrations:
 - Update the `INTEGRATIONS` list — each entry is an `Integration(name, env_keys, setup_func, status_func)`
 - Add corresponding `@app.command()` subcommands for individual integration setup
 - Update env var names in `config.py` to match what the setup wizard writes to `.env.local`
+- Verify `lup-devtools dashboard` exposes the same registry: declarative fields become browser forms, while bespoke flows link back to their CLI command
 
 The framework (env helpers, status table, mask, clipboard, browser open, wizard flow) is reusable — only the integration functions and registry need customization.
 
@@ -279,7 +286,7 @@ Once the scaffolding is generated, guide the user to:
 - `src/<project>/agent/subagents.py` -- Specialized subagents
 - `src/<project>/agent/tool_policy.py` -- Tool availability and MCP servers
 - `src/<project>/agent/core.py` -- Options building and orchestration
-- `src/<project>/agent/tools/reflect.py` -- Reflection tool and reviewer sub-agent
+- `src/<project>/agent/tools/reflect.py` -- Reflection tool and nested reviewer agent
 - `src/<project>/agent/prompts.py` -- System prompt templates
 - `src/<project>/environment/cli/__main__.py` -- CLI with loop + auto-commit
 - `src/<project>/devtools/setup.py` -- Setup wizard (integrations, env vars)

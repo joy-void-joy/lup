@@ -12,8 +12,6 @@ Usage:
     from lup_template.agent.config import settings
     print(settings.model)
 """
-# lup: please review the setup code in https://github.com/joy-void-joy/assistant/tree/dev and https://github.com/joy-void-joy/inkwell/tree/dev for setup workflow that should be present in those
-# We should also copy their UI patterns, and have lup host a dashboard
 
 import logging
 import os
@@ -163,6 +161,20 @@ class Settings(BaseSettings):
         ),
     )
 
+    tool_search: str | None = Field(
+        default="false",
+        validation_alias="AGENT_TOOL_SEARCH",
+        description=(
+            "Claude tool-schema deferral (ENABLE_TOOL_SEARCH): false loads "
+            "every schema upfront, true forces tool search, auto/auto:N "
+            "defer past a context threshold, None inherits the harness "
+            "default. Defaults to false because the template serves a small "
+            "curated surface where a deferred (invisible) tool risks the "
+            "agent concluding the capability is missing — see PATTERNS.md "
+            "§ Deferred Tool Schemas. Claude sessions only."
+        ),
+    )
+
     permission_mode: (
         Literal["default", "acceptEdits", "plan", "bypassPermissions"] | None
     ) = Field(
@@ -289,7 +301,7 @@ class Settings(BaseSettings):
 
 
 # Singleton instance
-settings = Settings.model_validate({})
+settings = Settings()
 
 
 def aux_model() -> str:

@@ -14,9 +14,9 @@ Review commits from tracked downstream repositories since the last sync. General
 
 ## Setup
 
-If `downstream.json` does not exist, help the user set it up.
+If `sync.json` does not exist, help the user set it up. Never modify the committed `sync.json` — it is template scaffold, and every personal registration belongs in the gitignored `sync.json.local`.
 
-**Self-referencing repos:** When the current repo IS the upstream (e.g., the lup template itself), set `"ignore": true` in `downstream.json.local` to skip it during updates. The committed `downstream.json` still ships the URL so downstream users can sync from it.
+**Self-referencing repos:** When the current repo IS the upstream (e.g., the lup template itself), set `"ignore": true` in `sync.json.local` to skip it during updates. The committed `sync.json` still ships the URL so downstream users can sync from it.
 
 ```bash
 # Set a local path for the lup template repo
@@ -78,8 +78,8 @@ Classify as:
   - **CLAUDE.md improvements** (coding standards, workflow tips, new guidelines)
 
 - **Portable as scaffold**: Domain-specific implementations that represent a generalizable _pattern_. These get ported with domain details replaced by template placeholders.
-  - **New agents/subagents** — A "version-reviewer" that uses Brier scores becomes a scaffold version-reviewer that uses generic outcome metrics. A "forecast reviewer" sub-agent becomes a generic "reviewer" scaffold that critiques agent output.
-  - **New tools or tool patterns** — A domain-specific reflection tool becomes a scaffold for structured self-assessment tools. A tool that calls a sub-agent internally is a reusable pattern.
+  - **New agents/subagents** — A "version-reviewer" that uses Brier scores becomes a scaffold version-reviewer that uses generic outcome metrics. A "forecast reviewer" nested agent becomes a generic "reviewer" scaffold that critiques agent output.
+  - **New tools or tool patterns** — A domain-specific reflection tool becomes a scaffold for structured self-assessment tools. A tool that runs a nested agent internally is a reusable pattern.
   - **New commands** — A "leak-investigator" for retrodiction becomes a scaffold for investigator-style commands
   - **Workflow improvements** — Offline mode for a specific API becomes a general "graceful degradation" pattern
   - **Reusable lib patterns** — A "response collector" that prints+logs SDK blocks is a general utility. A JSON pretty-printer for tool results belongs in lib.

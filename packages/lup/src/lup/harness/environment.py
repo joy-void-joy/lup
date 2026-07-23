@@ -5,8 +5,9 @@ resolver console owns — so a passphrase or editor prompt raised from an agent
 shell wedges the whole session instead of failing. These variables make every
 such command fail fast with a readable error: ssh refuses to prompt (keys
 already loaded in ssh-agent keep working), git never opens an editor or pager,
-and gh and keyring lookups stay non-interactive. Callers merge the defaults
-beneath their existing environment so explicit caller values always win.
+and gh and keyring lookups stay non-interactive. The devtools launch and
+resolver flows merge these defaults beneath the inherited environment at
+every agent spawn point, so explicit caller values always win.
 """
 
 from collections.abc import Mapping
@@ -27,6 +28,8 @@ NON_INTERACTIVE_SHELL_ENV: EnvVars = {
 }
 
 
-def non_interactive_environment(base: Mapping[str, str]) -> EnvVars:
+def non_interactive_environment(
+    base: Mapping[str, str],  # lup: ignore[dict-str-payload] — open env-var map
+) -> EnvVars:
     """Merge the non-interactive defaults beneath an existing environment."""
     return {**NON_INTERACTIVE_SHELL_ENV, **base}

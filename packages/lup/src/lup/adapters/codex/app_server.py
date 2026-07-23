@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from queue import Queue
 
@@ -124,7 +124,7 @@ class CodexAppServer:
             _err=receive_error,
             _bg=True,
             _encoding="utf-8",
-            _env=environment,  # lup: ignore[private-variable] — sh native keyword
+            _env=environment,
         )
         if not isinstance(running, sh.RunningCommand):
             raise RuntimeError("Codex app-server did not start as a background process")
@@ -289,13 +289,3 @@ class CodexAppServer:
                     error=RpcError(code=-32000, message=str(error)),
                 )
             )
-
-
-async def notification_iterator(
-    queue: asyncio.Queue[RpcNotification | None],
-) -> AsyncIterator[RpcNotification]:
-    """Iterate a notification queue until its explicit terminal sentinel."""
-    while (
-        notification := await queue.get()  # lup: ignore[dict-get] — asyncio.Queue
-    ) is not None:
-        yield notification

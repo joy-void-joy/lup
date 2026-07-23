@@ -214,9 +214,11 @@ __marimo__/
 # opting in removes these two notes/ lines.
 notes/*
 !notes/.gitkeep
+# lup: defer[until in-flight branches merge]: purge notes/feedback_loop from dev history — remnant commit 2d40f7c tracks 4 notes/feedback_loop files reachable from origin/dev and the pushed feature branches (main is clean); rewrite with filter-branch (--index-filter git rm -r --cached notes/feedback_loop notes/traces, range ^main), force-push rewritten branches, then drop refs/original backup refs
 worktrees/
 tmp/
 .lup/
+sync.json.local
 downstream.json.local
 .cache/
 refs/

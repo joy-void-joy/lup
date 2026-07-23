@@ -1,6 +1,7 @@
 """Codex CLI evidence, cache verification, and explicit plugin installation."""
 
 import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -26,7 +27,9 @@ class PluginCacheConfig(BaseModel):
     codex_home: Path = Field(default_factory=lambda: Path.home() / ".codex")
     marketplace: str = "lup-repository"
     plugin: str = "lup"
-    version: str = "local"
+    # None derives the cache segment from the plugin manifest — codex caches
+    # an installed plugin under its declared version.
+    version: str | None = None
 
 
 class PluginCacheEvidence(BaseModel):
@@ -62,6 +65,16 @@ def directory_digest(root: Path) -> str | None:
     return digest.hexdigest()
 
 
+def plugin_manifest_version(source_root: Path) -> str:
+    """The version segment codex caches this plugin under, from its manifest."""
+    manifest = source_root / ".codex-plugin" / "plugin.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    match data:
+        case {"version": str(version)}:
+            return version
+    raise ValueError(f"Codex plugin manifest lacks a version: {manifest}")
+
+
 def plugin_cache_evidence(
     source_root: Path, config: PluginCacheConfig
 ) -> PluginCacheEvidence:
@@ -75,7 +88,7 @@ def plugin_cache_evidence(
         / "cache"
         / config.marketplace
         / config.plugin
-        / config.version
+        / (config.version or plugin_manifest_version(source_root))
     )
     installed = directory_digest(installed_root)
     return PluginCacheEvidence(
@@ -101,8 +114,8 @@ class CodexCapabilityProbe(CapabilityProbe[CodexCliEvidence]):
         self.executable = executable
 
     def probe(self) -> CapabilityEvidence[CodexCliEvidence]:
-        command = sh.Command(str(self.executable))
         try:
+            command = sh.Command(str(self.executable))
             output = str(command(*self.arguments))
         except (sh.CommandNotFound, sh.ErrorReturnCode):
             evidence = CodexCliEvidence(
@@ -169,10 +182,24 @@ class CodexPluginInstaller:
         before = plugin_cache_evidence(source_root, self.config)
         if before.ready and not force:
             return before
+        # The CLI refuses to resolve a CODEX_HOME that does not exist yet;
+        # the installer owns the cache location, so it creates it.
+        self.config.codex_home.mkdir(parents=True, exist_ok=True)
         environment = {
             **os.environ,  # lup: ignore[os-environ] — exact child-process inheritance
             "CODEX_HOME": str(self.config.codex_home),
         }
+        # The marketplace definition lives in the repository
+        # (`.agents/plugins/marketplace.json`); registration is idempotent
+        # and a fresh CODEX_HOME has no marketplaces configured yet.
+        sh.Command(str(self.executable))(
+            "plugin",
+            "marketplace",
+            "add",
+            str(cwd),
+            _cwd=cwd,
+            _env=environment,
+        )
         selector = f"{self.config.plugin}@{self.config.marketplace}"
         if before.installed_digest is not None:
             sh.Command(str(self.executable))(

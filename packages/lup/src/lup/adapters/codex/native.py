@@ -173,7 +173,7 @@ class CodexDecisionRenderer(NativeDecisionRenderer[CodexDecisionOutput]):
 
     def render(self, decision: Decision) -> CodexDecisionOutput:
         match decision.effect:
-            case "allow":
+            case "allow" | "defer":
                 return CodexDecisionOutput(exit_code=0)
             case "deny":
                 return CodexDecisionOutput(exit_code=2, stderr=decision.reason)

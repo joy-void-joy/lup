@@ -1,5 +1,8 @@
 """Realtime machinery for persistent agents, split by concern.
 
+Not :mod:`lup.runtime` — that package is the session/turn engine underneath;
+``realtime`` owns the wake -> act -> sleep lifecycle layered on top of it.
+
 Three modules, one concern each, with a one-way dependency arrow:
 
 - :mod:`lup.realtime.scheduler` — the in-process ``Scheduler`` state machine

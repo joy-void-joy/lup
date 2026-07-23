@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "6e185b2298e5b4344fa773dcff99f5e9949fe9ab4c1ca70e8531eb41b4fa5215",
+  "source_digest": "b037c97b569942fad4becc20a9335cc6780785ac8856b08dc341d2a64af88f8f",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,14 +9,14 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "9f17731b34988445adfa122fdb51a936acad80277e9ffdeb3db6a79b77322ced",
+      "sha256": "6800fb06e55ea9a01329327819c10d886c69b9a7121b544c3603a7717f9b5c50",
       "semantic_id": "harness.guidance",
       "executable": false
     },
     {
       "path": ".claude/PATTERNS.md",
       "category": "generated",
-      "sha256": "fd61ec9ad7b3e982e80d2ea41a603941e71a4325ac0b127c852e4f6f06a60c26",
+      "sha256": "d924cebb92078f092bbcb67429f8b6e2b7d94b95b62bc2a6ece5a2cec2430dce",
       "semantic_id": "harness.patterns",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "96ca9a95112c3b1e7e64794186bf524138eab7e7fb7eba626ab99a1f08ec372c",
+      "sha256": "0427c15393cd556ed84930fe9aa1c9771bc369f957f4b82fe7040cf621c03e0e",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -51,7 +51,7 @@
     {
       "path": ".claude/plugins/lup/agents/resolve-editor.md",
       "category": "generated",
-      "sha256": "e776f68b4176481eb5cfae5662be892e7a3d8616b0c35a9e7442d2fc02daae28",
+      "sha256": "aaa38e2afadc0c2c4baf9112c56e29eae387cee14a7b3818ee1389a099f4e44d",
       "semantic_id": "agent.resolve-editor",
       "executable": false
     },
@@ -86,7 +86,7 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "a10787be167696abcc5564480f21201837f992d7918cbc72a4cf89b430f56464",
+      "sha256": "1e95828dd3b8b340d44b52c02439a043e17b3fe46d675baf310d87dc51ab4692",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -177,7 +177,7 @@
     {
       "path": ".claude/plugins/lup/commands/hooks.md",
       "category": "generated",
-      "sha256": "b76ad3a99dd38088e3347b5960143beeb2450ace3908bab368a9141c5ce73d56",
+      "sha256": "3afcc286f61320c2257c4b8acb67fae670e6012457904a6c3a58027f0cbda60f",
       "semantic_id": "skill.hooks",
       "executable": false
     },
@@ -191,21 +191,21 @@
     {
       "path": ".claude/plugins/lup/commands/import.md",
       "category": "generated",
-      "sha256": "72d41862430c747bbb4f8536da032ee2c406164ae8d88d77c48c87e586673a77",
+      "sha256": "f4e23e010980176c9e8549fe1e6b560f4b2e069bd8085858f57653809784a156",
       "semantic_id": "skill.import",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "460cdb3b75183ead32a1f0dae7f4c0342e017ae12e45441d26a60f2d4753cab9",
+      "sha256": "e225f4fffe28fc644c8ef32e9228f4fbab08399402ca9121f938c9d5516e82ea",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "0ae79a855a44f43aa8dce333e25013deefb38b9698b15ea2a0ed4ab8b2bad486",
+      "sha256": "3044b8d93df2b776db491989cc64f9be7c13d208a3a0d1afe93512d6c19f25db",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -219,7 +219,7 @@
     {
       "path": ".claude/plugins/lup/commands/meta.md",
       "category": "generated",
-      "sha256": "ec59f4c91080dd1f04b49de0bf9d17e0323e32378449fbffb43a81a29da35848",
+      "sha256": "2bf9ad05693c5205b454bf4d05fe259e9e7e5fcd4ebf304e7297faf4a303248b",
       "semantic_id": "skill.meta",
       "executable": false
     },
@@ -233,7 +233,7 @@
     {
       "path": ".claude/plugins/lup/commands/principle.md",
       "category": "generated",
-      "sha256": "b47f573b71573dbcc584f3fae1602f55d12972a364f03891adcbde84c1823db1",
+      "sha256": "4758b937f6dbe043560f0279c997b655cd206112ec2bef3d9bb04a8ec29f637f",
       "semantic_id": "skill.principle",
       "executable": false
     },
@@ -247,7 +247,7 @@
     {
       "path": ".claude/plugins/lup/commands/refactor-tools.md",
       "category": "generated",
-      "sha256": "a4ae7c7a4458ce8284b7b2a2fe7c8a69207525b9a2a1966a72885f35ab40855b",
+      "sha256": "6b5f96854da8266714a08f6ff74a3e3517264552ef49f2392be29f1f835f9579",
       "semantic_id": "skill.refactor-tools",
       "executable": false
     },
@@ -268,7 +268,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "33f78cf452cc60d0e6a3866a3e65b0fa6fe69fd7cef80e496094c2608724bba9",
+      "sha256": "d1f6dd5fda378f2e9aaca4bf52fa467087e69edbcbbf52ee2902aacf9860c867",
       "semantic_id": "skill.resolve",
       "executable": false
     },
@@ -282,7 +282,7 @@
     {
       "path": ".claude/plugins/lup/commands/update.md",
       "category": "generated",
-      "sha256": "1e22682c483ca5b21ad83065c685ce1c67c8f1bfb698cfad75f552d675ab0210",
+      "sha256": "4f4f42b108c54a596449255b6fddb58a9b9b229b778571c9262a1136f27704e6",
       "semantic_id": "skill.update",
       "executable": false
     },
@@ -303,46 +303,44 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel.py",
       "category": "generated",
-      "sha256": "4444129437d790155ef2dd769c085e6dbfdec6001bb53fa1cccf80ff3ec3b5b7",
+      "sha256": "765dcca6e45b50baf8341345a347c1bab061d9840d380c956d3b4d88e56ca922",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "21fe57f4e3e63012f1db03f5f97a280e64a6eba8e735158bac64508ad12f2776",
+      "sha256": "6e162830c6013570649e705cdee121d82d9d8ed78c838a4479fd755e70e77398",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "f7db9dc943b162131bdb66cabbad415eb0ae21a7e5b6dd5270d3da43bee3c6c3",
+      "sha256": "35bea89a1aebac828ae13ba2262d05240d70721a321cf3665a1f8bf56fcd2a70",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".claude/plugins/lup/scripts/file_suggest.sh",
       "category": "generated",
-      "sha256": "29631a1a31e95511c0d36b09bd642177c833f4e1e3445f9d5fd067654ba4ea09",
+      "sha256": "8408833a0d8e4fc13cc8d35b2bf421ef86880087327bcce0530667c8786dc358",
       "semantic_id": "harness.file-suggestion",
       "executable": true
     },
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "cf6fef0fb606d4a28dec828f73e585476fa57a73622a92476f49a4a06b77a7d9",
+      "sha256": "c7746da52afd4fb8636b55d5e11c3184eeabbe8726409242717d937f307b79e2",
       "semantic_id": "harness.project-settings",
       "executable": false
     },
     {
       "path": ".claude/workflows/commands/resolve.js",
       "category": "generated",
-      "sha256": "13c41ce77590bd8c742d5877325c33dff03f85758b419d9a278367f4a6ee8687",
+      "sha256": "d0df61e0bf73f5c9c1992faa5a16ebd8988fe7f095449cd18c0ece30808e0642",
       "semantic_id": "resolver.lup.entry",
       "executable": false
     }
   ]
 }
-
-# lup: What is this file? Why is it committed? Sounds a bit suspicious

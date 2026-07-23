@@ -17,9 +17,12 @@ launch them directly and hooks must run without importing the checkout.
 5. Run `uv run lup-devtools dev check` before committing.
 
 The pre-commit hook regenerates and stops when generation changes tracked
-files. This makes omitted generated output visible without silently adding it
-to the commit. Pull-request CI runs formatting, lint, type, unit, anti-pattern,
-native-boundary, and generated-drift checks. The two user-deferred review notes
+files; it triggers only for commits touching generation inputs or the owned
+native trees, so other commits run no generation. This makes omitted generated
+output visible without silently adding it to the commit. Pull-request CI runs
+formatting, lint, type, unit, anti-pattern, native-boundary, and
+generated-drift checks; `docs/quality-pipeline.md` maps what each layer
+uniquely catches. The two user-deferred review notes
 remain visible in the complete local `dev check`; they are not silently removed
 or treated as unrelated CI failures.
 
@@ -44,11 +47,18 @@ for the session-id, pager, dynamic-tool-schema, and blocked-edit boundaries.
 newer component warns locally and fails the nightly strict check, but the live
 job still runs so the drift cannot suppress the evidence needed to review it.
 
-The credentials-gated native job is a real workflow result: a failure stays
-failed, and a skipped job is not release evidence. A release cut requires two
-consecutive scheduled runs with successful `native` jobs and no version drift;
-review the probes and `docs/native-capabilities.md` rather than updating the
-ledger mechanically.
+## Release gate
+
+Beyond the ordinary pull-request checks, cutting a release requires observing
+two consecutive scheduled `native-nightly` runs in which:
+
+- the credentials-gated `native` job completed successfully — a skipped job is
+  not a green run, and a completed failure stays visible and release-blocking;
+- the strict evidence job reported no drift between the installed native
+  versions and `docs/native-capabilities.md`.
+
+Review the probe output together with the evidence ledger rather than updating
+the ledger mechanically.
 
 ## Rule documentation
 

@@ -1,33 +1,37 @@
-"""Validated canonical harness, prompt, artifact, and ownership models."""
-# lup: This file has a lot of model_validator. This makes me think there is something flawed in the design, where we're not using restrictive types (e.g. Litteral) enough.
+"""Genuinely shared harness vocabulary: declarations and rendered artifacts.
+
+The canonical declaration graph (``Harness`` down to prompt parts) that the
+application declares and the adapter renderers, devtools generation flows, and
+resolver consume, plus the rendered ``Artifact``/``ArtifactTree`` and probe
+evidence shared by every pipeline stage. A model owned by one concern lives
+beside its managing module instead (see the package docstring).
+"""
 
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
+    AfterValidator,
     AnyHttpUrl,
     BaseModel,
     ConfigDict,
+    Discriminator,
     Field,
-    field_validator,
+    StringConstraints,
     model_validator,
 )
 
-from lup.types import EnvVars, JsonValue
+from lup.policy.models import PolicyId, UrlPathPrefix
+from lup.policy.shell_rules import ShellCommandRule
+from lup.types import JsonValue, ToolGrant, ToolName
 
 FROZEN = ConfigDict(frozen=True)
 
-
-def is_native_name(value: str) -> bool:
-    """Return whether a native declaration name is portable across adapters."""
-    allowed = "abcdefghijklmnopqrstuvwxyz0123456789-_"
-    alphanumeric = "abcdefghijklmnopqrstuvwxyz0123456789"
-    return (
-        bool(value)
-        and all(character in allowed for character in value)
-        and value[0] in alphanumeric
-        and value[-1] in alphanumeric
-    )
+type NativeName = Annotated[
+    str, StringConstraints(pattern=r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
+]
+"""A declaration name portable across adapters: lowercase alphanumerics with
+interior hyphens or underscores."""
 
 
 class TextPart(BaseModel):
@@ -40,31 +44,17 @@ class TextPart(BaseModel):
 class InvocationArgument(BaseModel):
     model_config = FROZEN
 
-    name: str
+    name: NativeName
     value: JsonValue
-
-    @field_validator("name")
-    @classmethod
-    def portable_name(cls, value: str) -> str:
-        if not is_native_name(value):
-            raise ValueError(f"invocation argument name is not portable: {value!r}")
-        return value
 
 
 class SkillInvocation(BaseModel):
     model_config = FROZEN
 
     type: Literal["skill_invocation"] = "skill_invocation"
-    plugin: str
-    skill: str
+    plugin: NativeName
+    skill: NativeName
     arguments: list[InvocationArgument] = Field(default_factory=list)
-
-    @field_validator("plugin", "skill")
-    @classmethod
-    def portable_name(cls, value: str) -> str:
-        if not is_native_name(value):
-            raise ValueError(f"invocation name is not portable: {value!r}")
-        return value
 
 
 class AskUser(BaseModel):
@@ -102,15 +92,16 @@ class ArgumentsRef(BaseModel):
     type: Literal["arguments_ref"] = "arguments_ref"
 
 
-type PromptPart = (
+type PromptPart = Annotated[
     TextPart
     | SkillInvocation
     | AskUser
     | Delegate
     | RequestApproval
     | ResolverEntry
-    | ArgumentsRef
-)
+    | ArgumentsRef,
+    Discriminator("type"),
+]
 
 
 class PromptDocument(BaseModel):
@@ -122,7 +113,7 @@ class PromptDocument(BaseModel):
 class Argument(BaseModel):
     model_config = FROZEN
 
-    name: str
+    name: NativeName
     description: str = Field(min_length=1, max_length=1024)
     required: bool = False
 
@@ -131,25 +122,20 @@ class Skill(BaseModel):
     model_config = FROZEN
 
     id: str
-    name: str
+    name: NativeName
     description: str = Field(min_length=1, max_length=1024)
     arguments: list[Argument] = Field(default_factory=list)
-    tools: list[str] = Field(default_factory=list) #lup: No. Tools has a very clear lingua franca of accepted names, so should be a list[ToolNames] where ToolNames is a litteral, no?
+    tools: list[ToolGrant] = Field(default_factory=list)
     argument_hint: str | None = None
     prompt: PromptDocument
 
     @model_validator(mode="after")
-    def unique_arguments(self) -> "Skill":
+    def coherent_arguments(self) -> "Skill":
         names = [argument.name for argument in self.arguments]
         if len(names) != len(dict.fromkeys(names)):
             raise ValueError(f"skill {self.id!r} has duplicate argument names")
         optional_seen = False
         for argument in self.arguments:
-            if not is_native_name(argument.name):
-                raise ValueError(
-                    f"skill {self.id!r} has non-portable argument name "
-                    f"{argument.name!r}"
-                )
             if not argument.required:
                 optional_seen = True
             elif optional_seen:
@@ -166,16 +152,22 @@ class Skill(BaseModel):
         return self
 
 
+type AgentColor = Literal[
+    "red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"
+]
+"""The closed agent accent-color palette native runtimes accept."""
+
+
 class Agent(BaseModel):
     model_config = FROZEN
 
     id: str
-    name: str
+    name: NativeName
     description: str = Field(min_length=1, max_length=1024)
     prompt: PromptDocument
-    tools: list[str] = Field(default_factory=list)
+    tools: list[ToolName] = Field(default_factory=list)
     model: str | None = None
-    color: str | None = None
+    color: AgentColor | None = None
 
 
 class HookUrlScope(BaseModel):
@@ -184,24 +176,46 @@ class HookUrlScope(BaseModel):
     model_config = FROZEN
 
     origin: AnyHttpUrl
-    path_prefix: str = "/"
+    path_prefix: UrlPathPrefix = "/"
 
-    @field_validator("path_prefix")
-    @classmethod
-    def absolute_path_prefix(cls, value: str) -> str:
-        if not value.startswith("/"):
-            raise ValueError("hook URL path prefixes must start with a slash")
-        return value
+
+class HookSandbox(BaseModel):
+    """OS sandbox declaration compiled into native settings and launchers.
+
+    Fetch-scope hostnames join extra_domains as the network allowlist, and
+    human-owned files become OS-level write denials, so one declaration
+    feeds both the semantic policy and the kernel-enforced boundary.
+    """
+
+    model_config = FROZEN
+
+    extra_domains: list[str] = Field(default_factory=list)
+    credential_paths: list[str] = Field(default_factory=list)
 
 
 class HookSet(BaseModel):
     model_config = FROZEN
 
     id: str
-    policy_ids: list[str]
+    policy_ids: list[PolicyId]
     allowed_fetch: list[HookUrlScope] = Field(default_factory=list)
     denied_fetch: list[HookUrlScope] = Field(default_factory=list)
     protected_edit_roots: list[Path] = Field(default_factory=list)
+    human_owned_files: list[Path] = Field(
+        default_factory=list,
+        description=(
+            "Files whose content the human author owns; every edit is surfaced "
+            "as Ask so agents propose changes instead of applying them"
+        ),
+    )
+    shell_rules: list[ShellCommandRule] = Field(
+        default_factory=list,
+        description=(
+            "Application-specific shell command rules appended to the baseline "
+            "vocabulary; extend a downstream toolchain here, not in the kernel"
+        ),
+    )
+    sandbox: HookSandbox | None = None
 
 
 class ResolveSpec(BaseModel):
@@ -217,7 +231,7 @@ class Plugin(BaseModel):
     model_config = FROZEN
 
     id: str
-    name: str
+    name: NativeName
     version: str
     description: str = Field(min_length=1, max_length=1024)
     skills: list[Skill]
@@ -226,21 +240,12 @@ class Plugin(BaseModel):
 
     @model_validator(mode="after")
     def unique_effective_names(self) -> "Plugin":
-        if not is_native_name(self.name):
-            raise ValueError(f"plugin {self.id!r} has non-portable name {self.name!r}")
         skill_names = [skill.name for skill in self.skills]
         agent_names = [agent.name for agent in self.agents]
         if len(skill_names) != len(dict.fromkeys(skill_names)):
             raise ValueError(f"plugin {self.id!r} has duplicate skill names")
         if len(agent_names) != len(dict.fromkeys(agent_names)):
             raise ValueError(f"plugin {self.id!r} has duplicate agent names")
-        invalid = [
-            name for name in [*skill_names, *agent_names] if not is_native_name(name)
-        ]
-        if invalid:
-            raise ValueError(
-                f"plugin {self.id!r} has non-portable declaration names: {invalid}"
-            )
         return self
 
 
@@ -355,35 +360,41 @@ class Harness(BaseModel):
         return self
 
 
+def path_beneath_root(value: Path) -> Path:
+    raw = str(value)
+    portable = PurePosixPath(value.as_posix())
+    if (
+        "\\" in raw
+        or "\0" in raw
+        or value.is_absolute()
+        or ".." in portable.parts
+        or portable == PurePosixPath(".")
+    ):
+        raise ValueError(f"artifact path must stay beneath its root: {value}")
+    return value
+
+
+type ArtifactPath = Annotated[Path, AfterValidator(path_beneath_root)]
+"""A relative path proven unable to escape or alias the root it joins."""
+
+
+def lf_normalized(value: str) -> str:
+    if "\r" in value:
+        raise ValueError("artifact content must use LF newlines")
+    return value if not value or value.endswith("\n") else value + "\n"
+
+
+type NormalizedText = Annotated[str, AfterValidator(lf_normalized)]
+"""LF-only text, normalized to terminate in a newline."""
+
+
 class Artifact(BaseModel):
     model_config = FROZEN
 
-    path: Path
-    content: str
+    path: ArtifactPath
+    content: NormalizedText
     semantic_id: str = Field(min_length=1)
     executable: bool = False
-
-    @field_validator("path")
-    @classmethod
-    def safe_relative_path(cls, value: Path) -> Path:
-        raw = str(value)
-        portable = PurePosixPath(value.as_posix())
-        if (
-            "\\" in raw
-            or "\0" in raw
-            or value.is_absolute()
-            or ".." in portable.parts
-            or portable == PurePosixPath(".")
-        ):
-            raise ValueError(f"artifact path must stay beneath its root: {value}")
-        return value
-
-    @field_validator("content")
-    @classmethod
-    def normalized_content(cls, value: str) -> str:
-        if "\r" in value:
-            raise ValueError("artifact content must use LF newlines")
-        return value if not value or value.endswith("\n") else value + "\n"
 
 
 class ArtifactTree(BaseModel):
@@ -399,23 +410,6 @@ class ArtifactTree(BaseModel):
         return self
 
 
-class ValidationIssue(BaseModel):
-    model_config = FROZEN
-
-    semantic_id: str
-    message: str
-
-
-class ValidationResult(BaseModel):
-    model_config = FROZEN
-
-    issues: list[ValidationIssue] = Field(default_factory=list)
-
-    @property
-    def valid(self) -> bool:
-        return not self.issues
-
-
 class CapabilityEvidence[C](BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
@@ -423,116 +417,3 @@ class CapabilityEvidence[C](BaseModel):
     supported: bool
     evidence: C
     version: str
-
-
-class LaunchRequest(BaseModel):
-    model_config = FROZEN
-
-    arguments: list[str]
-    cwd: Path
-    environment: EnvVars = Field(default_factory=dict)
-
-
-class ExitStatus(BaseModel):
-    model_config = FROZEN
-
-    code: int
-    stdout: str = ""
-    stderr: str = ""
-
-
-type OwnershipCategory = Literal[
-    "generated",
-    "backpropagation_candidate",
-    "local_only",
-    "sensitive_local_only",
-    "unknown_conflict",
-    "obsolete_generated",
-]
-
-
-class OwnedArtifact(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    category: OwnershipCategory
-    sha256: str
-    semantic_id: str
-    executable: bool = False
-
-
-class OwnershipManifest(BaseModel):
-    model_config = FROZEN
-
-    schema_version: int
-    generator_version: str
-    source_digest: str
-    target_requirements: list[str]
-    files: list[OwnedArtifact]
-
-
-class CurrentArtifact(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    content: str
-    category: OwnershipCategory
-    sha256: str
-    executable: bool = False
-
-
-class CurrentTree(BaseModel):
-    model_config = FROZEN
-
-    root: Path
-    artifacts: list[CurrentArtifact]
-
-
-class ProposedWrite(BaseModel):
-    model_config = FROZEN
-
-    artifact: Artifact
-    previous_sha256: str | None = None
-    previous_executable: bool | None = None
-
-
-class ProposedDelete(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    prior_ownership_sha256: str
-
-
-class ReconciliationConflict(BaseModel):
-    model_config = FROZEN
-
-    path: Path
-    category: OwnershipCategory
-    message: str
-    sensitive: bool = False
-
-
-class ReconciliationProposal(BaseModel):
-    model_config = FROZEN
-
-    id: str
-    root: Path
-    writes: list[ProposedWrite] = Field(default_factory=list)
-    deletes: list[ProposedDelete] = Field(default_factory=list)
-    conflicts: list[ReconciliationConflict] = Field(default_factory=list)
-    base_digest: str
-
-
-class MaterializationResult(BaseModel):
-    model_config = FROZEN
-
-    changed: list[Path]
-    removed: list[Path]
-
-
-class ReconciliationMetadata(BaseModel):
-    model_config = FROZEN
-
-    proposal_id: str
-    base_digest: str
-    source_patch_sha256: str

@@ -1,24 +1,41 @@
-#lup: Both plans said that we needed to have differences between Claude and Codex file generation. e.g. lup:resolve is different under claude (using claude's native workflow) and under codex (that doessn't have anything similar? Please check this) . Or the fact that .md compilation should happen differently between claude and codex. I don't see where this platform differenciation is
-#lup: On that note, can you check whether we have good claude/codex parity, while respecting theiir native format? That all is reflected between claude and codex
-"""Project-owned typed declarations for the portable Lup harness."""
+"""Root of the project-owned harness declaration graph.
+
+The declaration leaves — skills, agents, prompt documents, settings, and
+assets — live under ``content/``, aggregated by ``content.catalog``. This
+module assembles those leaves with the hook policy and the resolver spec
+into the portable ``Harness`` that ``generate`` compiles into both native
+trees. Generated guidance and the adopter docs point here as the file that
+owns URL scopes and protected edit roots, so its path is part of the
+documented surface.
+"""
 
 from pathlib import Path
 
+from pydantic import AnyHttpUrl
+
 from lup.harness.models import (
     Harness,
+    HookSandbox,
     HookSet,
     HookUrlScope,
     Plugin,
     ResolveSpec,
     SkillInvocation,
 )
-from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS #lup: Like see, why is this in a content subfolder but this file is top-level? Can you review the full file hierarchy? It seems quite janky
+from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 
 
-# lup: Sounds weird? Should be declared per platform instead? Unless you mean something like default harness that the other two overrides?
 def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harness:
-    """Build the canonical declaration graph consumed by every adapter."""
+    """Build the canonical declaration graph consumed by every adapter.
+
+    Deliberately one declaration, not one per platform: every intended
+    Claude/Codex difference is a rendering decision in the adapters
+    (``compile_claude`` / ``compile_codex``) or a support artifact in the
+    generation recipes, mapped in ``docs/platform-differentiation.md``.
+    Per-platform declarations overriding a shared default were rejected
+    because they would let semantic content fork silently.
+    """
     del root
     plugin = Plugin(
         id="plugin.lup",
@@ -31,18 +48,38 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         agents=AGENTS,
         hooks=HookSet(
             id="hooks.lup-policy",
-            policy_ids=["fetch", "shell", "edit", "unknown-tool"], #lup: Wait what's that? It's really not understandable just like that. Sounds like the BaseModel doesn't have legible fields
+            policy_ids=["fetch", "shell", "edit", "unknown-tool"],
             allowed_fetch=[
-                HookUrlScope.model_validate({"origin": "https://docs.claude.com"}),
-                HookUrlScope.model_validate({"origin": "http://docs.claude.com"}),
-                HookUrlScope.model_validate({"origin": "https://ai.pydantic.dev"}),
-                HookUrlScope.model_validate({"origin": "http://ai.pydantic.dev"}), #lup: Why use model_validate instead of the constructor directly?
+                HookUrlScope(origin=AnyHttpUrl("https://docs.claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("http://docs.claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("https://code.claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("http://code.claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("https://ai.pydantic.dev")),
+                HookUrlScope(origin=AnyHttpUrl("http://ai.pydantic.dev")),
+                HookUrlScope(origin=AnyHttpUrl("https://learn.chatgpt.com")),
+                HookUrlScope(origin=AnyHttpUrl("http://learn.chatgpt.com")),
+                HookUrlScope(origin=AnyHttpUrl("https://developers.openai.com")),
+                HookUrlScope(origin=AnyHttpUrl("http://developers.openai.com")),
             ],
             protected_edit_roots=[
                 Path(".claude"),
                 Path("tmp"),
                 Path("pyproject.toml"),
+                Path("sync.json"),
+                Path("downstream.json"),
             ],
+            human_owned_files=[Path("README.md")],
+            sandbox=HookSandbox(
+                extra_domains=[
+                    "github.com",
+                    "api.github.com",
+                    "*.githubusercontent.com",
+                    "pypi.org",
+                    "files.pythonhosted.org",
+                    "api.anthropic.com",
+                ],
+                credential_paths=["~/.ssh", "~/.aws/credentials"],
+            ),
         ),
     )
     return Harness(

@@ -8,9 +8,14 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from lup.harness.contracts import ProcessLauncher, SkillInvocationRenderer
-from lup.harness.models import ExitStatus, LaunchRequest, ResolveSpec, SkillInvocation
-from lup.harness.process import LocalProcessLauncher
+from lup.harness.contracts import SkillInvocationRenderer
+from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.process import (
+    ExitStatus,
+    LaunchRequest,
+    LocalProcessLauncher,
+    ProcessLauncher,
+)
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
 from lup.resolver.contracts import QuestionBroker
 from lup.resolver.core import (
@@ -41,6 +46,7 @@ from lup.resolver.models import (
     ResolverConfig,
     ResolvePhase,
     ResolveState,
+    ReviewNote,
     ReviewReport,
     SourceSnapshot,
     QuestionBatch,
@@ -54,7 +60,11 @@ from lup.resolver.orchestrator import (
     WorktreeOrchestrator,
     WritableRootLeases,
 )
-from lup.resolver.state import ResolverStateRepository, StateTransitionError
+from lup.resolver.state import (
+    ResolverStateRepository,
+    StateCorruptionError,
+    StateTransitionError,
+)
 from lup.runtime.contracts import Session, SessionFactory, Turn
 from lup.runtime.composition import is_output_model
 from lup.runtime.models import (
@@ -222,6 +232,36 @@ def test_state_repository_writes_atomic_typed_projection_tree(tmp_path: Path) ->
         repository.save(state)
 
 
+def test_undecodable_persisted_state_raises_a_typed_recovery_error(
+    tmp_path: Path,
+) -> None:
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="run-1",
+        phase=ResolvePhase.INVENTORY,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("a")],
+        progress=[ConcernProgress(concern_id="a")],
+    )
+    repository = ResolverStateRepository(tmp_path, "run-1")
+    repository.save(state)
+    path = repository.root / "state.json"
+    complete = path.read_text(encoding="utf-8")
+
+    path.write_text(complete[: len(complete) // 2], encoding="utf-8")
+    with pytest.raises(StateCorruptionError, match="restore the file"):
+        repository.load()
+
+    path.write_text('{"run_id": "run-1"}', encoding="utf-8")
+    with pytest.raises(StateCorruptionError, match="remove the run directory"):
+        repository.load()
+
+    path.unlink()
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        repository.load()
+
+
 class RecordingLauncher(ProcessLauncher):
     def __init__(self) -> None:
         self.requests: list[LaunchRequest] = []
@@ -380,15 +420,7 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
                     "criteria": [
                         {"id": "typed", "description": "Domain type is explicit"}
                     ],
-                    "notes": [
-                        {
-                            "file": "src/module.py",
-                            "line": 7,
-                            "text": "use the domain type",
-                        }
-                    ],
-                    "eligible": False,
-                    "integration_approved": False,
+                    "note_indexes": [0],
                 }
             ]
         }
@@ -418,6 +450,11 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
     assert [item.id for item in inventory.concerns] == ["domain-type"]
     assert inventory.concerns[0].eligible
     assert inventory.concerns[0].integration_approved
+    # Notes are materialized from the request by position — context stripped,
+    # content authoritative, never echoed by the planner.
+    assert inventory.concerns[0].notes == [
+        ReviewNote(file=Path("src/module.py"), line=7, text="use the domain type")
+    ]
 
 
 def test_only_orchestrator_creates_commits_and_reads_their_identity(

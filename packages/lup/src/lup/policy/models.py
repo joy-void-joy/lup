@@ -1,11 +1,29 @@
-"""Immutable decisions and semantic native-boundary events."""
+"""Shared policy vocabulary: semantic events in, allow/ask/deny decisions out.
+
+The native decoders in ``lup.adapters.<provider>.native`` translate wire
+payloads into these events (shell command, fetch URL, edit batch, unknown
+tool); the policies in :mod:`lup.policy.rules` and :mod:`lup.policy.chain`
+consume them and return a :class:`Decision`.
+"""
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, StringConstraints
 
+from lup.policy.kernel import DecisionEffect
 from lup.types import JsonObject, JsonValue
+
+type PolicyId = Literal["fetch", "shell", "edit", "unknown-tool"]
+"""One semantic decision family a generated hook set enforces.
+
+Each id names the policy for one semantic tool: ``fetch`` for
+:class:`FetchUrl`, ``shell`` for :class:`ShellCommand`, ``edit`` for
+:class:`EditBatch`, and ``unknown-tool`` for the conservative
+:class:`UnknownTool` fallback."""
+
+type UrlPathPrefix = Annotated[str, StringConstraints(pattern=r"^/")]
+"""An absolute URL path prefix scoping a fetch rule beneath an origin."""
 
 
 class ToolIdentity(BaseModel):
@@ -42,6 +60,7 @@ class ShellCommand(BaseModel):
 
     command: str
     cwd: Path | None = None
+    unsandboxed: bool = False
 
 
 class FetchUrl(BaseModel):
@@ -156,7 +175,7 @@ class Decision(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    effect: Literal["allow", "ask", "deny"]
+    effect: DecisionEffect
     reason: str = ""
 
 
