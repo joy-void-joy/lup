@@ -1,4 +1,4 @@
-"""Behavioral contract of the Claude resolver workflow entry's args handling."""
+"""Behavioral contract of the resolver entry: args handling and note intake."""
 
 import json
 import shutil
@@ -8,8 +8,11 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict
 
+from lup.codescan.markers import NoteKind
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
 from lup.types import JsonObject, JsonValue
+from lup_template.devtools.dev.comments import FoundComment
+from lup_template.devtools.harness.resolve import resolver_intake
 
 DRIVER = Path(__file__).parent / "assets" / "resolve_entry_driver.js"
 RESOLVER_ENTRY = (
@@ -122,3 +125,27 @@ def test_entry_maps_rejection_and_surfaces_core_failure(tmp_path: Path) -> None:
     assert not run.ok
     assert "exited with status 3" in run.message
     assert run.spawned == [[*BASE_COMMAND, "--reject"]]
+
+
+def intake_note(kind: NoteKind = "note", condition: str | None = None) -> FoundComment:
+    return FoundComment(
+        file="parked.py",
+        start_line=2,
+        end_line=2,
+        read_start=1,
+        read_end=4,
+        text="body",
+        kind=kind,
+        condition=condition,
+        context="",
+    )
+
+
+def test_resolver_intake_excludes_deferred_notes_from_the_inventory() -> None:
+    open_note = intake_note()
+    parked = intake_note(kind="defer", condition="until v2 lands")
+
+    intake = resolver_intake([open_note, parked])
+
+    assert intake.actionable == [open_note]
+    assert intake.carried == ["carrying deferred[until v2 lands] parked.py:2-2"]

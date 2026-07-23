@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 import typer
+from pydantic import BaseModel
 
 from lup.codescan.markers import find_feedback
 from lup.harness.environment import non_interactive_environment
@@ -30,9 +31,34 @@ from lup.resolver.models import (
 from lup.runtime.contracts import SessionFactory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
-from lup_template.devtools.dev.comments import scan_tracked
+from lup_template.devtools.dev.comments import FoundComment, scan_tracked
 from lup_template.devtools.dev.remote_auth import check_remote_auth
 from lup_template.devtools.harness.composition import harness_compositions
+
+
+class ResolverIntake(BaseModel):
+    """The scan partitioned at the resolver boundary.
+
+    Deferred notes never enter the resolver inventory — waking one is an
+    explicit edit that removes its `defer[...]` head — so an editor can
+    never be assigned parked work. ``carried`` reports each parked note.
+    """
+
+    actionable: list[FoundComment]
+    carried: list[str]
+
+
+def resolver_intake(comments: list[FoundComment]) -> ResolverIntake:
+    """Partition scanned notes into resolver work and carried deferrals."""
+    return ResolverIntake(
+        actionable=[comment for comment in comments if comment.kind == "note"],
+        carried=[
+            f"carrying deferred[{comment.condition}] "
+            f"{comment.file}:{comment.start_line}-{comment.end_line}"
+            for comment in comments
+            if comment.kind == "defer"
+        ],
+    )
 
 
 class ConsoleQuestionBroker(QuestionBroker):
@@ -257,7 +283,10 @@ def run_resolve(adapter: str, run_id: str | None, human_decision: bool | None) -
         if core.repository.exists():
             manifest = await core.resume()
         else:
-            comments = scan_tracked(find_feedback)
+            intake = resolver_intake(scan_tracked(find_feedback))
+            for carried in intake.carried:
+                typer.echo(carried)
+            comments = intake.actionable
             if not comments:
                 typer.echo("No unresolved # lup: comments.")
                 return
