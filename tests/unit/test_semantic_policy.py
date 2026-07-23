@@ -249,6 +249,14 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="cat <<EOF\nplain body\nEOF", effect="allow"),
     DecisionCase(input="cat <<EOF\n$(id)\nEOF", effect="deny"),
     DecisionCase(input="grep x <<< 'needle haystack'", effect="allow"),
+    # A heredoc feeding a file write is shell file authoring: deny toward
+    # the Edit tool and tmp/*.py in both operator orders, even sandboxed.
+    DecisionCase(input="cat > out.py <<'EOF'\nbody\nEOF", effect="deny"),
+    DecisionCase(input="cat <<'EOF' > out.py\nbody\nEOF", effect="deny"),
+    DecisionCase(
+        input="cat > out.py <<'EOF'\nbody\nEOF", effect="deny", sandboxed=True
+    ),
+    DecisionCase(input="cat > tmp/oneoff.py <<'EOF'\nbody\nEOF", effect="allow"),
     # Frozen variable bindings: assignments and read rebind for the segments
     # that follow; literal values instantiate references, opaque ones gate
     # guarded rows, and unresolved expansions deny toward explicit binding.
