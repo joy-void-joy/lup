@@ -330,19 +330,31 @@ compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated dispatcher or runtime files directly.
 
 The policy classifies each shell command against the vocabulary in
-`lup.policy.shell_rules`, every URL scope, and each edit in a batch. Denial
-wins over approval, malformed input fails conservatively, command substitution
-is denied with a rewrite hint, file-writing redirection is never auto-allowed
-(stream discards to `/dev/null` and fd duplication are stripped as safe),
-`for`/`while`/`until` loops classify their condition and body recursively with
-literal for-words instantiated into the body, `sed` and `awk` are allowed only
-through read-only script screens rather than the row vocabulary, and edit decisions
-include protected paths, marker changes, size, and the canonical anti-pattern
-audit. An edit that exceeds the size gate alone is deferred — the hook emits no
-decision so auto-accept mode applies while the hard gates stay explicit. The
-resolver editor receives only its declared autonomous edit exceptions;
-temporary paths, human-owned files such as `README.md`, marker changes, and
-anti-pattern violations retain their guardrails.
+`lup.policy.shell_rules`, every URL scope, and each edit in a batch. The shell
+lattice reserves ask for judged risk: rows judged safe allow, rows judged
+risky (`git push --force`, `rm`, `worktree remove`) ask, and anything unjudged
+— an unclassified command, an unparsed construct — denies with a hint naming
+the escalation recipe. Prefixing the command with a leading
+`# lup: escalate: <why>` line promotes its classified deny or ask to an
+approval question carrying that reason, so the dialog always shows intent.
+Denial wins over approval, malformed input fails conservatively, command
+substitution is denied with a rewrite hint, and file-writing redirection is
+never auto-allowed outside repo-relative `tmp/` (stream discards to
+`/dev/null` and fd duplication are stripped as safe). Loops, conditionals,
+case constructs, subshells, and brace groups classify their commands
+recursively over frozen variable bindings — literal assignments and for-words
+instantiate their references, opaque ones (`read`, globs) gate flag-guarded
+commands. `find -exec` payloads and `timeout`/`nice` wrappers recurse to the
+wrapped command, `sed` and `awk` are allowed only through read-only script
+screens rather than the row vocabulary, quoted-delimiter heredocs are literal
+data, and `curl` is screened to read methods whose URLs the declared fetch
+scopes allow. Edit decisions include protected paths, marker changes, size,
+and the canonical anti-pattern audit. An edit that exceeds the size gate
+alone is deferred — the hook emits no decision so auto-accept mode applies
+while the hard gates stay explicit. The resolver editor receives only its
+declared autonomous edit exceptions; temporary paths, human-owned files such
+as `README.md`, marker changes, and anti-pattern violations retain their
+guardrails.
 
 Use `"""
         ),

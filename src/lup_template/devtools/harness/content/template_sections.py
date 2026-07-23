@@ -769,18 +769,30 @@ Run `uv run lup-devtools --help` for the full command tree.
     ),
 ]
 
-CLAUDE_POLICY_SCOPE = r"""The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary, every URL scope, and each edit in a batch. Denial
-wins over approval, malformed input fails conservatively, command substitution is
-denied with a rewrite hint, file-writing redirection is never auto-allowed, loops
-classify their condition and body recursively, `sed`/`awk` pass only read-only
-script screens, and edit decisions include protected
+CLAUDE_POLICY_SCOPE = r"""The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary, every URL scope, and each edit in a batch. Ask is
+reserved for judged risk; an unjudged command or unparsed construct denies with
+a hint naming the `# lup: escalate: <why>` marker, and that leading marker
+promotes the classified decision to an approval question carrying the agent's
+stated reason. Denial wins over approval, malformed input fails conservatively,
+command substitution is denied with a rewrite hint, file redirection outside
+repo-relative `tmp/` is never auto-allowed, loops, conditionals, and case
+constructs classify recursively over frozen variable bindings, `find -exec`
+payloads and `timeout`/`nice` wrappers recurse to their commands, `sed`/`awk`
+pass read-only script screens, `curl` is screened to read methods within the
+declared URL scopes, and edit decisions include protected
 paths, marker changes, size, and the canonical anti-pattern audit."""
 
-CODEX_POLICY_SCOPE = r"""The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary and every URL scope in a batch. Denial
-wins over approval, malformed input fails conservatively, command substitution is
-denied with a rewrite hint, file-writing redirection is never auto-allowed, loops
-classify their condition and body recursively, `sed`/`awk` pass only read-only
-script screens, and native `apply_patch` edits — opaque
+CODEX_POLICY_SCOPE = r"""The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary and every URL scope in a batch. Ask is
+reserved for judged risk; an unjudged command or unparsed construct denies with
+a hint naming the `# lup: escalate: <why>` marker, and that leading marker
+promotes the classified decision to an approval question carrying the agent's
+stated reason. Denial wins over approval, malformed input fails conservatively,
+command substitution is denied with a rewrite hint, file redirection outside
+repo-relative `tmp/` is never auto-allowed, loops, conditionals, and case
+constructs classify recursively over frozen variable bindings, `find -exec`
+payloads and `timeout`/`nice` wrappers recurse to their commands, `sed`/`awk`
+pass read-only script screens, `curl` is screened to read methods within the
+declared URL scopes, and native `apply_patch` edits — opaque
 to the policy — always fall through to fail-closed approval."""
 
 
