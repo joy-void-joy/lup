@@ -62,6 +62,48 @@ def apply_sandbox_environment(
     typer.echo(f"{label} sandbox: active — unjudged shell defers to the OS boundary")
 
 
+CODEX_SANDBOX_OVERRIDES = (
+    "-s",
+    "--sandbox",
+    "--full-auto",
+    "--yolo",
+    "--dangerously-bypass-approvals-and-sandbox",
+)
+
+
+def codex_sandbox_arguments(environment: EnvVars, extra_args: list[str]) -> list[str]:
+    """Compose the interactive Codex envelope that LUP_SANDBOX_ACTIVE vouches for.
+
+    The launcher establishes the boundary it announces: an explicit
+    workspace-write sandbox on the Codex command line, mirroring how the
+    Claude settings artifact compiles the same declaration into an OS wall.
+    Path-level write and credential denials have no Codex equivalent, so the
+    envelope is the declaration's strict subset (network stays off). When the
+    caller supplies its own sandbox flag the launcher vouches for nothing:
+    the flag stays unset and the deny lattice keeps the escalation recipe.
+    """
+    hooks = portable_harness().plugins[0].hooks
+    if hooks is None or hooks.sandbox is None:
+        return []
+    overrides = [
+        word
+        for word in extra_args
+        if word in CODEX_SANDBOX_OVERRIDES or word.startswith("--sandbox=")
+    ]
+    if overrides:
+        typer.echo(
+            f"codex sandbox: caller envelope ({' '.join(overrides)}) — "
+            "deny lattice stays active"
+        )
+        return []
+    environment["LUP_SANDBOX_ACTIVE"] = "1"
+    typer.echo(
+        "codex sandbox: workspace-write envelope — "
+        "unjudged shell defers to the OS boundary"
+    )
+    return ["--sandbox", "workspace-write"]
+
+
 def launch_claude(
     extra_args: list[str],
     profile: str | None,
@@ -113,7 +155,7 @@ def launch_codex(
         return
     runtime_preflight(composition)
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
-    apply_sandbox_environment(environment, "codex", [])
+    envelope = codex_sandbox_arguments(environment, extra_args)
     configured_home = environment["CODEX_HOME"] if "CODEX_HOME" in environment else None
     selected_home = codex_home or (
         Path(configured_home) if configured_home is not None else Path.home() / ".codex"
@@ -124,7 +166,7 @@ def launch_codex(
         force=force_install,
     )
     typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
-    arguments: list[str] = []
+    arguments: list[str] = list(envelope)
     if profile is not None:
         arguments.extend(["--profile", profile])
     if model is not None:
