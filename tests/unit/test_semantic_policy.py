@@ -212,6 +212,24 @@ SHELL_POLICY_CASES = [
     # or ask to an approval question carrying the agent's stated reason.
     DecisionCase(input="cargo build", effect="deny"),
     DecisionCase(input="pip install requests", effect="deny"),
+    # Credential-agent family: the pure listing form is the declared
+    # read-only exception; every other form is a judged deny.
+    DecisionCase(input="ssh-add -l", effect="allow"),
+    DecisionCase(input="ssh-add -L", effect="allow"),
+    DecisionCase(input="ssh-add", effect="deny"),
+    DecisionCase(input="ssh-add -D", effect="deny"),
+    DecisionCase(input="ssh-add -lD", effect="deny"),
+    DecisionCase(input="ssh-add -l ~/.ssh/id_ed25519", effect="deny"),
+    DecisionCase(input="ssh-add $flags", effect="deny"),
+    DecisionCase(input="ssh-agent", effect="deny"),
+    DecisionCase(input="ssh-agent -k", effect="deny"),
+    # The compound join is deny > ask > defer > allow: an unjudged segment
+    # is subsumed into a judged-risky segment's approval question (the full
+    # command is visible at the prompt), while a judged deny dominates it.
+    DecisionCase(input="frobnicate; ssh host", effect="ask"),
+    DecisionCase(input="ssh host; frobnicate", effect="ask"),
+    DecisionCase(input="pip install x; ssh host", effect="deny"),
+    DecisionCase(input="ssh-add -D; ssh host", effect="deny"),
     DecisionCase(input="rm -rf build", effect="ask"),
     DecisionCase(input="make test", effect="ask"),
     DecisionCase(input="wget https://x.test/f", effect="ask"),
@@ -300,6 +318,8 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="case $m in a) echo a;;", effect="defer", sandboxed=True),
     DecisionCase(input="git push --force", effect="ask", sandboxed=True),
     DecisionCase(input="sed -i 's/a/b/' f", effect="deny", sandboxed=True),
+    DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
+    DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
     DecisionCase(input="echo $(whoami)", effect="deny", sandboxed=True),
     DecisionCase(
