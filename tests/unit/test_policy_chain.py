@@ -19,7 +19,7 @@ class FixedPolicy(DecisionPolicy[str]):
     """A member policy returning one predetermined verdict."""
 
     def __init__(
-        self, effect: Literal["allow", "ask", "deny"], reason: str = ""
+        self, effect: Literal["allow", "ask", "deny", "defer"], reason: str = ""
     ) -> None:
         self.verdict = Decision(effect=effect, reason=reason)
 
@@ -51,6 +51,20 @@ def test_ask_wins_over_allow_when_nothing_denies() -> None:
 
     assert decision.effect == "ask"
     assert decision.reason == "needs review"
+
+
+def test_defer_wins_over_allow_but_yields_to_ask() -> None:
+    deferred = OrderedPolicyChain(
+        [FixedPolicy("allow"), FixedPolicy("defer", "sandbox boundary")]
+    )
+    decision = deferred.decide("event")
+    assert decision.effect == "defer"
+    assert decision.reason == "sandbox boundary"
+
+    asked = OrderedPolicyChain(
+        [FixedPolicy("defer"), FixedPolicy("ask", "needs review")]
+    )
+    assert asked.decide("event").effect == "ask"
 
 
 def test_unanimous_allows_produce_allow() -> None:

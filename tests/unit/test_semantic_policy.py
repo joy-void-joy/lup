@@ -378,6 +378,15 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
+    # The classic sourcing bypasses stay outside the vocabulary: deny
+    # unsandboxed, defer to the OS boundary inside it; a deferring segment
+    # among allows keeps the batch deferred.
+    DecisionCase(input="eval echo x", effect="deny"),
+    DecisionCase(input="source setup.sh", effect="deny"),
+    DecisionCase(input=". ./env.sh", effect="deny"),
+    DecisionCase(input="eval echo x", effect="defer", sandboxed=True),
+    DecisionCase(input="source setup.sh", effect="defer", sandboxed=True),
+    DecisionCase(input="frobnicate; ls", effect="defer", sandboxed=True),
     DecisionCase(input="echo $(whoami)", effect="allow", sandboxed=True),
     DecisionCase(input="echo $(frobnicate)", effect="deny"),
     DecisionCase(input="echo $(frobnicate)", effect="defer", sandboxed=True),
@@ -463,6 +472,20 @@ EDIT_POLICY_CASES = [
         before="# Lup\n",
         after="# Lup\n\nAn agent-added paragraph.\n",
         effect="ask",
+    ),
+    EditDecisionCase(
+        path="README.md",
+        before="# Lup\n",
+        after="# Lup, retitled\n",
+        effect="ask",
+        autonomous=True,
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1  # lup: revisit",
+        effect="ask",
+        autonomous=True,
     ),
     EditDecisionCase(
         path="README.md",
