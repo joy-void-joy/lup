@@ -165,6 +165,18 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git clean -fd", effect="ask"),
     DecisionCase(input="git push --force", effect="ask"),
     DecisionCase(input="git checkout -- file", effect="deny"),
+    # Ref-sourced pathspec restores name their content's commit; the shell
+    # option builtin is shell-local. Both anchor history-rebuild batches.
+    DecisionCase(input="set -e", effect="allow"),
+    DecisionCase(input="set -euo pipefail", effect="allow"),
+    DecisionCase(input="git checkout 81619e7 -- packages/x.py", effect="allow"),
+    DecisionCase(input="git checkout main -- f g", effect="allow"),
+    DecisionCase(input="git checkout $ref -- f", effect="deny"),
+    DecisionCase(input="git checkout -b topic", effect="deny"),
+    DecisionCase(
+        input="set -e; git checkout 81619e7 -- x.py; git commit -m x",
+        effect="allow",
+    ),
     DecisionCase(input="git config core.pager=x", effect="ask"),
     # Global value flags are consumed, never read as the subcommand; globals
     # that change execution behavior ask.
