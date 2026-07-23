@@ -10,6 +10,9 @@ todos that `dev todos` gathers for `/lup:init`.
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from lup.codescan.common import IGNORE_RE, file_level_ignore, ignore_rule_ids
 from lup.codescan.markers import (
     TEMPLATE_MARKER_RE,
@@ -299,3 +302,26 @@ def test_defer_classification_survives_model_roundtrip() -> None:
     (note,) = find_feedback(source, ScanMode.PYTHON)
     restored = MarkerComment.model_validate_json(note.model_dump_json())
     assert restored == note
+
+
+def test_marker_comment_rejects_incoherent_kind_condition_pairs() -> None:
+    def build(kind: str, condition: str | None) -> MarkerComment:
+        return MarkerComment.model_validate(
+            {
+                "start_line": 1,
+                "end_line": 1,
+                "read_start": 1,
+                "read_end": 1,
+                "text": "body",
+                "kind": kind,
+                "condition": condition,
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        build("defer", None)
+    with pytest.raises(ValidationError):
+        build("defer", "")
+    with pytest.raises(ValidationError):
+        build("note", "until then")
+    assert build("defer", "until then").condition == "until then"
