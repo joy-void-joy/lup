@@ -723,11 +723,21 @@ application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 
-The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary and every URL scope in a batch. Denial
-wins over approval, malformed input fails conservatively, command substitution is
-denied with a rewrite hint, file-writing redirection is never auto-allowed, loops
-classify their condition and body recursively, `sed`/`awk` pass only read-only
-script screens, and native `apply_patch` edits — opaque
+The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary and every URL scope in a batch. Ask is
+reserved for judged risk; an unjudged command or unparsed construct denies with
+a hint naming the `# lup: escalate: <why>` marker, and that leading marker
+promotes the classified decision to an approval question carrying the agent's
+stated reason. Under a launcher-verified sandbox (`LUP_SANDBOX_ACTIVE`),
+unjudged work defers to the native workspace boundary instead of denying.
+Segments join deny > ask > defer > allow — unjudged rides into a judged
+prompt, a judged deny wins the batch. Malformed input fails conservatively,
+command substitution is denied with a rewrite hint, file redirection outside
+repo-relative `tmp/` is never auto-allowed (a heredoc-fed file write denies
+toward the Edit tool), loops, conditionals, and case
+constructs classify recursively over frozen variable bindings, `find -exec`
+payloads and `timeout`/`nice` wrappers recurse to their commands, `sed`/`awk`
+pass read-only script screens, `curl` is screened to read methods within the
+declared URL scopes, and native `apply_patch` edits — opaque
 to the policy — always fall through to fail-closed approval. Use
 `$lup:hooks` to update canonical inputs, regenerate both plugins, and run the
 shared canonical/bundled fixture suite.

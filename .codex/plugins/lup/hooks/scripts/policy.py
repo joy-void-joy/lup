@@ -6,6 +6,7 @@ Rendered from lup.adapters.codex.assets.policy_dispatcher by
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -14,11 +15,22 @@ from kernel import KernelDecision, decide_fetch, decide_shell
 from policy_data import ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES, SHELL_RULES
 
 
+def sandbox_active():
+    environ = os.environ  # lup: ignore[os-environ]
+    return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
     if name == "Bash":
-        return decide_shell(tool_input["command"], SHELL_RULES)
+        return decide_shell(
+            tool_input["command"],
+            SHELL_RULES,
+            ALLOWED_FETCH_SCOPES,
+            DENIED_FETCH_SCOPES,
+            sandboxed=sandbox_active(),
+        )
     if name == "web_fetch":
         return decide_fetch(
             tool_input["url"],

@@ -36,5 +36,40 @@
       "Read(./**/secrets*.local)",
       "Read(./**/*.secret.local)"
     ]
+  },
+  "sandbox": {
+    "credentials": {
+      "files": [
+        {
+          "mode": "deny",
+          "path": "~/.ssh"
+        },
+        {
+          "mode": "deny",
+          "path": "~/.aws/credentials"
+        }
+      ]
+    },
+    "enabled": true,
+    "filesystem": {
+      "denyWrite": [
+        "README.md"
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "docs.claude.com",
+        "code.claude.com",
+        "ai.pydantic.dev",
+        "learn.chatgpt.com",
+        "developers.openai.com",
+        "github.com",
+        "api.github.com",
+        "*.githubusercontent.com",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "api.anthropic.com"
+      ]
+    }
   }
 }
