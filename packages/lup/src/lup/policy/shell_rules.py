@@ -171,7 +171,6 @@ JUDGED_ASK_COMMANDS = (
     ("scp", "remote copies require approval"),
     ("rsync", "remote sync requires approval"),
     ("wget", "downloading files requires approval — prefer curl or WebFetch"),
-    ("curl", "networked transfer requires approval"),
     ("docker", "container operations require approval"),
     ("make", "make executes arbitrary recipes — requires approval"),
     ("npm", "package tools fetch and execute code — requires approval"),
@@ -495,12 +494,10 @@ BASE_SHELL_RULES: list[ShellCommandRule] = [
         reason="an xmllint flag that writes files or opens a shell requires approval",
     ),
     ShellCommandRule(
+        # -exec/-execdir payloads recurse through the kernel's find screen;
+        # only the file-writing and deleting actions remain flag-guarded.
         name="find",
         ask_flags=[
-            "-exec",
-            "-execdir",
-            "-ok",
-            "-okdir",
             "-delete",
             "-fprint",
             "-fprintf",

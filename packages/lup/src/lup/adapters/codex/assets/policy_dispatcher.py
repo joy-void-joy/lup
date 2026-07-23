@@ -18,7 +18,12 @@ def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
     if name == "Bash":
-        return decide_shell(tool_input["command"], SHELL_RULES)
+        return decide_shell(
+            tool_input["command"],
+            SHELL_RULES,
+            ALLOWED_FETCH_SCOPES,
+            DENIED_FETCH_SCOPES,
+        )
     if name == "web_fetch":
         return decide_fetch(
             tool_input["url"],

@@ -65,7 +65,12 @@ def dispatch(payload):
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = agent_type in AUTONOMOUS_AGENT_IDENTITIES
     if name == "Bash":
-        return decide_shell(tool_input["command"], SHELL_RULES)
+        return decide_shell(
+            tool_input["command"],
+            SHELL_RULES,
+            ALLOWED_FETCH_SCOPES,
+            DENIED_FETCH_SCOPES,
+        )
     if name == "WebFetch":
         return decide_fetch(
             tool_input["url"],

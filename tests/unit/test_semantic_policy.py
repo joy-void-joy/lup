@@ -202,7 +202,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="uv run ./pytest", effect="deny"),
     DecisionCase(input="uv run /tmp/tool --help", effect="deny"),
     DecisionCase(input="printf . | xargs find . -delete", effect="ask"),
-    DecisionCase(input="find . -execdir sh -c id ;", effect="ask"),
+    DecisionCase(input="find . -execdir sh -c id ;", effect="deny"),
     DecisionCase(input="sort f && python -c 'x'", effect="deny"),
     # The decision lattice: unjudged commands deny and bounce to the agent,
     # judged-risky rows ask, and a leading escalation marker promotes a deny
@@ -266,6 +266,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="timeout 5 rm -rf x", effect="ask"),
     DecisionCase(input="env", effect="allow"),
     DecisionCase(input="uv run pytest > tmp/out.txt", effect="allow"),
+    # find -exec payloads recurse; the sed scanner reads the full stdout-only
+    # grammar; curl is screened to read methods against the fetch scopes.
+    DecisionCase(
+        input="find src -name '*.py' -exec grep -l TODO {} +", effect="allow"
+    ),
+    DecisionCase(input="find . -exec rm {} \\;", effect="ask"),
+    DecisionCase(input="find . -ok cat {} \\;", effect="deny"),
+    DecisionCase(input="sed 's|/old/path|/new/path|g' f", effect="allow"),
+    DecisionCase(input="sed -n '/start/,/end/p' f", effect="allow"),
+    DecisionCase(input="sed '/^#/!d' f", effect="allow"),
+    DecisionCase(input="sed -n '1h;2,$H;${x;p}' f", effect="allow"),
+    DecisionCase(input="sed '2a inserted text' f", effect="allow"),
+    DecisionCase(input="sed --sandbox 's/a/b/w out' f", effect="allow"),
+    DecisionCase(input="sed 'w out' f", effect="deny"),
+    DecisionCase(input="curl -s https://example.com/api", effect="ask"),
+    DecisionCase(input="curl -X POST https://example.com", effect="ask"),
+    DecisionCase(input="curl -o f https://example.com", effect="deny"),
 ]
 
 FETCH_POLICY_CASES = [
@@ -636,6 +653,24 @@ def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) ->
         canonical = policy.decide(FetchUrl(url=AnyHttpUrl(case.input)))
         generated = bundled.decide_fetch(case.input, wire_scope, denied_wire_scope)
         assert canonical.effect == generated.effect == case.effect
+
+
+def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
+    policy = ShellPolicy(
+        allowed_urls=[UrlScope(origin=AnyHttpUrl("https://docs.example.com"))],
+        denied_urls=[UrlScope(origin=AnyHttpUrl("https://internal.example.com"))],
+    )
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("curl -s https://docs.example.com/api/one") == "allow"
+    assert effect("curl -sI https://docs.example.com/") == "deny"
+    assert effect("curl -s -I https://docs.example.com/") == "allow"
+    assert effect("curl -s https://internal.example.com/x") == "deny"
+    assert effect("curl -s https://elsewhere.example.com/") == "ask"
+    assert effect("curl -X DELETE https://docs.example.com/api") == "ask"
+    assert effect("curl -d a=b https://docs.example.com/api") == "deny"
 
 
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
