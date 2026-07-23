@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.2.0 — 2026-07-16
+## 0.2.0 — 2026-07-23
 
-Breaking capability-composition release.
+Breaking capability-composition and semantic-policy release.
 
 - Replaced engine/client/options service locators with narrow `SessionFactory`,
   `Session`, `Turn`, event, interrupt, steer, fork, binding, render, launch, and
@@ -21,6 +21,39 @@ Breaking capability-composition release.
   organize inline notes through the shared Python core without modifying the
   user's checkout.
 - Added the project-wide `abc-capability` AST rule and typed suppression audit.
+- Added the semantic shell decision lattice: erased rule tables judge every
+  command, subcommand, and flag tier; unjudged work denies with a
+  `# lup: escalate:` recipe; loops, conditionals, case arms, subshells, brace
+  groups, and `$(...)` substitutions classify recursively over frozen variable
+  bindings; `find -exec` payloads, `timeout`/`nice` wrappers, read-only
+  `sed`/`awk`/`curl` screens, and quoted heredocs are judged in place; segments
+  join deny > ask > defer > allow.
+- Added launcher-verified OS-sandbox awareness: a `HookSet` sandbox declaration
+  compiles into settings, launch, and doctor; unjudged work defers to the
+  active sandbox boundary, a `dangerouslyDisableSandbox` escape re-enters the
+  deny lattice, and Codex launches establish the interactive sandbox envelope.
+- Added the Codex guidance flavor: shared template sections render both
+  `TEMPLATE_CLAUDE.md` and a native `TEMPLATE_AGENTS.md`, with intentional
+  differences recorded in docs/platform-differentiation.md.
+- Added `# lup: defer[<wake condition>]:` parked-work notes with wake-gated
+  clearing; tracking files are retired and `dev check` stays red while any
+  deferred note exists.
+- Renamed the downstream registry to `sync.json` with a documented contract
+  (docs/sync.md) and a legacy fallback.
+- Added human-owned file protection compiled from the hook catalog: README.md
+  edits always ask and never auto-allow.
+- Added generated-artifact provenance banners with ownership documentation
+  (docs/generated-artifacts.md), and extracted the resolver entry and hook
+  dispatchers into real source assets.
+- Retyped the harness catalog around annotated domain types, decomposed the
+  harness CLI into composition, drift, reconcile, doctor, resolve, and launch
+  modules, and gave anti-pattern rules token-masked syntactic contexts shared
+  by the auditor and the hook kernel.
+- Hardened the resolver entry's argument normalization and pinned
+  worker-crash, revision-exhaustion, and join-conflict recovery legs.
+- Added the pre-commit generation gate and the native-nightly workflow
+  (deterministic evidence checks plus secrets-gated live smokes), and recorded
+  the test-suite audit (docs/test-suite-audit.md).
 - Removed all legacy engine, client, broad options, profile, background-driver,
   replay-stream, and provider-wide tool-registry modules. There is no legacy
   facade.
