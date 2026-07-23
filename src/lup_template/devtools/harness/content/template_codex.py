@@ -7,7 +7,8 @@ from lup_template.devtools.harness.content.template_sections import (
     CODEX_POLICY_SCOPE,
     DIRECTORY_STRUCTURE_THROUGH_TOOLS,
     INNER_AGENT_BULLET,
-    PRINCIPLES_THROUGH_WORKTREE_STEP,
+    PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP,
+    PRINCIPLES_THROUGH_PATTERN_MENU,
     SELF_IMPROVEMENT_THROUGH_END,
     SETUP_THROUGH_NAMING,
     TOOLING_INTRO,
@@ -52,7 +53,8 @@ This file provides guidance to Codex â€” and any agent that reads `AGENTS.md` â€
         models.TextPart(
             text=r""""Lup" is the framework's name for the inner agent, not a project-specific term. Use "Codex" when referring to the outer development agent and "Lup" when referring to the inner SDK agent, regardless of the project's package name."""
         ),
-        *PRINCIPLES_THROUGH_WORKTREE_STEP,
+        *PRINCIPLES_THROUGH_PATTERN_MENU,
+        *PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP,
         models.TextPart(
             text=r"""`lup-devtools harness codex` regenerates the artifacts and installs the digest-verified plugin copy"""
         ),
