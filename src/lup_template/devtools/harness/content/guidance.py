@@ -326,14 +326,13 @@ then regenerate.
 
 Permissions come from the canonical semantic policies in `lup.policy` and the
 application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
-compiles one hermetic dispatcher and dependency-free runtime for each native
-plugin. Do not edit generated dispatcher or runtime files directly.
+compiles one hermetic dispatcher and runtime for each native
+plugin. Never edit generated dispatcher or runtime files.
 
 The policy classifies each shell command against the vocabulary in
 `lup.policy.shell_rules`, every URL scope, and each edit in a batch. The shell
-lattice reserves ask for judged risk: judged-safe rows allow, judged-risky
-rows ask, and unjudged work denies with a hint naming the
-escalation recipe. A leading `# lup: escalate: <why>` line promotes a
+lattice reserves ask for judged risk; unjudged work denies, hinting
+the escalation recipe. A leading `# lup: escalate: <why>` line promotes a
 classified deny or ask to an approval question carrying that reason.
 Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`), unjudged work
 defers to that boundary, and a `dangerouslyDisableSandbox` escape
@@ -341,23 +340,25 @@ re-enters the deny lattice; the sandbox block derives from the
 same `HookSet` declaration.
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch.
-Malformed input fails conservatively, command
-substitution is denied with a rewrite hint, and file-writing redirection is
-never auto-allowed outside repo-relative `tmp/` (discards and fd
-duplication strip as safe; heredoc-fed file
-writes deny toward Edit/tmp scripts). Loops, conditionals,
+Malformed input fails conservatively. `$(...)` classifies recursively —
+the inner command joins the batch and its opaque result rides only
+argument-safe commands; command position, deep nesting, and backticks
+stay conservative. File writes (redirection, `rm`) auto-allow only into
+repo `tmp/` and the scratchpad (`$TMPDIR`, `/tmp/claude-*`; reassigning
+`TMPDIR` asks); discards and fd dups strip; heredoc-fed
+writes deny toward Edit/tmp scripts. Loops, conditionals,
 case arms, subshells, and brace groups classify recursively over frozen
-variable bindings — literal assignments instantiate their references,
-opaque ones (`read`, globs) gate flag-guarded commands.
+bindings — literal assignments instantiate, opaque ones
+(`read`, globs) gate flag-guarded commands.
 `find -exec` payloads and `timeout`/`nice` wrappers recurse,
-`sed`/`awk` pass read-only script screens, quoted-delimiter
-heredocs are literal data, and `curl` is screened to read methods
-within declared fetch scopes. Edit decisions include protected paths, marker changes, size,
-and the canonical anti-pattern audit. An edit over the size gate
+`sed`/`awk` pass read-only screens, quoted-delimiter
+heredocs are literal data, and `curl` is read-screened within
+declared fetch scopes. Edit decisions cover protected paths, marker changes, size,
+and the canonical anti-pattern audit; an edit over the size gate
 alone is deferred — the hook emits no decision, so auto-accept applies
-while the hard gates stay explicit. The resolver editor receives only its
+while hard gates stay explicit. The resolver editor receives only its
 declared autonomous edit exceptions; temporary paths, human-owned files
-like `README.md`, marker changes, and anti-pattern violations retain their
+like `README.md`, marker changes, and anti-patterns retain their
 guardrails.
 
 Use `"""
@@ -365,8 +366,8 @@ Use `"""
         models.SkillInvocation(plugin="lup", skill="hooks"),
         models.TextPart(
             text=r"""` to change the canonical policy inputs, regenerate both native
-plugins, and run the shared canonical/bundled fixture suite. `settings.json`
-contains only native settings that are outside this semantic policy boundary.
+plugins, and run the shared fixture suite. `settings.json`
+holds only native settings outside this semantic policy boundary.
 
 ### Pyright LSP
 
