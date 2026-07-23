@@ -50,8 +50,10 @@ from lup.harness.reconciliation import (
     source_patch_base_digest,
 )
 from lup.policy.bundle import policy_kernel_source
+from lup.types import EnvVars
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.settings import project_settings
+from lup_template.devtools.harness.launch import codex_sandbox_arguments
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
@@ -1069,3 +1071,25 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     assert "code.claude.com" in domains
     assert "github.com" in domains
     assert "sandbox" not in project_settings(None)
+
+
+def test_codex_sandbox_arguments_establish_the_envelope() -> None:
+    environment: EnvVars = {}
+    arguments = codex_sandbox_arguments(environment, ["--model", "gpt-5.2"])
+    assert arguments == ["--sandbox", "workspace-write"]
+    assert environment["LUP_SANDBOX_ACTIVE"] == "1"
+
+
+def test_codex_sandbox_arguments_defer_to_a_caller_envelope() -> None:
+    environment: EnvVars = {}
+    caller_forms = [
+        ["--sandbox", "danger-full-access"],
+        ["--sandbox=read-only"],
+        ["-s", "read-only"],
+        ["--yolo"],
+        ["--full-auto"],
+        ["--dangerously-bypass-approvals-and-sandbox"],
+    ]
+    for extra_args in caller_forms:
+        assert codex_sandbox_arguments(environment, extra_args) == []
+    assert "LUP_SANDBOX_ACTIVE" not in environment
