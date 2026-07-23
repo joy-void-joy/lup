@@ -6,6 +6,8 @@ evidence, and compares supported components against the accepted ledger in
 ``--strict-evidence``.
 """
 
+import shutil
+
 import typer
 
 from lup_template.devtools.harness.composition import harness_compositions
@@ -32,6 +34,9 @@ def run_doctor(target: str, strict_evidence: bool) -> None:
             sdk_drift = sdk_evidence_drift()
             if sdk_drift is not None:
                 drifts.append(sdk_drift)
+            for tool in ("bwrap", "socat"):
+                state = "ready" if shutil.which(tool) is not None else "missing"
+                typer.echo(f"claude sandbox dependency {tool}: {state}")
         failed = failed or any(not item.supported for item in evidence)
     for drift in drifts:
         typer.echo(drift.message, err=True)

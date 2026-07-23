@@ -6,6 +6,7 @@ native CLI with the non-interactive environment applied.
 """
 
 import os
+import shutil
 from pathlib import Path
 
 import sh
@@ -17,7 +18,9 @@ from lup.adapters.codex.harness_runtime import (
     PluginCacheConfig,
 )
 from lup.harness.environment import non_interactive_environment
+from lup.types import EnvVars
 from lup.workspace.paths import project_root
+from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.composition import (
     NativeHarnessComposition,
     claude_composition,
@@ -35,6 +38,28 @@ def runtime_preflight(composition: NativeHarnessComposition) -> None:
         typer.echo(f"{target} {item.capability}: {state} ({item.version})")
     if any(not item.supported for item in evidence):
         raise typer.BadParameter(f"{target} runtime preflight failed")
+
+
+def apply_sandbox_environment(
+    environment: EnvVars, label: str, required_tools: list[str]
+) -> None:
+    """Export LUP_SANDBOX_ACTIVE when the declared sandbox can actually run.
+
+    The dispatchers defer unjudged shell only under this flag, so it is set
+    exactly when the launch verified the OS boundary; without it the deny
+    lattice keeps carrying the escalation recipe.
+    """
+    hooks = portable_harness().plugins[0].hooks
+    if hooks is None or hooks.sandbox is None:
+        return
+    missing = [tool for tool in required_tools if shutil.which(tool) is None]
+    if missing:
+        typer.echo(
+            f"{label} sandbox: missing {', '.join(missing)} — deny lattice stays active"
+        )
+        return
+    environment["LUP_SANDBOX_ACTIVE"] = "1"
+    typer.echo(f"{label} sandbox: active — unjudged shell defers to the OS boundary")
 
 
 def launch_claude(
@@ -60,6 +85,7 @@ def launch_claude(
         ]
     )
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
+    apply_sandbox_environment(environment, "claude", ["bwrap", "socat"])
     if profile is not None:
         environment["CLAUDE_CONFIG_DIR"] = str(
             ClaudeProfileStore().resolve_config_dir(profile)
@@ -87,6 +113,7 @@ def launch_codex(
         return
     runtime_preflight(composition)
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
+    apply_sandbox_environment(environment, "codex", [])
     configured_home = environment["CODEX_HOME"] if "CODEX_HOME" in environment else None
     selected_home = codex_home or (
         Path(configured_home) if configured_home is not None else Path.home() / ".codex"
