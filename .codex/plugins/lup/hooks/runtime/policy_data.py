@@ -1589,6 +1589,16 @@ SHELL_RULES = [
         "reason": "",
     },
     {
+        "command": "set",
+        "subcommand": "",
+        "operation": "",
+        "effect": "allow",
+        "ask_flags": [],
+        "allow_flags": [],
+        "value_flags": [],
+        "reason": "",
+    },
+    {
         "command": "sleep",
         "subcommand": "",
         "operation": "",
