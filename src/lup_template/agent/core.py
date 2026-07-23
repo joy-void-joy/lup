@@ -77,7 +77,7 @@ from lup.types import (
     UsageCost,
 )
 from lup.workspace.history import save_session
-from lup.workspace.notes import NotesConfig, setup_notes
+from lup.workspace.notes import NotesConfig, session_gate_flag, setup_notes
 from lup.workspace.paths import agent_version
 from lup_template.agent.config import (
     compat_api_key,
@@ -218,6 +218,11 @@ def provider_factory(
             effort=normalize_claude_effort(settings.reasoning_effort),
             cwd=cwd,
             add_dirs=add_dirs or list(settings.extra_dirs),
+            environment=(
+                {"ENABLE_TOOL_SEARCH": settings.tool_search}
+                if settings.tool_search is not None
+                else {}
+            ),
             sandbox=ClaudeSandboxConfig() if session_defaults else None,
             hooks=hooks,
             submission_gate_resolver=submission_gate,
@@ -260,7 +265,7 @@ def provider_factory(
             cwd=cwd,
             sandbox=(
                 normalize_codex_sandbox(settings.codex_sandbox)
-                or ("workspaceWrite" if session_defaults else None)
+                or ("workspace-write" if session_defaults else None)
             ),
             approval_policy=(
                 normalize_codex_approval(settings.codex_approval_policy)
@@ -306,16 +311,19 @@ def normalize_claude_effort(
 
 def normalize_codex_sandbox(
     value: str | None,
-) -> Literal["readOnly", "workspaceWrite", "dangerFullAccess"] | None:
+) -> Literal["read-only", "workspace-write", "danger-full-access"] | None:
     """Translate the documented environment spelling once at composition."""
     aliases = {
         None: None,
-        "read_only": "readOnly",
-        "workspace_write": "workspaceWrite",
-        "danger_full_access": "dangerFullAccess",
-        "readOnly": "readOnly",
-        "workspaceWrite": "workspaceWrite",
-        "dangerFullAccess": "dangerFullAccess",
+        "read_only": "read-only",
+        "workspace_write": "workspace-write",
+        "danger_full_access": "danger-full-access",
+        "read-only": "read-only",
+        "workspace-write": "workspace-write",
+        "danger-full-access": "danger-full-access",
+        "readOnly": "read-only",
+        "workspaceWrite": "workspace-write",
+        "dangerFullAccess": "danger-full-access",
     }
     try:
         return aliases[value]
@@ -482,12 +490,18 @@ def build_session_factory(
             if name != EXAMPLE_GROUP
         ]
         tool_servers = dict(policy.get_mcp_servers(*servers))
+        from lup.adapters.claude.runtime import SUBMISSION_TOOL
+
         allowed_tools = policy.get_allowed_tools(
             tool_servers,
             builtin_tools=frozenset(  # lup: ignore[frozenset-shape] — immutable policy input
                 {"Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash"}
             ),
         )
+        # The turn-bound submission tool is registered by the adapter, not the
+        # template toolsets; without this the allowlist hook denies the very
+        # tool that finalizes the turn.
+        allowed_tools.append(SUBMISSION_TOOL)
         hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
         submission_gate = reflection_submission_gate(toolset["gate"])
     elif not toolless:
@@ -497,7 +511,11 @@ def build_session_factory(
 
         policy = ToolPolicy(settings)
         realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
-        gate = ReviewGate(flag_path=notes.trace_log.with_suffix(".reflection"))
+        # The flag lives outside the sandbox's writable roots (workspace,
+        # /tmp) so only the host-side tool server can open the gate.
+        gate_flag = session_gate_flag(notes.session.name)
+        gate_flag.unlink(missing_ok=True)
+        gate = ReviewGate(flag_path=gate_flag)
         submission_gate = reflection_submission_gate(gate)
         context = SessionContext(
             session_dir=notes.session,

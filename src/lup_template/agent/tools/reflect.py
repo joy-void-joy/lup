@@ -10,7 +10,7 @@ the reviewer passes: approve and warn open the gate, fail keeps it
 closed so the agent revises and reviews again, and after 3 consecutive
 fails the gate opens anyway (escape hatch).
 
-Runs a reviewer sub-agent (an independent one-shot query) that
+Runs a nested reviewer agent (an independent one-shot query) that
 critiques the main agent's reasoning with sandboxed file access to
 past outputs (Read/Glob/Grep) and WebFetch for known URLs, returning a
 structured :class:`~lup.reflect.ReviewResult` verdict. Skipping the
@@ -146,7 +146,7 @@ class ReflectInput(BaseModel):
     skip_reviewer: bool = Field(
         default=False,
         description=(
-            "Skip the reviewer sub-agent and record an approval "
+            "Skip the nested reviewer agent and record an approval "
             "(e.g., for speed or when trivial)."
         ),
     )
@@ -174,7 +174,7 @@ class ReviewOutput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Reviewer sub-agent
+# Nested reviewer agent
 # ---------------------------------------------------------------------------
 
 
@@ -197,7 +197,7 @@ async def run_reviewer(
     *,
     model: str = "claude-opus-4-6",
 ) -> ReviewResult | None:
-    """Run the reviewer sub-agent and return its structured verdict.
+    """Run the nested reviewer agent and return its structured verdict.
 
     The tool never inspects the provider. The application composition root
     supplies a typed auxiliary factory using ``aux_model()`` and the same
@@ -261,7 +261,7 @@ def create_reflect_tools(
         outputs_dir: Path to past outputs for the reviewer to Read.
             If None, the reviewer won't have historical data access.
         gate: External gate instance to use. Creates a new one if None.
-        reviewer_model: Model for the reviewer sub-agent. The template
+        reviewer_model: Model for the nested reviewer agent. The template
             passes ``aux_model()`` so the reviewer follows the backend.
     """
     gate = gate or ReviewGate()
@@ -295,7 +295,7 @@ def create_reflect_tools(
                     assessment="(reviewer unavailable — see logs)",
                 )
             except (RuntimeError, OSError, TimeoutError, ValueError):
-                logger.exception("Reviewer sub-agent failed")
+                logger.exception("Nested reviewer agent failed")
                 result = ReviewResult(
                     verdict=ReviewVerdict.approve,
                     assessment="(reviewer error — see logs)",

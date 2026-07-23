@@ -1,4 +1,12 @@
-"""Deterministic conservative policy and observer composition."""
+"""Deny-before-ask composition that can never weaken a member verdict.
+
+``OrderedPolicyChain`` folds several
+:class:`~lup.policy.contracts.DecisionPolicy` verdicts into the strictest
+one, ``UnknownToolPolicy`` holds unclassified tools at ``ask``, and
+``PolicyDispatcher`` notifies observers after deciding without letting an
+observer failure alter the outcome. The shared fixture suite and embedding
+applications compose the :mod:`lup.policy.rules` policies through here.
+"""
 
 from lup.policy.contracts import DecisionPolicy, Observer
 from lup.policy.models import (
@@ -27,6 +35,11 @@ class OrderedPolicyChain[E](DecisionPolicy[E]):
         )
         if asked is not None:
             return asked
+        deferred = next(
+            (decision for decision in decisions if decision.effect == "defer"), None
+        )
+        if deferred is not None:
+            return deferred
         if decisions:
             return Decision(effect="allow")
         return Decision(effect="ask", reason="no policy classified this event")

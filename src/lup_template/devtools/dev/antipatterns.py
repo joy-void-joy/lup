@@ -26,6 +26,7 @@ from lup.codescan.antipatterns import (
 )
 from lup.codescan.capabilities import audit_capabilities, sources_from_paths
 from lup.codescan.boundaries import audit_path_boundaries
+from lup.codescan.registry import RULE_REFERENCE
 from lup_template.devtools.utils import git, output_json
 
 
@@ -145,6 +146,7 @@ def summarize(as_json: bool) -> None:
     typer.echo("  by rule:")
     for rule, count in by_rule.most_common():
         typer.echo(f"    {count:5}  {rule}  ({len(files_by_rule[rule])} file(s))")
+    typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
 
 
 def report(as_json: bool) -> None:
@@ -170,5 +172,6 @@ def report(as_json: bool) -> None:
     advisory = len(found) - len(blocking)
     tail = f" (+{advisory} untyped, advisory)" if advisory else ""
     typer.echo(f"\n{len(blocking)} blocking finding(s){tail} in {len(files)} file(s)")
+    typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
     if blocking:
         raise typer.Exit(1)

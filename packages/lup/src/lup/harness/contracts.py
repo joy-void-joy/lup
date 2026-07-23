@@ -1,21 +1,31 @@
-"""Narrow harness, artifact, diagnostic, and process capabilities."""
+"""Neutral capability seams composed by neutral harness code.
+
+Each ABC names one narrow operation of the harness domain: the generation
+pipeline stages from rendering canonical declarations through materializing
+files on disk. Neutral orchestration composes these seams; provider-specific
+implementations live in adapter packages, while complete process and
+validation boundaries live beside their deterministic implementations.
+Parameter and result models live with their owning concern, so imports here
+are type-only.
+"""
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from lup.harness.models import (
-    ArtifactTree,
-    CapabilityEvidence,
-    CurrentTree,
-    ExitStatus,
-    LaunchRequest,
-    MaterializationResult,
-    ReconciliationProposal,
-    SkillInvocation,
-    ValidationResult,
-)
+if TYPE_CHECKING:
+    from pathlib import Path
 
-# lup: Isn't that mainly for resolve? Shouldn't it go there? Or what are we using those ABC for? It's not clear from code+file position
+    from lup.harness.materialization import MaterializationResult
+    from lup.harness.models import (
+        ArtifactTree,
+        CapabilityEvidence,
+        PromptDocument,
+        SkillInvocation,
+    )
+    from lup.harness.reconciliation import CurrentTree, ReconciliationProposal
+
 
 class ArtifactRenderer[S](ABC):
     """Render one cohesive artifact family."""
@@ -25,20 +35,20 @@ class ArtifactRenderer[S](ABC):
         """Render source into a complete in-memory artifact tree."""
 
 
-class ArtifactValidator(ABC):
-    """Validate a complete in-memory artifact tree."""
-
-    @abstractmethod
-    def validate(self, tree: ArtifactTree) -> ValidationResult:
-        """Return every deterministic validation issue."""
-
-
 class SkillInvocationRenderer(ABC):
     """Own one native runtime's complete skill invocation spelling."""
 
     @abstractmethod
     def render(self, invocation: SkillInvocation) -> str:
         """Render qualification, escaping, and arguments together."""
+
+
+class PromptRenderer(ABC):
+    """Own one native runtime's complete prompt-document spelling."""
+
+    @abstractmethod
+    def render(self, prompt: PromptDocument) -> str:
+        """Render every semantic prompt part into native prompt text."""
 
 
 class CurrentTreeReader(ABC):
@@ -73,11 +83,3 @@ class CapabilityProbe[C](ABC):
     @abstractmethod
     def probe(self) -> CapabilityEvidence[C]:
         """Return evidence without invoking an unsupported operation."""
-
-
-class ProcessLauncher(ABC):
-    """Launch one concrete process boundary."""
-
-    @abstractmethod
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        """Launch with typed arguments and environment."""

@@ -2,9 +2,14 @@
 
 import json
 import shlex
+from importlib import resources
 from pathlib import Path
 
-from lup.harness.contracts import ArtifactRenderer, SkillInvocationRenderer
+from lup.harness.contracts import (
+    ArtifactRenderer,
+    PromptRenderer,
+    SkillInvocationRenderer,
+)
 from lup.harness.generation import argument_text
 from lup.harness.models import (
     Agent,
@@ -42,7 +47,7 @@ class CodexSkillInvocationRenderer(SkillInvocationRenderer):
         return f"{mention} {arguments}" if arguments else mention
 
 
-class CodexPromptRenderer:
+class CodexPromptRenderer(PromptRenderer):
     """Render typed operations directly into Codex prompt instructions."""
 
     def __init__(self, invocations: SkillInvocationRenderer) -> None:
@@ -66,7 +71,10 @@ class CodexPromptRenderer:
                     )
                 case ResolverEntry():
                     rendered.append(
-                        "Run `uv run lup-devtools harness resolve --adapter codex`."
+                        "Run `uv run lup-devtools harness resolve --adapter codex`. "
+                        "The command accepts optional flags: `--run-id <id>` resumes "
+                        "a persisted run and `--accept`/`--reject` records the human "
+                        "decision on its review branch."
                     )
                 case ArgumentsRef():
                     rendered.append("the arguments supplied with this skill invocation")
@@ -77,7 +85,7 @@ class CodexPromptRenderer:
 class CodexSkillRenderer(ArtifactRenderer[Skill]):
     """Render one portable declaration as a same-named Codex skill."""
 
-    def __init__(self, prompts: CodexPromptRenderer, plugin_name: str) -> None:
+    def __init__(self, prompts: PromptRenderer, plugin_name: str) -> None:
         self.prompts = prompts
         self.plugin_name = plugin_name
 
@@ -105,11 +113,14 @@ class CodexSkillRenderer(ArtifactRenderer[Skill]):
 class CodexAgentRenderer(ArtifactRenderer[Agent]):
     """Render one portable agent as project-scoped custom-agent TOML."""
 
-    def __init__(self, prompts: CodexPromptRenderer) -> None:
+    def __init__(self, prompts: PromptRenderer) -> None:
         self.prompts = prompts
 
     def render(self, source: Agent) -> ArtifactTree:
         rows = [
+            "# Generated file — do not edit directly. Rendered from the portable",
+            f"# agent declaration {source.id} by "
+            "`uv run lup-devtools harness generate all`.",
             f"name = {json.dumps(source.name)}",
             f"description = {json.dumps(source.description)}",
             (
@@ -181,7 +192,7 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
 class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
     """Render root project guidance at Codex's documented repository location."""
 
-    def __init__(self, prompts: CodexPromptRenderer) -> None:
+    def __init__(self, prompts: PromptRenderer) -> None:
         self.prompts = prompts
 
     def render(self, source: Harness) -> ArtifactTree:
@@ -194,59 +205,24 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
                 ),
                 Artifact(
                     path=Path(".codex/config.toml"),
-                    content="[features]\nhooks = true\n",
+                    content=(
+                        "# Generated file — do not edit directly. Rendered from\n"
+                        "# lup.adapters.codex.harness by "
+                        "`uv run lup-devtools harness generate all`.\n"
+                        "[features]\nhooks = true\n"
+                    ),
                     semantic_id="harness.project-config",
                 ),
             ]
         )
 
 
-CODEX_POLICY_DISPATCHER = '''#!/usr/bin/env python3
-"""Generated Codex hook dispatcher over the canonical semantic kernel."""
-
-import json
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from kernel import KernelDecision, decide_fetch, decide_shell
-from policy_data import ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES
-
-
-def dispatch(payload):
-    name = payload["tool_name"]
-    tool_input = payload["tool_input"]
-    if name == "Bash":
-        return decide_shell(tool_input["command"])
-    if name == "web_fetch":
-        return decide_fetch(
-            tool_input["url"],
-            ALLOWED_FETCH_SCOPES,
-            DENIED_FETCH_SCOPES,
-        )
-    if name == "apply_patch":
-        return KernelDecision(
-            "ask",
-            "opaque patch input requires native parsing before it can be auto-allowed",
-        )
-    return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
-
-
-def main():
-    try:
-        decision = dispatch(json.load(sys.stdin))
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-        sys.stderr.write(f"Malformed hook input requires approval: {error}")
-        raise SystemExit(2) from error
-    if decision.effect == "allow":
-        return
-    sys.stderr.write(decision.reason)
-    raise SystemExit(2)
-
-
-if __name__ == "__main__":
-    main()
-'''
+CODEX_POLICY_DISPATCHER = (
+    resources.files("lup.adapters.codex")
+    .joinpath("assets/policy_dispatcher.py")
+    .read_text("utf-8")
+)
+"""Hermetic hook dispatcher script, shipped verbatim into the plugin tree."""
 
 
 class CodexHookRenderer(ArtifactRenderer[HookSet]):
@@ -319,7 +295,11 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         protected_roots=[
                             path.as_posix() for path in source.protected_edit_roots
                         ],
+                        human_owned_files=[
+                            path.as_posix() for path in source.human_owned_files
+                        ],
                         autonomous_agent_identities=[],
+                        shell_rule_extension=list(source.shell_rules),
                     ),
                     semantic_id=source.id,
                 ),

@@ -2,8 +2,12 @@
 
 The native Claude and Codex trees are deterministic committed output. Run
 `uv run lup-devtools harness generate all` before review. The local pre-commit
-hook regenerates and stops if that changes tracked files; CI runs the read-only
-`uv run lup-devtools harness check all` drift check and never commits changes.
+hook regenerates for commits touching harness sources or owned trees and stops
+if that changes tracked files; CI runs the read-only
+`uv run lup-devtools harness check all` drift check on every push and never
+commits changes. `docs/quality-pipeline.md` maps the full pipeline.
+`docs/generated-artifacts.md` maps every committed generated path to its
+canonical source and explains the committed ownership manifests.
 
 `src/lup_template/devtools/harness/content/` contains the canonical skill,
 agent, guidance, pattern, and template declarations.
@@ -12,6 +16,19 @@ invocations and the application-owned hook policy. Prompt prose is stored as
 ordered typed parts. A
 `SkillInvocationRenderer` owns the complete native invocation spelling; shared
 code never rewrites `/lup:` into another prefix.
+
+Each module in `src/lup_template/devtools/harness/` owns one subapp concern:
+
+- `app.py` — typer command wiring only; every body lives elsewhere
+- `catalog.py` — declaration-graph root assembling `content/` into a `Harness`
+- `content/` — the declaration leaves (skills, agents, documents, assets)
+- `composition.py` — composition roots wiring concrete Claude/Codex capabilities
+- `generate.py` — recipes, drift inspection, and atomic materialization
+- `drift.py` — console drift reporting for `generate` and `check`
+- `reconcile.py` — drift classification and the source-patch propose/apply flow
+- `doctor.py` — runtime evidence reporting against the `evidence.py` ledger
+- `resolve.py` — persisted-resolver glue: broker, snapshots, session factories
+- `launch.py` — runtime preflight and the native `claude`/`codex` launchers
 
 Concrete renderers build independent artifact families. Tree builders compose
 them, then validators check the result. Generate and launch with:
@@ -56,4 +73,6 @@ require a clean diff.
 See `docs/adopter-guide.md` for complete skill, fetch-policy, conflict, and
 source-patch reconciliation walkthroughs. The one-time reviewed differences
 from the retired native catalog are recorded in
-`docs/typed-content-migration-audit.md`.
+`docs/typed-content-migration-audit.md`. `docs/platform-differentiation.md`
+maps every intended Claude/Codex difference and records the parity decision
+for each generated artifact family.

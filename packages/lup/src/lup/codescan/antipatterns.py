@@ -15,17 +15,25 @@ without blinding the others. The bare `# lup: ignore` stays valid (it silences
 every rule) but the auditor surfaces it as "untyped" so the migration to typed
 directives is gradual.
 
-The rules live here as plain regexes rather than as custom linter rules: ruff
-has no plugin API, and engines that do (flake8, pylint, semgrep) could not run
-inside the hermetic hook — the shared table, mirrored hook, equality test, and
-tree auditor together are the unification a linter would have provided.
+The set is a syntax-aware linter pass, not a raw grep: every rule declares the
+syntactic ``context`` it inspects, and Python source is tokenized once (via
+`lup.codescan.common.LineProjections`) so "code" rules scan lines with string
+literals and comments blanked while "comment" directive rules see comments
+intact. The detectors themselves stay regexes because that is the primitive
+form the hermetic hook runtime can carry (ruff has no plugin API, and engines
+that do — flake8, pylint, semgrep — could not run inside the hook); AST
+refiners such as `empty_collection_exempt_lines` sharpen individual rules, and
+regex alone remains only where a rule is genuinely text-shaped. The
+`lup.codescan.registry` index and the generated `docs/rules.md` reference list
+this family beside the boundary, spelling, and architecture rules.
 
 Each entry pairs a stable id and a compiled regex with the message the hook and
 auditor show. This module imports only the standard library and `pydantic`
 (directly and through `lup.codescan.common`) so the auditor can load it cheaply;
 `# lup:` marker detection stays in `lup.codescan.markers`, and the shared scan
-core — ignore matching, comment-column tokenization, the line cursor — in
-`lup.codescan.common`, which this set's consumers and the auditor import directly.
+core — ignore matching, comment-column tokenization, the masked line
+projections, the line cursor — in `lup.codescan.common`, which this set's
+consumers and the auditor import directly.
 """
 
 import re
@@ -39,11 +47,13 @@ from lup.codescan.boundaries import (
 from lup.codescan.capabilities import RULE_ID as ABC_CAPABILITY_RULE_ID
 from lup.codescan.common import (
     IGNORE_RE,
+    LineProjections,
     PythonContext,
+    RuleContext,
     file_level_ignore,
     ignore_rule_ids,
 )
-from lup.policy.kernel import empty_collection_exempt_lines, mask_python_string_literals
+from lup.policy.kernel import empty_collection_exempt_lines
 
 
 class AntiPattern(BaseModel):
@@ -53,6 +63,14 @@ class AntiPattern(BaseModel):
     targets, so a single site can silence exactly one rule without opting out
     of the rest. Ids are pinned alongside the pattern and message by
     ``tests/unit/test_antipatterns.py`` and must stay in step with the hook.
+
+    ``context`` declares the syntactic surface the pattern inspects. A "code"
+    rule is matched against token-masked source — string literals and comments
+    both blanked — so an identifier quoted in prose never trips it; a
+    "comment" rule targets comment directives (`# type: ignore`, `# noqa`) and
+    is matched with comments intact. Where no tokenizer applies (the
+    TypeScript-family table, text that fails to tokenize) every rule scans the
+    raw line — those rules are genuinely text-shaped.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -60,9 +78,9 @@ class AntiPattern(BaseModel):
     id: str
     pattern: re.Pattern[str]
     message: str
+    context: RuleContext = "code"
 
 
-# lup: I thought we converted #lup: scanning to a full AST, yet this still uses normal regex. I think we should convert it to a linter
 PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="any-type",
@@ -73,16 +91,19 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="type-ignore",
         pattern=re.compile(r"#\s*type:\s*ignore"),
         message="Never use # type: ignore — fix the type error properly",
+        context="comment",
     ),
     AntiPattern(
         id="pyright-ignore",
         pattern=re.compile(r"#\s*pyright:\s*ignore"),
         message="Never use # pyright: ignore — fix the type error properly",
+        context="comment",
     ),
     AntiPattern(
         id="noqa",
         pattern=re.compile(r"#\s*noqa\b"),
         message="Never use # noqa — fix the lint issue properly",
+        context="comment",
     ),
     AntiPattern(
         id="generic-base",
@@ -134,6 +155,12 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # Flags every `.get(` — the user's explicit broad choice over a narrow
         # rule. On payload/TypedDict-shaped data use typed attribute access; on
         # a genuinely open dict (a registry or cache) it is one comment.
+        # lup: defer[when new dict-get false-positive ignores accumulate]: refute
+        # whole-file dict-get findings by receiver type — ask pyright
+        # (textDocument/definition on the matched attribute) whether it resolves
+        # into the mapping family's stubs, and drop confirmed non-mapping sites
+        # (HTTP clients, route decorators). Audit-side only; the hook kernel
+        # keeps this broad line rule because edit fragments have no types.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
         message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
@@ -394,31 +421,37 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
         id="ts-ignore",
         pattern=re.compile(r"@ts-ignore"),
         message="Never use @ts-ignore — fix the type error properly",
+        context="comment",
     ),
     AntiPattern(
         id="ts-expect-error",
         pattern=re.compile(r"@ts-expect-error"),
         message="Never use @ts-expect-error — fix the type error properly",
+        context="comment",
     ),
     AntiPattern(
         id="ts-nocheck",
         pattern=re.compile(r"@ts-nocheck"),
         message="Never use @ts-nocheck — fix the type errors in the file",
+        context="comment",
     ),
     AntiPattern(
         id="eslint-disable",
         pattern=re.compile(r"//\s*eslint-disable"),
         message="Never use eslint-disable — fix the lint issue properly",
+        context="comment",
     ),
     AntiPattern(
         id="eslint-disable-block",
         pattern=re.compile(r"/\*\s*eslint-disable"),
         message="Never use eslint-disable — fix the lint issue properly",
+        context="comment",
     ),
     AntiPattern(
         id="tslint-disable",
         pattern=re.compile(r"//\s*tslint:disable"),
         message="Never use tslint:disable — migrate to eslint and fix the issue",
+        context="comment",
     ),
     AntiPattern(
         id="non-null-assertion",
@@ -477,19 +510,28 @@ def patterns_for_suffix(suffix: str) -> list[AntiPattern] | None:
     return None
 
 
-def line_hits(line: str, patterns: list[AntiPattern]) -> list[AntiPattern]:
-    """Every anti-pattern a single line trips, skipping comment/blank lines.
+def line_hits(
+    lines: LineProjections, line_no: int, patterns: list[AntiPattern]
+) -> list[AntiPattern]:
+    """Every anti-pattern one line trips, each matched in its declared context.
 
-    A blank line or a pure comment that is not a `# type:` directive is code
-    the hook never scans, so it never matches — keeping the auditor's verdict
-    aligned with what the hook would have allowed.
+    Tokenized Python is scanned per rule context: a "code" rule sees string
+    literals and comments blanked, so identifiers in prose never match, while
+    a "comment" directive rule sees comments intact — a standalone `# noqa`
+    line included. Untokenized text (a non-Python file, a fragment) keeps the
+    conservative whole-line scan, skipping blank lines and pure comments that
+    carry no `type:` directive — aligned with what the hook would decide.
     """
-    stripped = line.strip()
-    if not stripped:
-        return []
-    if stripped.startswith("#") and "type:" not in stripped:
-        return []
-    return [ap for ap in patterns if ap.pattern.search(stripped)]
+    if not lines.tokenized:
+        raw = lines.commented[line_no - 1].strip()
+        if not raw or (raw.startswith("#") and "type:" not in raw):
+            return []
+        return [ap for ap in patterns if ap.pattern.search(raw)]
+    return [
+        ap
+        for ap in patterns
+        if (text := lines.scan_text(line_no, ap.context)) and ap.pattern.search(text)
+    ]
 
 
 class AntiPatternFinding(BaseModel):
@@ -573,7 +615,7 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
 
     file_ignore_line = file_ignore.line if file_ignore is not None else 0
     original_lines = text.splitlines()
-    scanned_lines = mask_python_string_literals(text)
+    projections = LineProjections.parse(text)
 
     file_live: set[str] = set()
     findings: list[AntiPatternFinding] = []
@@ -583,7 +625,7 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
         if index in context.docstring_lines:
             continue  # docstring prose is not code, and no comment can guard it
         preview = line.strip()[:80]
-        hits = line_hits(scanned_lines[index - 1], patterns)
+        hits = line_hits(projections, index, patterns)
         if index in exempt:
             hits = [ap for ap in hits if ap.id != EMPTY_COLLECTION_RULE_ID]
         hit_ids = {ap.id for ap in hits}

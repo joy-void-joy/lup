@@ -1,28 +1,79 @@
-"""Ownership-aware current-tree reading and deterministic reconciliation."""
+"""Current-tree classification and the write/delete/conflict proposal.
+
+``FilesystemCurrentTreeReader`` classifies what is on disk under prior
+ownership proof; ``DeterministicReconciler`` compares that against the desired
+tree and proposes writes, proven deletions, and explicit conflicts — without
+side effects. The proposal row types are defined here because reconciliation
+is their only producer; :mod:`lup.harness.materialization` applies them and
+the devtools generation flow composes both. The source-patch digests guard
+the backpropagation flow persisted by :mod:`lup.harness.proposals`.
+"""
 
 import hashlib
 import json
 import shlex
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from lup.harness.contracts import CurrentTreeReader, Reconciler
 from lup.harness.generation import artifact_map
-from lup.harness.models import (
-    ArtifactTree,
-    CurrentArtifact,
-    CurrentTree,
-    OwnershipCategory,
-    OwnershipManifest,
-    ProposedDelete,
-    ProposedWrite,
-    ReconciliationConflict,
-    ReconciliationProposal,
-)
+from lup.harness.models import Artifact, ArtifactTree
+from lup.harness.ownership import OwnershipCategory, OwnershipManifest
 
 
-# lup: Same
+class CurrentArtifact(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    path: Path
+    content: str
+    category: OwnershipCategory
+    sha256: str
+    executable: bool = False
+
+
+class CurrentTree(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    root: Path
+    artifacts: list[CurrentArtifact]
+
+
+class ProposedWrite(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    artifact: Artifact
+    previous_sha256: str | None = None
+    previous_executable: bool | None = None
+
+
+class ProposedDelete(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    path: Path
+    prior_ownership_sha256: str
+
+
+class ReconciliationConflict(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    path: Path
+    category: OwnershipCategory
+    message: str
+    sensitive: bool = False
+
+
+class ReconciliationProposal(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    root: Path
+    writes: list[ProposedWrite] = Field(default_factory=list)
+    deletes: list[ProposedDelete] = Field(default_factory=list)
+    conflicts: list[ReconciliationConflict] = Field(default_factory=list)
+    base_digest: str
+
+
 class SourcePreimageRow(BaseModel):
     """One named source path and its optional preimage hash."""
 
@@ -30,11 +81,6 @@ class SourcePreimageRow(BaseModel):
 
     path: str
     sha256: str | None
-
-
-def content_digest(content: str) -> str:
-    """Hash normalized UTF-8 artifact content."""
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def current_tree_digest(tree: CurrentTree) -> str:

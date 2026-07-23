@@ -7,7 +7,13 @@ SKILL = models.Skill(
     name="fb-reflect",
     description="Meta and meta-meta reflection on the feedback loop process itself",
     tools=[
-        "Bash(uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion"
+        "Bash(uv run lup-devtools:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "AskUserQuestion",
     ],
     prompt=models.PromptDocument(
         parts=[

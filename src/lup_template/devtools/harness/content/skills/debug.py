@@ -14,7 +14,10 @@ SKILL = models.Skill(
         ),
     ],
     tools=[
-        "Read, Grep, Glob, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)"
+        "Read",
+        "Grep",
+        "Glob",
+        "Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)",
     ],
     argument_hint="[error message or fragment]",
     prompt=models.PromptDocument(

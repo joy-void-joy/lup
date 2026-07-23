@@ -10,6 +10,11 @@ enforcement is the native workspace-write sandbox
 Kept beside its tests so the format survives for the day the runtime
 honors hooks again; do not wire it into a live adapter without
 re-probing.
+
+The emitted hook scripts stay inline as f-string templates: each bakes
+call-time constants (directories, flags, tool lists) into the generated
+source, so a standalone asset would be a brace-doubled ``.format``
+template — not valid Python — and would review worse than the literal.
 """
 
 import json

@@ -22,6 +22,7 @@ import logging
 from collections.abc import Sequence
 
 from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_names
+from lup.types import ToolName
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ class BaseToolPolicy:
         servers: dict[str, McpServerEntry],
         *,
         builtin_tools: frozenset[str] = frozenset(),  # lup: ignore[frozenset-shape]
-    ) -> list[str]:
+    ) -> list[ToolName]:
         """Compute every tool name the agent may call (hook-enforced path only —
         on subprocess-served backends tool availability is the served MCP groups).
 
@@ -158,11 +159,11 @@ class BaseToolPolicy:
 
         return sorted(tools)
 
-    def is_tool_available(self, tool_name: str) -> bool:
+    def is_tool_available(self, tool_name: ToolName) -> bool:
         """Check if a specific tool is available under this policy."""
         return tool_name not in self.excluded_tools
 
-    def exclusion_reason(self, tool_name: str) -> str | None:
+    def exclusion_reason(self, tool_name: ToolName) -> str | None:
         """Why a tool is unavailable by name, or None when it is allowed."""
         if tool_name in self.excluded_tools:
             return self.excluded_tools[tool_name]

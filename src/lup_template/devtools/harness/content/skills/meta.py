@@ -16,7 +16,14 @@ SKILL = models.Skill(
         ),
     ],
     tools=[
-        "Bash(ls:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, Agent, AskUserQuestion"
+        "Bash(ls:*, uv run lup-devtools:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "Agent",
+        "AskUserQuestion",
     ],
     prompt=models.PromptDocument(
         parts=[
@@ -60,6 +67,7 @@ plugins/lup/
 │       └── runtime/policy.py    # generated hermetic semantic policy
 ├── agents/                      # Subagent definitions
 └── TEMPLATE_CLAUDE.md           # CLAUDE.md template for new projects
+                                 # (.codex/plugins/lup/TEMPLATE_AGENTS.md is its Codex flavor)
 ```
 
 **Note:** Python CLI tooling (API inspection, trace analysis, feedback collection, worktree management, etc.) lives in `src/lup_template/devtools/` and is exposed as the `lup-devtools` CLI entry point. See the lup-devtools section in CLAUDE.md.

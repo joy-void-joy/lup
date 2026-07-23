@@ -382,10 +382,8 @@ async def test_app_server_eof_fails_current_turn_with_partial_evidence(
 def test_codex_config_rejects_unhandled_native_approval_requests(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(ValueError, match="dynamic-tool calls only"):
-        CodexSessionConfig.model_validate(
-            {"model": "gpt", "cwd": tmp_path, "approval_policy": "on-request"}
-        )
+    with pytest.raises(ValueError, match="approval_policy must be 'never'"):
+        CodexSessionConfig(model="gpt", cwd=tmp_path, approval_policy="on-request")
 
 
 @pytest.mark.asyncio

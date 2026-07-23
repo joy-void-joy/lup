@@ -7,6 +7,9 @@
     "lup@lup-template": true,
     "pyright-lsp@claude-plugins-official": true
   },
+  "env": {
+    "ENABLE_TOOL_SEARCH": "false"
+  },
   "extraKnownMarketplaces": {
     "lup-template": {
       "source": {
@@ -24,6 +27,7 @@
       "WebSearch",
       "Skill(lup:hooks)",
       "Read(./.claude/settings.json.local*)",
+      "Read(./sync.json.local)",
       "Read(./downstream.json.local)"
     ],
     "deny": [
@@ -32,5 +36,40 @@
       "Read(./**/secrets*.local)",
       "Read(./**/*.secret.local)"
     ]
+  },
+  "sandbox": {
+    "credentials": {
+      "files": [
+        {
+          "mode": "deny",
+          "path": "~/.ssh"
+        },
+        {
+          "mode": "deny",
+          "path": "~/.aws/credentials"
+        }
+      ]
+    },
+    "enabled": true,
+    "filesystem": {
+      "denyWrite": [
+        "README.md"
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "docs.claude.com",
+        "code.claude.com",
+        "ai.pydantic.dev",
+        "learn.chatgpt.com",
+        "developers.openai.com",
+        "github.com",
+        "api.github.com",
+        "*.githubusercontent.com",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "api.anthropic.com"
+      ]
+    }
   }
 }

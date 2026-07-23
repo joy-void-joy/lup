@@ -4,9 +4,9 @@ A nested agent is an MCP tool that, inside its handler, spins up an
 independent configured session via :func:`lup.runtime.query.query`, runs it to
 completion, and folds the scalar result back into a structured tool response.
 
-It differs from a **subagent** (defined upfront in ``get_subagent_specs`` and
-sharing the main session and trace): a nested agent is created on demand and
-keeps its context fully separate, so the main agent receives only the
+It differs from a **native subagent** (defined upfront in ``get_subagent_specs``
+and sharing the main session and trace): a nested agent — a *tool-subagent* —
+is created on demand and keeps its context fully separate, so the main agent receives only the
 conclusion, not the reasoning chain. The tool handler is the context boundary —
 it post-processes ("augments") the nested agent's raw output into the response.
 

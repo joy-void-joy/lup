@@ -50,6 +50,7 @@ class ClaudeShellOperation(BaseModel):
     type: Literal["shell"] = "shell"
     command: str
     cwd: Path | None = None
+    unsandboxed: bool = False
 
 
 class ClaudeFetchOperation(BaseModel):
@@ -113,6 +114,8 @@ def parse_claude_before_tool(payload: ClaudeHookPayload) -> ClaudeBeforeToolEven
             )
         case "Write", {"file_path": str(path), "content": str(content)}:
             operation = ClaudeWriteOperation(path=Path(path), content=content)
+        case "Bash", {"command": str(command), "dangerouslyDisableSandbox": True}:
+            operation = ClaudeShellOperation(command=command, unsandboxed=True)
         case "Bash", {"command": str(command)}:
             operation = ClaudeShellOperation(command=command)
         case "WebFetch", {"url": str(url)}:
@@ -143,8 +146,10 @@ class ClaudeEventDecoder(NativeEventDecoder[ClaudeBeforeToolEvent]):
             case ClaudeEditBatchOperation(changes=changes):
                 tool = EditBatch(changes=changes)
                 name = "Edit"
-            case ClaudeShellOperation(command=command, cwd=cwd):
-                tool = ShellCommand(command=command, cwd=cwd)
+            case ClaudeShellOperation(
+                command=command, cwd=cwd, unsandboxed=unsandboxed
+            ):
+                tool = ShellCommand(command=command, cwd=cwd, unsandboxed=unsandboxed)
                 name = "Bash"
             case ClaudeFetchOperation(url=url):
                 name = "WebFetch"
@@ -177,16 +182,18 @@ class ClaudeDecisionOutput(BaseModel):
     hook_event_name: Literal["PreToolUse"] = Field(
         default="PreToolUse", alias="hookEventName"
     )
-    permission_decision: Literal["allow", "ask", "deny"] = Field(
-        alias="permissionDecision"
+    permission_decision: Literal["allow", "ask", "deny"] | None = Field(
+        default=None, alias="permissionDecision"
     )
     reason: str = Field(default="", alias="permissionDecisionReason")
 
 
 class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
-    """Render all semantic effects through Claude's native approval result."""
+    """Render semantic effects; defer omits the decision so the client mode applies."""
 
     def render(self, decision: Decision) -> ClaudeDecisionOutput:
+        if decision.effect == "defer":
+            return ClaudeDecisionOutput(permissionDecisionReason=decision.reason)
         return ClaudeDecisionOutput(
             permissionDecision=decision.effect,
             permissionDecisionReason=decision.reason,
