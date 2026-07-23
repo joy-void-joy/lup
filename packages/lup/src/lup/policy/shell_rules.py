@@ -68,7 +68,9 @@ class ShellCommandRule(BaseModel):
     On a subcommand-gated command, ``value_flags`` name the global options that
     consume the following word (``git -C <path>``) so the value is never read
     as the subcommand, and ``ask_flags`` guard dangerous globals in that same
-    pre-subcommand position (``git -c``).
+    pre-subcommand position (``git -c``). ``allow_flags`` declare the pure
+    read-only form of a non-allow command: the row de-escalates to allow only
+    when every argument is exactly one of the named flags (``ssh-add -l``).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -76,6 +78,7 @@ class ShellCommandRule(BaseModel):
     name: str
     default_effect: CommandEffect = "allow"
     ask_flags: list[str] = Field(default_factory=list)
+    allow_flags: list[str] = Field(default_factory=list)
     value_flags: list[str] = Field(default_factory=list)
     subcommands: list[ShellSubcommandRule] = Field(default_factory=list)
     reason: str = ""
@@ -476,6 +479,19 @@ BASE_SHELL_RULES: list[ShellCommandRule] = [
         for name, reason in REDIRECTED_DENY_COMMANDS
     ],
     ShellCommandRule(
+        # -l/-L print fingerprints and public keys — the read-only diagnostic
+        # for push-auth failures; every other form mutates the agent.
+        name="ssh-add",
+        default_effect="deny",
+        allow_flags=["-l", "-L"],
+        reason="credential-agent changes stay with the user — ask them to run it",
+    ),
+    ShellCommandRule(
+        name="ssh-agent",
+        default_effect="deny",
+        reason="credential-agent lifecycle stays with the user — ask them to run it",
+    ),
+    ShellCommandRule(
         name="sort",
         ask_flags=["-o", "--output", "--compress-program"],
         reason="a sort flag that writes a file or runs a program requires approval",
@@ -530,6 +546,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 operation=operation.name,
                 effect=operation.effect,
                 ask_flags=list(operation.ask_flags),
+                allow_flags=[],
                 value_flags=[],
                 reason=operation.reason,
             )
@@ -541,6 +558,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             operation="",
             effect=subcommand.effect,
             ask_flags=list(subcommand.ask_flags),
+            allow_flags=[],
             value_flags=[],
             reason=subcommand.reason,
         )
@@ -553,6 +571,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             operation="",
             effect=command.default_effect,
             ask_flags=list(command.ask_flags),
+            allow_flags=list(command.allow_flags),
             value_flags=list(command.value_flags),
             reason=command.reason,
         )
