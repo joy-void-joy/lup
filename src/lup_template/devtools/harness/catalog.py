@@ -51,6 +51,8 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             allowed_fetch=[
                 HookUrlScope(origin=AnyHttpUrl("https://docs.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("http://docs.claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("https://code.claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("http://code.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("https://ai.pydantic.dev")),
                 HookUrlScope(origin=AnyHttpUrl("http://ai.pydantic.dev")),
                 HookUrlScope(origin=AnyHttpUrl("https://learn.chatgpt.com")),
