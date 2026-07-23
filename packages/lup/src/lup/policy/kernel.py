@@ -137,6 +137,10 @@ ESCALATE_HINT = (
     " — reshape the command into the allowed vocabulary, or resubmit with a"
     " leading '# lup: escalate: <why>' line to request approval"
 )
+SUBSTITUTION_REASON = (
+    "command substitution is denied — run the inner command in its own call"
+    " and splice its literal output, or read it through <(...) or a pipe"
+)
 
 
 class KernelDecision:
@@ -453,6 +457,12 @@ def decide_shell_segment(
     segment: list[str], rows: list[ShellRuleRow]
 ) -> KernelDecision:
     """Classify one parsed shell segment against the vocabulary and handlers."""
+    while segment and segment[0] == "!":
+        segment = segment[1:]
+    if not segment:
+        return KernelDecision("deny", "shell segment has no command")
+    if segment[0] == "[[":
+        return KernelDecision("allow", "test expression is read-only")
     if has_dangerous_assignment(segment):
         return KernelDecision(
             "ask", "a security-sensitive environment assignment requires approval"
@@ -488,13 +498,24 @@ def decide_shell_segment(
 
 
 class ShellToken:
-    """One lexed shell token: a word, an operator, or a ``<(...)`` inner command."""
+    """One lexed shell token: a word, an operator, or a ``<(...)`` inner command.
+
+    ``quoted`` records whether any part of a word came from quotes or escapes,
+    which decides whether a heredoc delimiter suppresses body expansion.
+    """
 
     kind: Literal["word", "op", "procsub"]
     text: str
+    quoted: bool
 
-    def __init__(self, kind: Literal["word", "op", "procsub"], text: str) -> None:
+    def __init__(
+        self,
+        kind: Literal["word", "op", "procsub"],
+        text: str,
+        quoted: bool = False,
+    ) -> None:
         self.kind = kind
+        self.quoted = quoted
         self.text = text
 
 
@@ -544,6 +565,8 @@ def read_redirection(command: str, position: int) -> tuple[str, int]:
         position += 1
         if core == "<" and position < length and command[position] == "<":
             position += 1
+        elif core == "<" and position < length and command[position] == "-":
+            position += 1
     if position < length and command[position] == "&":
         position += 1
         while position < length and (
@@ -576,20 +599,112 @@ def read_control(command: str, position: int) -> tuple[str, int]:
     return character, position + 1
 
 
+def read_arithmetic(command: str, position: int) -> tuple[str | None, int]:
+    """Scan a balanced ``$((...))`` expansion whose interior is pure data.
+
+    ``position`` sits on the ``$``. Arithmetic cannot run commands, so the
+    expansion joins its word verbatim — unless the interior nests a command
+    substitution, in which case the scan stops on it and returns ``None``.
+    """
+    depth = 2
+    cursor = position + 3
+    length = len(command)
+    while cursor < length:
+        character = command[cursor]
+        if character == "`" or command[cursor : cursor + 2] == "$(":
+            return None, cursor
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth == 0:
+                return command[position : cursor + 1], cursor + 1
+        cursor += 1
+    return None, cursor
+
+
+def arithmetic_token(command: str, position: int) -> tuple[str, int] | KernelDecision:
+    """Read one ``$((...))`` expansion or explain why it cannot join a word."""
+    expansion, end = read_arithmetic(command, position)
+    if expansion is not None:
+        return expansion, end
+    if command[end : end + 2] == "$(" or command[end : end + 1] == "`":
+        return KernelDecision("deny", SUBSTITUTION_REASON)
+    return KernelDecision("deny", "arithmetic expansion does not parse")
+
+
+def without_leading_tabs(line: str) -> str:
+    """The line with its ``<<-``-style leading tab indentation removed."""
+    first = next(
+        (index for index, character in enumerate(line) if character != "\t"),
+        len(line),
+    )
+    return line[first:]
+
+
+def read_heredoc_bodies(
+    command: str, position: int, pending: list[tuple[str, bool]]
+) -> int | KernelDecision:
+    """Consume heredoc bodies after a newline, gating unquoted expansion.
+
+    A quoted delimiter makes the body literal data. An unquoted one lets the
+    shell substitute inside the body, so any substitution syntax there is
+    refused with the quoting recipe.
+    """
+    for delimiter, is_quoted in pending:
+        lines: list[str] = []
+        terminated = False
+        while position <= len(command):
+            newline = command.find("\n", position)
+            end = len(command) if newline == -1 else newline
+            line = command[position:end]
+            position = end + 1
+            if line == delimiter or without_leading_tabs(line) == delimiter:
+                terminated = True
+                break
+            lines.append(line)
+            if newline == -1:
+                break
+        if not terminated:
+            return KernelDecision("deny", "heredoc does not terminate")
+        if not is_quoted:
+            body = "\n".join(lines)
+            if "`" in body or "$(" in body:
+                return KernelDecision(
+                    "deny",
+                    "an unquoted heredoc substitutes commands — quote the"
+                    " delimiter (<<'EOF') to make the body literal",
+                )
+    return position
+
+
 def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
-    """Lex a command into words and operators, refusing opaque or unsafe syntax."""
+    """Lex a command into words and operators, refusing opaque or unsafe syntax.
+
+    Heredoc bodies are consumed here: a delimiter registered by a ``<<``
+    redirection queues until the next newline, where the body lines are
+    skipped as data (quoted delimiter) or gated on substitution syntax
+    (unquoted delimiter).
+    """
     tokens: list[ShellToken] = []
     word: list[str] = []
     started = False
+    quoted = False
+    heredoc_expected = False
+    pending_heredocs: list[tuple[str, bool]] = []
     length = len(command)
     position = 0
 
     def flush() -> None:
-        nonlocal started
+        nonlocal started, quoted, heredoc_expected
         if started:
-            tokens.append(ShellToken("word", "".join(word)))
+            tokens.append(ShellToken("word", "".join(word), quoted))
+            if heredoc_expected:
+                pending_heredocs.append(("".join(word), quoted))
+                heredoc_expected = False
             word.clear()
             started = False
+            quoted = False
 
     while position < length:
         character = command[position]
@@ -599,27 +714,31 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                 return KernelDecision("deny", "shell quoting does not parse")
             word.extend(command[position + 1 : closing])
             started = True
+            quoted = True
             position = closing + 1
             continue
         if character == '"':
             position += 1
+            quoted = True
             while position < length and command[position] != '"':
                 inner = command[position]
                 if inner == "\\" and position + 1 < length:
                     word.append(command[position + 1])
                     position += 2
                     continue
+                if inner == "$" and command[position + 1 : position + 3] == "((":
+                    outcome = arithmetic_token(command, position)
+                    if isinstance(outcome, KernelDecision):
+                        return outcome
+                    expansion, position = outcome
+                    word.append(expansion)
+                    continue
                 if inner == "`" or (
                     inner == "$"
                     and position + 1 < length
                     and command[position + 1] == "("
                 ):
-                    return KernelDecision(
-                        "deny",
-                        "command substitution is denied — run the inner command"
-                        " in its own call and splice its literal output, or"
-                        " read it through <(...) or a pipe",
-                    )
+                    return KernelDecision("deny", SUBSTITUTION_REASON)
                 word.append(inner)
                 position += 1
             if position >= length:
@@ -631,21 +750,25 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             if position + 1 < length and command[position + 1] != "\n":
                 word.append(command[position + 1])
                 started = True
+                quoted = True
             position += 2
             continue
         if character in " \t\r":
             flush()
             position += 1
             continue
+        if character == "$" and command[position + 1 : position + 3] == "((":
+            outcome = arithmetic_token(command, position)
+            if isinstance(outcome, KernelDecision):
+                return outcome
+            expansion, position = outcome
+            word.append(expansion)
+            started = True
+            continue
         if character == "`" or (
             character == "$" and position + 1 < length and command[position + 1] == "("
         ):
-            return KernelDecision(
-                "deny",
-                "command substitution is denied — run the inner command in its"
-                " own call and splice its literal output, or read it through"
-                " <(...) or a pipe",
-            )
+            return KernelDecision("deny", SUBSTITUTION_REASON)
         if character == ">" and position + 1 < length and command[position + 1] == "(":
             return KernelDecision(
                 "ask", "writing process substitution is never auto-allowed"
@@ -675,28 +798,56 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                 fd = "".join(word)
                 word.clear()
                 started = False
+                quoted = False
             else:
                 flush()
             operator, position = read_redirection(command, position)
             tokens.append(ShellToken("op", fd + operator))
+            if "<<" in operator and "<<<" not in operator:
+                heredoc_expected = True
             continue
         if character in ";&|\n":
             flush()
             operator, position = read_control(command, position)
             tokens.append(ShellToken("op", operator))
+            if operator == "\n" and pending_heredocs:
+                consumed = read_heredoc_bodies(command, position, pending_heredocs)
+                if isinstance(consumed, KernelDecision):
+                    return consumed
+                position = consumed
+                pending_heredocs.clear()
             continue
-        if character in "()":
-            return KernelDecision("deny", "shell grouping is not classified")
+        if character == "(":
+            if started:
+                return KernelDecision(
+                    "deny",
+                    "shell arrays and function definitions are not classified",
+                )
+            tokens.append(ShellToken("op", "("))
+            position += 1
+            continue
+        if character == ")":
+            flush()
+            tokens.append(ShellToken("op", ")"))
+            position += 1
+            continue
         word.append(character)
         started = True
         position += 1
     flush()
+    if heredoc_expected:
+        return KernelDecision("deny", "heredoc has no delimiter")
+    if pending_heredocs:
+        return KernelDecision("deny", "heredoc does not terminate")
     return tokens
+
+
+SENTINEL_OPS = ("(", ")", ";;", ";&", ";;&")
 
 
 def is_control_operator(text: str) -> bool:
     """Return whether an operator token separates command segments."""
-    return text in (";", "&", "&&", "||", "|", "|&", "\n", ";;", ";&", ";;&")
+    return text in (";", "&", "&&", "||", "|", "|&", "\n")
 
 
 def resolve_redirection(
@@ -705,7 +856,10 @@ def resolve_redirection(
     """Classify one redirection, consuming its target and stripping safe forms."""
     operator = tokens[index].text
     if "<<" in operator and "<<<" not in operator:
-        return KernelDecision("deny", "heredoc input is not classified"), index + 1
+        target = index + 1
+        if target >= len(tokens) or tokens[target].kind != "word":
+            return KernelDecision("deny", "heredoc has no delimiter"), index + 1
+        return None, target + 1
     if "&" in operator and (operator[-1].isdigit() or operator[-1] == "-"):
         return None, index + 1
     target = index + 1
@@ -729,7 +883,9 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
 
     A read-side process substitution contributes a ``/dev/fd`` placeholder to
     its enclosing segment and its inner command joins the segment list, so the
-    caller classifies it exactly like a piped command.
+    caller classifies it exactly like a piped command. Grouping parentheses
+    and case terminators become single-word sentinel segments the segment
+    walker interprets, and ``[[ ... ]]`` folds into one read-only test word.
     """
     tokens = tokenize_shell(command)
     if isinstance(tokens, KernelDecision):
@@ -739,8 +895,40 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
     index = 0
     while index < len(tokens):
         token = tokens[index]
+        if token.kind == "word" and token.text == "[[" and not token.quoted:
+            fold = index + 1
+            while fold < len(tokens) and not (
+                tokens[fold].kind == "word" and tokens[fold].text == "]]"
+            ):
+                if tokens[fold].kind == "procsub":
+                    return KernelDecision(
+                        "deny",
+                        "process substitution inside [[ ]] is not classified",
+                    )
+                fold += 1
+            if fold >= len(tokens):
+                return KernelDecision("deny", "test expression does not parse")
+            current.append("[[")
+            index = fold + 1
+            continue
         if token.kind == "word":
             current.append(token.text)
+            index += 1
+            continue
+        if (
+            token.kind == "op"
+            and token.text == "("
+            and current
+            and current[-1] not in ("then", "else", "elif", "do", "if", "in", "!")
+        ):
+            return KernelDecision(
+                "deny", "shell function definitions are not classified"
+            )
+        if token.kind == "op" and token.text in SENTINEL_OPS:
+            if current:
+                segments.append(current)
+                current = []
+            segments.append([token.text])
             index += 1
             continue
         if token.kind == "procsub":
@@ -940,16 +1128,125 @@ def decide_loop(
     return KernelDecision("ask", "loop construct does not parse")
 
 
+CASE_TERMINATORS = (";;", ";&", ";;&")
+
+
+def strip_structure_keywords(segment: list[str]) -> list[str]:
+    """Drop leading conditional keywords — pure structure, never commands."""
+    index = 0
+    while index < len(segment) and segment[index] in ("then", "else", "elif"):
+        index += 1
+    return segment[index:]
+
+
+def find_conditional_end(segments: list[list[str]], start: int) -> int | None:
+    """Locate the bare ``fi`` segment closing the conditional at ``start``."""
+    depth = 1
+    for index in range(start + 1, len(segments)):
+        if segments[index] == ["fi"]:
+            depth -= 1
+            if depth == 0:
+                return index
+        else:
+            stripped = strip_structure_keywords(segments[index])
+            if stripped and stripped[0] == "if":
+                depth += 1
+    return None
+
+
+def decide_conditional(
+    segments: list[list[str]], start: int, rows: list[ShellRuleRow], depth: int
+) -> tuple[list[KernelDecision], int] | KernelDecision:
+    """Classify one ``if`` construct: conditions and branches recursively."""
+    if depth >= 2:
+        return KernelDecision("deny", "conditionals nest too deeply")
+    end = find_conditional_end(segments, start)
+    if end is None:
+        return KernelDecision("deny", "conditional construct does not parse")
+    interior: list[list[str]] = []
+    for segment in [segments[start][1:], *segments[start + 1 : end]]:
+        stripped = strip_structure_keywords(segment)
+        if stripped:
+            interior.append(stripped)
+    if not interior:
+        return KernelDecision("deny", "conditional is empty")
+    return decide_segment_list(interior, rows, depth + 1), end + 1
+
+
+def decide_case(
+    segments: list[list[str]], start: int, rows: list[ShellRuleRow], depth: int
+) -> tuple[list[KernelDecision], int] | KernelDecision:
+    """Classify one ``case`` construct: patterns are match data, bodies recurse."""
+    if depth >= 2:
+        return KernelDecision("deny", "case constructs nest too deeply")
+    opener = segments[start]
+    if len(opener) < 3 or opener[2] != "in":
+        return KernelDecision("deny", "case construct does not parse")
+    body: list[list[str]] = []
+    collecting = False
+    nested = 0
+    end = None
+    for index in range(start + 1, len(segments)):
+        segment = segments[index]
+        if nested == 0 and segment == ["esac"]:
+            end = index
+            break
+        if nested == 0 and segment == [")"]:
+            collecting = True
+        elif nested == 0 and len(segment) == 1 and segment[0] in CASE_TERMINATORS:
+            collecting = False
+        elif nested == 0 and segment == ["("]:
+            continue
+        elif nested == 0 and not collecting:
+            continue
+        elif segment == ["esac"]:
+            nested -= 1
+            body.append(segment)
+        elif segment[0] == "case":
+            nested += 1
+            body.append(segment)
+        else:
+            body.append(segment)
+    if end is None:
+        return KernelDecision("deny", "case construct does not parse")
+    if not body:
+        return [], end + 1
+    return decide_segment_list(body, rows, depth + 1), end + 1
+
+
 def decide_segment_list(
     segments: list[list[str]], rows: list[ShellRuleRow], depth: int = 0
 ) -> list[KernelDecision]:
-    """Classify a segment list, grouping loop constructs recursively."""
+    """Classify a segment list, grouping structured constructs recursively."""
+    segments = list(segments)
     decisions: list[KernelDecision] = []
     index = 0
     while index < len(segments):
         segment = segments[index]
+        if segment in (["("], [")"]):
+            index += 1
+            continue
+        if len(segment) == 1 and segment[0] in CASE_TERMINATORS:
+            return [
+                *decisions,
+                KernelDecision("deny", "case terminator outside a case construct"),
+            ]
+        while segment and segment[0] == "{":
+            segment = segment[1:]
+        while segment and segment[-1] == "}":
+            segment = segment[:-1]
+        if not segment:
+            index += 1
+            continue
+        segments[index] = segment
+        outcome: tuple[list[KernelDecision], int] | KernelDecision | None = None
         if segment[0] in ("for", "while", "until"):
             outcome = decide_loop(segments, index, rows, depth)
+        elif segment[0] == "if":
+            outcome = decide_conditional(segments, index, rows, depth)
+        elif segment[0] == "case":
+            outcome = decide_case(segments, index, rows, depth)
+        if outcome is not None:
             if isinstance(outcome, KernelDecision):
                 return [*decisions, outcome]
             grouped, index = outcome
