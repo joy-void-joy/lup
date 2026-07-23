@@ -11,11 +11,11 @@ import lup_template.devtools.dev.branches as branches
 import lup_template.devtools.dev.check as check
 import lup_template.devtools.dev.comments as comments
 import lup_template.devtools.dev.conflicts as conflicts
-import lup_template.devtools.dev.gen_hook as gen_hook
 import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.plugin as plugin
 import lup_template.devtools.dev.pr as pr
 import lup_template.devtools.dev.resolve_review as resolve_review
+import lup_template.devtools.dev.rules as rules
 import lup_template.devtools.dev.worktree as worktree
 
 app = typer.Typer(no_args_is_help=True)
@@ -289,7 +289,7 @@ def check_cmd(
         bool,
         typer.Option(
             "--antipatterns",
-            help="Audit tracked files for missing/spurious `# lup: ignore` markers "
+            help="Audit repository files for missing/spurious `# lup: ignore` markers "
             "only — the same lup.codescan.antipatterns rules the edit hook enforces",
         ),
     ] = False,
@@ -297,7 +297,7 @@ def check_cmd(
         bool,
         typer.Option(
             "--boundaries",
-            help="Scan for per-engine adapter imports outside the seam only — "
+            help="Scan for native adapter imports outside composition roots only — "
             "the lup.codescan.boundaries guard the full check also runs",
         ),
     ] = False,
@@ -327,18 +327,6 @@ def check_cmd(
     check.run_checks(fix, no_test)
 
 
-@app.command("gen-hook")
-def gen_hook_cmd() -> None:
-    """Regenerate the edit hook's anti-pattern mirror from lup.codescan.antipatterns.
-
-    The hook cannot import a package on its per-edit hot path, so its
-    ANTI_PATTERNS/TS_ANTI_PATTERNS tables are a committed copy of the single
-    source of truth. This rewrites that copy from the library; run it after
-    changing any rule, and the pinning test guards that it was run.
-    """
-    gen_hook.regenerate()
-
-
 # -- comments command --
 
 
@@ -365,14 +353,22 @@ def comments_cmd(
             help="Strip the file:line markers given (only on a resolve/* worktree branch)",
         ),
     ] = False,
+    wake: Annotated[
+        bool,
+        typer.Option(
+            "--wake",
+            help="With --clear: also strip defer[...] notes whose wake condition is met",
+        ),
+    ] = False,
 ) -> None:
     """List unresolved `# lup:` feedback comments, or clear specific ones.
 
     With --clear, removes each `file:line` marker named as an argument; used at
-    fork time to strip a concern's own notes from an editor's worktree.
+    fork time to strip a concern's own notes from an editor's worktree. Deferred
+    notes are skipped unless --wake is passed as well.
     """
     if clear:
-        comments.clear_markers(targets or [])
+        comments.clear_markers(targets or [], wake=wake)
         return
     comments.report(as_json, commit)
 
@@ -393,6 +389,24 @@ def todos_cmd(
     `dev comments`.
     """
     comments.todos(as_json)
+
+
+@app.command("rules")
+def rules_cmd(
+    check_only: Annotated[
+        bool,
+        typer.Option("--check", help="Fail when docs/rules.md is stale"),
+    ] = False,
+) -> None:
+    """Generate the Lup rule and typed-suppression reference."""
+    try:
+        destination = rules.write_rule_reference(check=check_only)
+    except RuntimeError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    typer.echo(
+        f"Lup rule reference {'verified' if check_only else 'written'}: {destination}"
+    )
 
 
 # -- init commands --

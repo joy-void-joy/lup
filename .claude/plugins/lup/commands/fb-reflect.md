@@ -1,6 +1,6 @@
 ---
+description: "Meta and meta-meta reflection on the feedback loop process itself"
 allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion
-description: Meta and meta-meta reflection on the feedback loop process itself
 ---
 
 # Reflect: Process Quality Assessment

@@ -3,7 +3,8 @@
 Backs two `lup-devtools dev` commands (wired in
 `lup_template.devtools.dev.app`):
 
-- `dev comments` lists unresolved `# lup:` / `// lup:` feedback notes;
+- `dev comments` lists unresolved `# lup:` / `// lup:` feedback notes, with
+  deferred (`defer[<wake condition>]:`) notes in their own section;
   `report`, `commit_prompts`, and `clear_markers` back its default listing
   and its `--commit` / `--clear` modes.
 - `dev todos` lists `TEMPLATE:` customization markers — the template's
@@ -24,7 +25,6 @@ from pathlib import Path
 
 import sh
 import typer
-from pydantic import BaseModel
 
 from lup.codescan.markers import (
     MARKER_RE,
@@ -37,13 +37,10 @@ from lup.codescan.markers import (
 from lup_template.devtools.utils import decode_stderr, git, output_json
 
 
-class FoundComment(BaseModel):
+class FoundComment(MarkerComment):
+    """One scanned note located in its tracked file, with read context."""
+
     file: str
-    start_line: int
-    end_line: int
-    read_start: int
-    read_end: int
-    text: str
     context: str
 
 
@@ -77,7 +74,7 @@ def find_todos(text: str, mode: str) -> list[MarkerComment]:
     return find_markers(text, mode, marker=TEMPLATE_MARKER_RE)
 
 
-def clear_markers(targets: list[str]) -> None:
+def clear_markers(targets: list[str], *, wake: bool = False) -> None:
     """Remove specific feedback markers named as `file:line` targets.
 
     The execute workflow calls this at fork time to strip a concern's own
@@ -85,6 +82,10 @@ def clear_markers(targets: list[str]) -> None:
     generalized spec without ever seeing — or being able to cheat by
     deleting — its markers. A standalone comment line is dropped whole; an
     inline trailing marker keeps its code and loses only the comment.
+
+    A `defer[...]` note is parked work, not open feedback: a target that
+    lands on one is skipped unless *wake* is set, so a concern sweeping its
+    own notes can never strip a deferral whose condition it does not meet.
 
     Refuses to run unless HEAD is a disposable `resolve/*` branch, so a note
     can never be silently stripped from a real checkout — there, a note is
@@ -136,6 +137,13 @@ def clear_markers(targets: list[str]) -> None:
             if comment is None:
                 typer.echo(f"No marker at {rel}:{line_no}", err=True)
                 continue
+            if comment.kind == "defer" and not wake:
+                typer.echo(
+                    f"Skipping deferred note at {rel}:{line_no} — parked work "
+                    "is cleared only with --wake once its condition is met",
+                    err=True,
+                )
+                continue
             strip_span(lines, comment)
             removed += 1
         trailing = "\n" if text.endswith("\n") else ""
@@ -152,7 +160,8 @@ def commit_prompts() -> None:
     files = sorted({comment.file for comment in found})
     git("add", "--", *files)
     body = "\n".join(
-        f"{comment.file}:{comment.start_line} {comment.text}" for comment in found
+        f"{comment.file}:{comment.start_line} {comment.marker_text()}"
+        for comment in found
     )
     subject = f"chore(review): {len(found)} inline feedback prompt(s)"
     try:
@@ -163,22 +172,42 @@ def commit_prompts() -> None:
     typer.echo(f"Committed {len(found)} prompt(s) across {len(files)} file(s).")
 
 
+def location_line(comment: FoundComment) -> str:
+    """One note's span and read window, the listing's per-note header."""
+    return (
+        f"{comment.file}:{comment.start_line}-{comment.end_line}  "
+        f"(read {comment.read_start}-{comment.read_end})"
+    )
+
+
 def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
-    """Print one scan's results as a listing or JSON (same shape either way)."""
+    """Print one scan's results as a listing or JSON (same shape either way).
+
+    Deferred notes are listed in their own section, each with its wake
+    condition, so parked work never blends into the open feedback above it.
+    """
     if as_json:
         output_json([comment.model_dump() for comment in found])
         return
     if not found:
         typer.echo(empty)
         return
+    deferred = [comment for comment in found if comment.kind == "defer"]
     for comment in found:
-        typer.echo(
-            f"{comment.file}:{comment.start_line}-{comment.end_line}  "
-            f"(read {comment.read_start}-{comment.read_end})"
-        )
+        if comment.kind == "defer":
+            continue
+        typer.echo(location_line(comment))
         typer.echo(f"    {comment.text}")
+    if deferred:
+        typer.echo("\nDeferred — parked until each wake condition is met:")
+        for comment in deferred:
+            typer.echo(location_line(comment))
+            typer.echo(f"    defer[{comment.condition}] {comment.text}")
     files = {comment.file for comment in found}
-    typer.echo(f"\n{len(found)} comment(s) in {len(files)} file(s)")
+    summary = f"\n{len(found)} comment(s) in {len(files)} file(s)"
+    if deferred:
+        summary += f" ({len(deferred)} deferred)"
+    typer.echo(summary)
 
 
 def report(as_json: bool, commit: bool) -> None:

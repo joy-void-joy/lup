@@ -1,0 +1,31 @@
+name: Quality and harness drift
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.14"
+      - run: uv sync --all-extras
+      - name: Formatting
+        run: uv run ruff format --check .
+      - name: Lint
+        run: uv run ruff check .
+      - name: Types
+        run: uv run pyright
+      - name: Unit tests
+        run: uv run pytest
+      - name: Lup anti-pattern rules
+        run: uv run lup-devtools dev check --antipatterns
+      - name: Native seam boundaries
+        run: uv run lup-devtools dev check --boundaries
+      - name: Generated harness drift
+        run: uv run lup-devtools harness check all

@@ -6,10 +6,15 @@ The wire-format reference, quarantined out of the shipped package: a
 live probe showed config.toml command hooks never fire on the Codex
 builds this project targets, so no live adapter wires this —
 enforcement is the native workspace-write sandbox
-(:func:`~lup.adapters.clients.codex.config.build_sandbox_config_overrides`).
+(:class:`~lup.adapters.codex.runtime.CodexSessionConfig`).
 Kept beside its tests so the format survives for the day the runtime
 honors hooks again; do not wire it into a live adapter without
 re-probing.
+
+The emitted hook scripts stay inline as f-string templates: each bakes
+call-time constants (directories, flags, tool lists) into the generated
+source, so a standalone asset would be a brace-doubled ``.format``
+template — not valid Python — and would review worse than the literal.
 """
 
 import json

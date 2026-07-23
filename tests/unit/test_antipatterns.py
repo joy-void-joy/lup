@@ -1,51 +1,33 @@
-# lup: ignore
-"""The anti-pattern set is single-sourced, and the auditor agrees with the hook.
+# lup: ignore[import-re, re-call, set-shape, string-replace, tuple-shape]
+"""The anti-pattern set is single-sourced for the auditor and policy bundle.
 
-`lup.codescan.antipatterns` is the importable source of truth; the edit hook carries
-a generated copy inline because it cannot import on its hot path. These tests pin
-that the committed mirror equals `lup-devtools dev gen-hook`'s output (so it can
-never drift) and that the auditor flags the two classes the hook cannot catch
-after the fact: a match with no marker, and a marker guarding nothing.
+`lup.codescan.antipatterns` is the importable source of truth. Harness generation
+embeds its rows into the dependency-free policy runtime; these tests pin that
+projection and audit missing, untyped, and spurious suppressions.
 """
 
-import importlib.util
 import re
-from pathlib import Path
 
 from lup.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
     TS_ANTI_PATTERNS,
     AntiPattern,
     audit_text,
-    empty_collection_exempt_lines,
 )
-from lup_template.devtools.dev.gen_hook import HOOK_PATH, render_hook_text
-
-spec = importlib.util.spec_from_file_location("auto_allow_edits", HOOK_PATH)
-assert spec is not None and spec.loader is not None
-hook = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(hook)
+from lup.policy.bundle import bundled_antipattern_rows
+from lup.policy.kernel import empty_collection_exempt_lines
 
 
-def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str, str]]:
-    return [(ap.id, ap.pattern.pattern, ap.message) for ap in patterns]
+def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str, str, str]]:
+    return [(ap.id, ap.pattern.pattern, ap.message, ap.context) for ap in patterns]
 
 
-def hook_rows(
-    table: list[tuple[str, re.Pattern[str], str]],
-) -> list[tuple[str, str, str]]:
-    return [(rule_id, pattern.pattern, message) for rule_id, pattern, message in table]
+def test_python_table_matches_generated_bundle() -> None:
+    assert lib_rows(PYTHON_ANTI_PATTERNS) == bundled_antipattern_rows()[".py"]
 
 
-def test_python_table_matches_hook() -> None:
-    """The committed hook equals `dev gen-hook`'s output — regenerate after editing a rule."""
-    assert render_hook_text() == HOOK_PATH.read_text(encoding="utf-8")
-
-
-def test_ts_table_matches_hook() -> None:
-    """The library TS table is identical to the hook's inline copy (ids too)."""
-    hook_table: list[tuple[str, re.Pattern[str], str]] = hook.TS_ANTI_PATTERNS
-    assert lib_rows(TS_ANTI_PATTERNS) == hook_rows(hook_table)
+def test_ts_table_matches_generated_bundle() -> None:
+    assert lib_rows(TS_ANTI_PATTERNS) == bundled_antipattern_rows()[".ts"]
 
 
 def test_rule_ids_are_unique_kebab_case() -> None:
@@ -149,6 +131,53 @@ def test_audit_keeps_foreign_ids_out_of_file_level_verdicts() -> None:
 def test_audit_skips_plain_comment_lines() -> None:
     findings = audit_text("# a comment mentioning Any in prose\n", PYTHON_ANTI_PATTERNS)
     assert findings == []
+
+
+def test_comment_context_covers_exactly_the_directive_rules() -> None:
+    """Only comment-directive rules scan comments; every other rule sees code."""
+    python_comment = {ap.id for ap in PYTHON_ANTI_PATTERNS if ap.context == "comment"}
+    ts_comment = {ap.id for ap in TS_ANTI_PATTERNS if ap.context == "comment"}
+    assert python_comment == {"type-ignore", "pyright-ignore", "noqa"}
+    assert ts_comment == {
+        "ts-ignore",
+        "ts-expect-error",
+        "ts-nocheck",
+        "eslint-disable",
+        "eslint-disable-block",
+        "tslint-disable",
+    }
+
+
+def test_audit_ignores_identifiers_quoted_in_trailing_comments() -> None:
+    # Prose in a trailing comment is comment text, not code: the token-masked
+    # code scan no longer false-positives on it as the raw line scan did.
+    clean = (
+        "x = compute()  # may return Any when unset\n"
+        "entry = lookup(key)  # like registry.get(key)\n"
+        "value = parse(raw)  # a tuple[int, str] semantically\n"
+    )
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_ignores_type_comment_prose() -> None:
+    # A legacy `# type: List[Any]` comment carries no `ignore` directive and
+    # is masked for code rules, so neither any-type nor typing-generics trips.
+    prose = "# type: List[Any] was this field's old shape\n"
+    assert audit_text(prose, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_audit_catches_directive_comments_wherever_they_sit() -> None:
+    # Comment-context rules see comments intact: a standalone suppression
+    # comment line (pyright's ignore, flake8's noqa) is a directive to flag,
+    # not skippable prose. The noqa fixture is split so ruff's own
+    # line-oriented directive scan does not read this source as suppressed.
+    for line, rule_id in (
+        ("# pyright: ignore\n", "pyright-ignore"),
+        ("# " + "noqa\n", "noqa"),
+        ("x = 1  # type: ignore\n", "type-ignore"),
+    ):
+        findings = audit_text(line, PYTHON_ANTI_PATTERNS)
+        assert [(f.kind, f.rule_id) for f in findings] == [("missing", rule_id)], line
 
 
 # ── empty-collection AST refiner ──────────────────────────────────────────
@@ -319,27 +348,6 @@ def test_audit_local_seed_still_flags() -> None:
     assert findings[0].rule_id == "empty-collection"
 
 
-def test_hook_refiner_exempts_init_state_edit(tmp_path: Path) -> None:
-    """The hook composes the post-edit file, so state added inside __init__
-    passes with no marker while a module-level seed still denies."""
-    target = tmp_path / "mod.py"
-    target.write_text(
-        "class Scheduler:\n    def __init__(self) -> None:\n        self.a = 1\n",
-        encoding="utf-8",
-    )
-
-    allowed = hook.anti_pattern_decision(
-        str(target),
-        "        self.a = 1\n",
-        "        self.a = 1\n        self.pending = []\n",
-    )
-    assert allowed is None
-
-    denied = hook.anti_pattern_decision(str(target), "", "items = {}\n")
-    assert denied is not None
-    assert "empty-collection" in str(denied)
-
-
 def test_audit_skips_docstring_prose() -> None:
     # Prose is not code, and no inline directive could ever guard a docstring
     # line — a comment cannot open inside a string. Code outside stays audited.
@@ -352,13 +360,12 @@ def test_audit_skips_docstring_prose() -> None:
 
 def test_audit_skips_attribute_docstrings() -> None:
     # A bare string statement after a field or alias is the attribute-docstring
-    # convention — documentation by construction. An *assigned* string is data
-    # and stays scanned.
+    # convention — documentation by construction. Assigned string contents are
+    # data too, so examples inside them are not scanned as executable code.
     prose = 'x: int = 1\n"""Unlike ``Any`` this field is honest."""\n'
     assert audit_text(prose, PYTHON_ANTI_PATTERNS) == []
     data = 'x = "fixture: Any = cast(str, 1)"\n'
-    kinds = {f.rule_id for f in audit_text(data, PYTHON_ANTI_PATTERNS)}
-    assert kinds == {"any-type", "cast"}
+    assert audit_text(data, PYTHON_ANTI_PATTERNS) == []
 
 
 def test_atomic_renames_are_exempt_from_replace_rule() -> None:
@@ -391,7 +398,7 @@ def test_docstring_mention_of_ignore_is_not_a_guard() -> None:
 def test_ignore_inside_string_literal_is_not_a_guard() -> None:
     source = 'fixture = "x: Any = 1  # lup: ignore"\n'
     findings = audit_text(source, PYTHON_ANTI_PATTERNS)
-    assert [f.kind for f in findings] == ["missing"]
+    assert findings == []
 
 
 def test_note_quoting_ignore_is_not_a_guard() -> None:

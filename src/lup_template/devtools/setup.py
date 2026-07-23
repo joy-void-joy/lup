@@ -41,9 +41,7 @@ from rich.panel import Panel
 from rich.table import Table
 from tzlocal import get_localzone_name
 
-from lup.adapters.profiles.claude.store import (  # lup: ignore[seam-boundary]
-    ProfileStore,
-)
+from lup.adapters.claude.profile_store import ClaudeProfileStore
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 
@@ -70,7 +68,7 @@ CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 profile_app = typer.Typer(no_args_is_help=True, help="Manage Claude account profiles")
 app.add_typer(profile_app, name="profile")
 
-claude_profiles = ProfileStore()
+claude_profiles = ClaudeProfileStore()
 
 
 # =====================================================================

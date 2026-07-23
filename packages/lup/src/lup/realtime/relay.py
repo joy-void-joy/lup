@@ -65,7 +65,6 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from lup.adapters.clients.sessions.Session import Session
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime.models import (
     ContextInput,
@@ -84,6 +83,8 @@ from lup.realtime.models import (
 )
 from lup.realtime.scheduler import Scheduler, SleepResult
 from lup.reflect import ReflectionGate
+from lup.runtime.contracts import Session
+from lup.runtime.models import TurnInput, turn_request
 from lup.telemetry.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
@@ -683,7 +684,8 @@ async def run_relay_session(
         stop_watching = asyncio.Event()
         watcher = asyncio.create_task(watch_mailbox())
         try:
-            await conversation.send(message, trace_logger=trace_logger)
+            handle = await conversation.start(turn_request(TurnInput(text=message)))
+            await handle.turn.result()
         finally:
             stop_watching.set()
             await watcher

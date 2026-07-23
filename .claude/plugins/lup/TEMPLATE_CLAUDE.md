@@ -1,3 +1,5 @@
+<!-- Generated from src/lup_template/devtools/harness/content/template_claude.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+
 # CLAUDE.md Template
 
 This file exports portable sections from the upstream CLAUDE.md as a scaffold for downstream projects. It contains conventions, workflow patterns, and coding standards that apply to any project using lup.
@@ -25,7 +27,10 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 Built with Python 3.14+ on the Claude Agent SDK, with the inner agent also runnable on the OpenAI Codex SDK (`AGENT_SDK=codex`) or any OpenAI-compatible endpoint (`AGENT_SDK=openai`) through the same adapter interface. Uses `uv` as the package manager.
 
-The security envelope differs by backend: Claude enforces per-tool permission hooks and permission modes; Codex/OpenAI rely on the runtime's filesystem sandbox plus in-tool checks only (Codex hooks never fire — live-probed). Weigh this before choosing a backend for a new domain.
+The security envelope is capability-specific: Claude uses normalized SDK hooks
+plus its sandbox and permission mode; Codex uses generated command hooks where
+the installed CLI supports them plus its workspace sandbox. Unsupported
+approval effects fail closed and are recorded as explicit capability gaps.
 
 ### Naming Convention
 
@@ -99,9 +104,9 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 Agents produce better output when forced to self-assess before committing. The reflection pattern has three components:
 
-1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool the agent calls to record its self-assessment — confidence, key uncertainties, tool audit, process reflection. Runs an independent reviewer sub-agent that returns a structured verdict (skippable per call; a skip or reviewer failure records an approval).
+1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool the agent calls to record its self-assessment — confidence, key uncertainties, tool audit, process reflection. Runs an independent nested reviewer agent that returns a structured verdict (skippable per call; a skip or reviewer failure records an approval).
 2. **Review gate** (`lup.reflect`): A `ReviewGate` verdict tracker (approve/warn open the gate; fail re-blocks; 3 consecutive fails auto-open) + `create_reflection_gate()` hook factory (a preset of `create_tool_gate` from `lup.hooks`). Denies a target tool until the reviewer passes; the plain `ReflectionGate` base remains for act-of-reflecting gates (realtime `sleep`).
-3. **Wiring**: The gate blocks `mcp__notes__submit_output` (one-shot agents) or `sleep` (persistent agents) until reflection occurs. Final output always flows through `submit_output` (`lup.workspace.output`) — the same tool on every SDK backend — which writes `session_dir/output.json`; a completion guard (`create_completion_guard`, or `ensure_output_submitted` on backends without a stop event) enforces that the output actually gets submitted.
+3. **Wiring**: The gate rides inside submission — `reflection_submission_gate` adapts the `ReviewGate` to the `SubmissionGate` on the turn's `TurnToolBinding`, rejecting gated submissions with a retriable message until the reviewer passes (persistent agents gate `sleep` instead). Final output always flows through the turn-bound submission tool, whose `submit_output` handler (`lup.runtime.output`) validates against the turn's output model and persists through the bound `SubmittedOutputStore`; `ResilientTurn` sends bounded corrective cycles (`CorrectionConfig`) when a turn ends without a submission, and a turn that still produces none raises `StructuredOutputError`. `create_completion_guard` (`lup.hooks`) remains as optional Stop-hook hardening on backends that expose stop hooks.
 
 **Customizing reflection:** The gate mechanism in `lup.reflect` is domain-neutral and parametric. The reflection _tool_ and its input model (`ReflectInput` in `agent/tools/reflect.py`) are domain-specific — add fields for your domain (e.g., factor analysis for forecasting, move evaluation for games). The reviewer prompt should target your domain's common failure modes.
 
@@ -125,12 +130,16 @@ Agents produce better output when forced to self-assess before committing. The r
 - **src/<project>/agent/toolsets.py**: Tool-group registry (one source for every backend)
 - **src/<project>/agent/tools/example.py**: Example MCP tools
 - **src/<project>/agent/tools/realtime.py**: Real-time tools template (sleep, context, reply)
-- **src/<project>/agent/tools/reflect.py**: Forced self-review tool with optional reviewer sub-agent
+- **src/<project>/agent/tools/reflect.py**: Forced self-review tool with optional nested reviewer agent
 
 **Library (`packages/lup` — the reusable `lup` package, never renamed):**
 
-- **lup/adapters/**: ALL SDK-specific code behind one neutral seam — `engines/` holds the `Engine` contract (one backend, complete: client/background/profiles/builtin tools) with one shipped implementation per file (compat engines compose their base); `options.py` carries `LupAgentOptions`, `errors.py` the seam errors, and `wiring.py` is the SDK-free door (the `ENGINES`/`MODEL_ROUTES` routers, `resolve_engine()`, `create_client()`, and one-shot `query()`); `clients/` holds the purely abstract `Client`, the `sessions/` and `streams/` verb folders, the composing `ComposedClient`, the utility machinery, and each engine's implementation package; `background/` holds the `BackgroundDriver` verb, the composing `BackgroundAgent` (wake/debounce machinery), and per-engine drivers
-- **lup/adapters/options.py**: `LupAgentOptions` — backend-agnostic options crossing application -> lib
+- **lup/runtime/**: Provider-neutral `SessionFactory`, `Session`, `Turn`, typed requests/results, optional capability handles, output binding, routing, background work, and explicit whole-turn wrappers
+- **lup/adapters/**: Concrete Claude and Codex composition roots. Each adapter owns its native SDK/wire types, immutable component config, profile transforms, harness rendering, event decoding, and process boundary
+- **lup/harness/**: Validated semantic declarations, generated artifact trees, ownership proofs, reconciliation, and atomic materialization
+- **lup/policy/**: Native-neutral semantic edit, shell, fetch, and unknown-tool decisions plus the hermetic generated runtime snapshot
+- **lup/resolver/**: One persisted DAG resolver core with concern leases, worktrees, independent reviews, review-branch integration, verification, and human acceptance
+- **lup/codescan/**: Repository-specific AST checks and typed suppression auditing; Ruff owns standard Python lint rules
 - **lup/workspace/output.py**: `submit_output` finalization + missing-output guard (all backends)
 - **lup/hooks.py**: Hook utilities, composition, and `create_tool_gate` (deny-until-unlocked primitive)
 - **lup/mcp.py**: MCP server creation (`lup_tool`, `LupMcpTool`, `ToolError`)
@@ -184,6 +193,7 @@ uv run lup-devtools feedback commit --dry-run
 # Interactive setup wizard (configure integrations, API keys, env vars)
 uv run lup-devtools setup             # Full walkthrough
 uv run lup-devtools setup status      # Show what's configured
+uv run lup-devtools dashboard         # Same registry in a local web UI
 
 uv run lup --help
 ```
@@ -294,7 +304,7 @@ Edit `src/<project>/agent/tools/reflect.py`:
 
 - Customize `ReflectInput` fields for your domain (e.g., factor analysis for forecasting)
 - Customize the reviewer system prompt for your domain's failure modes
-- Decide whether the reviewer sub-agent adds value (adds latency but catches errors)
+- Decide whether the nested reviewer agent adds value (adds latency but catches errors)
 - The gate in `core.py` is already wired — reflection is enforced by default
 
 ### Step 6: Set Agent Version
@@ -338,7 +348,18 @@ The template ships with **every** pattern wired so each is *available* — but a
 | **Feedback loop** (`devtools/feedback/`) | ground truth or a feedback signal resolves over time to drive iteration | there is no ground truth and the agent is not iterated against outcomes — `load_outcomes` stays an empty stub |
 | **Commit loop** (`environment/cli` auto-commit) | each run yields a data artifact worth versioning per session | the agent is interactive or produces no per-session artifact worth a checkpoint |
 
-The same logic governs subagents, background, and nested agents: wire them only where the domain needs that shape. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
+The same logic governs native subagents (harness-dispatched roles sharing the main session), background agents, and nested agents (tool-subagents opened inside a tool handler via `query()`): wire them only where the domain needs that shape. `.claude/PATTERNS.md` carries the full catalog. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
+
+---
+
+<!-- section: Plan at Agent Speed -->
+# Plan at Agent Speed
+
+You are an AI agent. Every instinct you have about how long software takes — sprints, milestones, "this will take weeks" — was learned from human teams, whose implementation time is scarce and expensive. Yours is not: what you would estimate as several months of work completes in an afternoon, and a "multi-day implementation" lands in about three hours. Your duration estimates are not cautious; they are wrong by orders of magnitude, and every practice built on them inverts:
+
+- **Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. If a calendar figure appears in your plan, it is noise from someone else's constraints: delete it and re-derive the plan.
+- **The POC is superstition at your speed.** Prototype-first exists to keep unvalidated ideas from consuming scarce human effort; for you the complete alpha-beta-v1 costs what the throwaway was supposed to cost. Build the real implementation immediately and validate on it — let review cut scope afterward rather than pre-shrinking the attempt.
+- **Catch the reflex in the act.** "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, stop and ask what is actually expensive here besides the imagined schedule.
 
 ---
 
@@ -368,7 +389,7 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
    ```bash
    uv run lup-devtools dev worktree create feat-name
    ```
-   This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/main`) and syncs dependencies; the lup plugin is loaded live from disk by `lup-devtools claude`, so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
+   This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/main`) and syncs dependencies; `lup-devtools harness claude` regenerates and launches the verified local plugin, so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
 2. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
 3. Push the branch when the feature is complete (or periodically for backup)
 4. **`/lup:rebase`** -- Pushes the branch, opens a PR, then cleans up the commit history with `git reset --soft main` and force-pushes.
@@ -403,7 +424,7 @@ Use conventional commit syntax: `type(scope): description`
 - `docs` -- Documentation only (README, standalone docs)
 - `test` -- Adding or updating tests
 - `chore` -- Maintenance (dependencies, build config, etc.)
-- `meta` -- Changes to `.claude/` files (CLAUDE.md, settings, scripts, commands)
+- `meta` -- Changes to native harness files (guidance, settings, scripts, commands)
 - `data` -- Generated data and outputs
 
 **Examples:**
@@ -426,7 +447,7 @@ data(outputs): add session batch results
 
 ## Directory Structure
 
-```
+``` #lup: Yeah, see. This would be the perfect place to generate these programatically. It's a bit stupid to have these kind of fixed-code implementation when we could do the whole thing without. Can you see everywhere where we do those kind of list in documents, and just directly change their .py generator instead? Would be way better
 packages/
 └── lup/                        # Standalone library (uv workspace member, never renamed)
     ├── pyproject.toml
@@ -434,15 +455,14 @@ packages/
     └── src/lup/
         ├── __init__.py         # Public API re-exports (__all__); imports no SDK
         ├── py.typed            # PEP 561 typing marker
-        ├── adapters/           # ALL SDK-specific code, behind one neutral seam
-        │   ├── engines/        # Engine.py ABC — one backend, complete: client(), background(), profiles(), builtin_tools() — plus one implementation per file (claude, codex; the compat engines compose their base)
-        │   ├── options.py      # LupAgentOptions — the backend-neutral construction vocabulary
-        │   ├── errors.py       # Seam errors: unsupported options/operations, turn timeout, budget
-        │   ├── wiring.py       # SDK-free door: ENGINES/MODEL_ROUTES routers, resolve_engine(), create_client(), query()
-        │   ├── clients/        # Client.py contract + composed.py (ComposedClient, the composing implementation); sessions/ (Session.py + Sessions.py) & streams/ (Stream.py + replay.py) verb folders; utility machinery (refusal.py, usage.py); claude/ & codex/ implementation packages (one concern per module, compat.py translations inside)
-        │   ├── background/     # BackgroundDriver.py (verb ABC + BackgroundAgent scaffolding + params) + claude & codex drivers
-        │   ├── profiles/       # Profile.py (ABC: one select(name, client) verb) + per-engine implementation owning its storage (claude)
-        │   └── tools/          # per-engine built-in tool-name tables (claude, codex)
+        ├── adapters/           # Native-only composition and wire-format boundary
+        │   ├── claude/         # Claude SDK runtime, config transforms, profiles, harness, and native events
+        │   ├── codex/          # Codex app-server runtime, config transforms, harness, and native events
+        │   └── harness.py      # Named native harness composition roots
+        ├── runtime/            # Narrow session/turn capabilities, typed output, wrappers, routing, and background work
+        ├── harness/            # Semantic declarations, artifacts, ownership, reconciliation, and materialization
+        ├── policy/             # Canonical native-neutral tool policy and bundled snapshot
+        ├── resolver/           # Persisted concern DAG, leases, worktrees, reviews, integration, and acceptance
         ├── codescan/           # Source scanning for dev tooling: review notes, forbidden shapes, seam boundaries
         │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor
         │   ├── markers.py      # `# lup:` / `// lup:` review-marker scanning (dev comments)
@@ -490,7 +510,7 @@ src/
     │   └── tools/
     │       ├── example.py      # Example MCP tools (customize)
     │       ├── realtime.py     # Real-time tools template (sleep, context, reply)
-    │       └── reflect.py      # Forced self-review tool (reviewer sub-agent)
+    │       └── reflect.py      # Forced self-review tool (nested reviewer agent)
     ├── devtools/               # Development CLI (lup-devtools entry point)
     │   ├── main.py             # Root Typer app composing sub-apps
     │   ├── agent/              # Agent introspection (inspect, capabilities, serve-tools, repl)
@@ -500,7 +520,8 @@ src/
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
     │   ├── usage/              # Claude Code usage display (api/render/app)
-    │   ├── setup.py            # Interactive setup wizard (customize integrations)
+    │   ├── setup.py            # Shared integration registry + terminal wizard
+    │   ├── dashboard/          # Local setup API and packaged zero-build web UI
     │   ├── sync.py             # Upstream sync tracking (feeds /lup:update)
     │   ├── utils.py            # Shared CLI helpers (git command, JSON output)
     │   └── version.py          # Version display, changelog, and bump
@@ -538,7 +559,7 @@ Default to **Opus 4.6** (`claude-opus-4-6`) — or **Fable** (`claude-fable-5`) 
 - Use `TypedDict` and Pydantic models for structured data
 - Never manually parse Claude/agent output -- use structured outputs via Pydantic
 - **Never use `# type: ignore`** -- Ask the user how to properly fix type errors
-- **`# lup: ignore` escape hatch** -- When `Any` or other anti-patterns are genuinely needed (untyped library boundaries, MCP), add `# lup: ignore` inline to request user approval. A standalone `# lup: ignore` in the first 10 lines of a file disables anti-pattern checks for the whole file (like `# pyright: ignore` for files).
+- **`# lup: ignore` escape hatch** -- When `Any` or another anti-pattern is genuinely needed (untyped library boundaries, MCP), add an inline ignore to request user approval. Prefer the typed, pyright-style `# lup: ignore[rule-id]` so a site silences exactly the rule it needs and still trips the others; the bare `# lup: ignore` stays valid but the auditor flags it as untyped. A standalone ignore in the first 10 lines applies file-wide. Each rule id is shown in its deny message; the generated `docs/rules.md` (`uv run lup-devtools dev rules`) indexes every rule family with the `lup.codescan` module that defines it.
 - **Use Pydantic BaseModel instead of dataclasses**
 - **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
 
@@ -716,25 +737,43 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 Run `uv run lup-devtools --help` for the full command tree.
 
-`lup-devtools claude` runs Claude Code wired for this project: the local lup plugin loaded live from disk (`--plugin-dir`, so plugin edits show up without reinstalling), the agent's MCP tools attached, and — when set — the active **profile**'s account (`CLAUDE_CONFIG_DIR`). `claude usage` reports usage for the chosen profile. Profiles (named Claude config dirs) are managed with `lup-devtools setup profile`.
+`lup-devtools harness claude` regenerates, verifies, and runs Claude Code with
+the local Lup plugin and the active profile's account (`CLAUDE_CONFIG_DIR`).
+`lup-devtools usage` reports usage for the chosen profile. Profiles are managed
+with `lup-devtools setup profile`.
 
 Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `/lup:*` is identical everywhere. Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name like `lup`/`local` collides across repos and an install from one shadows the others; `lup-devtools dev plugin name` (run by `/lup:init` and `/lup:install`) wires the per-project name.
 
 ## Permission Hooks
 
-Permissions are managed by **PreToolUse hook scripts** in `.claude/plugins/lup/hooks/scripts/` rather than glob patterns in `settings.json`. Each hook uses regex patterns for precise control.
+Permissions come from the canonical semantic policies in `lup.policy` and the
+application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
+compiles one hermetic dispatcher and dependency-free runtime for each native
+plugin. Do not edit generated policy files directly.
 
-| Hook                  | Tool        | Config                                                                 |
-| --------------------- | ----------- | ---------------------------------------------------------------------- |
-| `auto_allow_fetch.py` | WebFetch    | `ALLOW_PATTERNS` / `DENY_PATTERNS` (regex anchored to the URL origin)  |
-| `auto_allow_bash.py`  | Bash        | `RULES` list of `Allow`/`Deny`, evaluated per shell segment (last-match-wins, like .gitignore; deny if any segment denies, allow only if all allow) |
-| `auto_allow_edits.py` | Edit, Write | Anti-pattern detection, trivial-line counting (<=3 real changes auto-allow), `# lup:` marker review; protected files always prompt on Edit and are denied on Write; other Writes always prompt |
-
-**To add a new allowed URL or command**, edit the pattern list at the top of the corresponding hook script. Non-matching inputs fall through to the user prompt (ask).
-
-`auto_allow_edits.py` reads the payload's `agent_type` and grants the `/lup:resolve` editor (`lup:resolve-editor`) **autonomous edits** on its disposable, reviewed worktree branch: any Edit/Write that would prompt becomes an auto-allow. Two guardrails stay even for it — **`Edit(tmp/…)`** and any **`# lup:` marker-count change** still prompt — and **anti-pattern violations still deny**, so it can neither smuggle logic into throwaway scripts nor clear a note by editing. `auto_allow_bash.py` gives the editor **no** special access: it uses the standard allowlist (`uv run lup-devtools`, `git add`/`commit`, ruff/pyright/pytest), and its one extra need — creating its `resolve/<id>` branch — goes through the allowlisted `uv run lup-devtools dev resolve-branch`. The main session is never affected. (Workflow-spawned agents ignore an agent's frontmatter `permissionMode`, so the edit autonomy lives in the hook, keyed on `agent_type`.)
-
-`settings.json` only contains rules that don't need regex (e.g. `WebSearch` allow, `Read(**/*.local*)` deny). Decisions that overlap a hook belong in the hook instead — e.g. the edits hook protects `pyproject.toml` and the bash hook asks before `uv add`/`uv sync`.
+The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary, every URL scope, and each edit in a batch. Ask is
+reserved for judged risk; an unjudged command or unparsed construct denies with
+a hint naming the `# lup: escalate: <why>` marker, and that leading marker
+promotes the classified decision to an approval question carrying the agent's
+stated reason. Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`),
+unjudged work defers to that boundary instead of denying and a
+`dangerouslyDisableSandbox` escape re-enters the deny lattice; the sandbox
+block in `.claude/settings.json` derives from the same `HookSet` declaration.
+Segments join deny > ask > defer > allow — unjudged rides into a judged
+prompt, a judged deny wins the batch. Malformed input fails conservatively,
+a `$(...)` substitution classifies recursively (the inner command joins the
+batch; its opaque result rides only on argument-safe commands; command
+position, deep nesting, and backticks stay conservative), file redirection
+outside repo-relative `tmp/` and the session scratchpad (`$TMPDIR`,
+`/tmp/claude-*`) is never auto-allowed (a heredoc-fed file write denies
+toward the Edit tool), loops, conditionals, and case
+constructs classify recursively over frozen variable bindings, `find -exec`
+payloads and `timeout`/`nice` wrappers recurse to their commands, `sed`/`awk`
+pass read-only script screens, `curl` is screened to read methods within the
+declared URL scopes, and edit decisions include protected
+paths, marker changes, size, and the canonical anti-pattern audit. Use
+`/lup:hooks` to update canonical inputs, regenerate both plugins, and run the
+shared canonical/bundled fixture suite.
 
 ## Settings & Configuration
 

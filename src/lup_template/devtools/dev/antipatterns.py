@@ -1,7 +1,7 @@
-"""Audit tracked source for missing and spurious `# lup: ignore` markers.
+"""Audit repository source for missing and spurious `# lup: ignore` markers.
 
 Backs `lup-devtools dev check --antipatterns` (and the standalone
-`dev check`-row). Walks every git-tracked `.py`/TS-family file and runs the
+`dev check`-row). Walks every tracked or untracked `.py`/TS-family file and runs the
 single `lup.codescan.antipatterns` set over it — the same set the edit hook enforces —
 reporting three classes the hook cannot catch after the fact:
 
@@ -24,6 +24,9 @@ from lup.codescan.antipatterns import (
     audit_text,
     patterns_for_suffix,
 )
+from lup.codescan.capabilities import audit_capabilities, sources_from_paths
+from lup.codescan.boundaries import audit_path_boundaries
+from lup.codescan.registry import RULE_REFERENCE
 from lup_template.devtools.utils import git, output_json
 
 
@@ -36,7 +39,8 @@ class FoundAntiPattern(AntiPatternFinding):
 def scan_antipatterns() -> list[FoundAntiPattern]:
     """Every missing/spurious marker across tracked `.py`/TS-family files."""
     results: list[FoundAntiPattern] = []  # lup: ignore[empty-collection] — scan fold
-    for rel in git.lines("ls-files"):
+    python_paths: list[Path] = []
+    for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):
         path = Path(rel)
         patterns = patterns_for_suffix(path.suffix.lower())
         if patterns is None:
@@ -45,8 +49,51 @@ def scan_antipatterns() -> list[FoundAntiPattern]:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        if path.suffix.lower() in {".py", ".pyi"}:
+            python_paths.append(path)
         for finding in audit_text(text, patterns):
             results.append(FoundAntiPattern(file=rel, **finding.model_dump()))
+    for finding in audit_capabilities(sources_from_paths(python_paths)):
+        results.append(
+            FoundAntiPattern(
+                file=finding.path.as_posix(),
+                kind=finding.kind,
+                line=finding.line,
+                text="",
+                message=finding.message,
+                rule_id=finding.rule_id,
+            )
+        )
+    boundary_findings = [
+        (path, finding)
+        for path in python_paths
+        for finding in audit_path_boundaries(path, path.read_text(encoding="utf-8"))
+    ]
+    foreign_untyped = {
+        (path.as_posix(), finding.line)
+        for path, finding in boundary_findings
+        if finding.kind == "untyped"
+    }
+    results = [
+        finding
+        for finding in results
+        if not (
+            finding.kind == "spurious"
+            and not finding.rule_id
+            and (finding.file, finding.line) in foreign_untyped
+        )
+    ]
+    results.extend(
+        FoundAntiPattern(
+            file=path.as_posix(),
+            kind=finding.kind,
+            line=finding.line,
+            text=finding.text,
+            message=finding.message,
+            rule_id=finding.rule_id,
+        )
+        for path, finding in boundary_findings
+    )
     return results
 
 
@@ -99,6 +146,7 @@ def summarize(as_json: bool) -> None:
     typer.echo("  by rule:")
     for rule, count in by_rule.most_common():
         typer.echo(f"    {count:5}  {rule}  ({len(files_by_rule[rule])} file(s))")
+    typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
 
 
 def report(as_json: bool) -> None:
@@ -124,5 +172,6 @@ def report(as_json: bool) -> None:
     advisory = len(found) - len(blocking)
     tail = f" (+{advisory} untyped, advisory)" if advisory else ""
     typer.echo(f"\n{len(blocking)} blocking finding(s){tail} in {len(files)} file(s)")
+    typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
     if blocking:
         raise typer.Exit(1)

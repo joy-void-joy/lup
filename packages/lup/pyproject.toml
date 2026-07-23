@@ -1,6 +1,6 @@
 [project]
 name = "lup"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agent development library for Claude and Codex agent SDKs"
 readme = "README.md"
 license = "MIT"
@@ -22,12 +22,13 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.14.1",
     "rich>=14.3.1",
+    "sh>=2.2.2",
     "tenacity>=9.0.0",
 ]
 
 [project.optional-dependencies]
 claude = ["claude-agent-sdk>=0.1.26"]
-codex = ["openai-codex"]
+codex = []
 docker = ["docker>=7.1.0"]
 
 [project.urls]
@@ -44,6 +45,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 lup = ["py.typed"]
+"lup.adapters.claude" = ["assets/*.py"]
+"lup.adapters.codex" = ["assets/*.py"]
 
 [tool.pyright]
 # Independent of the workspace-root config: this lets the standalone library
@@ -51,5 +54,7 @@ lup = ["py.typed"]
 # to packages/lup/src. The root config re-lists this path under its own include
 # for the workspace-wide run; the two configs do not merge or conflict.
 include = ["src"]
+# Adapter asset scripts are verbatim payloads for the generated plugin tree;
+# their imports resolve only in that runtime layout, not in this workspace.
+exclude = ["src/lup/adapters/claude/assets", "src/lup/adapters/codex/assets"]
 pythonVersion = "3.14"
-

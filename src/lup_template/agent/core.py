@@ -1,337 +1,156 @@
-"""Main agent orchestration.
+"""Application composition roots over Lup's provider-neutral runtime."""
 
-This is a TEMPLATE. Customize for your domain.
-
-Dispatches to the appropriate SDK adapter based on ``settings.agent_sdk``.
-SDK-specific imports are deferred (inline or TYPE_CHECKING) so the
-module loads without requiring any particular SDK to be installed.
-"""
-
+import json
 import logging
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, SecretStr
 
-if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
-    from lup.adapters.options import LupAgentOptions
-    from lup.sandbox.container import Sandbox
-    from lup.types import SessionResource, UsageCost
-
-from lup_template.agent.config import (
-    compat_api_key,
-    compat_base_url,
-    engine_for_settings,
-    settings,
+from lup.adapters.claude.config import (
+    ClaudeCompatibilityTransform,
+    ClaudeCompatibleEndpoint,
 )
-from lup_template.agent.models import AgentOutput, AgentSessionResult
-from lup.adapters.clients.Client import Client
-from lup.adapters.tools.names import WEB_TOOLS
+from lup.adapters.claude.runtime import (
+    SESSION_THINKING_TOKENS,
+    ClaudeSandboxConfig,
+    ClaudeSessionConfig,
+    create_claude_session_factory,
+)
+from lup.adapters.codex.config import (
+    CodexCompatibilityTransform,
+    CodexCompatibleEndpoint,
+)
+from lup.adapters.codex.runtime import (
+    CodexMcpServerConfig,
+    CodexSessionConfig,
+    create_codex_session_factory,
+)
+from lup.runtime.contracts import SessionFactory
+from lup.runtime.composition import submission_gate_resolver
+from lup.hooks import LupHooksConfig
+from lup.runtime.models import (
+    SessionHandle,
+    SessionId,
+    SubmissionDecision,
+    SubmissionGate,
+    SubmissionGateResolver,
+    TurnBlock,
+    TurnInput,
+    TurnResult,
+    TurnTextBlock,
+    TurnThinkingBlock,
+    TurnToolCallBlock,
+    TurnToolResultBlock,
+    turn_request,
+)
+from lup.runtime.usage import per_mtok_usage_cost
+from lup.runtime.wrappers import (
+    BudgetConfig,
+    CorrectionConfig,
+    DecoratingSessionFactory,
+    DisplayConfig,
+    DisplayRecord,
+    PersistenceConfig,
+    TimeoutConfig,
+    TraceRecord,
+    TracingConfig,
+)
+from lup.mcp import McpServerEntry
 from lup.telemetry.metrics import (
     get_metrics_summary,
     log_metrics_summary,
     reset_metrics,
 )
 from lup.telemetry.trace import TraceLogger
-from lup.workspace.history import save_session
-from lup.workspace.notes import NotesConfig, setup_notes
-from lup.workspace.output import ensure_output_submitted, output_path
 from lup.types import (
-    EnvVars,
     LupContentBlock,
-    LupResponse,
     LupTextBlock,
+    LupThinkingBlock,
+    LupToolResultBlock,
     LupToolUseBlock,
+    SubagentSpec,
+    Usage,
+    UsageCost,
 )
+from lup.workspace.history import save_session
+from lup.workspace.notes import NotesConfig, session_gate_flag, setup_notes
 from lup.workspace.paths import agent_version
+from lup_template.agent.config import (
+    compat_api_key,
+    compat_base_url,
+    settings,
+)
+from lup_template.agent.models import AgentOutput, AgentSessionResult
+from lup_template.agent.prompts import get_system_prompt
 
 logger = logging.getLogger(__name__)
 
-SERVE_TOOLS_COMMAND = ["uv", "run", "lup-devtools", "agent", "serve-tools"]
-"""How this project serves a tool group to subprocess engines: the
-devtools stdio server, one subprocess per group (``--server <name>``
-appended by the engine's translation)."""
-
-
-class CodexScaffold(BaseModel):
-    """Shared scaffolding for the Codex-runtime adapters."""
-
-    system_prompt: str
-    mcp_env: EnvVars
-    writable_roots: list[Path]
+if TYPE_CHECKING:
+    from lup.reflect import ReviewGate
+    from lup.sandbox.container import Sandbox
 
 
 class PersistentSessionResult(BaseModel):
-    """Outcome of a persistent (sleep/wake) session.
-
-    A persistent session produces no submitted output to assemble, so its
-    result is the relay bookkeeping — the number of wake-driven turns it ran.
-    """
+    """Number of wake-driven turns completed by a persistent session."""
 
     turns: int
 
 
-def extract_sources(blocks: list[LupContentBlock]) -> list[str]:
-    """Extract source URLs/queries from tool use blocks."""
+class SessionBuild(BaseModel):
+    """Configured provider-neutral factory and its application workspace."""
 
-    def source_of(block: LupContentBlock) -> str | None:
-        if not (isinstance(block, LupToolUseBlock) and block.name in WEB_TOOLS):
-            return None
-        match block.input:
-            case {"url": str(found)} if found:
-                return found
-            case {"query": str(found)} if found:
-                return found
-        return None
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
-    return [source for block in blocks if (source := source_of(block))]
+    factory: SessionFactory
+    notes: NotesConfig
+    trace_logger: TraceLogger
 
 
-def build_result(
-    *,
-    session_id: str,
-    task_id: str | None,
-    response: LupResponse,
-    session_dir: Path,
-) -> AgentSessionResult:
-    """Build an AgentSessionResult from the completed agent run.
+class CleaningSessionFactory(SessionFactory):
+    """Run one application resource cleanup after every opened session."""
 
-    The output is what the agent submitted via the submit_output tool
-    (``session_dir/output.json``) — the single finalization mechanism
-    on every backend. Tool metrics come from the session's flushed
-    metrics file when tools ran in a subprocess (Codex/OpenAI paths),
-    falling back to the in-process collector (Claude path).
-    """
-    from lup.telemetry.metrics import read_metrics_summary
-    from lup.workspace.output import read_output
+    def __init__(self, inner: SessionFactory, cleanup: Callable[[], None]) -> None:
+        self.inner = inner
+        self.cleanup = cleanup
 
-    result = response.result
-    if result is None:
-        raise RuntimeError("No result in response")
+    def open(
+        self, resume: SessionId | None = None
+    ) -> AbstractAsyncContextManager[SessionHandle]:
+        return self.open_cleaned(resume)
 
-    output = read_output(session_dir, AgentOutput)
-    if output is None:
-        logger.error("Session %s finished without submitting output", session_id)
-        output = AgentOutput.empty()
-
-    return AgentSessionResult(
-        session_id=session_id,
-        task_id=task_id,
-        agent_version=agent_version(),
-        agent_sdk=settings.agent_sdk,
-        sdk_session_id=response.session_id,
-        timestamp=datetime.now().isoformat(),
-        output=output,
-        reasoning="".join(
-            b.text for b in response.blocks if isinstance(b, LupTextBlock)
-        ),
-        sources_consulted=extract_sources(response.blocks),
-        duration_seconds=(result.duration_ms / 1000) if result.duration_ms else None,
-        cost_usd=result.total_cost_usd,
-        token_usage=result.usage,
-        tool_metrics=read_metrics_summary(session_dir) or get_metrics_summary(),
-    )
+    @asynccontextmanager
+    async def open_cleaned(
+        self, resume: SessionId | None
+    ) -> AsyncGenerator[SessionHandle]:
+        try:
+            async with self.inner.open(resume) as handle:
+                yield handle
+        finally:
+            self.cleanup()
 
 
-def build_session_options(
-    notes: "NotesConfig",
-    *,
-    realtime: bool = False,
-    model: str | None = None,
-    toolless: bool = False,
-    bare_prompt: bool = False,
-) -> "LupAgentOptions":
-    """Assemble the whole session in neutral terms — no engine named.
+def reflection_submission_gate(gate: "ReviewGate") -> SubmissionGate[AgentOutput]:
+    """Adapt the domain review flag to portable turn submission semantics."""
 
-    Describes both enforcement mechanisms and lets the engine consume its
-    own side: hook-enforced engines read the in-process assembly (MCP
-    servers, the permission/reflection/completion hooks, the allowlist the
-    policy produces), and natively-sandboxed engines read the subprocess
-    assembly (served tool groups, env relay, writable roots). Intent knobs
-    pass through as the user set them — an engine refuses at construction
-    what it cannot honor, and unset knobs get engine defaults. Sessions
-    persist, so ``lup run --resume`` can continue them.
-
-    The keyword overrides are assembly knobs (the REPL's ``--model``,
-    ``--no-tools``, ``--no-prompt``): ``model`` replaces the configured
-    session model everywhere it is read, ``toolless`` skips the tool
-    assembly on both sides — no tool servers, no served groups, none of
-    the tool-coupled hooks (reflection gate, completion guard, allowlist),
-    no code-execution sandbox; the permission hooks stay — and
-    ``bare_prompt`` sends an empty system prompt with the coding-harness
-    preset off. Overrides are realized here, in neutral terms, never by
-    patching a translated client.
-    """
-    from lup.adapters.wiring import resolve_engine
-    from lup.hooks import (
-        create_completion_guard,
-        create_permission_hooks,
-        create_tool_allowlist_hook,
-        merge_hooks,
-    )
-    from lup.adapters.options import LupAgentOptions
-    from lup.mcp import McpServerEntry, create_mcp_server
-    from lup.realtime.relay import REALTIME_DIRNAME
-    from lup.reflect import create_reflection_gate
-
-    from lup_template.agent.subagents import get_subagent_specs
-    from lup_template.agent.tool_policy import ToolPolicy
-    from lup_template.agent.toolsets import (
-        EXAMPLE_GROUP,
-        build_session_toolset,
-        tool_group_names,
-    )
-
-    effective_model = model or settings.model
-    policy = ToolPolicy(settings)
-
-    hooks = create_permission_hooks(rw_dirs=notes.rw, ro_dirs=notes.ro)
-    policy_servers: dict[str, McpServerEntry] = {}
-    allowed_tools: list[str] = []
-    served_groups: list[str] = []
-    if not toolless:
-        # In-process assembly — consumed by hook-enforced engines (claude*).
-        toolset = build_session_toolset(
-            session_dir=notes.session,
-            outputs_dir=notes.output.parent,
-            include_subagent_tool=False,
-            sandbox=build_session_sandbox(notes),
+    async def decide(_output: AgentOutput) -> SubmissionDecision:
+        if gate.reflected:
+            return SubmissionDecision(accepted=True)
+        return SubmissionDecision(
+            accepted=False,
+            message="Call the review tool and address its verdict before submitting.",
         )
-        all_servers = [
-            create_mcp_server(name, tools=policy.filter_tools(tools))
-            for name, tools in toolset["groups"].items()
-            if name != EXAMPLE_GROUP
-        ]
-        policy_servers = policy.get_mcp_servers(*all_servers)
-        hooks = merge_hooks(
-            hooks,
-            create_reflection_gate(
-                gate=toolset["gate"],
-                gated_tool="mcp__notes__submit_output",
-                reflection_tool_name="mcp__notes__review",
-            ),
-        )
-        hooks = merge_hooks(
-            hooks, create_completion_guard(toolset["output_path"].exists)
-        )
-        # Tool allowlist: allowed_tools in options is ignored under
-        # bypassPermissions, so availability is enforced by a PreToolUse hook.
-        builtin_tools = resolve_engine(
-            engine_for_settings(), model=effective_model
-        ).builtin_tools()
-        allowed_tools = policy.get_allowed_tools(
-            policy_servers, builtin_tools=builtin_tools
-        )
-        hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
-        served_groups = policy.filter_group_names(tool_group_names(realtime=realtime))
 
-    # Subprocess assembly — consumed by natively-sandboxed engines (codex*).
-    realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
-    scaffold = build_codex_session(
-        notes, realtime_dir=realtime_dir, model=effective_model
-    )
-    system_prompt, mcp_env, writable_roots = (
-        scaffold.system_prompt,
-        scaffold.mcp_env,
-        scaffold.writable_roots,
-    )
-    if bare_prompt:
-        system_prompt = ""
-
-    return LupAgentOptions(
-        model=effective_model,
-        system_prompt=system_prompt,
-        coding_harness_preset=not bare_prompt,
-        tool_servers=policy_servers,
-        subagents=get_subagent_specs(),
-        hooks=hooks,
-        allowed_tools=allowed_tools,
-        served_tool_groups=served_groups,
-        serve_tools_command=SERVE_TOOLS_COMMAND,
-        add_dirs=[*notes.all_dirs, *settings.extra_dirs],
-        permission_mode=settings.permission_mode,
-        max_turns=settings.max_turns,
-        max_thinking_tokens=settings.max_thinking_tokens,
-        reasoning_effort=settings.codex_effort or settings.reasoning_effort,
-        max_budget_usd=settings.max_budget_usd,
-        turn_timeout_seconds=settings.turn_timeout_seconds,
-        usage_cost=build_usage_cost(),
-        base_url=compat_base_url(),
-        api_key=compat_api_key(),
-        model_provider=settings.openai_model_provider,
-        codex_sandbox=settings.codex_sandbox,
-        approval_policy=settings.codex_approval_policy,
-        mcp_env=mcp_env,
-        writable_roots=writable_roots,
-        session_resources=build_session_cleanup(notes),
-    )
+    return decide
 
 
-def build_codex_session(
-    notes: "NotesConfig",
-    *,
-    realtime_dir: Path | None = None,
-    model: str | None = None,
-) -> CodexScaffold:
-    """Shared scaffolding for Codex-runtime adapters.
-
-    Returns (system_prompt, mcp_env, writable_roots). Enforcement on
-    Codex is native and in-tool: the runtime's workspace-write sandbox
-    confines writes to ``writable_roots``, and the reflection gate is
-    checked inside submit_output (the serve-tools subprocess reads the
-    flag path from the relayed env). Codex config.toml command hooks
-    are not wired — a live probe showed they never fire on current
-    codex builds.
-    """
-    import tempfile
-
-    from lup.workspace.context import SessionContext
-
-    from lup_template.agent.prompts import get_system_prompt
-
-    state_dir = Path(tempfile.mkdtemp(prefix="lup_codex_session_"))
-    gate_flag_path = state_dir / "reflection_gate_flag"
-
-    context = SessionContext(
-        session_dir=notes.session,
-        outputs_dir=notes.output.parent,
-        gate_flag=gate_flag_path,
-        session_id=notes.session.name,
-        task_id=notes.output.parent.name,
-        realtime_dir=realtime_dir,
-    )
-
-    # The serve-tools subprocess resolves aux_model() from its own settings,
-    # and the Codex runtime does not pass the parent's shell env through to
-    # MCP servers — relay the inputs that resolution needs.
-    mcp_env = {
-        **context.to_env(),
-        "AGENT_SDK": settings.agent_sdk,
-        "AGENT_MODEL": model or settings.model,
-    }
-    if settings.aux_model:
-        mcp_env["AGENT_AUX_MODEL"] = settings.aux_model
-
-    return CodexScaffold(
-        system_prompt=get_system_prompt(),
-        mcp_env=mcp_env,
-        writable_roots=list(notes.rw),
-    )
-
-
-def build_usage_cost() -> "UsageCost | None":
-    """The token→USD estimator from the configured per-MTok rates.
-
-    The Codex runtime reports token counts, not cost — budget enforcement
-    there needs ``CODEX_USD_PER_MTOK_INPUT`` / ``_OUTPUT`` (optional
-    ``_CACHED_INPUT``). Without rates this stays ``None``, and a codex-tier
-    engine given a budget refuses the construction.
-    """
-    from lup.adapters.clients.usage import per_mtok_usage_cost
-
+def build_usage_cost() -> UsageCost | None:
+    """Build configured token pricing without coupling it to an adapter."""
+    if settings.agent_sdk in ("claude", "claude-compat"):
+        return reported_usage_cost
     if (
         settings.codex_usd_per_mtok_input is None
         or settings.codex_usd_per_mtok_output is None
@@ -344,80 +163,285 @@ def build_usage_cost() -> "UsageCost | None":
     )
 
 
-def resolve_resume_token(reference: str) -> str:
-    """Turn a ``--resume`` reference into an engine session id.
+def reported_usage_cost(usage: Usage) -> float:
+    """Use the complete cost reported by providers that supply one."""
+    if usage.cost_usd is None:
+        raise ValueError("the provider completed without reporting turn cost")
+    return usage.cost_usd
 
-    A saved run's session name resolves to its stored ``sdk_session_id``
-    (the engine-native resume token). An unknown reference is assumed to
-    already be an engine session id and passes through — a saved run that
-    recorded no token fails loudly instead of silently starting fresh.
+
+def provider_factory(
+    *,
+    model: str,
+    system_prompt: str,
+    cwd: Path,
+    tools: list[str] | None = None,
+    tool_servers: dict[str, McpServerEntry] | None = None,
+    allowed_tools: list[str] | None = None,
+    hooks: LupHooksConfig | None = None,
+    add_dirs: list[Path] | None = None,
+    coding_harness_preset: bool = True,
+    session_defaults: bool = True,
+    submission_gate: SubmissionGateResolver | None = None,
+    codex_mcp_servers: dict[str, CodexMcpServerConfig] | None = None,
+    writable_roots: list[Path] | None = None,
+    subagents: list[SubagentSpec] | None = None,
+) -> SessionFactory:
+    """The one application-owned provider selection boundary.
+
+    Native identifiers are intentionally confined to this concrete composition
+    root. Every caller above it receives only a configured ``SessionFactory``.
     """
-    from lup.workspace.history import latest_session_record
-
-    record = latest_session_record(reference)
-    if record is None:
-        return reference
-    token = record.sdk_session_id
-    if not token:
-        raise ValueError(
-            f"Session {reference!r} recorded no engine session id to resume "
-            "from (it predates resume support or its engine reported none)."
+    if settings.agent_sdk in ("claude", "claude-compat"):
+        config = ClaudeSessionConfig(
+            model=model,
+            system_prompt=system_prompt,
+            coding_harness_preset=coding_harness_preset,
+            tools=tools,
+            allowed_tools=allowed_tools or [],
+            tool_servers=tool_servers or {},
+            permission_mode=(
+                settings.permission_mode
+                if settings.permission_mode is not None
+                else "bypassPermissions"
+                if session_defaults
+                else None
+            ),
+            max_turns=settings.max_turns,
+            max_thinking_tokens=(
+                settings.max_thinking_tokens
+                if settings.max_thinking_tokens is not None
+                else SESSION_THINKING_TOKENS
+                if session_defaults
+                else None
+            ),
+            effort=normalize_claude_effort(settings.reasoning_effort),
+            cwd=cwd,
+            add_dirs=add_dirs or list(settings.extra_dirs),
+            environment=(
+                {"ENABLE_TOOL_SEARCH": settings.tool_search}
+                if settings.tool_search is not None
+                else {}
+            ),
+            sandbox=ClaudeSandboxConfig() if session_defaults else None,
+            hooks=hooks,
+            submission_gate_resolver=submission_gate,
+            subagents=subagents or [],
         )
-    return token
+        endpoint = compat_base_url()
+        if endpoint is not None:
+            config = ClaudeCompatibilityTransform(
+                ClaudeCompatibleEndpoint(
+                    base_url=AnyHttpUrl(endpoint),
+                    api_key=(
+                        SecretStr(key)
+                        if (key := compat_api_key()) is not None
+                        else None
+                    ),
+                )
+            ).apply(config)
+        return create_claude_session_factory(config)
+
+    if settings.agent_sdk in ("codex", "openai", "openai-compat"):
+        unsupported = [
+            name
+            for name, value in [
+                ("AGENT_PERMISSION_MODE", settings.permission_mode),
+                ("AGENT_MAX_TURNS", settings.max_turns),
+                ("AGENT_MAX_THINKING_TOKENS", settings.max_thinking_tokens),
+            ]
+            if value is not None
+        ]
+        if tools:
+            unsupported.append("tools")
+        if unsupported:
+            raise ValueError(
+                "Codex app-server cannot honor configured option(s): "
+                + ", ".join(unsupported)
+            )
+        config = CodexSessionConfig(
+            model=model,
+            developer_instructions=system_prompt,
+            cwd=cwd,
+            sandbox=(
+                normalize_codex_sandbox(settings.codex_sandbox)
+                or ("workspace-write" if session_defaults else None)
+            ),
+            approval_policy=(
+                normalize_codex_approval(settings.codex_approval_policy)
+                or ("never" if session_defaults else None)
+            ),
+            effort=normalize_codex_effort(
+                settings.codex_effort or settings.reasoning_effort
+            ),
+            submission_gate_resolver=submission_gate,
+            mcp_servers=codex_mcp_servers or {},
+            writable_roots=writable_roots or [],
+        )
+        endpoint = compat_base_url()
+        if settings.agent_sdk in ("openai", "openai-compat"):
+            if endpoint is None:
+                raise ValueError(
+                    "OPENAI_BASE_URL is required for an OpenAI-compatible route"
+                )
+            config = CodexCompatibilityTransform(
+                CodexCompatibleEndpoint(
+                    identifier=settings.openai_model_provider or "lup_openai_compat",
+                    base_url=AnyHttpUrl(endpoint),
+                    api_key=(
+                        SecretStr(key)
+                        if (key := compat_api_key()) is not None
+                        else None
+                    ),
+                )
+            ).apply(config)
+        return create_codex_session_factory(config)
+
+    raise ValueError(f"unsupported AGENT_SDK {settings.agent_sdk!r}")
 
 
-def build_session_sandbox(notes: "NotesConfig") -> "Sandbox | None":
-    """The code-execution sandbox for the in-process toolset, if available.
+def normalize_claude_effort(
+    value: str | None,
+) -> Literal["low", "medium", "high", "xhigh", "max"] | None:
+    """Validate the application setting at the Claude adapter boundary."""
+    if value in (None, "low", "medium", "high", "xhigh", "max"):
+        return value
+    raise ValueError(f"unsupported Claude reasoning effort {value!r}")
 
-    Optional twice over: ``AGENT_SANDBOX_ENABLED=false`` runs the agent
-    without code execution tools, and a missing docker extra degrades the
-    same way instead of failing sessions that never use these tools
-    (subprocess engines run their own sandbox tool-side).
-    """
-    if not settings.sandbox_enabled:
-        return None
+
+def normalize_codex_sandbox(
+    value: str | None,
+) -> Literal["read-only", "workspace-write", "danger-full-access"] | None:
+    """Translate the documented environment spelling once at composition."""
+    aliases = {
+        None: None,
+        "read_only": "read-only",
+        "workspace_write": "workspace-write",
+        "danger_full_access": "danger-full-access",
+        "read-only": "read-only",
+        "workspace-write": "workspace-write",
+        "danger-full-access": "danger-full-access",
+        "readOnly": "read-only",
+        "workspaceWrite": "workspace-write",
+        "dangerFullAccess": "danger-full-access",
+    }
     try:
-        from lup.sandbox.container import Sandbox
-    except ImportError:
-        logger.warning(
-            "docker extra not installed; running without code-execution tools"
-        )
-        return None
+        return aliases[value]
+    except KeyError as error:
+        raise ValueError(f"unsupported Codex sandbox {value!r}") from error
 
-    return Sandbox(
-        session_id=notes.session.name,
-        shared_dir=notes.session / "sandbox_shared",
-        timeout_seconds=settings.sandbox_timeout_seconds,
+
+def normalize_codex_approval(
+    value: str | None,
+) -> Literal["never"] | None:
+    """Validate the Codex approval policy before model construction."""
+    if value in (None, "never"):
+        return value
+    raise ValueError(
+        f"Codex approval policy {value!r} is not supported by the app-server "
+        "adapter; use 'never' with Lup's policy boundary"
     )
 
 
-def build_session_cleanup(notes: "NotesConfig") -> "list[SessionResource]":
-    """The subprocess sandbox's cleanup guarantee, when docker is present.
-
-    A sandbox living in a served-tool subprocess can be killed before its
-    own atexit cleanup runs; the engine enters this factory's context with
-    the session so the container and volume are removed however the
-    subprocess died. Without the docker extra there is nothing to clean.
-    """
-    try:
-        from lup.sandbox.container import sandbox_cleanup
-    except ImportError:
-        return []
-    session_id = notes.session.name
-    shared_dir = notes.session / "sandbox_shared"
-    return [lambda: sandbox_cleanup(session_id=session_id, shared_dir=shared_dir)]
+def normalize_codex_effort(
+    value: str | None,
+) -> Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None:
+    """Validate reasoning effort at the Codex adapter boundary."""
+    if value in (None, "none", "minimal", "low", "medium", "high", "xhigh"):
+        return value
+    raise ValueError(f"unsupported Codex reasoning effort {value!r}")
 
 
-class SessionBuild(BaseModel):
-    """A constructed session client plus the notes it reports into."""
+def decorate_factory(
+    factory: SessionFactory,
+    *,
+    notes: NotesConfig | None = None,
+    trace_logger: TraceLogger | None = None,
+) -> SessionFactory:
+    """Apply complete-logical-turn governance in its explicit order."""
+    usage_cost = build_usage_cost()
+    budget = None
+    if settings.max_budget_usd is not None:
+        if usage_cost is None:
+            raise ValueError(
+                "a budget requires CODEX_USD_PER_MTOK_INPUT and "
+                "CODEX_USD_PER_MTOK_OUTPUT"
+            )
+        budget = BudgetConfig(
+            maximum_usd=settings.max_budget_usd,
+            usage_cost=usage_cost,
+        )
+    timeout = (
+        TimeoutConfig(seconds=settings.turn_timeout_seconds)
+        if settings.turn_timeout_seconds is not None
+        else None
+    )
+    persistence = None
+    tracing = None
+    display = None
+    if notes is not None and trace_logger is not None:
+        from lup.telemetry.display import ColorAssigner, print_block
+        from lup.telemetry.trace import TraceEvent
 
-    model_config = {"arbitrary_types_allowed": True}
+        colors = ColorAssigner()
 
-    client: Client
-    notes: NotesConfig
+        async def display_result(record: DisplayRecord) -> None:
+            for block in record.blocks:
+                print_block(
+                    telemetry_block(block),
+                    trace=trace_logger,
+                    colors=colors,
+                )
+
+        async def trace_result(record: TraceRecord) -> None:
+            if not record.succeeded and record.failure is not None:
+                for block in record.failure.blocks:
+                    trace_logger.log_block(telemetry_block(block))
+                trace_logger.log_text(record.failure.message, heading="Turn error")
+                trace_logger.emit_event(
+                    TraceEvent(
+                        kind="error",
+                        timestamp=datetime.now().isoformat(),
+                        brief=record.failure.message,
+                    )
+                )
+            trace_logger.save()
+
+        persistence = PersistenceConfig(directory=notes.trace_log.parent / "turns")
+        tracing = TracingConfig(sink=trace_result)
+        display = DisplayConfig(sink=display_result)
+    return DecoratingSessionFactory(
+        factory,
+        timeout=timeout,
+        budget=budget,
+        correction=CorrectionConfig(cycles=2),
+        persistence=persistence,
+        tracing=tracing,
+        display=display,
+    )
 
 
-def build_session_client(
+def telemetry_block(block: TurnBlock) -> LupContentBlock:
+    """Project one portable completed block into the existing telemetry view."""
+    match block:
+        case TurnTextBlock(text=text):
+            return LupTextBlock(text=text)
+        case TurnThinkingBlock(thinking=thinking, redacted=redacted):
+            return LupThinkingBlock(thinking=thinking, redacted=redacted)
+        case TurnToolCallBlock(id=identifier, name=name, arguments=arguments):
+            return LupToolUseBlock(id=identifier, name=name, input=arguments)
+        case TurnToolResultBlock(
+            tool_call_id=identifier, content=content, is_error=is_error
+        ):
+            rendered = (
+                json.dumps({"is_error": True, "content": content})
+                if is_error
+                else content
+            )
+            return LupToolResultBlock(tool_use_id=identifier, content=rendered)
+
+
+def build_session_factory(
     session_id: str,
     task_id: str | None = None,
     *,
@@ -426,28 +450,232 @@ def build_session_client(
     toolless: bool = False,
     bare_prompt: bool = False,
 ) -> SessionBuild:
-    """Build the session's client for ``settings.agent_sdk``.
-
-    Assembles neutral :class:`~lup.adapters.options.LupAgentOptions` and hands them
-    to ``create_client`` with the configured engine — no ``match`` on the
-    backend, no native option type. Session-scoped resources live inside
-    ``client.session()``; session artifacts are read from the notes.
-    ``model``/``toolless``/``bare_prompt`` pass through to
-    :func:`build_session_options` (the REPL's overrides).
-    """
-    from lup.adapters.wiring import create_client
+    """Assemble tools and return a fully configured neutral factory."""
+    from lup.hooks import (
+        create_permission_hooks,
+        create_tool_allowlist_hook,
+        merge_hooks,
+    )
+    from lup.mcp import create_mcp_server
+    from lup.realtime.relay import REALTIME_DIRNAME
+    from lup_template.agent.tool_policy import ToolPolicy
+    from lup_template.agent.subagents import get_subagent_specs
+    from lup_template.agent.toolsets import EXAMPLE_GROUP, build_session_toolset
 
     notes = setup_notes(session_id, task_id or "0")
-    opts = build_session_options(
-        notes,
-        realtime=realtime,
-        model=model,
-        toolless=toolless,
-        bare_prompt=bare_prompt,
+    no_subagents: list[SubagentSpec] = []
+    subagents = no_subagents if toolless else get_subagent_specs()
+    system_prompt = "" if bare_prompt else get_system_prompt()
+    tool_servers: dict[str, McpServerEntry] = {}
+    codex_mcp_servers: dict[str, CodexMcpServerConfig] = {}
+    writable_roots: list[Path] = []
+    allowed_tools: list[str] = []
+    submission_gate: SubmissionGate[AgentOutput] | None = None
+    hooks = create_permission_hooks(notes.rw, notes.ro)
+    tools: list[str] | None = [] if toolless else None  # lup: ignore[empty-collection]
+    sandbox: Sandbox | None = None
+    if not toolless and settings.agent_sdk in ("claude", "claude-compat"):
+        policy = ToolPolicy(settings)
+        realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
+        sandbox = build_session_sandbox(notes)
+        toolset = build_session_toolset(
+            session_dir=notes.session,
+            outputs_dir=notes.output.parent,
+            sandbox=sandbox,
+            realtime_dir=realtime_dir,
+        )
+        servers = [
+            create_mcp_server(name, tools=policy.filter_tools(group_tools))
+            for name, group_tools in toolset["groups"].items()
+            if name != EXAMPLE_GROUP
+        ]
+        tool_servers = dict(policy.get_mcp_servers(*servers))
+        from lup.adapters.claude.runtime import SUBMISSION_TOOL
+
+        allowed_tools = policy.get_allowed_tools(
+            tool_servers,
+            builtin_tools=frozenset(  # lup: ignore[frozenset-shape] — immutable policy input
+                {"Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash"}
+            ),
+        )
+        # The turn-bound submission tool is registered by the adapter, not the
+        # template toolsets; without this the allowlist hook denies the very
+        # tool that finalizes the turn.
+        allowed_tools.append(SUBMISSION_TOOL)
+        hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
+        submission_gate = reflection_submission_gate(toolset["gate"])
+    elif not toolless:
+        from lup.reflect import ReviewGate
+        from lup.workspace.context import SessionContext
+        from lup_template.agent.toolsets import tool_group_names
+
+        policy = ToolPolicy(settings)
+        realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
+        # The flag lives outside the sandbox's writable roots (workspace,
+        # /tmp) so only the host-side tool server can open the gate.
+        gate_flag = session_gate_flag(notes.session.name)
+        gate_flag.unlink(missing_ok=True)
+        gate = ReviewGate(flag_path=gate_flag)
+        submission_gate = reflection_submission_gate(gate)
+        context = SessionContext(
+            session_dir=notes.session,
+            outputs_dir=notes.output.parent,
+            gate_flag=gate.flag_path,
+            session_id=notes.session.name,
+            task_id=notes.output.parent.name,
+            realtime_dir=realtime_dir,
+        )
+        environment = {
+            **context.to_env(),
+            "AGENT_SDK": settings.agent_sdk,
+            "AGENT_MODEL": model or settings.model,
+            "AGENT_SANDBOX_ENABLED": str(settings.sandbox_enabled).lower(),
+        }
+        if settings.aux_model is not None:
+            environment["AGENT_AUX_MODEL"] = settings.aux_model
+        codex_mcp_servers = {
+            name: CodexMcpServerConfig(
+                command="uv",
+                args=[
+                    "run",
+                    "lup-devtools",
+                    "agent",
+                    "serve-tools",
+                    "--server",
+                    name,
+                ],
+                env=environment,
+            )
+            for name in policy.filter_group_names(tool_group_names(realtime=realtime))
+        }
+        writable_roots = list(notes.rw)
+
+    resolver = (
+        submission_gate_resolver(AgentOutput, submission_gate)
+        if submission_gate is not None
+        else None
+    )
+    factory = provider_factory(
+        model=model or settings.model,
+        system_prompt=system_prompt,
+        cwd=Path.cwd(),
+        tools=tools,
+        tool_servers=tool_servers,
+        allowed_tools=allowed_tools,
+        hooks=hooks,
+        add_dirs=[*notes.all_dirs, *settings.extra_dirs],
+        coding_harness_preset=not bare_prompt,
+        submission_gate=resolver,
+        codex_mcp_servers=codex_mcp_servers,
+        writable_roots=writable_roots,
+        subagents=subagents,
+    )
+    if sandbox is not None:
+        factory = CleaningSessionFactory(factory, sandbox.stop)
+    elif (
+        not toolless
+        and settings.sandbox_enabled
+        and settings.agent_sdk
+        in (
+            "codex",
+            "openai",
+            "openai-compat",
+        )
+    ):
+        factory = CleaningSessionFactory(factory, codex_sandbox_cleanup(notes))
+    trace_logger = TraceLogger(
+        trace_path=notes.trace_log,
+        title=f"Session {session_id}",
     )
     return SessionBuild(
-        client=create_client(options=opts, engine=engine_for_settings()),
+        factory=decorate_factory(
+            factory,
+            notes=notes,
+            trace_logger=trace_logger,
+        ),
         notes=notes,
+        trace_logger=trace_logger,
+    )
+
+
+def build_auxiliary_factory(
+    *,
+    model: str,
+    system_prompt: str = "",
+    tools: list[str] | None = None,
+) -> SessionFactory:
+    """Build a one-shot nested/reviewer factory through the same route."""
+    return decorate_factory(
+        provider_factory(
+            model=model,
+            system_prompt=system_prompt,
+            cwd=Path.cwd(),
+            tools=tools,
+            allowed_tools=tools,
+            coding_harness_preset=False,
+            session_defaults=False,
+        )
+    )
+
+
+def resolve_resume_token(reference: str) -> SessionId:
+    """Resolve a saved run name or accept an opaque provider session id."""
+    from lup.workspace.history import latest_session_record
+
+    record = latest_session_record(reference)
+    if record is None:
+        return SessionId(value=reference)
+    if not record.sdk_session_id:
+        raise ValueError(f"session {reference!r} has no provider resume identity")
+    return SessionId(value=record.sdk_session_id)
+
+
+def result_text[T: BaseModel | None](result: TurnResult[T]) -> str:
+    """Concatenate completed portable text blocks."""
+    return "\n\n".join(
+        block.text for block in result.blocks if isinstance(block, TurnTextBlock)
+    )
+
+
+def result_sources[T: BaseModel | None](result: TurnResult[T]) -> list[str]:
+    """Extract source URLs and search queries from semantic tool calls."""
+    sources: list[str] = []  # lup: ignore[empty-collection]
+    for block in result.blocks:
+        if not isinstance(block, TurnToolCallBlock):
+            continue
+        if block.name in ("FetchUrl", "WebFetch"):
+            value = block.arguments.get("url")  # lup: ignore[dict-get]
+        elif block.name in ("SearchWeb", "WebSearch"):
+            value = block.arguments.get("query")  # lup: ignore[dict-get]
+        else:
+            continue
+        if isinstance(value, str) and value:
+            sources.append(value)
+    return sources
+
+
+def application_result(
+    result: TurnResult[AgentOutput],
+    *,
+    session_id: str,
+    task_id: str | None,
+) -> AgentSessionResult:
+    """Project a strict typed turn result into the domain history model."""
+    usage_cost = build_usage_cost()
+    return AgentSessionResult(
+        session_id=session_id,
+        task_id=task_id,
+        agent_version=agent_version(),
+        agent_sdk=settings.agent_sdk,
+        sdk_session_id=result.identifiers.session.value,
+        timestamp=datetime.now().isoformat(),
+        output=result.output,
+        reasoning=result_text(result),
+        sources_consulted=result_sources(result),
+        duration_seconds=result.duration.total_seconds(),
+        cost_usd=usage_cost(result.usage) if usage_cost is not None else None,
+        token_usage=result.usage,
+        tool_metrics=get_metrics_summary(),
     )
 
 
@@ -456,129 +684,93 @@ async def run_agent(
     *,
     session_id: str | None = None,
     task_id: str | None = None,
-    resume: str | None = None,
+    resume: SessionId | None = None,
 ) -> AgentSessionResult:
-    """Run the agent on a task, on the engine ``settings.agent_sdk`` names.
-
-    ``resume`` takes a previous run's SDK session id (``lup run --resume``
-    resolves it from history) and continues that conversation instead of
-    starting fresh.
-    """
-    if session_id is None:
-        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    logger.info("Starting session %s (sdk=%s)", session_id, settings.agent_sdk)
+    """Run one strict typed turn and persist its application projection."""
+    identifier = session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
     reset_metrics()
-
-    build = build_session_client(session_id, task_id)
-    notes = build.notes
-
-    trace_logger = TraceLogger(
-        trace_path=notes.trace_log, title=f"Session {session_id}"
-    )
-
-    async with build.client.session(resume=resume) as session:
-        response = await session.send(task, trace_logger=trace_logger)
-        # A no-op where the engine's Stop hook already forced submission;
-        # elsewhere this is the one retry nudge toward submit_output.
-        retry = await ensure_output_submitted(
-            session,
-            output_exists=output_path(notes.session).exists,
-            trace_logger=trace_logger,
+    build = build_session_factory(identifier, task_id)
+    async with build.factory.open(resume) as handle:
+        turn = await handle.session.start(
+            turn_request(TurnInput(text=task), AgentOutput)
         )
-        if retry is not None:
-            response = retry
-
-    trace_logger.save()
+        result = await turn.turn.result()
     log_metrics_summary()
-
-    session_result = build_result(
-        session_id=session_id,
+    projected = application_result(
+        result,
+        session_id=identifier,
         task_id=task_id,
-        response=response,
-        session_dir=notes.session,
     )
-
-    save_session(session_result, session_id=session_result.session_id)
-
-    return session_result
+    save_session(projected, session_id=identifier)
+    return projected
 
 
 async def run_persistent_agent(
     task: str,
     *,
     session_id: str | None = None,
-    on_reply: "Callable[[str], Awaitable[None]] | None" = None,
+    on_reply: Callable[[str], Awaitable[None]] | None = None,
 ) -> PersistentSessionResult:
-    """Run a persistent (sleep/wake) session through the file relay.
-
-    The minimal wiring of the Persistent Agent pattern on the relay backends:
-    the parent owns the Scheduler, each wake is one SDK turn, and the served
-    ``session`` tools relay through the mailbox. Replies surface through
-    ``on_reply`` (stdout by default) — replace it with your environment's
-    delivery callback, and call ``scheduler.wake(...)`` from your event sources
-    (customization step 8). Artifacts are the trace log and the relay
-    directory; a persistent session has no ``submit_output`` finalization, so
-    no session JSON is saved.
-
-    The relay transport is for subprocess engines (codex/openai-compat),
-    whose served ``session`` tools write the mailbox files the parent
-    polls. An in-process engine (Claude — one never-ending turn with a
-    Stop hook, see PATTERNS.md, Persistent Agent) never writes them, so
-    this entry point refuses to start there.
-
-    Returns:
-        The completed-turn count.
-    """
-    from lup.realtime.relay import (
-        REALTIME_DIRNAME,
-        RealtimeMailbox,
-        run_relay_session,
-    )
+    """Run the relay over the same ``Session`` contract as ordinary turns."""
+    from lup.realtime.relay import REALTIME_DIRNAME, RealtimeMailbox, run_relay_session
     from lup.realtime.scheduler import Scheduler
-    from lup.reflect import ReflectionGate
-
     from lup_template.agent.tools.realtime import MISSING_SLEEP_MESSAGE
 
-    if engine_for_settings() not in ("codex", "openai-compat"):
-        raise ValueError(
-            "Persistent mode on this engine runs in-process (customization "
-            "step 8; PATTERNS.md 'Persistent Agent'); the relay entry point "
-            "needs AGENT_SDK=codex or openai."
-        )
-
-    if session_id is None:
-        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    logger.info(
-        "Starting persistent session %s (sdk=%s)", session_id, settings.agent_sdk
-    )
-    reset_metrics()
-
-    build = build_session_client(session_id, realtime=True)
-    notes = build.notes
-    mailbox = RealtimeMailbox(notes.session / REALTIME_DIRNAME)
+    identifier = session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+    build = build_session_factory(identifier, realtime=True)
 
     async def echo_reply(message: str) -> None:
         print(f"[lup] {message}")
 
     scheduler = Scheduler(on_action=on_reply or echo_reply)
-    meta_gate = ReflectionGate(flag_path=mailbox.meta_flag_path)
-    trace_logger = TraceLogger(
-        trace_path=notes.trace_log, title=f"Session {session_id}"
-    )
+    mailbox = RealtimeMailbox(build.notes.session / REALTIME_DIRNAME)
+    from lup.reflect import ReflectionGate
 
-    async with build.client.session() as session:
+    relay_gate = ReflectionGate(
+        flag_path=build.notes.trace_log.with_suffix(".reflection")
+    )
+    async with build.factory.open() as handle:
         turns = await run_relay_session(
-            session,
+            handle.session,
             scheduler=scheduler,
             mailbox=mailbox,
             initial_prompt=task,
             missing_sleep_message=MISSING_SLEEP_MESSAGE,
-            gate=meta_gate,
-            trace_logger=trace_logger,
+            gate=relay_gate,
+            trace_logger=build.trace_logger,
         )
-
-    trace_logger.save()
-    log_metrics_summary()
     return PersistentSessionResult(turns=turns)
+
+
+def build_session_sandbox(notes: NotesConfig) -> "Sandbox | None":
+    """Build the optional application code-execution sandbox lazily."""
+    if not settings.sandbox_enabled:
+        return None
+    try:
+        from lup.sandbox.container import Sandbox
+    except ImportError:
+        logger.warning("docker extra not installed; code execution is unavailable")
+        return None
+    return Sandbox(
+        session_id=notes.session.name,
+        shared_dir=notes.session / "sandbox_shared",
+        timeout_seconds=settings.sandbox_timeout_seconds,
+    )
+
+
+def codex_sandbox_cleanup(notes: NotesConfig) -> Callable[[], None]:
+    """Build parent-side teardown for a sandbox hosted by an MCP subprocess."""
+
+    def cleanup() -> None:
+        try:
+            from lup.sandbox.container import sandbox_cleanup
+
+            with sandbox_cleanup(
+                session_id=notes.session.name,
+                shared_dir=notes.session / "sandbox_shared",
+            ):
+                pass
+        except Exception:
+            logger.exception("Post-session Codex sandbox cleanup failed")
+
+    return cleanup

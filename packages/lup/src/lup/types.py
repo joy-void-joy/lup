@@ -8,10 +8,9 @@ never imports from SDK packages directly. The hook vocabulary lives in
 """
 
 from collections.abc import Callable, Sequence
-from contextlib import AbstractContextManager
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, SerializeAsAny
+from pydantic import BaseModel, Field, StringConstraints
 
 
 # ---------------------------------------------------------------------------
@@ -38,15 +37,63 @@ The keys are open and data-driven by nature (whatever variables exist), which
 is exactly the shape the dict-str-payload rule otherwise flags: annotate env
 maps with this alias instead of respelling ``dict[str, str]`` per site."""
 
-type PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
-"""How a session prompts for tool permission — a neutral intent knob;
-engines without permission modes refuse it at construction."""
-
 type Decorator[T, R] = Callable[[T], R]
 """A decorator: applied with ``@`` to a `T`, yields an `R`. Names the intent
 at a signature (``-> Decorator[Handler, Tool]``) where a bare ``Callable`` of
 a callable reads as noise. ``R`` need not be ``T`` — a decorator may return a
 different type than it wraps (a builder, a registration object)."""
+
+
+# ---------------------------------------------------------------------------
+# Tool vocabulary
+# ---------------------------------------------------------------------------
+
+type KnownToolName = Literal[
+    "Agent",
+    "AskUserQuestion",
+    "Bash",
+    "BashOutput",
+    "Edit",
+    "ExitPlanMode",
+    "Glob",
+    "Grep",
+    "KillShell",
+    "ListMcpResources",
+    "MultiEdit",
+    "NotebookEdit",
+    "Read",
+    "ReadMcpResource",
+    "Skill",
+    "SlashCommand",
+    "StructuredOutput",
+    "Task",
+    "TodoWrite",
+    "WebFetch",
+    "WebSearch",
+    "Workflow",
+    "Write",
+]
+"""The well-known built-in tool names — the framework's lingua franca.
+
+Claude Code's tool vocabulary is adopted as the neutral spelling: adapters
+translate their backend's native tool identities onto these names, so hooks,
+policies, and harness declarations all read one vocabulary."""
+
+type McpToolName = Annotated[
+    str, StringConstraints(pattern=r"^mcp__[A-Za-z0-9_-]+(?:__[A-Za-z0-9_-]+)*$")
+]
+"""A dynamically registered MCP tool: ``mcp__<server>`` or ``mcp__<server>__<tool>``."""
+
+type ToolName = KnownToolName | McpToolName
+"""One tool identity: a well-known built-in or a registered ``mcp__*`` tool."""
+
+type ScopedToolGrant = Annotated[
+    str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_]*\([^()]+\)$")
+]
+"""A tool grant narrowed by a parenthesized specifier, e.g. ``Bash(git:*)``."""
+
+type ToolGrant = ToolName | ScopedToolGrant
+"""One entry of a declared tool grant list: a whole tool or a scoped rule."""
 
 
 # ---------------------------------------------------------------------------
@@ -97,13 +144,7 @@ type LupContentBlock = (
 
 
 class SubagentSpec(BaseModel):
-    """SDK-agnostic subagent definition.
-
-    Each adapter interprets this into its native subagent primitive:
-    engines with native subagents convert it into that primitive; engines
-    without one serve a ``run_subagent`` tool that dispatches a one-shot
-    query per spec.
-    """
+    """Provider-neutral subagent definition used by injected factory recipes."""
 
     name: str
     description: str
@@ -158,7 +199,17 @@ class Usage(BaseModel):
     session JSON.
     """
 
-    input_tokens: int = 0
+    input_tokens: int = Field(
+        default=0,
+        description=(
+            "Complete input token count, cached reads and cache creation"
+            " included; adapters normalize cache-exclusive native counts"
+        ),
+    )
+    cost_usd: float | None = Field(
+        default=None,
+        description="Optional provider-reported complete cost for this usage span",
+    )
     output_tokens: int = 0
     cache_read_input_tokens: int = 0
     cache_creation_input_tokens: int = 0
@@ -167,116 +218,8 @@ class Usage(BaseModel):
 type UsageCost = Callable[[Usage], float]
 """Estimates the USD cost of accumulated token usage.
 
-Backends that report token counts but no cost take one of these to enforce a
-budget; build it from per-token rates with the shared
-``lup.adapters.clients.usage.per_mtok_usage_cost`` helper.
+Adapters that report token counts but no cost take one of these to enforce a
+budget; build it with :func:`lup.runtime.usage.per_mtok_usage_cost`.
 """
 
-
-type SessionResource = Callable[[], AbstractContextManager[object]]
-"""A factory for one session-scoped resource.
-
-Called once per session open; the returned context is entered with the
-session and exited when it closes. What must live and die with a session
-(a subprocess sandbox's cleanup guarantee) arrives as one of these on
-``LupAgentOptions.session_resources`` — a factory rather than a context,
-because one client can open many sessions.
-"""
-
-
-class LupResultMessage(BaseModel):
-    """Final result metadata from a completed agent run."""
-
-    structured_output: JsonObject | None = None
-    is_error: bool = False
-    result: str | None = None
-    duration_ms: float | None = None
-    total_cost_usd: float | None = None
-    usage: SerializeAsAny[Usage] | None = None
-
-
-type LupMessage = (
-    LupAssistantMessage | LupUserMessage | LupSystemMessage | LupResultMessage
-)
-
-
-# ---------------------------------------------------------------------------
-# Response wrapper
-# ---------------------------------------------------------------------------
-
-
-class LupResponse(BaseModel):
-    """Collected results from a completed agent run.
-
-    The public return type from adapters: ``.text`` for concatenated
-    assistant text, ``.output(Model)`` for validated structured output.
-    """
-
-    blocks: list[LupContentBlock] = Field(default_factory=list)
-    tool_results: list[LupContentBlock] = Field(default_factory=list)
-    messages: list[LupAssistantMessage | LupUserMessage] = Field(default_factory=list)
-    result: LupResultMessage | None = None
-    session_id: str | None = None
-
-    @property
-    def text(self) -> str | None:
-        """Concatenated text from all assistant text blocks."""
-        texts = [b.text for b in self.blocks if isinstance(b, LupTextBlock)]
-        return "\n\n".join(texts) if texts else None
-
-    def output[T: BaseModel](self, output_type: type[T]) -> T | None:
-        """Extract structured output as a validated Pydantic model."""
-        if self.result is not None and self.result.structured_output:
-            return output_type.model_validate(self.result.structured_output)
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Streaming events
-# ---------------------------------------------------------------------------
-
-
-class LupTextEvent(BaseModel):
-    """Streamed text delta."""
-
-    type: Literal["text"] = "text"
-    text: str
-
-
-class LupThinkingEvent(BaseModel):
-    """Streamed thinking content."""
-
-    type: Literal["thinking"] = "thinking"
-    thinking: str
-
-
-class LupToolUseEvent(BaseModel):
-    """Streamed tool invocation start."""
-
-    type: Literal["tool_use"] = "tool_use"
-    id: str
-    name: str
-
-
-class LupToolResultEvent(BaseModel):
-    """Streamed tool result."""
-
-    type: Literal["tool_result"] = "tool_result"
-    tool_use_id: str
-    content: str
-
-
-class LupDoneEvent(BaseModel):
-    """Stream complete; carries all collected content blocks."""
-
-    type: Literal["done"] = "done"
-    blocks: list[LupContentBlock] = Field(default_factory=list)
-
-
-type LupEvent = (
-    LupTextEvent
-    | LupThinkingEvent
-    | LupToolUseEvent
-    | LupToolResultEvent
-    | LupDoneEvent
-)
+type LupMessage = LupAssistantMessage | LupUserMessage | LupSystemMessage

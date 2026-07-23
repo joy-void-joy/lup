@@ -1,7 +1,7 @@
 ---
+description: "Install lup plugin and scaffolding into a target repo"
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
-description: Install lup plugin and scaffolding into a target repo
-argument-hint: [target-repo] [--interactive]
+argument-hint: "[target-repo] [--interactive]"
 ---
 
 # Install Lup into Target Repo
@@ -27,10 +27,11 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 
 - `.claude/plugins/lup/.claude-plugin/plugin.json` — plugin identity
 - `.claude/plugins/lup/hooks/hooks.json` — hook definitions
-- `.claude/plugins/lup/hooks/scripts/*.py` — permission hooks (auto_allow_bash, auto_allow_edits, auto_allow_fetch)
+- `.claude/plugins/lup/hooks/` — generated dispatcher and hermetic semantic policy runtime
 - `.claude/plugins/lup/commands/*.md` — slash commands
 - `.claude/plugins/lup/agents/*.md` — agent definitions
 - `.claude/plugins/lup/TEMPLATE_CLAUDE.md` — CLAUDE.md template
+- `.codex/plugins/lup/TEMPLATE_AGENTS.md` — AGENTS.md template (Codex flavor of the same sections)
 
 ### Reusable Library Code
 
@@ -42,16 +43,22 @@ Inventory what the lup plugin offers. Read these key files in the **current** re
 The `lup-devtools` CLI (`src/lup_template/devtools/`) gives Claude Code structured commands for development tasks that would otherwise require ad-hoc bash one-liners. Without it, Claude resorts to `python -c "..."` snippets or manual shell pipelines for trace analysis, feedback collection, and session management — which are fragile and unrepeatable. The devtools encode these workflows as proper CLI commands with argument parsing, output formatting, and error handling.
 
 - `src/lup_template/devtools/main.py` — root typer app composing sub-apps (entry point: `lup-devtools`)
-  - `trace/` — trace display, search, and analysis
-  - `feedback/` — feedback state, metrics, and commits
-  - `dev/` — worktree management, branch analysis, pre-flight checks
-  - `version.py` — version, changelog, and bump operations
-  - `sync.py` — upstream sync tracking
+  - `agent` — Agent introspection and debugging
+  - `dashboard` — Host the local setup dashboard
+  - `dev` — Worktrees, branches, and pre-flight checks
+  - `feedback` — Feedback state, metrics, and commits
+  - `harness` — Generate and launch Claude or Codex harnesses
+  - `py` — Python module introspection
+  - `setup` — Interactive setup wizard
+  - `sync` — Track sync.json repos and review their commits
+  - `trace` — Trace display, search, and analysis
+  - `usage` — Claude Code usage display
+  - `version` — Agent version, changelog, and bump
 
 ### Configuration Patterns
 
 - `.claude/settings.json` — settings structure
-- `downstream.json` — upstream sync tracking
+- `sync.json` — registry of repos tracked for sync
 
 Build a mental inventory of **portable capabilities** organized by category:
 
@@ -89,7 +96,7 @@ Based on the analysis, classify each lup capability as:
 These work in any repo:
 
 - **Plugin infrastructure**: The `.claude/plugins/lup/` directory structure itself
-- **Permission hooks**: auto_allow_bash (adapt patterns), auto_allow_edits (adapt for target's file types), auto_allow_fetch (adapt URL patterns)
+- **Permission policy**: configure URL scopes and protected roots in the canonical `HookSet`; change semantic decisions in `lup.policy`, then regenerate
 - **Pre-push quality gates**: Adapt to target's linter/type-checker/test runner
 - **Generic commands**: commit, rebase, close, clean-gone, meta, debug, refactor, add-command, modify-command, merge, principle, review, create-investigator
 - **CLAUDE.md patterns**: Git workflow, editing style, asking questions, debugging philosophy
@@ -101,7 +108,7 @@ These port well to other Python projects:
 
 - **Library utilities**: hook composition, version tracking, retry, cache
 - **DevTools CLI**: The `lup-devtools` typer app structure — `main.py` composing sub-apps, `pyproject.toml` entry point. Even if the target doesn't need every subcommand, the skeleton (dev, py, sync, usage, version) gives Claude Code reliable tooling instead of ad-hoc scripts.
-- **Upstream sync**: downstream.json + sync commands (`lup-devtools sync`)
+- **Upstream sync**: sync.json + sync commands (`lup-devtools sync`)
 
 ### Portable if Agent SDK
 
@@ -110,10 +117,10 @@ If the target repo uses (or will use) the Claude Agent SDK, the **self-improveme
 - **Agent scaffolding**: core.py pattern (orchestration), subagents.py, models.py (structured output), prompts.py, tool_policy.py, config.py (pydantic-settings)
 - **Feedback loop**: feedback collection, trace analysis, metrics aggregation, scoring CSV
 - **Session management**: CLI with `run` + `loop` commands, auto-commit, session storage
-- **DevTools**: The full `lup-devtools` CLI (trace, feedback, dev, version, usage)
+- **DevTools**: The full `lup-devtools` CLI (`agent`, `dashboard`, `dev`, `feedback`, `harness`, `py`, `setup`, `sync`, `trace`, `usage`, `version`)
 - **Version tracking**: `[tool.lup] agent_version` in pyproject.toml + `lup-devtools version bump` for tracking agent behavior changes
 - **Commands**: `init`, `feedback-loop`, `bump`, `update` — the self-improvement workflow
-- **TEMPLATE_CLAUDE.md**: Section-level merge into the target's existing CLAUDE.md (add missing sections, leave existing ones)
+- **Template guidance**: Section-level merge into the target's existing guidance file — CLAUDE.md from TEMPLATE_CLAUDE.md, AGENTS.md from TEMPLATE_AGENTS.md (add missing sections, leave existing ones)
 
 When the target has Agent SDK code, adapt the scaffolding to wrap their existing agent — don't replace it. The lup patterns (trace logging, scoring, feedback collection) layer on top of whatever agent they already have.
 
@@ -166,8 +173,8 @@ Be conservative — only install what clearly adds value. Typical candidates (bu
 - **Plugin infrastructure**: plugin.json, hooks.json, settings.json (project-named marketplace + plugin enablement)
 - **Permission hooks** adapted to the target's ecosystem (its build tool, test runner, linter, doc URLs)
 - **Generic commands** that work in any repo (git workflow, CLAUDE.md maintenance, meta, refactor, etc.)
-- **CLAUDE.md**: Perform a **section-level merge** using `TEMPLATE_CLAUDE.md` (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`). Read the template, use the `<!-- section: ... -->` markers to identify independent merge units, adapt for the target's project name and ecosystem, then compare marked sections against the target's existing CLAUDE.md. Add sections that are missing; leave existing sections untouched. If no CLAUDE.md exists, create one from the adapted template.
-- **If Agent SDK detected**: Also install the self-improvement scaffolding — this is lup's core value. The feedback loop commands, lib utilities (trace, scoring, metrics, hooks, version), devtools CLI pattern, session/trace directory structure, downstream.json for sync. Adapt to layer on top of the target's existing agent, not replace it.
+- **Guidance file**: Perform a **section-level merge** using the platform template — `TEMPLATE_CLAUDE.md` (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`) into the target's CLAUDE.md, or `TEMPLATE_AGENTS.md` (`.codex/plugins/lup/TEMPLATE_AGENTS.md`) into its AGENTS.md. Read the template, use the `<!-- section: ... -->` markers to identify independent merge units, adapt for the target's project name and ecosystem, then compare marked sections against the target's existing guidance file. Add sections that are missing; leave existing sections untouched. If no guidance file exists, create one from the adapted template.
+- **If Agent SDK detected**: Also install the self-improvement scaffolding — this is lup's core value. The feedback loop commands, lib utilities (trace, scoring, metrics, hooks, version), devtools CLI pattern, session/trace directory structure, sync.json for upstream sync. Adapt to layer on top of the target's existing agent, not replace it.
 
 **Constraints** in non-interactive mode:
 
@@ -212,7 +219,7 @@ For each item being installed:
 | `from lup_template.*` → `from <target>.*` imports | `lup-devtools` CLI entry point name |
 | `src/lup_template/` → `src/<target>/` paths | `@lup_tool(...)`, `LupMcpTool` |
 | `pyproject.toml` package name | `.claude/plugins/lup/` directory |
-| marketplace `name` (marketplace.json) → `<target>` | plugin entry `name`: `lup` (so `/lup:*` is stable) |
+| marketplace `name` (marketplace.json) → `<target>` | plugin entry `name`: `lup` (so `the corresponding Lup skill` is stable) |
 | Main CLI entry point name | `.lup/` state directory |
 | Logger module paths | `lup-tools`, `lup-sandbox-*`, `lup-mcp-*` |
 | | Naming convention ("Lup" = inner agent) |
@@ -225,7 +232,7 @@ For each item being installed:
 4. `.claude/plugins/lup/commands/` — selected commands
 5. `src/<project>/devtools/` — devtools CLI skeleton (if Python target, adapt import paths but keep `lup-devtools` as the CLI entry point name)
 6. `.claude/settings.json` — create or merge
-7. `.claude/CLAUDE.md` — section-level merge from TEMPLATE_CLAUDE.md (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
+7. The guidance file — section-level merge from its platform template: `.claude/CLAUDE.md` from TEMPLATE_CLAUDE.md, or `AGENTS.md` from TEMPLATE_AGENTS.md (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
 8. **Initialize upstream sync**: Run `uv run lup-devtools sync mark-synced lup` to baseline the sync state so `/lup:update` only shows commits after installation
 
 ## Phase 7: Verify & Report

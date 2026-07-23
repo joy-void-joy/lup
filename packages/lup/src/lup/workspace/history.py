@@ -90,13 +90,13 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     )
     agent_sdk: str | None = Field(
         default=None,
-        description="Engine that ran the session (its engine id); "
+        description="Provider adapter that ran the session; "
         "None on results predating the stamp",
     )
     sdk_session_id: str | None = Field(
         default=None,
-        description="Engine-native session id — the resume token for "
-        "Client.session(resume=...); None when the engine reported none",
+        description="Provider-native session id — pass it as SessionId to "
+        "SessionFactory.open(); None when the provider reported none",
     )
     timestamp: str
     output: OutputT
@@ -169,7 +169,7 @@ def session_backend(session_dir: Path) -> str | None:
     (sessions predating it) — display code renders that as unknown
     rather than guessing a backend.
     """
-    for filepath in sorted(session_dir.glob("*.json"), reverse=True):
+    for filepath in sorted(session_dir.glob("[0-9]*.json"), reverse=True):
         try:
             data = json.loads(filepath.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
@@ -199,7 +199,9 @@ def load_session_records(session_id: str) -> list[SessionRecord]:
     sessions: list[SessionRecord] = []
 
     for session_dir in iter_session_dirs(session_id=session_id):
-        for filepath in sorted(session_dir.glob("*.json")):
+        # Only timestamp-named files are session records (save_session's
+        # format); sibling artifacts like review.json share the directory.
+        for filepath in sorted(session_dir.glob("[0-9]*.json")):
             try:
                 data = json.loads(filepath.read_text(encoding="utf-8"))
                 sessions.append(SessionRecord.model_validate(data))

@@ -7,8 +7,12 @@ invisible to the agent.
 
 from pathlib import Path
 
-from lup.adapters.clients.claude.hooks import claude_hook_tool_path
-from lup.hooks import LupHookInput, LupHooksConfig, create_permission_hooks
+from lup.hooks import (
+    LupHookInput,
+    LupHooksConfig,
+    create_git_inspection_hook,
+    create_permission_hooks,
+)
 from lup.workspace.notes import setup_notes
 from lup.workspace.paths import path_is_under
 from lup.types import JsonObject
@@ -19,11 +23,22 @@ async def decision_for(
     tool_name: str,
     tool_input: JsonObject,
 ) -> str | None:
+    match tool_name, tool_input:
+        case ("Write" | "Edit" | "Read", {"file_path": str(path)}):
+            tool_path = path
+        case ("Grep" | "Glob", {"path": str(path)}):
+            tool_path = path
+        case ("Glob", {"pattern": str(pattern)}):
+            from lup.workspace.paths import extract_glob_dir
+
+            tool_path = extract_glob_dir(pattern)
+        case _:
+            tool_path = ""
     input_data = LupHookInput(
         event="PreToolUse",
         tool_name=tool_name,
         tool_input=tool_input,
-        tool_path=claude_hook_tool_path(tool_name, tool_input),
+        tool_path=tool_path,
     )
     output = await config.pre_tool_use[0].hook(input_data)
     return output.decision
@@ -78,6 +93,22 @@ async def test_glob_requires_a_readable_path(tmp_path: Path) -> None:
 async def test_other_tools_pass_through(tmp_path: Path) -> None:
     config = create_permission_hooks([tmp_path], [])
     assert await decision_for(config, "WebSearch", {"query": "x"}) == "allow"
+
+
+async def test_resolver_workers_can_inspect_git_but_cannot_mutate_it() -> None:
+    config = create_git_inspection_hook()
+
+    assert await decision_for(config, "Bash", {"command": "git status"}) == "allow"
+    assert await decision_for(config, "Bash", {"command": "git commit -am done"}) == (
+        "deny"
+    )
+    assert await decision_for(config, "Bash", {"command": "sh -c 'git commit'"}) == (
+        "deny"
+    )
+    assert await decision_for(config, "Bash", {"command": "echo x > .git/HEAD"}) == (
+        "deny"
+    )
+    assert await decision_for(config, "Edit", {"file_path": ".git"}) == "deny"
 
 
 # ---------------------------------------------------------------------------
