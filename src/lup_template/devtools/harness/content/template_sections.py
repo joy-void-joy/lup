@@ -777,7 +777,8 @@ stated reason. Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`),
 unjudged work defers to that boundary instead of denying and a
 `dangerouslyDisableSandbox` escape re-enters the deny lattice; the sandbox
 block in `.claude/settings.json` derives from the same `HookSet` declaration.
-Denial wins over approval, malformed input fails conservatively,
+Segments join deny > ask > defer > allow — unjudged rides into a judged
+prompt, a judged deny wins the batch. Malformed input fails conservatively,
 command substitution is denied with a rewrite hint, file redirection outside
 repo-relative `tmp/` is never auto-allowed (a heredoc-fed file write denies
 toward the Edit tool), loops, conditionals, and case
@@ -793,7 +794,8 @@ a hint naming the `# lup: escalate: <why>` marker, and that leading marker
 promotes the classified decision to an approval question carrying the agent's
 stated reason. Under a launcher-verified sandbox (`LUP_SANDBOX_ACTIVE`),
 unjudged work defers to the native workspace boundary instead of denying.
-Denial wins over approval, malformed input fails conservatively,
+Segments join deny > ask > defer > allow — unjudged rides into a judged
+prompt, a judged deny wins the batch. Malformed input fails conservatively,
 command substitution is denied with a rewrite hint, file redirection outside
 repo-relative `tmp/` is never auto-allowed (a heredoc-fed file write denies
 toward the Edit tool), loops, conditionals, and case

@@ -332,30 +332,32 @@ plugin. Do not edit generated dispatcher or runtime files directly.
 The policy classifies each shell command against the vocabulary in
 `lup.policy.shell_rules`, every URL scope, and each edit in a batch. The shell
 lattice reserves ask for judged risk: judged-safe rows allow, judged-risky
-rows ask, and anything unjudged denies with a hint naming
-the escalation recipe. A leading `# lup: escalate: <why>` line promotes a
+rows ask, and unjudged work denies with a hint naming the
+escalation recipe. A leading `# lup: escalate: <why>` line promotes a
 classified deny or ask to an approval question carrying that reason.
 Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`), unjudged work
 defers to that boundary, and a `dangerouslyDisableSandbox` escape
 re-enters the deny lattice; the sandbox block derives from the
 same `HookSet` declaration.
-Denial wins over approval, malformed input fails conservatively, command
+Segments join deny > ask > defer > allow — unjudged rides into a judged
+prompt, a judged deny wins the batch.
+Malformed input fails conservatively, command
 substitution is denied with a rewrite hint, and file-writing redirection is
-never auto-allowed outside repo-relative `tmp/` (stream discards to
-`/dev/null` and fd duplication are stripped as safe; a heredoc-fed file
-write denies toward Edit/tmp scripts). Loops, conditionals,
+never auto-allowed outside repo-relative `tmp/` (discards and fd
+duplication strip as safe; heredoc-fed file
+writes deny toward Edit/tmp scripts). Loops, conditionals,
 case arms, subshells, and brace groups classify recursively over frozen
 variable bindings — literal assignments instantiate their references,
 opaque ones (`read`, globs) gate flag-guarded commands.
-`find -exec` payloads and `timeout`/`nice` wrappers recurse to the
-wrapped command, `sed`/`awk` pass read-only script screens, quoted-delimiter
-heredocs are literal data, and `curl` is screened to read methods within
-the declared fetch scopes. Edit decisions include protected paths, marker changes, size,
-and the canonical anti-pattern audit. An edit that exceeds the size gate
-alone is deferred — the hook emits no decision so auto-accept mode applies
+`find -exec` payloads and `timeout`/`nice` wrappers recurse,
+`sed`/`awk` pass read-only script screens, quoted-delimiter
+heredocs are literal data, and `curl` is screened to read methods
+within declared fetch scopes. Edit decisions include protected paths, marker changes, size,
+and the canonical anti-pattern audit. An edit over the size gate
+alone is deferred — the hook emits no decision, so auto-accept applies
 while the hard gates stay explicit. The resolver editor receives only its
-declared autonomous edit exceptions; temporary paths, human-owned files such
-as `README.md`, marker changes, and anti-pattern violations retain their
+declared autonomous edit exceptions; temporary paths, human-owned files
+like `README.md`, marker changes, and anti-pattern violations retain their
 guardrails.
 
 Use `"""
