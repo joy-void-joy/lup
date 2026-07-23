@@ -50,6 +50,7 @@ class ClaudeShellOperation(BaseModel):
     type: Literal["shell"] = "shell"
     command: str
     cwd: Path | None = None
+    unsandboxed: bool = False
 
 
 class ClaudeFetchOperation(BaseModel):
@@ -113,6 +114,8 @@ def parse_claude_before_tool(payload: ClaudeHookPayload) -> ClaudeBeforeToolEven
             )
         case "Write", {"file_path": str(path), "content": str(content)}:
             operation = ClaudeWriteOperation(path=Path(path), content=content)
+        case "Bash", {"command": str(command), "dangerouslyDisableSandbox": True}:
+            operation = ClaudeShellOperation(command=command, unsandboxed=True)
         case "Bash", {"command": str(command)}:
             operation = ClaudeShellOperation(command=command)
         case "WebFetch", {"url": str(url)}:
@@ -143,8 +146,10 @@ class ClaudeEventDecoder(NativeEventDecoder[ClaudeBeforeToolEvent]):
             case ClaudeEditBatchOperation(changes=changes):
                 tool = EditBatch(changes=changes)
                 name = "Edit"
-            case ClaudeShellOperation(command=command, cwd=cwd):
-                tool = ShellCommand(command=command, cwd=cwd)
+            case ClaudeShellOperation(
+                command=command, cwd=cwd, unsandboxed=unsandboxed
+            ):
+                tool = ShellCommand(command=command, cwd=cwd, unsandboxed=unsandboxed)
                 name = "Bash"
             case ClaudeFetchOperation(url=url):
                 name = "WebFetch"
