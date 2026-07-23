@@ -61,26 +61,27 @@ Fixed in both adapters; `test_native_probes` holds the pin.
 
 ## Ranked remaining gaps
 
-1. **`lup/sandbox/container.py` (33%) and `lup/sandbox/repl.py` (29%)** — the
-   Docker lifecycle (create, adopt, orphan-removal execution, REPL client
-   transport) runs only in the nightly `-m integration` lane. The pure
-   decision logic is unit-pinned, but a lifecycle regression surfaces a day
-   late. Next step: route container commands through a fake-`docker`
-   executable seam like `test_native_probes` does for `codex`.
-2. **`lup/adapters/codex/runtime.py` (63%)** — turn-channel notification
+1. **`lup/adapters/codex/runtime.py` (63%)** — turn-channel notification
    decoding breadth (item deltas, approval param shapes) beyond the pinned
    failure paths.
-3. **`lup/adapters/codex/app_server.py` `start`/`close` (module 72%)** — the
+2. **`lup/adapters/codex/app_server.py` `start`/`close` (module 72%)** — the
    process-attached handshake and terminate paths run only in native smokes; a
    fake app-server executable speaking the initialize exchange would close
    this offline.
-4. **`lup/resolver/orchestrator.py` (77%)** — `restore`, `reset`, and
+3. **`lup/resolver/orchestrator.py` (77%)** — `restore`, `reset`, and
    `prepare_join`/`commit_join` error branches of the resolver's git
    authority.
-5. **`lup/adapters/claude/native.py` (76%) / `codex/native.py` (82%)** —
+4. **`lup/adapters/claude/native.py` (76%) / `codex/native.py` (82%)** —
    decoder/renderer long-tail operation shapes.
-6. **`lup/telemetry/display.py` (53%)** — TUI assembly; lowest stakes on this
+5. **`lup/telemetry/display.py` (53%)** — TUI assembly; lowest stakes on this
    list.
+
+The former top entry — the Docker lifecycle running only in the nightly
+integration lane — is closed: `test_sandbox_lifecycle` drives the container
+create/adopt/sweep/destroy legs through typed docker SDK fakes and the REPL
+transport through a real socketpair speaking the exec multiplex framing,
+lifting `lup/sandbox/container.py` to 78% and `lup/sandbox/repl.py` to 89% in
+the unit lane.
 
 Overall `lup` package statement coverage stands at 85% under the default
 (non-integration) selection.
