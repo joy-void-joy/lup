@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "1cc17a0f7ae44c1a4f4dde04e6fbc36ed4271be18de6147c4583eed91fdb63d8",
+  "source_digest": "b037c97b569942fad4becc20a9335cc6780785ac8856b08dc341d2a64af88f8f",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "57714e5ec0d4652afce54467e337a436ff3570cbd508be2d22a8c9ff1c8c80b2",
+      "sha256": "6800fb06e55ea9a01329327819c10d886c69b9a7121b544c3603a7717f9b5c50",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "cd0f9d7596969c20b148b7cf0e299030ebaada6bfa8b8b7f1cd296425c4cb723",
+      "sha256": "0427c15393cd556ed84930fe9aa1c9771bc369f957f4b82fe7040cf621c03e0e",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -303,21 +303,21 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel.py",
       "category": "generated",
-      "sha256": "17dea1d8d27c82337834ce907a20d400d1a1b34586e1f6b6f7be50cd36429015",
+      "sha256": "8827a1a787c439c279ac9514d68e47f3c12cc72b6c457ecc1787c479121c9473",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "b19b03aeac1e60ae0cc2849c4108bce97e697197768c1a2b2940eec6713f0a50",
+      "sha256": "48c118170e1502452abdd9693a164301b6a30b951ef293dd45cefb3de49bbe9c",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "0c9181d266cd5b3fe13919094671482b3d6493f172ccdb91d8b5c3de9fb0df68",
+      "sha256": "35bea89a1aebac828ae13ba2262d05240d70721a321cf3665a1f8bf56fcd2a70",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -331,7 +331,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "10ae430b0ba891e208ba4f98ded7ae492c51cd4aab1f2cc05e0820cb597d4c50",
+      "sha256": "c7746da52afd4fb8636b55d5e11c3184eeabbe8726409242717d937f307b79e2",
       "semantic_id": "harness.project-settings",
       "executable": false
     },

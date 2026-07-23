@@ -6,6 +6,7 @@ Rendered from lup.adapters.claude.assets.policy_dispatcher by
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -20,6 +21,11 @@ from policy_data import (
     PATH_RULES,
     SHELL_RULES,
 )
+
+
+def sandbox_active():
+    environ = os.environ  # lup: ignore[os-environ]
+    return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
 def edit_documents(path, old_text, new_text):
@@ -65,7 +71,17 @@ def dispatch(payload):
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = agent_type in AUTONOMOUS_AGENT_IDENTITIES
     if name == "Bash":
-        return decide_shell(tool_input["command"], SHELL_RULES)
+        unsandboxed = (
+            "dangerouslyDisableSandbox" in tool_input
+            and tool_input["dangerouslyDisableSandbox"] is True
+        )
+        return decide_shell(
+            tool_input["command"],
+            SHELL_RULES,
+            ALLOWED_FETCH_SCOPES,
+            DENIED_FETCH_SCOPES,
+            sandboxed=sandbox_active() and not unsandboxed,
+        )
     if name == "WebFetch":
         return decide_fetch(
             tool_input["url"],
