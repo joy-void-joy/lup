@@ -761,8 +761,11 @@ unjudged work defers to that boundary instead of denying and a
 block in `.claude/settings.json` derives from the same `HookSet` declaration.
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively,
-command substitution is denied with a rewrite hint, file redirection outside
-repo-relative `tmp/` is never auto-allowed (a heredoc-fed file write denies
+a `$(...)` substitution classifies recursively (the inner command joins the
+batch; its opaque result rides only on argument-safe commands; command
+position, deep nesting, and backticks stay conservative), file redirection
+outside repo-relative `tmp/` and the session scratchpad (`$TMPDIR`,
+`/tmp/claude-*`) is never auto-allowed (a heredoc-fed file write denies
 toward the Edit tool), loops, conditionals, and case
 constructs classify recursively over frozen variable bindings, `find -exec`
 payloads and `timeout`/`nice` wrappers recurse to their commands, `sed`/`awk`

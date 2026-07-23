@@ -80,6 +80,7 @@ DANGEROUS_ENV_NAMES = (
     "PATH",
     "IFS",
     "ENV",
+    "TMPDIR",
     "BASH_ENV",
     "CDPATH",
     "SHELL",
@@ -141,6 +142,17 @@ SUBSTITUTION_REASON = (
     "command substitution is denied — run the inner command in its own call"
     " and splice its literal output, or read it through <(...) or a pipe"
 )
+BACKTICK_REASON = (
+    "backtick substitution is denied — use $(...) so the inner command"
+    " can be classified"
+)
+SUBSTITUTION_SENTINEL = "$~sub~"
+"""Spliced into a word where a real ``$(...)`` stood.
+
+The spelling sits outside identifier space, so no variable binding can
+instantiate it, and a quoted literal that happens to match only makes the
+word read as opaque — the conservative direction.
+"""
 
 
 class KernelDecision:
@@ -244,6 +256,48 @@ def is_repository_tmp_script(word: str) -> bool:
     return not normalized.startswith("/") and normalized.split("/")[0] == "tmp"
 
 
+def is_session_scratch_target(word: str) -> bool:
+    """Recognize a path confined to the session scratchpad.
+
+    ``$TMPDIR`` is the harness-provided scratch root and ``/tmp/claude-*`` its
+    host-side spelling, so writes there are scratch by definition. A suffix
+    that expands further or climbs out of the root stays unrecognized.
+    """
+    for prefix in ("$TMPDIR/", "${TMPDIR}/"):
+        if word.startswith(prefix):
+            suffix = word[len(prefix) :]
+            normalized = posixpath.normpath(suffix)
+            return "$" not in suffix and not normalized.startswith(("..", "/"))
+    return "$" not in word and posixpath.normpath(word).startswith("/tmp/claude-")
+
+
+def rm_confined_to_scratch(words: list[str]) -> KernelDecision | None:
+    """Recognize ``rm`` whose every target sits in repo ``tmp/`` or the scratchpad.
+
+    Both roots exist for disposable files, so clearing them is as safe as
+    writing them. A long flag, an opaque word, or a target outside the roots
+    falls through to the rm row's ask.
+    """
+    targets: list[str] = []
+    for word in words[1:]:
+        if word == "--":
+            continue
+        if word.startswith("-"):
+            short = not word.startswith("--") and len(word) > 1
+            if short and all(letter in "rfv" for letter in word[1:]):
+                continue
+            return None
+        targets.append(word)
+    if not targets:
+        return None
+    if all(
+        is_repository_tmp_script(word) or is_session_scratch_target(word)
+        for word in targets
+    ):
+        return KernelDecision("allow", "removal confined to disposable scratch roots")
+    return None
+
+
 def dangerous_env_name(name: str) -> bool:
     """Recognize an environment variable that can redirect a command's execution."""
     return name in DANGEROUS_ENV_NAMES or any(
@@ -270,8 +324,13 @@ def flag_matches(word: str, flags: list[str]) -> bool:
 
 
 def opaque_argument(word: str) -> bool:
-    """A word whose runtime expansion could inject a guarded flag."""
-    if word.startswith("$"):
+    """A word whose runtime expansion could inject a guarded flag.
+
+    A substitution sentinel anywhere in the word marks it: the substitution's
+    output word-splits at expansion, so even a mid-word result can become new
+    words.
+    """
+    if word.startswith("$") or SUBSTITUTION_SENTINEL in word:
         return True
     return "}" in word and ("{-" in word or ",-" in word)
 
@@ -825,6 +884,47 @@ def git_checkout_pathspec(words: list[str]) -> KernelDecision | None:
     )
 
 
+def git_restore_source(words: list[str]) -> KernelDecision | None:
+    """Recognize ``git restore --source=<ref> [--staged|--worktree] <path>...``.
+
+    The ref-sourced twin of ``git checkout <ref> -- <path>``: content comes
+    from a named commit, so committed state stays recoverable through the
+    reflog. The index-sourced form and opaque words fall through to the
+    restore row's ask.
+    """
+    if len(words) < 4 or words[1] != "restore":
+        return None
+    source: str | None = None
+    paths: list[str] = []
+    position = 2
+    while position < len(words):
+        word = words[position]
+        if word == "--source" and position + 1 < len(words):
+            source = words[position + 1]
+            position += 2
+            continue
+        if word.startswith("--source="):
+            source = word[len("--source=") :]
+            position += 1
+            continue
+        if word in ("--staged", "--worktree", "-S", "-W", "--"):
+            position += 1
+            continue
+        if word.startswith("-"):
+            return None
+        paths.append(word)
+        position += 1
+    if source is None or not paths:
+        return None
+    if source.startswith("-") or opaque_argument(source):
+        return None
+    if any(opaque_argument(word) for word in paths):
+        return None
+    return KernelDecision(
+        "allow", "restore from a named ref recovers committed file state"
+    )
+
+
 def decide_shell_segment(
     segment: list[str],
     rows: list[ShellRuleRow],
@@ -845,6 +945,15 @@ def decide_shell_segment(
         )
     if not words:
         return unjudged("shell segment has no command")
+    if SUBSTITUTION_SENTINEL in words[0]:
+        return unjudged("a command substitution in command position is not classified")
+    if any(
+        SUBSTITUTION_SENTINEL in word for word in words[1:]
+    ) and not argument_safe_words(words, rows):
+        return unjudged(
+            "a command substitution result could become a guarded flag — run"
+            " it in its own call and splice the literal output"
+        )
     executable = posixpath.basename(words[0])
     if executable in INTERPRETERS:
         return KernelDecision(
@@ -856,8 +965,14 @@ def decide_shell_segment(
         )
     if executable == "git":
         pathspec = git_checkout_pathspec(words)
+        if pathspec is None:
+            pathspec = git_restore_source(words)
         if pathspec is not None:
             return pathspec
+    if executable == "rm":
+        scratch_removal = rm_confined_to_scratch(words)
+        if scratch_removal is not None:
+            return scratch_removal
     if executable == "xargs":
         payload = xargs_payload(words)
         if not payload:
@@ -881,19 +996,21 @@ def decide_shell_segment(
 
 
 class ShellToken:
-    """One lexed shell token: a word, an operator, or a ``<(...)`` inner command.
+    """One lexed shell token: a word, an operator, or a substituted command.
 
-    ``quoted`` records whether any part of a word came from quotes or escapes,
-    which decides whether a heredoc delimiter suppresses body expansion.
+    ``procsub`` carries a ``<(...)`` inner command and ``cmdsub`` a ``$(...)``
+    one; both are classified recursively. ``quoted`` records whether any part
+    of a word came from quotes or escapes, which decides whether a heredoc
+    delimiter suppresses body expansion.
     """
 
-    kind: Literal["word", "op", "procsub"]
+    kind: Literal["word", "op", "procsub", "cmdsub"]
     text: str
     quoted: bool
 
     def __init__(
         self,
-        kind: Literal["word", "op", "procsub"],
+        kind: Literal["word", "op", "procsub", "cmdsub"],
         text: str,
         quoted: bool = False,
     ) -> None:
@@ -934,6 +1051,16 @@ def read_process_substitution(command: str, position: int) -> tuple[str | None, 
                 return command[start:position], position + 1
         position += 1
     return None, position
+
+
+def read_command_substitution(command: str, position: int) -> tuple[str | None, int]:
+    """Scan a balanced ``$(...)`` expansion, returning its inner text.
+
+    ``position`` sits on the ``$``; the returned end position follows the
+    closing parenthesis, so ``command[position:end]`` is the raw expansion
+    the enclosing word keeps as its opaque spelling.
+    """
+    return read_process_substitution(command, position + 2)
 
 
 def read_redirection(command: str, position: int) -> tuple[str, int]:
@@ -1116,12 +1243,20 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                     expansion, position = outcome
                     word.append(expansion)
                     continue
-                if inner == "`" or (
+                if inner == "`":
+                    return KernelDecision("deny", BACKTICK_REASON)
+                if (
                     inner == "$"
                     and position + 1 < length
                     and command[position + 1] == "("
                 ):
-                    return KernelDecision("deny", SUBSTITUTION_REASON)
+                    body, end = read_command_substitution(command, position)
+                    if body is None:
+                        return unjudged("command substitution does not parse")
+                    tokens.append(ShellToken("cmdsub", body))
+                    word.append(SUBSTITUTION_SENTINEL)
+                    position = end
+                    continue
                 word.append(inner)
                 position += 1
             if position >= length:
@@ -1148,10 +1283,17 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             word.append(expansion)
             started = True
             continue
-        if character == "`" or (
-            character == "$" and position + 1 < length and command[position + 1] == "("
-        ):
-            return KernelDecision("deny", SUBSTITUTION_REASON)
+        if character == "`":
+            return KernelDecision("deny", BACKTICK_REASON)
+        if character == "$" and position + 1 < length and command[position + 1] == "(":
+            body, end = read_command_substitution(command, position)
+            if body is None:
+                return unjudged("command substitution does not parse")
+            tokens.append(ShellToken("cmdsub", body))
+            word.append(SUBSTITUTION_SENTINEL)
+            started = True
+            position = end
+            continue
         if character == ">" and position + 1 < length and command[position + 1] == "(":
             return KernelDecision(
                 "ask", "writing process substitution is never auto-allowed"
@@ -1258,6 +1400,8 @@ def resolve_redirection(
         return None, target + 1
     if is_repository_tmp_script(tokens[target].text):
         return None, target + 1
+    if is_session_scratch_target(tokens[target].text):
+        return None, target + 1
     if heredoc_fed:
         return (
             KernelDecision(
@@ -1285,6 +1429,12 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
     tokens = tokenize_shell(command)
     if isinstance(tokens, KernelDecision):
         return tokens
+
+    def substituted_segments(text: str) -> list[list[str]] | KernelDecision:
+        if depth >= 2:
+            return unjudged("command substitution nests too deeply")
+        return parse_shell_words(text, depth + 1)
+
     heredoc_fed = any(
         token.kind == "op" and "<<" in token.text and "<<<" not in token.text
         for token in tokens
@@ -1303,6 +1453,11 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
                     return unjudged(
                         "process substitution inside [[ ]] is not classified"
                     )
+                if tokens[fold].kind == "cmdsub":
+                    folded = substituted_segments(tokens[fold].text)
+                    if isinstance(folded, KernelDecision):
+                        return folded
+                    segments.extend(folded)
                 fold += 1
             if fold >= len(tokens):
                 return unjudged("test expression does not parse")
@@ -1335,6 +1490,13 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
                 return inner
             segments.extend(inner)
             current.append("/dev/fd/63")
+            index += 1
+            continue
+        if token.kind == "cmdsub":
+            spliced = substituted_segments(token.text)
+            if isinstance(spliced, KernelDecision):
+                return spliced
+            segments.extend(spliced)
             index += 1
             continue
         if is_control_operator(token.text):
@@ -1529,6 +1691,13 @@ def decide_for_body(
     (globs, expansions) can become any word, so every segment referencing the
     variable must name an argument-safe command before one placeholder pass.
     """
+    if dangerous_env_name(name):
+        return [
+            KernelDecision(
+                "ask",
+                "a security-sensitive environment assignment requires approval",
+            )
+        ]
     if len(loop_words) > 16:
         return [unjudged("loop word list is too long to instantiate")]
 
