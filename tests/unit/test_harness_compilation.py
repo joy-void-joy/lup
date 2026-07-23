@@ -51,6 +51,7 @@ from lup.harness.reconciliation import (
 )
 from lup.policy.bundle import policy_kernel_source
 from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
@@ -1051,3 +1052,20 @@ def test_proposal_rewrite_is_idempotent_but_tampering_refuses(tmp_path: Path) ->
 
     with pytest.raises(FileExistsError, match="collision"):
         writer.write(tmp_path, patch)
+
+
+def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
+    hooks = portable_harness().plugins[0].hooks
+    assert hooks is not None
+    settings = project_settings(hooks)
+    sandbox = settings["sandbox"]
+    assert isinstance(sandbox, dict)
+    filesystem = sandbox["filesystem"]
+    network = sandbox["network"]
+    assert isinstance(filesystem, dict) and isinstance(network, dict)
+    assert filesystem["denyWrite"] == ["README.md"]
+    domains = network["allowedDomains"]
+    assert isinstance(domains, list)
+    assert "code.claude.com" in domains
+    assert "github.com" in domains
+    assert "sandbox" not in project_settings(None)
