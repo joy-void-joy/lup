@@ -37,9 +37,9 @@ documentation examples are not flagged.
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from lup.codescan.common import IGNORE_RE, LineCursor, PythonContext
 from lup.policy.kernel import marker_count as kernel_marker_count
@@ -121,6 +121,16 @@ class MarkerComment(BaseModel):
     text: str
     kind: NoteKind = "note"
     condition: str | None = None
+
+    @model_validator(mode="after")
+    def coherent_kind(self) -> Self:
+        match (self.kind, self.condition):
+            case ("defer", None) | ("defer", ""):
+                raise ValueError("a defer note requires a wake condition")
+            case ("note", str()):
+                raise ValueError("an ordinary note carries no wake condition")
+            case _:
+                return self
 
     def marker_text(self) -> str:
         """The note body as written after its marker, defer head included."""
