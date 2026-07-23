@@ -773,9 +773,14 @@ CLAUDE_POLICY_SCOPE = r"""The policy classifies each shell command against the `
 reserved for judged risk; an unjudged command or unparsed construct denies with
 a hint naming the `# lup: escalate: <why>` marker, and that leading marker
 promotes the classified decision to an approval question carrying the agent's
-stated reason. Denial wins over approval, malformed input fails conservatively,
+stated reason. Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`),
+unjudged work defers to that boundary instead of denying and a
+`dangerouslyDisableSandbox` escape re-enters the deny lattice; the sandbox
+block in `.claude/settings.json` derives from the same `HookSet` declaration.
+Denial wins over approval, malformed input fails conservatively,
 command substitution is denied with a rewrite hint, file redirection outside
-repo-relative `tmp/` is never auto-allowed, loops, conditionals, and case
+repo-relative `tmp/` is never auto-allowed (a heredoc-fed file write denies
+toward the Edit tool), loops, conditionals, and case
 constructs classify recursively over frozen variable bindings, `find -exec`
 payloads and `timeout`/`nice` wrappers recurse to their commands, `sed`/`awk`
 pass read-only script screens, `curl` is screened to read methods within the
@@ -786,9 +791,12 @@ CODEX_POLICY_SCOPE = r"""The policy classifies each shell command against the `l
 reserved for judged risk; an unjudged command or unparsed construct denies with
 a hint naming the `# lup: escalate: <why>` marker, and that leading marker
 promotes the classified decision to an approval question carrying the agent's
-stated reason. Denial wins over approval, malformed input fails conservatively,
+stated reason. Under a launcher-verified sandbox (`LUP_SANDBOX_ACTIVE`),
+unjudged work defers to the native workspace boundary instead of denying.
+Denial wins over approval, malformed input fails conservatively,
 command substitution is denied with a rewrite hint, file redirection outside
-repo-relative `tmp/` is never auto-allowed, loops, conditionals, and case
+repo-relative `tmp/` is never auto-allowed (a heredoc-fed file write denies
+toward the Edit tool), loops, conditionals, and case
 constructs classify recursively over frozen variable bindings, `find -exec`
 payloads and `timeout`/`nice` wrappers recurse to their commands, `sed`/`awk`
 pass read-only script screens, `curl` is screened to read methods within the
