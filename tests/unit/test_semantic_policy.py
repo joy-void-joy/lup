@@ -85,7 +85,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git status\ncurl https://example.com", effect="ask"),
     DecisionCase(input="find . -name '*.tmp' -delete", effect="ask"),
     DecisionCase(input="cat x |& rm -rf ~", effect="ask"),
-    DecisionCase(input="cat x ;& rm -rf ~", effect="ask"),
+    DecisionCase(input="cat x ;& rm -rf ~", effect="deny"),
     DecisionCase(input="echo payload > pyproject.toml", effect="ask"),
     DecisionCase(input="echo payload >> src/generated.py", effect="ask"),
     DecisionCase(input="gh pr view 123", effect="allow"),
@@ -221,6 +221,31 @@ SHELL_POLICY_CASES = [
     DecisionCase(
         input="# lup: escalate: clear caches\necho x | xargs rm -rf", effect="ask"
     ),
+    # Structured constructs classify their embedded commands recursively:
+    # conditionals, case arms, subshells, brace groups, negation, [[ ]],
+    # arithmetic expansion, and heredoc bodies.
+    DecisionCase(input="if grep -q x f; then echo y; fi", effect="allow"),
+    DecisionCase(input="if grep -q x f; then rm y; else echo n; fi", effect="ask"),
+    DecisionCase(
+        input="if [ -f x ]; then cat x; elif [ -d x ]; then ls x; fi",
+        effect="allow",
+    ),
+    DecisionCase(input="case $m in a) echo a;; *) echo d;; esac", effect="allow"),
+    DecisionCase(input="case $m in a) rm f;; esac", effect="ask"),
+    DecisionCase(input="case $m in a) echo a;;", effect="deny"),
+    DecisionCase(input="(cd pkg && uv run pytest)", effect="allow"),
+    DecisionCase(input="if true; then (cd x && rm -rf y); fi", effect="ask"),
+    DecisionCase(input="case $m in (a) echo a;; esac", effect="allow"),
+    DecisionCase(input="{ git status; git log; }", effect="allow"),
+    DecisionCase(input="! grep -q x f", effect="allow"),
+    DecisionCase(input="[[ -f x && -n $y ]]", effect="allow"),
+    DecisionCase(input="foo() { cat x; }", effect="deny"),
+    DecisionCase(input="echo $((1 + 2))", effect="allow"),
+    DecisionCase(input="echo $(( $(id) ))", effect="deny"),
+    DecisionCase(input="cat <<'EOF'\nliteral $(x)\nEOF", effect="allow"),
+    DecisionCase(input="cat <<EOF\nplain body\nEOF", effect="allow"),
+    DecisionCase(input="cat <<EOF\n$(id)\nEOF", effect="deny"),
+    DecisionCase(input="grep x <<< 'needle haystack'", effect="allow"),
 ]
 
 FETCH_POLICY_CASES = [
