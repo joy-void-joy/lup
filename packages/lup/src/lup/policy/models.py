@@ -60,6 +60,7 @@ class ShellCommand(BaseModel):
 
     command: str
     cwd: Path | None = None
+    unsandboxed: bool = False
 
 
 class FetchUrl(BaseModel):

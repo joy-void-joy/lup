@@ -6,12 +6,18 @@ Rendered from lup.adapters.codex.assets.policy_dispatcher by
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from kernel import KernelDecision, decide_fetch, decide_shell
 from policy_data import ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES, SHELL_RULES
+
+
+def sandbox_active():
+    environ = os.environ  # lup: ignore[os-environ]
+    return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
 def dispatch(payload):
@@ -23,6 +29,7 @@ def dispatch(payload):
             SHELL_RULES,
             ALLOWED_FETCH_SCOPES,
             DENIED_FETCH_SCOPES,
+            sandboxed=sandbox_active(),
         )
     if name == "web_fetch":
         return decide_fetch(
