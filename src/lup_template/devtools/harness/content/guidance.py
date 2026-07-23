@@ -331,24 +331,26 @@ plugin. Do not edit generated dispatcher or runtime files directly.
 
 The policy classifies each shell command against the vocabulary in
 `lup.policy.shell_rules`, every URL scope, and each edit in a batch. The shell
-lattice reserves ask for judged risk: rows judged safe allow, rows judged
-risky (`git push --force`, `rm`, `worktree remove`) ask, and anything unjudged
-— an unclassified command, an unparsed construct — denies with a hint naming
-the escalation recipe. Prefixing the command with a leading
-`# lup: escalate: <why>` line promotes its classified deny or ask to an
-approval question carrying that reason, so the dialog always shows intent.
+lattice reserves ask for judged risk: judged-safe rows allow, judged-risky
+rows ask, and anything unjudged denies with a hint naming
+the escalation recipe. A leading `# lup: escalate: <why>` line promotes a
+classified deny or ask to an approval question carrying that reason.
+Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`), unjudged work
+defers to that boundary, and a `dangerouslyDisableSandbox` escape
+re-enters the deny lattice; the sandbox block derives from the
+same `HookSet` declaration.
 Denial wins over approval, malformed input fails conservatively, command
 substitution is denied with a rewrite hint, and file-writing redirection is
 never auto-allowed outside repo-relative `tmp/` (stream discards to
-`/dev/null` and fd duplication are stripped as safe). Loops, conditionals,
-case constructs, subshells, and brace groups classify their commands
-recursively over frozen variable bindings — literal assignments and for-words
-instantiate their references, opaque ones (`read`, globs) gate flag-guarded
-commands. `find -exec` payloads and `timeout`/`nice` wrappers recurse to the
-wrapped command, `sed` and `awk` are allowed only through read-only script
-screens rather than the row vocabulary, quoted-delimiter heredocs are literal
-data, and `curl` is screened to read methods whose URLs the declared fetch
-scopes allow. Edit decisions include protected paths, marker changes, size,
+`/dev/null` and fd duplication are stripped as safe; a heredoc-fed file
+write denies toward Edit/tmp scripts). Loops, conditionals,
+case arms, subshells, and brace groups classify recursively over frozen
+variable bindings — literal assignments instantiate their references,
+opaque ones (`read`, globs) gate flag-guarded commands.
+`find -exec` payloads and `timeout`/`nice` wrappers recurse to the
+wrapped command, `sed`/`awk` pass read-only script screens, quoted-delimiter
+heredocs are literal data, and `curl` is screened to read methods within
+the declared fetch scopes. Edit decisions include protected paths, marker changes, size,
 and the canonical anti-pattern audit. An edit that exceeds the size gate
 alone is deferred — the hook emits no decision so auto-accept mode applies
 while the hard gates stay explicit. The resolver editor receives only its
