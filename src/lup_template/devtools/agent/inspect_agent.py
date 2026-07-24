@@ -206,7 +206,7 @@ def run_inspect(as_json: bool, full: bool) -> None:
     out.write(f"  Subagents ({len(subagents)})\n")
     out.write(f"{'─' * 60}\n")
     for name, agent in subagents.items():
-        out.write(f"\n  {name} (model: {agent.model})\n")
+        out.write(f"\n  {name} (model: {agent.model or 'inherits session'})\n")
         if full:
             out.write(f"    {agent.description}\n")
         if agent.tools:
