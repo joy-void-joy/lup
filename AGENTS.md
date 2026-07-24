@@ -248,7 +248,7 @@ If you find yourself running the same command repeatedly, **add a command** to `
 Sub-apps: `agent`, `dashboard`, `dev`, `feedback`, `harness`, `py`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — the list above is rendered from the typed sub-app roster in `src/lup_template/devtools/subapps.py`.
 
 `lup-devtools harness claude` and `harness codex` regenerate, reconcile, and
-launch the native plugins. `lup-devtools usage` reports Claude usage. Profiles
+launch the native plugins. `lup-devtools usage claude` reports usage. Profiles
 (named Claude config dirs) are managed with `lup-devtools setup profile`.
 
 Each repo names its plugin marketplace after the project. Claude launches the

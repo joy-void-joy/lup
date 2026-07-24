@@ -296,7 +296,7 @@ If you find yourself running the same command repeatedly, **add a command** to `
         models.TextPart(
             text=r"""
 `lup-devtools harness claude` and `harness codex` regenerate, reconcile, and
-launch the native plugins. `lup-devtools usage` reports Claude usage. Profiles
+launch the native plugins. `lup-devtools usage claude` reports usage. Profiles
 (named Claude config dirs) are managed with `lup-devtools setup profile`.
 
 Each repo names its plugin marketplace after the project. Claude launches the

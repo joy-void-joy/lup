@@ -83,7 +83,7 @@ There is no editor-integrated language server in this environment. Run `uv run p
             text=r"""`lup-devtools harness codex` regenerates and verifies the Codex artifacts,
 installs a separately cached copy of the plugin after a digest check, and
 launches the Codex CLI. `CODEX_HOME` selects the account/config home.
-`lup-devtools usage` reports Claude usage; profiles are managed with
+`lup-devtools usage claude` reports Claude usage; profiles are managed with
 `lup-devtools setup profile`.
 
 Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `$lup:*` is identical everywhere. Codex resolves the marketplace from the repository's `.agents/plugins/marketplace.json` and installs the plugin into its own cache, verifying the digest before every launch; `lup-devtools dev plugin name` (run by `"""

@@ -23,7 +23,7 @@ Examples::
     $ uv run lup-devtools dev check --no-test
     $ uv run lup-devtools version
     $ uv run lup-devtools sync status
-    $ uv run lup-devtools usage --no-detail
+    $ uv run lup-devtools usage claude --no-detail
 """
 
 import typer
