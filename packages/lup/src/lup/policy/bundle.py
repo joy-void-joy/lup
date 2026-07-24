@@ -172,6 +172,7 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
         for name, flags in (
             ("ask_flags", row["ask_flags"]),
             ("allow_flags", row["allow_flags"]),
+            ("read_verbs", row["read_verbs"]),
             ("value_flags", row["value_flags"]),
         ):
             if flags:

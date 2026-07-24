@@ -218,6 +218,16 @@ SHELL_POLICY_CASES = [
         effect="allow",
     ),
     DecisionCase(input="git config core.pager=x", effect="ask"),
+    # Read verbs pin git config to its query action; writes, scoped writes,
+    # and opaque words keep the row's ask.
+    DecisionCase(input="git config --get user.name", effect="allow"),
+    DecisionCase(input="git config --get-regexp 'branch\\..*'", effect="allow"),
+    DecisionCase(input="git config --list", effect="allow"),
+    DecisionCase(input="git config -l", effect="allow"),
+    DecisionCase(input="git config user.name me", effect="ask"),
+    DecisionCase(input="git config --unset user.name", effect="ask"),
+    DecisionCase(input="git config --global user.name me", effect="ask"),
+    DecisionCase(input="git config --get $KEY", effect="ask"),
     # Global value flags are consumed, never read as the subcommand; globals
     # that change execution behavior ask.
     DecisionCase(input="git -C /other status", effect="allow"),
