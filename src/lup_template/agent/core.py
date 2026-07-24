@@ -82,6 +82,7 @@ from lup.workspace.paths import agent_version
 from lup_template.agent.config import (
     compat_api_key,
     compat_base_url,
+    engine_for_settings,
     settings,
 )
 from lup_template.agent.models import AgentOutput, AgentSessionResult
@@ -149,7 +150,7 @@ def reflection_submission_gate(gate: "ReviewGate") -> SubmissionGate[AgentOutput
 
 def build_usage_cost() -> UsageCost | None:
     """Build configured token pricing without coupling it to an adapter."""
-    if settings.agent_sdk in ("claude", "claude-compat"):
+    if engine_for_settings() in ("claude", "claude-compat"):
         return reported_usage_cost
     if (
         settings.codex_usd_per_mtok_input is None
@@ -192,7 +193,14 @@ def provider_factory(
     Native identifiers are intentionally confined to this concrete composition
     root. Every caller above it receives only a configured ``SessionFactory``.
     """
-    if settings.agent_sdk in ("claude", "claude-compat"):
+    engine = engine_for_settings()
+    logger.info(
+        "Engine %s runs model %s (AGENT_SDK %s)",
+        engine,
+        model,
+        settings.agent_sdk or "unset — routed by model",
+    )
+    if engine in ("claude", "claude-compat"):
         config = ClaudeSessionConfig(
             model=model,
             system_prompt=system_prompt,
@@ -242,7 +250,7 @@ def provider_factory(
             ).apply(config)
         return create_claude_session_factory(config)
 
-    if settings.agent_sdk in ("codex", "openai", "openai-compat"):
+    if engine in ("codex", "openai", "openai-compat"):
         unsupported = [
             name
             for name, value in [
@@ -279,7 +287,7 @@ def provider_factory(
             writable_roots=writable_roots or [],
         )
         endpoint = compat_base_url()
-        if settings.agent_sdk in ("openai", "openai-compat"):
+        if engine in ("openai", "openai-compat"):
             if endpoint is None:
                 raise ValueError(
                     "OPENAI_BASE_URL is required for an OpenAI-compatible route"
@@ -297,7 +305,7 @@ def provider_factory(
             ).apply(config)
         return create_codex_session_factory(config)
 
-    raise ValueError(f"unsupported AGENT_SDK {settings.agent_sdk!r}")
+    raise ValueError(f"unsupported engine {engine!r}")
 
 
 def normalize_claude_effort(
@@ -474,7 +482,8 @@ def build_session_factory(
     hooks = create_permission_hooks(notes.rw, notes.ro)
     tools: list[str] | None = [] if toolless else None  # lup: ignore[empty-collection]
     sandbox: Sandbox | None = None
-    if not toolless and settings.agent_sdk in ("claude", "claude-compat"):
+    engine = engine_for_settings()
+    if not toolless and engine in ("claude", "claude-compat"):
         policy = ToolPolicy(settings)
         realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
         sandbox = build_session_sandbox(notes)
@@ -527,7 +536,7 @@ def build_session_factory(
         )
         environment = {
             **context.to_env(),
-            "AGENT_SDK": settings.agent_sdk,
+            "AGENT_SDK": engine,
             "AGENT_MODEL": model or settings.model,
             "AGENT_SANDBOX_ENABLED": str(settings.sandbox_enabled).lower(),
         }
@@ -575,7 +584,7 @@ def build_session_factory(
     elif (
         not toolless
         and settings.sandbox_enabled
-        and settings.agent_sdk
+        and engine
         in (
             "codex",
             "openai",
@@ -666,7 +675,7 @@ def application_result(
         session_id=session_id,
         task_id=task_id,
         agent_version=agent_version(),
-        agent_sdk=settings.agent_sdk,
+        agent_sdk=engine_for_settings(),
         sdk_session_id=result.identifiers.session.value,
         timestamp=datetime.now().isoformat(),
         output=result.output,
