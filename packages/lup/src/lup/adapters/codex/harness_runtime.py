@@ -190,8 +190,18 @@ class CodexPluginInstaller:
             "CODEX_HOME": str(self.config.codex_home),
         }
         # The marketplace definition lives in the repository
-        # (`.agents/plugins/marketplace.json`); registration is idempotent
-        # and a fresh CODEX_HOME has no marketplaces configured yet.
+        # (`.agents/plugins/marketplace.json`). The CLI refuses a name already
+        # registered from a different source — which every sibling worktree and
+        # project is — so the name is dropped before it is re-pointed here.
+        sh.Command(str(self.executable))(
+            "plugin",
+            "marketplace",
+            "remove",
+            self.config.marketplace,
+            _cwd=cwd,
+            _env=environment,
+            _ok_code=[0, 1],
+        )
         sh.Command(str(self.executable))(
             "plugin",
             "marketplace",

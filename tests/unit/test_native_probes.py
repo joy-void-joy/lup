@@ -126,7 +126,7 @@ class TestPluginInstallGate:
         installer_cli = fake_cli(
             tmp_path,
             "codex",
-            f'echo "$1 $2" >> "{log}"\n'
+            f'echo "$1 $2 $3" >> "{log}"\n'
             'if [ "$2" = "add" ]; then\n'
             f'  rm -rf "{cache}" && mkdir -p "{cache}" && cp -R "{source}/." "{cache}/"\n'
             "fi",
@@ -135,11 +135,46 @@ class TestPluginInstallGate:
         evidence = CodexPluginInstaller(config, installer_cli).ensure(source, tmp_path)
 
         assert evidence.ready
+        selector = f"{config.plugin}@{config.marketplace}"
         assert log.read_text(encoding="utf-8").splitlines() == [
-            "plugin marketplace",
-            "plugin remove",
-            "plugin add",
+            "plugin marketplace remove",
+            "plugin marketplace add",
+            f"plugin remove {selector}",
+            f"plugin add {selector}",
         ]
+
+    def test_marketplace_bound_to_another_source_is_repointed(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex refuses a marketplace name already bound to a different root.
+
+        Every sibling worktree and template-derived project is such a root,
+        so the name is dropped before it is re-pointed at this one.
+        """
+        source = tmp_path / "source"
+        write_plugin_source(source)
+        config = PluginCacheConfig(codex_home=tmp_path / "codex-home")
+        cache = self.cache_root(config)
+        bound = tmp_path / "bound-elsewhere"
+        bound.write_text(config.marketplace, encoding="utf-8")
+        installer_cli = fake_cli(
+            tmp_path,
+            "codex",
+            f'if [ "$3" = "remove" ]; then rm -f "{bound}"; fi\n'
+            f'if [ "$3" = "add" ] && [ -f "{bound}" ]; then\n'
+            f"  echo \"marketplace '{config.marketplace}' is already added"
+            ' from a different source" >&2\n'
+            "  exit 1\n"
+            "fi\n"
+            'if [ "$2" = "add" ]; then\n'
+            f'  rm -rf "{cache}" && mkdir -p "{cache}" && cp -R "{source}/." "{cache}/"\n'
+            "fi",
+        )
+
+        evidence = CodexPluginInstaller(config, installer_cli).ensure(source, tmp_path)
+
+        assert evidence.ready
+        assert not bound.exists()
 
     def test_install_that_leaves_a_differing_digest_is_refused(
         self, tmp_path: Path
