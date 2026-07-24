@@ -268,7 +268,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "3d294658b1f3207d7232fb279728c0bd9dcab8328916f01471ce0735b6d8247b",
+      "sha256": "a5247a6d7110f1726056eb26988c924b7c0210409761938204074531c12dbd0e",
       "semantic_id": "skill.resolve",
       "executable": false
     },
@@ -333,13 +333,6 @@
       "category": "generated",
       "sha256": "c7746da52afd4fb8636b55d5e11c3184eeabbe8726409242717d937f307b79e2",
       "semantic_id": "harness.project-settings",
-      "executable": false
-    },
-    {
-      "path": ".claude/workflows/commands/resolve.js",
-      "category": "generated",
-      "sha256": "d0df61e0bf73f5c9c1992faa5a16ebd8988fe7f095449cd18c0ece30808e0642",
-      "semantic_id": "resolver.lup.entry",
       "executable": false
     }
   ]

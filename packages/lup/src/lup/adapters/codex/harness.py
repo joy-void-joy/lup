@@ -74,7 +74,10 @@ class CodexPromptRenderer(PromptRenderer):
                         "Run `uv run lup-devtools harness resolve --adapter codex`. "
                         "The command accepts optional flags: `--run-id <id>` resumes "
                         "a persisted run and `--accept`/`--reject` records the human "
-                        "decision on its review branch."
+                        "decision on its review branch. A headless run parks on "
+                        "material questions — relay them to the user verbatim, never "
+                        "answer them yourself, then rerun with the repeatable "
+                        "`--answer <question-id>=<value>` flag."
                     )
                 case ArgumentsRef():
                     rendered.append("the arguments supplied with this skill invocation")
