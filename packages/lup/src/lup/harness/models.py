@@ -110,6 +110,20 @@ class PromptDocument(BaseModel):
     parts: list[PromptPart]
 
 
+GUIDANCE_CHARACTER_BUDGET = 32_768
+"""Ceiling on the guidance document every session loads before its first turn.
+
+Only literal text counts: a skill invocation renders to provider syntax whose
+length belongs to the adapter, not the declaration. Reference material that a
+skill or a denial message surfaces at the right moment belongs in a generated
+document under ``docs/`` instead, reached by a file-path pointer."""
+
+
+def document_text_size(document: PromptDocument) -> int:
+    """Total literal characters a document contributes to the guidance budget."""
+    return sum(len(part.text) for part in document.parts if isinstance(part, TextPart))
+
+
 class Argument(BaseModel):
     model_config = FROZEN
 
@@ -177,6 +191,13 @@ class HookUrlScope(BaseModel):
 
     origin: AnyHttpUrl
     path_prefix: UrlPathPrefix = "/"
+    include_subdomains: bool = Field(
+        default=False,
+        description=(
+            "Extend the scope to every host beneath the origin, rendered as a "
+            "*.host wildcard in the OS sandbox network allowlist"
+        ),
+    )
 
 
 class HookSandbox(BaseModel):
@@ -185,6 +206,13 @@ class HookSandbox(BaseModel):
     Fetch-scope hostnames join extra_domains as the network allowlist, and
     human-owned files become OS-level write denials, so one declaration
     feeds both the semantic policy and the kernel-enforced boundary.
+
+    That makes allowed_fetch the home for any origin an agent should be able
+    to read: declaring it there grants both the fetch and the egress. Reserve
+    extra_domains for hosts that need egress but are not readable sources —
+    an authenticated API a library calls, never a document the agent opens.
+    Listing a readable origin here instead is what lets the two boundaries
+    disagree, with the OS admitting a host the fetch policy still asks about.
     """
 
     model_config = FROZEN
@@ -355,11 +383,15 @@ class Harness(BaseModel):
                     f"is missing required arguments: {missing}"
                 )
 
-        guidance_size = sum(
-            len(part.text) for part in self.guidance.parts if isinstance(part, TextPart)
-        )
-        if guidance_size > 32_768:
-            raise ValueError("always-loaded guidance exceeds 32768 characters")
+        used = document_text_size(self.guidance)
+        if used > GUIDANCE_CHARACTER_BUDGET:
+            raise ValueError(
+                f"always-loaded guidance is {used} characters, over the "
+                f"{GUIDANCE_CHARACTER_BUDGET} budget by "
+                f"{used - GUIDANCE_CHARACTER_BUDGET}. Move a section to a "
+                "generated document under docs/ and leave a file-path pointer, "
+                "the way Self-Improvement Loop and Permission Hooks were split."
+            )
         return self
 
 

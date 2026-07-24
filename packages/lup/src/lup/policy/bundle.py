@@ -55,12 +55,24 @@ def bundled_antipattern_rows() -> dict[str, list[AntiPatternRow]]:
     }
 
 
-def runtime_url_scope(origin: str, path_prefix: str, reason: str = "") -> UrlScopeRow:
+def runtime_url_scope(
+    origin: str,
+    path_prefix: str,
+    reason: str = "",
+    include_subdomains: bool = False,
+) -> UrlScopeRow:
     """Normalize one validated hook scope into a primitive runtime row."""
     parsed = urllib.parse.urlsplit(origin)
     if parsed.hostname is None:
         raise ValueError("validated hook URL scope has no hostname")
-    return parsed.scheme, parsed.hostname, parsed.port, path_prefix, reason
+    return (
+        parsed.scheme,
+        parsed.hostname,
+        parsed.port,
+        path_prefix,
+        reason,
+        include_subdomains,
+    )
 
 
 def runtime_path_rule(root: str) -> PathRuleRow:
@@ -110,8 +122,9 @@ def url_scope_rows_literal(rows: list[UrlScopeRow]) -> str:
                 "None" if port is None else str(port),
                 json.dumps(path_prefix),
                 json.dumps(reason),
+                str(include_subdomains),
             ]
-            for scheme, host, port, path_prefix, reason in rows
+            for scheme, host, port, path_prefix, reason, include_subdomains in rows
         ]
     )
 

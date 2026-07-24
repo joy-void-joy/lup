@@ -61,6 +61,14 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 HookUrlScope(origin=AnyHttpUrl("http://learn.chatgpt.com")),
                 HookUrlScope(origin=AnyHttpUrl("https://developers.openai.com")),
                 HookUrlScope(origin=AnyHttpUrl("http://developers.openai.com")),
+                HookUrlScope(origin=AnyHttpUrl("https://github.com")),
+                HookUrlScope(origin=AnyHttpUrl("https://api.github.com")),
+                HookUrlScope(
+                    origin=AnyHttpUrl("https://githubusercontent.com"),
+                    include_subdomains=True,
+                ),
+                HookUrlScope(origin=AnyHttpUrl("https://pypi.org")),
+                HookUrlScope(origin=AnyHttpUrl("https://files.pythonhosted.org")),
             ],
             protected_edit_roots=[
                 Path(".claude"),
@@ -71,14 +79,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             ],
             human_owned_files=[Path("README.md")],
             sandbox=HookSandbox(
-                extra_domains=[
-                    "github.com",
-                    "api.github.com",
-                    "*.githubusercontent.com",
-                    "pypi.org",
-                    "files.pythonhosted.org",
-                    "api.anthropic.com",
-                ],
+                extra_domains=["api.anthropic.com"],
                 credential_paths=["~/.ssh", "~/.aws/credentials"],
             ),
         ),

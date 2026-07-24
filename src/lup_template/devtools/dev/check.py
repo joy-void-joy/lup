@@ -5,10 +5,12 @@ import typer
 from pydantic import BaseModel
 
 from lup.codescan.markers import find_feedback
+from lup.harness.models import GUIDANCE_CHARACTER_BUDGET, document_text_size
 
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
 from lup_template.devtools.dev.boundaries import scan_boundaries
 from lup_template.devtools.dev.comments import FoundComment, scan_tracked
+from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.utils import git, uv
 
 
@@ -142,6 +144,15 @@ def run_checks(fix: bool, no_test: bool) -> None:
     else:
         typer.echo("seam boundaries: ok")
         results.append(CheckOutcome(name="seam boundaries", passed=True))
+
+    used = document_text_size(GUIDANCE)
+    free = GUIDANCE_CHARACTER_BUDGET - used
+    state = "ok" if free >= 0 else f"FAIL (over by {-free})"
+    typer.echo(
+        f"guidance budget: {state} — {used}/{GUIDANCE_CHARACTER_BUDGET}"
+        f" characters, {free} free"
+    )
+    results.append(CheckOutcome(name="guidance budget", passed=free >= 0))
 
     # summary
     passed = sum(1 for r in results if r.passed)

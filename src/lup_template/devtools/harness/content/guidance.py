@@ -211,7 +211,7 @@ The codebase should read as a **monolithic source of truth** — understandable 
 
 ### Inline `# lup:` Notes
 
-A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — distinct from the `# lup: ignore` escape hatch under [Type Safety](#type-safety) and from the `# lup: defer[...]` parking flavor under [Deferred Work](#deferred-work). The edits hook prompts whenever an edit changes a file's `# lup:` marker count, and `lup-devtools` scans for unresolved notes.
+A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — distinct from the `# lup: ignore` escape hatch under § Type Safety and from the `# lup: defer[...]` parking flavor under § Deferred Work. The edits hook prompts whenever an edit changes a file's `# lup:` marker count, and `lup-devtools` scans for unresolved notes.
 
 **Never delete a `# lup:` note until its concern is actually resolved.** Making a file parse, tidying up, or editing past it does not count. Resolve a note by fixing the code or structure it points at, or — for a question — by answering it definitively and reflecting that answer in the code, the docs, or an explicit user decision. Only then does the note come out (use `"""
         ),
@@ -232,7 +232,9 @@ A note in a comment-less format (e.g. JSON) is the trap: you can't keep it there
 
 - If logic exists in `lup` (the library), import it. Don't copy-paste.
 - Reusable utilities belong in `packages/lup/`, not `src/lup_template/`.
-- See [lup vs lup_template Boundary](#lup-library-vs-lup_template-application-boundary) for the placement test.
+- Placement test: would another project built on lup want this? Then it belongs
+  in `packages/lup/`. If it only makes sense for this application, it belongs in
+  `src/lup_template/`.
 
 ### Imports: No Barrel Files
 
@@ -296,7 +298,7 @@ If you find yourself running the same command repeatedly, **add a command** to `
         models.TextPart(
             text=r"""
 `lup-devtools harness claude` and `harness codex` regenerate, reconcile, and
-launch the native plugins. `lup-devtools usage` reports Claude usage. Profiles
+launch the native plugins. `lup-devtools usage claude` reports usage. Profiles
 (named Claude config dirs) are managed with `lup-devtools setup profile`.
 
 Each repo names its plugin marketplace after the project. Claude launches the
@@ -329,37 +331,22 @@ application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and runtime for each native
 plugin. Never edit generated dispatcher or runtime files.
 
-The policy classifies each shell command against the vocabulary in
-`lup.policy.shell_rules`, every URL scope, and each edit in a batch. The shell
-lattice reserves ask for judged risk; unjudged work denies, hinting
-the escalation recipe. A leading `# lup: escalate: <why>` line promotes a
-classified deny or ask to an approval question carrying that reason.
-Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`), unjudged work
-defers to that boundary, and a `dangerouslyDisableSandbox` escape
-re-enters the deny lattice; the sandbox block derives from the
-same `HookSet` declaration.
-Segments join deny > ask > defer > allow — unjudged rides into a judged
-prompt, a judged deny wins the batch.
-Malformed input fails conservatively. `$(...)` classifies recursively —
-the inner command joins the batch and its opaque result rides only
-argument-safe commands; command position, deep nesting, and backticks
-stay conservative. File writes (redirection, `rm`) auto-allow only into
-repo `tmp/` and the scratchpad (`$TMPDIR`, `/tmp/claude-*`; reassigning
-`TMPDIR` asks); discards and fd dups strip; heredoc-fed
-writes deny toward Edit/tmp scripts. Loops, conditionals,
-case arms, subshells, and brace groups classify recursively over frozen
-bindings — literal assignments instantiate, opaque ones
-(`read`, globs) gate flag-guarded commands.
-`find -exec` payloads and `timeout`/`nice` wrappers recurse,
-`sed`/`awk` pass read-only screens, quoted-delimiter
-heredocs are literal data, and `curl` is read-screened within
-declared fetch scopes. Edit decisions cover protected paths, marker changes, size,
-and the canonical anti-pattern audit; an edit over the size gate
-alone is deferred — the hook emits no decision, so auto-accept applies
-while hard gates stay explicit. The resolver editor receives only its
-declared autonomous edit exceptions; temporary paths, human-owned files
-like `README.md`, marker changes, and anti-patterns retain their
-guardrails.
+Every shell command, URL scope, and edit in a batch is classified. Segments
+join deny > ask > defer > allow, and malformed input fails conservatively.
+`docs/permissions.md` carries the full lattice — shell vocabulary, `$(...)`
+recursion, write targets, fetch scopes, and edit gates. You rarely need to
+read it first: a denial names what tripped and how to recover.
+
+**Two markers change a decision, so keep them in mind before you are stopped:**
+
+- `# lup: escalate: <why>` as the leading line of a shell command promotes a
+  classified deny or ask into an approval question carrying that reason. This
+  is the recovery path when work is denied as unjudged — reshape the command
+  into the allowed vocabulary, or escalate with a reason.
+- `# lup: ignore[<rule-id>]` on the offending line suppresses exactly that
+  anti-pattern (see § Type Safety). It must sit on the line that
+  trips the rule — a marker one line above is reported as spurious while the
+  violation stays uncovered.
 
 Use `"""
         ),
@@ -457,72 +444,18 @@ When the user provides documentation links, incorporate that knowledge into CLAU
 
 ## Self-Improvement Loop
 
-See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-design-philosophy) — these govern all agent improvements.
+`docs/self-improvement.md` carries the full loop: how to diagnose a failure
+through the pipeline, the three levels of analysis, what to track per session,
+and the anti-patterns to avoid. Read it when running the feedback-loop,
+review, or meta skills — each of them works from it.
 
 **When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" The fix is almost never a prompt line about a specific decision. Instead: does the agent have enough context? The right tools? A strong enough model?
 
 When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
 
-### Diagnosing Failures
-
-When the agent fails, the instinct is to patch the prompt. Resist it. Instead, trace the failure through the pipeline:
-
-1. **What data did the agent have?** Read the trace. What tools did it call? What did they return? Was the information sufficient for a correct decision?
-2. **Where in the workflow did the wrong decision enter?** Find the exact step — not the symptom, the entry point. A bad output is a symptom; a missing tool call or a misleading tool result is the cause.
-3. **What structural change prevents it?** A new tool, a better tool description, a restructured pipeline step, richer data — these are durable fixes. A prompt rule is a patch that coexists with the failure.
-
-| Do This | Not This |
-|---|---|
-| Trace the failure to a missing input or structural flaw | Add "NEVER do X" or "ALWAYS do Y" to the prompt |
-| Formulate general principles with fresh examples | Copy examples from the specific trace that failed |
-| Ask "what data was the agent missing?" and provide it | Add a numeric threshold ("if score > 15, then...") |
-| Restructure the pipeline step where the error enters | Add a warning after the error-prone step |
-
-**Examples that look the same but aren't:**
-
-- Agent misclassifies commits → **Do:** Restructure the step to process files individually before grouping. **Don't:** Add "CRITICAL: Always check if a commit touches multiple concerns."
-- Agent produces verbose output → **Do:** Constrain via output model or add a reviewer subagent. **Don't:** Add "Keep responses under 200 words."
-- Agent ignores an available tool → **Do:** Improve the tool's description (what/when/why). **Don't:** Add "Remember to use X tool" to the prompt.
-
-### Three Levels of Analysis
-
-1. **Object Level** — The agent itself: tools, capabilities, behavior
-2. **Meta Level** — The agent's self-tracking: what it monitors about itself
-3. **Meta-Meta Level** — The feedback loop process: scripts, analysis methods
-
-### Running the Feedback Loop
-
-1. **Collect feedback**: `uv run lup-devtools feedback collect`
-2. **Read traces deeply**: Read 5-10 sessions in detail — don't skip to aggregates
-3. **Extract patterns**: Tool failures, capability requests, reasoning quality
-4. **Implement changes**: Fix tools → Build requested capabilities → Simplify prompts
-5. **Update documentation**: This file should evolve with the agent
-
-### What to Track Per Session
-
-- **Sessions**: `notes/traces/<version>/sessions/<session_id>/`
-- **Outputs**: `notes/traces/<version>/outputs/<task_id>/`
-- **Traces**: `notes/traces/<version>/logs/<session_id>/`
-- **Metrics**: Tool calls, timing, errors via metrics tracking
-
-### Anti-Patterns
-
-- Adding rules the agent can't act on (no access to required data)
-- Adding "CRITICAL: Never do X" warnings instead of restructuring the workflow so X has no entry point
-- Copying examples from a specific trace into the prompt instead of deriving general principles and writing fresh examples
-- Adding numeric thresholds or absolute rules ("if more than N, do X") — these are brittle and don't survive domain shifts
-- Patching for one observed symptom instead of tracing the failure through the pipeline to find the structural cause
-- Listing tools by name in the system prompt (two sources of truth that drift apart)
-- Skipping trace analysis to jump to aggregate statistics
-- Over-engineering initial implementations
-- Making changes in `lup.environment` when `lup.agent` is the right place
-
-**Validation questions for proposed changes:**
-
-1. Does this add a capability or just a rule?
-2. Would this help if the domain changed completely?
-3. Are we changing the right level (object/meta/meta-meta)?
-4. What data would we need to validate this change worked?
+The durable fix is a capability, not a rule: trace the failure to the missing
+input or the workflow step where the wrong decision entered, and change that.
+A prompt rule coexists peacefully with the failure it warns about.
 """
         ),
     ]
