@@ -85,6 +85,46 @@ ALLOWED_FETCH_SCOPES = [
         "",
         False,
     ),
+    (
+        "https",
+        "github.com",
+        None,
+        "/",
+        "",
+        False,
+    ),
+    (
+        "https",
+        "api.github.com",
+        None,
+        "/",
+        "",
+        False,
+    ),
+    (
+        "https",
+        "githubusercontent.com",
+        None,
+        "/",
+        "",
+        True,
+    ),
+    (
+        "https",
+        "pypi.org",
+        None,
+        "/",
+        "",
+        False,
+    ),
+    (
+        "https",
+        "files.pythonhosted.org",
+        None,
+        "/",
+        "",
+        False,
+    ),
 ]
 
 DENIED_FETCH_SCOPES = ()

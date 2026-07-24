@@ -65,6 +65,7 @@
         "developers.openai.com",
         "github.com",
         "api.github.com",
+        "githubusercontent.com",
         "*.githubusercontent.com",
         "pypi.org",
         "files.pythonhosted.org",
