@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "bdd843667fd6793e23de4dc6e42e5078d113884a50824c20f6cdd83d98084038",
+  "source_digest": "87412a3d87b7c4b23151015bf508f7a0822592c816d477d91e0e013e50b12e72",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -268,7 +268,7 @@
     {
       "path": ".codex/plugins/lup/skills/rebase/SKILL.md",
       "category": "generated",
-      "sha256": "f15cd4d89409674764c1e91c85518e84f983a6c069d223791d0167234ebe3ba1",
+      "sha256": "8b09dabe77da2f967b2f9c0263f17b1a7499260bcf2a359cb973a9b2188a99e5",
       "semantic_id": "skill.rebase",
       "executable": false
     },

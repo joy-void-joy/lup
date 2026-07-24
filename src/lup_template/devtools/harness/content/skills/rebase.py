@@ -33,7 +33,7 @@ Clean up the commit history on the current feature branch, push it, and open (or
 
 ### Base branch (`<base>`)
 
-Run `uv run lup-devtools dev pr sync-base --json` (step 1 below) -- it auto-detects the base branch. If ambiguous, use AskUserQuestion to ask which branch to use.
+Run `uv run lup-devtools dev pr sync-base --json` (step 1 below) -- it reports the base branch and a `base_source`. `recorded` (from worktree creation) and `explicit` are authoritative; `guessed` means topology alone picked it, so confirm the branch with AskUserQuestion before relying on it.
 
 ### PR target (`<target>`)
 
