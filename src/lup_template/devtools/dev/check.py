@@ -9,6 +9,7 @@ from lup.harness.models import GUIDANCE_CHARACTER_BUDGET, document_text_size
 
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
 from lup_template.devtools.dev.boundaries import scan_boundaries
+from lup_template.devtools.dev.branches import unlanded_siblings
 from lup_template.devtools.dev.comments import FoundComment, scan_tracked
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.utils import git, uv
@@ -153,6 +154,16 @@ def run_checks(fix: bool, no_test: bool) -> None:
         f" characters, {free} free"
     )
     results.append(CheckOutcome(name="guidance budget", passed=free >= 0))
+
+    # advisory — reports another tree's state, so it never gates this one
+    unlanded = unlanded_siblings()
+    if unlanded:
+        typer.echo(f"unlanded siblings: {len(unlanded)} (advisory)")
+        for branch in unlanded:
+            typer.echo(
+                f"  {branch.name}  {branch.unique_commits} commits, "
+                f"{branch.source_diff_lines} ln"
+            )
 
     # summary
     passed = sum(1 for r in results if r.passed)
