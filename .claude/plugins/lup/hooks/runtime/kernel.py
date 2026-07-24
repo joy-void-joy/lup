@@ -256,6 +256,18 @@ def is_repository_tmp_script(word: str) -> bool:
     return not normalized.startswith("/") and normalized.split("/")[0] == "tmp"
 
 
+def is_trusted_script(word: str, roots: list[str]) -> bool:
+    """Recognize an absolute script confined to a native-managed package root."""
+    if "$" in word or not word.startswith("/"):
+        return False
+    normalized = posixpath.normpath(word)
+    return any(
+        normalized.startswith(posixpath.join(posixpath.normpath(root), ""))
+        for root in roots
+        if root.startswith("/") and posixpath.normpath(root) != "/"
+    )
+
+
 def is_session_scratch_target(word: str) -> bool:
     """Recognize a path confined to the session scratchpad.
 
@@ -672,6 +684,7 @@ def decide_find_words(
     rows: list[ShellRuleRow],
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> KernelDecision:
     """Classify find, recursing into -exec payloads with {} as a path word.
 
@@ -704,7 +717,9 @@ def decide_find_words(
             ]
             if not payload:
                 return unjudged("find -exec payload is empty")
-            verdict = decide_shell_segment(payload, rows, allowed_scopes, denied_scopes)
+            verdict = decide_shell_segment(
+                payload, rows, allowed_scopes, denied_scopes, trusted_script_roots
+            )
             if verdict.effect != "allow":
                 return verdict
             position = terminator + 1
@@ -930,6 +945,7 @@ def decide_shell_segment(
     rows: list[ShellRuleRow],
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> KernelDecision:
     """Classify one parsed shell segment against the vocabulary and handlers."""
     while segment and segment[0] == "!":
@@ -956,6 +972,8 @@ def decide_shell_segment(
         )
     executable = posixpath.basename(words[0])
     if executable in INTERPRETERS:
+        if len(words) > 1 and is_trusted_script(words[1], trusted_script_roots or []):
+            return KernelDecision("allow", "native-managed skill script")
         return KernelDecision(
             "deny", "bare interpreters and inline code are not allowed"
         )
@@ -977,11 +995,15 @@ def decide_shell_segment(
         payload = xargs_payload(words)
         if not payload:
             return unjudged("xargs payload is not classified")
-        return decide_shell_segment(payload, rows, allowed_scopes, denied_scopes)
+        return decide_shell_segment(
+            payload, rows, allowed_scopes, denied_scopes, trusted_script_roots
+        )
     if executable == "curl":
         return decide_curl_words(words, allowed_scopes or [], denied_scopes or [])
     if executable == "find":
-        return decide_find_words(words, rows, allowed_scopes, denied_scopes)
+        return decide_find_words(
+            words, rows, allowed_scopes, denied_scopes, trusted_script_roots
+        )
     if executable == "sed":
         return decide_sed_words(words)
     if executable in ("awk", "gawk", "mawk"):
@@ -1683,6 +1705,7 @@ def decide_for_body(
     bindings: tuple[ShellBinding, ...] = (),
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> list[KernelDecision]:
     """Classify a ``for`` body once per literal loop word, or gated when opaque.
 
@@ -1715,6 +1738,7 @@ def decide_for_body(
                 bindings,
                 allowed_scopes,
                 denied_scopes,
+                trusted_script_roots,
             )
         ]
 
@@ -1741,6 +1765,7 @@ def decide_loop(
     bindings: tuple[ShellBinding, ...] = (),
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one loop construct, returning its decisions and the next index.
 
@@ -1776,6 +1801,7 @@ def decide_loop(
                     bindings,
                     allowed_scopes,
                     denied_scopes,
+                    trusted_script_roots,
                 ),
                 end + 1,
             )
@@ -1792,6 +1818,7 @@ def decide_loop(
                 bindings,
                 allowed_scopes,
                 denied_scopes,
+                trusted_script_roots,
             )
             return decisions, end + 1
     return unjudged("loop construct does not parse")
@@ -1831,6 +1858,7 @@ def decide_conditional(
     bindings: tuple[ShellBinding, ...] = (),
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one ``if`` construct: conditions and branches recursively."""
     if depth >= 2:
@@ -1847,7 +1875,13 @@ def decide_conditional(
         return unjudged("conditional is empty")
     return (
         decide_segment_list(
-            interior, rows, depth + 1, bindings, allowed_scopes, denied_scopes
+            interior,
+            rows,
+            depth + 1,
+            bindings,
+            allowed_scopes,
+            denied_scopes,
+            trusted_script_roots,
         ),
         end + 1,
     )
@@ -1861,6 +1895,7 @@ def decide_case(
     bindings: tuple[ShellBinding, ...] = (),
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one ``case`` construct: patterns are match data, bodies recurse."""
     if depth >= 2:
@@ -1899,7 +1934,13 @@ def decide_case(
         return [], end + 1
     return (
         decide_segment_list(
-            body, rows, depth + 1, bindings, allowed_scopes, denied_scopes
+            body,
+            rows,
+            depth + 1,
+            bindings,
+            allowed_scopes,
+            denied_scopes,
+            trusted_script_roots,
         ),
         end + 1,
     )
@@ -1912,6 +1953,7 @@ def decide_segment_list(
     bindings: tuple[ShellBinding, ...] = (),
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> list[KernelDecision]:
     """Classify a segment list, grouping structured constructs recursively.
 
@@ -1959,6 +2001,7 @@ def decide_segment_list(
                         bindings,
                         allowed_scopes,
                         denied_scopes,
+                        trusted_script_roots,
                     )
                 case "if":
                     outcome = decide_conditional(
@@ -1969,6 +2012,7 @@ def decide_segment_list(
                         bindings,
                         allowed_scopes,
                         denied_scopes,
+                        trusted_script_roots,
                     )
                 case _:
                     outcome = decide_case(
@@ -1979,6 +2023,7 @@ def decide_segment_list(
                         bindings,
                         allowed_scopes,
                         denied_scopes,
+                        trusted_script_roots,
                     )
             if isinstance(outcome, KernelDecision):
                 return [*decisions, outcome]
@@ -2009,7 +2054,13 @@ def decide_segment_list(
             index += 1
             continue
         decisions.append(
-            decide_shell_segment(segment, rows, allowed_scopes, denied_scopes)
+            decide_shell_segment(
+                segment,
+                rows,
+                allowed_scopes,
+                denied_scopes,
+                trusted_script_roots,
+            )
         )
         index += 1
     return decisions
@@ -2020,13 +2071,14 @@ def classify_shell(
     rows: list[ShellRuleRow],
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(command)
     if isinstance(segments, KernelDecision):
         return segments
     decisions = decide_segment_list(
-        segments, rows, 0, (), allowed_scopes, denied_scopes
+        segments, rows, 0, (), allowed_scopes, denied_scopes, trusted_script_roots
     )
     denied = next((item for item in decisions if item.effect == "deny"), None)
     if denied is not None:
@@ -2046,6 +2098,7 @@ def decide_shell(
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
     sandboxed: bool = False,
+    trusted_script_roots: list[str] | None = None,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -2066,12 +2119,18 @@ def decide_shell(
                 "deny", "escalation requires a stated reason" + ESCALATE_HINT
             )
         inner = classify_shell(
-            command[marker.end() :], rows, allowed_scopes, denied_scopes
+            command[marker.end() :],
+            rows,
+            allowed_scopes,
+            denied_scopes,
+            trusted_script_roots,
         )
         if inner.effect == "allow":
             return inner
         return KernelDecision("ask", f"escalated ({why}): {inner.reason}")
-    decision = classify_shell(command, rows, allowed_scopes, denied_scopes)
+    decision = classify_shell(
+        command, rows, allowed_scopes, denied_scopes, trusted_script_roots
+    )
     if decision.effect == "defer" and sandboxed:
         return decision
     if decision.effect in ("deny", "defer"):

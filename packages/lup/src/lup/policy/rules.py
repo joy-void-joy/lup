@@ -124,11 +124,13 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         allowed_urls: list[UrlScope] | None = None,
         denied_urls: list[UrlScope] | None = None,
         sandbox_active: bool = False,
+        trusted_script_roots: list[str] | None = None,
     ) -> None:
         self.rules = erase_shell_rules(BASE_SHELL_RULES if rules is None else rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
         self.sandbox_active = sandbox_active
+        self.trusted_script_roots = trusted_script_roots or []
 
     def decide(self, event: ShellCommand) -> Decision:
         return pydantic_decision(
@@ -138,13 +140,18 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 self.allowed_scopes,
                 self.denied_scopes,
                 sandboxed=self.sandbox_active and not event.unsandboxed,
+                trusted_script_roots=self.trusted_script_roots,
             )
         )
 
     def decide_segment(self, segment: ShellSegment) -> Decision:
         return pydantic_decision(
             decide_shell_segment(
-                segment.words, self.rules, self.allowed_scopes, self.denied_scopes
+                segment.words,
+                self.rules,
+                self.allowed_scopes,
+                self.denied_scopes,
+                self.trusted_script_roots,
             )
         )
 
