@@ -21,6 +21,7 @@ from lup.adapters.codex.harness_runtime import (
 from lup.adapters.harness import compile_claude, compile_codex
 from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
 from lup.harness.models import (
+    GUIDANCE_CHARACTER_BUDGET,
     Argument,
     Artifact,
     ArgumentsRef,
@@ -32,6 +33,7 @@ from lup.harness.models import (
     Skill,
     SkillInvocation,
     TextPart,
+    document_text_size,
 )
 from lup.harness.ownership import (
     OwnershipManifestError,
@@ -51,6 +53,7 @@ from lup.harness.reconciliation import (
 from lup.policy.bundle import policy_kernel_source
 from lup.types import EnvVars
 from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness.launch import codex_sandbox_arguments
 from lup_template.devtools.harness.content.template_claude import (
@@ -116,6 +119,29 @@ def test_claude_tree_renders_every_typed_support_document() -> None:
     assert Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md") in paths
     assert Path(".claude/plugins/lup/scripts/file_suggest.sh") in paths
     assert Path(".claude/settings.json") in paths
+    assert Path("docs/self-improvement.md") in paths
+    assert Path("docs/permissions.md") in paths
+
+
+def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
+    """Guidance carried links to sections that live only in the adopter template.
+
+    A same-document anchor resolves right up until the text it names moves to
+    another document, and then fails silently. Naming the section, or the file
+    that holds it, survives the move that broke the anchor.
+    """
+    rendered = ClaudePromptRenderer(ClaudeSkillInvocationRenderer()).render(GUIDANCE)
+
+    assert "](#" not in rendered
+
+
+def test_guidance_stays_within_its_always_loaded_budget() -> None:
+    used = document_text_size(GUIDANCE)
+
+    assert used <= GUIDANCE_CHARACTER_BUDGET, (
+        f"guidance is {used} characters, over budget by "
+        f"{used - GUIDANCE_CHARACTER_BUDGET}"
+    )
 
 
 def test_codex_tree_renders_the_agents_flavored_template() -> None:
@@ -240,7 +266,7 @@ def test_typed_content_package_has_expected_module_inventory() -> None:
     content = Path("src/lup_template/devtools/harness/content")
     sources = list(content.rglob("*.py"))
 
-    assert len(sources) == 46
+    assert len(sources) == 48
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:

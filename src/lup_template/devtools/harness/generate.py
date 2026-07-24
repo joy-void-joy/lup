@@ -39,6 +39,12 @@ from lup.harness.reconciliation import (
 from lup.harness.contracts import CurrentTreeReader, Reconciler
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.patterns import DOCUMENT as PATTERNS
+from lup_template.devtools.harness.content.permissions import (
+    DOCUMENT as PERMISSIONS,
+)
+from lup_template.devtools.harness.content.self_improvement import (
+    DOCUMENT as SELF_IMPROVEMENT,
+)
 from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
@@ -134,6 +140,16 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
             path=Path(".claude/PATTERNS.md"),
             content=prompts.render(PATTERNS),
             semantic_id="harness.patterns",
+        ),
+        Artifact(
+            path=Path("docs/self-improvement.md"),
+            content=prompts.render(SELF_IMPROVEMENT),
+            semantic_id="harness.self-improvement",
+        ),
+        Artifact(
+            path=Path("docs/permissions.md"),
+            content=prompts.render(PERMISSIONS),
+            semantic_id="harness.permissions",
         ),
         Artifact(
             path=Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md"),
