@@ -93,6 +93,9 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo payload >> src/generated.py", effect="ask"),
     DecisionCase(input="gh pr view 123", effect="allow"),
     DecisionCase(input="uv run tool --help", effect="allow"),
+    DecisionCase(
+        input="uv run lup-devtools dev worktree create feature", effect="allow"
+    ),
     # Redirections: discards and fd duplication are stripped; file writes ask.
     DecisionCase(input="grep x f 2>&1", effect="allow"),
     DecisionCase(input="grep x f > /dev/null", effect="allow"),
@@ -828,6 +831,28 @@ def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
         == "deny"
     )
     assert policy.decide(ShellCommand(command="echo $(dangerous)")).effect == "deny"
+
+
+def test_shell_policy_confines_trusted_native_skill_scripts() -> None:
+    root = "/opt/codex/skills"
+    policy = ShellPolicy(trusted_script_roots=[root])
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    helper = f"{root}/.system/openai-docs/scripts/fetch-codex-manual.mjs"
+    assert effect(f"node {helper}") == "allow"
+    assert effect(f"if true; then sh {root}/tool/scripts/resolve; fi") == "allow"
+    assert effect(f"node {helper} && rm source.py") == "ask"
+    assert effect("node /tmp/openai-docs/scripts/fetch-codex-manual.mjs") == "deny"
+    assert effect(f"node {root}/../escape.mjs") == "deny"
+    assert effect("node --eval 'process.exit()'") == "deny"
+    assert (
+        ShellPolicy(trusted_script_roots=["/"])
+        .decide(ShellCommand(command="node /tmp/untrusted-script.mjs"))
+        .effect
+        == "deny"
+    )
 
 
 def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(

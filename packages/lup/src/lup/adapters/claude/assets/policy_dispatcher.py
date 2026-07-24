@@ -28,6 +28,25 @@ def sandbox_active():
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
+def managed_script_roots() -> list[str]:
+    """Return absolute package roots installed and trusted by Claude Code.
+
+    The workspace-local plugin directory is deliberately not a root: it is
+    agent-adjacent and verified only at launch, so an approved write there
+    must not grant silent execution rights for the rest of the session.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    if "CLAUDE_CONFIG_DIR" in environ:
+        home = Path(environ["CLAUDE_CONFIG_DIR"])
+    elif "HOME" in environ:
+        home = Path(environ["HOME"]) / ".claude"
+    else:
+        return []
+    if not home.is_absolute():
+        return []
+    return [str(home / "skills"), str(home / "plugins" / "cache")]
+
+
 def edit_documents(path, old_text, new_text):
     current = Path(path).read_text(encoding="utf-8")
     if current.count(old_text) != 1:
@@ -81,6 +100,7 @@ def dispatch(payload):
             ALLOWED_FETCH_SCOPES,
             DENIED_FETCH_SCOPES,
             sandboxed=sandbox_active() and not unsandboxed,
+            trusted_script_roots=managed_script_roots(),
         )
     if name == "WebFetch":
         return decide_fetch(
