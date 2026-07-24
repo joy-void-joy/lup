@@ -516,7 +516,7 @@ def test_codex_cache_digest_requires_an_exact_separate_copy(tmp_path: Path) -> N
     source = tmp_path / "source"
     home = tmp_path / "home"
     # codex caches an installed plugin under its manifest version segment.
-    installed = home / "plugins" / "cache" / "lup-repository" / "lup" / "9.9.9"
+    installed = home / "plugins" / "cache" / "lup-template-repository" / "lup" / "9.9.9"
     source.mkdir()
     installed.mkdir(parents=True)
     for root in (source, installed):
@@ -526,7 +526,7 @@ def test_codex_cache_digest_requires_an_exact_separate_copy(tmp_path: Path) -> N
             '{"name": "lup", "version": "9.9.9"}\n', encoding="utf-8"
         )
         (root / "plugin.txt").write_text("same\n", encoding="utf-8")
-    config = PluginCacheConfig(codex_home=home)
+    config = PluginCacheConfig(codex_home=home, marketplace="lup-template-repository")
 
     assert plugin_cache_evidence(source, config).ready
     (installed / "plugin.txt").write_text("stale\n", encoding="utf-8")

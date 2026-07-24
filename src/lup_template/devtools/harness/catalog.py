@@ -22,6 +22,7 @@ from lup.harness.models import (
     ResolveSpec,
     SkillInvocation,
 )
+from lup.workspace.paths import project_root, read_project_name
 from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 
@@ -36,10 +37,10 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
     Per-platform declarations overriding a shared default were rejected
     because they would let semantic content fork silently.
     """
-    del root
     plugin = Plugin(
         id="plugin.lup",
         name="lup",
+        marketplace=f"{read_project_name(root or project_root())}-repository",
         version=version,
         description=(
             "Self-improvement harness with feedback, review, and safe resolution flows"

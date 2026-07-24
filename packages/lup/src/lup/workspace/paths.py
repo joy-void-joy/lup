@@ -107,6 +107,25 @@ def read_agent_version(root: Path) -> str:
     return "0.0.0"
 
 
+def read_project_name(root: Path) -> str:
+    """Read the distribution name from [project] in pyproject.toml.
+
+    Returns "lup" when the file or the [project] table is absent, so roots
+    that are not Python projects still yield a usable identifier. Callers
+    that need a portable declaration name validate through ``NativeName``,
+    which rejects a distribution name that is not already one.
+    """
+    pyproject = root / "pyproject.toml"
+    if not pyproject.exists():
+        return "lup"
+    with pyproject.open("rb") as f:
+        data = tomllib.load(f)
+    match data:
+        case {"project": {"name": str(name)}}:
+            return name.lower()
+    return "lup"
+
+
 # -- Mutable path state -------------------------------------------------------
 # Resolved lazily on first accessor call; overridable via configure().
 # Internal — read it through the accessor functions, never import it by name.

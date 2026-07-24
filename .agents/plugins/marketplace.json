@@ -1,5 +1,5 @@
 {
-  "name": "lup-repository",
+  "name": "lup-template-repository",
   "plugins": [
     {
       "category": "development",

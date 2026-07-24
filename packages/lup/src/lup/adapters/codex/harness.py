@@ -157,7 +157,7 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
         if source.hooks is not None:
             manifest["hooks"] = "./hooks/hooks.json"
         marketplace = {
-            "name": "lup-repository",
+            "name": source.marketplace,
             "plugins": [
                 {
                     "name": source.name,

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "87412a3d87b7c4b23151015bf508f7a0822592c816d477d91e0e013e50b12e72",
+  "source_digest": "f138e3cdffbfb9ff0393d147d8b8c69f7ba28dc9bf17a45c1a82649c9b474c0d",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".agents/plugins/marketplace.json",
       "category": "generated",
-      "sha256": "ccdf0d64d67b2720d5769ab7ff355200c2b66da69a11402d29a23a8f7d696eb8",
+      "sha256": "f0ca4c2c59edd6821d3b7decff12b4f20bd3b62d2f3d6d0f5129034ce98eb4f9",
       "semantic_id": "plugin.lup",
       "executable": false
     },

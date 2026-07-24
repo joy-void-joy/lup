@@ -29,6 +29,8 @@ def fake_cli(tmp_path: Path, name: str, body: str) -> Path:
     return path
 
 
+MARKETPLACE = "lup-template-repository"
+
 VERSIONED_CLI = """\
 if [ "$1" = "--version" ]; then
   echo "9.9.9 (Fake CLI)"
@@ -106,7 +108,9 @@ class TestPluginInstallGate:
     ) -> None:
         source = tmp_path / "source"
         write_plugin_source(source)
-        config = PluginCacheConfig(codex_home=tmp_path / "codex-home")
+        config = PluginCacheConfig(
+            codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
+        )
         write_plugin_source(self.cache_root(config))
         exploding = fake_cli(tmp_path, "codex", "exit 97")
 
@@ -118,7 +122,9 @@ class TestPluginInstallGate:
     def test_stale_cache_is_removed_then_reinstalled(self, tmp_path: Path) -> None:
         source = tmp_path / "source"
         write_plugin_source(source)
-        config = PluginCacheConfig(codex_home=tmp_path / "codex-home")
+        config = PluginCacheConfig(
+            codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
+        )
         cache = self.cache_root(config)
         write_plugin_source(cache)
         (cache / "hook.py").write_text("DECISION = 'allow'\n", encoding="utf-8")
@@ -153,7 +159,9 @@ class TestPluginInstallGate:
         """
         source = tmp_path / "source"
         write_plugin_source(source)
-        config = PluginCacheConfig(codex_home=tmp_path / "codex-home")
+        config = PluginCacheConfig(
+            codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
+        )
         cache = self.cache_root(config)
         bound = tmp_path / "bound-elsewhere"
         bound.write_text(config.marketplace, encoding="utf-8")
@@ -181,14 +189,18 @@ class TestPluginInstallGate:
     ) -> None:
         source = tmp_path / "source"
         write_plugin_source(source)
-        config = PluginCacheConfig(codex_home=tmp_path / "codex-home")
+        config = PluginCacheConfig(
+            codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
+        )
         lying_cli = fake_cli(tmp_path, "codex", "exit 0")
 
         with pytest.raises(RuntimeError, match="digest differs"):
             CodexPluginInstaller(config, lying_cli).ensure(source, tmp_path)
 
     def test_missing_source_tree_is_an_explicit_error(self, tmp_path: Path) -> None:
-        config = PluginCacheConfig(codex_home=tmp_path / "codex-home")
+        config = PluginCacheConfig(
+            codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
+        )
         idle_cli = fake_cli(tmp_path, "codex", "exit 0")
 
         with pytest.raises(FileNotFoundError, match="plugin source does not exist"):

@@ -160,8 +160,11 @@ def launch_codex(
     selected_home = codex_home or (
         Path(configured_home) if configured_home is not None else Path.home() / ".codex"
     )
-    cache = CodexPluginInstaller(PluginCacheConfig(codex_home=selected_home)).ensure(
-        project_root() / ".codex" / "plugins" / "lup",
+    plugin = portable_harness().plugins[0]
+    cache = CodexPluginInstaller(
+        PluginCacheConfig(codex_home=selected_home, marketplace=plugin.marketplace)
+    ).ensure(
+        project_root() / ".codex" / "plugins" / plugin.name,
         project_root(),
         force=force_install,
     )

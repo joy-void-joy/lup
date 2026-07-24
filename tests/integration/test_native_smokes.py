@@ -232,8 +232,13 @@ def test_codex_plugin_blocks_a_forbidden_apply_patch(tmp_path: Path) -> None:
     if auth.exists():
         codex_home.mkdir(parents=True)
         shutil.copy(auth, codex_home / "auth.json")
-    CodexPluginInstaller(PluginCacheConfig(codex_home=codex_home)).ensure(
-        root / ".codex" / "plugins" / "lup",
+    from lup_template.devtools.harness.catalog import portable_harness
+
+    plugin = portable_harness().plugins[0]
+    CodexPluginInstaller(
+        PluginCacheConfig(codex_home=codex_home, marketplace=plugin.marketplace)
+    ).ensure(
+        root / ".codex" / "plugins" / plugin.name,
         root,
     )
     fixture = codex_edit_fixture(tmp_path)
