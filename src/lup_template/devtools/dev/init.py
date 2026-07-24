@@ -5,9 +5,11 @@
 """Package renaming for downstream project initialization.
 
 Renames the ``lup_template`` Python package to a project-specific name,
-updating imports, entry points, and CLI references. Framework
-vocabulary (``lup_tool``, ``lup-devtools``, ``.lup/``, etc.) stays
-unchanged.
+updating imports, dotted string anchors (``resources.files`` and
+``mock.patch`` targets, entry-point strings), entry points, and CLI
+references, then reports surviving references for manual triage.
+Framework vocabulary (``lup_tool``, ``lup-devtools``, ``.lup/``, etc.)
+stays unchanged.
 
 Examples::
 
@@ -34,6 +36,15 @@ PACKAGE_IMPORT_RE = re.compile(
     re.VERBOSE,
 )
 
+PACKAGE_STRING_ANCHOR_RE = re.compile(
+    r"""
+    ["']                # opening quote
+    lup_template        # the package name
+    (?=\.)              # dotted module path only — bare literals stay vocabulary
+    """,
+    re.VERBOSE,
+)
+
 FRAMEWORK_MARKERS = {
     "lup_tool",
     "LupMcpTool",
@@ -53,13 +64,20 @@ def is_framework_reference(line: str) -> bool:
     return any(marker in line for marker in FRAMEWORK_MARKERS)
 
 
+def is_renamer_module(path: Path) -> bool:
+    """Check if ``path`` is the renamer module — its literals are rename vocabulary."""
+    return path.as_posix().endswith("devtools/dev/init.py")
+
+
 def rename_match(matched: str, new_name: str) -> str:
     """Rewrite the package name inside one matched piece of source text."""
     return matched.replace("lup_template", new_name, 1)
 
 
-def rename_imports_in_file(path: Path, new_name: str, dry_run: bool) -> list[str]:
-    """Rename ``from lup_template.`` / ``import lup_template`` imports in a single file.
+def rename_pattern_in_file(
+    path: Path, pattern: re.Pattern[str], new_name: str, dry_run: bool
+) -> list[str]:
+    """Rename ``lup_template`` occurrences matched by ``pattern`` in a single file.
 
     Returns a list of change descriptions (empty if no changes); a dry run
     detects and describes without writing.
@@ -67,7 +85,7 @@ def rename_imports_in_file(path: Path, new_name: str, dry_run: bool) -> list[str
     text = path.read_text()
     changes: list[str] = []
 
-    def replace_import(m: re.Match[str]) -> str:
+    def replace_match(m: re.Match[str]) -> str:
         full_match = m.group(0)
         line_start = text.rfind("\n", 0, m.start()) + 1
         line_end = text.find("\n", m.end())
@@ -80,7 +98,7 @@ def rename_imports_in_file(path: Path, new_name: str, dry_run: bool) -> list[str
         changes.append(f"  {path}: {full_match!r} -> {replaced!r}")
         return replaced
 
-    new_text = PACKAGE_IMPORT_RE.sub(replace_import, text)
+    new_text = pattern.sub(replace_match, text)
     if not dry_run and new_text != text:
         path.write_text(new_text)
     return changes
@@ -132,6 +150,31 @@ def rename_cli_app_name(cli_path: Path, new_name: str, dry_run: bool) -> list[st
     return [f"  CLI app name: lup -> {new_name}"]
 
 
+def find_stale_references(root: Path) -> list[str]:
+    """List surviving ``lup_template`` occurrences for manual triage.
+
+    Covers reference forms the rewriting passes deliberately leave alone —
+    docstring prose, path fragments, generated-content templates — so
+    nothing dangles silently after a rename.
+    """
+    scan_files = [
+        path
+        for search_dir in [root / "src", root / "tests"]
+        if search_dir.is_dir()
+        for path in sorted(search_dir.rglob("*.py"))
+        if not is_renamer_module(path)
+    ]
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file():
+        scan_files.append(pyproject)
+    return [
+        f"  {path.relative_to(root)}:{lineno}: {line.strip()}"
+        for path in scan_files
+        for lineno, line in enumerate(path.read_text().splitlines(), start=1)
+        if "lup_template" in line
+    ]
+
+
 def rename_package(
     new_name: str,
     dry_run: bool,
@@ -169,7 +212,18 @@ def rename_package(
 
     typer.echo("Import renames:" if dry_run else "Renaming imports...")
     for py_file in sorted(python_files):
-        all_changes.extend(rename_imports_in_file(py_file, new_name, dry_run))
+        all_changes.extend(
+            rename_pattern_in_file(py_file, PACKAGE_IMPORT_RE, new_name, dry_run)
+        )
+
+    typer.echo("\nString anchors:" if dry_run else "Renaming string anchors...")
+    for py_file in sorted(python_files):
+        if not is_renamer_module(py_file):
+            all_changes.extend(
+                rename_pattern_in_file(
+                    py_file, PACKAGE_STRING_ANCHOR_RE, new_name, dry_run
+                )
+            )
 
     pyproject = root / "pyproject.toml"
     typer.echo("\npyproject.toml:" if dry_run else "Updating pyproject.toml...")
@@ -199,6 +253,13 @@ def rename_package(
         typer.echo(change)
 
     if not dry_run:
+        stale = find_stale_references(root)
+        if stale:
+            typer.echo(
+                f"\nRemaining lup_template references ({len(stale)}) — review manually:"
+            )
+            for line in stale:
+                typer.echo(line)
         typer.echo("\nNext steps:")
         typer.echo("  uv sync")
         typer.echo("  uv run pyright")
