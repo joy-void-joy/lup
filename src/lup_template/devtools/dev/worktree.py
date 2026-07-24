@@ -145,13 +145,15 @@ def create(
             typer.echo(f"Warning: uv sync failed: {decode_stderr(e)}")
 
     typer.echo()
+    typer.echo(f"Worktree path: {worktree_path}")
+    typer.echo("Creating a worktree does not move whoever ran this. To follow it:")
+    typer.echo("  agent:  EnterWorktree(path=<the path above>)")
     cd_command = f"cd /; cd {worktree_path}; claude"
 
     if copy_to_clipboard(cd_command):
-        typer.echo(f"Copied to clipboard: {cd_command}")
+        typer.echo(f"  shell:  {cd_command}   [copied to clipboard]")
     else:
-        typer.echo("Done! To switch to the new worktree:")
-        typer.echo(f"  {cd_command}")
+        typer.echo(f"  shell:  {cd_command}")
 
 
 def worktree_status(path: str) -> str:
