@@ -278,11 +278,19 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     ),
                     content=render_policy_data(
                         allowed_fetch_scopes=[
-                            runtime_url_scope(str(scope.origin), scope.path_prefix)
+                            runtime_url_scope(
+                                str(scope.origin),
+                                scope.path_prefix,
+                                include_subdomains=scope.include_subdomains,
+                            )
                             for scope in source.allowed_fetch
                         ],
                         denied_fetch_scopes=[
-                            runtime_url_scope(str(scope.origin), scope.path_prefix)
+                            runtime_url_scope(
+                                str(scope.origin),
+                                scope.path_prefix,
+                                include_subdomains=scope.include_subdomains,
+                            )
                             for scope in source.denied_fetch
                         ],
                         protected_roots=[

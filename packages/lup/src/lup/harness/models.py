@@ -177,6 +177,13 @@ class HookUrlScope(BaseModel):
 
     origin: AnyHttpUrl
     path_prefix: UrlPathPrefix = "/"
+    include_subdomains: bool = Field(
+        default=False,
+        description=(
+            "Extend the scope to every host beneath the origin, rendered as a "
+            "*.host wildcard in the OS sandbox network allowlist"
+        ),
+    )
 
 
 class HookSandbox(BaseModel):
@@ -185,6 +192,13 @@ class HookSandbox(BaseModel):
     Fetch-scope hostnames join extra_domains as the network allowlist, and
     human-owned files become OS-level write denials, so one declaration
     feeds both the semantic policy and the kernel-enforced boundary.
+
+    That makes allowed_fetch the home for any origin an agent should be able
+    to read: declaring it there grants both the fetch and the egress. Reserve
+    extra_domains for hosts that need egress but are not readable sources —
+    an authenticated API a library calls, never a document the agent opens.
+    Listing a readable origin here instead is what lets the two boundaries
+    disagree, with the OS admitting a host the fetch policy still asks about.
     """
 
     model_config = FROZEN

@@ -28,7 +28,7 @@ type PathRuleKind = Literal[
     "contains_part",
     "new_devtools",
 ]
-type UrlScopeRow = tuple[str, str, int | None, str, str]
+type UrlScopeRow = tuple[str, str, int | None, str, str, bool]
 type PathRuleRow = tuple[PathRuleKind, str, str, bool]
 type AntiPatternRow = tuple[str, str, str, str]
 
@@ -2222,6 +2222,18 @@ def decide_shell(
     )
 
 
+def host_matches_scope(hostname: str, expected_host: str, subdomains: bool) -> bool:
+    """Match a host exactly, or beneath a scope that opted into subdomains.
+
+    The leading dot is required so a scope for ``githubusercontent.com``
+    covers ``raw.githubusercontent.com`` without also covering a
+    lookalike registration like ``evilgithubusercontent.com``.
+    """
+    return hostname == expected_host or (
+        subdomains and hostname.endswith(f".{expected_host}")
+    )
+
+
 def url_matches_scope(
     scheme: str,
     hostname: str,
@@ -2230,10 +2242,12 @@ def url_matches_scope(
     scope: UrlScopeRow,
 ) -> bool:
     """Compare parsed URL components with one primitive scope row."""
-    expected_scheme, expected_host, expected_port, path_prefix, _reason = scope
+    expected_scheme, expected_host, expected_port, path_prefix, _reason, subdomains = (
+        scope
+    )
     return (
         scheme == expected_scheme
-        and hostname == expected_host
+        and host_matches_scope(hostname, expected_host, subdomains)
         and port == expected_port
         and path.startswith(path_prefix)
     )

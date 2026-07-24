@@ -471,6 +471,11 @@ FETCH_POLICY_CASES = [
     DecisionCase(input="http://docs.example.com:8443/reference/api", effect="ask"),
     DecisionCase(input="https://docs.example.com/reference/api", effect="ask"),
     DecisionCase(input="https://docs.example.com:8443/private", effect="ask"),
+    DecisionCase(input="https://api.docs.example.com:8443/reference/api", effect="ask"),
+    DecisionCase(input="https://cdn.example.org/asset.js", effect="allow"),
+    DecisionCase(input="https://raw.cdn.example.org/asset.js", effect="allow"),
+    DecisionCase(input="https://one.two.cdn.example.org/asset.js", effect="allow"),
+    DecisionCase(input="https://evilcdn.example.org/asset.js", effect="ask"),
 ]
 
 EDIT_POLICY_CASES = [
@@ -653,7 +658,10 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
     (runtime / "policy_data.py").write_text(
         render_policy_data(
             allowed_fetch_scopes=[
-                runtime_url_scope("https://docs.example.com:8443", "/reference/")
+                runtime_url_scope("https://docs.example.com:8443", "/reference/"),
+                runtime_url_scope(
+                    "https://cdn.example.org", "/", include_subdomains=True
+                ),
             ],
             denied_fetch_scopes=[
                 runtime_url_scope(
@@ -836,8 +844,18 @@ def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) ->
         path_prefix="/reference/private/",
         reason="sensitive documentation path",
     )
-    policy = FetchPolicy(allowed=[scope], denied=[denied_scope])
-    wire_scope = [runtime_url_scope(str(scope.origin), scope.path_prefix)]
+    subdomain_scope = UrlScope(
+        origin=AnyHttpUrl("https://cdn.example.org"), include_subdomains=True
+    )
+    policy = FetchPolicy(allowed=[scope, subdomain_scope], denied=[denied_scope])
+    wire_scope = [
+        runtime_url_scope(str(scope.origin), scope.path_prefix),
+        runtime_url_scope(
+            str(subdomain_scope.origin),
+            subdomain_scope.path_prefix,
+            include_subdomains=True,
+        ),
+    ]
     denied_wire_scope = [
         runtime_url_scope(
             str(denied_scope.origin), denied_scope.path_prefix, denied_scope.reason

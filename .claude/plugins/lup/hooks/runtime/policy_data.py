@@ -11,6 +11,7 @@ ALLOWED_FETCH_SCOPES = [
         None,
         "/",
         "",
+        False,
     ),
     (
         "http",
@@ -18,6 +19,7 @@ ALLOWED_FETCH_SCOPES = [
         None,
         "/",
         "",
+        False,
     ),
     (
         "https",
@@ -25,6 +27,7 @@ ALLOWED_FETCH_SCOPES = [
         None,
         "/",
         "",
+        False,
     ),
     (
         "http",
@@ -32,6 +35,7 @@ ALLOWED_FETCH_SCOPES = [
         None,
         "/",
         "",
+        False,
     ),
     (
         "https",
@@ -39,6 +43,7 @@ ALLOWED_FETCH_SCOPES = [
         None,
         "/",
         "",
+        False,
     ),
     (
         "http",
@@ -46,6 +51,7 @@ ALLOWED_FETCH_SCOPES = [
         None,
         "/",
         "",
+        False,
     ),
     (
         "https",
@@ -53,6 +59,7 @@ ALLOWED_FETCH_SCOPES = [
         None,
         "/",
         "",
+        False,
     ),
     (
         "http",
@@ -60,6 +67,7 @@ ALLOWED_FETCH_SCOPES = [
         None,
         "/",
         "",
+        False,
     ),
     (
         "https",
@@ -67,6 +75,7 @@ ALLOWED_FETCH_SCOPES = [
         None,
         "/",
         "",
+        False,
     ),
     (
         "http",
@@ -74,6 +83,7 @@ ALLOWED_FETCH_SCOPES = [
         None,
         "/",
         "",
+        False,
     ),
 ]
 
