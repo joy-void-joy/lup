@@ -20,6 +20,15 @@ def sandbox_active():
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
+def managed_script_roots() -> list[str]:
+    """Return absolute package roots installed and trusted by Codex."""
+    environ = os.environ  # lup: ignore[os-environ]
+    root = Path(environ["CODEX_HOME"]) if "CODEX_HOME" in environ else None
+    if root is None or not root.is_absolute():
+        return []
+    return [str(root / "skills"), str(root / "plugins" / "cache")]
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -30,6 +39,7 @@ def dispatch(payload):
             ALLOWED_FETCH_SCOPES,
             DENIED_FETCH_SCOPES,
             sandboxed=sandbox_active(),
+            trusted_script_roots=managed_script_roots(),
         )
     if name == "web_fetch":
         return decide_fetch(

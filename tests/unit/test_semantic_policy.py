@@ -93,6 +93,9 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo payload >> src/generated.py", effect="ask"),
     DecisionCase(input="gh pr view 123", effect="allow"),
     DecisionCase(input="uv run tool --help", effect="allow"),
+    DecisionCase(
+        input="uv run lup-devtools dev worktree create feature", effect="allow"
+    ),
     # Redirections: discards and fd duplication are stripped; file writes ask.
     DecisionCase(input="grep x f 2>&1", effect="allow"),
     DecisionCase(input="grep x f > /dev/null", effect="allow"),
@@ -215,6 +218,16 @@ SHELL_POLICY_CASES = [
         effect="allow",
     ),
     DecisionCase(input="git config core.pager=x", effect="ask"),
+    # Read verbs pin git config to its query action; writes, scoped writes,
+    # and opaque words keep the row's ask.
+    DecisionCase(input="git config --get user.name", effect="allow"),
+    DecisionCase(input="git config --get-regexp 'branch\\..*'", effect="allow"),
+    DecisionCase(input="git config --list", effect="allow"),
+    DecisionCase(input="git config -l", effect="allow"),
+    DecisionCase(input="git config user.name me", effect="ask"),
+    DecisionCase(input="git config --unset user.name", effect="ask"),
+    DecisionCase(input="git config --global user.name me", effect="ask"),
+    DecisionCase(input="git config --get $KEY", effect="ask"),
     # Global value flags are consumed, never read as the subcommand; globals
     # that change execution behavior ask.
     DecisionCase(input="git -C /other status", effect="allow"),
@@ -259,6 +272,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="GIT_SSH_COMMAND=./x git fetch origin", effect="ask"),
     DecisionCase(input="git fetch ext::sh -c id", effect="ask"),
     DecisionCase(input="uv run --with evil pytest", effect="ask"),
+    # Unknown words behind a literal blessed uv run target only reach that
+    # target's argv; at or before the target they keep the opaque gate.
+    DecisionCase(
+        input='uv run lup-devtools dev pr update 22 --body "$(cat tmp/x.md)"',
+        effect="allow",
+    ),
+    DecisionCase(
+        input='uv run --python "$(cat v.txt)" lup-devtools dev check', effect="deny"
+    ),
+    DecisionCase(input='uv run "$(cat t.txt)" dev check', effect="deny"),
     DecisionCase(input="uv run ./pytest", effect="deny"),
     DecisionCase(input="uv run /tmp/tool --help", effect="deny"),
     DecisionCase(input="printf . | xargs find . -delete", effect="ask"),
@@ -828,6 +851,28 @@ def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
         == "deny"
     )
     assert policy.decide(ShellCommand(command="echo $(dangerous)")).effect == "deny"
+
+
+def test_shell_policy_confines_trusted_native_skill_scripts() -> None:
+    root = "/opt/codex/skills"
+    policy = ShellPolicy(trusted_script_roots=[root])
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    helper = f"{root}/.system/openai-docs/scripts/fetch-codex-manual.mjs"
+    assert effect(f"node {helper}") == "allow"
+    assert effect(f"if true; then sh {root}/tool/scripts/resolve; fi") == "allow"
+    assert effect(f"node {helper} && rm source.py") == "ask"
+    assert effect("node /tmp/openai-docs/scripts/fetch-codex-manual.mjs") == "deny"
+    assert effect(f"node {root}/../escape.mjs") == "deny"
+    assert effect("node --eval 'process.exit()'") == "deny"
+    assert (
+        ShellPolicy(trusted_script_roots=["/"])
+        .decide(ShellCommand(command="node /tmp/untrusted-script.mjs"))
+        .effect
+        == "deny"
+    )
 
 
 def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
