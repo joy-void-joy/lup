@@ -429,19 +429,20 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 WORKFLOW_THROUGH_COMMIT_FORMAT: list[models.PromptPart] = [
     models.TextPart(
         text=r""", so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
-2. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
-3. Push the branch when the feature is complete (or periodically for backup)
-4. **`"""
+2. **Relocate this session into the worktree** -- `EnterWorktree(path=<the absolute path step 1 prints>)`. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale. Return with `ExitWorktree(action="keep")`.
+3. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
+4. Push the branch when the feature is complete (or periodically for backup)
+5. **`"""
     ),
     models.SkillInvocation(plugin="lup", skill="rebase"),
     models.TextPart(
         text=r"""`** -- Pushes the branch, opens a PR, then cleans up the commit history with `git reset --soft main` and force-pushes.
-5. **Review the PR** -- If changes are needed, fix them on the feature branch and re-run `"""
+6. **Review the PR** -- If changes are needed, fix them on the feature branch and re-run `"""
     ),
     models.SkillInvocation(plugin="lup", skill="rebase"),
     models.TextPart(
         text=r"""` (it rebuilds the history and force-pushes, updating the PR).
-6. **`"""
+7. **`"""
     ),
     models.SkillInvocation(plugin="lup", skill="close"),
     models.TextPart(

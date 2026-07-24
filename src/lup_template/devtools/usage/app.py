@@ -21,10 +21,7 @@ from lup_template.devtools.usage.render import (
     build_snapshot,
 )
 
-app = typer.Typer(
-    help="Claude Code live usage display",
-    invoke_without_command=True,
-)
+app = typer.Typer(no_args_is_help=True)
 console = Console()
 
 
@@ -54,8 +51,8 @@ def emit_json(config_dir: Path, detail: bool) -> None:
 # ── CLI ────────────────────────────────────────────────────
 
 
-@app.callback(invoke_without_command=True)
-def main(
+@app.command("claude")
+def claude(
     profile: Annotated[
         str | None,
         typer.Option(

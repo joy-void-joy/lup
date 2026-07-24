@@ -91,7 +91,10 @@ def parse_answer_flags(
     flags: list[str],
 ) -> dict[str, str]:  # lup: ignore[dict-str-payload] — open question-id map
     """Split repeatable ``--answer`` flags into a question-id to value map."""
-    pairs = [flag.split("=", 1) for flag in flags]
+    pairs = [
+        flag.split("=", 1)  # lup: ignore[string-split] — this CLI's flag grammar
+        for flag in flags
+    ]
     malformed = [
         flag
         for flag, pair in zip(flags, pairs, strict=True)

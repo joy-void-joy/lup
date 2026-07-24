@@ -2,7 +2,7 @@
 
 from urllib.parse import urlsplit
 
-from lup.harness.models import HookSet
+from lup.harness.models import HookSet, HookUrlScope
 from lup.types import JsonObject, JsonValue
 
 SETTINGS: JsonObject = {
@@ -41,11 +41,24 @@ SETTINGS: JsonObject = {
 
 
 def allowed_network_domains(hooks: HookSet) -> list[str]:
-    """Collect fetch-scope hostnames and declared extras, first-seen order."""
+    """Collect fetch-scope hostnames and declared extras, first-seen order.
+
+    A scope that includes subdomains contributes both its apex host and the
+    ``*.host`` wildcard, so the OS boundary admits exactly what the semantic
+    fetch policy already allows.
+    """
     if hooks.sandbox is None:
         return []
-    hostnames = [urlsplit(str(scope.origin)).hostname for scope in hooks.allowed_fetch]
-    merged = [name for name in hostnames if name is not None]
+
+    def sandbox_domains(scope: HookUrlScope) -> list[str]:
+        host = urlsplit(str(scope.origin)).hostname
+        if host is None:
+            return []
+        return [host, f"*.{host}"] if scope.include_subdomains else [host]
+
+    merged = [
+        domain for scope in hooks.allowed_fetch for domain in sandbox_domains(scope)
+    ]
     merged.extend(hooks.sandbox.extra_domains)
     return list(dict.fromkeys(merged))
 

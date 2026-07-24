@@ -5,7 +5,7 @@ import lup.harness.models as models
 SKILL = models.Skill(
     id="skill.clean-gone",
     name="clean-gone",
-    description="Review branches/worktrees and clean up merged ones",
+    description="Sweep every branch to one disposition — land unlanded work, clear merged ones",
     arguments=[
         models.Argument(
             name="arguments",
@@ -13,18 +13,25 @@ SKILL = models.Skill(
             required=False,
         ),
     ],
-    tools=["Bash(uv run lup-devtools:*)", "AskUserQuestion", "Skill(lup:commit)"],
+    tools=[
+        "Bash(uv run lup-devtools:*)",
+        "AskUserQuestion",
+        "EnterWorktree",
+        "Skill(lup:commit)",
+        "Skill(lup:rebase)",
+        "Skill(lup:merge)",
+    ],
     argument_hint="[branch-name]",
     prompt=models.PromptDocument(
         parts=[
             models.TextPart(
-                text=r"""# Clean Merged Branches
+                text=r"""# Branch Disposition Sweep
 
-Review all local branches and worktrees. Identify branches that are fully merged or have completed PRs. Present the merge graph and ask before deleting.
+Resolve every local branch to exactly one disposition and act on it. Unlanded work and merged leftovers surface in the same pass, so no branch sits in a silent bucket waiting to go stale.
 
 ## Arguments
 
-- **branch-name** (optional): Name of a specific branch to remove. If provided, runs in targeted mode. If omitted, runs a full scan.
+- **branch-name** (optional): a single branch to dispose of. If provided, runs in targeted mode. If omitted, sweeps every branch.
 
 Raw arguments: `"""
             ),
@@ -42,16 +49,16 @@ Invoke `"""
             ),
             models.SkillInvocation(plugin="lup", skill="commit"),
             models.TextPart(
-                text=r"""` to commit any uncommitted work before cleaning up branches.
+                text=r"""` to commit any uncommitted work before the sweep.
 
 ## Targeted Mode (branch name provided)
 
-1. Run `uv run lup-devtools dev survey --json` to get full branch data.
-2. Find the target branch in the survey results. If not found, report and stop.
-3. Show the branch's status (containment, PR, unique commits) and confirm deletion via AskUserQuestion.
-4. Run `uv run lup-devtools dev delete <branch-name>` (add `--force` only with explicit user approval).
+1. Run `uv run lup-devtools dev survey --json`.
+2. Find the named branch. If it is absent, report and stop.
+3. Show its `disposition` and `reason`, and confirm the matching action via AskUserQuestion.
+4. Carry out that disposition's action from the table below.
 
-## Full Scan Mode (no argument)
+## Full Sweep Mode (no argument)
 
 ### 2. Collect data
 
@@ -59,43 +66,59 @@ Invoke `"""
 uv run lup-devtools dev survey --json
 ```
 
-### 3. Classify each branch
+Every branch arrives with a `disposition` and a `reason` already computed. **Do not re-derive them** — the classifier is shared with `dev status`, so a judgement made here would drift from the one made there.
 
-Using the survey JSON, classify each branch:
+### 3. Present the sweep
 
-- **DELETE** -- `contained_in` is non-empty (fully contained in another branch), or PR state is `MERGED`
-- **STALE** -- Few `unique_commits` AND low `source_diff_lines` (content superseded by integration branch's continued development). Also check for transitive merges: if branch B is contained in a branch whose PR was merged, B's content reached integration transitively.
-- **KEEP** -- Has unique commits not captured elsewhere, or has an open PR
-- **CURRENT** -- `is_current` is true (never delete, warn if it qualifies)
+One table covering every branch, ordered `LAND` first (that is the work at risk), then `DELETE`/`STALE`, then `KEEP`/`CURRENT`:
 
-### 4. Present the merge graph
+| Branch | Disposition | Unique | Diff | PR | Proposed action |
 
-Show a table with:
-- Branch name, containment info, PR status, unique commits, diff lines
-- Proposed action (DELETE/STALE/KEEP) with reason
-- For STALE branches, show the transitive path
+### 4. Act on each disposition
 
-### 5. Confirm and delete
+| Disposition | Meaning | Action |
+| --- | --- | --- |
+| `LAND` | Holds commits the integration branch lacks, with no PR driving it | Land it — step 5 |
+| `DELETE` | Reached the integration branch, or its PR merged | `uv run lup-devtools dev delete <branch>` |
+| `STALE` | Every commit already cherry-picked into the integration branch | Confirm, then delete |
+| `KEEP` | Protected, or an open PR is already driving it | Leave alone |
+| `CURRENT` | The branch checked out here | Never delete; warn if it would otherwise qualify |
 
-Use AskUserQuestion to confirm before deleting anything. For each confirmed deletion:
+### 5. Landing a LAND branch
 
-```bash
-uv run lup-devtools dev delete <branch-name>
-```
+Ask the user, per branch, which route to take:
 
-If safe delete (`-d`) fails, report to user and ask if `--force` is acceptable.
+- **Open a PR** — relocate into that branch's worktree with `EnterWorktree(path=<the survey's worktree field>)`, or create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `"""
+            ),
+            models.SkillInvocation(plugin="lup", skill="rebase"),
+            models.TextPart(
+                text=r"""`.
+- **Merge directly** — from the integration checkout, `"""
+            ),
+            models.SkillInvocation(plugin="lup", skill="merge"),
+            models.TextPart(
+                text=r""" <branch>`. Suits small, uncontroversial work that needs no review.
+- **Drop it** — the work is not worth landing. Requires explicit confirmation, then delete.
 
-### 6. Report results
+Never choose a route on the user's behalf: a `LAND` branch by definition carries no PR expressing intent, so the intent has to come from them.
 
-List what was cleaned up.
+Land the oldest divergence first. Every branch that lands moves the integration branch, so the ones behind it re-diverge and their conflict surface grows.
+
+### 6. Confirm and execute
+
+Use AskUserQuestion before anything that deletes or pushes. Then carry out the approved actions.
+
+### 7. Report results
+
+What landed, what was deleted, and what was deliberately left alone.
 
 ## Guidelines
 
 - Never force-delete without explicit user approval for that specific branch
-- Always confirm before deleting anything
-- Skip the current branch -- warn the user instead
-- A branch merged into ANY other active branch counts as consumed
-- For rebased branches: the original feature branch content may be in integration via a rebase PR, even though `--is-ancestor` returns false
+- **Never delete a `LAND` branch unless the user explicitly chose to drop it** — it holds the only copy of that work
+- Skip the current branch — warn the user instead
+- Containment counts as landed only against the integration branch; riding inside a sibling that has not landed either is no reason to drop work
+- For rebased branches, content may have reached the integration branch via a rebase PR even though `--is-ancestor` is false — the `DELETE` disposition already accounts for merged PRs
 """
             ),
         ]

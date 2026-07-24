@@ -33,6 +33,16 @@ class PRStatus(BaseModel):
     url: str = ""
 
 
+type BranchStatus = Literal["LAND", "DELETE", "STALE", "KEEP", "CURRENT", "NOT_FOUND"]
+
+
+class Disposition(BaseModel):
+    """The one verb a branch resolves to, and the reason it got it."""
+
+    status: BranchStatus
+    reason: str
+
+
 class BranchInfo(BaseModel):
     name: str
     commit: str
@@ -43,15 +53,14 @@ class BranchInfo(BaseModel):
     pr: PRStatus | None
     unique_commits: int
     source_diff_lines: int
+    disposition: BranchStatus
+    reason: str
 
 
 class SurveyResult(BaseModel):
     integration_branch: str
     current_branch: str
     branches: list[BranchInfo]
-
-
-type BranchStatus = Literal["DELETE", "STALE", "KEEP", "CURRENT", "NOT_FOUND"]
 
 
 class BranchClassification(TypedDict, total=False):
@@ -250,6 +259,48 @@ def get_pr_info(branch: str) -> PRStatus | None:
 PROTECTED_BRANCHES = {"main", "master", "dev", "develop"}
 
 
+def disposition_for(
+    name: str,
+    *,
+    integration: str,
+    current: str,
+    contained_in: list[str],
+    pr: PRStatus | None,
+    unique_commits: int,
+) -> Disposition:
+    """Resolve a branch to its single disposition.
+
+    Every branch resolves to exactly one verb, so unlanded work has no silent
+    bucket to sit in: a branch holding commits the integration branch lacks,
+    with no open PR driving it, is ``LAND`` rather than ``KEEP``. Containment
+    counts as landed only against the integration branch — sitting inside a
+    sibling that has not landed either is no reason to drop work.
+    """
+    if name == current:
+        return Disposition(status="CURRENT", reason="current branch")
+    if name in PROTECTED_BRANCHES:
+        return Disposition(status="KEEP", reason="protected branch")
+    if integration in contained_in:
+        return Disposition(status="DELETE", reason=f"merged into {integration}")
+    if pr is not None and pr.state == "MERGED":
+        return Disposition(status="DELETE", reason=f"PR #{pr.number} merged")
+    if unique_commits == 0:
+        return Disposition(
+            status="STALE", reason=f"all commits cherry-picked into {integration}"
+        )
+    if pr is not None and pr.state == "OPEN":
+        return Disposition(
+            status="KEEP",
+            reason=f"PR #{pr.number} open, {unique_commits} unique commits",
+        )
+
+    carried = [b for b in contained_in if b != integration]
+    also = f"; also carried by {', '.join(carried)}" if carried else ""
+    return Disposition(
+        status="LAND", reason=f"{unique_commits} unique commits, no PR{also}"
+    )
+
+
 def classify_branch(
     branch: str,
     integration: str,
@@ -267,61 +318,87 @@ def classify_branch(
             "reason": "no such local branch",
         }
 
-    if branch == current:
-        return {"branch": branch, "status": "CURRENT", "reason": "current branch"}
-
-    if branch in PROTECTED_BRANCHES:
-        return {"branch": branch, "status": "KEEP", "reason": "protected branch"}
+    if branch == current or branch in PROTECTED_BRANCHES:
+        guard = disposition_for(
+            branch,
+            integration=integration,
+            current=current,
+            contained_in=[],
+            pr=None,
+            unique_commits=0,
+        )
+        return {"branch": branch, "status": guard.status, "reason": guard.reason}
 
     merged_into_integration = is_ancestor(branch, integration)
     worktree = get_branch_worktree(branch)
     pr = get_pr_info(branch) if has_remote else None
-    pr_state = pr.state if pr else ""
-    pr_merged = pr_state == "MERGED"
     pr_number: str | int = pr.number if pr else ""
     pr_url = pr.url if pr else ""
 
-    if merged_into_integration:
-        return {
-            "branch": branch,
-            "status": "DELETE",
-            "reason": f"merged into {integration}",
-            "worktree": worktree,
-            "pr": pr_number,
-            "pr_url": pr_url,
-        }
-
-    if pr_merged:
-        return {
-            "branch": branch,
-            "status": "DELETE",
-            "reason": f"PR #{pr_number} merged",
-            "worktree": worktree,
-            "pr": pr_number,
-            "pr_url": pr_url,
-        }
-
     counted = count_unique_commits(branch, integration)
-    unique = counted if counted >= 0 else 999
-
-    if unique == 0:
-        return {
-            "branch": branch,
-            "status": "STALE",
-            "reason": f"all commits cherry-picked into {integration}",
-            "worktree": worktree,
-            "pr": pr_number,
-            "pr_url": pr_url,
-        }
+    verdict = disposition_for(
+        branch,
+        integration=integration,
+        current=current,
+        contained_in=[integration] if merged_into_integration else [],
+        pr=pr,
+        unique_commits=counted if counted >= 0 else 999,
+    )
 
     return {
         "branch": branch,
-        "status": "KEEP",
-        "reason": f"{unique} unique commits, PR: {pr_state or 'none'}",
+        "status": verdict.status,
+        "reason": verdict.reason,
         "worktree": worktree,
         "pr": pr_number,
         "pr_url": pr_url,
     }
+
+
+class UnlandedBranch(BaseModel):
+    """A branch holding commits the integration branch does not have."""
+
+    name: str
+    unique_commits: int
+    source_diff_lines: int
+    worktree: str | None
+
+
+def unlanded_siblings() -> list[UnlandedBranch]:
+    """Local-only scan for branches holding work the integration branch lacks.
+
+    Deliberately offline — no fetch, no PR query — because this runs inside
+    every ``dev check``. An open PR driving a branch is therefore invisible
+    here, which is why the result is advisory: it reports what has not
+    reached integration, and the full sweep decides what to do about it.
+
+    The current branch is excluded: work in hand is not work parked out of
+    sight, and reporting it every run would train the reader to skip the line.
+    """
+    integration = get_integration_branch()
+    worktrees = parse_worktrees()
+    current = git.out("branch", "--show-current")
+
+    def measure(name: str) -> UnlandedBranch | None:
+        if name == current or name in PROTECTED_BRANCHES:
+            return None
+        if is_ancestor(name, integration):
+            return None
+        unique = count_unique_commits(name, integration)
+        if unique <= 0:
+            return None
+        return UnlandedBranch(
+            name=name,
+            unique_commits=unique,
+            source_diff_lines=count_source_diff_lines(name, integration),
+            worktree=worktrees.get(name),  # lup: ignore[dict-get] — open map
+        )
+
+    return [
+        found
+        for name in git.lines("branch", "--format=%(refname:short)")
+        if (found := measure(name)) is not None
+    ]
 
 
 class BaseCandidate(BaseModel):
@@ -436,6 +513,7 @@ def branch_status(branch: str | None, as_json: bool) -> None:
     typer.echo(f"\nIntegration branch: {integration}")
     typer.echo(f"Current branch: {current}\n")
     status_markers: dict[BranchStatus, str] = {
+        "LAND": "^",
         "DELETE": "x",
         "STALE": "~",
         "KEEP": " ",
@@ -454,6 +532,10 @@ def branch_status(branch: str | None, as_json: bool) -> None:
     deletable = [r for r in results if r["status"] in ("DELETE", "STALE")]
     if deletable:
         typer.echo(f"{len(deletable)} branch(es) can be cleaned up")
+
+    landable = [r for r in results if r["status"] == "LAND"]
+    if landable:
+        typer.echo(f"{len(landable)} branch(es) hold unlanded work")
 
 
 def base_branch(branch: str | None, as_json: bool) -> None:
@@ -557,12 +639,21 @@ def survey(as_json: bool) -> None:
         contained_in = containment[name]
         pr_merged = name in pr_map and pr_map[name].state == "MERGED"
 
-        if contained_in or pr_merged:
+        if integration in contained_in or pr_merged:
             unique = 0
             diff_lines = 0
         else:
             unique = count_unique_commits(name, integration)
             diff_lines = count_source_diff_lines(name, integration)
+
+        verdict = disposition_for(
+            name,
+            integration=integration,
+            current=cur,
+            contained_in=contained_in,
+            pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
+            unique_commits=unique,
+        )
 
         return BranchInfo(
             name=name,
@@ -574,6 +665,8 @@ def survey(as_json: bool) -> None:
             pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
             unique_commits=unique,
             source_diff_lines=diff_lines,
+            disposition=verdict.status,
+            reason=verdict.reason,
         )
 
     branches_list = [info(b) for b in raw_branches]
@@ -590,19 +683,18 @@ def survey(as_json: bool) -> None:
         typer.echo(f"\nIntegration: {integration} | Current: {cur}\n")
 
         def display_row(bi: BranchInfo) -> list[str]:
-            contained = ", ".join(bi.contained_in) if bi.contained_in else "-"
             pr_str = f"#{bi.pr.number} {bi.pr.state}" if bi.pr else "-"
             marker = "* " if bi.is_current else "  "
             return [
                 f"{marker}{bi.name}",
-                bi.commit,
-                contained,
-                pr_str,
+                bi.disposition,
                 str(bi.unique_commits),
                 str(bi.source_diff_lines),
+                pr_str,
+                bi.reason,
             ]
 
-        headers = ("Branch", "Commit", "Contained In", "PR", "Unique", "Diff")
+        headers = ("Branch", "Disposition", "Unique", "Diff", "PR", "Reason")
         typer.echo(format_table(headers, [display_row(bi) for bi in branches_list]))
 
 

@@ -11,9 +11,9 @@ Codex cost needs ``CODEX_USD_PER_MTOK_*`` rates).
 
 Examples::
 
-    $ uv run lup-devtools usage
-    $ uv run lup-devtools usage --no-watch
-    $ uv run lup-devtools usage --no-detail
-    $ uv run lup-devtools usage --json
-    $ uv run lup-devtools usage --watch --interval 300
+    $ uv run lup-devtools usage claude
+    $ uv run lup-devtools usage claude --no-watch
+    $ uv run lup-devtools usage claude --no-detail
+    $ uv run lup-devtools usage claude --json
+    $ uv run lup-devtools usage claude --watch --interval 300
 """

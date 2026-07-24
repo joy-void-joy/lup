@@ -140,7 +140,7 @@ def print_aggregate_stats(sessions: list[LoadedSession]) -> None:
 def costs(version: str | None, all_versions: bool, as_json: bool) -> None:
     """Per-backend session cost/token rollup from session result JSONs.
 
-    The cross-backend counterpart of ``lup-devtools usage`` (which is
+    The cross-backend counterpart of ``lup-devtools usage claude`` (which is
     Anthropic-OAuth only): codex/openai sessions carry normalized token
     usage and rate-estimated cost in their session JSON, and this is
     where they aggregate.
