@@ -55,6 +55,7 @@ from lup.types import EnvVars
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
+from lup_template.devtools.dev.worktree import get_tree_dir
 from lup_template.devtools.harness.launch import codex_sandbox_arguments
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
@@ -1167,8 +1168,18 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
 def test_codex_sandbox_arguments_establish_the_envelope() -> None:
     environment: EnvVars = {}
     arguments = codex_sandbox_arguments(environment, ["--model", "gpt-5.2"])
-    assert arguments == ["--sandbox", "workspace-write"]
+    assert arguments[:2] == ["--sandbox", "workspace-write"]
     assert environment["LUP_SANDBOX_ACTIVE"] == "1"
+
+
+def test_codex_sandbox_widens_the_root_to_sibling_worktrees() -> None:
+    """Codex roots writes at the launch cwd; the prescribed worktree is outside."""
+    environment: EnvVars = {}
+    arguments = codex_sandbox_arguments(environment, [])
+    roots = arguments[arguments.index("-c") + 1]
+
+    assert roots.startswith("sandbox_workspace_write.writable_roots=")
+    assert str(get_tree_dir()) in roots
 
 
 def test_codex_sandbox_arguments_defer_to_a_caller_envelope() -> None:
