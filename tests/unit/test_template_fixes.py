@@ -60,7 +60,20 @@ def test_aux_model_explicit_override_wins(monkeypatch: pytest.MonkeyPatch) -> No
 def test_aux_model_claude_defaults_to_opus(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "aux_model", None)
     monkeypatch.setattr(settings, "agent_sdk", "claude")
+    monkeypatch.setattr(settings, "openai_base_url", None)
+    monkeypatch.setattr(settings, "openrouter_api_key", None)
     assert aux_model() == "claude-opus-4-6"
+
+
+def test_aux_model_compat_endpoint_reuses_session_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "aux_model", None)
+    monkeypatch.setattr(settings, "agent_sdk", "claude")
+    monkeypatch.setattr(settings, "model", "anthropic/claude-opus-4.6")
+    monkeypatch.setattr(settings, "openai_base_url", None)
+    monkeypatch.setattr(settings, "openrouter_api_key", "or-key")
+    assert aux_model() == "anthropic/claude-opus-4.6"
 
 
 def test_aux_model_codex_reuses_session_model(

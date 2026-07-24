@@ -307,13 +307,16 @@ settings = Settings()
 def aux_model() -> str:
     """Backend-coherent model for auxiliary agents (reviewer, backgrounds).
 
-    Explicit ``AGENT_AUX_MODEL`` wins. Otherwise Claude sessions get an
-    opus-class reviewer (best results on a subscription) and Codex/OpenAI
-    sessions reuse the session model — the one model the account accepts.
+    Explicit ``AGENT_AUX_MODEL`` wins. Otherwise native Claude sessions get
+    an opus-class reviewer (best results on a subscription), while Codex/
+    OpenAI sessions and compat-endpoint sessions reuse the session model —
+    the one model the account accepts.
     """
     if settings.aux_model:
         return settings.aux_model
-    return "claude-opus-4-6" if settings.agent_sdk == "claude" else settings.model
+    if settings.agent_sdk == "claude" and compat_base_url() is None:
+        return "claude-opus-4-6"
+    return settings.model
 
 
 # Route notes/logs paths into lup.workspace.paths so every consumer (history,
