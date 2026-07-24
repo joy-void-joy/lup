@@ -15,6 +15,7 @@ Examples::
 import json
 import logging
 from pathlib import PurePosixPath
+from typing import Literal
 from urllib.parse import urlparse
 
 import sh
@@ -115,6 +116,7 @@ class MergeResult(BaseModel):
 class SyncBaseResult(BaseModel):
     feature_branch: str
     base_branch: str
+    base_source: Literal["explicit", "recorded", "guessed"]
     merged: bool
     conflicts: list[str]
 
@@ -201,12 +203,20 @@ def format_pr_status(result: PRStatusResult) -> None:
             typer.echo(f"    {marker} {c.name}: {c.conclusion or c.status}")
 
 
-def find_base_branch() -> str:
-    """Auto-detect the base branch by merge-base proximity to HEAD."""
+class DetectedBase(BaseModel):
+    """The auto-detected base branch and how its name was determined."""
+
+    name: str
+    source: Literal["recorded", "guessed"]
+
+
+def find_base_branch() -> DetectedBase:
+    """Auto-detect the base branch, preferring the recorded creation base."""
     try:
-        return detect_base_branch().name
+        candidate = detect_base_branch()
+        return DetectedBase(name=candidate.name, source=candidate.source)
     except (typer.Exit, SystemExit):
-        return get_integration_branch()
+        return DetectedBase(name=get_integration_branch(), source="guessed")
 
 
 def status(
@@ -354,7 +364,13 @@ def sync_base(
 ) -> None:
     """Sync the base branch and merge it into the current feature branch."""
     feature = current_branch()
-    base_branch = base or find_base_branch()
+    base_source: Literal["explicit", "recorded", "guessed"] = "explicit"
+    if base:
+        base_branch = base
+    else:
+        detected = find_base_branch()
+        base_branch = detected.name
+        base_source = detected.source
 
     if not as_json:
         typer.echo(f"Feature branch: {feature}", err=True)
@@ -385,6 +401,7 @@ def sync_base(
         result = SyncBaseResult(
             feature_branch=feature,
             base_branch=base_branch,
+            base_source=base_source,
             merged=True,
             conflicts=[],
         )
@@ -394,6 +411,7 @@ def sync_base(
         result = SyncBaseResult(
             feature_branch=feature,
             base_branch=base_branch,
+            base_source=base_source,
             merged=False,
             conflicts=conflicts,
         )

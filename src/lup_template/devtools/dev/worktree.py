@@ -118,6 +118,11 @@ def create(
         typer.echo(f"Error creating worktree: {decode_stderr(e)}")
         raise typer.Exit(1)
 
+    if not already_exists:
+        origin = base_branch or git.out("branch", "--show-current")
+        if origin and origin != name:
+            git("config", f"branch.{name}.lup-base", origin)
+
     if not no_copy_data:
         for rel_path in GITIGNORED_EXTRAS:
             src = current_dir / rel_path

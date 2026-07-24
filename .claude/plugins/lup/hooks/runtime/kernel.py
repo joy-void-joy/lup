@@ -46,6 +46,11 @@ class ShellRuleRow(TypedDict):
     non-allow row (``ssh-add -l``): the row de-escalates to allow only when
     every remaining word is exactly one of the named flags, so clusters,
     ``=`` values, paths, and unresolved expansions never qualify.
+    ``read_verbs`` name action-selecting flags of a command that enforces one
+    action at a time (``git config --get``): a non-allow row de-escalates to
+    allow when a declared verb appears among words that are all literal and
+    free of guarded flags, because the verb pins the invocation to its query
+    action regardless of the other words.
     """
 
     command: str
@@ -54,6 +59,7 @@ class ShellRuleRow(TypedDict):
     effect: DecisionEffect
     ask_flags: list[str]
     allow_flags: list[str]
+    read_verbs: list[str]
     value_flags: list[str]
     reason: str
 
@@ -120,6 +126,12 @@ INTERPRETERS = (
     "dash",
     "ksh",
     "fish",
+)
+UV_RUN_ALLOWED_TARGETS = (
+    "pyright",
+    "pytest",
+    "ruff",
+    "lup-devtools",
 )
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 IGNORE_RE = re.compile(
@@ -256,6 +268,18 @@ def is_repository_tmp_script(word: str) -> bool:
     return not normalized.startswith("/") and normalized.split("/")[0] == "tmp"
 
 
+def is_trusted_script(word: str, roots: list[str]) -> bool:
+    """Recognize an absolute script confined to a native-managed package root."""
+    if "$" in word or not word.startswith("/"):
+        return False
+    normalized = posixpath.normpath(word)
+    return any(
+        normalized.startswith(posixpath.join(posixpath.normpath(root), ""))
+        for root in roots
+        if root.startswith("/") and posixpath.normpath(root) != "/"
+    )
+
+
 def is_session_scratch_target(word: str) -> bool:
     """Recognize a path confined to the session scratchpad.
 
@@ -342,12 +366,23 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     flag at runtime, so opaque words deny toward an explicit literal binding.
     A non-allow row with ``allow_flags`` de-escalates only when every
     argument is exactly one of those flags — the command's declared pure
-    read-only form.
+    read-only form. One with ``read_verbs`` de-escalates when a declared
+    verb appears and every word is a literal free of guarded flags — the
+    verb pins the invocation to its query action.
     """
     if row["effect"] != "allow" and row["allow_flags"] and arguments:
         if all(word in row["allow_flags"] for word in arguments):
             return KernelDecision(
                 "allow", "every argument is a declared read-only flag"
+            )
+    if row["effect"] != "allow" and row["read_verbs"] and arguments:
+        clean = not any(
+            opaque_argument(word) or flag_matches(word, row["ask_flags"])
+            for word in arguments
+        )
+        if clean and any(word in row["read_verbs"] for word in arguments):
+            return KernelDecision(
+                "allow", "a declared read-only verb pins the query action"
             )
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
@@ -672,6 +707,7 @@ def decide_find_words(
     rows: list[ShellRuleRow],
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> KernelDecision:
     """Classify find, recursing into -exec payloads with {} as a path word.
 
@@ -704,7 +740,9 @@ def decide_find_words(
             ]
             if not payload:
                 return unjudged("find -exec payload is empty")
-            verdict = decide_shell_segment(payload, rows, allowed_scopes, denied_scopes)
+            verdict = decide_shell_segment(
+                payload, rows, allowed_scopes, denied_scopes, trusted_script_roots
+            )
             if verdict.effect != "allow":
                 return verdict
             position = terminator + 1
@@ -857,7 +895,7 @@ def decide_uv(words: list[str]) -> KernelDecision:
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
             )
-        if bare_target and run_command in ("pyright", "pytest", "ruff", "lup-devtools"):
+        if bare_target and run_command in UV_RUN_ALLOWED_TARGETS:
             return KernelDecision("allow")
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")
@@ -930,6 +968,7 @@ def decide_shell_segment(
     rows: list[ShellRuleRow],
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> KernelDecision:
     """Classify one parsed shell segment against the vocabulary and handlers."""
     while segment and segment[0] == "!":
@@ -956,6 +995,8 @@ def decide_shell_segment(
         )
     executable = posixpath.basename(words[0])
     if executable in INTERPRETERS:
+        if len(words) > 1 and is_trusted_script(words[1], trusted_script_roots or []):
+            return KernelDecision("allow", "native-managed skill script")
         return KernelDecision(
             "deny", "bare interpreters and inline code are not allowed"
         )
@@ -977,11 +1018,15 @@ def decide_shell_segment(
         payload = xargs_payload(words)
         if not payload:
             return unjudged("xargs payload is not classified")
-        return decide_shell_segment(payload, rows, allowed_scopes, denied_scopes)
+        return decide_shell_segment(
+            payload, rows, allowed_scopes, denied_scopes, trusted_script_roots
+        )
     if executable == "curl":
         return decide_curl_words(words, allowed_scopes or [], denied_scopes or [])
     if executable == "find":
-        return decide_find_words(words, rows, allowed_scopes, denied_scopes)
+        return decide_find_words(
+            words, rows, allowed_scopes, denied_scopes, trusted_script_roots
+        )
     if executable == "sed":
         return decide_sed_words(words)
     if executable in ("awk", "gawk", "mawk"):
@@ -1581,16 +1626,39 @@ def literal_loop_word(word: str) -> bool:
     )
 
 
+def uv_post_target_words_safe(words: list[str]) -> bool:
+    """True when every unknown word sits strictly after a blessed uv run target.
+
+    uv stops parsing its own options at the first positional word, so a word
+    after a literal blessed target only ever reaches that target's argv —
+    the trust literal arguments already receive there. An unknown word at or
+    before the target could become a uv flag, a flag value, or the target
+    itself, so any such word keeps the conservative gate.
+    """
+    if len(words) < 3 or words[1] != "run":
+        return False
+    for word in words[2:]:
+        if opaque_argument(word):
+            return False
+        if word.startswith("-"):
+            continue
+        return "/" not in word and word in UV_RUN_ALLOWED_TARGETS
+    return False
+
+
 def argument_safe_words(words: list[str], rows: list[ShellRuleRow]) -> bool:
     """True when the command's row allows regardless of argument content.
 
     A loop variable bound to a non-literal word list can expand to any word,
     including a flag-shaped one, so only a single unguarded command-level
     allow row qualifies — flag-guarded rows and the specially parsed
-    executables do not.
+    executables do not. ``uv run`` is the carved-out exception: unknown
+    words strictly behind a literal blessed target are inert.
     """
     executable = posixpath.basename(words[0])
-    if executable in INTERPRETERS or executable in ("sed", "git", "uv", "uvx", "xargs"):
+    if executable == "uv":
+        return uv_post_target_words_safe(words)
+    if executable in INTERPRETERS or executable in ("sed", "git", "uvx", "xargs"):
         return False
     matches = [row for row in rows if row["command"] == executable]
     return (
@@ -1683,6 +1751,7 @@ def decide_for_body(
     bindings: tuple[ShellBinding, ...] = (),
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> list[KernelDecision]:
     """Classify a ``for`` body once per literal loop word, or gated when opaque.
 
@@ -1715,6 +1784,7 @@ def decide_for_body(
                 bindings,
                 allowed_scopes,
                 denied_scopes,
+                trusted_script_roots,
             )
         ]
 
@@ -1741,6 +1811,7 @@ def decide_loop(
     bindings: tuple[ShellBinding, ...] = (),
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one loop construct, returning its decisions and the next index.
 
@@ -1776,6 +1847,7 @@ def decide_loop(
                     bindings,
                     allowed_scopes,
                     denied_scopes,
+                    trusted_script_roots,
                 ),
                 end + 1,
             )
@@ -1792,6 +1864,7 @@ def decide_loop(
                 bindings,
                 allowed_scopes,
                 denied_scopes,
+                trusted_script_roots,
             )
             return decisions, end + 1
     return unjudged("loop construct does not parse")
@@ -1831,6 +1904,7 @@ def decide_conditional(
     bindings: tuple[ShellBinding, ...] = (),
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one ``if`` construct: conditions and branches recursively."""
     if depth >= 2:
@@ -1847,7 +1921,13 @@ def decide_conditional(
         return unjudged("conditional is empty")
     return (
         decide_segment_list(
-            interior, rows, depth + 1, bindings, allowed_scopes, denied_scopes
+            interior,
+            rows,
+            depth + 1,
+            bindings,
+            allowed_scopes,
+            denied_scopes,
+            trusted_script_roots,
         ),
         end + 1,
     )
@@ -1861,6 +1941,7 @@ def decide_case(
     bindings: tuple[ShellBinding, ...] = (),
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> tuple[list[KernelDecision], int] | KernelDecision:
     """Classify one ``case`` construct: patterns are match data, bodies recurse."""
     if depth >= 2:
@@ -1899,7 +1980,13 @@ def decide_case(
         return [], end + 1
     return (
         decide_segment_list(
-            body, rows, depth + 1, bindings, allowed_scopes, denied_scopes
+            body,
+            rows,
+            depth + 1,
+            bindings,
+            allowed_scopes,
+            denied_scopes,
+            trusted_script_roots,
         ),
         end + 1,
     )
@@ -1912,6 +1999,7 @@ def decide_segment_list(
     bindings: tuple[ShellBinding, ...] = (),
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> list[KernelDecision]:
     """Classify a segment list, grouping structured constructs recursively.
 
@@ -1959,6 +2047,7 @@ def decide_segment_list(
                         bindings,
                         allowed_scopes,
                         denied_scopes,
+                        trusted_script_roots,
                     )
                 case "if":
                     outcome = decide_conditional(
@@ -1969,6 +2058,7 @@ def decide_segment_list(
                         bindings,
                         allowed_scopes,
                         denied_scopes,
+                        trusted_script_roots,
                     )
                 case _:
                     outcome = decide_case(
@@ -1979,6 +2069,7 @@ def decide_segment_list(
                         bindings,
                         allowed_scopes,
                         denied_scopes,
+                        trusted_script_roots,
                     )
             if isinstance(outcome, KernelDecision):
                 return [*decisions, outcome]
@@ -2009,7 +2100,13 @@ def decide_segment_list(
             index += 1
             continue
         decisions.append(
-            decide_shell_segment(segment, rows, allowed_scopes, denied_scopes)
+            decide_shell_segment(
+                segment,
+                rows,
+                allowed_scopes,
+                denied_scopes,
+                trusted_script_roots,
+            )
         )
         index += 1
     return decisions
@@ -2020,13 +2117,14 @@ def classify_shell(
     rows: list[ShellRuleRow],
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
+    trusted_script_roots: list[str] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(command)
     if isinstance(segments, KernelDecision):
         return segments
     decisions = decide_segment_list(
-        segments, rows, 0, (), allowed_scopes, denied_scopes
+        segments, rows, 0, (), allowed_scopes, denied_scopes, trusted_script_roots
     )
     denied = next((item for item in decisions if item.effect == "deny"), None)
     if denied is not None:
@@ -2046,6 +2144,7 @@ def decide_shell(
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
     sandboxed: bool = False,
+    trusted_script_roots: list[str] | None = None,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -2066,12 +2165,18 @@ def decide_shell(
                 "deny", "escalation requires a stated reason" + ESCALATE_HINT
             )
         inner = classify_shell(
-            command[marker.end() :], rows, allowed_scopes, denied_scopes
+            command[marker.end() :],
+            rows,
+            allowed_scopes,
+            denied_scopes,
+            trusted_script_roots,
         )
         if inner.effect == "allow":
             return inner
         return KernelDecision("ask", f"escalated ({why}): {inner.reason}")
-    decision = classify_shell(command, rows, allowed_scopes, denied_scopes)
+    decision = classify_shell(
+        command, rows, allowed_scopes, denied_scopes, trusted_script_roots
+    )
     if decision.effect == "defer" and sandboxed:
         return decision
     if decision.effect in ("deny", "defer"):

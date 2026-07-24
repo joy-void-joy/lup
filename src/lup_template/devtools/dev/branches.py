@@ -325,20 +325,37 @@ def classify_branch(
 
 
 class BaseCandidate(BaseModel):
-    """A candidate base branch, measured against the branch under test."""
+    """A candidate base branch, measured against the branch under test.
+
+    ``source`` states whether the name came from the base recorded at
+    worktree creation or from topological guessing.
+    """
 
     name: str
     distance: int
     merge_base: str
     is_ancestor: bool
+    source: Literal["recorded", "guessed"] = "guessed"
+
+
+def recorded_base(branch: str) -> str | None:
+    """The base recorded at worktree creation, when one was written."""
+    try:
+        value = git.out("config", "--get", f"branch.{branch}.lup-base", _ok_code=[0])
+    except sh.ErrorReturnCode:
+        return None
+    return value or None
 
 
 def detect_base_branch(branch: str | None = None) -> BaseCandidate:
     """Detect the base branch for the given (or current) branch.
 
-    Prefers ancestor branches (the natural parent in a two-tier model)
-    over siblings. Among ancestors, picks the one with the fewest commits
-    ahead (``distance``). Falls back to non-ancestors when no ancestor exists.
+    A base recorded at worktree creation (``branch.<name>.lup-base``) wins
+    outright — topology cannot recover the creation point once the parent
+    has merged on. Without a record, prefers ancestor branches (the natural
+    parent in a two-tier model) over siblings. Among ancestors, picks the
+    one with the fewest commits ahead (``distance``). Falls back to
+    non-ancestors when no ancestor exists.
     """
     effective = branch or git.out("branch", "--show-current")
 
@@ -362,6 +379,12 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
             merge_base=merge_base,
             is_ancestor=is_ancestor(candidate, effective),
         )
+
+    recorded = recorded_base(effective)
+    if recorded is not None and recorded in local_branches:
+        pinned = measure(recorded)
+        if pinned is not None:
+            return pinned.model_copy(update={"source": "recorded"})
 
     measured = [m for c in local_branches if (m := measure(c)) is not None]
     ancestors = [m for m in measured if m.is_ancestor]

@@ -51,13 +51,19 @@ class ShellOperationRule(BaseModel):
 
 
 class ShellSubcommandRule(BaseModel):
-    """One subcommand under a command — e.g. ``git worktree``, ``gh pr``."""
+    """One subcommand under a command — e.g. ``git worktree``, ``gh pr``.
+
+    ``read_verbs`` name action-selecting flags that pin a one-action-at-a-time
+    subcommand to its query form (``git config --get``); their presence among
+    literal, unguarded words de-escalates a non-allow effect to allow.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     name: str
     effect: CommandEffect = "allow"
     ask_flags: list[str] = Field(default_factory=list)
+    read_verbs: list[str] = Field(default_factory=list)
     operations: list[ShellOperationRule] = Field(default_factory=list)
     reason: str = ""
 
@@ -291,6 +297,16 @@ def git_rule() -> ShellCommandRule:
         ShellSubcommandRule(
             name="config",
             effect="ask",
+            read_verbs=[
+                "--get",
+                "--get-all",
+                "--get-regexp",
+                "--get-urlmatch",
+                "--get-color",
+                "--get-colorbool",
+                "--list",
+                "-l",
+            ],
             reason="git config can change how commands execute",
         ),
         ShellSubcommandRule(
@@ -598,6 +614,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 effect=operation.effect,
                 ask_flags=list(operation.ask_flags),
                 allow_flags=[],
+                read_verbs=[],
                 value_flags=[],
                 reason=operation.reason,
             )
@@ -610,6 +627,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             effect=subcommand.effect,
             ask_flags=list(subcommand.ask_flags),
             allow_flags=[],
+            read_verbs=list(subcommand.read_verbs),
             value_flags=[],
             reason=subcommand.reason,
         )
@@ -623,6 +641,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             effect=command.default_effect,
             ask_flags=list(command.ask_flags),
             allow_flags=list(command.allow_flags),
+            read_verbs=[],
             value_flags=list(command.value_flags),
             reason=command.reason,
         )

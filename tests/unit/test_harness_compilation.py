@@ -618,6 +618,54 @@ def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     assert b"interpreters" in result.stderr
 
 
+def test_generated_codex_hook_allows_managed_skill_scripts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
+    helper = codex_home / "skills/.system/openai-docs/scripts/fetch-codex-manual.mjs"
+    body = {"tool_name": "Bash", "tool_input": {"command": f"node {helper}"}}
+    allowed = sh.Command(str(script))(
+        _in=json.dumps(body),
+        _ok_code=[0, 2],
+        _return_cmd=True,
+    )
+    assert isinstance(allowed, sh.RunningCommand)
+    assert allowed.exit_code == 0
+
+    body["tool_input"]["command"] = "node /tmp/untrusted-script.mjs"
+    denied = sh.Command(str(script))(
+        _in=json.dumps(body),
+        _ok_code=[0, 2],
+        _return_cmd=True,
+    )
+    assert isinstance(denied, sh.RunningCommand)
+    assert denied.exit_code == 2
+
+
+def test_generated_claude_hook_allows_managed_skill_scripts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_dir = tmp_path / "claude-profile"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+
+    def decision(command: str) -> str:
+        body = {"tool_name": "Bash", "tool_input": {"command": command}}
+        result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
+        assert isinstance(result, sh.RunningCommand)
+        output = ClaudeHookOutput.model_validate_json(result.stdout)
+        return output.hook_specific_output.permission_decision
+
+    helper = config_dir / "plugins/cache/official/tool/scripts/validate.mjs"
+    assert decision(f"node {helper}") == "allow"
+    assert decision(f"node {config_dir}/skills/tool/scripts/report.mjs") == "allow"
+    assert decision("node /tmp/untrusted-script.mjs") == "deny"
+    workspace_script = Path(".claude/plugins/lup/scripts/file_suggest.sh").resolve()
+    assert decision(f"sh {workspace_script}") == "deny"
+
+
 def test_generated_claude_hook_executes_the_canonical_kernel() -> None:
     script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
     result = sh.Command(str(script))(
