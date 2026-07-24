@@ -23,6 +23,10 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
+type Engine = Literal["claude", "codex", "openai", "openai-compat", "claude-compat"]
+"""The engines the composition root can assemble; ``engine_for_settings``
+resolves which one a session runs."""
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables.
@@ -79,20 +83,21 @@ class Settings(BaseSettings):
     # SDK SELECTION
     # ==========================================================================
 
-    agent_sdk: Literal[
-        "claude", "codex", "openai", "openai-compat", "claude-compat"
-    ] = Field(
-        default="claude",
+    agent_sdk: Engine | None = Field(
+        default=None,
         validation_alias="AGENT_SDK",
         description=(
             "Which engine runs the agent (claude, codex, openai-compat, "
             "claude-compat; openai is a legacy alias of openai-compat). "
-            "claude-compat keeps the Claude scaffolding on an Anthropic-"
-            "protocol endpoint (OPENAI_BASE_URL). The reviewer and "
-            "background agents follow AGENT_AUX_MODEL, which defaults to an "
-            "engine-native model. Subagent specs pin their own models — the "
-            "template's pin Anthropic ones, so they need Anthropic "
-            "credentials on codex/openai unless overridden."
+            "Unset routes by the AGENT_MODEL vendor prefix: claude-* runs "
+            "claude, gpt-*/o<digit>*/codex* runs codex, and anything else "
+            "runs claude-compat when OPENROUTER_API_KEY is set or "
+            "openai-compat otherwise. claude-compat keeps the Claude "
+            "scaffolding on an Anthropic-protocol endpoint (OPENAI_BASE_URL). "
+            "The reviewer and background agents follow AGENT_AUX_MODEL, "
+            "which defaults to an engine-native model. Subagent specs pin "
+            "their own models — the template's pin Anthropic ones, so they "
+            "need Anthropic credentials on codex/openai unless overridden."
         ),
     )
 
@@ -304,6 +309,28 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+def engine_for_settings() -> Engine:
+    """The engine the session runs: explicit ``AGENT_SDK``, else routed.
+
+    Unset ``AGENT_SDK`` routes by the model's vendor prefix — ``claude-*``
+    runs the native Claude engine and ``gpt-*``/``o<digit>``/``codex*`` runs
+    Codex. Anything else runs a compat engine: ``claude-compat`` when
+    ``OPENROUTER_API_KEY`` selects OpenRouter's Anthropic-protocol endpoint,
+    ``openai-compat`` otherwise.
+    """
+    if settings.agent_sdk is not None:
+        return settings.agent_sdk
+    match settings.model:
+        case model if model.startswith("claude-"):
+            return "claude"
+        case model if model.startswith(("gpt-", "codex")) or (
+            model[:1] == "o" and model[1:2].isdigit()
+        ):
+            return "codex"
+        case _:
+            return "claude-compat" if settings.openrouter_api_key else "openai-compat"
+
+
 def aux_model() -> str:
     """Backend-coherent model for auxiliary agents (reviewer, backgrounds).
 
@@ -314,7 +341,7 @@ def aux_model() -> str:
     """
     if settings.aux_model:
         return settings.aux_model
-    if settings.agent_sdk == "claude" and compat_base_url() is None:
+    if engine_for_settings() == "claude" and compat_base_url() is None:
         return "claude-opus-4-6"
     return settings.model
 
