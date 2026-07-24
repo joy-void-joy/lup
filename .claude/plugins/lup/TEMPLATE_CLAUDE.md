@@ -390,11 +390,12 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
    uv run lup-devtools dev worktree create feat-name
    ```
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/main`) and syncs dependencies; `lup-devtools harness claude` regenerates and launches the verified local plugin, so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
-2. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
-3. Push the branch when the feature is complete (or periodically for backup)
-4. **`/lup:rebase`** -- Pushes the branch, opens a PR, then cleans up the commit history with `git reset --soft main` and force-pushes.
-5. **Review the PR** -- If changes are needed, fix them on the feature branch and re-run `/lup:rebase` (it rebuilds the history and force-pushes, updating the PR).
-6. **`/lup:close`** -- Once the PR is approved, merges it and cleans up the branch.
+2. **Relocate this session into the worktree** -- `EnterWorktree(path=<the absolute path step 1 prints>)`. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale. Return with `ExitWorktree(action="keep")`.
+3. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
+4. Push the branch when the feature is complete (or periodically for backup)
+5. **`/lup:rebase`** -- Pushes the branch, opens a PR, then cleans up the commit history with `git reset --soft main` and force-pushes.
+6. **Review the PR** -- If changes are needed, fix them on the feature branch and re-run `/lup:rebase` (it rebuilds the history and force-pushes, updating the PR).
+7. **`/lup:close`** -- Once the PR is approved, merges it and cleans up the branch.
 
 ### Merge Conflict Resolution
 

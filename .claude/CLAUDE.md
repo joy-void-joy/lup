@@ -51,11 +51,12 @@ Worktrees typically branch from `dev`, but can also branch from other feature br
 
 1. `uv run lup-devtools dev worktree create feat-name`
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/dev`) and syncs dependencies. Generate and launch the native plugin with `lup-devtools harness claude` or `harness codex`. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
-2. Commit regularly and atomically
-3. Push when complete (or periodically for backup)
-4. `/lup:rebase` — Push, open PR, clean up history with `git reset --soft main` and force-push
-5. Review — Fix issues, re-run `/lup:rebase` to rebuild history
-6. `/lup:close` — Merge approved PR and clean up
+2. `EnterWorktree(path=<path step 1 prints>)` — creating a worktree does not move the session, and edits left in the old checkout never reach the branch. Leave with `ExitWorktree(action="keep")`.
+3. Commit regularly and atomically
+4. Push when complete (or periodically for backup)
+5. `/lup:rebase` — Push, open PR, clean up history with `git reset --soft main` and force-push
+6. Review — Fix issues, re-run `/lup:rebase` to rebuild history
+7. `/lup:close` — Merge approved PR and clean up
 
 **Note:** The `worktrees/` and `refs/` directories are gitignored. `refs/` contains symlinks to downstream projects.
 
@@ -269,7 +270,7 @@ then regenerate.
 - /lup:add-command — Create a new slash command in the lup plugin
 - /lup:brainstorm — Pre-init design exploration — brainstorm architecture, MCP tools, and agent design
 - /lup:bump — Review changes since last bump and bump agent version
-- /lup:clean-gone — Review branches/worktrees and clean up merged ones
+- /lup:clean-gone — Sweep every branch to one disposition — land unlanded work, clear merged ones
 - /lup:close — Check PR review status, merge if approved, and clean up branches
 - /lup:commit — Review all diffs and create atomic commits
 - /lup:create-investigator — Create a new diagnostic/investigator command (like /debug)
