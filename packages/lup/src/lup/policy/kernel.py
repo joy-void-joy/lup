@@ -127,6 +127,12 @@ INTERPRETERS = (
     "ksh",
     "fish",
 )
+UV_RUN_ALLOWED_TARGETS = (
+    "pyright",
+    "pytest",
+    "ruff",
+    "lup-devtools",
+)
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 IGNORE_RE = re.compile(
     r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?",
@@ -889,7 +895,7 @@ def decide_uv(words: list[str]) -> KernelDecision:
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
             )
-        if bare_target and run_command in ("pyright", "pytest", "ruff", "lup-devtools"):
+        if bare_target and run_command in UV_RUN_ALLOWED_TARGETS:
             return KernelDecision("allow")
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")
@@ -1620,16 +1626,39 @@ def literal_loop_word(word: str) -> bool:
     )
 
 
+def uv_post_target_words_safe(words: list[str]) -> bool:
+    """True when every unknown word sits strictly after a blessed uv run target.
+
+    uv stops parsing its own options at the first positional word, so a word
+    after a literal blessed target only ever reaches that target's argv —
+    the trust literal arguments already receive there. An unknown word at or
+    before the target could become a uv flag, a flag value, or the target
+    itself, so any such word keeps the conservative gate.
+    """
+    if len(words) < 3 or words[1] != "run":
+        return False
+    for word in words[2:]:
+        if opaque_argument(word):
+            return False
+        if word.startswith("-"):
+            continue
+        return "/" not in word and word in UV_RUN_ALLOWED_TARGETS
+    return False
+
+
 def argument_safe_words(words: list[str], rows: list[ShellRuleRow]) -> bool:
     """True when the command's row allows regardless of argument content.
 
     A loop variable bound to a non-literal word list can expand to any word,
     including a flag-shaped one, so only a single unguarded command-level
     allow row qualifies — flag-guarded rows and the specially parsed
-    executables do not.
+    executables do not. ``uv run`` is the carved-out exception: unknown
+    words strictly behind a literal blessed target are inert.
     """
     executable = posixpath.basename(words[0])
-    if executable in INTERPRETERS or executable in ("sed", "git", "uv", "uvx", "xargs"):
+    if executable == "uv":
+        return uv_post_target_words_safe(words)
+    if executable in INTERPRETERS or executable in ("sed", "git", "uvx", "xargs"):
         return False
     matches = [row for row in rows if row["command"] == executable]
     return (

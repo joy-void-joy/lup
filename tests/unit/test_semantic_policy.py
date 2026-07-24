@@ -272,6 +272,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="GIT_SSH_COMMAND=./x git fetch origin", effect="ask"),
     DecisionCase(input="git fetch ext::sh -c id", effect="ask"),
     DecisionCase(input="uv run --with evil pytest", effect="ask"),
+    # Unknown words behind a literal blessed uv run target only reach that
+    # target's argv; at or before the target they keep the opaque gate.
+    DecisionCase(
+        input='uv run lup-devtools dev pr update 22 --body "$(cat tmp/x.md)"',
+        effect="allow",
+    ),
+    DecisionCase(
+        input='uv run --python "$(cat v.txt)" lup-devtools dev check', effect="deny"
+    ),
+    DecisionCase(input='uv run "$(cat t.txt)" dev check', effect="deny"),
     DecisionCase(input="uv run ./pytest", effect="deny"),
     DecisionCase(input="uv run /tmp/tool --help", effect="deny"),
     DecisionCase(input="printf . | xargs find . -delete", effect="ask"),
