@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "bdd843667fd6793e23de4dc6e42e5078d113884a50824c20f6cdd83d98084038",
+  "source_digest": "87412a3d87b7c4b23151015bf508f7a0822592c816d477d91e0e013e50b12e72",
   "target_requirements": [
     "claude-code"
   ],
@@ -240,7 +240,7 @@
     {
       "path": ".claude/plugins/lup/commands/rebase.md",
       "category": "generated",
-      "sha256": "b6bc9762781020895e33f955f049841b45f9f0a933ab492d01b000fbc324cb40",
+      "sha256": "18e3f5ab025b3b347bd2d176ca9be28e6984edf6bfe79d19f6c44cfe86b1a903",
       "semantic_id": "skill.rebase",
       "executable": false
     },
