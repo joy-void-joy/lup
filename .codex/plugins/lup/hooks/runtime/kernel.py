@@ -46,6 +46,11 @@ class ShellRuleRow(TypedDict):
     non-allow row (``ssh-add -l``): the row de-escalates to allow only when
     every remaining word is exactly one of the named flags, so clusters,
     ``=`` values, paths, and unresolved expansions never qualify.
+    ``read_verbs`` name action-selecting flags of a command that enforces one
+    action at a time (``git config --get``): a non-allow row de-escalates to
+    allow when a declared verb appears among words that are all literal and
+    free of guarded flags, because the verb pins the invocation to its query
+    action regardless of the other words.
     """
 
     command: str
@@ -54,6 +59,7 @@ class ShellRuleRow(TypedDict):
     effect: DecisionEffect
     ask_flags: list[str]
     allow_flags: list[str]
+    read_verbs: list[str]
     value_flags: list[str]
     reason: str
 
@@ -354,12 +360,23 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     flag at runtime, so opaque words deny toward an explicit literal binding.
     A non-allow row with ``allow_flags`` de-escalates only when every
     argument is exactly one of those flags — the command's declared pure
-    read-only form.
+    read-only form. One with ``read_verbs`` de-escalates when a declared
+    verb appears and every word is a literal free of guarded flags — the
+    verb pins the invocation to its query action.
     """
     if row["effect"] != "allow" and row["allow_flags"] and arguments:
         if all(word in row["allow_flags"] for word in arguments):
             return KernelDecision(
                 "allow", "every argument is a declared read-only flag"
+            )
+    if row["effect"] != "allow" and row["read_verbs"] and arguments:
+        clean = not any(
+            opaque_argument(word) or flag_matches(word, row["ask_flags"])
+            for word in arguments
+        )
+        if clean and any(word in row["read_verbs"] for word in arguments):
+            return KernelDecision(
+                "allow", "a declared read-only verb pins the query action"
             )
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
