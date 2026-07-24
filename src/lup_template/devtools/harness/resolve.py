@@ -8,6 +8,7 @@ human acceptance of its review branch.
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 import typer
@@ -21,6 +22,7 @@ from lup.resolver.core import ResolverCore
 from lup.resolver.models import (
     AnswerBatch,
     InventoryNote,
+    MaterialQuestion,
     QuestionAnswer,
     QuestionBatch,
     ResolveRequest,
@@ -83,6 +85,112 @@ class ConsoleQuestionBroker(QuestionBroker):
                 typer.echo("Choose one of: " + ", ".join(question.choices))
             answers.append(QuestionAnswer(question_id=question.id, value=value))
         return AnswerBatch(run_id=questions.run_id, answers=answers)
+
+
+def parse_answer_flags(
+    flags: list[str],
+) -> dict[str, str]:  # lup: ignore[dict-str-payload] — open question-id map
+    """Split repeatable ``--answer`` flags into a question-id to value map."""
+    pairs = [flag.split("=", 1) for flag in flags]
+    malformed = [
+        flag
+        for flag, pair in zip(flags, pairs, strict=True)
+        if len(pair) != 2 or not pair[0]
+    ]
+    if malformed:
+        raise typer.BadParameter(
+            "--answer takes <question-id>=<value>; got: " + ", ".join(malformed)
+        )
+    identifiers = [pair[0] for pair in pairs]
+    if len(identifiers) != len(dict.fromkeys(identifiers)):
+        raise typer.BadParameter("--answer question ids must be unique")
+    return {pair[0]: pair[1] for pair in pairs}
+
+
+class ResolverAwaitingAnswers(Exception):
+    """A headless run parked on material questions it has no answers for."""
+
+    def __init__(self, pending: list[MaterialQuestion], problems: list[str]) -> None:
+        super().__init__(f"resolver run is awaiting {len(pending)} material answer(s)")
+        self.pending = pending
+        self.problems = problems
+
+
+class HeadlessQuestionBroker(QuestionBroker):
+    """Answer persisted resolver questions from pre-supplied flag values.
+
+    Every question must be answered explicitly — recommendations are never
+    assumed on behalf of the human. A batch with missing, invalid, or
+    unknown answers parks the run for a flag-carrying rerun.
+    """
+
+    def __init__(
+        self,
+        provided: dict[str, str],  # lup: ignore[dict-str-payload] — open id map
+    ) -> None:
+        self.provided = provided
+
+    async def ask(self, questions: QuestionBatch) -> AnswerBatch:
+        known = [question.id for question in questions.questions]
+        missing = [
+            question
+            for question in questions.questions
+            if question.id not in self.provided
+        ]
+        invalid = [
+            question
+            for question in questions.questions
+            if question.id in self.provided
+            and question.choices
+            and self.provided[question.id] not in question.choices
+        ]
+        problems = [
+            *(
+                f"--answer {question.id}={self.provided[question.id]} is not one of: "
+                + ", ".join(question.choices)
+                for question in invalid
+            ),
+            *(
+                f"--answer {identifier}=... names no pending question"
+                for identifier in self.provided
+                if identifier not in known
+            ),
+        ]
+        if missing or problems:
+            raise ResolverAwaitingAnswers([*missing, *invalid], problems)
+        return AnswerBatch(
+            run_id=questions.run_id,
+            answers=[
+                QuestionAnswer(
+                    question_id=question.id, value=self.provided[question.id]
+                )
+                for question in questions.questions
+            ],
+        )
+
+
+def report_awaiting(parked: ResolverAwaitingAnswers, adapter: str, run_id: str) -> None:
+    """Print parked questions and the exact flag-carrying rerun recipe."""
+    typer.echo("Resolver run parked awaiting material answers.")
+    for problem in parked.problems:
+        typer.echo(f"  problem: {problem}")
+    for question in parked.pending:
+        typer.echo(f"question {question.id} (concern {question.concern_id}):")
+        typer.echo(f"  {question.prompt}")
+        if question.choices:
+            typer.echo("  choices: " + " | ".join(question.choices))
+        if question.recommendation is not None:
+            typer.echo(f"  recommendation: {question.recommendation}")
+    recipe = " ".join(
+        [
+            "uv run lup-devtools harness resolve",
+            f"--adapter {adapter}",
+            f"--run-id {run_id}",
+            *(f"--answer {question.id}=<value>" for question in parked.pending),
+        ]
+    )
+    typer.echo("Relay the questions to the human, then rerun:")
+    typer.echo(f"  {recipe}")
 
 
 def resolver_git(
@@ -158,8 +266,14 @@ def resolver_source_snapshot(
     return SourceSnapshot(branch=branch, commit=commit)
 
 
-def run_resolve(adapter: str, run_id: str | None, human_decision: bool | None) -> None:
+def run_resolve(
+    adapter: str,
+    run_id: str | None,
+    human_decision: bool | None,
+    answers: list[str],
+) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
+    provided = parse_answer_flags(answers)
     compositions = harness_compositions(adapter)
     if len(compositions) != 1:
         raise typer.BadParameter("resolve requires exactly one adapter")
@@ -254,6 +368,11 @@ def run_resolve(adapter: str, run_id: str | None, human_decision: bool | None) -
 
         from lup_template.devtools.harness.catalog import portable_harness
 
+        broker: QuestionBroker = (
+            HeadlessQuestionBroker(provided)
+            if provided or not sys.stdin.isatty()
+            else ConsoleQuestionBroker()
+        )
         core = ResolverCore(
             ResolverConfig(
                 state_root=root / ".lup" / "resolve",
@@ -277,43 +396,53 @@ def run_resolve(adapter: str, run_id: str | None, human_decision: bool | None) -
             worker_factory,
             reviewer_factory,
             composition.invocation_renderer,
-            ConsoleQuestionBroker(),
+            broker,
             launcher,
         )
-        if core.repository.exists():
-            manifest = await core.resume()
-        else:
-            intake = resolver_intake(scan_tracked(find_feedback))
-            for carried in intake.carried:
-                typer.echo(carried)
-            comments = intake.actionable
-            if not comments:
-                typer.echo("No unresolved # lup: comments.")
-                return
-            note_paths = sorted({Path(comment.file) for comment in comments})
-            source = resolver_source_snapshot(
-                launcher,
-                root,
-                core.repository.root,
-                note_paths,
-            )
-            manifest = await core.run(
-                ResolveRequest(
-                    source=source,
-                    notes=[
-                        InventoryNote(
-                            file=Path(comment.file),
-                            line=comment.start_line,
-                            text=comment.marker_text(),
-                            context=comment.context,
-                        )
-                        for comment in comments
-                    ],
+        try:
+            if core.repository.exists():
+                manifest = await core.resume()
+            else:
+                intake = resolver_intake(scan_tracked(find_feedback))
+                for carried in intake.carried:
+                    typer.echo(carried)
+                comments = intake.actionable
+                if not comments:
+                    typer.echo("No unresolved # lup: comments.")
+                    return
+                note_paths = sorted({Path(comment.file) for comment in comments})
+                source = resolver_source_snapshot(
+                    launcher,
+                    root,
+                    core.repository.root,
+                    note_paths,
                 )
-            )
+                manifest = await core.run(
+                    ResolveRequest(
+                        source=source,
+                        notes=[
+                            InventoryNote(
+                                file=Path(comment.file),
+                                line=comment.start_line,
+                                text=comment.marker_text(),
+                                context=comment.context,
+                            )
+                            for comment in comments
+                        ],
+                    )
+                )
+        except ResolverAwaitingAnswers as parked:
+            report_awaiting(parked, adapter, resolved_run_id)
+            return
         if manifest.accepted is None and manifest.final_review is not None:
             typer.echo(f"Review branch: {manifest.review_branch}")
             typer.echo(manifest.final_review.model_dump_json(indent=2))
+            if human_decision is None and not sys.stdin.isatty():
+                typer.echo(
+                    "Run awaiting acceptance: relay the review to the human, "
+                    "then rerun with --accept or --reject."
+                )
+                return
             accepted = (
                 human_decision
                 if human_decision is not None

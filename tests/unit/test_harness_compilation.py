@@ -1,7 +1,6 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
 import json
-from importlib import resources
 from pathlib import Path
 from typing import Literal
 
@@ -172,24 +171,14 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
         artifact.path: artifact.content for artifact in compile_codex(harness).artifacts
     }
     command = claude[Path(".claude/plugins/lup/commands/resolve.md")]
-    workflow = (
-        resources.files("lup_template.devtools.harness.content")
-        .joinpath("assets/resolve.js")
-        .read_text("utf-8")
-    )
     skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
 
-    workflow_call = (
-        'Workflow(scriptPath=".claude/workflows/commands/resolve.js", args={})'
-    )
-    assert workflow_call in command
+    assert "uv run lup-devtools harness resolve --adapter claude" in command
+    assert "--run-id" in command and "--accept" in command and "--answer" in command
     assert "Triage into concerns" not in command
-    assert '"run_id"' in command and '"accept"' in command
-    assert "'harness',\n  'resolve',\n  '--adapter',\n  'claude'" in workflow
-    assert "input.inventory" not in workflow
-    assert "requires run_id" not in workflow
+    assert "Workflow(" not in command
     assert "uv run lup-devtools harness resolve --adapter codex" in skill
-    assert "--run-id" in skill and "--accept" in skill
+    assert "--run-id" in skill and "--accept" in skill and "--answer" in skill
     assert "scheduling" not in skill
 
 

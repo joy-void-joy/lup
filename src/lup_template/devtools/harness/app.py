@@ -99,9 +99,17 @@ def resolve_command(
             help="Record human acceptance or rejection of the review branch",
         ),
     ] = None,
+    answer: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--answer",
+            help="Answer a parked material question as <question-id>=<value> "
+            "(repeatable)",
+        ),
+    ] = None,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
-    resolve.run_resolve(adapter, run_id, human_decision)
+    resolve.run_resolve(adapter, run_id, human_decision, answer or [])
 
 
 @app.command(

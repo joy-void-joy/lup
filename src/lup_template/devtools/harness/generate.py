@@ -129,11 +129,6 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
     compiled = compile_claude(source)
     prompts = ClaudePromptRenderer(ClaudeSkillInvocationRenderer())
     content_root = Path(__file__).parent / "content"
-    resolver_entry = Artifact(
-        path=Path(".claude/workflows/commands/resolve.js"),
-        content=(content_root / "assets" / "resolve.js").read_text(encoding="utf-8"),
-        semantic_id="resolver.lup.entry",
-    )
     support_artifacts = [
         Artifact(
             path=Path(".claude/PATTERNS.md"),
@@ -160,7 +155,6 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
             ),
             semantic_id="harness.project-settings",
         ),
-        resolver_entry,
     ]
     desired = ArtifactTree(
         artifacts=sorted(
