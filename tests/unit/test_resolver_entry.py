@@ -1,130 +1,99 @@
-"""Behavioral contract of the resolver entry: args handling and note intake."""
+"""Behavioral contract of the resolver entry: headless answers and note intake."""
 
-import json
-import shutil
-from importlib import resources
-from pathlib import Path
+import asyncio
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+import typer
 
 from lup.codescan.markers import NoteKind
-from lup.harness.process import LaunchRequest, LocalProcessLauncher
-from lup.types import JsonObject, JsonValue
+from lup.resolver.models import (
+    AnswerBatch,
+    MaterialQuestion,
+    QuestionAnswer,
+    QuestionBatch,
+)
 from lup_template.devtools.dev.comments import FoundComment
-from lup_template.devtools.harness.resolve import resolver_intake
-
-DRIVER = Path(__file__).parent / "assets" / "resolve_entry_driver.js"
-RESOLVER_ENTRY = (
-    resources.files("lup_template.devtools.harness.content")
-    .joinpath("assets/resolve.js")
-    .read_text("utf-8")
-)
-BASE_COMMAND = [
-    "uv",
-    "run",
-    "lup-devtools",
-    "harness",
-    "resolve",
-    "--adapter",
-    "claude",
-]
-
-needs_bun = pytest.mark.skipif(
-    shutil.which("bun") is None, reason="needs the bun runtime"
+from lup_template.devtools.harness.resolve import (
+    HeadlessQuestionBroker,
+    ResolverAwaitingAnswers,
+    parse_answer_flags,
+    resolver_intake,
 )
 
 
-class EntryResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    exit_code: int
-
-
-class EntryRun(BaseModel):
-    """One recorded driver execution of the workflow entry."""
-
-    model_config = ConfigDict(frozen=True)
-
-    ok: bool
-    message: str = ""
-    spawned: list[list[str]]
-    result: EntryResult | None = None
-
-
-def run_entry(tmp_path: Path, envelope: JsonObject) -> EntryRun:
-    entry = tmp_path / "resolve.js"
-    entry.write_text(RESOLVER_ENTRY, encoding="utf-8")
-    status = LocalProcessLauncher().launch(
-        LaunchRequest(
-            arguments=["bun", str(DRIVER), str(entry), json.dumps(envelope)],
-            cwd=tmp_path,
-        )
+def material_question(
+    identifier: str,
+    choices: list[str] | None = None,
+    recommendation: str | None = None,
+) -> MaterialQuestion:
+    return MaterialQuestion(
+        id=identifier,
+        concern_id="concern-1",
+        prompt=f"prompt for {identifier}",
+        choices=choices or [],
+        recommendation=recommendation,
     )
-    assert status.code == 0, status.stderr
-    return EntryRun.model_validate_json(status.stdout)
 
 
-def test_committed_workflow_entry_matches_the_canonical_source() -> None:
-    committed = Path(".claude/workflows/commands/resolve.js").read_text(
-        encoding="utf-8"
+def question_batch(questions: list[MaterialQuestion]) -> QuestionBatch:
+    return QuestionBatch(run_id="run-7", questions=questions)
+
+
+def test_parse_answer_flags_maps_ids_and_keeps_values_with_equals() -> None:
+    parsed = parse_answer_flags(["q-1=yes", "q-2=a=b"])
+
+    assert parsed == {"q-1": "yes", "q-2": "a=b"}
+
+
+def test_parse_answer_flags_rejects_malformed_and_duplicate_flags() -> None:
+    with pytest.raises(typer.BadParameter):
+        parse_answer_flags(["missing-separator"])
+    with pytest.raises(typer.BadParameter):
+        parse_answer_flags(["=value"])
+    with pytest.raises(typer.BadParameter):
+        parse_answer_flags(["q-1=a", "q-1=b"])
+
+
+def test_headless_broker_answers_a_fully_covered_batch() -> None:
+    questions = question_batch(
+        [material_question("q-1", ["yes", "no"]), material_question("q-2")]
     )
-    assert committed == RESOLVER_ENTRY
+    broker = HeadlessQuestionBroker({"q-1": "yes", "q-2": "free text"})
 
+    answers = asyncio.run(broker.ask(questions))
 
-@needs_bun
-def test_entry_accepts_parsed_encoded_and_double_encoded_args(
-    tmp_path: Path,
-) -> None:
-    options: JsonValue = {"run_id": "run-7", "accept": True}
-    deliveries: list[JsonValue] = [
-        options,
-        json.dumps(options),
-        json.dumps(json.dumps(options)),
-    ]
-    for delivered in deliveries:
-        run = run_entry(tmp_path, {"delivery": "value", "value": delivered})
-        assert run.ok, run.message
-        assert run.spawned == [[*BASE_COMMAND, "--run-id", "run-7", "--accept"]]
-        assert run.result == EntryResult(exit_code=0)
-
-
-@needs_bun
-def test_entry_treats_absent_empty_and_null_args_as_defaults(
-    tmp_path: Path,
-) -> None:
-    envelopes: list[JsonObject] = [
-        {"delivery": "absent"},
-        {"delivery": "value", "value": None},
-        {"delivery": "value", "value": ""},
-        {"delivery": "value", "value": "   "},
-        {"delivery": "value", "value": "null"},
-    ]
-    for envelope in envelopes:
-        run = run_entry(tmp_path, envelope)
-        assert run.ok, run.message
-        assert run.spawned == [BASE_COMMAND]
-
-
-@needs_bun
-def test_entry_rejects_undecodable_args_without_launching(tmp_path: Path) -> None:
-    deliveries: list[JsonValue] = ["run-7", '"run-7"', '{"run_id":', [1], 7]
-    for delivered in deliveries:
-        run = run_entry(tmp_path, {"delivery": "value", "value": delivered})
-        assert not run.ok
-        assert "JSON object" in run.message
-        assert run.spawned == []
-
-
-@needs_bun
-def test_entry_maps_rejection_and_surfaces_core_failure(tmp_path: Path) -> None:
-    run = run_entry(
-        tmp_path,
-        {"delivery": "value", "value": {"accept": False}, "exit": 3},
+    assert answers == AnswerBatch(
+        run_id="run-7",
+        answers=[
+            QuestionAnswer(question_id="q-1", value="yes"),
+            QuestionAnswer(question_id="q-2", value="free text"),
+        ],
     )
-    assert not run.ok
-    assert "exited with status 3" in run.message
-    assert run.spawned == [[*BASE_COMMAND, "--reject"]]
+
+
+def test_headless_broker_parks_on_missing_invalid_and_unknown_answers() -> None:
+    questions = question_batch(
+        [material_question("q-1", ["yes", "no"]), material_question("q-2")]
+    )
+    broker = HeadlessQuestionBroker({"q-1": "maybe", "q-9": "x"})
+
+    with pytest.raises(ResolverAwaitingAnswers) as parked:
+        asyncio.run(broker.ask(questions))
+
+    pending_ids = [question.id for question in parked.value.pending]
+    assert pending_ids == ["q-2", "q-1"]
+    assert any("q-1=maybe" in problem for problem in parked.value.problems)
+    assert any("q-9" in problem for problem in parked.value.problems)
+
+
+def test_headless_broker_never_assumes_recommendations() -> None:
+    questions = question_batch(
+        [material_question("q-1", ["yes", "no"], recommendation="yes")]
+    )
+    broker = HeadlessQuestionBroker({})
+
+    with pytest.raises(ResolverAwaitingAnswers):
+        asyncio.run(broker.ask(questions))
 
 
 def intake_note(kind: NoteKind = "note", condition: str | None = None) -> FoundComment:

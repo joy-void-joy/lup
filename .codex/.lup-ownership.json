@@ -296,7 +296,7 @@
     {
       "path": ".codex/plugins/lup/skills/resolve/SKILL.md",
       "category": "generated",
-      "sha256": "3f9828d98bd64a5ea1a1edbf112c47f55a93efc0771f73378837993d55e0fe22",
+      "sha256": "b2bffbe92e82957329211e4d15260f7cdc8c89a413de1e60abe6a2eb571a265b",
       "semantic_id": "skill.resolve",
       "executable": false
     },
