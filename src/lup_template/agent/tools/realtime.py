@@ -408,7 +408,7 @@ def create_observer_tools(
 def create_observer(
     *,
     notes: list[str],
-    model: str = "claude-opus-4-6",
+    model: str | None = None,
 ) -> BackgroundAgent[ObserverState, ObserverSummary]:
     """Create an observer background agent.
 
@@ -420,11 +420,13 @@ def create_observer(
 
     Args:
         notes: Shared list for observer summaries.
-        model: Model to use for the observer.
+        model: Model for the observer; defaults to the backend-coherent
+            auxiliary model.
 
     Returns:
         A configured background agent (call ``.start()`` to begin).
     """
+    from lup_template.agent.config import aux_model
     from lup_template.agent.core import build_auxiliary_factory
 
     def state_to_request(state: ObserverState):
@@ -444,7 +446,9 @@ def create_observer(
         logger.error("Observer turn failed: %s", error.failure.message)
 
     return BackgroundAgent(
-        build_auxiliary_factory(model=model, system_prompt=OBSERVER_SYSTEM_PROMPT),
+        build_auxiliary_factory(
+            model=model or aux_model(), system_prompt=OBSERVER_SYSTEM_PROMPT
+        ),
         state_to_request,
         record,
         report,
