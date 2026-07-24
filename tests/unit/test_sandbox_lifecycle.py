@@ -1,3 +1,4 @@
+# lup: ignore[dict-get]
 """Offline behavior tests for the Docker sandbox lifecycle and REPL transport.
 
 Typed in-process fakes stand in for the docker SDK client at the seam the
@@ -92,7 +93,7 @@ class FakeContainers:
         self.run_error: DockerException | None = None
 
     def get(self, name: str) -> FakeContainer:
-        found = self.existing.get(name)  # lup: ignore[dict-get] — fake docker API
+        found = self.existing.get(name)
         if found is None:
             raise NotFound(f"no such container: {name}")
         return found
@@ -135,7 +136,7 @@ class FakeVolumes:
         self.existing: dict[str, FakeVolume] = {}
 
     def get(self, name: str) -> FakeVolume:
-        found = self.existing.get(name)  # lup: ignore[dict-get] — fake docker API
+        found = self.existing.get(name)
         if found is None:
             raise NotFound(f"no such volume: {name}")
         return found
@@ -204,9 +205,7 @@ def as_container(fake: FakeContainer) -> Container:
 
 def make_sandbox(client: FakeDockerClient, **overrides: str) -> Sandbox:
     sandbox = Sandbox(
-        session_id=overrides.get(  # lup: ignore[dict-get] — kwargs default
-            "session_id", "t1"
-        ),
+        session_id=overrides.get("session_id", "t1"),
         shared_dir="/tmp/lup-test-shared",
         pre_install=None,
     )
