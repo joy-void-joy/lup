@@ -341,7 +341,7 @@ def merge(
     pulled = False
     if integration_path and integration_path.is_dir():
         try:
-            git("-C", str(integration_path), "pull")
+            git("-C", str(integration_path), "pull", "--ff-only")
             typer.echo(f"Pulled changes into {integration}")
             pulled = True
         except sh.ErrorReturnCode as e:
@@ -386,7 +386,7 @@ def sync_base(
         if not as_json:
             typer.echo(f"Syncing {base_branch}...", err=True)
         try:
-            git("-C", str(base_path), "pull")
+            git("-C", str(base_path), "pull", "--ff-only")
             git("-C", str(base_path), "push")
         except sh.ErrorReturnCode as e:
             typer.echo(

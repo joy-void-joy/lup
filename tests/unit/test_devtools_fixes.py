@@ -7,6 +7,7 @@ that did not match the emitted format, helpers that crashed on real data,
 and arg construction that called nonexistent flags.
 """
 
+import ast
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -336,3 +337,37 @@ class TestSessionIdsFromStatus:
         ids = session_ids_from_status(status, root)
 
         assert ids == ["new-id"]
+
+
+# ── fix: worktree pulls are fast-forward-only ─────────────────────────────
+
+
+class TestWorktreePullsAreFastForwardOnly:
+    """A bare ``git pull`` obeys ``pull.rebase`` and can rewrite history.
+
+    Under ``pull.rebase=true`` against a stale base, it replays the whole
+    branch onto the remote default and strands the worktree mid-rebase
+    while the caller only logs a warning and reports success. ``--ff-only``
+    fails clean with the working tree untouched, so every pull carries it.
+    """
+
+    def test_every_pull_call_site_passes_ff_only(self) -> None:
+        from lup_template.devtools.dev import pr
+
+        tree = ast.parse(Path(pr.__file__).read_text(encoding="utf-8"))
+        pulls = [
+            call
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call)
+            if any(
+                isinstance(arg, ast.Constant) and arg.value == "pull"
+                for arg in call.args
+            )
+        ]
+
+        assert pulls, "no pull call site found in dev.pr"
+        for call in pulls:
+            flags = [arg.value for arg in call.args if isinstance(arg, ast.Constant)]
+            assert "--ff-only" in flags, (
+                f"dev/pr.py:{call.lineno} pulls without --ff-only"
+            )
