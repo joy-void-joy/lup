@@ -1,8 +1,8 @@
-(All code in this repository has been reviewed by humans, this README has been written by a human)
+(All code in this repository has been reviewed by humans. This README has been written by a human)
 
 # Lup
 
-A meta repository for speed-boosting your Claude Code development and create self-improving [ClaudeAgentSDK] applications
+A meta repository for speed-boosting your Claude Code and Codex development and create self-improving [ClaudeAgentSDK] and [CodexSDK](https://learn.chatgpt.com/docs/codex-sdk) applications
 
 <img width="1535" height="863" alt="image" src="https://github.com/user-attachments/assets/d5159e28-1669-433b-8f89-e012c3abfa1c" />
 <img width="1532" height="554" alt="image" src="https://github.com/user-attachments/assets/6f272a6e-71b6-4720-89bf-6b811081343d" />
