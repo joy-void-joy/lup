@@ -63,6 +63,7 @@ class DecisionCase(BaseModel):
     input: str
     effect: Literal["allow", "ask", "deny", "defer"]
     sandboxed: bool = False
+    interactive: bool = True
 
 
 class EditDecisionCase(BaseModel):
@@ -413,6 +414,34 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
+    # A help probe only prints usage, so it reads an unclassified command
+    # without judging it. Bare -h counts alone; carrying a value it is an
+    # ordinary argument (mysql -h host) and classifies normally.
+    DecisionCase(input="frobnicate --help", effect="allow"),
+    DecisionCase(input="codex plugin marketplace --help", effect="allow"),
+    DecisionCase(input="git push --help", effect="allow"),
+    DecisionCase(input="frobnicate -h", effect="allow"),
+    DecisionCase(input="mysql -h db.example.com", effect="deny"),
+    # A non-interactive host cannot put a question to a human: sandboxed, an
+    # ask rides the OS boundary; unsandboxed it fails closed. A judged deny
+    # is never rescued, and unjudged work defers exactly as it always did.
+    DecisionCase(input="git push --force", effect="deny", interactive=False),
+    DecisionCase(
+        input="git push --force", effect="defer", sandboxed=True, interactive=False
+    ),
+    DecisionCase(input="PYTHONPATH=src uv run pytest", effect="ask"),
+    DecisionCase(
+        input="PYTHONPATH=src uv run pytest",
+        effect="defer",
+        sandboxed=True,
+        interactive=False,
+    ),
+    DecisionCase(
+        input="sed -i 's/a/b/' f", effect="deny", sandboxed=True, interactive=False
+    ),
+    DecisionCase(
+        input="frobnicate --weird", effect="defer", sandboxed=True, interactive=False
+    ),
     # The classic sourcing bypasses stay outside the vocabulary: deny
     # unsandboxed, defer to the OS boundary inside it; a deferring segment
     # among allows keeps the batch deferred.
@@ -672,7 +701,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         ")\n"
         "for case in fixtures['shell']:\n"
         "    result = decide_shell(\n"
-        "        case['input'], SHELL_RULES, sandboxed=case['sandboxed']\n"
+        "        case['input'], SHELL_RULES, sandboxed=case['sandboxed'],\n"
+        "        interactive=case['interactive'],\n"
         "    )\n"
         "    assert result.effect == case['effect'], case\n"
         "for case in fixtures['fetch']:\n"
@@ -888,10 +918,16 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     sandboxed_policy = ShellPolicy(sandbox_active=True)
 
     for case in SHELL_POLICY_CASES:
-        active = sandboxed_policy if case.sandboxed else policy
+        if case.interactive:
+            active = sandboxed_policy if case.sandboxed else policy
+        else:
+            active = ShellPolicy(sandbox_active=case.sandboxed, interactive=False)
         assert active.decide(ShellCommand(command=case.input)).effect == case.effect
         bundled_effect = bundled.decide_shell(
-            case.input, policy.rules, sandboxed=case.sandboxed
+            case.input,
+            policy.rules,
+            sandboxed=case.sandboxed,
+            interactive=case.interactive,
         ).effect
         assert bundled_effect == case.effect
 
@@ -905,6 +941,19 @@ def test_sandbox_escape_reenters_the_deny_lattice() -> None:
     )
     assert escaped.effect == "deny"
     assert "escalate" in escaped.reason
+
+
+def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
+    """Codex hooks cannot complete the approval flow, so they never name it."""
+    interactive = ShellPolicy().decide(ShellCommand(command="git push --force"))
+    assert interactive.effect == "ask"
+
+    blocked = ShellPolicy(interactive=False).decide(
+        ShellCommand(command="git push --force")
+    )
+    assert blocked.effect == "deny"
+    assert "escalate" not in blocked.reason
+    assert "allowed vocabulary" in blocked.reason
 
 
 def test_claude_decoder_marks_unsandboxed_escapes() -> None:

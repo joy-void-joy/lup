@@ -40,6 +40,9 @@ def dispatch(payload):
             DENIED_FETCH_SCOPES,
             sandboxed=sandbox_active(),
             trusted_script_roots=managed_script_roots(),
+            # Codex hooks have no approval channel: an ask would land as a
+            # hard block, so it defers to the sandbox or fails closed.
+            interactive=False,
         )
     if name == "web_fetch":
         return decide_fetch(

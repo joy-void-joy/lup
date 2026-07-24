@@ -150,6 +150,7 @@ ESCALATE_HINT = (
     " — reshape the command into the allowed vocabulary, or resubmit with a"
     " leading '# lup: escalate: <why>' line to request approval"
 )
+RESHAPE_HINT = " — reshape the command into the allowed vocabulary"
 SUBSTITUTION_REASON = (
     "command substitution is denied — run the inner command in its own call"
     " and splice its literal output, or read it through <(...) or a pipe"
@@ -357,6 +358,26 @@ def opaque_argument(word: str) -> bool:
     if word.startswith("$") or SUBSTITUTION_SENTINEL in word:
         return True
     return "}" in word and ("{-" in word or ",-" in word)
+
+
+HELP_UNSAFE = set("/=$*?~<>|&;`\\'\" \t\n")
+
+
+def is_help_probe(arguments: list[str]) -> bool:
+    """Recognize an invocation that only prints usage.
+
+    ``--help`` is inert wherever it sits among plain subcommand words, so
+    an unclassified command is still readable through it. Bare ``-h`` counts
+    only when it stands alone, because several commands spend it on a value
+    (``mysql -h host``) rather than on help.
+    """
+    if not arguments:
+        return False
+    if any(character in HELP_UNSAFE for word in arguments for character in word):
+        return False
+    if arguments == ["-h"]:
+        return True
+    return "--help" in arguments
 
 
 def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision:
@@ -994,6 +1015,8 @@ def decide_shell_segment(
             " it in its own call and splice the literal output"
         )
     executable = posixpath.basename(words[0])
+    if is_help_probe(words[1:]):
+        return KernelDecision("allow", "a help probe only prints usage")
     if executable in INTERPRETERS:
         if len(words) > 1 and is_trusted_script(words[1], trusted_script_roots or []):
             return KernelDecision("allow", "native-managed skill script")
@@ -2145,6 +2168,7 @@ def decide_shell(
     denied_scopes: list[UrlScopeRow] | None = None,
     sandboxed: bool = False,
     trusted_script_roots: list[str] | None = None,
+    interactive: bool = True,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -2156,14 +2180,31 @@ def decide_shell(
     When the execution is sandboxed, unjudged work defers instead: the OS
     boundary confines it, and only an unsandboxed escape returns to the
     deny lattice.
+
+    A non-interactive host has no approval channel, so a question it cannot
+    put to a human is not a question — sandboxed, it rides the same OS
+    boundary as unjudged work; unsandboxed, it fails closed. Such a host is
+    never told to escalate, because that flow cannot complete there. A judged
+    deny is never rescued by the sandbox in either mode.
     """
+    hint = ESCALATE_HINT if interactive else RESHAPE_HINT
+
+    def resolve(decision: KernelDecision) -> KernelDecision:
+        match decision.effect:
+            case "allow":
+                return decision
+            case "ask" if interactive:
+                return decision
+            case "defer" | "ask" if sandboxed:
+                return KernelDecision("defer", decision.reason)
+            case _:
+                return KernelDecision("deny", decision.reason + hint)
+
     marker = ESCALATE_RE.match(command)
     if marker is not None:
         why = marker.group("why").strip()
         if not why:
-            return KernelDecision(
-                "deny", "escalation requires a stated reason" + ESCALATE_HINT
-            )
+            return KernelDecision("deny", "escalation requires a stated reason" + hint)
         inner = classify_shell(
             command[marker.end() :],
             rows,
@@ -2173,15 +2214,12 @@ def decide_shell(
         )
         if inner.effect == "allow":
             return inner
-        return KernelDecision("ask", f"escalated ({why}): {inner.reason}")
-    decision = classify_shell(
-        command, rows, allowed_scopes, denied_scopes, trusted_script_roots
+        return resolve(KernelDecision("ask", f"escalated ({why}): {inner.reason}"))
+    return resolve(
+        classify_shell(
+            command, rows, allowed_scopes, denied_scopes, trusted_script_roots
+        )
     )
-    if decision.effect == "defer" and sandboxed:
-        return decision
-    if decision.effect in ("deny", "defer"):
-        return KernelDecision("deny", decision.reason + ESCALATE_HINT)
-    return decision
 
 
 def url_matches_scope(

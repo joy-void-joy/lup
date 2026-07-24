@@ -125,12 +125,14 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         denied_urls: list[UrlScope] | None = None,
         sandbox_active: bool = False,
         trusted_script_roots: list[str] | None = None,
+        interactive: bool = True,
     ) -> None:
         self.rules = erase_shell_rules(BASE_SHELL_RULES if rules is None else rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
         self.sandbox_active = sandbox_active
         self.trusted_script_roots = trusted_script_roots or []
+        self.interactive = interactive
 
     def decide(self, event: ShellCommand) -> Decision:
         return pydantic_decision(
@@ -141,6 +143,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 self.denied_scopes,
                 sandboxed=self.sandbox_active and not event.unsandboxed,
                 trusted_script_roots=self.trusted_script_roots,
+                interactive=self.interactive,
             )
         )
 
