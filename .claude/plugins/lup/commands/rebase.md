@@ -12,7 +12,9 @@ Clean up the commit history on the current feature branch, push it, and open (or
 
 ### Base branch (`<base>`)
 
-Run `uv run lup-devtools dev pr sync-base --json` (step 1 below) -- it reports the base branch and a `base_source`. `recorded` (from worktree creation) and `explicit` are authoritative; `guessed` means topology alone picked it, so confirm the branch with AskUserQuestion before relying on it.
+Run `uv run lup-devtools dev pr sync-base --json` (step 1 below) -- it reports the base branch and a `base_source`. `recorded` (from worktree creation) and `explicit` are authoritative. `guessed` means topology alone picked it: the command merges nothing and exits non-zero, so confirm the branch with AskUserQuestion and rerun as `sync-base --base <branch>`.
+
+Confirm against the divergence, not the name that sounds right. `git log --oneline <candidate>..HEAD` on the true base shows this branch's own commits; on a wrong one it shows hundreds, which is the tell that the whole history between the two branches is about to be treated as yours.
 
 ### PR target (`<target>`)
 
@@ -30,7 +32,7 @@ Invoke `/lup:commit` to commit any uncommitted work before starting the rebase.
 uv run lup-devtools dev pr sync-base --json
 ```
 
-If conflicts are reported, resolve with `/lup:merge` (no argument) first.
+A `guessed` base exits non-zero having merged nothing -- settle the base as above and rerun with `--base <branch>`. If conflicts are reported, resolve with `/lup:merge` (no argument) first.
 
 ### 3. Fold local grants into the canonical policy
 
