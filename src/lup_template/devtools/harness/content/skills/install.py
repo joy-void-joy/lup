@@ -87,7 +87,7 @@ Build a mental inventory of **portable capabilities** organized by category:
 
 1. **Plugin infrastructure**: hooks.json, hook scripts, plugin.json structure
 2. **Permission hooks**: auto-allow patterns for Bash, Edit, WebFetch; pre-push quality gates; test protection
-3. **Slash commands**: which ones are generic (commit, rebase, close, clean-gone, meta, merge, debug, refactor) vs lup-specific (init, feedback-loop, bump, update)
+3. **Slash commands**: which ones are generic (commit, rebase, close, land, meta, merge, debug, refactor) vs lup-specific (init, feedback-loop, bump, update)
 4. **Library utilities**: print_block, TraceLogger, version tracking, retry decorator, cache, hook composition
 5. **CLAUDE.md patterns**: coding standards, git workflow, editing style, debugging philosophy
 6. **DevTools patterns**: CLI structure, sync tracking
@@ -121,7 +121,7 @@ These work in any repo:
 - **Plugin infrastructure**: The `.claude/plugins/lup/` directory structure itself
 - **Permission policy**: configure URL scopes and protected roots in the canonical `HookSet`; change semantic decisions in `lup.policy`, then regenerate
 - **Pre-push quality gates**: Adapt to target's linter/type-checker/test runner
-- **Generic commands**: commit, rebase, close, clean-gone, meta, debug, refactor, add-command, modify-command, merge, principle, review, create-investigator
+- **Generic commands**: commit, rebase, close, land, meta, debug, refactor, add-command, modify-command, merge, principle, review, create-investigator
 - **CLAUDE.md patterns**: Git workflow, editing style, asking questions, debugging philosophy
 - **Settings patterns**: permission structure in settings.json
 

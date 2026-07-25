@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "14fe84563cf9c63dda86b1a09ae338f012eade0b2caa997bd4494e49f99deec1",
+  "source_digest": "440e2f7120b0d814bd41ace7b1923619bd5ab2f76ae0019315aed391ba5c1241",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "5011abecf1c787d546c0f52ae9becff302430f4fb0b559635d72d1eb2279d743",
+      "sha256": "12b7c14c5e1cb78ab770a999407e95552b22d2b638821d31c1cbe745248f50d6",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -95,13 +95,6 @@
       "category": "generated",
       "sha256": "3a82cb32b9cca15d02493be58e996c3feca902dab8bf28471b9ecc134a3f75b7",
       "semantic_id": "skill.bump",
-      "executable": false
-    },
-    {
-      "path": ".claude/plugins/lup/commands/clean-gone.md",
-      "category": "generated",
-      "sha256": "21c7a33a1b7bed3ee1cc2505c686ffa8de335e02547445b0d7fa97531385b05a",
-      "semantic_id": "skill.clean-gone",
       "executable": false
     },
     {
@@ -205,8 +198,15 @@
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "01630ac7867fef5345be91fc70d2b3bc37823e6a840564f66cce0e85a13d376d",
+      "sha256": "f23720c9645b1147fcdfd1bb8833929347b030f720c3298e3b781ed33602c184",
       "semantic_id": "skill.install",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/commands/land.md",
+      "category": "generated",
+      "sha256": "fad1bff43f8867b6500bb7a57e2e320ddc91259398ab7fe0dccb07502da319d0",
+      "semantic_id": "skill.land",
       "executable": false
     },
     {

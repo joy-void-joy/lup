@@ -905,6 +905,34 @@ def test_proven_obsolete_deletion_is_proposed_and_executed(tmp_path: Path) -> No
     assert not obsolete.exists()
 
 
+def test_deletion_prunes_the_directories_it_empties(tmp_path: Path) -> None:
+    gone = tmp_path / "skills" / "gone" / "SKILL.md"
+    gone.parent.mkdir(parents=True)
+    gone.write_text("stale skill\n", encoding="utf-8")
+    kept = tmp_path / "skills" / "kept" / "SKILL.md"
+    kept.parent.mkdir(parents=True)
+    kept.write_text("live skill\n", encoding="utf-8")
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("skills/gone/SKILL.md"),
+                content="stale skill\n",
+                category="generated",
+                sha256=content_digest("stale skill\n"),
+            )
+        ],
+    )
+
+    AtomicMaterializer().apply(
+        DeterministicReconciler().propose(current, ArtifactTree(artifacts=[]))
+    )
+
+    assert not gone.parent.exists()
+    assert kept.exists()
+    assert tmp_path.exists()
+
+
 def test_deletion_with_changed_ownership_proof_is_refused(tmp_path: Path) -> None:
     obsolete = tmp_path / "obsolete.txt"
     obsolete.write_text("stale output\n", encoding="utf-8")

@@ -9,9 +9,6 @@ from lup_template.devtools.harness.content.skills.brainstorm import (
     SKILL as SKILL_BRAINSTORM,
 )
 from lup_template.devtools.harness.content.skills.bump import SKILL as SKILL_BUMP
-from lup_template.devtools.harness.content.skills.clean_gone import (
-    SKILL as SKILL_CLEAN_GONE,
-)
 from lup_template.devtools.harness.content.skills.close import SKILL as SKILL_CLOSE
 from lup_template.devtools.harness.content.skills.commit import SKILL as SKILL_COMMIT
 from lup_template.devtools.harness.content.skills.create_investigator import (
@@ -42,6 +39,7 @@ from lup_template.devtools.harness.content.skills.import_skill import (
 )
 from lup_template.devtools.harness.content.skills.init import SKILL as SKILL_INIT
 from lup_template.devtools.harness.content.skills.install import SKILL as SKILL_INSTALL
+from lup_template.devtools.harness.content.skills.land import SKILL as SKILL_LAND
 from lup_template.devtools.harness.content.skills.merge import SKILL as SKILL_MERGE
 from lup_template.devtools.harness.content.skills.meta import SKILL as SKILL_META
 from lup_template.devtools.harness.content.skills.modify_command import (
@@ -86,7 +84,6 @@ SKILLS = [
     SKILL_ADD_COMMAND,
     SKILL_BRAINSTORM,
     SKILL_BUMP,
-    SKILL_CLEAN_GONE,
     SKILL_CLOSE,
     SKILL_COMMIT,
     SKILL_CREATE_INVESTIGATOR,
@@ -101,6 +98,7 @@ SKILLS = [
     SKILL_IMPORT,
     SKILL_INIT,
     SKILL_INSTALL,
+    SKILL_LAND,
     SKILL_MERGE,
     SKILL_META,
     SKILL_MODIFY_COMMAND,
