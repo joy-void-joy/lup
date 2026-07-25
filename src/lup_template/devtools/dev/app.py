@@ -151,7 +151,11 @@ def delete_cmd(
     ] = False,
     force: Annotated[
         bool,
-        typer.Option("--force", "-f", help="Force delete (git branch -D)"),
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force delete the branch and a worktree holding modified files",
+        ),
     ] = False,
 ) -> None:
     """Delete a branch, its worktree, and remote tracking branch."""

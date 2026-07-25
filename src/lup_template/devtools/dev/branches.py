@@ -712,7 +712,11 @@ def delete_branch(
     worktree_path = parse_worktrees().get(name)  # lup: ignore[dict-get] — open map
 
     actions = [
-        *([f"Remove worktree: {worktree_path}"] if worktree_path else []),
+        *(
+            [f"Remove worktree: {worktree_path} ({'force' if force else 'safe'})"]
+            if worktree_path
+            else []
+        ),
         f"Delete local branch: {name} ({'force' if force else 'safe'})",
     ]
 
@@ -732,7 +736,7 @@ def delete_branch(
 
     if worktree_path:
         try:
-            git("worktree", "remove", worktree_path)
+            git("worktree", "remove", *(["--force"] if force else []), worktree_path)
             typer.echo(f"Removed worktree: {worktree_path}")
         except sh.ErrorReturnCode as e:
             typer.echo(
