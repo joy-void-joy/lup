@@ -41,18 +41,20 @@ Read every relevant file and categorize findings into three buckets:
 
 ### Layer A: Documentation & Meta
 
-1. **CLAUDE.md** (`.claude/CLAUDE.md`)
+1. **Guidance** (`src/lup_template/devtools/harness/content/guidance.py`)
    - Check every section: does it align with or contradict the principle?
    - Look for existing principles that overlap or conflict
+   - `.claude/CLAUDE.md` and the root `AGENTS.md` are generated from this module — read them for the rendered result, never edit them
 
-2. **Template guidance** (`.claude/plugins/lup/TEMPLATE_CLAUDE.md`, `.codex/plugins/lup/TEMPLATE_AGENTS.md`)
-   - Same checks — this is what new projects inherit; the two flavors share their portable sections
+2. **Template guidance** (`src/lup_template/devtools/harness/content/template_sections.py`)
+   - Same checks — this is what new projects inherit; the portable sections render into both `TEMPLATE_CLAUDE.md` and `TEMPLATE_AGENTS.md` from this one source
 
 ### Layer B: Commands & Workflows
 
-3. **All command files** (`.claude/plugins/lup/commands/*.md`)
-   - Read each command's instructions, guidelines, and anti-patterns
-   - Check if commands encode workflows that violate the principle
+3. **All skill modules** (`src/lup_template/devtools/harness/content/skills/*.py`)
+   - Read each skill's instructions, guidelines, and anti-patterns
+   - Check if a skill encodes a workflow that violates the principle
+   - `.claude/plugins/lup/commands/*.md` and `.codex/plugins/lup/skills/*/SKILL.md` are generated from these — never edit them
 
 ### Layer C: Semantic Policy & Enforcement
 
@@ -96,16 +98,16 @@ Present findings and proposed changes one layer at a time. For each layer:
 
 ### Layer order:
 
-**Group 1: CLAUDE.md + template guidance**
+**Group 1: Guidance + template sections**
 
-- CLAUDE.md is the source of truth. Changes here set the direction for everything else.
+- `guidance.py` is the source of truth. Changes here set the direction for everything else.
 - Consider: new section, additions to existing sections, anti-pattern entries, removal of contradictions.
-- Mirror relevant changes into the template flavors (TEMPLATE_CLAUDE.md, TEMPLATE_AGENTS.md); their portable sections share one canonical source, so a portable change lands in both.
-- Keep template sections general — domain-specific details belong in CLAUDE.md only.
+- Mirror relevant changes into `template_sections.py`; its portable sections render into both template flavors, so a portable change lands in both.
+- Keep template sections general — domain-specific details belong in `guidance.py` only.
 
-**Group 2: Command files**
+**Group 2: Skill modules**
 
-- Update commands whose workflows should reflect the principle.
+- Update the skill modules whose workflows should reflect the principle.
 - Add the principle to relevant "Guidelines" or "Anti-Patterns" sections.
 - Don't add the principle to every command — only where it's relevant to that command's workflow.
 
@@ -131,7 +133,14 @@ Present findings and proposed changes one layer at a time. For each layer:
 
 ## Phase 4: Execute Approved Changes
 
-For each approved group, make the edits. After all changes:
+For each approved group, make the edits. Every layer above is Python source, so regenerate both native plugins afterwards to bring the artifacts back in step:
+
+```bash
+uv run lup-devtools harness claude
+uv run lup-devtools harness codex
+```
+
+After all changes:
 
 1. Summarize what was changed across all layers
 2. Note any layers where no changes were needed (and why)
@@ -141,6 +150,6 @@ For each approved group, make the edits. After all changes:
 
 - **Consistency over completeness** — better to have 5 files consistently reflecting the principle than 10 files with half-baked mentions
 - **Don't dilute existing content** — integrate naturally into existing sections rather than bolting on disconnected paragraphs
-- **Respect the structure** — each file type has conventions. CLAUDE.md uses tables and sections, commands use phases, hooks use pattern lists
+- **Respect the structure** — each source has conventions. Guidance uses tables and sections, skills use phases, policy rules use pattern lists
 - **Less is more** — a principle mentioned in 3 right places is better than mentioned in 15 places where it becomes noise
 - **Enforcement > documentation** — a hook that prevents violations is worth more than a paragraph that describes the principle

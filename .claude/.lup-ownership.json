@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "40e1fdfb0114fbf25a6872a3a15e819be5fec7038b640b72ee2fbb60394d5d7a",
+  "source_digest": "b870cb13ce6e7df220fa6d4fa5c453fecaab6657f0370a2064b21999809674bc",
   "target_requirements": [
     "claude-code"
   ],
@@ -79,7 +79,7 @@
     {
       "path": ".claude/plugins/lup/commands/add-command.md",
       "category": "generated",
-      "sha256": "88ae07876324d49b458d704b3e9fa37b54f2a3aff8b3a06d12ee981ed3ea7f5d",
+      "sha256": "0626798f40f91316e63e450a7029a90cc326e75d54371c4528779d5041ca7936",
       "semantic_id": "skill.add-command",
       "executable": false
     },
@@ -121,7 +121,7 @@
     {
       "path": ".claude/plugins/lup/commands/create-investigator.md",
       "category": "generated",
-      "sha256": "17ae0ab7390855c207e5c0c8cae0b19acbb4ede0c521706317b06ad5748d3785",
+      "sha256": "9700ad9fc4043eab58e5e73ffe64fe5d122cd1b24319f3a0531da14c08c9a3b9",
       "semantic_id": "skill.create-investigator",
       "executable": false
     },
@@ -198,14 +198,14 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "e225f4fffe28fc644c8ef32e9228f4fbab08399402ca9121f938c9d5516e82ea",
+      "sha256": "1fd4177988ad59e16154e8849ae028b277e9e88492fbe67aecf5d0903a679e3b",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "3044b8d93df2b776db491989cc64f9be7c13d208a3a0d1afe93512d6c19f25db",
+      "sha256": "01630ac7867fef5345be91fc70d2b3bc37823e6a840564f66cce0e85a13d376d",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -219,28 +219,28 @@
     {
       "path": ".claude/plugins/lup/commands/meta.md",
       "category": "generated",
-      "sha256": "2bf9ad05693c5205b454bf4d05fe259e9e7e5fcd4ebf304e7297faf4a303248b",
+      "sha256": "bb0129a7437139c4a3cee244fa2919ec901f7ec738f160e2edd7200663009edc",
       "semantic_id": "skill.meta",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/modify-command.md",
       "category": "generated",
-      "sha256": "ca626d3a02e09a3fcaa97e2a8732fbcb1c5be5f11ad4fc5d15ac339e33d0916c",
+      "sha256": "9b6af825b2742e91aeab8b4a9c23df020485d9ede24ccd843167ccc98c3ddc03",
       "semantic_id": "skill.modify-command",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/principle.md",
       "category": "generated",
-      "sha256": "4758b937f6dbe043560f0279c997b655cd206112ec2bef3d9bb04a8ec29f637f",
+      "sha256": "1757f995b8bcfb2308bea0917dd8776d6e60c8a4e8b29c01cb39dc93934142f5",
       "semantic_id": "skill.principle",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/rebase.md",
       "category": "generated",
-      "sha256": "18e3f5ab025b3b347bd2d176ca9be28e6984edf6bfe79d19f6c44cfe86b1a903",
+      "sha256": "104d8687dd1a38a3baab36021330e4eace6c1e09042f2746c7313a31c6046660",
       "semantic_id": "skill.rebase",
       "executable": false
     },

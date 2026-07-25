@@ -5,11 +5,11 @@ description: "Create a new slash command in the lup plugin"
 
 # Add New Command
 
-Create a new slash command in `.claude/plugins/lup/commands/`.
+Declare a new skill in the harness catalog. The Claude slash command and its Codex flavor are generated from that one declaration.
 
 ## Your Task
 
-Help the user create a new slash command. Commands are markdown files with YAML frontmatter.
+Help the user create a new skill. A skill is a `models.Skill` declared in Python; the markdown with YAML frontmatter is what generation renders from it.
 
 **Arguments provided**: the arguments supplied with this skill invocation
 
@@ -39,100 +39,99 @@ Use AskUserQuestion to gather any info **not already provided via arguments**. S
    - `Bash, Read, Write, Edit, Glob, Grep` - For running commands + file ops
    - `AskUserQuestion` - For interactive commands
 
-## Phase 2: Create the Command
+## Phase 2: Declare the Skill
 
-Create the file at `.claude/plugins/lup/commands/<name>.md`:
+Commands are generated artifacts. Write the declaration, not the markdown.
 
-```markdown
----
-allowed-tools: <tools from phase 1>
-description: <one-line description>
-argument-hint: <hint from phase 1, omit if no arguments>
----
+1. Create `src/lup_template/devtools/harness/content/skills/<name>.py` exporting a `SKILL`:
 
-# <Command Title>
+```python
+import lup.harness.models as models
 
-<Brief description of what this command does>
-
-## Your Task
-
-**Arguments provided**: the arguments supplied with this skill invocation
-
-<Instructions for Claude when this command is invoked>
-<If the command accepts arguments, include parsing logic for the arguments supplied with this skill invocation>
-
-## Steps
-
-1. <Step 1>
-2. <Step 2>
-3. ...
-
-## Output
-
-<What the command should produce>
+SKILL = models.Skill(
+    id="skill.<name>",
+    name="<name>",
+    description="<one-line description>",
+    arguments=[
+        models.Argument(
+            name="arguments",
+            description="Optional arguments supplied with the skill invocation",
+            required=False,
+        ),
+    ],
+    tools=[<tools from phase 1>],
+    argument_hint="<hint from phase 1, omit if no arguments>",
+    prompt=models.PromptDocument(parts=[...]),
+)
 ```
+
+Build `parts` from `models.TextPart(text=r'...')` for the prose, splicing in `models.ArgumentsRef()` wherever the prompt needs the raw arguments and `models.SkillInvocation(plugin="lup", skill="<other>")` wherever it names another skill. Never hardcode a slash-command string — the invocation part renders the right syntax for each harness. Copy the raw-string style from a neighbouring skill module.
+
+2. Register it in `src/lup_template/devtools/harness/content/catalog.py`: import `SKILL as SKILL_<NAME>` alongside its siblings, then add `SKILL_<NAME>` to the `SKILLS` list. Both are alphabetical.
+
+3. Regenerate both native plugins:
+
+```bash
+uv run lup-devtools harness claude
+uv run lup-devtools harness codex
+```
+
+`.claude/plugins/lup/commands/<name>.md` and `.codex/plugins/lup/skills/<name>/SKILL.md` are written by that step — never by hand.
 
 ## Phase 3: Verify
 
-After creating the command:
+After regenerating:
 
-1. Show the user the file contents
-2. Explain how to invoke it: `the corresponding Lup skillcommand-name>`
-3. Ask if any adjustments are needed
+1. Show the user the declaration module, and confirm the generated artifacts appeared for both harnesses
+2. Run `uv run lup-devtools dev check` — the ownership manifest must record the new artifacts
+3. Explain how to invoke it: `the corresponding Lup skillcommand-name>`
+4. Ask if any adjustments are needed
 
 ## Template Examples
 
-### Read-only analysis command:
+### Read-only analysis skill:
 
-```markdown
----
-allowed-tools: Read, Glob, Grep
-description: Analyze code structure and patterns
----
-
-# Analyze Codebase
-
-Analyze the codebase structure and report findings.
-
-## Your Task
-
-1. Use Glob to find relevant files
-2. Use Grep to search for patterns
-3. Use Read to examine key files
-4. Report findings in a structured format
+```python
+SKILL = models.Skill(
+    id="skill.analyze",
+    name="analyze",
+    description="Analyze code structure and patterns",
+    tools=["Read", "Glob", "Grep"],
+    prompt=models.PromptDocument(parts=[...]),
+)
 ```
 
-### Command with arguments:
+Its prompt body walks the agent through finding relevant files with Glob, searching for patterns with Grep, reading the key files, and reporting findings in a structured format.
 
-```markdown
----
-allowed-tools: Bash, Read, Glob, Grep
-description: Run tests for a specific module
-argument-hint: [module-name] [--verbose]
----
+### Skill with arguments:
 
-# Run Module Tests
-
-Run tests for a specific module.
-
-## Your Task
-
-**Arguments provided**: the arguments supplied with this skill invocation
-
-Parse the arguments: first word is the module name, `--verbose` flag enables detailed output.
-If no module name provided, ask the user which module to test.
-
-1. Find test files for the module
-2. Run the tests
-3. Report results
+```python
+SKILL = models.Skill(
+    id="skill.test-module",
+    name="test-module",
+    description="Run tests for a specific module",
+    arguments=[
+        models.Argument(
+            name="arguments",
+            description="Optional arguments supplied with the skill invocation",
+            required=False,
+        ),
+    ],
+    tools=["Bash", "Read", "Glob", "Grep"],
+    argument_hint="[module-name] [--verbose]",
+    prompt=models.PromptDocument(parts=[...]),
+)
 ```
+
+Its `parts` open with the prose, splice `models.ArgumentsRef()` in after `**Arguments provided**: `, then resume: parse the first word as the module name and `--verbose` as a flag, ask which module to test when the arguments come through empty, then find the test files, run them, and report.
 
 ## Notes
 
-- Command names should be lowercase with hyphens (e.g., `my-command`)
+- Skill names should be lowercase with hyphens (e.g., `my-command`), and the module file takes the underscored form
 - Keep descriptions under 80 characters
-- Include clear steps in the command body
-- Use AskUserQuestion for interactive commands
-- Add `argument-hint` frontmatter when the command accepts arguments — use `[optional]` brackets and `<required>` angles
-- Reference `the arguments supplied with this skill invocation` in the command body to receive the user's input
+- Include clear steps in the prompt body
+- Use AskUserQuestion for interactive skills
+- Set `argument_hint` on the declaration when the skill accepts arguments — use `[optional]` brackets and `<required>` angles
+- Splice `models.ArgumentsRef()` into the prompt parts wherever the body needs `the arguments supplied with this skill invocation` — never type that token literally
 - Always include a fallback (e.g., AskUserQuestion) when arguments are empty
+- Regenerate after every change; a hand-edited artifact is reverted the next time generation runs
