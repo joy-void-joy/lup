@@ -143,7 +143,7 @@ def codex(
     ctx: typer.Context,
     codex_home: Annotated[
         Path | None,
-        typer.Option("--codex-home", help="Codex account/config home"),
+        typer.Option("--codex-home", help="Override the worktree-scoped Codex home"),
     ] = None,
     profile: Annotated[
         str | None,
