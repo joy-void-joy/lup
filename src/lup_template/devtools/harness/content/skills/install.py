@@ -264,7 +264,8 @@ For each item being installed:
 5. `src/<project>/devtools/` — devtools CLI skeleton (if Python target, adapt import paths but keep `lup-devtools` as the CLI entry point name)
 6. `.claude/settings.json` — create or merge
 7. The guidance file — section-level merge from its platform template: `.claude/CLAUDE.md` from TEMPLATE_CLAUDE.md, or `AGENTS.md` from TEMPLATE_AGENTS.md (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
-8. **Initialize upstream sync**: Run `uv run lup-devtools sync mark-synced lup` to baseline the sync state so `"""
+8. **Hand off to generation**: everything written in steps 1-4, 6 and 7 becomes a generated artifact once the target's harness runs. From here on, the target edits its declarations under `src/<project>/devtools/harness/content/` and regenerates with `uv run lup-devtools harness claude` and `harness codex`; the installed files are outputs, and a hand edit to one is reverted the next time generation runs. Say so explicitly in the Phase 7 report.
+9. **Initialize upstream sync**: Run `uv run lup-devtools sync mark-synced lup` to baseline the sync state so `"""
             ),
             models.SkillInvocation(plugin="lup", skill="update"),
             models.TextPart(
@@ -274,7 +275,7 @@ For each item being installed:
 
 After installation:
 
-1. **List all files created/modified** in the target repo
+1. **List all files created/modified** in the target repo, marking which ones generation now owns
 2. **Show a summary** of what was installed and why
 3. **Note what was skipped** and why (especially in non-interactive mode)
 4. **Suggest next steps**:

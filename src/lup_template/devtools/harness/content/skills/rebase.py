@@ -65,9 +65,21 @@ If conflicts are reported, resolve with `"""
             models.TextPart(
                 text=r"""` (no argument) first.
 
-### 3. Merge local settings into shared config
+### 3. Fold local grants into the canonical policy
 
-Check if `.claude/settings.local.json` exists. If so, merge all sensible settings into `.claude/settings.json` -- permissions, auto-accept patterns, etc. Skip user-specific items. Commit as a separate commit.
+Check if `.claude/settings.local.json` exists. Its permission entries are ad-hoc grants one person accepted; leaving them there means the next person re-approves the same prompts.
+
+`.claude/settings.json` is a generated artifact (`harness.project-settings`) -- never hand-merge into it. The next `lup-devtools harness claude` regenerates it from the policy and drops the edit. Shell, fetch, and edit permissions belong to the canonical semantic policy instead.
+
+Classify each entry:
+
+- **Already covered by the policy** -- drop it from the local file. Most read-only commands are.
+- **A genuine gap** -- invoke `"""
+            ),
+            models.SkillInvocation(plugin="lup", skill="hooks"),
+            models.TextPart(
+                text=r"""` to add it to the canonical policy, regenerate both native plugins, and commit that as a separate commit.
+- **User-specific** (plugin toggles, personal model choice) -- leave it in `.claude/settings.local.json`.
 
 ### 4. Run checks
 
