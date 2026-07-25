@@ -88,7 +88,11 @@ One table covering every branch, ordered `LAND` first (that is the work at risk)
 
 Ask the user, per branch, which route to take:
 
-- **Open a PR** — relocate into that branch's worktree with `EnterWorktree(path=<the survey's worktree field>)`, or create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `"""
+- **Open a PR** — relocate into that branch's worktree: """
+            ),
+            models.RelocateSession(path="the survey's worktree field"),
+            models.TextPart(
+                text=r""". Create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `"""
             ),
             models.SkillInvocation(plugin="lup", skill="rebase"),
             models.TextPart(

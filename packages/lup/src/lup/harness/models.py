@@ -80,6 +80,21 @@ class RequestApproval(BaseModel):
     reason: str
 
 
+class RelocateSession(BaseModel):
+    """Continue work inside an already-created worktree.
+
+    Runtimes differ on whether a running session can move: one relocates in
+    place, another can only be replaced by a session started there. Naming
+    the intent lets each adapter spell the move it actually supports.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["relocate_session"] = "relocate_session"
+    path: str
+    """Where the reader finds the path, e.g. "the path step 1 prints"."""
+
+
 class ResolverEntry(BaseModel):
     model_config = FROZEN
 
@@ -98,6 +113,7 @@ type PromptPart = Annotated[
     | AskUser
     | Delegate
     | RequestApproval
+    | RelocateSession
     | ResolverEntry
     | ArgumentsRef,
     Discriminator("type"),

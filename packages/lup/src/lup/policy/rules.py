@@ -16,19 +16,16 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from lup.codescan.antipatterns import patterns_for_suffix
 from lup.policy.contracts import DecisionPolicy
-from lup.policy.kernel import (
-    AntiPatternRow,
-    KernelDecision,
-    PathRuleRow,
-    UrlScopeRow,
-    command_words as kernel_command_words,
+from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.edit import (
     decide_edit,
-    decide_fetch,
-    decide_shell,
-    decide_shell_segment,
-    parse_shell_words,
     path_rule_matches as kernel_path_rule_matches,
 )
+from lup.policy.kernel.fetch import decide_fetch
+from lup.policy.kernel.lex import parse_shell_words, shell_write_targets
+from lup.policy.kernel.rows import AntiPatternRow, PathRuleRow, UrlScopeRow
+from lup.policy.kernel.shell import decide_shell, decide_shell_segment
+from lup.policy.kernel.words import command_words as kernel_command_words
 from lup.policy.shell_rules import (
     BASE_SHELL_RULES,
     ShellCommandRule,
@@ -65,13 +62,13 @@ def url_scope_row(scope: UrlScope) -> UrlScopeRow:
     parsed = urlsplit(str(scope.origin))
     if parsed.hostname is None:
         raise ValueError("validated URL scope has no hostname")
-    return (
-        parsed.scheme,
-        parsed.hostname,
-        parsed.port,
-        scope.path_prefix,
-        scope.reason,
-        scope.include_subdomains,
+    return UrlScopeRow(
+        scheme=parsed.scheme,
+        host=parsed.hostname,
+        port=parsed.port,
+        path_prefix=scope.path_prefix,
+        reason=scope.reason,
+        include_subdomains=scope.include_subdomains,
     )
 
 
@@ -137,6 +134,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         self.interactive = interactive
 
     def decide(self, event: ShellCommand) -> Decision:
+        root = event.cwd or Path.cwd()
         return pydantic_decision(
             decide_shell(
                 event.command,
@@ -146,6 +144,11 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 sandboxed=self.sandbox_active and not event.unsandboxed,
                 trusted_script_roots=self.trusted_script_roots,
                 interactive=self.interactive,
+                existing_targets=[
+                    target
+                    for target in shell_write_targets(event.command)
+                    if (root / target).exists()
+                ],
             )
         )
 
@@ -174,7 +177,12 @@ class PathRule(BaseModel):
 
 def path_rule_row(rule: PathRule) -> PathRuleRow:
     """Erase one validated path rule into the kernel's primitive row."""
-    return (rule.kind, rule.value, rule.reason, rule.allow_autonomous)
+    return PathRuleRow(
+        kind=rule.kind,
+        value=rule.value,
+        reason=rule.reason,
+        allow_autonomous=rule.allow_autonomous,
+    )
 
 
 def human_owned_path_rule(path: str) -> PathRule:
@@ -200,7 +208,13 @@ def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
     if patterns is None:
         return []
     return [
-        (rule.id, rule.pattern.pattern, rule.message, rule.context) for rule in patterns
+        AntiPatternRow(
+            id=rule.id,
+            pattern=rule.pattern.pattern,
+            message=rule.message,
+            context=rule.context,
+        )
+        for rule in patterns
     ]
 
 

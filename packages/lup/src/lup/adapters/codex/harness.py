@@ -22,6 +22,7 @@ from lup.harness.models import (
     HookSet,
     Plugin,
     PromptDocument,
+    RelocateSession,
     RequestApproval,
     ResolverEntry,
     Skill,
@@ -29,7 +30,7 @@ from lup.harness.models import (
     TextPart,
 )
 from lup.policy.bundle import (
-    policy_kernel_source,
+    policy_kernel_modules,
     render_policy_data,
     runtime_url_scope,
 )
@@ -68,6 +69,12 @@ class CodexPromptRenderer(PromptRenderer):
                 case RequestApproval(action=action, reason=reason):
                     rendered.append(
                         f"Request explicit user approval before {action}. Reason: {reason}"
+                    )
+                case RelocateSession(path=path):
+                    rendered.append(
+                        f"start a session rooted at <{path}> and continue there — "
+                        "this runtime cannot move a running session, so work "
+                        "carried on here would land in the checkout it started from"
                     )
                 case ResolverEntry():
                     rendered.append(
@@ -279,13 +286,17 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     semantic_id=source.id,
                     executable=True,
                 ),
-                Artifact(
-                    path=Path(
-                        f".codex/plugins/{self.plugin_name}/hooks/runtime/kernel.py"
-                    ),
-                    content=policy_kernel_source(),
-                    semantic_id=source.id,
-                ),
+                *[
+                    Artifact(
+                        path=Path(
+                            f".codex/plugins/{self.plugin_name}/hooks/runtime/"
+                            f"kernel/{module.name}"
+                        ),
+                        content=module.source,
+                        semantic_id=source.id,
+                    )
+                    for module in policy_kernel_modules()
+                ],
                 Artifact(
                     path=Path(
                         f".codex/plugins/{self.plugin_name}/hooks/runtime/"

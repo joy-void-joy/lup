@@ -7,6 +7,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
+from lup_template.devtools.harness.launch import relocation_hint
 from lup_template.devtools.utils import (
     copy_to_clipboard,
     decode_stderr,
@@ -165,13 +166,14 @@ def create(
     typer.echo()
     typer.echo(f"Worktree path: {worktree_path}")
     typer.echo("Creating a worktree does not move whoever ran this. To follow it:")
-    typer.echo("  agent:  EnterWorktree(path=<the path above>)")
-    cd_command = f"cd /; cd {worktree_path}; claude"
+    hint = relocation_hint(worktree_path)
+    if hint.agent:
+        typer.echo(f"  agent:  {hint.agent}")
 
-    if copy_to_clipboard(cd_command):
-        typer.echo(f"  shell:  {cd_command}   [copied to clipboard]")
+    if copy_to_clipboard(hint.shell):
+        typer.echo(f"  shell:  {hint.shell}   [copied to clipboard]")
     else:
-        typer.echo(f"  shell:  {cd_command}")
+        typer.echo(f"  shell:  {hint.shell}")
 
 
 def worktree_status(path: str) -> str:

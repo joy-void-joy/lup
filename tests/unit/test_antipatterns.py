@@ -1,4 +1,4 @@
-# lup: ignore[import-re, re-call, set-shape, string-replace, tuple-shape]
+# lup: ignore[import-re, re-call, set-shape, string-replace]
 """The anti-pattern set is single-sourced for the auditor and policy bundle.
 
 `lup.codescan.antipatterns` is the importable source of truth. Harness generation
@@ -15,11 +15,20 @@ from lup.codescan.antipatterns import (
     audit_text,
 )
 from lup.policy.bundle import bundled_antipattern_rows
-from lup.policy.kernel import empty_collection_exempt_lines
+from lup.policy.kernel.edit import empty_collection_exempt_lines
+from lup.policy.kernel.rows import AntiPatternRow
 
 
-def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str, str, str]]:
-    return [(ap.id, ap.pattern.pattern, ap.message, ap.context) for ap in patterns]
+def lib_rows(patterns: list[AntiPattern]) -> list[AntiPatternRow]:
+    return [
+        AntiPatternRow(
+            id=ap.id,
+            pattern=ap.pattern.pattern,
+            message=ap.message,
+            context=ap.context,
+        )
+        for ap in patterns
+    ]
 
 
 def test_python_table_matches_generated_bundle() -> None:

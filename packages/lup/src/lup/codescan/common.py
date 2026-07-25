@@ -20,7 +20,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel
 
-from lup.policy.kernel import (
+from lup.policy.kernel.edit import (
     docstring_lines as python_docstring_lines,
     mask_python_string_literals,
     python_code_lines,

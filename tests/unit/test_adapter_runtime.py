@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
@@ -12,6 +13,7 @@ from lup.adapters.claude.runtime import (
     ClaudeConversationState,
     ClaudeFork,
     ClaudeSessionConfig,
+    ClaudeSessionFactory,
     ClaudeTurnToolBinder,
     build_claude_options,
     claude_usage,
@@ -40,6 +42,9 @@ from lup.runtime.output import InMemorySubmittedOutputStore
 from lup.runtime.usage import per_mtok_usage_cost
 from lup.types import Usage
 
+if TYPE_CHECKING:
+    import claude_agent_sdk as claude
+
 
 class FirstOutput(BaseModel):
     answer: str
@@ -50,7 +55,9 @@ class SecondOutput(BaseModel):
 
 
 def test_fresh_claude_session_uses_cli_valid_uuid() -> None:
-    state = ClaudeConversationState(ClaudeSessionConfig(model="claude"), None)
+    state = ClaudeConversationState(
+        ClaudeSessionFactory(ClaudeSessionConfig(model="claude")), None
+    )
 
     assert str(UUID(state.session_id)) == state.session_id
 
@@ -80,6 +87,65 @@ def test_claude_session_defaults_and_hooks_reach_native_options(
     assert options.hooks is not None
     assert len(options.hooks["PreToolUse"]) == 1
     assert options.include_partial_messages
+
+
+def test_claude_isolation_knobs_reach_native_options() -> None:
+    options = build_claude_options(
+        ClaudeSessionConfig(
+            model="claude",
+            max_buffer_size=500 * 1024 * 1024,
+            setting_sources=[],
+            extra_args={"strict-mcp-config": None, "no-session-persistence": None},
+        ),
+        binding=None,
+        resume=None,
+        session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
+    )
+
+    assert options.max_buffer_size == 500 * 1024 * 1024
+    assert options.setting_sources == []
+    assert options.extra_args == {
+        "strict-mcp-config": None,
+        "no-session-persistence": None,
+    }
+
+
+def test_claude_isolation_knobs_default_to_native_behavior() -> None:
+    options = build_claude_options(
+        ClaudeSessionConfig(model="claude"),
+        binding=None,
+        resume=None,
+        session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
+    )
+
+    assert options.max_buffer_size is None
+    assert options.setting_sources is None
+    assert options.extra_args == {}
+
+
+def test_claude_factory_builds_options_through_an_overridable_seam() -> None:
+    class IsolatedFactory(ClaudeSessionFactory):
+        def build_options(
+            self,
+            *,
+            binding: TurnToolBinding[BaseModel] | None,
+            resume: str | None,
+            session_id: str | None,
+        ) -> "claude.ClaudeAgentOptions":
+            options = super().build_options(
+                binding=binding, resume=resume, session_id=session_id
+            )
+            options.max_buffer_size = 4096
+            return options
+
+    factory = IsolatedFactory(ClaudeSessionConfig(model="claude"))
+    state = factory.create_state(None)
+    options = state.factory.build_options(
+        binding=None, resume=None, session_id=state.session_id
+    )
+
+    assert state.factory is factory
+    assert options.max_buffer_size == 4096
 
 
 def test_claude_native_subagents_and_reported_cost_are_preserved() -> None:
@@ -264,7 +330,9 @@ async def test_claude_partial_events_are_live_and_completed_replay_is_preserved(
             )
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", FixtureClient)
-    state = ClaudeConversationState(ClaudeSessionConfig(model="claude"), None)
+    state = ClaudeConversationState(
+        ClaudeSessionFactory(ClaudeSessionConfig(model="claude")), None
+    )
 
     accepted = await state.start_turn("hello")
     assert accepted.events is not None
@@ -288,7 +356,7 @@ async def test_claude_latest_turn_fork_preserves_a_typed_session_handle(
     import claude_agent_sdk as claude
 
     state = ClaudeConversationState(
-        ClaudeSessionConfig(model="claude", cwd=tmp_path), None
+        ClaudeSessionFactory(ClaudeSessionConfig(model="claude", cwd=tmp_path)), None
     )
 
     def fork_session(
@@ -331,7 +399,9 @@ async def test_claude_binder_rebinds_schema_store_and_gate_across_turns(
             disconnects += 1
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", RecordingClient)
-    state = ClaudeConversationState(ClaudeSessionConfig(model="claude"), None)
+    state = ClaudeConversationState(
+        ClaudeSessionFactory(ClaudeSessionConfig(model="claude")), None
+    )
     binder = ClaudeTurnToolBinder(state)
 
     def submission_tool_is_bound() -> bool:

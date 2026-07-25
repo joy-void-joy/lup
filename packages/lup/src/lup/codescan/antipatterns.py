@@ -53,7 +53,7 @@ from lup.codescan.common import (
     file_level_ignore,
     ignore_rule_ids,
 )
-from lup.policy.kernel import empty_collection_exempt_lines
+from lup.policy.kernel.edit import empty_collection_exempt_lines
 
 
 class AntiPattern(BaseModel):

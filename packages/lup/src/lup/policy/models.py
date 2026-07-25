@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, StringConstraints
 
-from lup.policy.kernel import DecisionEffect
+from lup.policy.kernel.decision import DecisionEffect
 from lup.types import JsonObject, JsonValue
 
 type PolicyId = Literal["fetch", "shell", "edit", "unknown-tool"]

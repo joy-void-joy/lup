@@ -429,7 +429,11 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 WORKFLOW_THROUGH_COMMIT_FORMAT: list[models.PromptPart] = [
     models.TextPart(
         text=r""", so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
-2. **Relocate this session into the worktree** -- `EnterWorktree(path=<the absolute path step 1 prints>)`. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale. Return with `ExitWorktree(action="keep")`.
+2. **Relocate this session into the worktree** -- """
+    ),
+    models.RelocateSession(path="the absolute path step 1 prints"),
+    models.TextPart(
+        text=r""". Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale.
 3. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
 4. Push the branch when the feature is complete (or periodically for backup)
 5. **`"""

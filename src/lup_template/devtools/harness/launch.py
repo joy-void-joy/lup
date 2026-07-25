@@ -11,6 +11,7 @@ from pathlib import Path
 
 import sh
 import typer
+from pydantic import BaseModel, ConfigDict
 
 from lup.adapters.claude.profile_store import ClaudeProfileStore
 from lup.adapters.codex.harness_runtime import (
@@ -28,6 +29,38 @@ from lup_template.devtools.harness.composition import (
     codex_composition,
 )
 from lup_template.devtools.harness.drift import generate_with_report
+
+
+class RelocationHint(BaseModel):
+    """How the harness a command is running under follows a new worktree."""
+
+    model_config = ConfigDict(frozen=True)
+
+    agent: str
+    shell: str
+
+
+def relocation_hint(worktree_path: Path) -> RelocationHint:
+    """Name the follow-through in the vocabulary of the running harness.
+
+    Each launcher exports its own configuration home, so a session that
+    reached here through one of them is told the move it actually supports.
+    Anything else gets the portable shell form alone rather than the name of
+    a tool that runtime may not have.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    move = f"cd /; cd {worktree_path}"
+    if "CLAUDE_CONFIG_DIR" in environ:
+        return RelocationHint(
+            agent="EnterWorktree(path=<the path above>)",
+            shell=f"{move}; claude",
+        )
+    if "CODEX_HOME" in environ:
+        return RelocationHint(
+            agent="start a session there — this runtime cannot relocate a running one",
+            shell=f"{move}; codex",
+        )
+    return RelocationHint(agent="", shell=move)
 
 
 def runtime_preflight(composition: NativeHarnessComposition) -> None:

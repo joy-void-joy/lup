@@ -390,7 +390,7 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
    uv run lup-devtools dev worktree create feat-name
    ```
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/main`) and syncs dependencies; `lup-devtools harness codex` regenerates the artifacts and installs the digest-verified plugin copy, so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
-2. **Relocate this session into the worktree** -- `EnterWorktree(path=<the absolute path step 1 prints>)`. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale. Return with `ExitWorktree(action="keep")`.
+2. **Relocate this session into the worktree** -- start a session rooted at <the absolute path step 1 prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale.
 3. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
 4. Push the branch when the feature is complete (or periodically for backup)
 5. **`$lup:rebase`** -- Pushes the branch, opens a PR, then cleans up the commit history with `git reset --soft main` and force-pushes.

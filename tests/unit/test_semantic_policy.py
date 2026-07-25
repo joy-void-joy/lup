@@ -1,15 +1,17 @@
 """Cross-native semantic decoding and conservative policy parity tests."""
 
 import ast
+import importlib
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Literal
 
 import pytest
 import sh
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from lup.adapters.claude.native import (
     ClaudeBeforeToolEvent,
@@ -31,12 +33,13 @@ from lup.adapters.codex.native import (
 from lup.policy.chain import UnknownToolPolicy
 from lup.policy.bundle import (
     bundled_antipattern_rows,
-    policy_kernel_source,
+    policy_kernel_modules,
     render_policy_data,
     runtime_path_rules,
     runtime_url_scope,
 )
-from lup.policy.kernel import KernelDecision
+from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -64,6 +67,8 @@ class DecisionCase(BaseModel):
     effect: Literal["allow", "ask", "deny", "defer"]
     sandboxed: bool = False
     interactive: bool = True
+    existing: list[str] = Field(default_factory=list)
+    """Repository-relative files that already exist when the case is judged."""
 
 
 class EditDecisionCase(BaseModel):
@@ -90,8 +95,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="find . -name '*.tmp' -delete", effect="ask"),
     DecisionCase(input="cat x |& rm -rf ~", effect="ask"),
     DecisionCase(input="cat x ;& rm -rf ~", effect="deny"),
-    DecisionCase(input="echo payload > pyproject.toml", effect="ask"),
-    DecisionCase(input="echo payload >> src/generated.py", effect="ask"),
+    DecisionCase(
+        input="echo payload > pyproject.toml",
+        effect="ask",
+        existing=["pyproject.toml"],
+    ),
+    DecisionCase(
+        input="echo payload >> src/generated.py",
+        effect="ask",
+        existing=["src/generated.py"],
+    ),
     DecisionCase(input="gh pr view 123", effect="allow"),
     DecisionCase(input="gh pr list --state open", effect="allow"),
     DecisionCase(input="gh pr diff 123", effect="allow"),
@@ -106,18 +119,29 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="grep x f > /dev/null", effect="allow"),
     DecisionCase(input="cat f 2>/dev/null", effect="allow"),
     DecisionCase(input="ls >&2", effect="allow"),
-    DecisionCase(input="echo x > out.txt", effect="ask"),
+    # Overwriting an existing file is the destructive case and asks; creating
+    # one destroys nothing, and a target that cannot be resolved to a literal
+    # path keeps the strict verdict rather than guessing it is new.
+    DecisionCase(input="echo x > out.txt", effect="ask", existing=["out.txt"]),
+    DecisionCase(input="echo x > out.txt", effect="allow"),
+    DecisionCase(input="echo x > nested/new.txt", effect="allow"),
+    DecisionCase(input="echo x >> notes.log", effect="allow"),
+    DecisionCase(input="echo x > $UNSET_DIR/out.txt", effect="ask"),
+    DecisionCase(input="echo x > ~/out.txt", effect="ask"),
     DecisionCase(input="cat <<EOF", effect="deny"),
     # The session scratchpad is a write-allowed root like repo-relative tmp/;
-    # reassigning TMPDIR is a security-sensitive assignment, and a suffix
-    # that climbs out of the root falls back to the redirection ask.
+    # reassigning TMPDIR is a security-sensitive assignment, and a suffix that
+    # climbs out of the root falls back to the ordinary redirection rule —
+    # which still asks whenever the target cannot be resolved to a literal.
     DecisionCase(input="echo x > $TMPDIR/out.txt", effect="allow"),
     DecisionCase(input='sort f > "${TMPDIR}/sorted.txt"', effect="allow"),
     DecisionCase(input="echo x > /tmp/claude-1000/scratch/out.txt", effect="allow"),
     DecisionCase(input="cat <<'EOF' > $TMPDIR/notes.md\nbody\nEOF", effect="allow"),
     DecisionCase(input="echo x > $TMPDIR/../etc/crontab", effect="ask"),
-    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="ask"),
-    DecisionCase(input="echo x > /tmp/other/file", effect="ask"),
+    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="allow"),
+    # A /tmp path outside the session root is not scratch, so it follows the
+    # ordinary create-versus-overwrite rule rather than being written freely.
+    DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
     # Removal confined to the disposable roots is as safe as writing them;
@@ -258,6 +282,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git restore --source=$REF f", effect="ask"),
     DecisionCase(input="git restore --source=HEAD", effect="ask"),
     DecisionCase(input="git restore -s HEAD f", effect="ask"),
+    # Patch application allows in every in-repository form; only the flags that
+    # write outside the working area are guarded.
+    DecisionCase(input="git apply p.diff", effect="allow"),
+    DecisionCase(input="git apply --cached p.diff", effect="allow"),
+    DecisionCase(input="git apply --index p.diff", effect="allow"),
+    DecisionCase(input="git apply --check p.diff", effect="allow"),
+    DecisionCase(input="git apply -R p.diff", effect="allow"),
+    DecisionCase(input="git apply --unsafe-paths p.diff", effect="ask"),
+    DecisionCase(input="git apply --build-fake-ancestor=/tmp/x p.diff", effect="ask"),
+    DecisionCase(input="git apply $PATCH", effect="deny"),
     DecisionCase(input="git switch main", effect="allow"),
     DecisionCase(input="git checkout main", effect="deny"),
     DecisionCase(input="git bisect start", effect="deny"),
@@ -364,13 +398,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="cat <<EOF\nplain body\nEOF", effect="allow"),
     DecisionCase(input="cat <<EOF\n$(id)\nEOF", effect="deny"),
     DecisionCase(input="grep x <<< 'needle haystack'", effect="allow"),
-    # A heredoc feeding a file write is shell file authoring: deny toward
-    # the Edit tool and tmp/*.py in both operator orders, even sandboxed.
-    DecisionCase(input="cat > out.py <<'EOF'\nbody\nEOF", effect="deny"),
-    DecisionCase(input="cat <<'EOF' > out.py\nbody\nEOF", effect="deny"),
+    # A heredoc rewriting an existing file is shell file authoring over work
+    # the edit gate already saw: deny toward the Edit tool and tmp/*.py in
+    # both operator orders, even sandboxed. Authoring a file that is not
+    # there yet overwrites nothing and passes.
     DecisionCase(
-        input="cat > out.py <<'EOF'\nbody\nEOF", effect="deny", sandboxed=True
+        input="cat > out.py <<'EOF'\nbody\nEOF", effect="deny", existing=["out.py"]
     ),
+    DecisionCase(
+        input="cat <<'EOF' > out.py\nbody\nEOF", effect="deny", existing=["out.py"]
+    ),
+    DecisionCase(
+        input="cat > out.py <<'EOF'\nbody\nEOF",
+        effect="deny",
+        sandboxed=True,
+        existing=["out.py"],
+    ),
+    DecisionCase(input="cat > fresh.py <<'EOF'\nbody\nEOF", effect="allow"),
     DecisionCase(input="cat > tmp/oneoff.py <<'EOF'\nbody\nEOF", effect="allow"),
     # Frozen variable bindings: assignments and read rebind for the segments
     # that follow; literal values instantiate references, opaque ones gate
@@ -629,6 +673,34 @@ def test_policy_bundle_contains_assembly_but_no_decision_implementation() -> Non
     assert all(not name.startswith("decide_") for name in functions)
 
 
+def write_kernel_package(runtime: Path) -> Path:
+    """Materialize the kernel package a generated runtime directory carries."""
+    package = runtime / "kernel"
+    package.mkdir(parents=True, exist_ok=True)
+    for item in policy_kernel_modules():
+        (package / item.name).write_text(item.source, encoding="utf-8")
+    return package
+
+
+def load_bundled_kernel(root: Path, module: str) -> ModuleType:
+    """Import one module of a freshly materialized kernel copy.
+
+    The copy is imported as a real package, so its relative imports resolve
+    exactly as they do beneath a generated plugin's runtime directory rather
+    than through the lup installation under test.
+    """
+    write_kernel_package(root)
+    for name in [
+        name for name in sys.modules if name == "kernel" or name.startswith("kernel.")
+    ]:
+        del sys.modules[name]
+    sys.path.insert(0, str(root))
+    try:
+        return importlib.import_module(f"kernel.{module}")
+    finally:
+        sys.path.remove(str(root))
+
+
 def assembled_edit_decision(
     module: ModuleType,
     path: str,
@@ -658,7 +730,7 @@ def assembled_edit_decision(
 def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     runtime.mkdir()
-    (runtime / "kernel.py").write_text(policy_kernel_source(), encoding="utf-8")
+    write_kernel_package(runtime)
     (runtime / "policy_data.py").write_text(
         render_policy_data(
             allowed_fetch_scopes=[
@@ -703,7 +775,9 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "import sys\n"
         "from pathlib import Path\n"
         "sys.path.insert(0, str(Path(__file__).parent))\n"
-        "from kernel import decide_edit, decide_fetch, decide_shell\n"
+        "from kernel.edit import decide_edit\n"
+        "from kernel.fetch import decide_fetch\n"
+        "from kernel.shell import decide_shell\n"
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
         "    MAXIMUM_ADDED_LINES, PATH_RULES, SHELL_RULES,\n"
@@ -715,6 +789,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "    result = decide_shell(\n"
         "        case['input'], SHELL_RULES, sandboxed=case['sandboxed'],\n"
         "        interactive=case['interactive'],\n"
+        "        existing_targets=case['existing'],\n"
         "    )\n"
         "    assert result.effect == case['effect'], case\n"
         "for case in fixtures['fetch']:\n"
@@ -833,12 +908,7 @@ def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:
 
 
 def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) -> None:
-    path = tmp_path / "bundled_fetch_policy.py"
-    path.write_text(policy_kernel_source(), encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("bundled_fetch_policy", path)
-    assert spec is not None and spec.loader is not None
-    bundled = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(bundled)
+    bundled = load_bundled_kernel(tmp_path, "fetch")
     scope = UrlScope(
         origin=AnyHttpUrl("https://docs.example.com:8443"),
         path_prefix="/reference/",
@@ -930,28 +1000,57 @@ def test_shell_policy_confines_trusted_native_skill_scripts() -> None:
 def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "bundled_policy.py"
-    path.write_text(policy_kernel_source(), encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("bundled_policy", path)
-    assert spec is not None and spec.loader is not None
-    bundled = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(bundled)
+    bundled = load_bundled_kernel(tmp_path, "shell")
     policy = ShellPolicy()
     sandboxed_policy = ShellPolicy(sandbox_active=True)
 
-    for case in SHELL_POLICY_CASES:
+    for index, case in enumerate(SHELL_POLICY_CASES):
         if case.interactive:
             active = sandboxed_policy if case.sandboxed else policy
         else:
             active = ShellPolicy(sandbox_active=case.sandboxed, interactive=False)
-        assert active.decide(ShellCommand(command=case.input)).effect == case.effect
+        # Each case judges a tree of its own, so a file one case declares
+        # present never leaks into the next case's create-versus-overwrite.
+        root = tmp_path / f"case{index}"
+        root.mkdir()
+        for name in case.existing:
+            present = root / name
+            present.parent.mkdir(parents=True, exist_ok=True)
+            present.write_text("already here", encoding="utf-8")
+        decided = active.decide(ShellCommand(command=case.input, cwd=root))
+        assert decided.effect == case.effect, case.input
         bundled_effect = bundled.decide_shell(
             case.input,
             policy.rules,
             sandboxed=case.sandboxed,
             interactive=case.interactive,
+            existing_targets=case.existing,
         ).effect
-        assert bundled_effect == case.effect
+        assert bundled_effect == case.effect, case.input
+
+
+def test_write_targets_name_only_the_paths_a_command_opens_for_writing() -> None:
+    assert shell_write_targets("echo x > out.txt") == ["out.txt"]
+    assert shell_write_targets("echo x >> notes.log") == ["notes.log"]
+    assert shell_write_targets("cat > a.py <<'EOF'\nbody\nEOF") == ["a.py"]
+    assert shell_write_targets("wc -l < input.txt") == []
+    assert shell_write_targets("grep x f 2>&1") == []
+    assert shell_write_targets("ls >&2") == []
+    assert shell_write_targets("a > one.txt | b > two.txt") == ["one.txt", "two.txt"]
+    assert shell_write_targets("frobnicate --weird") == []
+
+
+def test_creating_a_file_passes_where_overwriting_one_still_asks(
+    tmp_path: Path,
+) -> None:
+    policy = ShellPolicy()
+    existing = tmp_path / "kept.txt"
+    existing.write_text("prior work", encoding="utf-8")
+    command = "echo x > kept.txt"
+
+    assert policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect == "ask"
+    existing.unlink()
+    assert policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect == "allow"
 
 
 def test_sandbox_escape_reenters_the_deny_lattice() -> None:
@@ -1063,12 +1162,7 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
 def test_bundled_edit_policy_matches_canonical_security_outcomes(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "bundled_policy.py"
-    path.write_text(policy_kernel_source(), encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("bundled_edit_policy", path)
-    assert spec is not None and spec.loader is not None
-    bundled = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(bundled)
+    bundled = load_bundled_kernel(tmp_path, "edit")
     policy = EditPolicy(
         protected=[
             PathRule(
@@ -1124,12 +1218,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
 
 
 def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
-    path = tmp_path / "bundled_editor_policy.py"
-    path.write_text(policy_kernel_source(), encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("bundled_editor_policy", path)
-    assert spec is not None and spec.loader is not None
-    bundled = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(bundled)
+    bundled = load_bundled_kernel(tmp_path, "edit")
 
     cases = [item for item in EDIT_POLICY_CASES if item.autonomous]
     for case in cases:
@@ -1148,12 +1237,7 @@ def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
 def test_edit_policy_uses_full_python_context_for_added_docstrings(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "bundled_docstring_policy.py"
-    path.write_text(policy_kernel_source(), encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("bundled_docstring_policy", path)
-    assert spec is not None and spec.loader is not None
-    bundled = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(bundled)
+    bundled = load_bundled_kernel(tmp_path, "edit")
     before = '"""Documentation.\n"""\nvalue = 1'
     unrestricted_type_name = "A" + "ny"
     after = (
@@ -1173,12 +1257,7 @@ def test_edit_policy_uses_full_python_context_for_added_docstrings(
 
 
 def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> None:
-    path = tmp_path / "bundled_ast_policy.py"
-    path.write_text(policy_kernel_source(), encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("bundled_ast_policy", path)
-    assert spec is not None and spec.loader is not None
-    bundled = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(bundled)
+    bundled = load_bundled_kernel(tmp_path, "edit")
     before = (
         "class Scheduler:\n    def __init__(self) -> None:\n        self.ready = True\n"
     )

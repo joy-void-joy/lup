@@ -70,7 +70,11 @@ Worktrees typically branch from `dev`, but can also branch from other feature br
 
 1. `uv run lup-devtools dev worktree create feat-name`
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/dev`) and syncs dependencies. Generate and launch the native plugin with `lup-devtools harness claude` or `harness codex`. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
-2. `EnterWorktree(path=<path step 1 prints>)` — creating a worktree does not move the session, and edits left in the old checkout never reach the branch. Leave with `ExitWorktree(action="keep")`.
+2. """
+        ),
+        models.RelocateSession(path="the path step 1 prints"),
+        models.TextPart(
+            text=r""" — creating a worktree does not move the session, and edits left in the old checkout never reach the branch.
 3. Commit regularly and atomically
 4. Push when complete (or periodically for backup)
 5. `"""

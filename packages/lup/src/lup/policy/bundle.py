@@ -11,9 +11,11 @@ import json
 import urllib.parse
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
+
 from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
 import lup.policy.kernel as kernel
-from lup.policy.kernel import (
+from lup.policy.kernel.rows import (
     AntiPatternRow,
     PathRuleRow,
     ShellRuleRow,
@@ -27,20 +29,46 @@ from lup.policy.shell_rules import (
 from lup.policy.rules import human_owned_path_rule, path_rule_row
 
 
-def policy_kernel_source() -> str:
-    """Read the canonical kernel verbatim for generated runtime assembly."""
-    path = Path(kernel.__file__)
-    return path.read_text(encoding="utf-8")
+class KernelModule(BaseModel):
+    """One hermetic kernel source file copied into a generated runtime."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    source: str
+
+
+def policy_kernel_modules() -> list[KernelModule]:
+    """Read the canonical kernel package verbatim for runtime assembly.
+
+    The package's relative imports resolve the same beneath ``runtime/`` as
+    they do in lup, so every module ships byte for byte.
+    """
+    directory = Path(kernel.__file__).parent
+    return [
+        KernelModule(name=path.name, source=path.read_text(encoding="utf-8"))
+        for path in sorted(directory.glob("*.py"))
+    ]
 
 
 def bundled_antipattern_rows() -> dict[str, list[AntiPatternRow]]:
     """Compile primitive runtime rows directly from canonical rule objects."""
     python_rows = [
-        (rule.id, rule.pattern.pattern, rule.message, rule.context)
+        AntiPatternRow(
+            id=rule.id,
+            pattern=rule.pattern.pattern,
+            message=rule.message,
+            context=rule.context,
+        )
         for rule in PYTHON_ANTI_PATTERNS
     ]
     typescript_rows = [
-        (rule.id, rule.pattern.pattern, rule.message, rule.context)
+        AntiPatternRow(
+            id=rule.id,
+            pattern=rule.pattern.pattern,
+            message=rule.message,
+            context=rule.context,
+        )
         for rule in TS_ANTI_PATTERNS
     ]
     return {
@@ -65,13 +93,13 @@ def runtime_url_scope(
     parsed = urllib.parse.urlsplit(origin)
     if parsed.hostname is None:
         raise ValueError("validated hook URL scope has no hostname")
-    return (
-        parsed.scheme,
-        parsed.hostname,
-        parsed.port,
-        path_prefix,
-        reason,
-        include_subdomains,
+    return UrlScopeRow(
+        scheme=parsed.scheme,
+        host=parsed.hostname,
+        port=parsed.port,
+        path_prefix=path_prefix,
+        reason=reason,
+        include_subdomains=include_subdomains,
     )
 
 
@@ -79,9 +107,19 @@ def runtime_path_rule(root: str) -> PathRuleRow:
     """Compile one application root into its primitive protected-path row."""
     match root:
         case "tmp":
-            return ("contains_part", root, "scratch path requires approval", False)
+            return PathRuleRow(
+                kind="contains_part",
+                value=root,
+                reason="scratch path requires approval",
+                allow_autonomous=False,
+            )
         case _:
-            return ("subtree", root, "protected path requires approval", True)
+            return PathRuleRow(
+                kind="subtree",
+                value=root,
+                reason="protected path requires approval",
+                allow_autonomous=True,
+            )
 
 
 def runtime_path_rules(
@@ -91,8 +129,18 @@ def runtime_path_rules(
     return [
         *[runtime_path_rule(root) for root in protected_roots],
         *[path_rule_row(human_owned_path_rule(path)) for path in human_owned_files],
-        ("name_prefix", ".env", "protected path requires approval", True),
-        ("new_devtools", "src", "new devtools module requires approval", False),
+        PathRuleRow(
+            kind="name_prefix",
+            value=".env",
+            reason="protected path requires approval",
+            allow_autonomous=True,
+        ),
+        PathRuleRow(
+            kind="new_devtools",
+            value="src",
+            reason="new devtools module requires approval",
+            allow_autonomous=False,
+        ),
     ]
 
 
@@ -101,45 +149,45 @@ def runtime_shell_rules(extension: list[ShellCommandRule]) -> list[ShellRuleRow]
     return erase_shell_rules([*BASE_SHELL_RULES, *extension])
 
 
-def tuple_rows_literal(rows: list[list[str]]) -> str:
-    """Render already-escaped tuple rows in Ruff-stable multiline form."""
+def dict_rows_literal(rows: list[list[str]]) -> str:
+    """Render already-escaped ``"key": value`` rows in Ruff-stable form."""
     if not rows:
         return "()"
     blocks = [
-        "    (\n" + "".join(f"        {value},\n" for value in row) + "    ),"
+        "    {\n" + "".join(f"        {entry},\n" for entry in row) + "    },"
         for row in rows
     ]
     return "[\n" + "\n".join(blocks) + "\n]"
 
 
 def url_scope_rows_literal(rows: list[UrlScopeRow]) -> str:
-    """Render normalized URL scopes as primitive tuples."""
-    return tuple_rows_literal(
+    """Render normalized URL scopes as primitive runtime rows."""
+    return dict_rows_literal(
         [
             [
-                json.dumps(scheme),
-                json.dumps(host),
-                "None" if port is None else str(port),
-                json.dumps(path_prefix),
-                json.dumps(reason),
-                str(include_subdomains),
+                f'"scheme": {json.dumps(row["scheme"])}',
+                f'"host": {json.dumps(row["host"])}',
+                f'"port": {"None" if row["port"] is None else row["port"]}',
+                f'"path_prefix": {json.dumps(row["path_prefix"])}',
+                f'"reason": {json.dumps(row["reason"])}',
+                f'"include_subdomains": {row["include_subdomains"]}',
             ]
-            for scheme, host, port, path_prefix, reason, include_subdomains in rows
+            for row in rows
         ]
     )
 
 
 def path_rule_rows_literal(rows: list[PathRuleRow]) -> str:
-    """Render protected-path rows as primitive tuples."""
-    return tuple_rows_literal(
+    """Render protected-path rows as primitive runtime rows."""
+    return dict_rows_literal(
         [
             [
-                json.dumps(kind),
-                json.dumps(value),
-                json.dumps(reason),
-                str(autonomous),
+                f'"kind": {json.dumps(row["kind"])}',
+                f'"value": {json.dumps(row["value"])}',
+                f'"reason": {json.dumps(row["reason"])}',
+                f'"allow_autonomous": {row["allow_autonomous"]}',
             ]
-            for kind, value, reason, autonomous in rows
+            for row in rows
         ]
     )
 
@@ -149,14 +197,14 @@ def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
     lines = ["{"]
     for suffix, patterns in sorted(rows.items()):
         lines.append(f"    {json.dumps(suffix)}: [")
-        for rule_id, pattern, message, context in patterns:
+        for row in patterns:
             block = (
-                "        (\n"
-                f"            {json.dumps(rule_id)},\n"
-                f"            {json.dumps(pattern)},\n"
-                f"            {json.dumps(message)},\n"
-                f"            {json.dumps(context)},\n"
-                "        ),"
+                "        {\n"
+                f'            "id": {json.dumps(row["id"])},\n'
+                f'            "pattern": {json.dumps(row["pattern"])},\n'
+                f'            "message": {json.dumps(row["message"])},\n'
+                f'            "context": {json.dumps(row["context"])},\n'
+                "        },"
             )
             lines.append(block)
         lines.append("    ],")
