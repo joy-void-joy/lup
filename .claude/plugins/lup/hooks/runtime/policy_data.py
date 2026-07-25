@@ -2855,6 +2855,20 @@ SHELL_RULES = [
     },
     {
         "command": "git",
+        "subcommand": "apply",
+        "operation": "",
+        "effect": "allow",
+        "ask_flags": [
+            "--unsafe-paths",
+            "--build-fake-ancestor",
+        ],
+        "allow_flags": [],
+        "read_verbs": [],
+        "value_flags": [],
+        "reason": "a patch that writes outside the working area requires approval",
+    },
+    {
+        "command": "git",
         "subcommand": "restore",
         "operation": "",
         "effect": "ask",

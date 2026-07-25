@@ -280,6 +280,11 @@ def git_rule() -> ShellCommandRule:
             reason="cloning fetches external code — requires approval",
         ),
         ShellSubcommandRule(
+            name="apply",
+            ask_flags=["--unsafe-paths", "--build-fake-ancestor"],
+            reason="a patch that writes outside the working area requires approval",
+        ),
+        ShellSubcommandRule(
             name="restore",
             effect="ask",
             reason="restoring files discards working-tree changes",

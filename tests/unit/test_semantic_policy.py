@@ -254,6 +254,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git restore --source=$REF f", effect="ask"),
     DecisionCase(input="git restore --source=HEAD", effect="ask"),
     DecisionCase(input="git restore -s HEAD f", effect="ask"),
+    # Patch application allows in every in-repository form; only the flags that
+    # write outside the working area are guarded.
+    DecisionCase(input="git apply p.diff", effect="allow"),
+    DecisionCase(input="git apply --cached p.diff", effect="allow"),
+    DecisionCase(input="git apply --index p.diff", effect="allow"),
+    DecisionCase(input="git apply --check p.diff", effect="allow"),
+    DecisionCase(input="git apply -R p.diff", effect="allow"),
+    DecisionCase(input="git apply --unsafe-paths p.diff", effect="ask"),
+    DecisionCase(input="git apply --build-fake-ancestor=/tmp/x p.diff", effect="ask"),
+    DecisionCase(input="git apply $PATCH", effect="deny"),
     DecisionCase(input="git switch main", effect="allow"),
     DecisionCase(input="git checkout main", effect="deny"),
     DecisionCase(input="git bisect start", effect="deny"),
