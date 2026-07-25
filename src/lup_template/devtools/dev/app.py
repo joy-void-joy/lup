@@ -142,6 +142,13 @@ def survey_cmd(
     branches.survey(as_json)
 
 
+@app.command("merge-driver")
+def merge_driver_cmd() -> None:
+    """Register the ownership-manifest merge driver `.gitattributes` names."""
+    worktree.register_merge_driver()
+    typer.echo(f"Registered merge driver: {worktree.OWNERSHIP_MERGE_DRIVER}")
+
+
 @app.command("delete")
 def delete_cmd(
     name: Annotated[str, typer.Argument(help="Branch name to delete")],
@@ -151,7 +158,11 @@ def delete_cmd(
     ] = False,
     force: Annotated[
         bool,
-        typer.Option("--force", "-f", help="Force delete (git branch -D)"),
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force delete the branch and a worktree holding modified files",
+        ),
     ] = False,
 ) -> None:
     """Delete a branch, its worktree, and remote tracking branch."""

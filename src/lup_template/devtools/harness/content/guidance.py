@@ -103,6 +103,8 @@ Use `"""
         models.TextPart(
             text=r"""` (with no argument) for guided conflict resolution. See the command for the full decision tree.
 
+**Generated artifacts are regenerated, never hand-merged.** A digest manifest (`.lup-ownership.json`) conflicts on every parallel branch because each field is derived, so `.gitattributes` gives it a driver that keeps one side; `lup-devtools dev merge-driver` registers it in a clone that has not run `worktree create`. Reconciling such a file hunk by hunk produces a proof that matches neither tree — take either side, then `lup-devtools harness generate all` and let `harness check all` confirm it settled.
+
 ### Commit Guidelines
 
 - **Commit before responding** — Don't accumulate changes across responses
