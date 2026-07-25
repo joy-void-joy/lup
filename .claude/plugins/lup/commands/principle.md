@@ -26,11 +26,8 @@ Before auditing files, articulate the principle precisely:
 2. **Identify the "do this / not this" pair** — what does the principle look like when followed vs violated?
 3. **Check generality** — would this principle still apply if the domain changed completely? If not, it may be too specific.
 
-Use AskUserQuestion to confirm the formulation with the user before proceeding. Show:
-
-- The principle statement
-- A "Do This / Not This" table (like the Bitter Lesson table in CLAUDE.md)
-- 2-3 concrete examples of the principle in action
+Show the principle statement, a "Do This / Not This" table (like the Bitter
+Lesson table in the guidance), and 2-3 concrete examples of it in action. Then Ask the user with the AskUserQuestion tool, offering concrete options plus a free-text choice: whether that formulation is the right one
 
 ## Phase 2: Audit All Layers
 
@@ -45,23 +42,22 @@ Read every relevant file and categorize findings into three buckets:
 1. **Guidance** (`src/lup_template/devtools/harness/content/guidance.py`)
    - Check every section: does it align with or contradict the principle?
    - Look for existing principles that overlap or conflict
-   - `.claude/CLAUDE.md` and the root `AGENTS.md` are generated from this module — read them for the rendered result, never edit them
+   - .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex are generated from this module — read them for the rendered result, never edit them
 
 2. **Template guidance** (`src/lup_template/devtools/harness/content/template_sections.py`)
-   - Same checks — this is what new projects inherit; the portable sections render into both `TEMPLATE_CLAUDE.md` and `TEMPLATE_AGENTS.md` from this one source
+   - Same checks — this is what new projects inherit; the portable sections render into every flavor of .claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex from this one source
 
 ### Layer B: Commands & Workflows
 
 3. **All skill modules** (`src/lup_template/devtools/harness/content/skills/*.py`)
    - Read each skill's instructions, guidelines, and anti-patterns
    - Check if a skill encodes a workflow that violates the principle
-   - `.claude/plugins/lup/commands/*.md` and `.codex/plugins/lup/skills/*/SKILL.md` are generated from these — never edit them
+   - .claude/plugins/lup/commands/*.md under Claude Code, .codex/plugins/lup/skills/*/SKILL.md under Codex are generated from these — never edit them
 
 ### Layer C: Semantic Policy & Enforcement
 
 4. **Canonical policy** (`packages/lup/src/lup/policy/` plus the `HookSet` in
-   `src/lup_template/devtools/harness/catalog.py`; everything under
-   `.claude/plugins/lup/hooks/` is generated from these — never edit it directly)
+   `src/lup_template/devtools/harness/catalog.py`; everything under .claude/plugins/lup/hooks/ under Claude Code, .codex/plugins/lup/hooks/ under Codex is generated from these — never edit it directly)
    - Check if any policy rule contradicts the principle
    - Consider if a new policy rule could enforce the principle mechanically
 
@@ -95,7 +91,7 @@ Present findings and proposed changes one layer at a time. For each layer:
 
 1. **Show current state** — quote the relevant sections that need changes
 2. **Propose specific edits** — show what would change and why
-3. **Use AskUserQuestion** to get approval before proceeding
+3. Request explicit user approval before applying that layer's edits. Reason: a principle sweep touches every layer and is hard to unpick once several have landed
 
 ### Layer order:
 

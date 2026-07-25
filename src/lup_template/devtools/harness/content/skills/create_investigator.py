@@ -57,7 +57,7 @@ Before writing anything, understand what this investigator needs to do:
    - What source code is most relevant? Which files in `src/` would the investigator need to read?
    - What devtools commands might be useful? (`uv run lup-devtools --help`)
 
-3. **Use AskUserQuestion** to align on the design:
+3. **Align on the design with the user** before writing anything:
    - What are the common scenarios this investigator will handle?
    - What are the typical "anchors" in the pasted output that help trace the issue? (IDs, timestamps, function names, error codes, etc.)
    - What domain-specific knowledge should the command encode? (common failure modes, known gotchas, relevant architecture)
@@ -87,28 +87,35 @@ Based on your exploration and the user's input, design the command. Existing inv
 
 ## Step 3: Declare the skill
 
-Write the declaration to `src/lup_template/devtools/harness/content/skills/<command_name>.py` as a `models.Skill`, then register it in `content/catalog.py` (import `SKILL as SKILL_<NAME>`, add it to `SKILLS`) and regenerate with `uv run lup-devtools harness claude` and `harness codex`. The command markdown under `.claude/plugins/lup/commands/` is generated from this — never write it by hand.
+Write the declaration to `src/lup_template/devtools/harness/content/skills/<command_name>.py` as a `models.Skill`, then register it in `content/catalog.py` (import `SKILL as SKILL_<NAME>`, add it to `SKILLS`) and regenerate with `uv run lup-devtools harness generate all`. The artifacts under """
+            ),
+            models.PluginPath(plugin="lup", location="skills", scope="every_tree"),
+            models.TextPart(
+                text=r""" are generated from this — never write them by hand.
 
-**Tools**: Choose the `tools` list based on what the investigator needs. Common choices:
-
-- `Read, Grep, Glob` — always needed for code/log exploration
-- `Bash(ls:*, wc:*, sort:*, tail:*, stat:*)` — for listing and sizing files
-- `Bash(uv run lup-devtools:*)` — if the command needs devtools scripts
-- `WebSearch` — if the investigation might need external context
-- `AskUserQuestion` — if the investigation might need clarification from the user
+**Tools**: Choose the `tools` list based on what the investigator needs. Every
+grant is a `ToolGrant` from `packages/lup/src/lup/types.py` — read that closed
+type for the spellings rather than guessing. An investigator almost always
+needs file reading and search; add scoped shell grants for listing and sizing
+files or for the devtools it runs, a web grant if it needs outside context, and
+a question grant if it may need clarification from the user.
 
 **Content**: Write the prompt body as `models.TextPart` parts, splicing `models.ArgumentsRef()` where the pasted output lands. Use the design from Step 2.
 
 ## Step 4: Confirm and iterate
 
-Show the user what was created. Offer to refine it — the first draft is rarely perfect. Use AskUserQuestion to check if anything needs adjustment.
+Show the user what was created — the first draft is rarely perfect. """
+            ),
+            models.AskUser(question="what needs adjusting, if anything"),
+            models.TextPart(
+                text=r"""
 
 ## Rules
 
 - **Read before writing** — Always explore the relevant codebase areas before designing the command. The command should reference actual file paths, actual script names, actual log locations.
 - **Be specific** — Generic investigation steps ("search the logs") are useless. Point to specific directories, file patterns, scripts, and code locations.
 - **Encode domain knowledge** — The whole point of an investigator command is that it captures knowledge you'd otherwise have to rediscover each time. Bake in common failure modes, known gotchas, and relevant architecture.
-- **Keep it conversational** — Use AskUserQuestion when you need input. Don't assume.
+- **Keep it conversational** — ask when you need input. Don't assume.
 """
             ),
         ]

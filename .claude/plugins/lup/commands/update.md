@@ -75,7 +75,7 @@ Classify as:
   - `devtools/` CLI improvements (new subcommands, better output formatting, new analysis tools)
   - Hook logic improvements (new permission patterns, better auto-allow rules)
   - Build/config improvements that generalize
-  - **CLAUDE.md improvements** (coding standards, workflow tips, new guidelines)
+  - **Guidance improvements** (coding standards, workflow tips, new guidelines)
 
 - **Portable as scaffold**: Domain-specific implementations that represent a generalizable _pattern_. These get ported with domain details replaced by template placeholders.
   - **New agents/subagents** — A "version-reviewer" that uses Brier scores becomes a scaffold version-reviewer that uses generic outcome metrics. A "forecast reviewer" nested agent becomes a generic "reviewer" scaffold that critiques agent output.
@@ -96,7 +96,7 @@ Examples of what gets missed when you classify by domain keywords instead of by 
 
 ### 5. Present improvements
 
-Present every extracted portable piece to the user via AskUserQuestion:
+Present every extracted portable piece to the user, one decision each:
 
 - The upstream commit(s) it comes from
 - What the portable piece is (function, pattern, infrastructure, etc.)

@@ -55,7 +55,14 @@ Invoke `"""
 
 1. Run `uv run lup-devtools dev survey --json`.
 2. Find the named branch. If it is absent, report and stop.
-3. Show its `disposition` and `reason`, and confirm the matching action via AskUserQuestion.
+3. Show its `disposition` and `reason`, then """
+            ),
+            models.RequestApproval(
+                action="carrying out the action that disposition implies",
+                reason="the branch may hold work the user has not looked at",
+            ),
+            models.TextPart(
+                text=r"""
 4. Carry out that disposition's action from the table below.
 
 ## Full Sweep Mode (no argument)
@@ -114,7 +121,15 @@ Never choose a route on the user's behalf: a `LAND` branch by definition carries
 
 ### 6. Confirm and execute
 
-Use AskUserQuestion before anything that deletes or pushes. Then carry out the approved actions.
+"""
+            ),
+            models.RequestApproval(
+                action="deleting a branch or pushing to a remote",
+                reason="a LAND branch carries no PR expressing intent, so the intent "
+                "has to come from the user",
+            ),
+            models.TextPart(
+                text=r""" Then carry out the approved actions.
 
 ### 7. Report results
 

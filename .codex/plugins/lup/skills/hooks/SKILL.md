@@ -26,7 +26,7 @@ the arguments supplied with this skill invocation
 - `tests/unit/test_semantic_policy.py` is the shared canonical/bundled fixture
   suite.
 
-Files beneath `.claude/plugins/lup/hooks/` and `.codex/plugins/lup/hooks/` are
+Files beneath .claude/plugins/lup/hooks/ under Claude Code, .codex/plugins/lup/hooks/ under Codex are
 generated artifacts. Never edit them as the source of a policy change.
 
 ## Workflow
@@ -34,9 +34,8 @@ generated artifacts. Never edit them as the source of a policy change.
 1. Classify the request as a semantic rule, an application policy input, or a
    native decoding/rendering capability.
 2. Read the relevant canonical source and its cross-native fixtures.
-3. Show the current behavior and propose the smallest semantic change. Use
-   AskUserQuestion before changing policy behavior when the request did not
-   already specify the decision.
+3. Show the current behavior and propose the smallest semantic change. When
+   the request did not already settle the decision, Request explicit user approval before changing policy behavior. Reason: a policy change alters what every later session may do
 4. Edit the canonical source and add fixtures for safe, denied, approval, and
    malformed variants as applicable.
 5. Run `uv run pytest -q tests/unit/test_semantic_policy.py`.

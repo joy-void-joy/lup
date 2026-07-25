@@ -15,31 +15,10 @@ RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
 MARK = "<supplied by the caller>"
 
 REMAINING_PROSE_BREACHES = [
-    "agent.resolve-editor",
     "harness.guidance",
-    "skill.add-command",
-    "skill.brainstorm",
-    "skill.bump",
-    "skill.close",
-    "skill.commit",
-    "skill.create-investigator",
-    "skill.fb-analyze",
-    "skill.fb-implement",
-    "skill.fb-investigate",
-    "skill.fb-status",
-    "skill.hooks",
-    "skill.import",
     "skill.init",
     "skill.install",
-    "skill.land",
-    "skill.merge",
     "skill.meta",
-    "skill.modify-command",
-    "skill.principle",
-    "skill.rebase",
-    "skill.refactor",
-    "skill.refactor-tools",
-    "skill.update",
 ]
 """Declarations whose prose still names a platform. This only ever shrinks.
 

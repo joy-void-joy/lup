@@ -9,7 +9,7 @@ Implement changes identified during investigation, analysis, and reflection.
 
 ## Entry Gate
 
-Use AskUserQuestion to present the prioritized change list with Bitter Lesson classification. User must approve before implementation.
+Present the prioritized change list with its Bitter Lesson classification, then Request explicit user approval before implementing any of the changes. Reason: the list decides what the next session's work will be
 
 **Bitter Lesson classification:**
 - **Tool/capability** (preferred): Build or fix a tool, add a data source, improve automation
@@ -32,7 +32,7 @@ From tool health analysis. Fix the root cause, not the symptom.
 
 ### P2: Build requested tools
 
-From capability gap analysis. Discuss with user before building — use AskUserQuestion to present the capability gap, proposed approach, and alternatives.
+From capability gap analysis. Present the gap, the proposed approach, and the alternatives, then Ask the user directly, offering concrete options, and wait for the answer: which approach to build, if any
 
 ### P3: Improve tool descriptions
 

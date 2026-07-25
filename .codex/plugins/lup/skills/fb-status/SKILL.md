@@ -39,9 +39,9 @@ Prioritize: sessions with errors, sessions with poor outcomes (if outcome data e
 
 ### 4. Gate
 
-Use AskUserQuestion to present:
+Show:
 - Agent version and session count
 - Selected target sessions with key stats
 - What was done last session (if applicable)
 
-Options: "Proceed with these targets" / "Change target selection" / "Custom"
+Then Ask the user directly, offering concrete options, and wait for the answer: whether to proceed with these targets or change the selection

@@ -41,20 +41,17 @@ If `$ARGUMENTS` is empty, ask the user:
 1. **Parse** the command name and delta from the arguments
 2. **Find** the source -- search in these locations, in order:
    - `src/lup_template/devtools/harness/content/skills/<name>.py` (lup skills, including every `lup:name` variant -- the underscored module name)
-   - `.claude/commands/<name>.md` (project commands)
-   - `~/.claude/commands/<name>.md` (personal commands)
+   - a command the project or the person defined natively, outside any plugin
 
-   Files under `.claude/plugins/lup/commands/` and `.codex/plugins/lup/skills/` are generated from the declarations -- read them to see the rendered result, never to edit.
+   Files under .claude/plugins/lup/commands/ under Claude Code, .codex/plugins/lup/skills/ under Codex are generated from the declarations -- read them to see the rendered result, never to edit.
 3. **Read** the current declaration in full
 4. **Analyze** the delta -- determine whether the user wants to:
    - **Add** new behavior (append steps, add sections)
    - **Change** existing behavior (modify instructions, update tools)
    - **Remove** behavior (simplify, strip sections)
    - **Replace** entirely (new description overrides old)
-5. **Show the user** the proposed changes using AskUserQuestion:
-   - Summarize what will change
-   - Show before/after for key sections if helpful
-   - Ask for confirmation before writing
+5. **Show the user** the proposed changes: summarize what will change, show
+   before/after for key sections if helpful, then Request explicit user approval before writing the changed declaration. Reason: the change reaches every tree the declaration renders into
 6. **Apply** the changes -- edit the declaration's prompt parts
 7. **Update the `tools` list** if needed (e.g., new grants for added functionality)
 8. **Regenerate** with `uv run lup-devtools harness claude` and `harness codex` when the source was a lup skill

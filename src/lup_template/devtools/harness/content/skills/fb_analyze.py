@@ -47,11 +47,14 @@ From investigation findings:
 
 ### 3. Version comparison (if relevant)
 
-If comparing across versions, launch the version-explorer subagent for code-level diffs:
-
-```
-Task(subagent_type="lup:version-explorer", prompt="Compare vX.Y.Z and vA.B.C")
-```
+If comparing across versions, get code-level diffs: """
+            ),
+            models.Delegate(
+                subagent_type="lup:version-explorer",
+                prompt="Compare vX.Y.Z and vA.B.C",
+            ),
+            models.TextPart(
+                text=r"""
 
 ### 4. Summarize
 
