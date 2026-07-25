@@ -20,6 +20,7 @@ from lup.adapters.codex.harness_runtime import (
 from lup.harness.environment import non_interactive_environment
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
+from lup_template.devtools.dev.worktree import get_tree_dir
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.composition import (
     NativeHarnessComposition,
@@ -101,7 +102,22 @@ def codex_sandbox_arguments(environment: EnvVars, extra_args: list[str]) -> list
         "codex sandbox: workspace-write envelope — "
         "unjudged shell defers to the OS boundary"
     )
-    return ["--sandbox", "workspace-write"]
+    return ["--sandbox", "workspace-write", *writable_root_arguments()]
+
+
+def writable_root_arguments() -> list[str]:
+    """Widen the workspace-write root to the tree/ holding sibling worktrees.
+
+    Codex roots writes at the launch directory, so a feature worktree this
+    project's own workflow prescribes creating lands outside the boundary
+    and cannot be edited from the session that created it. Claude resolves
+    its workspace to the repository and never had the split.
+    """
+    try:
+        tree = get_tree_dir()
+    except (typer.Exit, SystemExit):
+        return []
+    return ["-c", f'sandbox_workspace_write.writable_roots=["{tree}"]']
 
 
 def launch_claude(
