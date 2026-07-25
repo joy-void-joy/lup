@@ -6,6 +6,7 @@ from typing import Literal
 
 import pytest
 import sh
+import typer
 from pydantic import BaseModel, ConfigDict, Field
 
 from lup.adapters.claude.harness import (
@@ -55,7 +56,7 @@ from lup.types import EnvVars
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
-from lup_template.devtools.dev.worktree import get_tree_dir
+from lup_template.devtools.harness import launch
 from lup_template.devtools.harness.launch import codex_sandbox_arguments
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
@@ -1172,14 +1173,34 @@ def test_codex_sandbox_arguments_establish_the_envelope() -> None:
     assert environment["LUP_SANDBOX_ACTIVE"] == "1"
 
 
-def test_codex_sandbox_widens_the_root_to_sibling_worktrees() -> None:
+def test_codex_sandbox_widens_the_root_to_sibling_worktrees(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Codex roots writes at the launch cwd; the prescribed worktree is outside."""
+    monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
     environment: EnvVars = {}
     arguments = codex_sandbox_arguments(environment, [])
     roots = arguments[arguments.index("-c") + 1]
 
     assert roots.startswith("sandbox_workspace_write.writable_roots=")
-    assert str(get_tree_dir()) in roots
+    assert str(tmp_path) in roots
+
+
+def test_codex_sandbox_omits_the_root_outside_a_tree_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plain clone has no tree/ to widen to, so the envelope stands alone."""
+
+    def no_tree() -> Path:
+        raise typer.Exit(1)
+
+    monkeypatch.setattr(launch, "get_tree_dir", no_tree)
+    environment: EnvVars = {}
+
+    assert codex_sandbox_arguments(environment, []) == [
+        "--sandbox",
+        "workspace-write",
+    ]
 
 
 def test_codex_sandbox_arguments_defer_to_a_caller_envelope() -> None:
