@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "0414a9141236c9b4e93cc397ddfede0018d494010480a077d32304d3a33c365a",
+  "source_digest": "427d44e15e769878de94c709216b1db1212af3588e322b447b7b9c2271ba0a03",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "dec072e4eba75f12117fede72764729867c97323698d93b8166d3854bd554cc2",
+      "sha256": "c2006957d8ce6fa28a77273220fbcf8a6a211c91f1f22dad033273475b625199",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -205,7 +205,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "85715580e9fd7d0a4071201537b57ac14b557f256c9defcc8c00cf7e9d8b4655",
+      "sha256": "fad1bff43f8867b6500bb7a57e2e320ddc91259398ab7fe0dccb07502da319d0",
       "semantic_id": "skill.land",
       "executable": false
     },

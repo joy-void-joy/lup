@@ -711,9 +711,11 @@ Run `uv run lup-devtools --help` for the full command tree.
 
 `lup-devtools harness codex` regenerates and verifies the Codex artifacts,
 installs a separately cached copy of the plugin after a digest check, and
-launches the Codex CLI. `CODEX_HOME` selects the account/config home.
+launches the Codex CLI in a persistent per-worktree home seeded from personal
+Codex authentication and settings.
 `lup-devtools usage claude` reports Claude usage; profiles are managed with
 `lup-devtools setup profile`.
+`--codex-home` or an inherited `CODEX_HOME` selects an explicit home instead.
 
 Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `$lup:*` is identical everywhere. Codex resolves the marketplace from the repository's `.agents/plugins/marketplace.json` and installs the plugin into its own cache, verifying the digest before every launch; `lup-devtools dev plugin name` (run by `$lup:init` and `$lup:install`) wires the per-project name.
 
