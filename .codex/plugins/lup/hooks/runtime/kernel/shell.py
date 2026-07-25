@@ -22,7 +22,7 @@ from .words import (
     is_help_probe,
     is_trusted_script,
     opaque_argument,
-    rm_confined_to_scratch,
+    rm_confined_to_recoverable_roots,
     xargs_payload,
 )
 from .lex import parse_shell_words
@@ -142,9 +142,9 @@ def decide_shell_segment(
         if pathspec is not None:
             return pathspec
     if executable == "rm":
-        scratch_removal = rm_confined_to_scratch(words)
-        if scratch_removal is not None:
-            return scratch_removal
+        recoverable_removal = rm_confined_to_recoverable_roots(words)
+        if recoverable_removal is not None:
+            return recoverable_removal
     if executable == "xargs":
         payload = xargs_payload(words)
         if not payload:

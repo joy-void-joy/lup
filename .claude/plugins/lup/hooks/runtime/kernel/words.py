@@ -35,6 +35,7 @@ DANGEROUS_ENV_NAMES = (
     "RUBYOPT",
 )
 DANGEROUS_ENV_PREFIXES = ("LD_", "DYLD_", "PYTHON", "GIT_", "BASH_FUNC_")
+GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
 INTERPRETERS = (
     "python",
     "python3",
@@ -164,12 +165,30 @@ def is_session_scratch_target(word: str) -> bool:
     return "$" not in word and posixpath.normpath(word).startswith("/tmp/claude-")
 
 
-def rm_confined_to_scratch(words: list[str]) -> KernelDecision | None:
-    """Recognize ``rm`` whose every target sits in repo ``tmp/`` or the scratchpad.
+def is_generated_plugin_target(word: str) -> bool:
+    """Recognize a path confined to a native plugin tree the harness renders.
 
-    Both roots exist for disposable files, so clearing them is as safe as
-    writing them. A long flag, an opaque word, or a target outside the roots
-    falls through to the rm row's ask.
+    Every file there is compiled from typed source, so removing one costs a
+    regeneration rather than any information. The roots stop at ``plugins``
+    because their parents also hold settings, trust state, and hand-written
+    skills and commands that no generator can restore.
+    """
+    normalized = posixpath.normpath(word)
+    if normalized.startswith("/"):
+        return False
+    return any(
+        normalized == root or normalized.startswith(root + "/")
+        for root in GENERATED_PLUGIN_ROOTS
+    )
+
+
+def rm_confined_to_recoverable_roots(words: list[str]) -> KernelDecision | None:
+    """Recognize ``rm`` whose every target is scratch or regenerable.
+
+    Scratch roots exist for disposable files, so clearing them is as safe as
+    writing them; a generated plugin tree costs a regeneration rather than any
+    information. A long flag, an opaque word, or a single target outside those
+    roots falls through to the rm row's ask, so a mixed removal still asks.
     """
     targets: list[str] = []
     for word in words[1:]:
@@ -184,10 +203,12 @@ def rm_confined_to_scratch(words: list[str]) -> KernelDecision | None:
     if not targets:
         return None
     if all(
-        is_repository_tmp_script(word) or is_session_scratch_target(word)
+        is_repository_tmp_script(word)
+        or is_session_scratch_target(word)
+        or is_generated_plugin_target(word)
         for word in targets
     ):
-        return KernelDecision("allow", "removal confined to disposable scratch roots")
+        return KernelDecision("allow", "removal confined to recoverable roots")
     return None
 
 

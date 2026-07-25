@@ -146,6 +146,9 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
     # Removal confined to the disposable roots is as safe as writing them;
     # any long flag, opaque word, or outside target keeps the rm ask.
+    # A generated plugin tree joins them: regeneration restores it byte for
+    # byte, while its parent keeps settings, trust state, and authored skills
+    # that nothing can restore, so the grant stops at the plugins root.
     DecisionCase(input="rm tmp/oneoff.py", effect="allow"),
     DecisionCase(input="rm -rf tmp/scratch", effect="allow"),
     DecisionCase(input="rm -f $TMPDIR/out.txt", effect="allow"),
@@ -154,6 +157,14 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rm tmp/../src/x.py", effect="ask"),
     DecisionCase(input="rm --no-preserve-root -rf tmp", effect="ask"),
     DecisionCase(input="rm -rf /", effect="ask"),
+    DecisionCase(input="rm .codex/plugins/lup/hooks/scripts/policy.py", effect="allow"),
+    DecisionCase(input="rm -rf .claude/plugins", effect="allow"),
+    DecisionCase(input="rm .claude/plugins/lup/x tmp/y", effect="allow"),
+    DecisionCase(input="rm .claude/settings.local.json", effect="ask"),
+    DecisionCase(input="rm -rf .claude/skills", effect="ask"),
+    DecisionCase(input="rm .claude/plugins/../settings.json", effect="ask"),
+    DecisionCase(input="rm /home/u/.claude/plugins/lup/x", effect="ask"),
+    DecisionCase(input="rm .codex/config.local.toml", effect="ask"),
     # Quote-aware substitution: inert inside single quotes; a live $(...)
     # classifies recursively — the inner command joins the batch, and the
     # opaque result only rides on an argument-safe outer command. Command
