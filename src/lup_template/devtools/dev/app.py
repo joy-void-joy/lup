@@ -142,6 +142,13 @@ def survey_cmd(
     branches.survey(as_json)
 
 
+@app.command("merge-driver")
+def merge_driver_cmd() -> None:
+    """Register the ownership-manifest merge driver `.gitattributes` names."""
+    worktree.register_merge_driver()
+    typer.echo(f"Registered merge driver: {worktree.OWNERSHIP_MERGE_DRIVER}")
+
+
 @app.command("delete")
 def delete_cmd(
     name: Annotated[str, typer.Argument(help="Branch name to delete")],

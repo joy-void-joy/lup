@@ -48,6 +48,22 @@ def worktree_is_registered(path: Path) -> bool:
     )
 
 
+OWNERSHIP_MERGE_DRIVER = "lup-ownership"
+
+
+def register_merge_driver() -> None:
+    """Teach this clone the merge driver ``.gitattributes`` names.
+
+    A driver that exits without writing leaves git holding one side, which is
+    the whole resolution a generated digest manifest can have — regeneration
+    settles it afterwards. Git resolves driver names from config alone, so no
+    repository can ship this and every clone registers it once; the config is
+    shared with every worktree of the same repository.
+    """
+    git("config", f"merge.{OWNERSHIP_MERGE_DRIVER}.name", "keep one side, regenerate")
+    git("config", f"merge.{OWNERSHIP_MERGE_DRIVER}.driver", "true")
+
+
 def get_tree_dir() -> Path:
     """Locate the ``tree/`` directory that holds sibling worktrees.
 
@@ -117,6 +133,8 @@ def create(
     except sh.ErrorReturnCode as e:
         typer.echo(f"Error creating worktree: {decode_stderr(e)}")
         raise typer.Exit(1)
+
+    register_merge_driver()
 
     if not already_exists:
         origin = base_branch or git.out("branch", "--show-current")
