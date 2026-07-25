@@ -58,6 +58,9 @@ if TYPE_CHECKING:
 
 SESSION_THINKING_TOKENS = 128_000 - 1
 
+type ClaudeSettingSource = Literal["user", "project", "local"]
+"""One filesystem settings source the CLI may load for a session."""
+
 
 class ClaudeSandboxConfig(BaseModel):
     """Claude SDK sandbox settings consumed by this factory."""
@@ -96,13 +99,21 @@ class ClaudeSessionConfig(BaseModel):
     hooks: LupHooksConfig | None = None
     submission_gate_resolver: SubmissionGateResolver | None = None
     subagents: list[SubagentSpec] = Field(default_factory=list)
+    max_buffer_size: int | None = None
+    setting_sources: list[ClaudeSettingSource] | None = None
+    extra_args: dict[str, str | None] = Field(  # lup: ignore[dict-str-payload]
+        default_factory=dict
+    )
 
 
 class ClaudeConversationState:
     """Adapter-private reconnect/resume state for one Lup session."""
 
-    def __init__(self, config: ClaudeSessionConfig, resume: SessionId | None) -> None:
-        self.config = config
+    def __init__(
+        self, factory: "ClaudeSessionFactory", resume: SessionId | None
+    ) -> None:
+        self.factory = factory
+        self.config = factory.config
         self.resume = resume.value if resume is not None else None
         self.session_id = self.resume or str(uuid4())
         self.client: claude.ClaudeSDKClient | None = None
@@ -121,8 +132,7 @@ class ClaudeConversationState:
             return self.client
         import claude_agent_sdk as claude
 
-        options = build_claude_options(
-            self.config,
+        options = self.factory.build_options(
             binding=self.binding,
             resume=self.resume,
             session_id=None if self.resume is not None else self.session_id,
@@ -358,7 +368,7 @@ class ClaudeFork(ForkSession):
                 self.state.session_id,
                 directory,
             )
-        factory = ClaudeSessionFactory(self.state.config)
+        factory = self.state.factory
         async with factory.open(SessionId(value=result.session_id)) as handle:
             yield handle
 
@@ -369,6 +379,22 @@ class ClaudeSessionFactory(SessionFactory):
     def __init__(self, config: ClaudeSessionConfig) -> None:
         self.config = config
 
+    def create_state(self, resume: SessionId | None) -> ClaudeConversationState:
+        """Construct the reconnect state backing one opened session."""
+        return ClaudeConversationState(self, resume)
+
+    def build_options(
+        self,
+        *,
+        binding: TurnToolBinding[BaseModel] | None,
+        resume: str | None,
+        session_id: str | None,
+    ) -> "claude.ClaudeAgentOptions":
+        """Build the SDK options for one connection of this factory's sessions."""
+        return build_claude_options(
+            self.config, binding=binding, resume=resume, session_id=session_id
+        )
+
     def open(
         self, resume: SessionId | None = None
     ) -> AbstractAsyncContextManager[SessionHandle]:
@@ -378,7 +404,7 @@ class ClaudeSessionFactory(SessionFactory):
     async def open_session(
         self, resume: SessionId | None
     ) -> AsyncGenerator[SessionHandle]:
-        state = ClaudeConversationState(self.config, resume)
+        state = self.create_state(resume)
         session = ComposedSession(
             starter=state.start_turn,
             binder=ClaudeTurnToolBinder(state),
@@ -517,6 +543,9 @@ def build_claude_options(
         resume=resume,
         session_id=session_id,
         output_format=None,
+        max_buffer_size=config.max_buffer_size,
+        setting_sources=config.setting_sources,
+        extra_args=dict(config.extra_args),
     )
 
 
