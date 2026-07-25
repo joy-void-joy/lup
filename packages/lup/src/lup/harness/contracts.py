@@ -47,6 +47,24 @@ class SkillInvocationRenderer(ABC):
         """Render qualification, escaping, and arguments together."""
 
 
+class Atom(str):
+    """One native name spelled whole: a path, a product name, a reference.
+
+    Portable prose may not contain one, because whatever names it should have
+    been a prompt part. Every character is the runtime's own, so the whole
+    string is vocabulary.
+    """
+
+
+class Instruction(str):
+    """One native sentence carrying the caller's own words inside it.
+
+    Only the runtime's identifiers are its own here — the interpolated text
+    belongs to whoever declared it — so vocabulary is the identifier-shaped
+    tokens rather than the whole sentence.
+    """
+
+
 class NativeSpellings(SkillInvocationRenderer):
     """Own one native runtime's spelling of everything portable prose names.
 
@@ -55,56 +73,79 @@ class NativeSpellings(SkillInvocationRenderer):
     abstract method here, which no runtime can be constructed without
     answering — the rendering seam is closed by construction rather than by a
     reminder to edit two renderers.
+
+    The return type says what kind of spelling a method produces, and that is
+    also the answer the portable-content rule reads: an :class:`Atom` is the
+    runtime's own word end to end, an :class:`Instruction` wraps words the
+    caller supplied. A method returning a bare ``str`` spells into an artifact
+    rather than into prose, and no prose is judged against it.
     """
 
     @property
     @abstractmethod
-    def runtime_name(self) -> str:
+    def runtime_name(self) -> Atom:
         """Name the runtime the way prose addresses it."""
 
+    @property
     @abstractmethod
-    def tree(self, location: TreeLocation) -> str:
+    def native_identifiers(self) -> list[Atom]:
+        """This runtime's own words that appear inside its instructions.
+
+        An instruction frames text its caller supplied, so the sentence as a
+        whole says nothing about prose — but the runtime's own words within it
+        are exactly what prose must not reach for. Each one has to occur in
+        something this runtime actually spells, which is checked, so the list
+        cannot drift away from the sentences it describes.
+        """
+
+    @abstractmethod
+    def tree(self, location: TreeLocation) -> Atom:
         """Spell one harness-tree location."""
 
     @abstractmethod
-    def plugin(self, plugin: str, location: PluginLocation, member: str | None) -> str:
+    def plugin(self, plugin: str, location: PluginLocation, member: str | None) -> Atom:
         """Spell one plugin-owned location, with or without a leaf."""
 
     @abstractmethod
-    def invocation_pattern(self, plugin: str, placeholder: str) -> str:
+    def invocation_pattern(self, plugin: str, placeholder: str) -> Atom:
         """Spell an invocation whose skill the reader supplies."""
 
     @abstractmethod
-    def ask_user(self, question: str) -> str:
-        """Instruct the runtime to put one material question to the user."""
-
-    @abstractmethod
-    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> str:
-        """Instruct the runtime to hand one task to one of its agents."""
-
-    @abstractmethod
-    def request_approval(self, action: str, reason: str) -> str:
-        """Instruct the runtime to obtain explicit approval before acting."""
-
-    @abstractmethod
-    def relocate_session(self, path: str) -> str:
-        """Spell the move into an already-created worktree this runtime allows."""
-
-    @abstractmethod
-    def resolver_entry(self) -> str:
-        """Spell how this runtime enters the shared resolver."""
-
-    @abstractmethod
-    def arguments_ref(self) -> str:
+    def arguments_ref(self) -> Atom:
         """Spell how this runtime reaches the arguments of an invocation."""
 
     @abstractmethod
-    def runtime_docs(self) -> str:
+    def ask_user(self, question: str) -> Instruction:
+        """Instruct the runtime to put one material question to the user."""
+
+    @abstractmethod
+    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> Instruction:
+        """Instruct the runtime to hand one task to one of its agents."""
+
+    @abstractmethod
+    def request_approval(self, action: str, reason: str) -> Instruction:
+        """Instruct the runtime to obtain explicit approval before acting."""
+
+    @abstractmethod
+    def relocate_session(self, path: str) -> Instruction:
+        """Spell the move into an already-created worktree this runtime allows."""
+
+    @abstractmethod
+    def resolver_entry(self) -> Instruction:
+        """Spell how this runtime enters the shared resolver."""
+
+    @abstractmethod
+    def runtime_docs(self) -> Instruction:
         """Name this runtime's own documentation, wherever it lives."""
 
     @abstractmethod
     def model_alias(self, tier: ModelTier) -> str | None:
-        """Spell one portable tier, or decline where none is proven."""
+        """Spell one portable tier into agent metadata, or decline it.
+
+        Neither an atom nor an instruction: this reaches a generated artifact,
+        never a prompt, so tier words like ``inherit`` stay ordinary English
+        everywhere prose is judged.
+        """
 
 
 class PromptRenderer(ABC):

@@ -4,7 +4,13 @@ import json
 import shlex
 from importlib import resources
 from pathlib import Path
-from lup.harness.contracts import ArtifactRenderer, NativeSpellings, PromptRenderer
+from lup.harness.contracts import (
+    ArtifactRenderer,
+    Atom,
+    Instruction,
+    NativeSpellings,
+    PromptRenderer,
+)
 from lup.harness.generation import argument_text
 from lup.harness.models import (
     Agent,
@@ -40,8 +46,19 @@ class ClaudeSpellings(NativeSpellings):
     """Spell everything portable prose names the way Claude Code spells it."""
 
     @property
-    def runtime_name(self) -> str:
-        return "Claude Code"
+    def runtime_name(self) -> Atom:
+        return Atom("Claude Code")
+
+    @property
+    def native_identifiers(self) -> list[Atom]:
+        return [
+            Atom("AskUserQuestion"),
+            Atom("subagent_type"),
+            Atom("EnterWorktree"),
+            Atom("ExitWorktree"),
+            Atom("docs.claude.com"),
+            Atom("code.claude.com"),
+        ]
 
     def render(self, invocation: SkillInvocation) -> str:
         command = f"/{invocation.plugin}:{invocation.skill}"
@@ -51,32 +68,34 @@ class ClaudeSpellings(NativeSpellings):
         )
         return f"{command} {arguments}" if arguments else command
 
-    def invocation_pattern(self, plugin: str, placeholder: str) -> str:
-        return f"/{plugin}:{placeholder}"
+    def invocation_pattern(self, plugin: str, placeholder: str) -> Atom:
+        return Atom(f"/{plugin}:{placeholder}")
 
-    def ask_user(self, question: str) -> str:
-        return (
+    def ask_user(self, question: str) -> Instruction:
+        return Instruction(
             "Ask the user with the AskUserQuestion tool, offering concrete "
             f"options plus a free-text choice: {question}"
         )
 
-    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> str:
-        return (
+    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> Instruction:
+        return Instruction(
             f"Delegate with Agent(subagent_type={json.dumps(subagent_type)}"
             f", prompt={json.dumps(prompt)})"
         )
 
-    def request_approval(self, action: str, reason: str) -> str:
-        return f"Request explicit user approval before {action}. Reason: {reason}"
+    def request_approval(self, action: str, reason: str) -> Instruction:
+        return Instruction(
+            f"Request explicit user approval before {action}. Reason: {reason}"
+        )
 
-    def relocate_session(self, path: str) -> str:
-        return (
+    def relocate_session(self, path: str) -> Instruction:
+        return Instruction(
             f"`EnterWorktree(path=<{path}>)`, returning afterwards "
             'with `ExitWorktree(action="keep")`'
         )
 
-    def resolver_entry(self) -> str:
-        return (
+    def resolver_entry(self) -> Instruction:
+        return Instruction(
             "Run `uv run lup-devtools harness resolve --adapter claude`. "
             "The command accepts optional flags: `--run-id <id>` resumes "
             "a persisted run and `--accept`/`--reject` records the human "
@@ -86,11 +105,11 @@ class ClaudeSpellings(NativeSpellings):
             "`--answer <question-id>=<value>` flag."
         )
 
-    def arguments_ref(self) -> str:
-        return "$ARGUMENTS"
+    def arguments_ref(self) -> Atom:
+        return Atom("$ARGUMENTS")
 
-    def runtime_docs(self) -> str:
-        return (
+    def runtime_docs(self) -> Instruction:
+        return Instruction(
             "the Claude Code and Agent SDK documentation at "
             "https://docs.claude.com/ and https://code.claude.com/"
         )
@@ -98,36 +117,38 @@ class ClaudeSpellings(NativeSpellings):
     def model_alias(self, tier: ModelTier) -> str | None:
         return CLAUDE_MODEL_ALIASES[tier]
 
-    def tree(self, location: TreeLocation) -> str:
+    def tree(self, location: TreeLocation) -> Atom:
         match location:
             case "tree_root":
-                return ".claude/"
+                return Atom(".claude/")
             case "guidance_file":
-                return ".claude/CLAUDE.md"
+                return Atom(".claude/CLAUDE.md")
             case "ownership_manifest":
-                return ".claude/.lup-ownership.json"
+                return Atom(".claude/.lup-ownership.json")
             case "project_settings":
-                return ".claude/settings.json"
+                return Atom(".claude/settings.json")
             case "personal_settings":
-                return ".claude/settings.local.json"
+                return Atom(".claude/settings.local.json")
             case "marketplace":
-                return ".claude/plugins/.claude-plugin/marketplace.json"
+                return Atom(".claude/plugins/.claude-plugin/marketplace.json")
 
-    def plugin(self, plugin: str, location: PluginLocation, member: str | None) -> str:
+    def plugin(self, plugin: str, location: PluginLocation, member: str | None) -> Atom:
         root = f".claude/plugins/{plugin}"
         match location:
             case "root":
-                return f"{root}/"
+                return Atom(f"{root}/")
             case "manifest":
-                return f"{root}/.claude-plugin/plugin.json"
+                return Atom(f"{root}/.claude-plugin/plugin.json")
             case "skills":
-                return f"{root}/commands/{member}.md" if member else f"{root}/commands/"
+                leaf = f"commands/{member}.md" if member else "commands/"
+                return Atom(f"{root}/{leaf}")
             case "agents":
-                return f"{root}/agents/{member}.md" if member else f"{root}/agents/"
+                leaf = f"agents/{member}.md" if member else "agents/"
+                return Atom(f"{root}/{leaf}")
             case "hooks":
-                return f"{root}/hooks/"
+                return Atom(f"{root}/hooks/")
             case "guidance_template":
-                return f"{root}/TEMPLATE_CLAUDE.md"
+                return Atom(f"{root}/TEMPLATE_CLAUDE.md")
 
 
 class ClaudeSkillRenderer(ArtifactRenderer[Skill]):

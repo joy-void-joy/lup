@@ -19,6 +19,7 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 | `abc-capability` | architecture | Python architecture | <code>class Combined(Reader, Writer): ...</code> | Capability ABCs stay independently constructible and cohesive; implementations do not inherit multiple capabilities or reusable behavior. | `lup.codescan.capabilities` |
 | `kernel-imports` | boundary | Policy kernel | <code>from pydantic import BaseModel</code> | The copied hook kernel imports only its pinned standard-library allowlist. | `lup.codescan.boundaries` |
 | `native-spelling` | spelling | Neutral Python modules | <code>instruction = &quot;$lup:commit&quot;</code> | Provider command, event, environment, and manifest spellings stay at the native adapter boundary. | `lup.codescan.boundaries` |
+| `portable-content` | spelling | Portable harness declarations | <code>models.TextPart(text=&quot;Edit `.claude/settings.json`&quot;)</code> | Prose every native tree renders names no platform: the vocabulary is whatever the adapters spell, so a location, product, or tool a runtime can spell reaches prose through a typed part instead. | `lup.codescan.portable` |
 | `seam-boundary` | boundary | Neutral Python modules | <code>from lup.adapters.codex.runtime import CodexSessionConfig</code> | Concrete adapter imports belong only in adapters, tests, examples, and named application composition roots. | `lup.codescan.boundaries` |
 
 ## Edit anti-patterns

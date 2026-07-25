@@ -4,7 +4,13 @@ import json
 import shlex
 from importlib import resources
 from pathlib import Path
-from lup.harness.contracts import ArtifactRenderer, NativeSpellings, PromptRenderer
+from lup.harness.contracts import (
+    ArtifactRenderer,
+    Atom,
+    Instruction,
+    NativeSpellings,
+    PromptRenderer,
+)
 from lup.harness.generation import argument_text
 from lup.harness.models import (
     Agent,
@@ -37,8 +43,12 @@ class CodexSpellings(NativeSpellings):
     """
 
     @property
-    def runtime_name(self) -> str:
-        return "Codex"
+    def runtime_name(self) -> Atom:
+        return Atom("Codex")
+
+    @property
+    def native_identifiers(self) -> list[Atom]:
+        return [Atom("developers.openai.com"), Atom("learn.chatgpt.com")]
 
     def render(self, invocation: SkillInvocation) -> str:
         mention = f"${invocation.plugin}:{invocation.skill}"
@@ -48,30 +58,34 @@ class CodexSpellings(NativeSpellings):
         )
         return f"{mention} {arguments}" if arguments else mention
 
-    def invocation_pattern(self, plugin: str, placeholder: str) -> str:
-        return f"${plugin}:{placeholder}"
+    def invocation_pattern(self, plugin: str, placeholder: str) -> Atom:
+        return Atom(f"${plugin}:{placeholder}")
 
-    def ask_user(self, question: str) -> str:
-        return (
+    def ask_user(self, question: str) -> Instruction:
+        return Instruction(
             "Ask the user directly, offering concrete options, and wait "
             f"for the answer: {question}"
         )
 
-    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> str:
-        return f"Delegate to the {subagent_type} custom agent with this task: {prompt}"
+    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> Instruction:
+        return Instruction(
+            f"Delegate to the {subagent_type} custom agent with this task: {prompt}"
+        )
 
-    def request_approval(self, action: str, reason: str) -> str:
-        return f"Request explicit user approval before {action}. Reason: {reason}"
+    def request_approval(self, action: str, reason: str) -> Instruction:
+        return Instruction(
+            f"Request explicit user approval before {action}. Reason: {reason}"
+        )
 
-    def relocate_session(self, path: str) -> str:
-        return (
+    def relocate_session(self, path: str) -> Instruction:
+        return Instruction(
             f"start a session rooted at <{path}> and continue there — "
             "this runtime cannot move a running session, so work "
             "carried on here would land in the checkout it started from"
         )
 
-    def resolver_entry(self) -> str:
-        return (
+    def resolver_entry(self) -> Instruction:
+        return Instruction(
             "Run `uv run lup-devtools harness resolve --adapter codex`. "
             "The command accepts optional flags: `--run-id <id>` resumes "
             "a persisted run and `--accept`/`--reject` records the human "
@@ -81,11 +95,11 @@ class CodexSpellings(NativeSpellings):
             "`--answer <question-id>=<value>` flag."
         )
 
-    def arguments_ref(self) -> str:
-        return "the arguments supplied with this skill invocation"
+    def arguments_ref(self) -> Atom:
+        return Atom("the arguments supplied with this skill invocation")
 
-    def runtime_docs(self) -> str:
-        return (
+    def runtime_docs(self) -> Instruction:
+        return Instruction(
             "the Codex documentation at "
             "https://developers.openai.com/codex/ and "
             "https://learn.chatgpt.com/"
@@ -94,38 +108,38 @@ class CodexSpellings(NativeSpellings):
     def model_alias(self, tier: ModelTier) -> str | None:
         return None
 
-    def tree(self, location: TreeLocation) -> str:
+    def tree(self, location: TreeLocation) -> Atom:
         match location:
             case "tree_root":
-                return ".codex/"
+                return Atom(".codex/")
             case "guidance_file":
-                return "AGENTS.md"
+                return Atom("AGENTS.md")
             case "ownership_manifest":
-                return ".codex/.lup-ownership.json"
+                return Atom(".codex/.lup-ownership.json")
             case "project_settings":
-                return ".codex/config.toml"
+                return Atom(".codex/config.toml")
             case "personal_settings":
-                return ".codex/config.local.toml"
+                return Atom(".codex/config.local.toml")
             case "marketplace":
-                return ".agents/plugins/marketplace.json"
+                return Atom(".agents/plugins/marketplace.json")
 
-    def plugin(self, plugin: str, location: PluginLocation, member: str | None) -> str:
+    def plugin(self, plugin: str, location: PluginLocation, member: str | None) -> Atom:
         root = f".codex/plugins/{plugin}"
         match location:
             case "root":
-                return f"{root}/"
+                return Atom(f"{root}/")
             case "manifest":
-                return f"{root}/.codex-plugin/plugin.json"
+                return Atom(f"{root}/.codex-plugin/plugin.json")
             case "skills":
-                return (
-                    f"{root}/skills/{member}/SKILL.md" if member else f"{root}/skills/"
-                )
+                leaf = f"skills/{member}/SKILL.md" if member else "skills/"
+                return Atom(f"{root}/{leaf}")
             case "agents":
-                return f".codex/agents/{member}.toml" if member else ".codex/agents/"
+                leaf = f"agents/{member}.toml" if member else "agents/"
+                return Atom(f".codex/{leaf}")
             case "hooks":
-                return f"{root}/hooks/"
+                return Atom(f"{root}/hooks/")
             case "guidance_template":
-                return f"{root}/TEMPLATE_AGENTS.md"
+                return Atom(f"{root}/TEMPLATE_AGENTS.md")
 
 
 class CodexSkillRenderer(ArtifactRenderer[Skill]):
