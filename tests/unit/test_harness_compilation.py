@@ -2,24 +2,26 @@
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 import pytest
 import sh
 import typer
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.adapters.claude.harness import (
-    ClaudePromptRenderer,
-    ClaudeSkillInvocationRenderer,
-)
-from lup.adapters.codex.harness import CodexPromptRenderer, CodexSkillInvocationRenderer
+from lup.adapters.claude.harness import ClaudeSkillInvocationRenderer
+from lup.adapters.codex.harness import CodexSkillInvocationRenderer
 from lup.adapters.codex.harness_runtime import (
     PluginCacheConfig,
     directory_digest,
     plugin_cache_evidence,
 )
-from lup.adapters.harness import compile_claude, compile_codex
+from lup.adapters.harness import (
+    claude_prompt_renderer,
+    codex_prompt_renderer,
+    compile_claude,
+    compile_codex,
+)
 from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
 from lup.harness.models import (
     GUIDANCE_CHARACTER_BUDGET,
@@ -27,12 +29,21 @@ from lup.harness.models import (
     Artifact,
     ArgumentsRef,
     ArtifactTree,
+    AskUser,
+    Delegate,
     Harness,
     InvocationArgument,
+    NativePath,
+    PluginPath,
     PromptDocument,
     PromptPart,
+    RelocateSession,
+    RequestApproval,
+    ResolverEntry,
+    RuntimeDocs,
     Skill,
     SkillInvocation,
+    SkillPattern,
     TextPart,
     document_text_size,
 )
@@ -132,7 +143,7 @@ def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
     another document, and then fails silently. Naming the section, or the file
     that holds it, survives the move that broke the anchor.
     """
-    rendered = ClaudePromptRenderer(ClaudeSkillInvocationRenderer()).render(GUIDANCE)
+    rendered = claude_prompt_renderer().render(GUIDANCE)
 
     assert "](#" not in rendered
 
@@ -156,12 +167,8 @@ def test_codex_tree_renders_the_agents_flavored_template() -> None:
 
 
 def test_template_flavors_share_sections_and_differ_natively() -> None:
-    claude_render = ClaudePromptRenderer(ClaudeSkillInvocationRenderer()).render(
-        TEMPLATE_CLAUDE
-    )
-    codex_render = CodexPromptRenderer(CodexSkillInvocationRenderer()).render(
-        TEMPLATE_CODEX
-    )
+    claude_render = claude_prompt_renderer().render(TEMPLATE_CLAUDE)
+    codex_render = codex_prompt_renderer().render(TEMPLATE_CODEX)
 
     def sections(render: str) -> list[str]:
         return [
@@ -233,19 +240,104 @@ def test_invocation_renderers_own_complete_spelling_and_escaping() -> None:
 def test_prompt_renderer_preserves_ordinary_trailing_whitespace() -> None:
     prompt = PromptDocument(parts=[TextPart(text="keep these spaces  ")])
 
-    assert CodexPromptRenderer(CodexSkillInvocationRenderer()).render(prompt) == (
-        "keep these spaces  \n"
-    )
+    assert codex_prompt_renderer().render(prompt) == ("keep these spaces  \n")
 
 
 def test_argument_reference_has_one_semantic_part_and_native_renderings() -> None:
     prompt = PromptDocument(parts=[ArgumentsRef()])
 
-    assert ClaudePromptRenderer(ClaudeSkillInvocationRenderer()).render(prompt) == (
-        "$ARGUMENTS\n"
-    )
-    assert CodexPromptRenderer(CodexSkillInvocationRenderer()).render(prompt) == (
+    assert claude_prompt_renderer().render(prompt) == ("$ARGUMENTS\n")
+    assert codex_prompt_renderer().render(prompt) == (
         "the arguments supplied with this skill invocation\n"
+    )
+
+
+class PartExpectation(BaseModel):
+    """One prompt part and whether its two native renderings must differ."""
+
+    model_config = ConfigDict(frozen=True)
+
+    part: PromptPart
+    diverges: bool
+
+
+PART_CONTRACT: dict[str, PartExpectation] = {
+    "TextPart": PartExpectation(part=TextPart(text="plain prose"), diverges=False),
+    "SkillInvocation": PartExpectation(
+        part=SkillInvocation(plugin="lup", skill="merge"), diverges=True
+    ),
+    "NativePath": PartExpectation(
+        part=NativePath(location="ownership_manifest"), diverges=True
+    ),
+    "PluginPath": PartExpectation(
+        part=PluginPath(plugin="lup", location="skills", member="merge"), diverges=True
+    ),
+    "SkillPattern": PartExpectation(
+        part=SkillPattern(plugin="lup", placeholder="<name>"), diverges=True
+    ),
+    "RuntimeDocs": PartExpectation(part=RuntimeDocs(), diverges=True),
+    "AskUser": PartExpectation(
+        part=AskUser(question="which branch to land first"), diverges=True
+    ),
+    "Delegate": PartExpectation(
+        part=Delegate(plugin="lup", role="trace-explorer", task="read the trace"),
+        diverges=True,
+    ),
+    "RequestApproval": PartExpectation(
+        part=RequestApproval(action="pushing", reason="it is visible"), diverges=False
+    ),
+    "RelocateSession": PartExpectation(
+        part=RelocateSession(path="the path step 1 prints"), diverges=True
+    ),
+    "ResolverEntry": PartExpectation(part=ResolverEntry(), diverges=True),
+    "ArgumentsRef": PartExpectation(part=ArgumentsRef(), diverges=True),
+}
+"""Every prompt part, with the cross-runtime promise its renderings make."""
+
+
+def test_every_prompt_part_states_what_it_promises_across_runtimes() -> None:
+    """A part neither renderer handles renders as nothing, silently.
+
+    Pyright's ``assert_never`` catches the arm nobody wrote; this catches the
+    part nobody decided about — whether its two renderings agree is a design
+    choice no type can hold.
+    """
+    union, _ = get_args(PromptPart.__value__)
+
+    assert sorted(PART_CONTRACT) == sorted(
+        member.__name__ for member in get_args(union)
+    )
+
+
+@pytest.mark.parametrize("name", sorted(PART_CONTRACT))
+def test_each_prompt_part_keeps_its_cross_runtime_promise(name: str) -> None:
+    expectation = PART_CONTRACT[name]
+    prompt = PromptDocument(parts=[expectation.part])
+
+    claude = claude_prompt_renderer().render(prompt)
+    codex = codex_prompt_renderer().render(prompt)
+
+    assert claude.strip() and codex.strip()
+    assert (claude != codex) is expectation.diverges
+
+
+def test_every_tree_paths_read_the_same_under_either_runtime() -> None:
+    """Prose teaching every tree must not depend on which runtime renders it."""
+    prompt = PromptDocument(
+        parts=[
+            NativePath(location="guidance_file", scope="every_tree"),
+            TextPart(text=" and "),
+            PluginPath(plugin="lup", location="skills", scope="every_tree"),
+        ]
+    )
+
+    rendered = claude_prompt_renderer().render(prompt)
+
+    assert rendered == codex_prompt_renderer().render(prompt)
+    assert rendered == (
+        ".claude/CLAUDE.md under Claude Code, AGENTS.md under Codex and "
+        ".claude/plugins/lup/commands/ under Claude Code, "
+        ".codex/plugins/lup/skills/ under Codex\n"
     )
 
 

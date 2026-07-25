@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "0414a9141236c9b4e93cc397ddfede0018d494010480a077d32304d3a33c365a",
+  "source_digest": "99cc3fd51e6734f70551c2c1b2790f120dc1fe5911bebaed24d53a39393def92",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -16,35 +16,35 @@
     {
       "path": ".codex/agents/implementer.toml",
       "category": "generated",
-      "sha256": "2eb7e8c8ac2453ecc1b12de33c7fc811bc618aeb0d224112c9bfc7d7b0e6113e",
+      "sha256": "5d44f78c76aa1dc0aa302d40a2cd499a33d3447d4f9b34c1e37592b94413e37f",
       "semantic_id": "agent.implementer",
       "executable": false
     },
     {
       "path": ".codex/agents/resolve-editor.toml",
       "category": "generated",
-      "sha256": "893a870f36fd4b8a485f94fe740608195860ddf77024885cfb7106239b6f6e3e",
+      "sha256": "6bf228e6094a5bf4143efb4038beab46f799c8584dd53e4c26c36ac26a40c3d0",
       "semantic_id": "agent.resolve-editor",
       "executable": false
     },
     {
       "path": ".codex/agents/trace-explorer.toml",
       "category": "generated",
-      "sha256": "4ea4e4a546110a96964e15dffe84221e546892d927afd003c7307938f3496265",
+      "sha256": "9d1d43037421e8abc2ab3677c48a3285221722dc10a6cdec709fe26f166e9c40",
       "semantic_id": "agent.trace-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-explorer.toml",
       "category": "generated",
-      "sha256": "d14621889df6667b30ae1edf19e611fdda424e29312de904ceac6156997e47a0",
+      "sha256": "8b6e81df5cbd0de9bfa2c5ff6a8ccd2f9cbc3b7e73e51786a78e122d70ff025b",
       "semantic_id": "agent.version-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-reviewer.toml",
       "category": "generated",
-      "sha256": "beef8a922b52eec7e450562f23bd4177997d2170605612a241cc741d07d4d9b7",
+      "sha256": "1c646fe2ef67a2b91c3f662e3a858413513b08efab91842b77e389d3b02e41e2",
       "semantic_id": "agent.version-reviewer",
       "executable": false
     },

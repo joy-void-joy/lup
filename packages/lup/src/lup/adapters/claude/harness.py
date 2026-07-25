@@ -4,13 +4,15 @@ import json
 import shlex
 from importlib import resources
 from pathlib import Path
+from typing import assert_never
 
 from lup.harness.contracts import (
     ArtifactRenderer,
+    NativePathSpelling,
     PromptRenderer,
     SkillInvocationRenderer,
 )
-from lup.harness.generation import argument_text
+from lup.harness.generation import NativePaths, argument_text, plugin_path, tree_path
 from lup.harness.models import (
     Agent,
     ArgumentsRef,
@@ -20,14 +22,21 @@ from lup.harness.models import (
     Delegate,
     Harness,
     HookSet,
+    ModelTier,
+    NativePath,
     Plugin,
+    PluginLocation,
+    PluginPath,
     PromptDocument,
     RelocateSession,
     RequestApproval,
     ResolverEntry,
+    RuntimeDocs,
     Skill,
     SkillInvocation,
+    SkillPattern,
     TextPart,
+    TreeLocation,
 )
 from lup.policy.bundle import (
     policy_kernel_modules,
@@ -48,11 +57,62 @@ class ClaudeSkillInvocationRenderer(SkillInvocationRenderer):
         return f"{command} {arguments}" if arguments else command
 
 
+class ClaudeNativePathSpelling(NativePathSpelling):
+    """Spell every harness-owned location the way Claude Code lays it out."""
+
+    @property
+    def runtime_name(self) -> str:
+        return "Claude Code"
+
+    def tree(self, location: TreeLocation) -> str:
+        match location:
+            case "tree_root":
+                return ".claude/"
+            case "guidance_file":
+                return ".claude/CLAUDE.md"
+            case "ownership_manifest":
+                return ".claude/.lup-ownership.json"
+            case "project_settings":
+                return ".claude/settings.json"
+            case "personal_settings":
+                return ".claude/settings.local.json"
+            case "marketplace":
+                return ".claude/plugins/.claude-plugin/marketplace.json"
+
+    def plugin(self, plugin: str, location: PluginLocation, member: str | None) -> str:
+        root = f".claude/plugins/{plugin}"
+        match location:
+            case "root":
+                return f"{root}/"
+            case "manifest":
+                return f"{root}/.claude-plugin/plugin.json"
+            case "skills":
+                return f"{root}/commands/{member}.md" if member else f"{root}/commands/"
+            case "agents":
+                return f"{root}/agents/{member}.md" if member else f"{root}/agents/"
+            case "hooks":
+                return f"{root}/hooks/"
+            case "guidance_template":
+                return f"{root}/TEMPLATE_CLAUDE.md"
+
+
+CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
+    "inherit": "inherit",
+    "strongest": "opus",
+    "balanced": "sonnet",
+    "fast": "haiku",
+}
+"""Claude's own name for each portable tier, as agent frontmatter accepts it."""
+
+
 class ClaudePromptRenderer(PromptRenderer):
     """Render semantic prompt operations without a post-render rewrite pass."""
 
-    def __init__(self, invocations: SkillInvocationRenderer) -> None:
+    def __init__(
+        self, invocations: SkillInvocationRenderer, paths: NativePaths
+    ) -> None:
         self.invocations = invocations
+        self.paths = paths
 
     def render(self, prompt: PromptDocument) -> str:
         rendered: list[str] = []  # lup: ignore[empty-collection]
@@ -62,10 +122,27 @@ class ClaudePromptRenderer(PromptRenderer):
                     rendered.append(text)
                 case SkillInvocation():
                     rendered.append(self.invocations.render(part))
+                case NativePath():
+                    rendered.append(tree_path(self.paths, part))
+                case PluginPath():
+                    rendered.append(plugin_path(self.paths, part))
+                case SkillPattern(plugin=plugin, placeholder=placeholder):
+                    rendered.append(f"/{plugin}:{placeholder}")
+                case RuntimeDocs():
+                    rendered.append(
+                        "the Claude Code and Agent SDK documentation at "
+                        "https://docs.claude.com/ and https://code.claude.com/"
+                    )
                 case AskUser(question=question):
-                    rendered.append(f"Ask the user this material question: {question}")
-                case Delegate(role=role, task=task):
-                    rendered.append(f"Delegate to the {role} agent: {task}")
+                    rendered.append(
+                        "Ask the user with the AskUserQuestion tool, offering concrete "
+                        f"options plus a free-text choice: {question}"
+                    )
+                case Delegate(plugin=plugin, role=role, task=task):
+                    rendered.append(
+                        f'Delegate with Agent(subagent_type="{plugin}:{role}", '
+                        f"prompt={json.dumps(task)})"
+                    )
                 case RequestApproval(action=action, reason=reason):
                     rendered.append(
                         f"Request explicit user approval before {action}. Reason: {reason}"
@@ -87,6 +164,8 @@ class ClaudePromptRenderer(PromptRenderer):
                     )
                 case ArgumentsRef():
                     rendered.append("$ARGUMENTS")
+                case _ as unhandled:
+                    assert_never(unhandled)
         text = "".join(rendered)
         return text if text.endswith("\n") else text + "\n"
 
@@ -139,7 +218,8 @@ class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
 
     def render(self, source: Agent) -> ArtifactTree:
         tools = ", ".join(source.tools)
-        model = f"model: {source.model}\n" if source.model is not None else ""
+        tier = source.model
+        model = f"model: {CLAUDE_MODEL_ALIASES[tier]}\n" if tier is not None else ""
         color = f"color: {source.color}\n" if source.color is not None else ""
         content = (
             "---\n"

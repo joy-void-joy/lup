@@ -13,14 +13,11 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from lup.adapters.harness import compile_claude, compile_codex
-from lup.adapters.claude.harness import (
-    ClaudePromptRenderer,
-    ClaudeSkillInvocationRenderer,
-)
-from lup.adapters.codex.harness import (
-    CodexPromptRenderer,
-    CodexSkillInvocationRenderer,
+from lup.adapters.harness import (
+    claude_prompt_renderer,
+    codex_prompt_renderer,
+    compile_claude,
+    compile_codex,
 )
 from lup.harness.materialization import AtomicMaterializer
 from lup.harness.models import Artifact, ArtifactTree, Harness
@@ -133,7 +130,7 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
     """Compose the complete Claude tree from canonical typed declarations."""
     source = portable_harness(root=root)
     compiled = compile_claude(source)
-    prompts = ClaudePromptRenderer(ClaudeSkillInvocationRenderer())
+    prompts = claude_prompt_renderer()
     content_root = Path(__file__).parent / "content"
     support_artifacts = [
         Artifact(
@@ -201,7 +198,7 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
 def codex_generation_recipe(root: Path) -> GenerationRecipe:
     """Compose the Codex renderers, reader, and ownership location."""
     source = portable_harness(root=root)
-    prompts = CodexPromptRenderer(CodexSkillInvocationRenderer())
+    prompts = codex_prompt_renderer()
     support_artifacts = [
         Artifact(
             path=Path(".codex/plugins/lup/TEMPLATE_AGENTS.md"),

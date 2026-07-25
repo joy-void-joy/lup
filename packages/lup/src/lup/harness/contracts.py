@@ -21,8 +21,10 @@ if TYPE_CHECKING:
     from lup.harness.models import (
         ArtifactTree,
         CapabilityEvidence,
+        PluginLocation,
         PromptDocument,
         SkillInvocation,
+        TreeLocation,
     )
     from lup.harness.reconciliation import CurrentTree, ReconciliationProposal
 
@@ -41,6 +43,23 @@ class SkillInvocationRenderer(ABC):
     @abstractmethod
     def render(self, invocation: SkillInvocation) -> str:
         """Render qualification, escaping, and arguments together."""
+
+
+class NativePathSpelling(ABC):
+    """Own one native runtime's spelling of every harness-owned location."""
+
+    @property
+    @abstractmethod
+    def runtime_name(self) -> str:
+        """Name the runtime the way prose addresses it."""
+
+    @abstractmethod
+    def tree(self, location: TreeLocation) -> str:
+        """Spell one harness-tree location."""
+
+    @abstractmethod
+    def plugin(self, plugin: str, location: PluginLocation, member: str | None) -> str:
+        """Spell one plugin-owned location, with or without a leaf."""
 
 
 class PromptRenderer(ABC):

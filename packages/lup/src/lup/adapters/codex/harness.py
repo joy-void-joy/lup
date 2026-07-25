@@ -4,13 +4,15 @@ import json
 import shlex
 from importlib import resources
 from pathlib import Path
+from typing import assert_never
 
 from lup.harness.contracts import (
     ArtifactRenderer,
+    NativePathSpelling,
     PromptRenderer,
     SkillInvocationRenderer,
 )
-from lup.harness.generation import argument_text
+from lup.harness.generation import NativePaths, argument_text, plugin_path, tree_path
 from lup.harness.models import (
     Agent,
     ArgumentsRef,
@@ -20,14 +22,20 @@ from lup.harness.models import (
     Delegate,
     Harness,
     HookSet,
+    NativePath,
     Plugin,
+    PluginLocation,
+    PluginPath,
     PromptDocument,
     RelocateSession,
     RequestApproval,
     ResolverEntry,
+    RuntimeDocs,
     Skill,
     SkillInvocation,
+    SkillPattern,
     TextPart,
+    TreeLocation,
 )
 from lup.policy.bundle import (
     policy_kernel_modules,
@@ -48,11 +56,59 @@ class CodexSkillInvocationRenderer(SkillInvocationRenderer):
         return f"{mention} {arguments}" if arguments else mention
 
 
+class CodexNativePathSpelling(NativePathSpelling):
+    """Spell every harness-owned location the way Codex lays it out.
+
+    Custom agents are the one location Codex keeps outside the plugin, so the
+    plugin name is deliberately unused there.
+    """
+
+    @property
+    def runtime_name(self) -> str:
+        return "Codex"
+
+    def tree(self, location: TreeLocation) -> str:
+        match location:
+            case "tree_root":
+                return ".codex/"
+            case "guidance_file":
+                return "AGENTS.md"
+            case "ownership_manifest":
+                return ".codex/.lup-ownership.json"
+            case "project_settings":
+                return ".codex/config.toml"
+            case "personal_settings":
+                return ".codex/config.local.toml"
+            case "marketplace":
+                return ".agents/plugins/marketplace.json"
+
+    def plugin(self, plugin: str, location: PluginLocation, member: str | None) -> str:
+        root = f".codex/plugins/{plugin}"
+        match location:
+            case "root":
+                return f"{root}/"
+            case "manifest":
+                return f"{root}/.codex-plugin/plugin.json"
+            case "skills":
+                return (
+                    f"{root}/skills/{member}/SKILL.md" if member else f"{root}/skills/"
+                )
+            case "agents":
+                return f".codex/agents/{member}.toml" if member else ".codex/agents/"
+            case "hooks":
+                return f"{root}/hooks/"
+            case "guidance_template":
+                return f"{root}/TEMPLATE_AGENTS.md"
+
+
 class CodexPromptRenderer(PromptRenderer):
     """Render typed operations directly into Codex prompt instructions."""
 
-    def __init__(self, invocations: SkillInvocationRenderer) -> None:
+    def __init__(
+        self, invocations: SkillInvocationRenderer, paths: NativePaths
+    ) -> None:
         self.invocations = invocations
+        self.paths = paths
 
     def render(self, prompt: PromptDocument) -> str:
         rendered: list[str] = []  # lup: ignore[empty-collection]
@@ -62,10 +118,27 @@ class CodexPromptRenderer(PromptRenderer):
                     rendered.append(text)
                 case SkillInvocation():
                     rendered.append(self.invocations.render(part))
+                case NativePath():
+                    rendered.append(tree_path(self.paths, part))
+                case PluginPath():
+                    rendered.append(plugin_path(self.paths, part))
+                case SkillPattern(plugin=plugin, placeholder=placeholder):
+                    rendered.append(f"${plugin}:{placeholder}")
+                case RuntimeDocs():
+                    rendered.append(
+                        "the Codex documentation at "
+                        "https://developers.openai.com/codex/ and "
+                        "https://learn.chatgpt.com/"
+                    )
                 case AskUser(question=question):
-                    rendered.append(f"Ask the user this material question: {question}")
+                    rendered.append(
+                        "Ask the user directly, offering concrete options, and wait "
+                        f"for the answer: {question}"
+                    )
                 case Delegate(role=role, task=task):
-                    rendered.append(f"Delegate this task to the {role} agent: {task}")
+                    rendered.append(
+                        f"Delegate to the {role} custom agent with this task: {task}"
+                    )
                 case RequestApproval(action=action, reason=reason):
                     rendered.append(
                         f"Request explicit user approval before {action}. Reason: {reason}"
@@ -88,6 +161,8 @@ class CodexPromptRenderer(PromptRenderer):
                     )
                 case ArgumentsRef():
                     rendered.append("the arguments supplied with this skill invocation")
+                case _ as unhandled:
+                    assert_never(unhandled)
         text = "".join(rendered)
         return text if text.endswith("\n") else text + "\n"
 
@@ -121,7 +196,13 @@ class CodexSkillRenderer(ArtifactRenderer[Skill]):
 
 
 class CodexAgentRenderer(ArtifactRenderer[Agent]):
-    """Render one portable agent as project-scoped custom-agent TOML."""
+    """Render one portable agent as project-scoped custom-agent TOML.
+
+    The declared model tier is left out. Recorded evidence for Codex custom
+    agents covers TOML parsing only, so there is no probed alias table to spell
+    a tier in; omitting the row lets the agent inherit the session model, which
+    is honest where naming another runtime's alias would not be.
+    """
 
     def __init__(self, prompts: PromptRenderer) -> None:
         self.prompts = prompts
@@ -138,8 +219,6 @@ class CodexAgentRenderer(ArtifactRenderer[Agent]):
                 f"{json.dumps(self.prompts.render(source.prompt))}"
             ),
         ]
-        if source.model is not None:
-            rows.append(f"model = {json.dumps(source.model)}")
         return ArtifactTree(
             artifacts=[
                 Artifact(

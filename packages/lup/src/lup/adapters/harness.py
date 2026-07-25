@@ -4,6 +4,7 @@ from lup.adapters.claude.harness import (
     ClaudeAgentRenderer,
     ClaudeGuidanceRenderer,
     ClaudeHookRenderer,
+    ClaudeNativePathSpelling,
     ClaudePluginManifestRenderer,
     ClaudePromptRenderer,
     ClaudeSkillInvocationRenderer,
@@ -13,12 +14,14 @@ from lup.adapters.codex.harness import (
     CodexAgentRenderer,
     CodexGuidanceRenderer,
     CodexHookRenderer,
+    CodexNativePathSpelling,
     CodexPluginManifestRenderer,
     CodexPromptRenderer,
     CodexSkillInvocationRenderer,
     CodexSkillRenderer,
 )
-from lup.harness.generation import ArtifactValidationError
+from lup.harness.contracts import NativePathSpelling
+from lup.harness.generation import ArtifactValidationError, NativePaths
 from lup.harness.models import Artifact, ArtifactTree, Harness, TextPart
 from lup.harness.validation import DeterministicTreeValidator
 
@@ -36,6 +39,31 @@ def validated_tree(artifacts: list[Artifact]) -> ArtifactTree:
             )
         )
     return tree
+
+
+def native_paths(own: NativePathSpelling) -> NativePaths:
+    """Order every runtime's spellings around the one that is rendering.
+
+    Prose that teaches every tree names them in this order, so the ordering is
+    one composition decision rather than a claim any single adapter makes.
+    """
+    return NativePaths(
+        own=own, every=[ClaudeNativePathSpelling(), CodexNativePathSpelling()]
+    )
+
+
+def claude_prompt_renderer() -> ClaudePromptRenderer:
+    """Compose the Claude prompt renderer with the spellings it must reach."""
+    return ClaudePromptRenderer(
+        ClaudeSkillInvocationRenderer(), native_paths(ClaudeNativePathSpelling())
+    )
+
+
+def codex_prompt_renderer() -> CodexPromptRenderer:
+    """Compose the Codex prompt renderer with the spellings it must reach."""
+    return CodexPromptRenderer(
+        CodexSkillInvocationRenderer(), native_paths(CodexNativePathSpelling())
+    )
 
 
 def reject_rendered_invocations(source: Harness, sigil: str) -> None:
@@ -66,8 +94,7 @@ def reject_rendered_invocations(source: Harness, sigil: str) -> None:
 def compile_claude(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Claude-owned artifacts."""
     reject_rendered_invocations(source, "/")
-    invocations = ClaudeSkillInvocationRenderer()
-    prompts = ClaudePromptRenderer(invocations)
+    prompts = claude_prompt_renderer()
     manifest_renderer = ClaudePluginManifestRenderer()
     guidance_renderer = ClaudeGuidanceRenderer(prompts)
     artifacts: list[Artifact] = []  # lup: ignore[empty-collection]
@@ -90,8 +117,7 @@ def compile_claude(source: Harness) -> ArtifactTree:
 def compile_codex(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Codex-owned artifacts."""
     reject_rendered_invocations(source, "$")
-    invocations = CodexSkillInvocationRenderer()
-    prompts = CodexPromptRenderer(invocations)
+    prompts = codex_prompt_renderer()
     manifest_renderer = CodexPluginManifestRenderer()
     guidance_renderer = CodexGuidanceRenderer(prompts)
     artifacts: list[Artifact] = []  # lup: ignore[empty-collection]
