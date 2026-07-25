@@ -362,7 +362,14 @@ def sync_base(
     base: str | None,
     as_json: bool,
 ) -> None:
-    """Sync the base branch and merge it into the current feature branch."""
+    """Sync the base branch and merge it into the current feature branch.
+
+    A base only topology could name is reported and not merged. Guessing wrong
+    picks a branch the feature never diverged from, and every later step reads
+    that answer as settled — the history rebuild resets onto it, so a wrong
+    guess rewrites whatever sits between the two branches. An authoritative
+    base is one the caller passed or worktree creation recorded.
+    """
     feature = current_branch()
     base_source: Literal["explicit", "recorded", "guessed"] = "explicit"
     if base:
@@ -375,6 +382,25 @@ def sync_base(
     if not as_json:
         typer.echo(f"Feature branch: {feature}", err=True)
         typer.echo(f"Base branch: {base_branch}", err=True)
+
+    if base_source == "guessed":
+        if not as_json:
+            typer.echo(
+                f"Topology alone picked {base_branch}, so nothing is merged."
+                f" Confirm the base, then rerun with --base <branch>.",
+                err=True,
+            )
+        output_result(
+            SyncBaseResult(
+                feature_branch=feature,
+                base_branch=base_branch,
+                base_source=base_source,
+                merged=False,
+                conflicts=[],
+            ),
+            as_json,
+        )
+        raise typer.Exit(1)
 
     try:
         tree_dir = get_tree_dir()
