@@ -27,6 +27,9 @@ from policy_data import (
 )
 
 
+# lup: This seems very close to claude's policy_dispatcher, we shoud DRY this
+
+
 def sandbox_active():
     environ = os.environ  # lup: ignore[os-environ]
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"

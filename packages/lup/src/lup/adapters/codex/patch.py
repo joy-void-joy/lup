@@ -14,6 +14,7 @@ Rendered verbatim into each plugin's ``hooks/runtime`` as
 
 from collections.abc import Callable
 
+# lup: Why do we have # lup: ignore[tuple-shape] and empty-collection?  This file feels very patchy
 BEGIN = "*** Begin Patch"
 END = "*** End Patch"
 ADD = "*** Add File: "
