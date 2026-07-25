@@ -22,7 +22,13 @@ from lup.adapters.codex.harness import (
 )
 from lup.harness.contracts import NativePathSpelling
 from lup.harness.generation import ArtifactValidationError, NativePaths
-from lup.harness.models import Artifact, ArtifactTree, Harness, TextPart
+from lup.harness.models import (
+    GUIDANCE_CHARACTER_BUDGET,
+    Artifact,
+    ArtifactTree,
+    Harness,
+    TextPart,
+)
 from lup.harness.validation import DeterministicTreeValidator
 
 
@@ -64,6 +70,27 @@ def codex_prompt_renderer() -> CodexPromptRenderer:
     return CodexPromptRenderer(
         CodexSkillInvocationRenderer(), native_paths(CodexNativePathSpelling())
     )
+
+
+def reject_oversized_guidance(tree: ArtifactTree) -> None:
+    """Hold the always-loaded document to its budget as a session sees it.
+
+    The declaration-time lower bound in ``Harness`` cannot know what the parts
+    render to, and the gap grows with every part that replaces literal prose.
+    """
+    for artifact in tree.artifacts:
+        used = len(artifact.content)
+        if artifact.semantic_id != "harness.guidance" or used <= (
+            GUIDANCE_CHARACTER_BUDGET
+        ):
+            continue
+        raise ValueError(
+            f"rendered guidance {artifact.path.as_posix()} is {used} characters, "
+            f"over the {GUIDANCE_CHARACTER_BUDGET} budget by "
+            f"{used - GUIDANCE_CHARACTER_BUDGET}. Move a section to a generated "
+            "document under docs/ and leave a file-path pointer, the way "
+            "Self-Improvement Loop and Permission Hooks were split."
+        )
 
 
 def reject_rendered_invocations(source: Harness, sigil: str) -> None:
@@ -110,7 +137,9 @@ def compile_claude(source: Harness) -> ArtifactTree:
             artifacts.extend(
                 ClaudeHookRenderer(plugin.name).render(plugin.hooks).artifacts
             )
-    artifacts.extend(guidance_renderer.render(source).artifacts)
+    guidance = guidance_renderer.render(source)
+    reject_oversized_guidance(guidance)
+    artifacts.extend(guidance.artifacts)
     return validated_tree(artifacts)
 
 
@@ -133,5 +162,7 @@ def compile_codex(source: Harness) -> ArtifactTree:
             artifacts.extend(
                 CodexHookRenderer(plugin.name).render(plugin.hooks).artifacts
             )
-    artifacts.extend(guidance_renderer.render(source).artifacts)
+    guidance = guidance_renderer.render(source)
+    reject_oversized_guidance(guidance)
+    artifacts.extend(guidance.artifacts)
     return validated_tree(artifacts)

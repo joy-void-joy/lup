@@ -149,12 +149,20 @@ def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
 
 
 def test_guidance_stays_within_its_always_loaded_budget() -> None:
-    used = document_text_size(GUIDANCE)
+    """The budget bounds what a session loads, not what the declaration holds."""
+    declared = document_text_size(GUIDANCE)
+    rendered = {
+        "claude": claude_prompt_renderer().render(GUIDANCE),
+        "codex": codex_prompt_renderer().render(GUIDANCE),
+    }
 
-    assert used <= GUIDANCE_CHARACTER_BUDGET, (
-        f"guidance is {used} characters, over budget by "
-        f"{used - GUIDANCE_CHARACTER_BUDGET}"
-    )
+    for runtime, document in rendered.items():
+        used = len(document)
+        assert used >= declared
+        assert used <= GUIDANCE_CHARACTER_BUDGET, (
+            f"{runtime} guidance is {used} characters, over budget by "
+            f"{used - GUIDANCE_CHARACTER_BUDGET}"
+        )
 
 
 def test_codex_tree_renders_the_agents_flavored_template() -> None:

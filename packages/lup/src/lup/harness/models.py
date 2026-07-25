@@ -216,14 +216,20 @@ class PromptDocument(BaseModel):
 GUIDANCE_CHARACTER_BUDGET = 32_768
 """Ceiling on the guidance document every session loads before its first turn.
 
-Only literal text counts: a skill invocation renders to provider syntax whose
-length belongs to the adapter, not the declaration. Reference material that a
+What a session pays for is the rendered document, so that is what the adapters
+check as they compile it. A typed part costs whatever its adapter spells it as,
+however little literal text the declaration holds. Reference material that a
 skill or a denial message surfaces at the right moment belongs in a generated
 document under ``docs/`` instead, reached by a file-path pointer."""
 
 
 def document_text_size(document: PromptDocument) -> int:
-    """Total literal characters a document contributes to the guidance budget."""
+    """Lower bound on what a document costs a session, in literal characters.
+
+    Every part renders to something, so the rendered document is never smaller.
+    This is the share a neutral module can measure without reaching for an
+    adapter to spell the rest.
+    """
     return sum(len(part.text) for part in document.parts if isinstance(part, TextPart))
 
 
