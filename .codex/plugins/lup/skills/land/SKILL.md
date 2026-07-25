@@ -1,11 +1,11 @@
 ---
-name: clean-gone
-description: "Sweep every branch to one disposition \u2014 land unlanded work, clear merged ones"
+name: land
+description: "Land every branch that has not reached the integration branch, and clear the ones that have"
 ---
 
-# Branch Disposition Sweep
+# Land Every Branch
 
-Resolve every local branch to exactly one disposition and act on it. Unlanded work and merged leftovers surface in the same pass, so no branch sits in a silent bucket waiting to go stale.
+Drive every local branch to its terminal state. Each one is classified by whether its commits have reached the integration branch — the ones that have not get landed, the ones that have get cleared — so no branch sits in a silent bucket waiting to go stale.
 
 ## Arguments
 

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "b870cb13ce6e7df220fa6d4fa5c453fecaab6657f0370a2064b21999809674bc",
+  "source_digest": "80e8fe361a666cbcbf51d50501054742cdc7ca2342775817587a917240275fc8",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -126,13 +126,6 @@
       "executable": false
     },
     {
-      "path": ".codex/plugins/lup/skills/clean-gone/SKILL.md",
-      "category": "generated",
-      "sha256": "687356ea8a2df90e0bc70da4a2bc71e609d3f7192c88a5d7c2cef73171a0bdda",
-      "semantic_id": "skill.clean-gone",
-      "executable": false
-    },
-    {
       "path": ".codex/plugins/lup/skills/close/SKILL.md",
       "category": "generated",
       "sha256": "d0ae832f4f49a09fd135ea1c351195ced16c5589d5097cf417e3de774c207a78",
@@ -233,8 +226,15 @@
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "775fabe8b566685450bc899f1081d38f895a4b0e0678cbf4821c97bf6657a6a4",
+      "sha256": "4bed3dda11b1e66f6c476881bc62a4d439454a05f4d0153641bd5bd034058883",
       "semantic_id": "skill.install",
+      "executable": false
+    },
+    {
+      "path": ".codex/plugins/lup/skills/land/SKILL.md",
+      "category": "generated",
+      "sha256": "9a1bc32955fb537f63908cd8eb62d668217abbab4b89ea6df75848b8bbce963b",
+      "semantic_id": "skill.land",
       "executable": false
     },
     {
@@ -317,7 +317,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "5b3d9c2008e3410ffac56c036cc5fe001ffaba64b4c71d2400d3e226602687e5",
+      "sha256": "8ba1fd04891a04a64aaa355db8ef04c801156b9b0778be8bdb81c8f267e072c6",
       "semantic_id": "harness.guidance",
       "executable": false
     }
