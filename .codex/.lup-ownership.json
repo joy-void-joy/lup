@@ -77,6 +77,13 @@
       "executable": false
     },
     {
+      "path": ".codex/plugins/lup/hooks/runtime/codex_patch.py",
+      "category": "generated",
+      "sha256": "2b991626352715a64db501d4c077d43617325b934d0cc725263dae8f8b76e9d7",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
       "path": ".codex/plugins/lup/hooks/runtime/evidence.json",
       "category": "generated",
       "sha256": "dbdf506a89c479eb04b42fe957bd61124929fae3a90315ce29025e9198e41a9b",
@@ -324,7 +331,7 @@
     {
       "path": ".codex/plugins/lup/skills/rebase/SKILL.md",
       "category": "generated",
-      "sha256": "c937fbcbae45d4a5c2075e49abe51aeb4a8a4b2a8cf3369f65e59d1fb9b051c1",
+      "sha256": "9c95bccd30f527defac182306855e732d7e4e51a5a629c830e3fe44c6a2cac15",
       "semantic_id": "skill.rebase",
       "executable": false
     },

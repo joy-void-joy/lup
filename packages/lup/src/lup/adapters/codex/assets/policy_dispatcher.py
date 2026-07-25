@@ -16,6 +16,16 @@ from kernel.fetch import decide_fetch
 from kernel.lex import shell_write_targets
 from kernel.shell import decide_shell
 from policy_data import ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES, SHELL_RULES
+from codex_patch import patched_files
+from kernel import KernelDecision, decide_edit, decide_fetch, decide_shell
+from policy_data import (
+    ALLOWED_FETCH_SCOPES,
+    ANTI_PATTERN_ROWS,
+    DENIED_FETCH_SCOPES,
+    MAXIMUM_ADDED_LINES,
+    PATH_RULES,
+    SHELL_RULES,
+)
 
 
 def sandbox_active():
@@ -44,6 +54,53 @@ def existing_write_targets(command):
         for target in shell_write_targets(command)
         if (Path.cwd() / target).exists()
     ]
+  
+def worktree_path(path_text):
+    """Relativize against the worktree holding the path, not the cwd.
+
+    A sibling worktree is writable but is not under the launch directory,
+    so relativizing against the cwd would leave its paths absolute and
+    every repo-relative path rule — human-owned files, protected
+    directories — would quietly fail to match inside it.
+    """
+    path = Path(path_text)
+    if not path.is_absolute():
+        return path_text
+    resolved = path.resolve()
+    for root in resolved.parents:
+        if (root / ".git").exists():
+            return resolved.relative_to(root).as_posix()
+    return path_text
+
+
+def read_document(path_text):
+    path = Path(path_text)
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
+def edit_decision(path_text, before, after):
+    path = Path(path_text)
+    suffix = path.suffix.lower()
+    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else ()
+    return decide_edit(
+        worktree_path(path_text),
+        before,
+        after,
+        path_exists=path.exists(),
+        path_rules=PATH_RULES,
+        antipattern_rows=rows,
+        maximum_added_lines=MAXIMUM_ADDED_LINES,
+        python_source=suffix in (".py", ".pyi"),
+    )
+
+
+def joined(decisions):
+    """Join one envelope's files: deny beats ask beats defer beats allow."""
+    for effect in ("deny", "ask", "defer"):
+        for decision in decisions:
+            if decision.effect == effect:
+                return decision
+    return KernelDecision("allow", "every patched file is declared safe")
 
 
 def dispatch(payload):
@@ -69,9 +126,12 @@ def dispatch(payload):
             DENIED_FETCH_SCOPES,
         )
     if name == "apply_patch":
-        return KernelDecision(
-            "ask",
-            "opaque patch input requires native parsing before it can be auto-allowed",
+        changes = patched_files(tool_input["command"], read_document)
+        return joined(
+            [
+                edit_decision(change.path, change.before, change.after)
+                for change in changes
+            ]
         )
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
 

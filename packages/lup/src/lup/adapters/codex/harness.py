@@ -234,6 +234,11 @@ CODEX_POLICY_DISPATCHER = (
 )
 """Hermetic hook dispatcher script, shipped verbatim into the plugin tree."""
 
+CODEX_PATCH_RUNTIME = (
+    resources.files("lup.adapters.codex").joinpath("patch.py").read_text("utf-8")
+)
+"""Envelope decoder, shipped beside the kernel for the dispatcher to import."""
+
 
 class CodexHookRenderer(ArtifactRenderer[HookSet]):
     """Render Codex hooks, canonical kernel, and application policy rows."""
@@ -292,6 +297,14 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     )
                     for module in policy_kernel_modules()
                 ],
+                Artifact(
+                    path=Path(
+                        f".codex/plugins/{self.plugin_name}/hooks/runtime/"
+                        "codex_patch.py"
+                    ),
+                    content=CODEX_PATCH_RUNTIME,
+                    semantic_id=source.id,
+                ),
                 Artifact(
                     path=Path(
                         f".codex/plugins/{self.plugin_name}/hooks/runtime/"

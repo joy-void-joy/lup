@@ -106,6 +106,10 @@ SHELL_POLICY_CASES = [
         existing=["src/generated.py"],
     ),
     DecisionCase(input="gh pr view 123", effect="allow"),
+    DecisionCase(input="gh pr list --state open", effect="allow"),
+    DecisionCase(input="gh pr diff 123", effect="allow"),
+    DecisionCase(input="gh issue view 7", effect="allow"),
+    DecisionCase(input="tree -L 2 src", effect="allow"),
     DecisionCase(input="uv run tool --help", effect="allow"),
     DecisionCase(
         input="uv run lup-devtools dev worktree create feature", effect="allow"
