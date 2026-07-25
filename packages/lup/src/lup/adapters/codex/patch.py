@@ -1,12 +1,8 @@
-# lup: ignore[empty-collection, string-split, tuple-shape]
-# A line-oriented decoder accumulates into empty lists and speaks in the
-# marker/text pairs the envelope format itself is written in.
 """Codex apply_patch envelope parsing for the hook dispatcher.
 
-Codex hands a hook one opaque envelope covering any number of files where
-Claude's edit tools hand over structured before/after text. Decoding it
-back into per-file documents is what lets the canonical edit policy judge
-a Codex patch at all, instead of refusing every one of them unread.
+Codex exposes the complete envelope as ``tool_input.command``. Decoding it
+into per-file documents lets the canonical edit policy judge the same
+before/after batch that the native patcher will apply.
 
 Rendered verbatim into each plugin's ``hooks/runtime`` as
 ``codex_patch.py``, so it imports only the standard library.
@@ -14,15 +10,14 @@ Rendered verbatim into each plugin's ``hooks/runtime`` as
 
 from collections.abc import Callable
 
-# lup: Why do we have # lup: ignore[tuple-shape] and empty-collection?  This file feels very patchy
 BEGIN = "*** Begin Patch"
 END = "*** End Patch"
 ADD = "*** Add File: "
 DELETE = "*** Delete File: "
 UPDATE = "*** Update File: "
 MOVE = "*** Move to: "
-SECTION = "*** "
 HUNK = "@@"
+EOF = "*** End of File"
 
 
 class PatchedFile:
@@ -31,81 +26,272 @@ class PatchedFile:
     path: str
     before: str | None
     after: str | None
+    path_exists: bool
 
-    def __init__(self, path: str, before: str | None, after: str | None) -> None:
+    def __init__(
+        self,
+        path: str,
+        before: str | None,
+        after: str | None,
+        *,
+        path_exists: bool,
+    ) -> None:
         self.path = path
         self.before = before
         self.after = after
+        self.path_exists = path_exists
 
 
-def locate(source: list[str], preimage: list[str], start: int) -> int:
+class ChangeChunk:
+    """One context-anchored update chunk from a file section."""
+
+    context: str | None
+    old_lines: list[str]
+    new_lines: list[str]
+    end_of_file: bool
+
+    def __init__(self, context: str | None) -> None:
+        self.context = context
+        self.old_lines = list()
+        self.new_lines = list()
+        self.end_of_file = False
+
+
+class Replacement:
+    """A source span and the lines replacing it."""
+
+    start: int
+    old_count: int
+    new_lines: list[str]
+
+    def __init__(self, start: int, old_count: int, new_lines: list[str]) -> None:
+        self.start = start
+        self.old_count = old_count
+        self.new_lines = new_lines
+
+
+def locate(
+    source: list[str],
+    preimage: list[str],
+    start: int,
+    *,
+    end_of_file: bool = False,
+) -> int:
     """Find the hunk's preimage as a contiguous run at or after ``start``."""
     if not preimage:
         return start
     for index in range(start, len(source) - len(preimage) + 1):
-        if source[index : index + len(preimage)] == preimage:
+        matches = source[index : index + len(preimage)] == preimage
+        anchored = not end_of_file or index + len(preimage) == len(source)
+        if matches and anchored:
             return index
     raise ValueError("patch context does not match the file on disk")
 
 
-def apply_hunks(current: str, hunks: list[list[tuple[str, str]]]) -> str:
-    """Replay context-anchored hunks over the current document."""
-    source = current.split("\n")
-    result: list[str] = []
+def apply_hunks(current: str, chunks: list[ChangeChunk]) -> str:
+    """Replay parsed chunks with Codex's context and EOF anchoring semantics."""
+    source = current.splitlines()
+    replacements: list[Replacement] = list()
     cursor = 0
-    for hunk in hunks:
-        preimage = [text for marker, text in hunk if marker in (" ", "-")]
-        index = locate(source, preimage, cursor)
-        result.extend(source[cursor:index])
-        cursor = index
-        for marker, text in hunk:
+    for chunk in chunks:
+        if chunk.context is not None:
+            cursor = locate(source, [chunk.context], cursor) + 1
+        if not chunk.old_lines:
+            if chunk.new_lines:
+                replacements.append(Replacement(len(source), 0, list(chunk.new_lines)))
+            continue
+        old_lines = chunk.old_lines
+        new_lines = chunk.new_lines
+        try:
+            start = locate(
+                source,
+                old_lines,
+                cursor,
+                end_of_file=chunk.end_of_file,
+            )
+        except ValueError:
+            if old_lines[-1:] != [""]:
+                raise
+            old_lines = old_lines[:-1]
+            new_lines = new_lines[:-1] if new_lines[-1:] == [""] else new_lines
+            start = locate(
+                source,
+                old_lines,
+                cursor,
+                end_of_file=chunk.end_of_file,
+            )
+        replacements.append(Replacement(start, len(old_lines), list(new_lines)))
+        cursor = start + len(old_lines)
+    updated = list(source)
+    for replacement in reversed(replacements):
+        updated[replacement.start : replacement.start + replacement.old_count] = (
+            replacement.new_lines
+        )
+    return "\n".join(updated) + ("\n" if updated else "")
+
+
+class PatchParser:
+    """Stateful parser for one complete Codex patch envelope."""
+
+    lines: list[str]
+    index: int
+    files: list[PatchedFile]
+    read_document: Callable[[str], str | None]
+
+    def __init__(
+        self,
+        text: str,
+        read_document: Callable[[str], str | None],
+    ) -> None:
+        self.lines = text.strip().splitlines()
+        self.index = 1
+        self.files = list()
+        self.read_document = read_document
+        if not self.lines or self.lines[0].strip() != BEGIN:
+            raise ValueError("patch envelope is missing its Begin Patch header")
+        if len(self.lines) == 1 or self.lines[-1].strip() != END:
+            raise ValueError("patch envelope is missing its End Patch footer")
+
+    def path(self, marker: str) -> str:
+        """Return the non-empty path carried by the current header."""
+        header = self.lines[self.index].strip()
+        path = header[len(marker) :].strip()
+        if not path:
+            raise ValueError(f"{marker.strip()} requires a path")
+        return path
+
+    def current_document(self, path: str) -> str | None:
+        """Read a path after accounting for earlier sections in this envelope."""
+        for change in reversed(self.files):
+            if change.path == path:
+                return change.after
+        return self.read_document(path)
+
+    def record(self, path: str, before: str | None, after: str | None) -> None:
+        """Append one policy-ready file transition."""
+        self.files.append(
+            PatchedFile(path, before, after, path_exists=before is not None)
+        )
+
+    def parse_add(self) -> None:
+        """Parse an Add File section, including an existing overwritten file."""
+        path = self.path(ADD)
+        self.index += 1
+        body: list[str] = list()
+        while self.index < len(self.lines) - 1:
+            line = self.lines[self.index]
+            if not line.startswith("+"):
+                break
+            body.append(line[1:])
+            self.index += 1
+        if not body:
+            raise ValueError(f"Add File section for {path!r} has no added lines")
+        before = self.current_document(path)
+        self.record(path, before, "".join(f"{line}\n" for line in body))
+
+    def parse_delete(self) -> None:
+        """Parse a Delete File section and require its preimage to exist."""
+        path = self.path(DELETE)
+        before = self.current_document(path)
+        if before is None:
+            raise ValueError(f"patch deletes a file that does not exist: {path}")
+        self.record(path, before, None)
+        self.index += 1
+
+    def parse_chunks(self) -> list[ChangeChunk]:
+        """Parse update chunks up to the next file section."""
+        chunks: list[ChangeChunk] = list()
+        chunk: ChangeChunk | None = None
+        changed = False
+        while self.index < len(self.lines) - 1:
+            line = self.lines[self.index]
+            stripped = line.strip()
+            if (
+                stripped.startswith(ADD)
+                or stripped.startswith(DELETE)
+                or stripped.startswith(UPDATE)
+                or stripped == END
+            ):
+                break
+            if stripped == HUNK or stripped.startswith(f"{HUNK} "):
+                if chunk is not None:
+                    chunks.append(chunk)
+                context = stripped[len(HUNK) :].strip()
+                chunk = ChangeChunk(context or None)
+                self.index += 1
+                continue
+            if stripped == EOF:
+                if chunk is None or not (chunk.old_lines or chunk.new_lines):
+                    raise ValueError("End of File marker has no update lines")
+                chunk.end_of_file = True
+                self.index += 1
+                break
+            if line[:1] not in (" ", "-", "+"):
+                raise ValueError(f"unsupported patch line: {line!r}")
+            if chunk is None:
+                chunk = ChangeChunk(None)
+            marker = line[0]
+            content = line[1:]
             match marker:
                 case " ":
-                    result.append(text)
-                    cursor += 1
+                    chunk.old_lines.append(content)
+                    chunk.new_lines.append(content)
                 case "-":
-                    cursor += 1
-                case _:
-                    result.append(text)
-    result.extend(source[cursor:])
-    return "\n".join(result)
+                    chunk.old_lines.append(content)
+                case "+":
+                    chunk.new_lines.append(content)
+            changed = True
+            self.index += 1
+        if chunk is not None:
+            chunks.append(chunk)
+        if chunks and not changed:
+            raise ValueError("Update File section has no change lines")
+        return chunks
 
+    def parse_update(self) -> None:
+        """Parse an update and expand a move into both touched file paths."""
+        source = self.path(UPDATE)
+        self.index += 1
+        destination: str | None = None
+        if self.lines[self.index].strip().startswith(MOVE):
+            destination = self.path(MOVE)
+            self.index += 1
+        chunks = self.parse_chunks()
+        if destination is None and not chunks:
+            raise ValueError(f"Update File section for {source!r} is empty")
+        before = self.current_document(source)
+        if before is None:
+            raise ValueError(f"patch updates a file that does not exist: {source}")
+        after = apply_hunks(before, chunks) if chunks else before
+        if destination is None:
+            self.record(source, before, after)
+            return
+        if destination == source:
+            raise ValueError("a Move to path must differ from its source")
+        destination_before = self.current_document(destination)
+        self.record(source, before, None)
+        self.record(destination, destination_before, after)
 
-def take_added(lines: list[str], index: int) -> tuple[str, int]:
-    """Collect the ``+``-prefixed body introducing a new file."""
-    body: list[str] = []
-    while index < len(lines) and lines[index].startswith("+"):
-        body.append(lines[index][1:])
-        index += 1
-    return "\n".join(body), index
-
-
-def take_hunks(lines: list[str], index: int) -> tuple[list[list[tuple[str, str]]], int]:
-    """Collect hunks until the next section marker ends this file."""
-    hunks: list[list[tuple[str, str]]] = []
-    hunk: list[tuple[str, str]] = []
-    while index < len(lines):
-        line = lines[index]
-        if line.startswith(SECTION):
-            break
-        if line.startswith(HUNK):
-            if hunk:
-                hunks.append(hunk)
-            hunk = []
-            index += 1
-            continue
-        if line[:1] in (" ", "-", "+"):
-            hunk.append((line[:1], line[1:]))
-            index += 1
-            continue
-        if line == "":
-            hunk.append((" ", ""))
-            index += 1
-            continue
-        break
-    if hunk:
-        hunks.append(hunk)
-    return hunks, index
+    def parse(self) -> list[PatchedFile]:
+        """Decode every file section or reject the envelope."""
+        while self.index < len(self.lines) - 1:
+            header = self.lines[self.index].strip()
+            if not header:
+                self.index += 1
+                continue
+            if header.startswith(ADD):
+                self.parse_add()
+                continue
+            if header.startswith(DELETE):
+                self.parse_delete()
+                continue
+            if header.startswith(UPDATE):
+                self.parse_update()
+                continue
+            raise ValueError(f"unsupported patch section: {header!r}")
+        if not self.files:
+            raise ValueError("patch envelope declares no file changes")
+        return self.files
 
 
 def patched_files(
@@ -119,39 +305,4 @@ def patched_files(
     parser cannot vouch for reaches the caller's conservative branch
     rather than a decision made on a misread patch.
     """
-    lines = text.split("\n")
-    starts = [index for index, line in enumerate(lines) if line.strip() == BEGIN]
-    if not starts:
-        raise ValueError("patch envelope is missing its Begin Patch header")
-    index = starts[0] + 1
-    files: list[PatchedFile] = []
-    while index < len(lines):
-        line = lines[index]
-        if line.startswith(END):
-            break
-        if line.startswith(ADD):
-            body, index = take_added(lines, index + 1)
-            files.append(PatchedFile(line[len(ADD) :].strip(), None, body))
-            continue
-        if line.startswith(DELETE):
-            path = line[len(DELETE) :].strip()
-            files.append(PatchedFile(path, read_document(path), None))
-            index += 1
-            continue
-        if line.startswith(UPDATE):
-            path = line[len(UPDATE) :].strip()
-            index += 1
-            destination = path
-            if index < len(lines) and lines[index].startswith(MOVE):
-                destination = lines[index][len(MOVE) :].strip()
-                index += 1
-            hunks, index = take_hunks(lines, index)
-            current = read_document(path)
-            if current is None:
-                raise ValueError(f"patch updates a file that does not exist: {path}")
-            files.append(PatchedFile(destination, current, apply_hunks(current, hunks)))
-            continue
-        index += 1
-    if not files:
-        raise ValueError("patch envelope declares no file changes")
-    return files
+    return PatchParser(text, read_document).parse()

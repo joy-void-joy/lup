@@ -1,13 +1,15 @@
 """Codex apply_patch decoding and the edit policy it finally reaches.
 
-Codex hands a hook one opaque envelope where Claude hands over structured
-before/after text, so the dispatcher refused every patch unread and the
-canonical edit policy never ran for a Codex edit. These tests pin the
-decode, the per-file decisions it enables, and the path resolution that
-keeps repo-relative rules matching inside a sibling worktree.
+Codex hands a hook one complete patch command where Claude hands over
+structured before/after text. These tests pin the native decode, the
+per-file decisions it enables, and the path resolution that keeps
+repo-relative rules matching inside a sibling worktree.
 """
 
 import importlib.util
+import io
+import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -28,6 +30,20 @@ def document(text: str) -> Callable[[str], str | None]:
     return lambda _path: text
 
 
+def named_document(path: str, text: str) -> Callable[[str], str | None]:
+    return lambda candidate: text if candidate == path else None
+
+
+def moved_document(path: str) -> str | None:
+    match path:
+        case "old.py":
+            return "context\n"
+        case "new.py":
+            return "replaced\n"
+        case _:
+            return None
+
+
 def test_update_applies_hunks_over_the_current_document() -> None:
     envelope = update_envelope(
         "module.py", ' def greet():\n-    return "hi"\n+    return "hello"'
@@ -44,10 +60,11 @@ def test_update_applies_hunks_over_the_current_document() -> None:
 def test_add_file_carries_no_preimage() -> None:
     envelope = "*** Begin Patch\n*** Add File: new.py\n+one\n+two\n*** End Patch"
 
-    changes = patched_files(envelope, document(""))
+    changes = patched_files(envelope, named_document("other.py", ""))
 
+    assert not changes[0].path_exists
     assert changes[0].before is None
-    assert changes[0].after == "one\ntwo"
+    assert changes[0].after == "one\ntwo\n"
 
 
 def test_delete_file_carries_no_postimage() -> None:
@@ -57,17 +74,23 @@ def test_delete_file_carries_no_postimage() -> None:
 
     assert changes[0].before == "body\n"
     assert changes[0].after is None
+    assert changes[0].path_exists
 
 
-def test_move_reports_the_destination_path() -> None:
+def test_move_reports_source_deletion_and_destination_write() -> None:
     envelope = (
         "*** Begin Patch\n*** Update File: old.py\n*** Move to: new.py\n"
         "@@\n context\n*** End Patch"
     )
 
-    changes = patched_files(envelope, document("context\n"))
+    changes = patched_files(envelope, moved_document)
 
-    assert changes[0].path == "new.py"
+    assert [change.path for change in changes] == ["old.py", "new.py"]
+    assert changes[0].before == "context\n"
+    assert changes[0].after is None
+    assert changes[1].before == "replaced\n"
+    assert changes[1].after == "context\n"
+    assert changes[1].path_exists
 
 
 def test_one_envelope_yields_every_file_it_touches() -> None:
@@ -75,16 +98,39 @@ def test_one_envelope_yields_every_file_it_touches() -> None:
         "*** Begin Patch\n*** Add File: a.py\n+a\n*** Delete File: b.py\n*** End Patch"
     )
 
-    changes = patched_files(envelope, document("b\n"))
+    changes = patched_files(envelope, named_document("b.py", "b\n"))
 
     assert [change.path for change in changes] == ["a.py", "b.py"]
+
+
+def test_context_headers_and_end_of_file_anchor_the_native_result() -> None:
+    envelope = (
+        "*** Begin Patch\n*** Update File: module.py\n@@ def second():\n"
+        "-    return 2\n+    return 3\n*** End of File\n*** End Patch"
+    )
+    before = "def first():\n    return 2\n\ndef second():\n    return 2\n"
+
+    changes = patched_files(envelope, document(before))
+
+    assert changes[0].after == (
+        "def first():\n    return 2\n\ndef second():\n    return 3\n"
+    )
 
 
 @pytest.mark.parametrize(
     ("envelope", "message"),
     [
         ("no header at all", "Begin Patch"),
+        ("*** Begin Patch\n*** Add File: a.py\n+x", "End Patch"),
         ("*** Begin Patch\n*** End Patch", "no file changes"),
+        (
+            "*** Begin Patch\n*** Add File: a.py\nnot-added\n*** End Patch",
+            "no added lines",
+        ),
+        (
+            "*** Begin Patch\n*** Mystery File: a.py\n*** End Patch",
+            "unsupported patch section",
+        ),
         (update_envelope("m.py", " missing"), "does not match"),
     ],
 )
@@ -140,9 +186,99 @@ class TestDispatchedPatches:
 
         assert decision.effect != "allow"
 
+    def test_an_antipattern_is_denied_after_native_decoding(
+        self, tmp_path: Path
+    ) -> None:
+        root = worktree(tmp_path / "feature")
+        target = root / "module.py"
+        target.write_text(GREETING, encoding="utf-8")
+        envelope = update_envelope(
+            str(target),
+            '+import re\n def greet():\n     return "hi"',
+        )
+
+        decision = bundled_dispatcher().dispatch(patch_payload(envelope))
+
+        assert decision.effect == "deny"
+        assert "import-re" in decision.reason
+
+    def test_every_file_in_a_safe_multi_file_patch_is_allowed(
+        self, tmp_path: Path
+    ) -> None:
+        root = worktree(tmp_path / "feature")
+        first = root / "first.py"
+        second = root / "second.py"
+        first.write_text("value = 1\n", encoding="utf-8")
+        second.write_text("value = 2\n", encoding="utf-8")
+        envelope = (
+            f"*** Begin Patch\n*** Update File: {first}\n@@\n"
+            "-value = 1\n+value = 3\n"
+            f"*** Update File: {second}\n@@\n"
+            "-value = 2\n+value = 4\n*** End Patch"
+        )
+
+        decision = bundled_dispatcher().dispatch(patch_payload(envelope))
+
+        assert decision.effect == "allow"
+
+    def test_a_protected_file_wins_a_multi_file_batch(self, tmp_path: Path) -> None:
+        root = worktree(tmp_path / "feature")
+        safe = root / "module.py"
+        protected = root / "README.md"
+        safe.write_text("value = 1\n", encoding="utf-8")
+        protected.write_text("# Title\n", encoding="utf-8")
+        envelope = (
+            f"*** Begin Patch\n*** Update File: {safe}\n@@\n"
+            "-value = 1\n+value = 2\n"
+            f"*** Update File: {protected}\n@@\n"
+            "-# Title\n+# Rewritten\n*** End Patch"
+        )
+
+        decision = bundled_dispatcher().dispatch(patch_payload(envelope))
+
+        assert decision.effect == "ask"
+
+    def test_an_ordinary_delete_reaches_the_deletion_policy(
+        self, tmp_path: Path
+    ) -> None:
+        root = worktree(tmp_path / "feature")
+        target = root / "obsolete.py"
+        target.write_text("value = 1\n", encoding="utf-8")
+        envelope = f"*** Begin Patch\n*** Delete File: {target}\n*** End Patch"
+
+        decision = bundled_dispatcher().dispatch(patch_payload(envelope))
+
+        assert decision.effect == "allow"
+
+    def test_a_move_checks_the_protected_source_path(self, tmp_path: Path) -> None:
+        root = worktree(tmp_path / "feature")
+        source = root / "README.md"
+        destination = root / "README.old.md"
+        source.write_text("# Title\n", encoding="utf-8")
+        envelope = (
+            f"*** Begin Patch\n*** Update File: {source}\n"
+            f"*** Move to: {destination}\n@@\n # Title\n*** End Patch"
+        )
+
+        decision = bundled_dispatcher().dispatch(patch_payload(envelope))
+
+        assert decision.effect == "ask"
+        assert "human-authored" in decision.reason
+
     def test_an_unparsable_envelope_never_reports_allow(self) -> None:
         with pytest.raises(ValueError):
             bundled_dispatcher().dispatch(patch_payload("garbage"))
+
+    def test_an_unparsable_envelope_exits_nonzero(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        payload = json.dumps(patch_payload("garbage"))
+        monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
+
+        with pytest.raises(SystemExit) as raised:
+            bundled_dispatcher().main()
+
+        assert raised.value.code == 2
 
 
 def test_worktree_path_relativizes_against_the_holding_worktree(
