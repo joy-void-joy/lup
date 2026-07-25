@@ -4,24 +4,21 @@ from lup.adapters.claude.harness import (
     ClaudeAgentRenderer,
     ClaudeGuidanceRenderer,
     ClaudeHookRenderer,
-    ClaudeNativePathSpelling,
     ClaudePluginManifestRenderer,
-    ClaudePromptRenderer,
-    ClaudeSkillInvocationRenderer,
     ClaudeSkillRenderer,
+    ClaudeSpellings,
 )
 from lup.adapters.codex.harness import (
     CodexAgentRenderer,
     CodexGuidanceRenderer,
     CodexHookRenderer,
-    CodexNativePathSpelling,
     CodexPluginManifestRenderer,
-    CodexPromptRenderer,
-    CodexSkillInvocationRenderer,
     CodexSkillRenderer,
+    CodexSpellings,
 )
-from lup.harness.contracts import NativePathSpelling
-from lup.harness.generation import ArtifactValidationError, NativePaths
+from lup.harness.contracts import NativeSpellings
+from lup.harness.generation import ArtifactValidationError
+from lup.harness.prompts import SpelledPromptRenderer
 from lup.harness.models import (
     GUIDANCE_CHARACTER_BUDGET,
     Artifact,
@@ -47,29 +44,24 @@ def validated_tree(artifacts: list[Artifact]) -> ArtifactTree:
     return tree
 
 
-def native_paths(own: NativePathSpelling) -> NativePaths:
-    """Order every runtime's spellings around the one that is rendering.
+def prompt_renderer(own: NativeSpellings) -> SpelledPromptRenderer:
+    """Compose the one renderer around the vocabulary of one runtime.
 
-    Prose that teaches every tree names them in this order, so the ordering is
-    one composition decision rather than a claim any single adapter makes.
+    Prose that teaches every tree names the runtimes in this order, so the
+    ordering is a single composition decision rather than a claim any one
+    adapter makes about the others.
     """
-    return NativePaths(
-        own=own, every=[ClaudeNativePathSpelling(), CodexNativePathSpelling()]
-    )
+    return SpelledPromptRenderer(own=own, every=[ClaudeSpellings(), CodexSpellings()])
 
 
-def claude_prompt_renderer() -> ClaudePromptRenderer:
-    """Compose the Claude prompt renderer with the spellings it must reach."""
-    return ClaudePromptRenderer(
-        ClaudeSkillInvocationRenderer(), native_paths(ClaudeNativePathSpelling())
-    )
+def claude_prompt_renderer() -> SpelledPromptRenderer:
+    """Render prompts in Claude's vocabulary."""
+    return prompt_renderer(ClaudeSpellings())
 
 
-def codex_prompt_renderer() -> CodexPromptRenderer:
-    """Compose the Codex prompt renderer with the spellings it must reach."""
-    return CodexPromptRenderer(
-        CodexSkillInvocationRenderer(), native_paths(CodexNativePathSpelling())
-    )
+def codex_prompt_renderer() -> SpelledPromptRenderer:
+    """Render prompts in Codex's vocabulary."""
+    return prompt_renderer(CodexSpellings())
 
 
 def reject_oversized_guidance(tree: ArtifactTree) -> None:
@@ -121,13 +113,14 @@ def reject_rendered_invocations(source: Harness, sigil: str) -> None:
 def compile_claude(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Claude-owned artifacts."""
     reject_rendered_invocations(source, "/")
-    prompts = claude_prompt_renderer()
+    spellings = ClaudeSpellings()
+    prompts = prompt_renderer(spellings)
     manifest_renderer = ClaudePluginManifestRenderer()
     guidance_renderer = ClaudeGuidanceRenderer(prompts)
     artifacts: list[Artifact] = []  # lup: ignore[empty-collection]
     for plugin in source.plugins:
         skill_renderer = ClaudeSkillRenderer(prompts, plugin.name)
-        agent_renderer = ClaudeAgentRenderer(prompts, plugin.name)
+        agent_renderer = ClaudeAgentRenderer(prompts, plugin.name, spellings)
         for declaration in plugin.skills:
             artifacts.extend(skill_renderer.render(declaration).artifacts)
         for declaration in plugin.agents:
@@ -146,13 +139,14 @@ def compile_claude(source: Harness) -> ArtifactTree:
 def compile_codex(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Codex-owned artifacts."""
     reject_rendered_invocations(source, "$")
-    prompts = codex_prompt_renderer()
+    spellings = CodexSpellings()
+    prompts = prompt_renderer(spellings)
     manifest_renderer = CodexPluginManifestRenderer()
     guidance_renderer = CodexGuidanceRenderer(prompts)
     artifacts: list[Artifact] = []  # lup: ignore[empty-collection]
     for plugin in source.plugins:
         skill_renderer = CodexSkillRenderer(prompts, plugin.name)
-        agent_renderer = CodexAgentRenderer(prompts)
+        agent_renderer = CodexAgentRenderer(prompts, spellings)
         for declaration in plugin.skills:
             artifacts.extend(skill_renderer.render(declaration).artifacts)
         for declaration in plugin.agents:

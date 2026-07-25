@@ -4,38 +4,20 @@ import json
 import shlex
 from importlib import resources
 from pathlib import Path
-from typing import assert_never
-
-from lup.harness.contracts import (
-    ArtifactRenderer,
-    NativePathSpelling,
-    PromptRenderer,
-    SkillInvocationRenderer,
-)
-from lup.harness.generation import NativePaths, argument_text, plugin_path, tree_path
+from lup.harness.contracts import ArtifactRenderer, NativeSpellings, PromptRenderer
+from lup.harness.generation import argument_text
 from lup.harness.models import (
     Agent,
-    ArgumentsRef,
-    AskUser,
     Artifact,
     ArtifactTree,
-    Delegate,
     Harness,
     HookSet,
     ModelTier,
-    NativePath,
     Plugin,
     PluginLocation,
-    PluginPath,
-    PromptDocument,
-    RelocateSession,
-    RequestApproval,
-    ResolverEntry,
-    RuntimeDocs,
+    QualifiedAgentName,
     Skill,
     SkillInvocation,
-    SkillPattern,
-    TextPart,
     TreeLocation,
 )
 from lup.policy.bundle import (
@@ -45,8 +27,21 @@ from lup.policy.bundle import (
 )
 
 
-class ClaudeSkillInvocationRenderer(SkillInvocationRenderer):
-    """Render the entire Claude plugin command invocation."""
+CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
+    "inherit": "inherit",
+    "strongest": "opus",
+    "balanced": "sonnet",
+    "fast": "haiku",
+}
+"""Claude's own name for each portable tier, as agent frontmatter accepts it."""
+
+
+class ClaudeSpellings(NativeSpellings):
+    """Spell everything portable prose names the way Claude Code spells it."""
+
+    @property
+    def runtime_name(self) -> str:
+        return "Claude Code"
 
     def render(self, invocation: SkillInvocation) -> str:
         command = f"/{invocation.plugin}:{invocation.skill}"
@@ -56,13 +51,52 @@ class ClaudeSkillInvocationRenderer(SkillInvocationRenderer):
         )
         return f"{command} {arguments}" if arguments else command
 
+    def invocation_pattern(self, plugin: str, placeholder: str) -> str:
+        return f"/{plugin}:{placeholder}"
 
-class ClaudeNativePathSpelling(NativePathSpelling):
-    """Spell every harness-owned location the way Claude Code lays it out."""
+    def ask_user(self, question: str) -> str:
+        return (
+            "Ask the user with the AskUserQuestion tool, offering concrete "
+            f"options plus a free-text choice: {question}"
+        )
 
-    @property
-    def runtime_name(self) -> str:
-        return "Claude Code"
+    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> str:
+        return (
+            f"Delegate with Agent(subagent_type={json.dumps(subagent_type)}"
+            f", prompt={json.dumps(prompt)})"
+        )
+
+    def request_approval(self, action: str, reason: str) -> str:
+        return f"Request explicit user approval before {action}. Reason: {reason}"
+
+    def relocate_session(self, path: str) -> str:
+        return (
+            f"`EnterWorktree(path=<{path}>)`, returning afterwards "
+            'with `ExitWorktree(action="keep")`'
+        )
+
+    def resolver_entry(self) -> str:
+        return (
+            "Run `uv run lup-devtools harness resolve --adapter claude`. "
+            "The command accepts optional flags: `--run-id <id>` resumes "
+            "a persisted run and `--accept`/`--reject` records the human "
+            "decision on its review branch. A headless run parks on "
+            "material questions — relay them to the user verbatim, never "
+            "answer them yourself, then rerun with the repeatable "
+            "`--answer <question-id>=<value>` flag."
+        )
+
+    def arguments_ref(self) -> str:
+        return "$ARGUMENTS"
+
+    def runtime_docs(self) -> str:
+        return (
+            "the Claude Code and Agent SDK documentation at "
+            "https://docs.claude.com/ and https://code.claude.com/"
+        )
+
+    def model_alias(self, tier: ModelTier) -> str | None:
+        return CLAUDE_MODEL_ALIASES[tier]
 
     def tree(self, location: TreeLocation) -> str:
         match location:
@@ -94,80 +128,6 @@ class ClaudeNativePathSpelling(NativePathSpelling):
                 return f"{root}/hooks/"
             case "guidance_template":
                 return f"{root}/TEMPLATE_CLAUDE.md"
-
-
-CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
-    "inherit": "inherit",
-    "strongest": "opus",
-    "balanced": "sonnet",
-    "fast": "haiku",
-}
-"""Claude's own name for each portable tier, as agent frontmatter accepts it."""
-
-
-class ClaudePromptRenderer(PromptRenderer):
-    """Render semantic prompt operations without a post-render rewrite pass."""
-
-    def __init__(
-        self, invocations: SkillInvocationRenderer, paths: NativePaths
-    ) -> None:
-        self.invocations = invocations
-        self.paths = paths
-
-    def render(self, prompt: PromptDocument) -> str:
-        rendered: list[str] = []  # lup: ignore[empty-collection]
-        for part in prompt.parts:
-            match part:
-                case TextPart(text=text):
-                    rendered.append(text)
-                case SkillInvocation():
-                    rendered.append(self.invocations.render(part))
-                case NativePath():
-                    rendered.append(tree_path(self.paths, part))
-                case PluginPath():
-                    rendered.append(plugin_path(self.paths, part))
-                case SkillPattern(plugin=plugin, placeholder=placeholder):
-                    rendered.append(f"/{plugin}:{placeholder}")
-                case RuntimeDocs():
-                    rendered.append(
-                        "the Claude Code and Agent SDK documentation at "
-                        "https://docs.claude.com/ and https://code.claude.com/"
-                    )
-                case AskUser(question=question):
-                    rendered.append(
-                        "Ask the user with the AskUserQuestion tool, offering concrete "
-                        f"options plus a free-text choice: {question}"
-                    )
-                case Delegate(subagent_type=subagent_type, prompt=task):
-                    rendered.append(
-                        f"Delegate with Agent(subagent_type={json.dumps(subagent_type)}"
-                        f", prompt={json.dumps(task)})"
-                    )
-                case RequestApproval(action=action, reason=reason):
-                    rendered.append(
-                        f"Request explicit user approval before {action}. Reason: {reason}"
-                    )
-                case RelocateSession(path=path):
-                    rendered.append(
-                        f"`EnterWorktree(path=<{path}>)`, returning afterwards "
-                        'with `ExitWorktree(action="keep")`'
-                    )
-                case ResolverEntry():
-                    rendered.append(
-                        "Run `uv run lup-devtools harness resolve --adapter claude`. "
-                        "The command accepts optional flags: `--run-id <id>` resumes "
-                        "a persisted run and `--accept`/`--reject` records the human "
-                        "decision on its review branch. A headless run parks on "
-                        "material questions — relay them to the user verbatim, never "
-                        "answer them yourself, then rerun with the repeatable "
-                        "`--answer <question-id>=<value>` flag."
-                    )
-                case ArgumentsRef():
-                    rendered.append("$ARGUMENTS")
-                case _ as unhandled:
-                    assert_never(unhandled)
-        text = "".join(rendered)
-        return text if text.endswith("\n") else text + "\n"
 
 
 class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
@@ -212,14 +172,19 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
 class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
     """Render one portable agent in Claude's Markdown format."""
 
-    def __init__(self, prompts: PromptRenderer, plugin_name: str) -> None:
+    def __init__(
+        self, prompts: PromptRenderer, plugin_name: str, spellings: NativeSpellings
+    ) -> None:
         self.prompts = prompts
         self.plugin_name = plugin_name
+        self.spellings = spellings
 
     def render(self, source: Agent) -> ArtifactTree:
         tools = ", ".join(source.tools)
-        tier = source.model
-        model = f"model: {CLAUDE_MODEL_ALIASES[tier]}\n" if tier is not None else ""
+        alias = (
+            None if source.model is None else self.spellings.model_alias(source.model)
+        )
+        model = f"model: {alias}\n" if alias is not None else ""
         color = f"color: {source.color}\n" if source.color is not None else ""
         content = (
             "---\n"

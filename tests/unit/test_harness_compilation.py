@@ -9,8 +9,8 @@ import sh
 import typer
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.adapters.claude.harness import ClaudeSkillInvocationRenderer
-from lup.adapters.codex.harness import CodexSkillInvocationRenderer
+from lup.adapters.claude.harness import ClaudeSpellings
+from lup.adapters.codex.harness import CodexSpellings
 from lup.adapters.codex.harness_runtime import (
     PluginCacheConfig,
     directory_digest,
@@ -237,10 +237,10 @@ def test_invocation_renderers_own_complete_spelling_and_escaping() -> None:
         arguments=[InvocationArgument(name="target", value="feature with spaces")],
     )
 
-    assert ClaudeSkillInvocationRenderer().render(invocation) == (
+    assert ClaudeSpellings().render(invocation) == (
         "/lup:merge target='feature with spaces'"
     )
-    assert CodexSkillInvocationRenderer().render(invocation) == (
+    assert CodexSpellings().render(invocation) == (
         "$lup:merge target='feature with spaces'"
     )
 

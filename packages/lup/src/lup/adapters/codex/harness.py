@@ -4,37 +4,20 @@ import json
 import shlex
 from importlib import resources
 from pathlib import Path
-from typing import assert_never
-
-from lup.harness.contracts import (
-    ArtifactRenderer,
-    NativePathSpelling,
-    PromptRenderer,
-    SkillInvocationRenderer,
-)
-from lup.harness.generation import NativePaths, argument_text, plugin_path, tree_path
+from lup.harness.contracts import ArtifactRenderer, NativeSpellings, PromptRenderer
+from lup.harness.generation import argument_text
 from lup.harness.models import (
     Agent,
-    ArgumentsRef,
-    AskUser,
     Artifact,
     ArtifactTree,
-    Delegate,
     Harness,
     HookSet,
-    NativePath,
+    ModelTier,
     Plugin,
     PluginLocation,
-    PluginPath,
-    PromptDocument,
-    RelocateSession,
-    RequestApproval,
-    ResolverEntry,
-    RuntimeDocs,
+    QualifiedAgentName,
     Skill,
     SkillInvocation,
-    SkillPattern,
-    TextPart,
     TreeLocation,
 )
 from lup.policy.bundle import (
@@ -44,8 +27,18 @@ from lup.policy.bundle import (
 )
 
 
-class CodexSkillInvocationRenderer(SkillInvocationRenderer):
-    """Render the complete qualified Codex skill mention."""
+class CodexSpellings(NativeSpellings):
+    """Spell everything portable prose names the way Codex spells it.
+
+    Custom agents are the one location Codex keeps outside the plugin, so the
+    plugin name is deliberately unused there. The model tier is declined
+    outright: recorded evidence for Codex custom agents covers TOML parsing
+    only, so there is no proven alias to spell a tier in.
+    """
+
+    @property
+    def runtime_name(self) -> str:
+        return "Codex"
 
     def render(self, invocation: SkillInvocation) -> str:
         mention = f"${invocation.plugin}:{invocation.skill}"
@@ -55,17 +48,51 @@ class CodexSkillInvocationRenderer(SkillInvocationRenderer):
         )
         return f"{mention} {arguments}" if arguments else mention
 
+    def invocation_pattern(self, plugin: str, placeholder: str) -> str:
+        return f"${plugin}:{placeholder}"
 
-class CodexNativePathSpelling(NativePathSpelling):
-    """Spell every harness-owned location the way Codex lays it out.
+    def ask_user(self, question: str) -> str:
+        return (
+            "Ask the user directly, offering concrete options, and wait "
+            f"for the answer: {question}"
+        )
 
-    Custom agents are the one location Codex keeps outside the plugin, so the
-    plugin name is deliberately unused there.
-    """
+    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> str:
+        return f"Delegate to the {subagent_type} custom agent with this task: {prompt}"
 
-    @property
-    def runtime_name(self) -> str:
-        return "Codex"
+    def request_approval(self, action: str, reason: str) -> str:
+        return f"Request explicit user approval before {action}. Reason: {reason}"
+
+    def relocate_session(self, path: str) -> str:
+        return (
+            f"start a session rooted at <{path}> and continue there — "
+            "this runtime cannot move a running session, so work "
+            "carried on here would land in the checkout it started from"
+        )
+
+    def resolver_entry(self) -> str:
+        return (
+            "Run `uv run lup-devtools harness resolve --adapter codex`. "
+            "The command accepts optional flags: `--run-id <id>` resumes "
+            "a persisted run and `--accept`/`--reject` records the human "
+            "decision on its review branch. A headless run parks on "
+            "material questions — relay them to the user verbatim, never "
+            "answer them yourself, then rerun with the repeatable "
+            "`--answer <question-id>=<value>` flag."
+        )
+
+    def arguments_ref(self) -> str:
+        return "the arguments supplied with this skill invocation"
+
+    def runtime_docs(self) -> str:
+        return (
+            "the Codex documentation at "
+            "https://developers.openai.com/codex/ and "
+            "https://learn.chatgpt.com/"
+        )
+
+    def model_alias(self, tier: ModelTier) -> str | None:
+        return None
 
     def tree(self, location: TreeLocation) -> str:
         match location:
@@ -101,73 +128,6 @@ class CodexNativePathSpelling(NativePathSpelling):
                 return f"{root}/TEMPLATE_AGENTS.md"
 
 
-class CodexPromptRenderer(PromptRenderer):
-    """Render typed operations directly into Codex prompt instructions."""
-
-    def __init__(
-        self, invocations: SkillInvocationRenderer, paths: NativePaths
-    ) -> None:
-        self.invocations = invocations
-        self.paths = paths
-
-    def render(self, prompt: PromptDocument) -> str:
-        rendered: list[str] = []  # lup: ignore[empty-collection]
-        for part in prompt.parts:
-            match part:
-                case TextPart(text=text):
-                    rendered.append(text)
-                case SkillInvocation():
-                    rendered.append(self.invocations.render(part))
-                case NativePath():
-                    rendered.append(tree_path(self.paths, part))
-                case PluginPath():
-                    rendered.append(plugin_path(self.paths, part))
-                case SkillPattern(plugin=plugin, placeholder=placeholder):
-                    rendered.append(f"${plugin}:{placeholder}")
-                case RuntimeDocs():
-                    rendered.append(
-                        "the Codex documentation at "
-                        "https://developers.openai.com/codex/ and "
-                        "https://learn.chatgpt.com/"
-                    )
-                case AskUser(question=question):
-                    rendered.append(
-                        "Ask the user directly, offering concrete options, and wait "
-                        f"for the answer: {question}"
-                    )
-                case Delegate(subagent_type=subagent_type, prompt=task):
-                    rendered.append(
-                        f"Delegate to the {subagent_type} custom agent with this "
-                        f"task: {task}"
-                    )
-                case RequestApproval(action=action, reason=reason):
-                    rendered.append(
-                        f"Request explicit user approval before {action}. Reason: {reason}"
-                    )
-                case RelocateSession(path=path):
-                    rendered.append(
-                        f"start a session rooted at <{path}> and continue there — "
-                        "this runtime cannot move a running session, so work "
-                        "carried on here would land in the checkout it started from"
-                    )
-                case ResolverEntry():
-                    rendered.append(
-                        "Run `uv run lup-devtools harness resolve --adapter codex`. "
-                        "The command accepts optional flags: `--run-id <id>` resumes "
-                        "a persisted run and `--accept`/`--reject` records the human "
-                        "decision on its review branch. A headless run parks on "
-                        "material questions — relay them to the user verbatim, never "
-                        "answer them yourself, then rerun with the repeatable "
-                        "`--answer <question-id>=<value>` flag."
-                    )
-                case ArgumentsRef():
-                    rendered.append("the arguments supplied with this skill invocation")
-                case _ as unhandled:
-                    assert_never(unhandled)
-        text = "".join(rendered)
-        return text if text.endswith("\n") else text + "\n"
-
-
 class CodexSkillRenderer(ArtifactRenderer[Skill]):
     """Render one portable declaration as a same-named Codex skill."""
 
@@ -199,16 +159,19 @@ class CodexSkillRenderer(ArtifactRenderer[Skill]):
 class CodexAgentRenderer(ArtifactRenderer[Agent]):
     """Render one portable agent as project-scoped custom-agent TOML.
 
-    The declared model tier is left out. Recorded evidence for Codex custom
-    agents covers TOML parsing only, so there is no probed alias table to spell
-    a tier in; omitting the row lets the agent inherit the session model, which
-    is honest where naming another runtime's alias would not be.
+    The model row appears only where the vocabulary can spell the declared
+    tier, and this one declines: omitting it lets the agent inherit the session
+    model, which is honest where naming another runtime's alias would not be.
     """
 
-    def __init__(self, prompts: PromptRenderer) -> None:
+    def __init__(self, prompts: PromptRenderer, spellings: NativeSpellings) -> None:
         self.prompts = prompts
+        self.spellings = spellings
 
     def render(self, source: Agent) -> ArtifactTree:
+        alias = (
+            None if source.model is None else self.spellings.model_alias(source.model)
+        )
         rows = [
             "# Generated file — do not edit directly. Rendered from the portable",
             f"# agent declaration {source.id} by "
@@ -220,6 +183,8 @@ class CodexAgentRenderer(ArtifactRenderer[Agent]):
                 f"{json.dumps(self.prompts.render(source.prompt))}"
             ),
         ]
+        if alias is not None:
+            rows.append(f"model = {json.dumps(alias)}")
         return ArtifactTree(
             artifacts=[
                 Artifact(

@@ -12,7 +12,7 @@ import pytest
 import sh
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.adapters.claude.harness import ClaudeSkillInvocationRenderer
+from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
     create_claude_session_factory,
@@ -178,7 +178,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
         portable_harness().resolver,
         worker_factory,
         reviewer_factory,
-        ClaudeSkillInvocationRenderer(),
+        ClaudeSpellings(),
         ScriptedQuestionBroker(),
         launcher,
     )

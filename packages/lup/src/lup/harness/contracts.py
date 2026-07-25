@@ -21,8 +21,10 @@ if TYPE_CHECKING:
     from lup.harness.models import (
         ArtifactTree,
         CapabilityEvidence,
+        ModelTier,
         PluginLocation,
         PromptDocument,
+        QualifiedAgentName,
         SkillInvocation,
         TreeLocation,
     )
@@ -45,8 +47,15 @@ class SkillInvocationRenderer(ABC):
         """Render qualification, escaping, and arguments together."""
 
 
-class NativePathSpelling(ABC):
-    """Own one native runtime's spelling of every harness-owned location."""
+class NativeSpellings(SkillInvocationRenderer):
+    """Own one native runtime's spelling of everything portable prose names.
+
+    Every native word a prompt can reach arrives through one of these, so a
+    declaration states intent and never a platform. A new prompt part adds an
+    abstract method here, which no runtime can be constructed without
+    answering — the rendering seam is closed by construction rather than by a
+    reminder to edit two renderers.
+    """
 
     @property
     @abstractmethod
@@ -60,6 +69,42 @@ class NativePathSpelling(ABC):
     @abstractmethod
     def plugin(self, plugin: str, location: PluginLocation, member: str | None) -> str:
         """Spell one plugin-owned location, with or without a leaf."""
+
+    @abstractmethod
+    def invocation_pattern(self, plugin: str, placeholder: str) -> str:
+        """Spell an invocation whose skill the reader supplies."""
+
+    @abstractmethod
+    def ask_user(self, question: str) -> str:
+        """Instruct the runtime to put one material question to the user."""
+
+    @abstractmethod
+    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> str:
+        """Instruct the runtime to hand one task to one of its agents."""
+
+    @abstractmethod
+    def request_approval(self, action: str, reason: str) -> str:
+        """Instruct the runtime to obtain explicit approval before acting."""
+
+    @abstractmethod
+    def relocate_session(self, path: str) -> str:
+        """Spell the move into an already-created worktree this runtime allows."""
+
+    @abstractmethod
+    def resolver_entry(self) -> str:
+        """Spell how this runtime enters the shared resolver."""
+
+    @abstractmethod
+    def arguments_ref(self) -> str:
+        """Spell how this runtime reaches the arguments of an invocation."""
+
+    @abstractmethod
+    def runtime_docs(self) -> str:
+        """Name this runtime's own documentation, wherever it lives."""
+
+    @abstractmethod
+    def model_alias(self, tier: ModelTier) -> str | None:
+        """Spell one portable tier, or decline where none is proven."""
 
 
 class PromptRenderer(ABC):
