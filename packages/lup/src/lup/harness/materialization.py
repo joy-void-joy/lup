@@ -44,6 +44,17 @@ def safe_target(root: Path, relative: Path) -> Path:
     return candidate
 
 
+def prune_empty_parents(root: Path, path: Path) -> None:
+    """Remove directories a deletion left empty, never ascending past the root."""
+    resolved_root = root.resolve()
+    for parent in path.parents:
+        if parent == resolved_root or not parent.is_relative_to(resolved_root):
+            return
+        if any(parent.iterdir()):
+            return
+        parent.rmdir()
+
+
 class AtomicMaterializer(Materializer):
     """Replace changed owned files atomically and delete only with prior proof."""
 
@@ -92,5 +103,6 @@ class AtomicMaterializer(Materializer):
         for deletion in proposal.deletes:
             path = safe_target(proposal.root, deletion.path)
             path.unlink()
+            prune_empty_parents(proposal.root, path)
             removed.append(deletion.path)
         return MaterializationResult(changed=changed, removed=removed)
