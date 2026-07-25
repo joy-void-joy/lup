@@ -34,7 +34,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.policy.kernel import ShellRuleRow
+from lup.policy.kernel.rows import ShellRuleRow
 
 type CommandEffect = Literal["allow", "ask", "deny"]
 

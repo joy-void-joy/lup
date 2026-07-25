@@ -19,7 +19,7 @@ from lup.codescan.common import (
     file_level_ignore,
     ignore_rule_ids,
 )
-from lup.policy.kernel import KERNEL_IMPORT_ALLOWLIST
+from lup.policy.kernel.decision import KERNEL_IMPORT_ALLOWLIST
 
 RULE_ID = "seam-boundary"
 NATIVE_SPELLING_RULE_ID = "native-spelling"
@@ -159,6 +159,10 @@ def kernel_import_violations(text: str) -> list[SourceViolation]:
                     for item in names
                     if item.name not in KERNEL_IMPORT_ALLOWLIST
                 ]
+            # A relative import names a sibling kernel module, which carries
+            # the same hermetic guarantee this rule enforces.
+            case ast.ImportFrom(level=int(level)) if level > 0:
+                continue
             case ast.ImportFrom(module=str(module)) if (
                 module not in KERNEL_IMPORT_ALLOWLIST
             ):

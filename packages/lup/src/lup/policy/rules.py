@@ -16,19 +16,16 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from lup.codescan.antipatterns import patterns_for_suffix
 from lup.policy.contracts import DecisionPolicy
-from lup.policy.kernel import (
-    AntiPatternRow,
-    KernelDecision,
-    PathRuleRow,
-    UrlScopeRow,
-    command_words as kernel_command_words,
+from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.edit import (
     decide_edit,
-    decide_fetch,
-    decide_shell,
-    decide_shell_segment,
-    parse_shell_words,
     path_rule_matches as kernel_path_rule_matches,
 )
+from lup.policy.kernel.fetch import decide_fetch
+from lup.policy.kernel.lex import parse_shell_words
+from lup.policy.kernel.rows import AntiPatternRow, PathRuleRow, UrlScopeRow
+from lup.policy.kernel.shell import decide_shell, decide_shell_segment
+from lup.policy.kernel.words import command_words as kernel_command_words
 from lup.policy.shell_rules import (
     BASE_SHELL_RULES,
     ShellCommandRule,

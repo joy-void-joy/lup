@@ -11,7 +11,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from kernel import KernelDecision, decide_fetch, decide_shell
+from kernel.decision import KernelDecision
+from kernel.fetch import decide_fetch
+from kernel.shell import decide_shell
 from policy_data import ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES, SHELL_RULES
 
 

@@ -47,7 +47,7 @@ def scan_boundaries() -> list[FoundBreach]:
             for finding in findings
             if finding.kind == "missing"
         )
-        if rel == "packages/lup/src/lup/policy/kernel.py":
+        if rel.startswith("packages/lup/src/lup/policy/kernel/"):
             found.extend(
                 FoundBreach(file=rel, **breach.model_dump())
                 for breach in find_kernel_import_breaches(text)

@@ -15,7 +15,7 @@ from lup.codescan.antipatterns import (
     audit_text,
 )
 from lup.policy.bundle import bundled_antipattern_rows
-from lup.policy.kernel import empty_collection_exempt_lines
+from lup.policy.kernel.edit import empty_collection_exempt_lines
 
 
 def lib_rows(patterns: list[AntiPattern]) -> list[tuple[str, str, str, str]]:

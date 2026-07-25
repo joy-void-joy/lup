@@ -42,7 +42,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, model_validator
 
 from lup.codescan.common import IGNORE_RE, LineCursor, PythonContext
-from lup.policy.kernel import marker_count as kernel_marker_count
+from lup.policy.kernel.edit import marker_count as kernel_marker_count
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # A deferral note parks work until a stated wake condition is met:

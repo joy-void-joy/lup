@@ -50,7 +50,7 @@ from lup.harness.reconciliation import (
     FilesystemCurrentTreeReader,
     source_patch_base_digest,
 )
-from lup.policy.bundle import policy_kernel_source
+from lup.policy.bundle import policy_kernel_modules
 from lup.types import EnvVars
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
@@ -182,7 +182,7 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
     hook_config = artifacts[Path(".claude/plugins/lup/hooks/hooks.json")].content
     assert "uv run" not in hook_config
     assert "hooks/scripts/policy.py" in hook_config
-    assert Path(".claude/plugins/lup/hooks/runtime/kernel.py") in artifacts
+    assert Path(".claude/plugins/lup/hooks/runtime/kernel/shell.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/policy_data.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/evidence.json") in artifacts
 
@@ -316,18 +316,20 @@ def test_both_native_trees_compile_deterministically() -> None:
         item.path for item in codex.artifacts
     }
     assert Path("AGENTS.md") in {item.path for item in codex.artifacts}
-    claude_runtime = next(
-        item.content
-        for item in claude.artifacts
-        if item.path.as_posix().endswith("hooks/runtime/kernel.py")
+
+    def shipped_kernel(artifacts: list[Artifact]) -> list[str]:
+        """Render every shipped kernel module as one comparable block."""
+        return sorted(
+            f"{item.path.name}\n{item.content}"
+            for item in artifacts
+            if "hooks/runtime/kernel/" in item.path.as_posix()
+        )
+
+    canonical = sorted(
+        f"{module.name}\n{module.source}" for module in policy_kernel_modules()
     )
-    codex_runtime = next(
-        item.content
-        for item in codex.artifacts
-        if item.path.as_posix().endswith("hooks/runtime/kernel.py")
-    )
-    assert claude_runtime == codex_runtime
-    assert claude_runtime == policy_kernel_source()
+    assert shipped_kernel(claude.artifacts) == shipped_kernel(codex.artifacts)
+    assert shipped_kernel(claude.artifacts) == canonical
 
 
 def test_repository_generated_harness_is_drift_clean() -> None:

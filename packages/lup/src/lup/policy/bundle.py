@@ -11,9 +11,11 @@ import json
 import urllib.parse
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
+
 from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
 import lup.policy.kernel as kernel
-from lup.policy.kernel import (
+from lup.policy.kernel.rows import (
     AntiPatternRow,
     PathRuleRow,
     ShellRuleRow,
@@ -27,10 +29,26 @@ from lup.policy.shell_rules import (
 from lup.policy.rules import human_owned_path_rule, path_rule_row
 
 
-def policy_kernel_source() -> str:
-    """Read the canonical kernel verbatim for generated runtime assembly."""
-    path = Path(kernel.__file__)
-    return path.read_text(encoding="utf-8")
+class KernelModule(BaseModel):
+    """One hermetic kernel source file copied into a generated runtime."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    source: str
+
+
+def policy_kernel_modules() -> list[KernelModule]:
+    """Read the canonical kernel package verbatim for runtime assembly.
+
+    The package's relative imports resolve the same beneath ``runtime/`` as
+    they do in lup, so every module ships byte for byte.
+    """
+    directory = Path(kernel.__file__).parent
+    return [
+        KernelModule(name=path.name, source=path.read_text(encoding="utf-8"))
+        for path in sorted(directory.glob("*.py"))
+    ]
 
 
 def bundled_antipattern_rows() -> dict[str, list[AntiPatternRow]]:

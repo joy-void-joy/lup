@@ -301,9 +301,65 @@
       "executable": false
     },
     {
-      "path": ".claude/plugins/lup/hooks/runtime/kernel.py",
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/__init__.py",
       "category": "generated",
-      "sha256": "994ce87b566845ac62246484f0286665a51d343737e27db9497715ec685159f8",
+      "sha256": "d3ea16ebc89d50d6f41f8a1a47be5fc6a79c1a55ebd00080bce0a7b8b4714dba",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/commands.py",
+      "category": "generated",
+      "sha256": "8950c71ebc4956e44835a2df9256e3358400653f4d49ae773a9fb85def514592",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/decision.py",
+      "category": "generated",
+      "sha256": "3fc426230f26407028503c328841a35749bcf491d730812cfc26c706b95859b0",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
+      "category": "generated",
+      "sha256": "bbd833feed3450a439cd1b9f1f348814abece3c11e026c98fff12c90d7de1adb",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/fetch.py",
+      "category": "generated",
+      "sha256": "e640dbf4c7c08c883c89bfe458d6b904c16fd73bf734d8c106474bfd0cba1519",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/lex.py",
+      "category": "generated",
+      "sha256": "67beea0c9af5da40c9ebd9e2bf996988e6ddcf50f86934beb39ee1c375e34b78",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/rows.py",
+      "category": "generated",
+      "sha256": "64bce7fa579d2c03b4379ade6ef563cb16a8fac746b8459de452ec825e8ca7c1",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/shell.py",
+      "category": "generated",
+      "sha256": "50bebda16a5f2370b203092b880a49bdf3bf6628d78d2482c24d2cca3d76a5f3",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/words.py",
+      "category": "generated",
+      "sha256": "509c88d44f2a06eace9a7674abdb345752636388639981012071923762e9f100",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -317,7 +373,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "4fab95f6f40ece9d2ac507eccea026fa2051d1bc308fbb38e291f159256c95c5",
+      "sha256": "e2b9eca64ffc4a20590a35f13456efbd60398c16a0d4d8bf56feea4bd978618c",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

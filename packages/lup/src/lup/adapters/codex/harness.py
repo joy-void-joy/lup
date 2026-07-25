@@ -29,7 +29,7 @@ from lup.harness.models import (
     TextPart,
 )
 from lup.policy.bundle import (
-    policy_kernel_source,
+    policy_kernel_modules,
     render_policy_data,
     runtime_url_scope,
 )
@@ -274,13 +274,17 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     semantic_id=source.id,
                     executable=True,
                 ),
-                Artifact(
-                    path=Path(
-                        f".codex/plugins/{self.plugin_name}/hooks/runtime/kernel.py"
-                    ),
-                    content=policy_kernel_source(),
-                    semantic_id=source.id,
-                ),
+                *[
+                    Artifact(
+                        path=Path(
+                            f".codex/plugins/{self.plugin_name}/hooks/runtime/"
+                            f"kernel/{module.name}"
+                        ),
+                        content=module.source,
+                        semantic_id=source.id,
+                    )
+                    for module in policy_kernel_modules()
+                ],
                 Artifact(
                     path=Path(
                         f".codex/plugins/{self.plugin_name}/hooks/runtime/"

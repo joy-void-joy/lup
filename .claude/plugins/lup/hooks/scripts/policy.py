@@ -11,7 +11,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from kernel import KernelDecision, decide_edit, decide_fetch, decide_shell
+from kernel.decision import KernelDecision
+from kernel.edit import decide_edit
+from kernel.fetch import decide_fetch
+from kernel.shell import decide_shell
 from policy_data import (
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
