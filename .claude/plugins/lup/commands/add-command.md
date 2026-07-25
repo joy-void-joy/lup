@@ -85,7 +85,7 @@ After regenerating:
 
 1. Show the user the declaration module, and confirm the generated artifacts appeared for both harnesses
 2. Run `uv run lup-devtools dev check` — the ownership manifest must record the new artifacts
-3. Explain how to invoke it: `the corresponding Lup skillcommand-name>`
+3. Explain how to invoke it: `/lup:<command-name>`
 4. Ask if any adjustments are needed
 
 ## Template Examples

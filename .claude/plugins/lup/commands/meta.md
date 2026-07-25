@@ -58,7 +58,7 @@ plugins/lup/
 
 ### When to Add to the Plugin
 
-- **Commands**: Reusable workflows invoked via `the corresponding Lup skill`
+- **Commands**: Reusable workflows invoked via `/lup:command-name`
 - **Hooks**: Permission hooks in `hooks/scripts/` — auto-allow, deny, or quality gates
 - **Agents**: Subagent definitions for specialized tasks
 - **Devtools**: Python CLI tools go in `src/lup_template/devtools/` (exposed as `lup-devtools`), not in the plugin

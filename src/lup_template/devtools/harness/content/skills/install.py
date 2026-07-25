@@ -248,7 +248,7 @@ For each item being installed:
 | `pyproject.toml` package name | `.claude/plugins/lup/` directory |
 | marketplace `name` (marketplace.json) → `<target>` | plugin entry `name`: `lup` (so `"""
             ),
-            models.TextPart(text="the corresponding Lup skill"),
+            models.SkillPattern(plugin="lup", placeholder="*"),
             models.TextPart(
                 text=r"""` is stable) |
 | Main CLI entry point name | `.lup/` state directory |

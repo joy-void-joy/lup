@@ -121,9 +121,9 @@ After regenerating:
 2. Run `uv run lup-devtools dev check` — the ownership manifest must record the new artifacts
 3. Explain how to invoke it: `"""
             ),
-            models.TextPart(text="the corresponding Lup skill"),
+            models.SkillPattern(plugin="lup", placeholder="<command-name>"),
             models.TextPart(
-                text=r"""command-name>`
+                text=r"""`
 4. Ask if any adjustments are needed
 
 ## Template Examples

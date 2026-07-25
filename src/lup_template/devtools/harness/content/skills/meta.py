@@ -85,7 +85,7 @@ plugins/lup/
 
 - **Commands**: Reusable workflows invoked via `"""
             ),
-            models.TextPart(text="the corresponding Lup skill"),
+            models.SkillPattern(plugin="lup", placeholder="command-name"),
             models.TextPart(
                 text=r"""`
 - **Hooks**: Permission hooks in `hooks/scripts/` — auto-allow, deny, or quality gates

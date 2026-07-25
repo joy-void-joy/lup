@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "99cc3fd51e6734f70551c2c1b2790f120dc1fe5911bebaed24d53a39393def92",
+  "source_digest": "0c28f125a271b5272e265308271d60215d457f82f0b9a42866f9ed0c096aa824",
   "target_requirements": [
     "claude-code"
   ],
@@ -79,7 +79,7 @@
     {
       "path": ".claude/plugins/lup/commands/add-command.md",
       "category": "generated",
-      "sha256": "0626798f40f91316e63e450a7029a90cc326e75d54371c4528779d5041ca7936",
+      "sha256": "875c26a0f13222538718c21decf596af361c8bd72dba3a9b607f36a04b12936d",
       "semantic_id": "skill.add-command",
       "executable": false
     },
@@ -191,14 +191,14 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "1fd4177988ad59e16154e8849ae028b277e9e88492fbe67aecf5d0903a679e3b",
+      "sha256": "87e72df4f6da7ba5b5e79db1613bdf23ab60c819d2411b059becee18c2326cb7",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "f23720c9645b1147fcdfd1bb8833929347b030f720c3298e3b781ed33602c184",
+      "sha256": "9b01454cc490fbe2c52faaad14168fee9a7866367799874a542ac98d6d494e21",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -219,7 +219,7 @@
     {
       "path": ".claude/plugins/lup/commands/meta.md",
       "category": "generated",
-      "sha256": "bb0129a7437139c4a3cee244fa2919ec901f7ec738f160e2edd7200663009edc",
+      "sha256": "37e2269b4735e04c5788dd6262fe4f8b288a33d99a0eb00b5d4c85ac304e9d79",
       "semantic_id": "skill.meta",
       "executable": false
     },

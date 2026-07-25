@@ -125,7 +125,7 @@ uv run lup-devtools dev init rename-package <project>
 
 This handles directory rename (`src/lup_template/` -> `src/<project>/`), import updates, pyproject.toml entry points, CLI app name, and the plugin marketplace name -- all in one shot. The marketplace (`.claude/plugins/.claude-plugin/marketplace.json` + settings.json) is named `<project>` so it doesn't collide in the global marketplace namespace, while the plugin entry stays `lup` (so `"""
             ),
-            models.TextPart(text="the corresponding Lup skill"),
+            models.SkillPattern(plugin="lup", placeholder="*"),
             models.TextPart(
                 text=r"""` is identical everywhere). Framework vocabulary (`lup_tool`, `lup-devtools`, `.lup/`, etc.) is preserved automatically.
 
