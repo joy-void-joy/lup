@@ -1,11 +1,11 @@
-"""Canonical declaration for the clean-gone skill."""
+"""Canonical declaration for the land skill."""
 
 import lup.harness.models as models
 
 SKILL = models.Skill(
-    id="skill.clean-gone",
-    name="clean-gone",
-    description="Sweep every branch to one disposition — land unlanded work, clear merged ones",
+    id="skill.land",
+    name="land",
+    description="Land every branch that has not reached the integration branch, and clear the ones that have",
     arguments=[
         models.Argument(
             name="arguments",
@@ -25,9 +25,9 @@ SKILL = models.Skill(
     prompt=models.PromptDocument(
         parts=[
             models.TextPart(
-                text=r"""# Branch Disposition Sweep
+                text=r"""# Land Every Branch
 
-Resolve every local branch to exactly one disposition and act on it. Unlanded work and merged leftovers surface in the same pass, so no branch sits in a silent bucket waiting to go stale.
+Drive every local branch to its terminal state. Each one is classified by whether its commits have reached the integration branch — the ones that have not get landed, the ones that have get cleared — so no branch sits in a silent bucket waiting to go stale.
 
 ## Arguments
 
