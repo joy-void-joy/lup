@@ -27,6 +27,7 @@ GITIGNORED_EXTRAS = [
     "sync.json.local",
     "downstream.json.local",  # legacy sync.json.local name, still read via fallback
     ".claude/settings.local.json",
+    ".codex/config.local.toml",
     "logs",
     "refs",
 ]
