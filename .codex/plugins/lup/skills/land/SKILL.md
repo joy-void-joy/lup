@@ -1,18 +1,17 @@
 ---
-description: "Sweep every branch to one disposition \u2014 land unlanded work, clear merged ones"
-allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion, EnterWorktree, Skill(lup:commit), Skill(lup:rebase), Skill(lup:merge)
-argument-hint: "[branch-name]"
+name: land
+description: "Land every branch that has not reached the integration branch, and clear the ones that have"
 ---
 
-# Branch Disposition Sweep
+# Land Every Branch
 
-Resolve every local branch to exactly one disposition and act on it. Unlanded work and merged leftovers surface in the same pass, so no branch sits in a silent bucket waiting to go stale.
+Drive every local branch to its terminal state. Each one is classified by whether its commits have reached the integration branch — the ones that have not get landed, the ones that have get cleared — so no branch sits in a silent bucket waiting to go stale.
 
 ## Arguments
 
 - **branch-name** (optional): a single branch to dispose of. If provided, runs in targeted mode. If omitted, sweeps every branch.
 
-Raw arguments: `$ARGUMENTS`
+Raw arguments: `the arguments supplied with this skill invocation`
 
 Parse the raw arguments: if non-empty, the first word is the **branch name**. Ignore remaining words.
 
@@ -20,7 +19,7 @@ Parse the raw arguments: if non-empty, the first word is the **branch name**. Ig
 
 ### 1. Commit pending changes
 
-Invoke `/lup:commit` to commit any uncommitted work before the sweep.
+Invoke `$lup:commit` to commit any uncommitted work before the sweep.
 
 ## Targeted Mode (branch name provided)
 
@@ -59,8 +58,8 @@ One table covering every branch, ordered `LAND` first (that is the work at risk)
 
 Ask the user, per branch, which route to take:
 
-- **Open a PR** — relocate into that branch's worktree with `EnterWorktree(path=<the survey's worktree field>)`, or create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `/lup:rebase`.
-- **Merge directly** — from the integration checkout, `/lup:merge <branch>`. Suits small, uncontroversial work that needs no review.
+- **Open a PR** — relocate into that branch's worktree with `EnterWorktree(path=<the survey's worktree field>)`, or create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `$lup:rebase`.
+- **Merge directly** — from the integration checkout, `$lup:merge <branch>`. Suits small, uncontroversial work that needs no review.
 - **Drop it** — the work is not worth landing. Requires explicit confirmation, then delete.
 
 Never choose a route on the user's behalf: a `LAND` branch by definition carries no PR expressing intent, so the intent has to come from them.

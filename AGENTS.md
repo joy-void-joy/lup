@@ -270,7 +270,6 @@ then regenerate.
 - $lup:add-command — Create a new slash command in the lup plugin
 - $lup:brainstorm — Pre-init design exploration — brainstorm architecture, MCP tools, and agent design
 - $lup:bump — Review changes since last bump and bump agent version
-- $lup:clean-gone — Sweep every branch to one disposition — land unlanded work, clear merged ones
 - $lup:close — Check PR review status, merge if approved, and clean up branches
 - $lup:commit — Review all diffs and create atomic commits
 - $lup:create-investigator — Create a new diagnostic/investigator command (like /debug)
@@ -286,6 +285,7 @@ then regenerate.
 - $lup:import — Import a specific pattern from a tracked downstream repo
 - $lup:init — Initialize the self-improvement loop for a specific domain
 - $lup:install — Install lup plugin and scaffolding into a target repo
+- $lup:land — Land every branch that has not reached the integration branch, and clear the ones that have
 - $lup:merge — Merge a branch or resolve existing merge conflicts
 - $lup:meta — Review and modify .claude structure, brainstorm improvements interactively
 - $lup:modify-command — Modify an existing slash command based on a description or delta
