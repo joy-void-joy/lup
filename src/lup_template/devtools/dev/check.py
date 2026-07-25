@@ -14,6 +14,13 @@ from lup_template.devtools.dev.comments import FoundComment, scan_tracked
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.utils import git, uv
 
+# The suite waits on git subprocesses and hook scripts far more than it
+# computes, so it parallelizes well — but each worker pays a full interpreter
+# boot and package import, and past roughly this many that startup costs more
+# than the concurrency returns. `-n auto` on a large host is slower than serial
+# arithmetic suggests, so the count is bounded rather than derived from cores.
+TEST_WORKERS = 8
+
 
 class CheckOutcome(BaseModel):
     """One pre-flight check's name and whether it passed."""
@@ -105,7 +112,7 @@ def run_checks(fix: bool, no_test: bool) -> None:
     # pytest
     if not no_test:
         try:
-            uv("run", "pytest")
+            uv("run", "pytest", "-n", str(TEST_WORKERS))
             typer.echo("pytest: ok")
             results.append(CheckOutcome(name="pytest", passed=True))
         except sh.ErrorReturnCode as e:
