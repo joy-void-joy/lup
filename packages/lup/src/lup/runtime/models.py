@@ -190,7 +190,7 @@ class TurnRequest[T: BaseModel | None](BaseModel):
     output_type: type[T] | None = None
 
 
-@overload
+@overload  # lup: The overload seems superfluous? Can't we just TurnRequest[T: BaseModel | None] ?
 def turn_request(input: TurnInput) -> TurnRequest[None]: ...
 
 

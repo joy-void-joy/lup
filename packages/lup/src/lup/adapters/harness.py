@@ -40,7 +40,9 @@ def validated_tree(artifacts: list[Artifact]) -> ArtifactTree:
 
 def reject_rendered_invocations(source: Harness, sigil: str) -> None:
     """Keep native invocation spelling inside typed adapter rendering only."""
-    prefixes = tuple(f"{sigil}{plugin.name}:" for plugin in source.plugins)
+    prefixes = tuple(
+        f"{sigil}{plugin.name}:" for plugin in source.plugins
+    )  # lup: tuple() is an antipattern, please run a full antipattern sweep
     prompts = [
         source.guidance,
         *[
@@ -56,7 +58,7 @@ def reject_rendered_invocations(source: Harness, sigil: str) -> None:
         if isinstance(part, TextPart)
         for prefix in prefixes
     ):
-        raise ValueError(
+        raise ValueError(  # lup: I feel like this is failing the "parse, don't validate" principle
             "provider invocation syntax must be represented by SkillInvocation"
         )
 
