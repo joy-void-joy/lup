@@ -42,15 +42,24 @@ You are reviewing the `.claude/` directory structure and brainstorming improveme
 
 ## Your Task
 
-Based on the user's input above, explore the relevant parts of `.claude/` and brainstorm solutions. The `.claude/` directory contains:
+Based on the user's input above, explore the relevant sources and brainstorm solutions. Almost everything under `.claude/` is a generated artifact — read it for the rendered result, but make every change at its source:
 
-- `CLAUDE.md` - Project instructions and documentation
-- `settings.json` - Permissions and plugin configuration
-- `plugins/lup/` - Self-improvement loop plugin with commands, hooks, and agents
+| Artifact | Source |
+| --- | --- |
+| `.claude/CLAUDE.md`, root `AGENTS.md` | `harness/content/guidance.py` |
+| `.claude/settings.json` | `harness/content/settings.py`, driven by the `HookSet` in `harness/catalog.py` |
+| `.claude/plugins/lup/commands/`, `.codex/plugins/lup/skills/` | `harness/content/skills/*.py` |
+| `.claude/plugins/lup/agents/` | `harness/content/agents/*.py` |
+| `.claude/plugins/lup/hooks/` | the canonical policy in `packages/lup/src/lup/policy/` |
+| `TEMPLATE_CLAUDE.md`, `TEMPLATE_AGENTS.md` | `harness/content/template_sections.py` |
 
-Read the relevant files based on what the user is asking about, then use AskUserQuestion to propose specific changes or additions.
+All paths are relative to `src/lup_template/devtools/`. `.claude/.lup-ownership.json` records which artifacts generation owns — consult it whenever a path's source is not obvious.
+
+Read the relevant sources based on what the user is asking about, then use AskUserQuestion to propose specific changes or additions. Regenerate with `uv run lup-devtools harness claude` and `harness codex` after any accepted change.
 
 ## Plugin Structure Reference
+
+This is the rendered tree, not an editable one — every path below is written by generation from the sources in the table above.
 
 ```
 plugins/lup/
@@ -70,7 +79,7 @@ plugins/lup/
                                  # (.codex/plugins/lup/TEMPLATE_AGENTS.md is its Codex flavor)
 ```
 
-**Note:** Python CLI tooling (API inspection, trace analysis, feedback collection, worktree management, etc.) lives in `src/lup_template/devtools/` and is exposed as the `lup-devtools` CLI entry point. See the lup-devtools section in CLAUDE.md.
+**Note:** Python CLI tooling (API inspection, trace analysis, feedback collection, worktree management, etc.) lives in `src/lup_template/devtools/` and is exposed as the `lup-devtools` CLI entry point. See the lup-devtools section in the guidance.
 
 ### When to Add to the Plugin
 

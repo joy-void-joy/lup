@@ -182,9 +182,11 @@ The reflection gate (`lup.reflect`) is domain-neutral and doesn't need modificat
 
 The feedback collection module (exposed via `uv run lup-devtools feedback collect`). Customize `load_outcomes()` and `compute_metrics()` for the domain's ground truth type.
 
-### 8. Update `CLAUDE.md`
+### 8. Update the guidance
 
-The CLAUDE.md should already have the template sections from the Phase 2 merge. Now add domain-specific content based on the interview answers:
+Edit `src/<project>/devtools/harness/content/guidance.py`, then regenerate with `uv run lup-devtools harness claude` and `harness codex` -- `.claude/CLAUDE.md` and the root `AGENTS.md` are its outputs, and editing them directly is undone by the next generation.
+
+The guidance should already carry the template sections from the Phase 2 merge. Now add domain-specific content based on the interview answers:
 
 - Fill in the Project Overview placeholder with the domain description
 - Add domain-specific commands and examples
@@ -236,7 +238,7 @@ After generating files:
 3. Run `uv run ruff check .` to check lint
 4. Run `uv run lup --help` to verify CLI
 5. Verify the feedback loop command references the right scripts
-6. Check that CLAUDE.md accurately describes the domain
+6. Regenerate both harnesses and check that the rendered guidance accurately describes the domain
 
 ## After Initialization
 

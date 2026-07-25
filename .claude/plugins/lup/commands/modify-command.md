@@ -39,12 +39,13 @@ If `$ARGUMENTS` is empty, ask the user:
 ### Steps
 
 1. **Parse** the command name and delta from the arguments
-2. **Find** the command file -- search in these locations:
-   - `.claude/plugins/lup/commands/<name>.md` (plugin commands)
+2. **Find** the source -- search in these locations, in order:
+   - `src/lup_template/devtools/harness/content/skills/<name>.py` (lup skills, including every `lup:name` variant -- the underscored module name)
    - `.claude/commands/<name>.md` (project commands)
    - `~/.claude/commands/<name>.md` (personal commands)
-   - Also check for namespaced variants (e.g., `lup:name` -> `.claude/plugins/lup/commands/name.md`)
-3. **Read** the current command file in full
+
+   Files under `.claude/plugins/lup/commands/` and `.codex/plugins/lup/skills/` are generated from the declarations -- read them to see the rendered result, never to edit.
+3. **Read** the current declaration in full
 4. **Analyze** the delta -- determine whether the user wants to:
    - **Add** new behavior (append steps, add sections)
    - **Change** existing behavior (modify instructions, update tools)
@@ -54,14 +55,15 @@ If `$ARGUMENTS` is empty, ask the user:
    - Summarize what will change
    - Show before/after for key sections if helpful
    - Ask for confirmation before writing
-6. **Apply** the changes -- edit or rewrite the command file
-7. **Update frontmatter** if needed (e.g., new `allowed-tools` for added functionality)
-8. **Confirm** the modification and show a summary
+6. **Apply** the changes -- edit the declaration's prompt parts
+7. **Update the `tools` list** if needed (e.g., new grants for added functionality)
+8. **Regenerate** with `uv run lup-devtools harness claude` and `harness codex` when the source was a lup skill
+9. **Confirm** the modification and show a summary
 
 ### Guidelines
 
-- **Preserve the command's structure and style** -- match the formatting patterns of the existing command
+- **Preserve the declaration's structure and style** -- match the raw-string and part-splitting patterns of the existing module
 - **Don't over-modify** -- only change what the delta requires. If the user says "add X", don't also reorganize unrelated sections.
-- **Update allowed-tools** if the delta introduces new tool requirements (e.g., adding a git step requires `Bash(git:*)`)
-- **Keep the command self-contained** -- it should work without requiring the user to remember the delta
+- **Update the `tools` list** if the delta introduces new tool requirements (e.g., adding a git step requires `Bash(git:*)`)
+- **Keep the skill self-contained** -- it should work without requiring the user to remember the delta
 - **Preserve working behavior** -- don't break existing functionality unless the user explicitly asks to replace it

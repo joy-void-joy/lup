@@ -22,8 +22,8 @@ If `$ARGUMENTS` is empty, ask the user what the command should be called and wha
 
 Before writing anything, understand what this investigator needs to do:
 
-1. **Read existing investigator commands** as reference:
-   - `.claude/plugins/lup/commands/debug.md` — traces errors through logs
+1. **Read existing investigator declarations** as reference:
+   - `src/lup_template/devtools/harness/content/skills/debug.py` — traces errors through logs
 
 2. **Explore the codebase** to understand the domain. Based on the description, identify:
    - What specific content will appear in the pasted trace? (tool calls, thinking blocks, error messages, subagent output, etc.)
@@ -55,11 +55,11 @@ Based on your exploration and the user's input, design the command. Existing inv
 
 **Rules**: Domain-specific rules about what to never do (guess, speculate, etc.) and what to always do (quote evidence, read source, etc.).
 
-## Step 3: Write the command
+## Step 3: Declare the skill
 
-Write the command file to `.claude/plugins/lup/commands/<command-name>.md`.
+Write the declaration to `src/lup_template/devtools/harness/content/skills/<command_name>.py` as a `models.Skill`, then register it in `content/catalog.py` (import `SKILL as SKILL_<NAME>`, add it to `SKILLS`) and regenerate with `uv run lup-devtools harness claude` and `harness codex`. The command markdown under `.claude/plugins/lup/commands/` is generated from this — never write it by hand.
 
-**Frontmatter**: Choose `allowed-tools` based on what the investigator needs. Common choices:
+**Tools**: Choose the `tools` list based on what the investigator needs. Common choices:
 
 - `Read, Grep, Glob` — always needed for code/log exploration
 - `Bash(ls:*, wc:*, sort:*, tail:*, stat:*)` — for listing and sizing files
@@ -67,7 +67,7 @@ Write the command file to `.claude/plugins/lup/commands/<command-name>.md`.
 - `WebSearch` — if the investigation might need external context
 - `AskUserQuestion` — if the investigation might need clarification from the user
 
-**Content**: Write the command body. Use the design from Step 2.
+**Content**: Write the prompt body as `models.TextPart` parts, splicing `models.ArgumentsRef()` where the pasted output lands. Use the design from Step 2.
 
 ## Step 4: Confirm and iterate
 
