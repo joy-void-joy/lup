@@ -59,7 +59,7 @@ One table covering every branch, ordered `LAND` first (that is the work at risk)
 
 Ask the user, per branch, which route to take:
 
-- **Open a PR** — relocate into that branch's worktree with `EnterWorktree(path=<the survey's worktree field>)`, or create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `/lup:rebase`.
+- **Open a PR** — relocate into that branch's worktree: `EnterWorktree(path=<the survey's worktree field>)`, returning afterwards with `ExitWorktree(action="keep")`. Create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `/lup:rebase`.
 - **Merge directly** — from the integration checkout, `/lup:merge <branch>`. Suits small, uncontroversial work that needs no review.
 - **Drop it** — the work is not worth landing. Requires explicit confirmation, then delete.
 

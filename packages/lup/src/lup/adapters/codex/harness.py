@@ -22,6 +22,7 @@ from lup.harness.models import (
     HookSet,
     Plugin,
     PromptDocument,
+    RelocateSession,
     RequestApproval,
     ResolverEntry,
     Skill,
@@ -68,6 +69,12 @@ class CodexPromptRenderer(PromptRenderer):
                 case RequestApproval(action=action, reason=reason):
                     rendered.append(
                         f"Request explicit user approval before {action}. Reason: {reason}"
+                    )
+                case RelocateSession(path=path):
+                    rendered.append(
+                        f"start a session rooted at <{path}> and continue there — "
+                        "this runtime cannot move a running session, so work "
+                        "carried on here would land in the checkout it started from"
                     )
                 case ResolverEntry():
                     rendered.append(

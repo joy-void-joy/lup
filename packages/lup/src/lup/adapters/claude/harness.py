@@ -22,6 +22,7 @@ from lup.harness.models import (
     HookSet,
     Plugin,
     PromptDocument,
+    RelocateSession,
     RequestApproval,
     ResolverEntry,
     Skill,
@@ -68,6 +69,11 @@ class ClaudePromptRenderer(PromptRenderer):
                 case RequestApproval(action=action, reason=reason):
                     rendered.append(
                         f"Request explicit user approval before {action}. Reason: {reason}"
+                    )
+                case RelocateSession(path=path):
+                    rendered.append(
+                        f"`EnterWorktree(path=<{path}>)`, returning afterwards "
+                        'with `ExitWorktree(action="keep")`'
                     )
                 case ResolverEntry():
                     rendered.append(

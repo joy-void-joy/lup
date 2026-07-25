@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "b870cb13ce6e7df220fa6d4fa5c453fecaab6657f0370a2064b21999809674bc",
+  "source_digest": "14fe84563cf9c63dda86b1a09ae338f012eade0b2caa997bd4494e49f99deec1",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "47a3eaeb1f92de50b9776659ec371ff615fb56fa620d69b7d39a84621691cd18",
+      "sha256": "5011abecf1c787d546c0f52ae9becff302430f4fb0b559635d72d1eb2279d743",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "ee0b5cf8a460c0f8bfe1fde521b79d255d969b39e9155568699294999477aae8",
+      "sha256": "a4ab922e91278627302375f70d50d54c99125ce301eccb4c607861d658b96722",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -100,7 +100,7 @@
     {
       "path": ".claude/plugins/lup/commands/clean-gone.md",
       "category": "generated",
-      "sha256": "a5c2f5eb8f69b212b8e0a107e5c92ac3564266922ffa2a08f9502d3a60ee6fae",
+      "sha256": "21c7a33a1b7bed3ee1cc2505c686ffa8de335e02547445b0d7fa97531385b05a",
       "semantic_id": "skill.clean-gone",
       "executable": false
     },

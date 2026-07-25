@@ -173,6 +173,11 @@ def test_template_flavors_share_sections_and_differ_natively() -> None:
     assert "$lup:init" in codex_render and "/lup:" not in codex_render
     assert "AskUserQuestion" in claude_render
     assert "AskUserQuestion" not in codex_render
+    # Session relocation is a Claude tool; Codex can only be told to start
+    # a session in the worktree, never to call one it does not have.
+    assert "EnterWorktree" in claude_render and "ExitWorktree" in claude_render
+    assert "EnterWorktree" not in codex_render
+    assert "ExitWorktree" not in codex_render
 
 
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
