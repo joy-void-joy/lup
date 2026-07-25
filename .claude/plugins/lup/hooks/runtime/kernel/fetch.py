@@ -26,14 +26,11 @@ def url_matches_scope(
     scope: UrlScopeRow,
 ) -> bool:
     """Compare parsed URL components with one primitive scope row."""
-    expected_scheme, expected_host, expected_port, path_prefix, _reason, subdomains = (
-        scope
-    )
     return (
-        scheme == expected_scheme
-        and host_matches_scope(hostname, expected_host, subdomains)
-        and port == expected_port
-        and path.startswith(path_prefix)
+        scheme == scope["scheme"]
+        and host_matches_scope(hostname, scope["host"], scope["include_subdomains"])
+        and port == scope["port"]
+        and path.startswith(scope["path_prefix"])
     )
 
 
@@ -60,7 +57,7 @@ def decide_fetch(
         None,
     )
     if denied is not None:
-        return KernelDecision("deny", denied[4] or "URL is denied")
+        return KernelDecision("deny", denied["reason"] or "URL is denied")
     allowed = next(
         (
             scope
@@ -70,5 +67,5 @@ def decide_fetch(
         None,
     )
     if allowed is not None:
-        return KernelDecision("allow", allowed[4])
+        return KernelDecision("allow", allowed["reason"])
     return KernelDecision("ask", "URL is outside the declared documentation scopes")

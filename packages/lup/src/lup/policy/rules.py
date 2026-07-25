@@ -62,13 +62,13 @@ def url_scope_row(scope: UrlScope) -> UrlScopeRow:
     parsed = urlsplit(str(scope.origin))
     if parsed.hostname is None:
         raise ValueError("validated URL scope has no hostname")
-    return (
-        parsed.scheme,
-        parsed.hostname,
-        parsed.port,
-        scope.path_prefix,
-        scope.reason,
-        scope.include_subdomains,
+    return UrlScopeRow(
+        scheme=parsed.scheme,
+        host=parsed.hostname,
+        port=parsed.port,
+        path_prefix=scope.path_prefix,
+        reason=scope.reason,
+        include_subdomains=scope.include_subdomains,
     )
 
 
@@ -171,7 +171,12 @@ class PathRule(BaseModel):
 
 def path_rule_row(rule: PathRule) -> PathRuleRow:
     """Erase one validated path rule into the kernel's primitive row."""
-    return (rule.kind, rule.value, rule.reason, rule.allow_autonomous)
+    return PathRuleRow(
+        kind=rule.kind,
+        value=rule.value,
+        reason=rule.reason,
+        allow_autonomous=rule.allow_autonomous,
+    )
 
 
 def human_owned_path_rule(path: str) -> PathRule:
@@ -197,7 +202,13 @@ def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
     if patterns is None:
         return []
     return [
-        (rule.id, rule.pattern.pattern, rule.message, rule.context) for rule in patterns
+        AntiPatternRow(
+            id=rule.id,
+            pattern=rule.pattern.pattern,
+            message=rule.message,
+            context=rule.context,
+        )
+        for rule in patterns
     ]
 
 

@@ -1,5 +1,3 @@
-# lup: ignore[tuple-shape]
-# The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Primitive row shapes the generated data file renders into."""
 
 from typing import Literal, TypedDict
@@ -14,9 +12,43 @@ type PathRuleKind = Literal[
     "contains_part",
     "new_devtools",
 ]
-type UrlScopeRow = tuple[str, str, int | None, str, str, bool]
-type PathRuleRow = tuple[PathRuleKind, str, str, bool]
-type AntiPatternRow = tuple[str, str, str, str]
+
+
+class UrlScopeRow(TypedDict):
+    """One erased fetch scope: an origin, the path beneath it, and its reason.
+
+    ``include_subdomains`` widens ``host`` to cover names beneath it, so a
+    scope can name a documentation site once instead of every subdomain.
+    """
+
+    scheme: str
+    host: str
+    port: int | None
+    path_prefix: str
+    reason: str
+    include_subdomains: bool
+
+
+class PathRuleRow(TypedDict):
+    """One erased protected-path rule and whether review may bypass it.
+
+    ``allow_autonomous`` releases the rule for an identity that already
+    reviews its own edits; every other rule holds regardless of caller.
+    """
+
+    kind: PathRuleKind
+    value: str
+    reason: str
+    allow_autonomous: bool
+
+
+class AntiPatternRow(TypedDict):
+    """One erased anti-pattern rule and the syntactic context it inspects."""
+
+    id: str
+    pattern: str
+    message: str
+    context: str
 
 
 class ShellRuleRow(TypedDict):

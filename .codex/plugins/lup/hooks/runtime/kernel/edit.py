@@ -387,13 +387,15 @@ def antipattern_decision(
         if not tokenized and masked.startswith("#") and "type:" not in masked:
             continue
         code = code_lines[number - 1].strip()
-        for rule_id, pattern, message, context in rows:
-            stripped = code if tokenized and context == "code" else masked
+        for row in rows:
+            rule_id = row["id"]
+            message = row["message"]
+            stripped = code if tokenized and row["context"] == "code" else masked
             if not stripped:
                 continue
             if rule_id == "empty-collection" and number in exempt:
                 continue
-            if re.search(pattern, stripped) is None:
+            if re.search(row["pattern"], stripped) is None:
                 continue
             if has_file_ignore and (disabled_ids is None or rule_id in disabled_ids):
                 continue
@@ -417,7 +419,8 @@ def normalized_path(path: str) -> str:
 
 def path_rule_matches(path: str, path_exists: bool, row: PathRuleRow) -> bool:
     """Evaluate one primitive protected-path rule."""
-    kind, value, _reason, _allow_autonomous = row
+    kind = row["kind"]
+    value = row["value"]
     portable = normalized_path(path)
     expected = normalized_path(value)
     parts = tuple(part for part in portable.split("/") if part)
@@ -475,8 +478,8 @@ def decide_edit(
         (row for row in path_rules if path_rule_matches(path, path_exists, row)),
         None,
     )
-    if protected is not None and not (autonomous and protected[3]):
-        return KernelDecision("ask", protected[2])
+    if protected is not None and not (autonomous and protected["allow_autonomous"]):
+        return KernelDecision("ask", protected["reason"])
     if marker_count(previous, python_source) != marker_count(updated, python_source):
         return KernelDecision("ask", "edit changes inline review markers")
     if before is None:
