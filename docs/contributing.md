@@ -1,3 +1,7 @@
+# lup: Two problems:
+# - The docs is focusing a lot on the harness, but lup-devtools harness is only a small part of lup (the library is a big one, and the template as well)
+# - This isn't very indicative of how one could go about contributing to this codebase
+
 # Contributing generated harness changes
 
 Work in a feature worktree and change canonical Python first. The generated
