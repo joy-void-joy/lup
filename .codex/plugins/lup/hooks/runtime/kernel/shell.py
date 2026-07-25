@@ -729,9 +729,10 @@ def classify_shell(
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
     trusted_script_roots: list[str] | None = None,
+    existing_targets: list[str] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
-    segments = parse_shell_words(command)
+    segments = parse_shell_words(command, 0, existing_targets)
     if isinstance(segments, KernelDecision):
         return segments
     decisions = decide_segment_list(
@@ -757,6 +758,7 @@ def decide_shell(
     sandboxed: bool = False,
     trusted_script_roots: list[str] | None = None,
     interactive: bool = True,
+    existing_targets: list[str] | None = None,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -799,12 +801,18 @@ def decide_shell(
             allowed_scopes,
             denied_scopes,
             trusted_script_roots,
+            existing_targets,
         )
         if inner.effect == "allow":
             return inner
         return resolve(KernelDecision("ask", f"escalated ({why}): {inner.reason}"))
     return resolve(
         classify_shell(
-            command, rows, allowed_scopes, denied_scopes, trusted_script_roots
+            command,
+            rows,
+            allowed_scopes,
+            denied_scopes,
+            trusted_script_roots,
+            existing_targets,
         )
     )

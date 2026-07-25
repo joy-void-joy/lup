@@ -11,7 +11,7 @@ from typing import Literal
 
 import pytest
 import sh
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from lup.adapters.claude.native import (
     ClaudeBeforeToolEvent,
@@ -39,6 +39,7 @@ from lup.policy.bundle import (
     runtime_url_scope,
 )
 from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -66,6 +67,8 @@ class DecisionCase(BaseModel):
     effect: Literal["allow", "ask", "deny", "defer"]
     sandboxed: bool = False
     interactive: bool = True
+    existing: list[str] = Field(default_factory=list)
+    """Repository-relative files that already exist when the case is judged."""
 
 
 class EditDecisionCase(BaseModel):
@@ -92,8 +95,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="find . -name '*.tmp' -delete", effect="ask"),
     DecisionCase(input="cat x |& rm -rf ~", effect="ask"),
     DecisionCase(input="cat x ;& rm -rf ~", effect="deny"),
-    DecisionCase(input="echo payload > pyproject.toml", effect="ask"),
-    DecisionCase(input="echo payload >> src/generated.py", effect="ask"),
+    DecisionCase(
+        input="echo payload > pyproject.toml",
+        effect="ask",
+        existing=["pyproject.toml"],
+    ),
+    DecisionCase(
+        input="echo payload >> src/generated.py",
+        effect="ask",
+        existing=["src/generated.py"],
+    ),
     DecisionCase(input="gh pr view 123", effect="allow"),
     DecisionCase(input="uv run tool --help", effect="allow"),
     DecisionCase(
@@ -104,18 +115,29 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="grep x f > /dev/null", effect="allow"),
     DecisionCase(input="cat f 2>/dev/null", effect="allow"),
     DecisionCase(input="ls >&2", effect="allow"),
-    DecisionCase(input="echo x > out.txt", effect="ask"),
+    # Overwriting an existing file is the destructive case and asks; creating
+    # one destroys nothing, and a target that cannot be resolved to a literal
+    # path keeps the strict verdict rather than guessing it is new.
+    DecisionCase(input="echo x > out.txt", effect="ask", existing=["out.txt"]),
+    DecisionCase(input="echo x > out.txt", effect="allow"),
+    DecisionCase(input="echo x > nested/new.txt", effect="allow"),
+    DecisionCase(input="echo x >> notes.log", effect="allow"),
+    DecisionCase(input="echo x > $UNSET_DIR/out.txt", effect="ask"),
+    DecisionCase(input="echo x > ~/out.txt", effect="ask"),
     DecisionCase(input="cat <<EOF", effect="deny"),
     # The session scratchpad is a write-allowed root like repo-relative tmp/;
-    # reassigning TMPDIR is a security-sensitive assignment, and a suffix
-    # that climbs out of the root falls back to the redirection ask.
+    # reassigning TMPDIR is a security-sensitive assignment, and a suffix that
+    # climbs out of the root falls back to the ordinary redirection rule —
+    # which still asks whenever the target cannot be resolved to a literal.
     DecisionCase(input="echo x > $TMPDIR/out.txt", effect="allow"),
     DecisionCase(input='sort f > "${TMPDIR}/sorted.txt"', effect="allow"),
     DecisionCase(input="echo x > /tmp/claude-1000/scratch/out.txt", effect="allow"),
     DecisionCase(input="cat <<'EOF' > $TMPDIR/notes.md\nbody\nEOF", effect="allow"),
     DecisionCase(input="echo x > $TMPDIR/../etc/crontab", effect="ask"),
-    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="ask"),
-    DecisionCase(input="echo x > /tmp/other/file", effect="ask"),
+    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="allow"),
+    # A /tmp path outside the session root is not scratch, so it follows the
+    # ordinary create-versus-overwrite rule rather than being written freely.
+    DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
     # Removal confined to the disposable roots is as safe as writing them;
@@ -372,13 +394,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="cat <<EOF\nplain body\nEOF", effect="allow"),
     DecisionCase(input="cat <<EOF\n$(id)\nEOF", effect="deny"),
     DecisionCase(input="grep x <<< 'needle haystack'", effect="allow"),
-    # A heredoc feeding a file write is shell file authoring: deny toward
-    # the Edit tool and tmp/*.py in both operator orders, even sandboxed.
-    DecisionCase(input="cat > out.py <<'EOF'\nbody\nEOF", effect="deny"),
-    DecisionCase(input="cat <<'EOF' > out.py\nbody\nEOF", effect="deny"),
+    # A heredoc rewriting an existing file is shell file authoring over work
+    # the edit gate already saw: deny toward the Edit tool and tmp/*.py in
+    # both operator orders, even sandboxed. Authoring a file that is not
+    # there yet overwrites nothing and passes.
     DecisionCase(
-        input="cat > out.py <<'EOF'\nbody\nEOF", effect="deny", sandboxed=True
+        input="cat > out.py <<'EOF'\nbody\nEOF", effect="deny", existing=["out.py"]
     ),
+    DecisionCase(
+        input="cat <<'EOF' > out.py\nbody\nEOF", effect="deny", existing=["out.py"]
+    ),
+    DecisionCase(
+        input="cat > out.py <<'EOF'\nbody\nEOF",
+        effect="deny",
+        sandboxed=True,
+        existing=["out.py"],
+    ),
+    DecisionCase(input="cat > fresh.py <<'EOF'\nbody\nEOF", effect="allow"),
     DecisionCase(input="cat > tmp/oneoff.py <<'EOF'\nbody\nEOF", effect="allow"),
     # Frozen variable bindings: assignments and read rebind for the segments
     # that follow; literal values instantiate references, opaque ones gate
@@ -753,6 +785,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "    result = decide_shell(\n"
         "        case['input'], SHELL_RULES, sandboxed=case['sandboxed'],\n"
         "        interactive=case['interactive'],\n"
+        "        existing_targets=case['existing'],\n"
         "    )\n"
         "    assert result.effect == case['effect'], case\n"
         "for case in fixtures['fetch']:\n"
@@ -967,19 +1000,53 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     policy = ShellPolicy()
     sandboxed_policy = ShellPolicy(sandbox_active=True)
 
-    for case in SHELL_POLICY_CASES:
+    for index, case in enumerate(SHELL_POLICY_CASES):
         if case.interactive:
             active = sandboxed_policy if case.sandboxed else policy
         else:
             active = ShellPolicy(sandbox_active=case.sandboxed, interactive=False)
-        assert active.decide(ShellCommand(command=case.input)).effect == case.effect
+        # Each case judges a tree of its own, so a file one case declares
+        # present never leaks into the next case's create-versus-overwrite.
+        root = tmp_path / f"case{index}"
+        root.mkdir()
+        for name in case.existing:
+            present = root / name
+            present.parent.mkdir(parents=True, exist_ok=True)
+            present.write_text("already here", encoding="utf-8")
+        decided = active.decide(ShellCommand(command=case.input, cwd=root))
+        assert decided.effect == case.effect, case.input
         bundled_effect = bundled.decide_shell(
             case.input,
             policy.rules,
             sandboxed=case.sandboxed,
             interactive=case.interactive,
+            existing_targets=case.existing,
         ).effect
-        assert bundled_effect == case.effect
+        assert bundled_effect == case.effect, case.input
+
+
+def test_write_targets_name_only_the_paths_a_command_opens_for_writing() -> None:
+    assert shell_write_targets("echo x > out.txt") == ["out.txt"]
+    assert shell_write_targets("echo x >> notes.log") == ["notes.log"]
+    assert shell_write_targets("cat > a.py <<'EOF'\nbody\nEOF") == ["a.py"]
+    assert shell_write_targets("wc -l < input.txt") == []
+    assert shell_write_targets("grep x f 2>&1") == []
+    assert shell_write_targets("ls >&2") == []
+    assert shell_write_targets("a > one.txt | b > two.txt") == ["one.txt", "two.txt"]
+    assert shell_write_targets("frobnicate --weird") == []
+
+
+def test_creating_a_file_passes_where_overwriting_one_still_asks(
+    tmp_path: Path,
+) -> None:
+    policy = ShellPolicy()
+    existing = tmp_path / "kept.txt"
+    existing.write_text("prior work", encoding="utf-8")
+    command = "echo x > kept.txt"
+
+    assert policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect == "ask"
+    existing.unlink()
+    assert policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect == "allow"
 
 
 def test_sandbox_escape_reenters_the_deny_lattice() -> None:

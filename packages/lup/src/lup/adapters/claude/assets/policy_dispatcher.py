@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from kernel.decision import KernelDecision
 from kernel.edit import decide_edit
 from kernel.fetch import decide_fetch
+from kernel.lex import shell_write_targets
 from kernel.shell import decide_shell
 from policy_data import (
     ALLOWED_FETCH_SCOPES,
@@ -87,6 +88,20 @@ def edit_decision(path_text, before, after, autonomous):
     )
 
 
+def existing_write_targets(command):
+    """Report which of a command's write targets already exist on disk.
+
+    The kernel never reads the filesystem, so it cannot tell creating a file
+    from overwriting one. Resolving that here keeps the decision itself a
+    pure function of the command text and this list.
+    """
+    return [
+        target
+        for target in shell_write_targets(command)
+        if (Path.cwd() / target).exists()
+    ]
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -104,6 +119,7 @@ def dispatch(payload):
             DENIED_FETCH_SCOPES,
             sandboxed=sandbox_active() and not unsandboxed,
             trusted_script_roots=managed_script_roots(),
+            existing_targets=existing_write_targets(tool_input["command"]),
         )
     if name == "WebFetch":
         return decide_fetch(

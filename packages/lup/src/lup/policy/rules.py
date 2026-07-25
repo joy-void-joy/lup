@@ -22,7 +22,7 @@ from lup.policy.kernel.edit import (
     path_rule_matches as kernel_path_rule_matches,
 )
 from lup.policy.kernel.fetch import decide_fetch
-from lup.policy.kernel.lex import parse_shell_words
+from lup.policy.kernel.lex import parse_shell_words, shell_write_targets
 from lup.policy.kernel.rows import AntiPatternRow, PathRuleRow, UrlScopeRow
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment
 from lup.policy.kernel.words import command_words as kernel_command_words
@@ -134,6 +134,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         self.interactive = interactive
 
     def decide(self, event: ShellCommand) -> Decision:
+        root = event.cwd or Path.cwd()
         return pydantic_decision(
             decide_shell(
                 event.command,
@@ -143,6 +144,11 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 sandboxed=self.sandbox_active and not event.unsandboxed,
                 trusted_script_roots=self.trusted_script_roots,
                 interactive=self.interactive,
+                existing_targets=[
+                    target
+                    for target in shell_write_targets(event.command)
+                    if (root / target).exists()
+                ],
             )
         )
 

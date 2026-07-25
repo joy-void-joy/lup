@@ -392,13 +392,77 @@ def is_control_operator(text: str) -> bool:
     return text in (";", "&", "&&", "||", "|", "|&", "\n")
 
 
+def literal_target(word: str) -> bool:
+    """Whether a redirection target names exactly the path it spells.
+
+    Existence is established against the word as written, so a target
+    carrying an unexpanded parameter, a substitution, or a tilde names a
+    different file at run time than the one that was stat'd. Such a target
+    never qualifies for the create-versus-overwrite relaxation, and keeps
+    the strict verdict the operator alone earns.
+    """
+    return not any(marker in word for marker in ("$", "~", "`", SUBSTITUTION_SENTINEL))
+
+
+def redirection_writes(operator: str) -> bool:
+    """Whether one redirection operator opens its target for writing.
+
+    Every writing form spells ``>``, which also separates them from the
+    control operators that carry a following word of their own.
+    """
+    if ">" not in operator:
+        return False
+    if "<<" in operator and "<<<" not in operator:
+        return False
+    return not ("&" in operator and (operator[-1].isdigit() or operator[-1] == "-"))
+
+
+def shell_write_targets(command: str, depth: int = 0) -> list[str]:
+    """Name every path this command's redirections would open for writing.
+
+    A caller that can reach the filesystem stats these and hands back the
+    ones that already exist, so the kernel can tell creating a file from
+    overwriting one without ever reading the filesystem itself. A command
+    that does not lex yields nothing and keeps its unjudged verdict.
+    """
+    tokens = tokenize_shell(command)
+    if isinstance(tokens, KernelDecision):
+        return []
+    targets: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.kind in ("cmdsub", "procsub"):
+            if depth < 2:
+                targets.extend(shell_write_targets(token.text, depth + 1))
+            index += 1
+            continue
+        if token.kind != "op" or not redirection_writes(token.text):
+            index += 1
+            continue
+        following = index + 1
+        if following < len(tokens) and tokens[following].kind == "word":
+            targets.append(tokens[following].text)
+            index = following + 1
+            continue
+        index += 1
+    return targets
+
+
 def resolve_redirection(
-    tokens: list[ShellToken], index: int, heredoc_fed: bool = False
+    tokens: list[ShellToken],
+    index: int,
+    heredoc_fed: bool = False,
+    existing_targets: list[str] | None = None,
 ) -> tuple[KernelDecision | None, int]:
     """Classify one redirection, consuming its target and stripping safe forms.
 
-    A file write fed by a heredoc is authoring a file through the shell, so
-    it denies toward the Edit tool and tmp/*.py scripts instead of asking.
+    A write that would overwrite an existing file is the destructive case: a
+    heredoc-fed one denies toward the Edit tool and tmp/*.py scripts, and any
+    other asks. Creating a file destroys nothing, so it passes once the
+    caller has established the target does not exist. ``existing_targets`` of
+    ``None`` means no caller established anything, and every target is
+    treated as already there.
     """
     operator = tokens[index].text
     if "<<" in operator and "<<<" not in operator:
@@ -422,6 +486,12 @@ def resolve_redirection(
         return None, target + 1
     if is_session_scratch_target(tokens[target].text):
         return None, target + 1
+    if (
+        existing_targets is not None
+        and literal_target(tokens[target].text)
+        and tokens[target].text not in existing_targets
+    ):
+        return None, target + 1
     if heredoc_fed:
         return (
             KernelDecision(
@@ -437,7 +507,9 @@ def resolve_redirection(
     )
 
 
-def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelDecision:
+def parse_shell_words(
+    command: str, depth: int = 0, existing_targets: list[str] | None = None
+) -> list[list[str]] | KernelDecision:
     """Group lexed tokens into command segments, resolving safe redirections.
 
     A read-side process substitution contributes a ``/dev/fd`` placeholder to
@@ -453,7 +525,7 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
     def substituted_segments(text: str) -> list[list[str]] | KernelDecision:
         if depth >= 2:
             return unjudged("command substitution nests too deeply")
-        return parse_shell_words(text, depth + 1)
+        return parse_shell_words(text, depth + 1, existing_targets)
 
     heredoc_fed = any(
         token.kind == "op" and "<<" in token.text and "<<<" not in token.text
@@ -505,7 +577,7 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
         if token.kind == "procsub":
             if depth >= 2:
                 return unjudged("process substitution nests too deeply")
-            inner = parse_shell_words(token.text, depth + 1)
+            inner = parse_shell_words(token.text, depth + 1, existing_targets)
             if isinstance(inner, KernelDecision):
                 return inner
             segments.extend(inner)
@@ -525,7 +597,9 @@ def parse_shell_words(command: str, depth: int = 0) -> list[list[str]] | KernelD
                 current = []
             index += 1
             continue
-        verdict, index = resolve_redirection(tokens, index, heredoc_fed)
+        verdict, index = resolve_redirection(
+            tokens, index, heredoc_fed, existing_targets
+        )
         if verdict is not None:
             return verdict
     if current:
