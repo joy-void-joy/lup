@@ -288,7 +288,7 @@ PART_CONTRACT: dict[str, PartExpectation] = {
         part=AskUser(question="which branch to land first"), diverges=True
     ),
     "Delegate": PartExpectation(
-        part=Delegate(plugin="lup", role="trace-explorer", task="read the trace"),
+        part=Delegate(subagent_type="lup:trace-explorer", prompt="read the trace"),
         diverges=True,
     ),
     "RequestApproval": PartExpectation(

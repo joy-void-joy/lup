@@ -135,9 +135,10 @@ class CodexPromptRenderer(PromptRenderer):
                         "Ask the user directly, offering concrete options, and wait "
                         f"for the answer: {question}"
                     )
-                case Delegate(role=role, task=task):
+                case Delegate(subagent_type=subagent_type, prompt=task):
                     rendered.append(
-                        f"Delegate to the {role} custom agent with this task: {task}"
+                        f"Delegate to the {subagent_type} custom agent with this "
+                        f"task: {task}"
                     )
                 case RequestApproval(action=action, reason=reason):
                     rendered.append(

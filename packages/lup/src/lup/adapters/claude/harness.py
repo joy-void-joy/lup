@@ -138,10 +138,10 @@ class ClaudePromptRenderer(PromptRenderer):
                         "Ask the user with the AskUserQuestion tool, offering concrete "
                         f"options plus a free-text choice: {question}"
                     )
-                case Delegate(plugin=plugin, role=role, task=task):
+                case Delegate(subagent_type=subagent_type, prompt=task):
                     rendered.append(
-                        f'Delegate with Agent(subagent_type="{plugin}:{role}", '
-                        f"prompt={json.dumps(task)})"
+                        f"Delegate with Agent(subagent_type={json.dumps(subagent_type)}"
+                        f", prompt={json.dumps(task)})"
                     )
                 case RequestApproval(action=action, reason=reason):
                     rendered.append(

@@ -33,6 +33,11 @@ type NativeName = Annotated[
 """A declaration name portable across adapters: lowercase alphanumerics with
 interior hyphens or underscores."""
 
+type QualifiedAgentName = Annotated[
+    str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]*:[a-z0-9][a-z0-9_-]*$")
+]
+"""A delegation target, ``<plugin>:<agent>``, as a runtime addresses one."""
+
 
 class TextPart(BaseModel):
     model_config = FROZEN
@@ -150,9 +155,8 @@ class Delegate(BaseModel):
     model_config = FROZEN
 
     type: Literal["delegate"] = "delegate"
-    plugin: NativeName
-    role: NativeName
-    task: str
+    subagent_type: QualifiedAgentName
+    prompt: str
 
 
 class RequestApproval(BaseModel):
@@ -500,25 +504,24 @@ class Harness(BaseModel):
                     f"is missing required arguments: {missing}"
                 )
 
-        declared_agents = {
-            (plugin.name, agent.name)
+        declared_agents = [
+            f"{plugin.name}:{agent.name}"
             for plugin in self.plugins
             for agent in plugin.agents
-        }
+        ]
         parts = [part for prompt in prompts for part in prompt.parts]
         unknown_plugins = [
             part.plugin
             for part in parts
-            if isinstance(part, PluginPath | SkillPattern | Delegate)
+            if isinstance(part, PluginPath | SkillPattern)
             and part.plugin not in plugin_names
         ]
         if unknown_plugins:
             raise ValueError(f"prompt parts name unknown plugins: {unknown_plugins}")
         unknown_agents = [
-            f"{part.plugin}:{part.role}"
+            part.subagent_type
             for part in parts
-            if isinstance(part, Delegate)
-            and (part.plugin, part.role) not in declared_agents
+            if isinstance(part, Delegate) and part.subagent_type not in declared_agents
         ]
         if unknown_agents:
             raise ValueError(f"delegations name unknown agents: {unknown_agents}")
