@@ -819,17 +819,21 @@ toward the Edit tool), loops, conditionals, and case
 constructs classify recursively over frozen variable bindings, `find -exec`
 payloads and `timeout`/`nice` wrappers recurse to their commands, `sed`/`awk`
 pass read-only script screens, `curl` is screened to read methods within the
-declared URL scopes, and native `apply_patch` edits — opaque
-to the policy — always fall through to fail-closed approval."""
+declared URL scopes, and native `apply_patch` commands are decoded into complete
+before/after batches for the canonical edit policy. Malformed or unsupported
+patches fail closed. Codex's sandbox and approval policy remain the outer
+filesystem and network boundary. Harness generation also compiles every
+prefix-safe shell allow into `.codex/rules/lup.rules`; Codex uses those native
+rules to run matching commands outside the sandbox without prompting, while
+flag-sensitive and content-sensitive forms remain under the hook and sandbox."""
 
 
 def permission_hooks(policy_scope: str) -> list[models.PromptPart]:
     """Render the permission-hooks section around one flavor-owned scope claim.
 
-    The canonical-policy framing is identical on both platforms; how native
-    edits are decided is not — Claude Code edits are inspected in-policy,
-    Codex `apply_patch` input is opaque and fails closed — so each template
-    passes its own scope paragraph.
+    The canonical-policy framing is identical on both platforms; each native
+    adapter supplies complete edit documents through its own decoding boundary,
+    so each template passes its own scope paragraph.
     """
     return [
         models.TextPart(
