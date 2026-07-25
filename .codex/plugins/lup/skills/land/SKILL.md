@@ -56,15 +56,15 @@ One table covering every branch, ordered `LAND` first (that is the work at risk)
 
 ### 5. Landing a LAND branch
 
+Land one branch at a time, oldest divergence first — rebase, merge, and push before the next branch is touched. Every branch that lands moves the integration branch, so a rebase run ahead of a sibling's merge carries a base that no longer exists.
+
 Ask the user, per branch, which route to take:
 
 - **Open a PR** — relocate into that branch's worktree: start a session rooted at <the survey's worktree field> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `$lup:rebase`.
-- **Merge directly** — from the integration checkout, `$lup:merge <branch>`. Suits small, uncontroversial work that needs no review.
+- **Merge directly** — take the same route into the worktree and through `$lup:rebase`, then merge from the integration checkout with `$lup:merge <branch>`. `sync-base` has already pulled the integration branch in, so the merge is a fast-forward, and pushing it closes the PR the rebase opened. Suits small, uncontroversial work that needs no review.
 - **Drop it** — the work is not worth landing. Requires explicit confirmation, then delete.
 
 Never choose a route on the user's behalf: a `LAND` branch by definition carries no PR expressing intent, so the intent has to come from them.
-
-Land the oldest divergence first. Every branch that lands moves the integration branch, so the ones behind it re-diverge and their conflict surface grows.
 
 ### 6. Confirm and execute
 

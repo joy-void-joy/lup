@@ -86,6 +86,8 @@ One table covering every branch, ordered `LAND` first (that is the work at risk)
 
 ### 5. Landing a LAND branch
 
+Land one branch at a time, oldest divergence first — rebase, merge, and push before the next branch is touched. Every branch that lands moves the integration branch, so a rebase run ahead of a sibling's merge carries a base that no longer exists.
+
 Ask the user, per branch, which route to take:
 
 - **Open a PR** — relocate into that branch's worktree: """
@@ -97,16 +99,18 @@ Ask the user, per branch, which route to take:
             models.SkillInvocation(plugin="lup", skill="rebase"),
             models.TextPart(
                 text=r"""`.
-- **Merge directly** — from the integration checkout, `"""
+- **Merge directly** — take the same route into the worktree and through `"""
+            ),
+            models.SkillInvocation(plugin="lup", skill="rebase"),
+            models.TextPart(
+                text=r"""`, then merge from the integration checkout with `"""
             ),
             models.SkillInvocation(plugin="lup", skill="merge"),
             models.TextPart(
-                text=r""" <branch>`. Suits small, uncontroversial work that needs no review.
+                text=r""" <branch>`. `sync-base` has already pulled the integration branch in, so the merge is a fast-forward, and pushing it closes the PR the rebase opened. Suits small, uncontroversial work that needs no review.
 - **Drop it** — the work is not worth landing. Requires explicit confirmation, then delete.
 
 Never choose a route on the user's behalf: a `LAND` branch by definition carries no PR expressing intent, so the intent has to come from them.
-
-Land the oldest divergence first. Every branch that lands moves the integration branch, so the ones behind it re-diverge and their conflict surface grows.
 
 ### 6. Confirm and execute
 
