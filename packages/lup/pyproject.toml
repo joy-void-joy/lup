@@ -27,7 +27,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-claude = ["claude-agent-sdk>=0.1.26"]
+claude = [
+    "claude-agent-sdk>=0.2.89",
+]
 codex = []
 docker = ["docker>=7.1.0"]
 
