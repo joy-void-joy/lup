@@ -20,7 +20,7 @@ async def main() -> None:
         )
     )
     result = await query(
-        factory,
+        factory,  # lup: Shouldn't it be factory.query? I find it a bit bulky with turn_request(TurnInput) too
         turn_request(TurnInput(text="Summarize why typed boundaries help."), Summary),
     )
     print(result.output.model_dump_json(indent=2))
