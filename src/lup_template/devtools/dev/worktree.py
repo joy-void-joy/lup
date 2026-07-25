@@ -8,6 +8,7 @@ import typer
 from pydantic import BaseModel
 
 from lup_template.devtools.harness.launch import relocation_hint
+from lup_template.devtools.layout import get_tree_dir
 from lup_template.devtools.utils import (
     copy_to_clipboard,
     decode_stderr,
@@ -63,28 +64,6 @@ def register_merge_driver() -> None:
     """
     git("config", f"merge.{OWNERSHIP_MERGE_DRIVER}.name", "keep one side, regenerate")
     git("config", f"merge.{OWNERSHIP_MERGE_DRIVER}.driver", "true")
-
-
-def get_tree_dir() -> Path:
-    """Locate the ``tree/`` directory that holds sibling worktrees.
-
-    Two checkout layouts are supported. In the bare-repo layout the current
-    checkout is itself a worktree living inside ``tree/``, so ``tree/`` is the
-    parent. Otherwise ``tree/`` sits at the current directory or an ancestor,
-    so walking upward lets the command run from anywhere inside the checkout.
-    """
-    cwd = Path.cwd().resolve()
-
-    if cwd.parent.name == "tree":
-        return cwd.parent
-
-    for directory in (cwd, *cwd.parents):
-        tree = directory / "tree"
-        if tree.is_dir():
-            return tree
-
-    typer.echo("Error: Could not find tree/ directory", err=True)
-    raise typer.Exit(1)
 
 
 def create(

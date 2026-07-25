@@ -21,7 +21,6 @@ from lup.adapters.codex.harness_runtime import (
 from lup.harness.environment import non_interactive_environment
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
-from lup_template.devtools.dev.worktree import get_tree_dir
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.composition import (
     NativeHarnessComposition,
@@ -29,6 +28,7 @@ from lup_template.devtools.harness.composition import (
     codex_composition,
 )
 from lup_template.devtools.harness.drift import generate_with_report
+from lup_template.devtools.layout import get_tree_dir
 
 
 class RelocationHint(BaseModel):
