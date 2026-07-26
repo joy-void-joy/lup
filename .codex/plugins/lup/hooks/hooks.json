@@ -1,5 +1,18 @@
 {
   "hooks": {
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\"",
+            "statusMessage": "Checking Lup policy",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|apply_patch|web_fetch"
+      }
+    ],
     "PreToolUse": [
       {
         "hooks": [

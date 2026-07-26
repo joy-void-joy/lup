@@ -247,29 +247,32 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
         self.plugin_name = plugin_name
 
     def render(self, source: HookSet) -> ArtifactTree:
+        policy_hook = {
+            "type": "command",
+            "command": 'python3 "$PLUGIN_ROOT/hooks/scripts/policy.py"',
+            "statusMessage": "Checking Lup policy",
+            "timeout": 30,
+        }
         hooks = {
             "hooks": {
+                "PermissionRequest": [
+                    {
+                        "matcher": "Bash|apply_patch|web_fetch",
+                        "hooks": [policy_hook],
+                    }
+                ],
                 "PreToolUse": [
                     {
                         "matcher": "Bash|apply_patch|web_fetch",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": (
-                                    'python3 "$PLUGIN_ROOT/hooks/scripts/policy.py"'
-                                ),
-                                "statusMessage": "Checking Lup policy",
-                                "timeout": 30,
-                            }
-                        ],
+                        "hooks": [policy_hook],
                     }
-                ]
+                ],
             }
         }
         evidence = {
             "schemaVersion": 1,
             "policyIds": source.policy_ids,
-            "askApproximation": "fail-closed exit code 2",
+            "askApproximation": "PermissionRequest defers asks to native approval",
         }
         return ArtifactTree(
             artifacts=[
