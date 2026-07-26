@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.harness.process import LaunchRequest, ProcessLauncher
-from lup.resolver.contracts import QuestionBroker
+from lup.resolver.contracts import QuestionBroker, ResolverAwaitingAnswers
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.models import (
     AgentRound,
@@ -108,6 +108,13 @@ def failure_messages(error: BaseException) -> list[str]:
             for message in failure_messages(nested)
         ]
     return [str(error)]
+
+
+def merge_parked(parked: list[ResolverAwaitingAnswers]) -> ResolverAwaitingAnswers:
+    """Combine sibling parks so one rerun can answer every pending question."""
+    pending = {question.id: question for park in parked for question in park.pending}
+    problems = [problem for park in parked for problem in park.problems]
+    return ResolverAwaitingAnswers(list(pending.values()), problems)
 
 
 def approval_question(concern: Concern) -> MaterialQuestion:
@@ -238,6 +245,8 @@ class ResolverCore:
         self.persist(state)
         try:
             return await self.advance(state)
+        except ResolverAwaitingAnswers:
+            raise
         except Exception as error:
             self.persist_failure(error)
             raise
@@ -282,6 +291,8 @@ class ResolverCore:
         state = self.require_state()
         try:
             return await self.advance(state)
+        except ResolverAwaitingAnswers:
+            raise
         except Exception as error:
             self.persist_failure(error)
             raise
@@ -489,6 +500,13 @@ class ResolverCore:
                         raise ResolverInvariantError(
                             "parallel concern execution was cancelled"
                         )
+                    parked = [
+                        error
+                        for error in errors
+                        if isinstance(error, ResolverAwaitingAnswers)
+                    ]
+                    if parked and len(parked) == len(errors):
+                        raise merge_parked(parked)
                     raise ExceptionGroup("parallel concern failures", errors)
 
             state = self.require_state()
@@ -612,6 +630,13 @@ class ResolverCore:
         """Execute one concern while persisting a terminal failure on exceptions."""
         try:
             return await self.execute_concern_inner(concern, lease, commits, builder)
+        except ResolverAwaitingAnswers:
+            await self.transition_concern(
+                concern.id,
+                ConcernStatus.WAITING_FOR_ANSWERS,
+                "parked on material questions",
+            )
+            raise
         except Exception as error:
             await self.transition_concern(concern.id, ConcernStatus.FAILED, str(error))
             raise
@@ -853,9 +878,17 @@ class ResolverCore:
                 run_id=state.run_id, questions=[]
             )
             batch = QuestionBatch(run_id=state.run_id, questions=questions)
+            fresh = {question.id for question in questions}
             combined_questions = QuestionBatch(
                 run_id=state.run_id,
-                questions=[*existing_questions.questions, *questions],
+                questions=[
+                    *(
+                        question
+                        for question in existing_questions.questions
+                        if question.id not in fresh
+                    ),
+                    *questions,
+                ],
             )
             self.persist(state.model_copy(update={"questions": combined_questions}))
             answers = await self.ask(batch)
@@ -863,9 +896,17 @@ class ResolverCore:
             existing_answers = state.answers or AnswerBatch(
                 run_id=state.run_id, answers=[]
             )
+            answered = {answer.question_id for answer in answers.answers}
             combined_answers = AnswerBatch(
                 run_id=state.run_id,
-                answers=[*existing_answers.answers, *answers.answers],
+                answers=[
+                    *(
+                        answer
+                        for answer in existing_answers.answers
+                        if answer.question_id not in answered
+                    ),
+                    *answers.answers,
+                ],
             )
             self.persist(state.model_copy(update={"answers": combined_answers}))
             return answers

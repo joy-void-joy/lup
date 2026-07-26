@@ -17,12 +17,11 @@ from pydantic import BaseModel
 from lup.codescan.markers import find_feedback
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
-from lup.resolver.contracts import QuestionBroker
+from lup.resolver.contracts import QuestionBroker, ResolverAwaitingAnswers
 from lup.resolver.core import ResolverCore
 from lup.resolver.models import (
     AnswerBatch,
     InventoryNote,
-    MaterialQuestion,
     QuestionAnswer,
     QuestionBatch,
     ResolveRequest,
@@ -108,15 +107,6 @@ def parse_answer_flags(
     if len(identifiers) != len(dict.fromkeys(identifiers)):
         raise typer.BadParameter("--answer question ids must be unique")
     return {pair[0]: pair[1] for pair in pairs}
-
-
-class ResolverAwaitingAnswers(Exception):
-    """A headless run parked on material questions it has no answers for."""
-
-    def __init__(self, pending: list[MaterialQuestion], problems: list[str]) -> None:
-        super().__init__(f"resolver run is awaiting {len(pending)} material answer(s)")
-        self.pending = pending
-        self.problems = problems
 
 
 class HeadlessQuestionBroker(QuestionBroker):

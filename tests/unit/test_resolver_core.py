@@ -17,7 +17,7 @@ from lup.harness.process import (
     ProcessLauncher,
 )
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
-from lup.resolver.contracts import QuestionBroker
+from lup.resolver.contracts import QuestionBroker, ResolverAwaitingAnswers
 from lup.resolver.core import (
     APPROVE,
     DEFER,
@@ -1256,3 +1256,122 @@ async def test_unresolved_semantic_join_fails_the_dependent_concern(
     assert progress["b"].status == ConcernStatus.VERIFIED
     assert progress["c"].status == ConcernStatus.FAILED
     assert "semantic join failed for c" in (progress["c"].reason or "")
+
+
+class ParkingQuestionBroker(QuestionBroker):
+    """Answer planning questions from recommendations; park dynamic ones."""
+
+    async def ask(self, questions: QuestionBatch) -> AnswerBatch:
+        dynamic = [
+            question
+            for question in questions.questions
+            if question.id == "a-dynamic"
+        ]
+        if dynamic:
+            raise ResolverAwaitingAnswers(dynamic, [])
+        return AnswerBatch(
+            run_id=questions.run_id,
+            answers=[
+                QuestionAnswer(
+                    question_id=question.id,
+                    value=question.recommendation or question.choices[0],
+                )
+                for question in questions.questions
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
+    tmp_path: Path,
+) -> None:
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_calls: Counter[str] = Counter()
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        if output_name != WorkerReport.__name__:
+            raise AssertionError(output_name)
+        call = worker_calls["a"] + 1
+        worker_calls["a"] = call
+        if call <= 2:
+            return {
+                "concern_id": "a",
+                "changed": False,
+                "summary": "material choice required",
+                "questions": [
+                    {
+                        "id": "a-dynamic",
+                        "concern_id": "a",
+                        "prompt": "Choose the durable implementation",
+                        "choices": ["durable"],
+                        "recommendation": "durable",
+                    }
+                ],
+            }
+        (root / "a.txt").write_text("durable\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def reviewer_response(_root: Path, output_name: str) -> JsonObject:
+        if output_name == FinalReview.__name__:
+            return {"accepted": True, "reason": "combined branch verified"}
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    def build_core(broker: QuestionBroker) -> ResolverCore:
+        return ResolverCore(
+            ResolverConfig(
+                state_root=tmp_path / "state",
+                workspace=workspace,
+                worktree_root=tmp_path / "resolver-worktrees",
+                run_id="midrun-park",
+                integration_branch="resolve/midrun-park/review",
+                verification_commands=[
+                    VerificationCommand(
+                        name="combined-diff",
+                        arguments=["git", "diff", "--check", "HEAD"],
+                    )
+                ],
+            ),
+            resolve_spec(),
+            lambda root: ResolverTestFactory(root, worker_response),
+            lambda root: ResolverTestFactory(root, reviewer_response),
+            LiteralInvocationRenderer(),
+            broker,
+            launcher,
+        )
+
+    parked_core = build_core(ParkingQuestionBroker())
+    with pytest.raises(ResolverAwaitingAnswers) as raised:
+        await parked_core.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    assert [question.id for question in raised.value.pending] == ["a-dynamic"]
+    persisted = parked_core.repository.load()
+    progress = {item.concern_id: item for item in persisted.progress}
+    assert progress["a"].status == ConcernStatus.WAITING_FOR_ANSWERS
+    assert progress["a"].reason == "parked on material questions"
+    assert persisted.phase != ResolvePhase.FAILED
+    assert persisted.questions is not None
+    assert "a-dynamic" in {q.id for q in persisted.questions.questions}
+
+    manifest = await build_core(RecordingQuestionBroker()).resume()
+
+    assert worker_calls["a"] == 3
+    assert [outcome.verified for outcome in manifest.outcomes] == [True]
+    assert manifest.final_review is not None
