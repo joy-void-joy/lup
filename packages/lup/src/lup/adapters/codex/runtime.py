@@ -49,7 +49,7 @@ class CodexSessionConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
-    model: str
+    model: str | None = None
     developer_instructions: str = ""
     cwd: Path
     executable: Path = Path("codex")
@@ -361,10 +361,11 @@ class CodexConversationState:
     def thread_parameters(self) -> JsonObject:
         """Preserve configured thread behavior for new and resumed threads."""
         params: JsonObject = {
-            "model": self.config.model,
             "cwd": str(self.config.cwd),
             "developerInstructions": self.config.developer_instructions,
         }
+        if self.config.model is not None:
+            params["model"] = self.config.model
         if self.config.model_provider is not None:
             params["modelProvider"] = self.config.model_provider
         configuration = dict(self.config.provider_config or {})

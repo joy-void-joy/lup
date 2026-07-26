@@ -94,7 +94,7 @@ class ClaudeCompatibilityTransform(ConfigTransform[ClaudeSessionConfig]):
         else:
             environment["ANTHROPIC_API_KEY"] = credential
             environment["ANTHROPIC_AUTH_TOKEN"] = ""
-        if self.endpoint.map_model_aliases:
+        if self.endpoint.map_model_aliases and config.model is not None:
             environment.update(
                 {
                     "ANTHROPIC_DEFAULT_OPUS_MODEL": config.model,

@@ -336,7 +336,7 @@ def run_resolve(
             CodexSessionConfig,
             create_codex_session_factory,
         )
-        from lup_template.agent.config import settings
+        from lup_template.agent.config import engine_for_model, settings
         from lup.hooks import (
             create_git_inspection_hook,
             create_permission_hooks,
@@ -346,12 +346,20 @@ def run_resolve(
         session_environment = non_interactive_environment(
             os.environ  # lup: ignore[os-environ] — sessions inherit the console
         )
+        session_model = (
+            settings.model if engine_for_model(settings.model) == adapter else None
+        )
+        if session_model is None:
+            typer.echo(
+                f"Configured model {settings.model!r} does not route to adapter "
+                f"{adapter!r}; sessions use the adapter's native default model."
+            )
 
         def worker_factory(cwd: Path) -> SessionFactory:
             if adapter == "claude":
                 return create_claude_session_factory(
                     ClaudeSessionConfig(
-                        model=settings.model,
+                        model=session_model,
                         system_prompt="Execute the persisted Lup resolver assignment.",
                         cwd=cwd,
                         add_dirs=[cwd],
@@ -364,7 +372,7 @@ def run_resolve(
                 )
             return create_codex_session_factory(
                 CodexSessionConfig(
-                    model=settings.model,
+                    model=session_model,
                     developer_instructions=(
                         "Execute the persisted Lup resolver assignment."
                     ),
@@ -380,7 +388,7 @@ def run_resolve(
             if adapter == "claude":
                 return create_claude_session_factory(
                     ClaudeSessionConfig(
-                        model=settings.model,
+                        model=session_model,
                         system_prompt=(
                             "Independently review the persisted resolver change."
                         ),
@@ -392,7 +400,7 @@ def run_resolve(
                 )
             return create_codex_session_factory(
                 CodexSessionConfig(
-                    model=settings.model,
+                    model=session_model,
                     developer_instructions=(
                         "Independently review the persisted resolver change."
                     ),
