@@ -8,7 +8,6 @@ human acceptance of its review branch.
 
 import asyncio
 import os
-import sys
 from pathlib import Path
 
 import typer
@@ -308,6 +307,7 @@ def run_resolve(
     run_id: str | None,
     human_decision: bool | None,
     answers: list[str],
+    interactive: bool = False,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
@@ -407,7 +407,7 @@ def run_resolve(
 
         broker: QuestionBroker = (
             HeadlessQuestionBroker(provided)
-            if provided or not sys.stdin.isatty()
+            if provided or not interactive
             else ConsoleQuestionBroker()
         )
         core = ResolverCore(
@@ -476,7 +476,7 @@ def run_resolve(
         if manifest.accepted is None and manifest.final_review is not None:
             typer.echo(f"Review branch: {manifest.review_branch}")
             typer.echo(manifest.final_review.model_dump_json(indent=2))
-            if human_decision is None and not sys.stdin.isatty():
+            if human_decision is None and not interactive:
                 typer.echo(
                     "Run awaiting acceptance: relay the review to the human, "
                     "then rerun with --accept or --reject."

@@ -268,7 +268,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "a5247a6d7110f1726056eb26988c924b7c0210409761938204074531c12dbd0e",
+      "sha256": "b567748b00afa1779f681d442635a15708cd31b0591e7c024c6d229a66310b4e",
       "semantic_id": "skill.resolve",
       "executable": false
     },

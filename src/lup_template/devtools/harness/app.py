@@ -107,9 +107,18 @@ def resolve_command(
             "(repeatable)",
         ),
     ] = None,
+    interactive: Annotated[
+        bool,
+        typer.Option(
+            "--interactive/--headless",
+            help="Prompt on this console for material questions and acceptance "
+            "instead of parking the run (headless is the default; --answer "
+            "always answers headlessly)",
+        ),
+    ] = False,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
-    resolve.run_resolve(adapter, run_id, human_decision, answer or [])
+    resolve.run_resolve(adapter, run_id, human_decision, answer or [], interactive)
 
 
 @app.command(
