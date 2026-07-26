@@ -16,7 +16,6 @@ MARK = "<supplied by the caller>"
 
 REMAINING_PROSE_BREACHES = [
     "harness.guidance",
-    "skill.init",
     "skill.install",
 ]
 """Declarations whose prose still names a platform. This only ever shrinks.

@@ -65,8 +65,15 @@ class Instruction(str):
     """
 
 
-class NativeSpellings(SkillInvocationRenderer):
+class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
     """Own one native runtime's spelling of everything portable prose names.
+
+    Deliberately wider than the three-method shape the capability rule wants: a
+    runtime's vocabulary is one concept with many words, and splitting it into
+    a handful of ABCs would make a caller compose several objects that never
+    vary independently. It extends the invocation renderer rather than being
+    implemented alongside it, so a single object satisfies both seams and no
+    implementation inherits two capabilities.
 
     Every native word a prompt can reach arrives through one of these, so a
     declaration states intent and never a platform. A new prompt part adds an
