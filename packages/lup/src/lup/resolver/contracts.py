@@ -2,7 +2,13 @@
 
 from abc import ABC, abstractmethod
 
-from lup.resolver.models import AnswerBatch, MaterialQuestion, QuestionBatch
+from lup.resolver.models import (
+    AnswerBatch,
+    ConcernProgress,
+    MaterialQuestion,
+    QuestionBatch,
+    ResolvePhase,
+)
 
 
 class ResolverAwaitingAnswers(Exception):
@@ -25,3 +31,19 @@ class QuestionBroker(ABC):
     @abstractmethod
     async def ask(self, questions: QuestionBatch) -> AnswerBatch:
         """Ask one batch before worker execution."""
+
+
+class ResolverObserver(ABC):
+    """Receive every durably recorded resolver transition as it lands.
+
+    The resolver emits only after the state repository has saved, so an
+    observer never reports a transition that a crash could roll back.
+    """
+
+    @abstractmethod
+    def phase_changed(self, phase: ResolvePhase) -> None:
+        """One run-level phase was recorded."""
+
+    @abstractmethod
+    def concern_changed(self, progress: ConcernProgress) -> None:
+        """One concern status or reason was recorded."""

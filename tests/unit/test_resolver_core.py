@@ -17,7 +17,11 @@ from lup.harness.process import (
     ProcessLauncher,
 )
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
-from lup.resolver.contracts import QuestionBroker, ResolverAwaitingAnswers
+from lup.resolver.contracts import (
+    QuestionBroker,
+    ResolverAwaitingAnswers,
+    ResolverObserver,
+)
 from lup.resolver.core import (
     APPROVE,
     DEFER,
@@ -1375,3 +1379,102 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
     assert worker_calls["a"] == 3
     assert [outcome.verified for outcome in manifest.outcomes] == [True]
     assert manifest.final_review is not None
+
+
+class RecordingObserver(ResolverObserver):
+    def __init__(self) -> None:
+        self.phases: list[ResolvePhase] = []
+        self.transitions: list[ConcernProgress] = []
+
+    def phase_changed(self, phase: ResolvePhase) -> None:
+        self.phases.append(phase)
+
+    def concern_changed(self, progress: ConcernProgress) -> None:
+        self.transitions.append(progress)
+
+
+@pytest.mark.asyncio
+async def test_observer_receives_every_persisted_transition_in_order(
+    tmp_path: Path,
+) -> None:
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        (root / "a.txt").write_text("done\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def reviewer_response(_root: Path, output_name: str) -> JsonObject:
+        if output_name == FinalReview.__name__:
+            return {"accepted": True, "reason": "combined branch verified"}
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    observer = RecordingObserver()
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="observed",
+            integration_branch="resolve/observed/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda root: ResolverTestFactory(root, worker_response),
+        lambda root: ResolverTestFactory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        RecordingQuestionBroker(),
+        launcher,
+        observer=observer,
+    )
+
+    await core.run(
+        ResolveInventory(
+            source=snapshot(workspace, launcher), concerns=[concern("a")]
+        )
+    )
+
+    assert observer.phases == [
+        ResolvePhase.INVENTORY,
+        ResolvePhase.QUESTIONS,
+        ResolvePhase.ELIGIBILITY,
+        ResolvePhase.DAG,
+        ResolvePhase.LEASES,
+        ResolvePhase.WORKERS,
+        ResolvePhase.DEPENDENCY_BASES,
+        ResolvePhase.REVIEW,
+        ResolvePhase.INTEGRATION,
+        ResolvePhase.VERIFICATION,
+        ResolvePhase.ACCEPTANCE,
+    ]
+    assert [item.status for item in observer.transitions] == [
+        ConcernStatus.DISCOVERED,
+        ConcernStatus.WAITING_FOR_ANSWERS,
+        ConcernStatus.ELIGIBLE,
+        ConcernStatus.LEASED,
+        ConcernStatus.RUNNING,
+        ConcernStatus.VALIDATING,
+        ConcernStatus.REVIEWING,
+        ConcernStatus.VERIFIED,
+        ConcernStatus.INTEGRATING,
+        ConcernStatus.INTEGRATED,
+    ]
+    assert {item.concern_id for item in observer.transitions} == {"a"}

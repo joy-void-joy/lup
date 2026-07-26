@@ -17,13 +17,19 @@ from pydantic import BaseModel
 from lup.codescan.markers import find_feedback
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
-from lup.resolver.contracts import QuestionBroker, ResolverAwaitingAnswers
+from lup.resolver.contracts import (
+    QuestionBroker,
+    ResolverAwaitingAnswers,
+    ResolverObserver,
+)
 from lup.resolver.core import ResolverCore
 from lup.resolver.models import (
     AnswerBatch,
+    ConcernProgress,
     InventoryNote,
     QuestionAnswer,
     QuestionBatch,
+    ResolvePhase,
     ResolveRequest,
     ResolverConfig,
     SourceSnapshot,
@@ -60,6 +66,23 @@ def resolver_intake(comments: list[FoundComment]) -> ResolverIntake:
             if comment.kind == "defer"
         ],
     )
+
+
+class ConsoleResolverObserver(ResolverObserver):
+    """Print one line per durably recorded resolver transition.
+
+    Long worker phases are otherwise silent; these lines are the liveness
+    signal that lets an operator stop polling state files and worktrees.
+    """
+
+    def phase_changed(self, phase: ResolvePhase) -> None:
+        typer.echo(f"[resolve] phase: {phase}")
+
+    def concern_changed(self, progress: ConcernProgress) -> None:
+        line = f"[resolve] {progress.concern_id}: {progress.status}"
+        if progress.reason:
+            line = f"{line} ({progress.reason})"
+        typer.echo(line)
 
 
 class ConsoleQuestionBroker(QuestionBroker):
@@ -391,6 +414,7 @@ def run_resolve(
             composition.invocation_renderer,
             broker,
             launcher,
+            observer=ConsoleResolverObserver(),
         )
         try:
             if core.repository.exists():

@@ -10,7 +10,11 @@ from pydantic import BaseModel, ConfigDict
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.harness.process import LaunchRequest, ProcessLauncher
-from lup.resolver.contracts import QuestionBroker, ResolverAwaitingAnswers
+from lup.resolver.contracts import (
+    QuestionBroker,
+    ResolverAwaitingAnswers,
+    ResolverObserver,
+)
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.models import (
     AgentRound,
@@ -159,6 +163,7 @@ class ResolverCore:
         invocation_renderer: SkillInvocationRenderer,
         question_broker: QuestionBroker,
         process_launcher: ProcessLauncher,
+        observer: ResolverObserver | None = None,
     ) -> None:
         self.config = config
         self.spec = spec
@@ -167,6 +172,7 @@ class ResolverCore:
         self.invocation_renderer = invocation_renderer
         self.question_broker = question_broker
         self.process_launcher = process_launcher
+        self.observer = observer
         self.repository = ResolverStateRepository(config.state_root, config.run_id)
         self.leases = WritableRootLeases(config.worktree_root)
         self.worktrees = WorktreeOrchestrator(process_launcher, config.workspace)
@@ -1163,6 +1169,25 @@ class ResolverCore:
             state = state.model_copy(update={"phase": current.phase})
         self.state = state
         self.repository.save(state)
+        self.emit_transitions(current, state)
+
+    def emit_transitions(
+        self, previous: ResolveState | None, state: ResolveState
+    ) -> None:
+        """Report only durably saved phase and concern changes to the observer."""
+        if self.observer is None:
+            return
+        if previous is None or previous.phase != state.phase:
+            self.observer.phase_changed(state.phase)
+        before = (
+            {item.concern_id: item for item in previous.progress}
+            if previous is not None
+            else {}
+        )
+        for item in state.progress:
+            prior = before[item.concern_id] if item.concern_id in before else None
+            if prior != item:
+                self.observer.concern_changed(item)
 
     def progress_state(
         self,
