@@ -21,6 +21,7 @@ from lup.resolver.contracts import (
     QuestionBroker,
     ResolverAwaitingAnswers,
     ResolverObserver,
+    WorktreePreparer,
 )
 from lup.resolver.core import ResolverCore
 from lup.resolver.models import (
@@ -40,6 +41,10 @@ from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup_template.devtools.dev.comments import FoundComment, scan_tracked
 from lup_template.devtools.dev.remote_auth import check_remote_auth
+from lup_template.devtools.dev.worktree import (
+    copy_gitignored_extras,
+    sync_dependencies,
+)
 from lup_template.devtools.harness.composition import harness_compositions
 
 
@@ -66,6 +71,22 @@ def resolver_intake(comments: list[FoundComment]) -> ResolverIntake:
             if comment.kind == "defer"
         ],
     )
+
+
+class FeatureWorktreePreparer(WorktreePreparer):
+    """Prepare leased resolver worktrees exactly like feature worktrees.
+
+    Copies the same gitignored extras and runs the same dependency sync as
+    ``dev worktree create``, so verification and tests inside a lease bind
+    to the leased checkout instead of the source tree's environment.
+    """
+
+    def __init__(self, source_root: Path) -> None:
+        self.source_root = source_root
+
+    def prepare(self, root: Path) -> None:
+        copy_gitignored_extras(self.source_root, root)
+        sync_dependencies(root)
 
 
 class ConsoleResolverObserver(ResolverObserver):
@@ -415,6 +436,7 @@ def run_resolve(
             broker,
             launcher,
             observer=ConsoleResolverObserver(),
+            worktree_preparer=FeatureWorktreePreparer(root),
         )
         try:
             if core.repository.exists():

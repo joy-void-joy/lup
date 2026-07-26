@@ -14,6 +14,7 @@ from lup.resolver.contracts import (
     QuestionBroker,
     ResolverAwaitingAnswers,
     ResolverObserver,
+    WorktreePreparer,
 )
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.models import (
@@ -164,6 +165,7 @@ class ResolverCore:
         question_broker: QuestionBroker,
         process_launcher: ProcessLauncher,
         observer: ResolverObserver | None = None,
+        worktree_preparer: WorktreePreparer | None = None,
     ) -> None:
         self.config = config
         self.spec = spec
@@ -175,7 +177,9 @@ class ResolverCore:
         self.observer = observer
         self.repository = ResolverStateRepository(config.state_root, config.run_id)
         self.leases = WritableRootLeases(config.worktree_root)
-        self.worktrees = WorktreeOrchestrator(process_launcher, config.workspace)
+        self.worktrees = WorktreeOrchestrator(
+            process_launcher, config.workspace, worktree_preparer
+        )
         self.question_lock = asyncio.Lock()
         self.state_lock = asyncio.Lock()
         self.state: ResolveState | None = None

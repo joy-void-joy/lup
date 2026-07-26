@@ -21,6 +21,7 @@ from lup.resolver.contracts import (
     QuestionBroker,
     ResolverAwaitingAnswers,
     ResolverObserver,
+    WorktreePreparer,
 )
 from lup.resolver.core import (
     APPROVE,
@@ -1478,3 +1479,35 @@ async def test_observer_receives_every_persisted_transition_in_order(
         ConcernStatus.INTEGRATED,
     ]
     assert {item.concern_id for item in observer.transitions} == {"a"}
+
+
+class RecordingPreparer(WorktreePreparer):
+    def __init__(self) -> None:
+        self.prepared: list[Path] = []
+
+    def prepare(self, root: Path) -> None:
+        self.prepared.append(root)
+
+
+def test_every_created_and_restored_worktree_is_prepared(tmp_path: Path) -> None:
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    source = snapshot(workspace, launcher)
+    preparer = RecordingPreparer()
+    orchestrator = WorktreeOrchestrator(launcher, workspace, preparer)
+    leases = WritableRootLeases(tmp_path / "resolver-worktrees")
+    lease = leases.acquire("a", "resolve/prepared/a")
+
+    orchestrator.create(lease, source.commit)
+    assert preparer.prepared == [lease.root]
+
+    orchestrator.remove(lease)
+    orchestrator.create(lease, source.commit)
+    launcher.launch(
+        LaunchRequest(
+            arguments=["git", "worktree", "remove", "--force", str(lease.root)],
+            cwd=workspace,
+        )
+    )
+    orchestrator.restore(lease)
+    assert preparer.prepared == [lease.root, lease.root, lease.root]

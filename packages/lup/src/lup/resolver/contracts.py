@@ -1,6 +1,7 @@
-"""The independently replaceable user-question delivery capability."""
+"""The independently replaceable resolver capability contracts."""
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from lup.resolver.models import (
     AnswerBatch,
@@ -47,3 +48,17 @@ class ResolverObserver(ABC):
     @abstractmethod
     def concern_changed(self, progress: ConcernProgress) -> None:
         """One concern status or reason was recorded."""
+
+
+class WorktreePreparer(ABC):
+    """Make a freshly created leased worktree ready for execution.
+
+    A bare ``git worktree add`` carries no dependency environment, so
+    verification commands inside the lease would resolve against the source
+    checkout. The application injects the same preparation its ordinary
+    feature worktrees receive.
+    """
+
+    @abstractmethod
+    def prepare(self, root: Path) -> None:
+        """Prepare one worktree root after creation or restoration."""
