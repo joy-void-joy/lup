@@ -35,7 +35,7 @@ generated artifacts. Never edit them as the source of a policy change.
    native decoding/rendering capability.
 2. Read the relevant canonical source and its cross-native fixtures.
 3. Show the current behavior and propose the smallest semantic change. When
-   the request did not already settle the decision, Request explicit user approval before changing policy behavior. Reason: a policy change alters what every later session may do
+   the request did not already settle the decision, Request explicit user approval before changing policy behavior. Reason: a policy change alters what every later session may do.
 4. Edit the canonical source and add fixtures for safe, denied, approval, and
    malformed variants as applicable.
 5. Run `uv run pytest -q tests/unit/test_semantic_policy.py`.

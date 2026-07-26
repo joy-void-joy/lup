@@ -88,7 +88,7 @@ Before porting, analyze what needs to change:
 - **Integration points**: Where does this pattern connect to the rest of the codebase?
 - **Conflicts**: Does anything in the current project overlap with or contradict this pattern?
 
-Present your analysis and proposed adaptation plan, then Request explicit user approval before making any change to this repository. Reason: the pattern comes from another project and has to be adapted, not copied
+Present your analysis and proposed adaptation plan, then Request explicit user approval before making any change to this repository. Reason: the pattern comes from another project and has to be adapted, not copied.
 
 ### 6. Port the pattern
 

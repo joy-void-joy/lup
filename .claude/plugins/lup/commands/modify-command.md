@@ -51,7 +51,7 @@ If `$ARGUMENTS` is empty, ask the user:
    - **Remove** behavior (simplify, strip sections)
    - **Replace** entirely (new description overrides old)
 5. **Show the user** the proposed changes: summarize what will change, show
-   before/after for key sections if helpful, then Request explicit user approval before writing the changed declaration. Reason: the change reaches every tree the declaration renders into
+   before/after for key sections if helpful, then Request explicit user approval before writing the changed declaration. Reason: the change reaches every tree the declaration renders into.
 6. **Apply** the changes -- edit the declaration's prompt parts
 7. **Update the `tools` list** if needed (e.g., new grants for added functionality)
 8. **Regenerate** with `uv run lup-devtools harness claude` and `harness codex` when the source was a lup skill

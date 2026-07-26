@@ -85,7 +85,7 @@ class ClaudeSpellings(NativeSpellings):
 
     def request_approval(self, action: str, reason: str) -> Instruction:
         return Instruction(
-            f"Request explicit user approval before {action}. Reason: {reason}"
+            f"Request explicit user approval before {action}. Reason: {reason}."
         )
 
     def relocate_session(self, path: str) -> Instruction:

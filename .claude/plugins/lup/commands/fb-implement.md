@@ -9,7 +9,7 @@ Implement changes identified during investigation, analysis, and reflection.
 
 ## Entry Gate
 
-Present the prioritized change list with its Bitter Lesson classification, then Request explicit user approval before implementing any of the changes. Reason: the list decides what the next session's work will be
+Present the prioritized change list with its Bitter Lesson classification, then Request explicit user approval before implementing any of the changes. Reason: the list decides what the next session's work will be.
 
 **Bitter Lesson classification:**
 - **Tool/capability** (preferred): Build or fix a tool, add a data source, improve automation

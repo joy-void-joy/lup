@@ -32,7 +32,7 @@ If no PR is found, check if the user passed a PR number as an argument. If still
 **If all reviews are approved (or no reviews but checks pass):**
 
 1. Show the PR summary
-2. Request explicit user approval before merging the pull request. Reason: the merge is irreversible and closes the review it opened
+2. Request explicit user approval before merging the pull request. Reason: the merge is irreversible and closes the review it opened.
 
 ### 4. Merge the PR
 

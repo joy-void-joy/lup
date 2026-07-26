@@ -91,7 +91,7 @@ Present findings and proposed changes one layer at a time. For each layer:
 
 1. **Show current state** — quote the relevant sections that need changes
 2. **Propose specific edits** — show what would change and why
-3. Request explicit user approval before applying that layer's edits. Reason: a principle sweep touches every layer and is hard to unpick once several have landed
+3. Request explicit user approval before applying that layer's edits. Reason: a principle sweep touches every layer and is hard to unpick once several have landed.
 
 ### Layer order:
 

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "8d4504d9154651612ee64219be0a65c460f293e4b1a6426185b3fe87b6b10e86",
+  "source_digest": "59ada2f2eb3d47d355a930f0aca7a4c6aa660b5012af7f1af4f6751f34dbf6d7",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "dec072e4eba75f12117fede72764729867c97323698d93b8166d3854bd554cc2",
+      "sha256": "fa5d5dcaf65a90924ffd119247abca10764f774021d098bd438efd271bcf402d",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -100,7 +100,7 @@
     {
       "path": ".claude/plugins/lup/commands/close.md",
       "category": "generated",
-      "sha256": "8d89f611e9abd9b37b4ebc049e45c82a5d596cbe5c8b2ec6470f6e4bb76f1d9e",
+      "sha256": "8790f88153368924ef608631601851ae5d6f4eafb35824e11626842201aaf398",
       "semantic_id": "skill.close",
       "executable": false
     },
@@ -135,7 +135,7 @@
     {
       "path": ".claude/plugins/lup/commands/fb-implement.md",
       "category": "generated",
-      "sha256": "bf38f215137bcca4493297bfb756caecc2d83bb412eab669d8b87f205c04c75f",
+      "sha256": "acce4abb62e49416d46ed73fe60212f3eb2119706b1e9da524aa8d0cb7eb8bcf",
       "semantic_id": "skill.fb-implement",
       "executable": false
     },
@@ -170,7 +170,7 @@
     {
       "path": ".claude/plugins/lup/commands/hooks.md",
       "category": "generated",
-      "sha256": "ce7d126facbf8872c52c411386b5dc7fc1e2d02c1a38995d200d142518f0df33",
+      "sha256": "5dbcaac649dd55ec97a36689934a594309b3caabe2cdc38504c13a4328fcc3ed",
       "semantic_id": "skill.hooks",
       "executable": false
     },
@@ -184,7 +184,7 @@
     {
       "path": ".claude/plugins/lup/commands/import.md",
       "category": "generated",
-      "sha256": "7ed486f2aed1e3c04aa120bc0834575bbe4d6f5c7e911c6656628231533d10ae",
+      "sha256": "ac3fb572deb3622f674c5efe372ce104935348492b9927404f95293c0e8fa941",
       "semantic_id": "skill.import",
       "executable": false
     },
@@ -205,7 +205,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "3df3d3ffe2b00500bab82ce2e6bd9c6fbcdcf999dd01b0b68f934c2fbf6ab699",
+      "sha256": "f92b268bac2d6454a4814581cf3da3ee1ffda580f55697e3be91745eb9ac76e4",
       "semantic_id": "skill.land",
       "executable": false
     },
@@ -219,21 +219,21 @@
     {
       "path": ".claude/plugins/lup/commands/meta.md",
       "category": "generated",
-      "sha256": "37e2269b4735e04c5788dd6262fe4f8b288a33d99a0eb00b5d4c85ac304e9d79",
+      "sha256": "9202d813591787319d59458931d07e223043d54aa3a3002a49ba100b861f3734",
       "semantic_id": "skill.meta",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/modify-command.md",
       "category": "generated",
-      "sha256": "be18235664a68a5805a5b7077d94dedeae3284a98c52b6bbe8067986ce978a49",
+      "sha256": "da99bf568dfddf163a65588a9b63582675cc0a6fd9fd33a1771ce4a9239402fb",
       "semantic_id": "skill.modify-command",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/principle.md",
       "category": "generated",
-      "sha256": "f1290238dd15f57aa1c47a30af884017b383046ee8f780ecfd76691907a85ac9",
+      "sha256": "e6c2c7d5b3be92aff750f06a055fc17ca29decfdde17c5efb53ae7ad7e58cb7a",
       "semantic_id": "skill.principle",
       "executable": false
     },
