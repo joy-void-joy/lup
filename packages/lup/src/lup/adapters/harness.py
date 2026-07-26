@@ -16,6 +16,7 @@ from lup.adapters.codex.harness import (
     CodexSkillRenderer,
     CodexSpellings,
 )
+from lup.codescan.portable import prose_breaches
 from lup.harness.contracts import NativeSpellings
 from lup.harness.generation import ArtifactValidationError
 from lup.harness.prompts import SpelledPromptRenderer
@@ -85,6 +86,24 @@ def reject_oversized_guidance(tree: ArtifactTree) -> None:
         )
 
 
+def reject_native_prose(source: Harness) -> None:
+    """Keep every native spelling inside the adapter that owns it.
+
+    Composition is the only place that sees the assembled text, so a
+    description built elsewhere and folded into a prompt is judged here too.
+    """
+    breaches = prose_breaches(source, [ClaudeSpellings(), CodexSpellings()])
+    if breaches:
+        named = ", ".join(
+            f"{breach.declaration_id} names {breach.spelling!r}"
+            for breach in breaches[:8]
+        )
+        raise ValueError(
+            "prose every tree renders must name no platform; a typed part "
+            f"spells these for each runtime instead: {named}"
+        )
+
+
 def reject_rendered_invocations(source: Harness, sigil: str) -> None:
     """Keep native invocation spelling inside typed adapter rendering only."""
     prefixes = tuple(
@@ -113,6 +132,7 @@ def reject_rendered_invocations(source: Harness, sigil: str) -> None:
 def compile_claude(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Claude-owned artifacts."""
     reject_rendered_invocations(source, "/")
+    reject_native_prose(source)
     spellings = ClaudeSpellings()
     prompts = prompt_renderer(spellings)
     manifest_renderer = ClaudePluginManifestRenderer()
@@ -139,6 +159,7 @@ def compile_claude(source: Harness) -> ArtifactTree:
 def compile_codex(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Codex-owned artifacts."""
     reject_rendered_invocations(source, "$")
+    reject_native_prose(source)
     spellings = CodexSpellings()
     prompts = prompt_renderer(spellings)
     manifest_renderer = CodexPluginManifestRenderer()
