@@ -106,7 +106,7 @@ def joined(decisions):
     return KernelDecision("allow", "every patched file is declared safe")
 
 
-def dispatch(payload):
+def dispatch(payload, permission_request=False):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
     if name == "Bash":
@@ -115,12 +115,10 @@ def dispatch(payload):
             SHELL_RULES,
             ALLOWED_FETCH_SCOPES,
             DENIED_FETCH_SCOPES,
-            sandboxed=sandbox_active(),
+            sandboxed=False if permission_request else sandbox_active(),
             trusted_script_roots=managed_script_roots(),
             existing_targets=existing_write_targets(tool_input["command"]),
-            # Codex hooks have no approval channel: an ask would land as a
-            # hard block, so it defers to the sandbox or fails closed.
-            interactive=False,
+            interactive=permission_request,
         )
     if name == "web_fetch":
         return decide_fetch(
@@ -146,10 +144,29 @@ def dispatch(payload):
 
 def main():
     try:
-        decision = dispatch(json.load(sys.stdin))
+        payload = json.load(sys.stdin)
+        permission_request = (
+            payload["hook_event_name"] == "PermissionRequest"
+            if "hook_event_name" in payload
+            else False
+        )
+        decision = dispatch(payload, permission_request)
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         sys.stderr.write(f"Malformed hook input requires approval: {error}")
         raise SystemExit(2) from error
+    if permission_request and decision.effect == "allow":
+        json.dump(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {"behavior": "allow"},
+                }
+            },
+            sys.stdout,
+        )
+        return
+    if permission_request and decision.effect == "ask":
+        return
     if decision.effect in ("allow", "defer"):
         return
     sys.stderr.write(decision.reason)

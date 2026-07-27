@@ -105,6 +105,31 @@ class ClaudeHookOutput(BaseModel):
     hook_specific_output: ClaudeHookDecision = Field(alias="hookSpecificOutput")
 
 
+class CodexPermissionDecision(BaseModel):
+    """Validated permission decision emitted by the Codex dispatcher."""
+
+    model_config = ConfigDict(frozen=True)
+
+    behavior: Literal["allow", "deny"]
+
+
+class CodexPermissionHookOutput(BaseModel):
+    """Codex PermissionRequest hook-specific output."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hook_event_name: Literal["PermissionRequest"] = Field(alias="hookEventName")
+    decision: CodexPermissionDecision
+
+
+class CodexPermissionOutput(BaseModel):
+    """Generated Codex permission hook output envelope."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hook_specific_output: CodexPermissionHookOutput = Field(alias="hookSpecificOutput")
+
+
 def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
     harness = portable_harness()
     plugin = harness.plugins[0]
@@ -207,6 +232,15 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
     assert Path(".claude/plugins/lup/hooks/runtime/kernel/shell.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/policy_data.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/evidence.json") in artifacts
+
+
+def test_codex_recipe_registers_semantic_permission_approval() -> None:
+    recipe = codex_generation_recipe(Path.cwd())
+    artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
+
+    hook_config = artifacts[Path(".codex/plugins/lup/hooks/hooks.json")].content
+    assert '"PermissionRequest"' in hook_config
+    assert "hooks/scripts/policy.py" in hook_config
 
 
 def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None:
@@ -751,6 +785,63 @@ def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     result = sh.Command(str(script))(
         _in='{"tool_name":"Bash","tool_input":{"command":"python -c 1"}}',
+        _ok_code=[0, 2],
+        _return_cmd=True,
+    )
+    assert isinstance(result, sh.RunningCommand)
+    assert result.exit_code == 2
+    assert b"interpreters" in result.stderr
+
+
+def test_generated_codex_permission_request_allows_safe_resolver() -> None:
+    script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
+    body = {
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": (
+                "UV_CACHE_DIR=/tmp/lup-uv-cache uv run lup-devtools "
+                "harness resolve --adapter codex"
+            )
+        },
+    }
+    result = sh.Command(str(script))(
+        _in=json.dumps(body),
+        _ok_code=[0, 2],
+        _return_cmd=True,
+    )
+    assert isinstance(result, sh.RunningCommand)
+    output = CodexPermissionOutput.model_validate_json(result.stdout)
+    assert result.exit_code == 0
+    assert output.hook_specific_output.decision.behavior == "allow"
+
+
+def test_generated_codex_permission_request_preserves_human_approval() -> None:
+    script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
+    body = {
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "tool_input": {"command": "# lup: escalate: required diagnostic\npython -c 1"},
+    }
+    result = sh.Command(str(script))(
+        _in=json.dumps(body),
+        _ok_code=[0, 2],
+        _return_cmd=True,
+    )
+    assert isinstance(result, sh.RunningCommand)
+    assert result.exit_code == 0
+    assert result.stdout == b""
+
+
+def test_generated_codex_permission_request_denies_unapproved_code() -> None:
+    script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
+    body = {
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "tool_input": {"command": "python -c 1"},
+    }
+    result = sh.Command(str(script))(
+        _in=json.dumps(body),
         _ok_code=[0, 2],
         _return_cmd=True,
     )

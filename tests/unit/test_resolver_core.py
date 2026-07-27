@@ -1268,9 +1268,7 @@ class ParkingQuestionBroker(QuestionBroker):
 
     async def ask(self, questions: QuestionBatch) -> AnswerBatch:
         dynamic = [
-            question
-            for question in questions.questions
-            if question.id == "a-dynamic"
+            question for question in questions.questions if question.id == "a-dynamic"
         ]
         if dynamic:
             raise ResolverAwaitingAnswers(dynamic, [])
@@ -1448,9 +1446,7 @@ async def test_observer_receives_every_persisted_transition_in_order(
     )
 
     await core.run(
-        ResolveInventory(
-            source=snapshot(workspace, launcher), concerns=[concern("a")]
-        )
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
     )
 
     assert observer.phases == [

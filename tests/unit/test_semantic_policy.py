@@ -112,6 +112,13 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="tree -L 2 src", effect="allow"),
     DecisionCase(input="uv run tool --help", effect="allow"),
     DecisionCase(
+        input=(
+            "UV_CACHE_DIR=/tmp/lup-uv-cache uv run lup-devtools "
+            "harness resolve --adapter codex"
+        ),
+        effect="allow",
+    ),
+    DecisionCase(
         input="uv run lup-devtools dev worktree create feature", effect="allow"
     ),
     # Redirections: discards and fd duplication are stripped; file writes ask.

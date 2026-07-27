@@ -1,5 +1,5 @@
 {
-  "askApproximation": "fail-closed exit code 2",
+  "askApproximation": "PermissionRequest defers asks to native approval",
   "policyIds": [
     "fetch",
     "shell",
