@@ -4,6 +4,7 @@ These tests execute installed provider CLIs and incur real model calls. The
 scheduled native lane supplies credentials and deliberately cheap models.
 """
 
+import asyncio
 import os
 import shutil
 from pathlib import Path
@@ -20,17 +21,22 @@ from lup.adapters.claude.runtime import (
 from lup.adapters.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.adapters.codex.runtime import CodexSessionConfig, create_codex_session_factory
 from lup.harness.process import LocalProcessLauncher
-from lup.resolver.contracts import QuestionBroker
 from lup.resolver.core import ResolverCore
+from lup.mcp import create_mcp_server, server_tool_names
+from lup.resolver.mailbox import (
+    AnswerDoor,
+    AnswerOffer,
+    QuestionMailbox,
+    utc_now,
+)
+from lup.resolver.tools import create_question_tools
 from lup.resolver.models import (
-    AnswerBatch,
     InventoryNote,
-    QuestionAnswer,
-    QuestionBatch,
     ResolveRequest,
     ResolverConfig,
     SourceSnapshot,
     VerificationCommand,
+    WorkerContext,
 )
 from lup.runtime.contracts import SessionFactory
 from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
@@ -99,23 +105,33 @@ async def test_codex_thread_start_carries_a_dynamic_tool(tmp_path: Path) -> None
     assert result.identifiers.session.value
 
 
-class ScriptedQuestionBroker(QuestionBroker):
-    """Answer every persisted resolver question with its recommendation."""
+async def answer_every_question(core: ResolverCore, stop: asyncio.Event) -> None:
+    """Stand in for a human at the mailbox, answering each recommendation.
 
-    def __init__(self) -> None:
-        self.asked: list[QuestionBatch] = []
-
-    async def ask(self, questions: QuestionBatch) -> AnswerBatch:
-        self.asked.append(questions)
-        answers = [
-            QuestionAnswer(
-                question_id=question.id,
-                value=question.recommendation
-                or (question.choices[0] if question.choices else "yes"),
+    The planner invents the concerns, so their question ids are not known
+    until the run asks — which is exactly the case a door serves and a
+    pre-seeded offer cannot.
+    """
+    while not stop.is_set():
+        answered = core.mailbox.answered_ids()
+        for item in core.mailbox.questions():
+            if item.question.id in answered:
+                continue
+            core.mailbox.offer(
+                AnswerOffer(
+                    run_id=core.config.run_id,
+                    question_id=item.question.id,
+                    value=item.question.recommendation
+                    or (item.question.choices[0] if item.question.choices else "yes"),
+                    door=AnswerDoor.FLAG,
+                    offered_at=utc_now(),
+                )
             )
-            for question in questions.questions
-        ]
-        return AnswerBatch(run_id=questions.run_id, answers=answers)
+        try:
+            async with asyncio.timeout(0.05):
+                await stop.wait()
+        except TimeoutError:
+            continue
 
 
 def fixture_repository(root: Path) -> Path:
@@ -142,13 +158,26 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
     launcher = LocalProcessLauncher()
     run_id = "smoke-run"
 
-    def worker_factory(cwd: Path) -> SessionFactory:
+    def worker_factory(context: WorkerContext) -> SessionFactory:
+        server = create_mcp_server(
+            "resolver",
+            tools=create_question_tools(
+                QuestionMailbox(repo / ".lup" / "resolve" / run_id),
+                context.concern_id,
+                run_id=run_id,
+                wake=core.wake,
+            ),
+        )
         return create_claude_session_factory(
             ClaudeSessionConfig(
                 model=CLAUDE_SMOKE_MODEL,
                 system_prompt="Execute the persisted Lup resolver assignment.",
-                cwd=cwd,
-                add_dirs=[cwd],
+                cwd=context.root,
+                add_dirs=[context.root],
+                tool_servers={"resolver": server},
+                allowed_tools=[
+                    f"mcp__resolver__{name}" for name in server_tool_names(server)
+                ],
             )
         )
 
@@ -179,9 +208,11 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
         worker_factory,
         reviewer_factory,
         ClaudeSpellings(),
-        ScriptedQuestionBroker(),
         launcher,
+        answer_wait_seconds=120.0,
     )
+    stop = asyncio.Event()
+    answering = asyncio.create_task(answer_every_question(core, stop))
     head = str(sh.Command("git")("rev-parse", "HEAD", _cwd=repo)).strip()
     manifest = await core.run(
         ResolveRequest(
@@ -196,6 +227,9 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
             ],
         )
     )
+
+    stop.set()
+    await answering
 
     assert manifest.run_id == run_id
     assert manifest.review_branch
