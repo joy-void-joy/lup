@@ -3,7 +3,7 @@
 from collections import Counter
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import pytest
 from pydantic import BaseModel
@@ -17,8 +17,13 @@ from lup.harness.process import (
     ProcessLauncher,
 )
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
+from lup.resolver.mailbox import (
+    AnswerDoor,
+    AnswerOffer,
+    PendingQuestion,
+    QuestionMailbox,
+)
 from lup.resolver.contracts import (
-    QuestionBroker,
     ResolverAwaitingAnswers,
     ResolverObserver,
     WorktreePreparer,
@@ -32,9 +37,12 @@ from lup.resolver.core import (
     approval_question,
 )
 from lup.resolver.models import (
+    ACCEPT,
+    ACCEPTANCE_QUESTION_ID,
     AnswerBatch,
     AcceptanceCriterion,
     Concern,
+    acceptance_question,
     ConcernInventory,
     ConcernOutcome,
     ConcernProgress,
@@ -54,7 +62,6 @@ from lup.resolver.models import (
     ReviewNote,
     ReviewReport,
     SourceSnapshot,
-    QuestionBatch,
     VerificationCommand,
     WorkerReport,
     WritableRootLease,
@@ -100,6 +107,55 @@ def concern(
     )
 
 
+def seed_offer(core: ResolverCore, question_id: str, value: str) -> None:
+    """Answer through the same door a `--answer` flag uses.
+
+    Offers may precede their questions, so a whole run's decisions can be
+    supplied before it starts — which is what replaces a test broker.
+    """
+    core.mailbox.offer(
+        AnswerOffer(
+            run_id=core.config.run_id,
+            question_id=question_id,
+            value=value,
+            door=AnswerDoor.FLAG,
+            offered_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+    )
+
+
+def seed_approvals(core: ResolverCore, concerns: list[Concern]) -> None:
+    for item in concerns:
+        seed_offer(core, approval_question(item).id, APPROVE)
+
+
+def worker_asks(mailbox: QuestionMailbox, run_id: str, asked: MaterialQuestion) -> None:
+    """Queue a question exactly as a worker's ``queue_questions`` tool does.
+
+    The fake worker cannot call an MCP tool, so it writes the record the
+    tool would write. Everything downstream — promotion, folding, and the
+    park — then runs against the real mailbox rather than a stub.
+    """
+    mailbox.queue(
+        PendingQuestion(
+            run_id=run_id,
+            question=asked,
+            asked_by=asked.concern_id,
+            asked_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+    )
+
+
+def dynamic_question(concern_id: str) -> MaterialQuestion:
+    return MaterialQuestion(
+        id=f"{concern_id}-dynamic",
+        concern_id=concern_id,
+        prompt="Choose the durable implementation",
+        choices=["durable"],
+        recommendation="durable",
+    )
+
+
 def resolve_spec() -> ResolveSpec:
     return ResolveSpec(
         id="resolve",
@@ -138,6 +194,17 @@ def test_dag_rejects_missing_nodes_and_cycles_and_filters_unapproved_ancestry() 
         [concern("parent", approved=False), concern("child", ["parent"])]
     )
     assert graph.approved() == []
+
+
+def test_a_question_id_must_name_one_mailbox_file() -> None:
+    with pytest.raises(ValueError, match="not a path-safe name"):
+        MaterialQuestion(id="nested/id", concern_id="a", prompt="Decide?")
+
+
+def test_a_missing_approval_answer_is_a_named_invariant() -> None:
+    """Answers arrive per question now, so absence must read as itself."""
+    with pytest.raises(ResolverInvariantError, match="no persisted approval answer"):
+        approval_decisions([concern("a")], AnswerBatch(run_id="run-1", answers=[]))
 
 
 def test_persisted_approval_answers_filter_deferred_ancestry() -> None:
@@ -312,11 +379,6 @@ class UnusedInvocationRenderer(SkillInvocationRenderer):
         raise AssertionError(f"invocation should not be rendered: {invocation}")
 
 
-class UnusedQuestionBroker(QuestionBroker):
-    async def ask(self, questions: QuestionBatch) -> AnswerBatch:
-        raise AssertionError(f"questions should not be asked: {questions}")
-
-
 class StaticResultTurn[T: BaseModel | None](Turn[T]):
     def __init__(self, result: TurnResult[T]) -> None:
         self.value = result
@@ -375,24 +437,6 @@ class ResolverTestFactory(SessionFactory):
         yield SessionHandle(session=ResolverTestSession(self.root, self.response))
 
 
-class RecordingQuestionBroker(QuestionBroker):
-    def __init__(self) -> None:
-        self.batches: list[QuestionBatch] = []
-
-    async def ask(self, questions: QuestionBatch) -> AnswerBatch:
-        self.batches.append(questions)
-        return AnswerBatch(
-            run_id=questions.run_id,
-            answers=[
-                QuestionAnswer(
-                    question_id=question.id,
-                    value=question.recommendation or question.choices[0],
-                )
-                for question in questions.questions
-            ],
-        )
-
-
 class LiteralInvocationRenderer(SkillInvocationRenderer):
     def render(self, invocation: SkillInvocation) -> str:
         return f"{invocation.plugin}:{invocation.skill}"
@@ -442,10 +486,9 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
             ],
         ),
         resolve_spec(),
-        lambda root: ResolverTestFactory(root, reviewer_response),
+        lambda context: ResolverTestFactory(context.root, reviewer_response),
         lambda root: ResolverTestFactory(root, reviewer_response),
         LiteralInvocationRenderer(),
-        UnusedQuestionBroker(),
         RecordingLauncher(),
     )
 
@@ -552,7 +595,6 @@ async def test_failed_integration_verification_is_not_marked_successful(
         lambda _cwd: UnusedSessionFactory(),
         lambda _cwd: UnusedSessionFactory(),
         UnusedInvocationRenderer(),
-        UnusedQuestionBroker(),
         FailingVerificationLauncher(),
     )
     core.persist(state)
@@ -636,7 +678,6 @@ def test_interrupted_concern_returns_to_persisted_lease_boundary(
         lambda _cwd: UnusedSessionFactory(),
         lambda _cwd: UnusedSessionFactory(),
         UnusedInvocationRenderer(),
-        UnusedQuestionBroker(),
         MissingBranchLauncher(),
     )
     core.persist(state)
@@ -708,7 +749,6 @@ def test_human_decision_is_locked_persisted_and_cleans_ephemeral_branches(
         lambda _cwd: UnusedSessionFactory(),
         lambda _cwd: UnusedSessionFactory(),
         UnusedInvocationRenderer(),
-        UnusedQuestionBroker(),
         SuccessfulLauncher(),
     )
     core.persist(state)
@@ -758,20 +798,11 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
         call = worker_calls[identifier] + 1
         worker_calls[identifier] = call
         if identifier == "b" and call == 1:
-            return {
-                "concern_id": identifier,
-                "changed": False,
-                "summary": "material choice required",
-                "questions": [
-                    {
-                        "id": "b-dynamic",
-                        "concern_id": "b",
-                        "prompt": "Choose the durable implementation",
-                        "choices": ["durable"],
-                        "recommendation": "durable",
-                    }
-                ],
-            }
+            worker_asks(
+                QuestionMailbox(tmp_path / "state" / run_id),
+                run_id,
+                dynamic_question("b"),
+            )
         relative = Path(f"{identifier}.txt")
         (root / relative).write_text(f"{identifier} round {call}\n", encoding="utf-8")
         return {
@@ -805,7 +836,6 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
             "criteria_met": [f"{identifier}-done"],
         }
 
-    broker = RecordingQuestionBroker()
     run_id = "complete-lifecycle"
     core = ResolverCore(
         ResolverConfig(
@@ -821,10 +851,9 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
             ],
         ),
         resolve_spec(),
-        lambda root: ResolverTestFactory(root, worker_response),
+        lambda context: ResolverTestFactory(context.root, worker_response),
         lambda root: ResolverTestFactory(root, reviewer_response),
         LiteralInvocationRenderer(),
-        broker,
         launcher,
     )
     initial_question = MaterialQuestion(
@@ -843,6 +872,10 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
         ],
     )
 
+    seed_approvals(core, inventory.concerns)
+    seed_offer(core, "a-initial", "yes")
+    seed_offer(core, "b-dynamic", "durable")
+
     manifest = await core.run(inventory)
 
     assert manifest.accepted is None
@@ -851,11 +884,11 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
     )
     assert all(outcome.verified for outcome in manifest.outcomes)
     assert {outcome.concern_id for outcome in manifest.outcomes} == {"a", "b", "c"}
-    assert worker_calls == {"a": 2, "b": 2, "c": 1}
-    assert [batch.questions[0].id for batch in broker.batches] == [
+    assert worker_calls == {"a": 2, "b": 1, "c": 1}
+    assert {item.question.id for item in core.mailbox.questions()} >= {
         "a-initial",
         "b-dynamic",
-    ]
+    }
     assert git("branch", "--show-current") == source_branch
     assert git("rev-parse", "HEAD") == source_commit
 
@@ -914,7 +947,6 @@ def test_persist_clamps_phase_to_the_recorded_high_water_mark(tmp_path: Path) ->
         lambda _cwd: UnusedSessionFactory(),
         lambda _cwd: UnusedSessionFactory(),
         UnusedInvocationRenderer(),
-        UnusedQuestionBroker(),
         RecordingLauncher(),
     )
     core.persist(state)
@@ -990,10 +1022,9 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
                 ],
             ),
             resolve_spec(),
-            lambda root: ResolverTestFactory(root, worker_response),
+            lambda context: ResolverTestFactory(context.root, worker_response),
             lambda root: ResolverTestFactory(root, reviewer_response),
             LiteralInvocationRenderer(),
-            RecordingQuestionBroker(),
             launcher,
         )
 
@@ -1008,6 +1039,7 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
 
     monkeypatch.setattr(killed.leases, "acquire", kill_before_integration)
     with pytest.raises(RuntimeError, match="killed before"):
+        seed_approvals(killed, [concern("a")])
         await killed.run(ResolveInventory(source=source, concerns=[concern("a")]))
     assert killed.repository.load().phase == ResolvePhase.REVIEW
 
@@ -1065,10 +1097,9 @@ def failure_leg_core(
             max_revision_rounds=max_revision_rounds,
         ),
         resolve_spec(),
-        lambda root: ResolverTestFactory(root, worker_response),
+        lambda context: ResolverTestFactory(context.root, worker_response),
         lambda root: ResolverTestFactory(root, reviewer_response),
         LiteralInvocationRenderer(),
-        RecordingQuestionBroker(),
         launcher,
     )
 
@@ -1109,6 +1140,7 @@ async def test_worker_crash_persists_the_failure_and_raises_a_group(
     )
 
     with pytest.raises(ExceptionGroup) as raised:
+        seed_approvals(core, [concern("a")])
         await core.run(
             ResolveInventory(
                 source=snapshot(workspace, launcher), concerns=[concern("a")]
@@ -1179,6 +1211,7 @@ async def test_revision_exhaustion_soft_fails_and_blocks_dependents(
         max_revision_rounds=1,
     )
 
+    seed_approvals(core, [concern("a"), concern("b"), concern("c", ["a"])])
     manifest = await core.run(
         ResolveInventory(
             source=snapshot(workspace, launcher),
@@ -1244,6 +1277,7 @@ async def test_unresolved_semantic_join_fails_the_dependent_concern(
     )
 
     with pytest.raises(ExceptionGroup) as raised:
+        seed_approvals(core, [concern("a"), concern("b"), concern("c", ["a", "b"])])
         await core.run(
             ResolveInventory(
                 source=snapshot(workspace, launcher),
@@ -1263,27 +1297,6 @@ async def test_unresolved_semantic_join_fails_the_dependent_concern(
     assert "semantic join failed for c" in (progress["c"].reason or "")
 
 
-class ParkingQuestionBroker(QuestionBroker):
-    """Answer planning questions from recommendations; park dynamic ones."""
-
-    async def ask(self, questions: QuestionBatch) -> AnswerBatch:
-        dynamic = [
-            question for question in questions.questions if question.id == "a-dynamic"
-        ]
-        if dynamic:
-            raise ResolverAwaitingAnswers(dynamic, [])
-        return AnswerBatch(
-            run_id=questions.run_id,
-            answers=[
-                QuestionAnswer(
-                    question_id=question.id,
-                    value=question.recommendation or question.choices[0],
-                )
-                for question in questions.questions
-            ],
-        )
-
-
 @pytest.mark.asyncio
 async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
     tmp_path: Path,
@@ -1297,22 +1310,14 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
             return {"completed": True, "summary": "semantic join reviewed"}
         if output_name != WorkerReport.__name__:
             raise AssertionError(output_name)
-        call = worker_calls["a"] + 1
-        worker_calls["a"] = call
-        if call <= 2:
+        worker_calls["a"] += 1
+        mailbox = QuestionMailbox(tmp_path / "state" / "midrun-park")
+        worker_asks(mailbox, "midrun-park", dynamic_question("a"))
+        if "a-dynamic" not in mailbox.answered_ids():
             return {
                 "concern_id": "a",
                 "changed": False,
-                "summary": "material choice required",
-                "questions": [
-                    {
-                        "id": "a-dynamic",
-                        "concern_id": "a",
-                        "prompt": "Choose the durable implementation",
-                        "choices": ["durable"],
-                        "recommendation": "durable",
-                    }
-                ],
+                "summary": "parked awaiting a material choice",
             }
         (root / "a.txt").write_text("durable\n", encoding="utf-8")
         return {
@@ -1333,7 +1338,7 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
             "criteria_met": ["a-done"],
         }
 
-    def build_core(broker: QuestionBroker) -> ResolverCore:
+    def build_core() -> ResolverCore:
         return ResolverCore(
             ResolverConfig(
                 state_root=tmp_path / "state",
@@ -1349,14 +1354,14 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
                 ],
             ),
             resolve_spec(),
-            lambda root: ResolverTestFactory(root, worker_response),
+            lambda context: ResolverTestFactory(context.root, worker_response),
             lambda root: ResolverTestFactory(root, reviewer_response),
             LiteralInvocationRenderer(),
-            broker,
             launcher,
         )
 
-    parked_core = build_core(ParkingQuestionBroker())
+    parked_core = build_core()
+    seed_approvals(parked_core, [concern("a")])
     with pytest.raises(ResolverAwaitingAnswers) as raised:
         await parked_core.run(
             ResolveInventory(
@@ -1373,11 +1378,123 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
     assert persisted.questions is not None
     assert "a-dynamic" in {q.id for q in persisted.questions.questions}
 
-    manifest = await build_core(RecordingQuestionBroker()).resume()
+    resumed = build_core()
+    seed_offer(resumed, "a-dynamic", "durable")
+    manifest = await resumed.resume()
 
-    assert worker_calls["a"] == 3
+    assert worker_calls["a"] == 2
     assert [outcome.verified for outcome in manifest.outcomes] == [True]
     assert manifest.final_review is not None
+
+
+@pytest.mark.asyncio
+async def test_acceptance_is_answered_through_the_mailbox_like_any_question(
+    tmp_path: Path,
+) -> None:
+    """``--accept`` is a door, not a separate path into cleanup.
+
+    The flag, the page, and a console answer all write the same reserved
+    offer, so the run applies whichever arrives without knowing which door
+    it came through.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        (root / "a.txt").write_text("durable\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def reviewer_response(_root: Path, output_name: str) -> JsonObject:
+        if output_name == FinalReview.__name__:
+            return {"accepted": True, "reason": "combined branch verified"}
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    def build_core() -> ResolverCore:
+        return ResolverCore(
+            ResolverConfig(
+                state_root=tmp_path / "state",
+                workspace=workspace,
+                worktree_root=tmp_path / "resolver-worktrees",
+                run_id="acceptance-door",
+                integration_branch="resolve/acceptance-door/review",
+                verification_commands=[
+                    VerificationCommand(
+                        name="combined-diff",
+                        arguments=["git", "diff", "--check", "HEAD"],
+                    )
+                ],
+            ),
+            resolve_spec(),
+            lambda context: ResolverTestFactory(context.root, worker_response),
+            lambda root: ResolverTestFactory(root, reviewer_response),
+            LiteralInvocationRenderer(),
+            launcher,
+        )
+
+    undecided = build_core()
+    seed_approvals(undecided, [concern("a")])
+    manifest = await undecided.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    assert manifest.accepted is None
+    assert manifest.final_review is not None
+    assert ACCEPTANCE_QUESTION_ID in {
+        item.question.id for item in undecided.mailbox.questions()
+    }
+
+    decided = build_core()
+    seed_offer(decided, ACCEPTANCE_QUESTION_ID, ACCEPT)
+    completed = await decided.resume()
+
+    assert completed.accepted is True
+    assert [record.action for record in completed.cleanup] == ["removed", "retained"]
+
+
+@pytest.mark.asyncio
+async def test_an_acceptance_offer_outside_its_choices_never_decides(
+    tmp_path: Path,
+) -> None:
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="bad-acceptance",
+            integration_branch="resolve/bad-acceptance/review",
+            verification_commands=[VerificationCommand(name="v", arguments=["git"])],
+        ),
+        resolve_spec(),
+        lambda context: ResolverTestFactory(context.root, lambda *_: {}),
+        lambda root: ResolverTestFactory(root, lambda *_: {}),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    core.queue_questions([acceptance_question()], "integration")
+    seed_offer(core, ACCEPTANCE_QUESTION_ID, "maybe")
+
+    problems = core.promote_offers()
+
+    assert core.mailbox.answers() == []
+    assert problems == [
+        f"{ACCEPTANCE_QUESTION_ID} was answered 'maybe', which is not one of: "
+        "accept, reject"
+    ]
 
 
 class RecordingObserver(ResolverObserver):
@@ -1437,14 +1554,14 @@ async def test_observer_receives_every_persisted_transition_in_order(
             ],
         ),
         resolve_spec(),
-        lambda root: ResolverTestFactory(root, worker_response),
+        lambda context: ResolverTestFactory(context.root, worker_response),
         lambda root: ResolverTestFactory(root, reviewer_response),
         LiteralInvocationRenderer(),
-        RecordingQuestionBroker(),
         launcher,
         observer=observer,
     )
 
+    seed_approvals(core, [concern("a")])
     await core.run(
         ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
     )

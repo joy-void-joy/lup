@@ -2,7 +2,8 @@
 
 import asyncio
 import hashlib
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -11,16 +12,26 @@ from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.harness.process import LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import (
-    QuestionBroker,
     ResolverAwaitingAnswers,
     ResolverObserver,
     WorktreePreparer,
 )
 from lup.resolver.dag import ConcernGraph
+from lup.resolver.mailbox import (
+    ANSWER_POLL_SECONDS,
+    PendingQuestion,
+    QuestionMailbox,
+    RecordedAnswer,
+    utc_now,
+    wait_for_answers,
+)
 from lup.resolver.models import (
+    ACCEPT,
+    ACCEPTANCE_CONCERN_ID,
     AgentRound,
     AnswerBatch,
     CleanupRecord,
+    acceptance_question,
     Concern,
     ConcernEligibility,
     ConcernInventory,
@@ -45,8 +56,8 @@ from lup.resolver.models import (
     ReviewReport,
     VerificationRecord,
     WorkAssignment,
+    WorkerContext,
     WorkerReport,
-    WorkerQuestionResolution,
     WritableRootLease,
 )
 from lup.resolver.orchestrator import (
@@ -55,6 +66,7 @@ from lup.resolver.orchestrator import (
     WritableRootLeases,
 )
 from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
+from lup.resolver.tools import WAIT_CONTRACT
 from lup.runtime.contracts import SessionFactory
 from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.query import query
@@ -65,11 +77,14 @@ class ResolverInvariantError(RuntimeError):
     """A native result or persisted transition violated resolver semantics."""
 
 
-type SessionFactoryRecipe = Callable[[Path], SessionFactory]
+type WorkerFactoryRecipe = Callable[[WorkerContext], SessionFactory]
+type ReviewerFactoryRecipe = Callable[[Path], SessionFactory]
 type ResolverInput = ResolveRequest | ResolveInventory
 
 
-def corrective(recipe: SessionFactoryRecipe) -> SessionFactoryRecipe:
+def corrective[T](
+    recipe: Callable[[T], SessionFactory],
+) -> Callable[[T], SessionFactory]:
     """Give each opened session corrective structured-output reprompts.
 
     Every resolver turn ends in a typed submission; a model that answers in
@@ -77,9 +92,9 @@ def corrective(recipe: SessionFactoryRecipe) -> SessionFactoryRecipe:
     whole run on its first miss.
     """
 
-    def factory(root: Path) -> SessionFactory:
+    def factory(argument: T) -> SessionFactory:
         return DecoratingSessionFactory(
-            recipe(root), correction=CorrectionConfig(cycles=2)
+            recipe(argument), correction=CorrectionConfig(cycles=2)
         )
 
     return factory
@@ -87,6 +102,12 @@ def corrective(recipe: SessionFactoryRecipe) -> SessionFactoryRecipe:
 
 APPROVE = "approve"
 DEFER = "defer"
+
+ASK_PREAMBLE = (
+    "When a decision is not yours to make, ask through the resolver's question "
+    "tools — queue_questions, await_answers, ask_questions — rather than "
+    "guessing or ending your turn to report it. " + WAIT_CONTRACT
+)
 
 
 class ApprovalDecisions(BaseModel):
@@ -138,12 +159,24 @@ def approval_decisions(
 ) -> ApprovalDecisions:
     """Return direct and dependency-safe approvals from persisted answers."""
     answer_values = {answer.question_id: answer.value for answer in answers.answers}
+    gated = [
+        concern
+        for concern in concerns
+        if concern.eligible and concern.integration_approved
+    ]
+    missing = [
+        concern.id
+        for concern in gated
+        if approval_question(concern).id not in answer_values
+    ]
+    if missing:
+        raise ResolverInvariantError(
+            "no persisted approval answer for " + ", ".join(sorted(missing))
+        )
     direct = {
         concern.id
-        for concern in concerns
-        if concern.eligible
-        and concern.integration_approved
-        and answer_values[approval_question(concern).id] == APPROVE
+        for concern in gated
+        if answer_values[approval_question(concern).id] == APPROVE
     }
     approved = ConcernGraph(concerns).transitively_approved(direct)
     return ApprovalDecisions(
@@ -159,28 +192,31 @@ class ResolverCore:
         self,
         config: ResolverConfig,
         spec: ResolveSpec,
-        worker_factory: SessionFactoryRecipe,
-        reviewer_factory: SessionFactoryRecipe,
+        worker_factory: WorkerFactoryRecipe,
+        reviewer_factory: ReviewerFactoryRecipe,
         invocation_renderer: SkillInvocationRenderer,
-        question_broker: QuestionBroker,
         process_launcher: ProcessLauncher,
         observer: ResolverObserver | None = None,
         worktree_preparer: WorktreePreparer | None = None,
+        answer_wait_seconds: float = 0.0,
+        poll_interval_seconds: float = ANSWER_POLL_SECONDS,
     ) -> None:
         self.config = config
         self.spec = spec
         self.worker_factory = corrective(worker_factory)
         self.reviewer_factory = corrective(reviewer_factory)
         self.invocation_renderer = invocation_renderer
-        self.question_broker = question_broker
         self.process_launcher = process_launcher
+        self.answer_wait_seconds = answer_wait_seconds
+        self.poll_interval_seconds = poll_interval_seconds
         self.observer = observer
         self.repository = ResolverStateRepository(config.state_root, config.run_id)
         self.leases = WritableRootLeases(config.worktree_root)
         self.worktrees = WorktreeOrchestrator(
             process_launcher, config.workspace, worktree_preparer
         )
-        self.question_lock = asyncio.Lock()
+        self.mailbox = QuestionMailbox(self.repository.root)
+        self.wake = asyncio.Event()
         self.state_lock = asyncio.Lock()
         self.state: ResolveState | None = None
 
@@ -287,7 +323,8 @@ class ResolverCore:
             return self.manifest(state)
         if state.phase == ResolvePhase.ACCEPTANCE:
             self.state = state
-            return self.manifest(state)
+            async with self.promoting():
+                return self.manifest(await self.settle_acceptance())
         if state.phase == ResolvePhase.FAILED:
             if state.resume_from is None:
                 raise ResolverInvariantError(
@@ -308,7 +345,32 @@ class ResolverCore:
             raise
 
     async def advance(self, state: ResolveState) -> ResolveManifest:
-        """Advance an initial or restored state through the acceptance boundary."""
+        """Advance an initial or restored state through the acceptance boundary.
+
+        A stale park marker would abort the first wait of a resumed run, so
+        it is the one mailbox record a resume clears.
+        """
+        async with self.promoting():
+            return await self.advance_exclusive(state)
+
+    @asynccontextmanager
+    async def promoting(self) -> AsyncGenerator[None]:
+        """Keep every door's offers promoted for the lifetime of one operation.
+
+        Waiting reads ``answers/``, and only a promoter writes there, so any
+        wait that runs without this is a wait no door can satisfy.
+        """
+        self.mailbox.clear_park()
+        stop = asyncio.Event()
+        promoter = asyncio.create_task(self.promote_until(stop))
+        try:
+            yield
+        finally:
+            stop.set()
+            await promoter
+
+    async def advance_exclusive(self, state: ResolveState) -> ResolveManifest:
+        """Advance while a promoter is folding every door's answers in."""
         if state.questions is None:
             initial_questions = QuestionBatch(
                 run_id=state.run_id,
@@ -323,6 +385,7 @@ class ResolverCore:
                     if concern.eligible and concern.integration_approved
                 ],
             )
+            self.queue_questions(initial_questions.questions, "planning")
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.QUESTIONS,
@@ -340,13 +403,11 @@ class ResolverCore:
                 ConcernStatus.WAITING_FOR_ANSWERS,
             )
             self.persist(state)
-        if state.answers is None:
-            questions = state.questions
-            if questions is None:
-                raise ResolverInvariantError("question phase has no persisted batch")
-            answers = await self.ask(questions)
-            state = state.model_copy(update={"answers": answers})
-            self.persist(state)
+        questions = state.questions
+        if questions is None:
+            raise ResolverInvariantError("question phase has no persisted batch")
+        await self.await_questions(questions.questions)
+        state = self.require_state()
 
         answers = state.answers
         if answers is None:
@@ -527,6 +588,8 @@ class ResolverCore:
             state = await self.integrate(state, outcomes)
         elif state.final_review is None:
             state = await self.integrate(state, outcomes)
+        if state.phase is ResolvePhase.ACCEPTANCE and state.accepted is None:
+            state = await self.settle_acceptance()
         return self.manifest(state)
 
     def restore_leases(self, state: ResolveState) -> None:
@@ -693,11 +756,9 @@ class ResolverCore:
         for round_number in range(1, maximum_round + 1):
             await self.transition_concern(concern.id, ConcernStatus.RUNNING)
             worker = await self.worker_turn(assignment, feedback)
-            question_resolution = await self.resolve_worker_questions(
-                worker, assignment, feedback
-            )
-            worker = question_resolution.report
-            assignment = question_resolution.assignment
+            outstanding = await self.unanswered_for(concern.id)
+            if outstanding:
+                raise ResolverAwaitingAnswers(outstanding, [])
             await self.transition_concern(concern.id, ConcernStatus.VALIDATING)
             diff = self.worktrees.validate_and_commit(
                 concern, worker, lease, current_base, self.leases
@@ -780,13 +841,18 @@ class ResolverCore:
             "that authority. Resolve every acceptance criterion, then remove each "
             "assigned review-note marker as part of the same change. Never remove a "
             "marker whose concern remains unresolved.\n\n"
+            f"{ASK_PREAMBLE}\n\n"
             f"{assignment.rendered_skill_invocation}\n\n"
             f"Assignment:\n{assignment.model_dump_json(indent=2)}"
         )
         if feedback:
             prompt += f"\n\nPersisted review feedback:\n{feedback}"
         result = await query(
-            self.worker_factory(assignment.lease.root),
+            self.worker_factory(
+                WorkerContext(
+                    root=assignment.lease.root, concern_id=assignment.concern.id
+                )
+            ),
             turn_request(TurnInput(text=prompt), WorkerReport),
         )
         if result.output.concern_id != assignment.concern.id:
@@ -854,92 +920,141 @@ class ResolverCore:
             f"Parent commits:\n" + "\n".join(commits)
         )
         result = await query(
-            self.worker_factory(lease.root),
+            self.worker_factory(
+                WorkerContext(root=lease.root, concern_id=lease.concern_id)
+            ),
             turn_request(TurnInput(text=prompt), MergeReport),
         )
         return result.output
 
-    async def resolve_worker_questions(
-        self,
-        worker: WorkerReport,
-        assignment: WorkAssignment,
-        feedback: str,
-    ) -> WorkerQuestionResolution:
-        current = worker
-        updated = assignment
-        for _question_round in range(self.config.max_question_rounds):
-            if not current.questions:
-                return WorkerQuestionResolution(report=current, assignment=updated)
-            answers = await self.ask_dynamic(current.questions)
-            updated = updated.model_copy(
-                update={"answers": [*updated.answers, *answers.answers]}
-            )
-            current = await self.worker_turn(updated, feedback)
-        if current.questions:
-            raise ResolverInvariantError(
-                f"worker question limit exhausted for {assignment.concern.id}"
-            )
-        return WorkerQuestionResolution(report=current, assignment=updated)
+    async def unanswered_for(self, concern_id: str) -> list[MaterialQuestion]:
+        """Questions this concern asked that no door has answered yet.
 
-    async def ask_dynamic(self, questions: list[MaterialQuestion]) -> AnswerBatch:
-        async with self.question_lock:
-            state = self.require_state()
-            existing_questions = state.questions or QuestionBatch(
-                run_id=state.run_id, questions=[]
-            )
-            batch = QuestionBatch(run_id=state.run_id, questions=questions)
-            fresh = {question.id for question in questions}
-            combined_questions = QuestionBatch(
-                run_id=state.run_id,
-                questions=[
-                    *(
-                        question
-                        for question in existing_questions.questions
-                        if question.id not in fresh
-                    ),
-                    *questions,
-                ],
-            )
-            self.persist(state.model_copy(update={"questions": combined_questions}))
-            answers = await self.ask(batch)
-            state = self.require_state()
-            existing_answers = state.answers or AnswerBatch(
-                run_id=state.run_id, answers=[]
-            )
-            answered = {answer.question_id for answer in answers.answers}
-            combined_answers = AnswerBatch(
-                run_id=state.run_id,
-                answers=[
-                    *(
-                        answer
-                        for answer in existing_answers.answers
-                        if answer.question_id not in answered
-                    ),
-                    *answers.answers,
-                ],
-            )
-            self.persist(state.model_copy(update={"answers": combined_answers}))
-            return answers
+        A worker asks through its tools and waits there, so reaching this
+        point with anything outstanding means the tool returned ``parked``
+        and the worker submitted rather than guessing. Reading the mailbox
+        is what turns that into the run's existing park.
+        """
+        await self.apply_mailbox()
+        answered = self.mailbox.answered_ids()
+        return [
+            item.question
+            for item in self.mailbox.questions()
+            if item.question.concern_id == concern_id
+            and item.question.id not in answered
+        ]
 
-    async def ask(self, batch: QuestionBatch) -> AnswerBatch:
-        if not batch.questions:
-            return AnswerBatch(run_id=batch.run_id, answers=[])
-        answers = await self.question_broker.ask(batch)
-        if answers.run_id != batch.run_id:
-            raise ResolverInvariantError("question broker returned a foreign run id")
-        expected = {question.id: question for question in batch.questions}
-        received = {answer.question_id: answer for answer in answers.answers}
-        if set(expected) != set(received):  # lup: ignore[set-shape]
-            raise ResolverInvariantError(
-                "question broker did not answer the exact batch"
-            )
-        for identifier, answer in received.items():
-            choices = expected[identifier].choices
-            if choices and answer.value not in choices:
-                raise ResolverInvariantError(
-                    f"answer for {identifier!r} is not a declared choice"
+    def queue_questions(self, questions: list[MaterialQuestion], asked_by: str) -> None:
+        """Publish questions so any door can answer them."""
+        for question in questions:
+            self.mailbox.queue(
+                PendingQuestion(
+                    run_id=self.config.run_id,
+                    question=question,
+                    asked_by=asked_by,
+                    asked_at=utc_now(),
                 )
-        return answers
+            )
+
+    def promote_offers(self) -> list[str]:
+        """Promote what the doors offered, and report what could not count.
+
+        This is the only writer of recorded answers. An offer outside its
+        question's declared choices is a correctable problem rather than a
+        fatal one — a door is a form, not a trusted caller.
+        """
+        questions = {
+            item.question.id: item.question for item in self.mailbox.questions()
+        }
+        answered = self.mailbox.answered_ids()
+        fresh = [
+            offer
+            for offer in sorted(self.mailbox.offers(), key=lambda item: item.offered_at)
+            if offer.question_id in questions and offer.question_id not in answered
+        ]
+        valid = [
+            offer
+            for offer in fresh
+            if not questions[offer.question_id].choices
+            or offer.value in questions[offer.question_id].choices
+        ]
+        for offer in valid:
+            self.mailbox.record(
+                RecordedAnswer(
+                    run_id=self.config.run_id,
+                    answer=QuestionAnswer(
+                        question_id=offer.question_id, value=offer.value
+                    ),
+                    door=offer.door,
+                    answered_at=utc_now(),
+                )
+            )
+        return [
+            f"{offer.question_id} was answered {offer.value!r}, which is not one of: "
+            + ", ".join(questions[offer.question_id].choices)
+            for offer in fresh
+            if offer not in valid
+        ]
+
+    async def apply_mailbox(self) -> list[str]:
+        """Promote the doors' offers and fold the mailbox into persisted state."""
+        problems = self.promote_offers()
+        async with self.state_lock:
+            state = self.require_state()
+            questions = QuestionBatch(
+                run_id=state.run_id,
+                questions=[item.question for item in self.mailbox.questions()],
+            )
+            answers = AnswerBatch(
+                run_id=state.run_id,
+                answers=[record.answer for record in self.mailbox.answers()],
+            )
+            if state.questions != questions or state.answers != answers:
+                self.persist(
+                    state.model_copy(
+                        update={"questions": questions, "answers": answers}
+                    )
+                )
+        self.wake.set()
+        return problems
+
+    async def promote_until(self, stop: asyncio.Event) -> None:
+        """Keep promoting for the lifetime of one advance."""
+        while not stop.is_set():
+            await self.apply_mailbox()
+            try:
+                async with asyncio.timeout(self.poll_interval_seconds):
+                    await stop.wait()
+            except TimeoutError:
+                continue
+        await self.apply_mailbox()
+
+    async def await_questions(self, questions: list[MaterialQuestion]) -> AnswerBatch:
+        """Wait for every named question, or park the run on what is missing."""
+        if not questions:
+            return AnswerBatch(run_id=self.config.run_id, answers=[])
+        await self.apply_mailbox()
+        result = await wait_for_answers(
+            self.mailbox,
+            [question.id for question in questions],
+            wait_seconds=self.answer_wait_seconds,
+            poll_interval_seconds=self.poll_interval_seconds,
+            wake=self.wake,
+        )
+        problems = await self.apply_mailbox()
+        if result.unanswered:
+            raise ResolverAwaitingAnswers(
+                [
+                    question
+                    for question in questions
+                    if question.id in result.unanswered
+                ],
+                problems,
+            )
+        return AnswerBatch(
+            run_id=self.config.run_id,
+            answers=[record.answer for record in result.answered],
+        )
 
     def answers_for(self, concern_id: str) -> list[QuestionAnswer]:
         state = self.require_state()
@@ -1094,6 +1209,33 @@ class ResolverCore:
         )
         self.persist(state)
         return state
+
+    async def settle_acceptance(self) -> ResolveState:
+        """Offer the review decision through the mailbox and apply any answer.
+
+        Acceptance is a reserved question, so the page, a CLI door, and
+        ``--accept``/``--reject`` are one form rather than three separate
+        paths into cleanup. A run whose decision has not arrived returns
+        unchanged, exactly as it did before there was a door to answer
+        through — the decision is a boundary, not a failure.
+        """
+        question = acceptance_question()
+        self.queue_questions([question], ACCEPTANCE_CONCERN_ID)
+        await self.apply_mailbox()
+        result = await wait_for_answers(
+            self.mailbox,
+            [question.id],
+            wait_seconds=self.answer_wait_seconds,
+            poll_interval_seconds=self.poll_interval_seconds,
+            wake=self.wake,
+        )
+        await self.apply_mailbox()
+        if result.unanswered:
+            return self.require_state()
+        self.record_human_acceptance_exclusive(
+            result.answered[0].answer.value == ACCEPT
+        )
+        return self.require_state()
 
     def record_human_acceptance(self, accepted: bool) -> ResolveManifest:
         """Record cleanup/retention after the human decides on the review branch."""

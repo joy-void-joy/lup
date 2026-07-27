@@ -1,21 +1,16 @@
 """Behavioral contract of the resolver entry: headless answers and note intake."""
 
-import asyncio
+from pathlib import Path
 
 import pytest
 import typer
 
 from lup.codescan.markers import NoteKind
-from lup.resolver.models import (
-    AnswerBatch,
-    MaterialQuestion,
-    QuestionAnswer,
-    QuestionBatch,
-)
+from lup.resolver.mailbox import AnswerDoor, QuestionMailbox
+from lup.resolver.models import MaterialQuestion, QuestionBatch
 from lup_template.devtools.dev.comments import FoundComment
 from lup_template.devtools.harness.resolve import (
-    HeadlessQuestionBroker,
-    ResolverAwaitingAnswers,
+    offer_flag_answers,
     parse_answer_flags,
     resolver_intake,
 )
@@ -54,46 +49,28 @@ def test_parse_answer_flags_rejects_malformed_and_duplicate_flags() -> None:
         parse_answer_flags(["q-1=a", "q-1=b"])
 
 
-def test_headless_broker_answers_a_fully_covered_batch() -> None:
-    questions = question_batch(
-        [material_question("q-1", ["yes", "no"]), material_question("q-2")]
-    )
-    broker = HeadlessQuestionBroker({"q-1": "yes", "q-2": "free text"})
+def test_flag_answers_become_offers(tmp_path: Path) -> None:
+    mailbox = QuestionMailbox(tmp_path)
 
-    answers = asyncio.run(broker.ask(questions))
+    offer_flag_answers(mailbox, "run-7", {"q-1": "yes", "q-2": "free text"})
 
-    assert answers == AnswerBatch(
-        run_id="run-7",
-        answers=[
-            QuestionAnswer(question_id="q-1", value="yes"),
-            QuestionAnswer(question_id="q-2", value="free text"),
-        ],
-    )
+    assert [(item.question_id, item.value, item.door) for item in mailbox.offers()] == [
+        ("q-1", "yes", AnswerDoor.FLAG),
+        ("q-2", "free text", AnswerDoor.FLAG),
+    ]
 
 
-def test_headless_broker_parks_on_missing_invalid_and_unknown_answers() -> None:
-    questions = question_batch(
-        [material_question("q-1", ["yes", "no"]), material_question("q-2")]
-    )
-    broker = HeadlessQuestionBroker({"q-1": "maybe", "q-9": "x"})
+def test_a_flag_may_answer_a_question_the_run_has_not_asked_yet(
+    tmp_path: Path,
+) -> None:
+    """Offers precede questions, so a fresh run need not park once first."""
+    mailbox = QuestionMailbox(tmp_path)
 
-    with pytest.raises(ResolverAwaitingAnswers) as parked:
-        asyncio.run(broker.ask(questions))
+    offer_flag_answers(mailbox, "run-7", {"q-9": "x"})
 
-    pending_ids = [question.id for question in parked.value.pending]
-    assert pending_ids == ["q-2", "q-1"]
-    assert any("q-1=maybe" in problem for problem in parked.value.problems)
-    assert any("q-9" in problem for problem in parked.value.problems)
-
-
-def test_headless_broker_never_assumes_recommendations() -> None:
-    questions = question_batch(
-        [material_question("q-1", ["yes", "no"], recommendation="yes")]
-    )
-    broker = HeadlessQuestionBroker({})
-
-    with pytest.raises(ResolverAwaitingAnswers):
-        asyncio.run(broker.ask(questions))
+    assert mailbox.questions() == []
+    assert [item.question_id for item in mailbox.offers()] == ["q-9"]
+    assert mailbox.answers() == []
 
 
 def intake_note(kind: NoteKind = "note", condition: str | None = None) -> FoundComment:
