@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from lup.harness.models import ResolveSpec
 
 FROZEN = ConfigDict(frozen=True)
+FROZEN_STRICT = ConfigDict(frozen=True, extra="forbid")
 
 
 class ResolvePhase(StrEnum):
@@ -88,6 +89,13 @@ class MaterialQuestion(BaseModel):
     recommendation: str | None = None
 
     @model_validator(mode="after")
+    def identity_is_path_safe(self) -> "MaterialQuestion":
+        """Each question is one file in the mailbox, so its id is a filename."""
+        if not self.id or Path(self.id).name != self.id:
+            raise ValueError(f"question id {self.id!r} is not a path-safe name")
+        return self
+
+    @model_validator(mode="after")
     def recommendation_is_a_choice(self) -> "MaterialQuestion":
         if (
             self.recommendation is not None
@@ -133,6 +141,27 @@ class AnswerBatch(BaseModel):
         if len(identifiers) != len(dict.fromkeys(identifiers)):
             raise ValueError("answer question ids must be unique")
         return self
+
+
+ACCEPTANCE_QUESTION_ID = "integration-acceptance"
+ACCEPTANCE_CONCERN_ID = "integration"
+ACCEPT = "accept"
+REJECT = "reject"
+
+
+def acceptance_question() -> MaterialQuestion:
+    """The reserved question every acceptance door answers through.
+
+    Making the review decision an ordinary mailbox question is what lets the
+    page, the CLI, and ``--accept``/``--reject`` share one form instead of
+    each carrying its own path into :meth:`record_human_acceptance`.
+    """
+    return MaterialQuestion(
+        id=ACCEPTANCE_QUESTION_ID,
+        concern_id=ACCEPTANCE_CONCERN_ID,
+        prompt="Accept the review branch for manual integration?",
+        choices=[ACCEPT, REJECT],
+    )
 
 
 class ConcernShape(BaseModel):
@@ -233,22 +262,37 @@ class WorkAssignment(BaseModel):
     answers: list[QuestionAnswer] = Field(default_factory=list)
 
 
-class WorkerQuestionResolution(BaseModel):
+class WorkerContext(BaseModel):
+    """What one worker session needs to know about its own assignment.
+
+    The concern id is supplied rather than derived from the lease directory
+    name: that derivation holds only incidentally for concern worktrees and
+    is wrong for the integration lease. The question tools bind whatever id
+    they are given as the identity a worker cannot post outside of.
+    """
+
     model_config = FROZEN
 
-    report: "WorkerReport"
-    assignment: WorkAssignment
+    root: Path
+    concern_id: str
 
 
 class WorkerReport(BaseModel):
-    model_config = FROZEN
+    """One worker's account of its turn.
+
+    Extra fields are forbidden rather than ignored: a model still emitting
+    the retired ``questions`` field would otherwise have it silently dropped
+    and the question simply lost. Forbidding makes that a loud correction
+    the reprompt wrapper can fix.
+    """
+
+    model_config = FROZEN_STRICT
 
     concern_id: str
     changed: bool
     summary: str
     files_changed: list[Path] = Field(default_factory=list)
     swept_beyond_scope: list[Path] = Field(default_factory=list)
-    questions: list[MaterialQuestion] = Field(default_factory=list)
 
 
 class DiffValidation(BaseModel):
@@ -396,7 +440,6 @@ class ResolverConfig(BaseModel):
     run_id: str
     integration_branch: str
     max_revision_rounds: int = Field(default=2, ge=0)
-    max_question_rounds: int = Field(default=2, ge=0)
     verification_commands: list["VerificationCommand"] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -438,7 +481,7 @@ class ResolveState(BaseModel):
 
     model_config = FROZEN
 
-    schema_version: int = 1
+    schema_version: int = 2
     config_digest: str
     run_id: str
     phase: ResolvePhase

@@ -49,6 +49,7 @@ CONCERN_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {
     ConcernStatus.WAITING_FOR_ANSWERS: [
         ConcernStatus.ELIGIBLE,
         ConcernStatus.INELIGIBLE,
+        ConcernStatus.RUNNING,
         ConcernStatus.FAILED,
     ],
     ConcernStatus.ELIGIBLE: [ConcernStatus.LEASED, ConcernStatus.FAILED],
