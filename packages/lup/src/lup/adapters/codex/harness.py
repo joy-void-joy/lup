@@ -31,6 +31,12 @@ from lup.policy.bundle import (
     render_policy_data,
     runtime_url_scope,
 )
+from lup.policy.kernel.words import (
+    INTERPRETERS,
+    PASS_THROUGH_WORDS,
+    UV_RUN_ALLOWED_TARGETS,
+)
+from lup.policy.shell_rules import BASE_SHELL_RULES, ShellCommandRule
 
 
 class CodexSpellings(NativeSpellings):
@@ -89,10 +95,11 @@ class CodexSpellings(NativeSpellings):
             "Run `uv run lup-devtools harness resolve --adapter codex`. "
             "The command accepts optional flags: `--run-id <id>` resumes "
             "a persisted run and `--accept`/`--reject` records the human "
-            "decision on its review branch. A headless run parks on "
-            "material questions — relay them to the user verbatim, never "
-            "answer them yourself, then rerun with the repeatable "
-            "`--answer <question-id>=<value>` flag."
+            "decision on its review branch. The command is headless by "
+            "default and parks on material questions — relay them to "
+            "the user verbatim, never answer them yourself, then rerun "
+            "with the repeatable `--answer <question-id>=<value>` flag. "
+            "Never pass `--interactive`; it is for humans at a console."
         )
 
     def arguments_ref(self) -> Atom:
@@ -278,6 +285,10 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
                         "# Generated file — do not edit directly. Rendered from\n"
                         "# lup.adapters.codex.harness by "
                         "`uv run lup-devtools harness generate all`.\n"
+                        "# Personal sandbox and approval defaults stay in "
+                        "~/.codex/config.toml.\n"
+                        "# Native shell allows are generated under "
+                        ".codex/rules/.\n"
                         "[features]\nhooks = true\n"
                     ),
                     semantic_id="harness.project-config",
@@ -297,6 +308,74 @@ CODEX_PATCH_RUNTIME = (
     resources.files("lup.adapters.codex").joinpath("patch.py").read_text("utf-8")
 )
 """Envelope decoder, shipped beside the kernel for the dispatcher to import."""
+
+
+CODEX_DYNAMIC_COMMANDS = (
+    *INTERPRETERS,
+    *PASS_THROUGH_WORDS,
+    "awk",
+    "curl",
+    "find",
+    "gawk",
+    "git",
+    "mawk",
+    "rm",
+    "sed",
+    "uv",
+    "uvx",
+    "xargs",
+)
+"""Executables whose semantic decision cannot be represented by one prefix."""
+
+
+def codex_allow_prefixes(extension: list[ShellCommandRule]) -> list[list[str]]:
+    """Compile semantic allows that stay allowed for every suffix.
+
+    Codex prefix rules bypass the sandbox, so flag-guarded rows cannot be
+    widened into a native allow. The runtime hook continues to classify those
+    forms, along with every command whose safety depends on parsed content.
+    """
+
+    def add(prefix: list[str]) -> None:
+        if prefix not in prefixes:
+            prefixes.append(prefix)
+
+    prefixes: list[list[str]] = []
+    for command in [*BASE_SHELL_RULES, *extension]:
+        if not command.subcommands:
+            if (
+                command.name not in CODEX_DYNAMIC_COMMANDS
+                and command.default_effect == "allow"
+                and not command.ask_flags
+            ):
+                add([command.name])
+            continue
+        for subcommand in command.subcommands:
+            if subcommand.operations:
+                for operation in subcommand.operations:
+                    if operation.effect == "allow" and not operation.ask_flags:
+                        add([command.name, subcommand.name, operation.name])
+                continue
+            if subcommand.effect == "allow" and not subcommand.ask_flags:
+                add([command.name, subcommand.name])
+    for target in UV_RUN_ALLOWED_TARGETS:
+        add(["uv", "run", target])
+    return sorted(prefixes)
+
+
+def render_codex_rules(source: HookSet) -> str:
+    """Render project-local native execution rules for prefix-safe allows."""
+    rows = [
+        "# Generated file — do not edit directly. Rendered from the canonical",
+        "# Lup semantic shell policy by `uv run lup-devtools harness generate all`.",
+        "",
+    ]
+    for prefix in codex_allow_prefixes(source.shell_rules):
+        rows.append(
+            f"prefix_rule(pattern = {json.dumps(prefix)}, decision = "
+            '"allow", justification = "Allowed by Lup semantic shell policy")'
+        )
+    return "\n".join([*rows, ""])
 
 
 class CodexHookRenderer(ArtifactRenderer[HookSet]):
@@ -335,6 +414,11 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 Artifact(
                     path=Path(f".codex/plugins/{self.plugin_name}/hooks/hooks.json"),
                     content=json.dumps(hooks, indent=2, sort_keys=True),
+                    semantic_id=source.id,
+                ),
+                Artifact(
+                    path=Path(f".codex/rules/{self.plugin_name}.rules"),
+                    content=render_codex_rules(source),
                     semantic_id=source.id,
                 ),
                 Artifact(

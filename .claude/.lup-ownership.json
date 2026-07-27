@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "bdba13c9166f525d966b215475f41c5be8a13876a2f786c10f2dfcf1c915283d",
+  "source_digest": "d27978c88e3b8a3e3e1c2f96d30278301eb967f270f7e0e763d5b8378301b483",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "4eab4b0267bdda4e533aba46a5d10dcda57ae243800ee95ba82443da6c75098c",
+      "sha256": "3d9db0d0d37883f1a06692d33e0eb4f6f68588ccfb967e5ab46ac1f3018591bf",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -268,7 +268,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "a5247a6d7110f1726056eb26988c924b7c0210409761938204074531c12dbd0e",
+      "sha256": "b567748b00afa1779f681d442635a15708cd31b0591e7c024c6d229a66310b4e",
       "semantic_id": "skill.resolve",
       "executable": false
     },

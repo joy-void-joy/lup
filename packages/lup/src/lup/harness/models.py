@@ -381,8 +381,8 @@ class Plugin(BaseModel):
 
     id: str
     name: NativeName
-    # Namespaces the plugin in a shared CODEX_HOME: one registration per
-    # project, so sibling projects never contend for a single entry.
+    # Namespaces the plugin inside the selected CODEX_HOME and remains required
+    # for callers that deliberately share one home across projects.
     marketplace: NativeName
     version: str
     description: str = Field(min_length=1, max_length=1024)

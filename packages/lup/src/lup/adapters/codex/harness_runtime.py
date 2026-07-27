@@ -25,8 +25,7 @@ class PluginCacheConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     codex_home: Path = Field(default_factory=lambda: Path.home() / ".codex")
-    # Required: a default would let sibling projects silently share one
-    # registration, which is exactly the collision the name namespaces away.
+    # Required for explicit shared homes and for a stable installed-cache path.
     marketplace: str
     plugin: str = "lup"
     # None derives the cache segment from the plugin manifest — codex caches

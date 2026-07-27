@@ -259,8 +259,10 @@ are managed with `lup-devtools setup profile`.
 
 Each repo names its plugin marketplace after the project. How a launch reaches
 the plugin differs per runtime: one verifies the local directory in place, the
-other installs a separately cached copy and checks its digest first. Personal
-cache and trust state are never committed.
+other seeds a persistent per-worktree home from personal authentication and
+settings, installs the verified plugin there, and checks its digest first. A
+runtime flag or an inherited environment variable selects an explicit home
+instead. Personal cache, trust, and session state are never committed.
 
 ### Lup Skills & Agents
 

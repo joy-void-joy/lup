@@ -33,6 +33,31 @@ GITIGNORED_EXTRAS = [
 ]
 
 
+def copy_gitignored_extras(source_root: Path, worktree_path: Path) -> list[str]:
+    """Copy each present gitignored extra into a worktree; report what moved."""
+    copied: list[str] = []  # lup: ignore[empty-collection] — copy report fold
+    for rel_path in GITIGNORED_EXTRAS:
+        src = source_root / rel_path
+        if not src.exists():
+            continue
+        dst = worktree_path / rel_path
+        if src.is_dir():
+            shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=True)
+        else:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        copied.append(rel_path)
+    return copied
+
+
+def sync_dependencies(worktree_path: Path) -> None:
+    """Sync one worktree's environment; warn instead of failing the caller."""
+    try:
+        uv("sync", _cwd=str(worktree_path))
+    except sh.ErrorReturnCode as e:
+        typer.echo(f"Warning: uv sync failed: {decode_stderr(e)}")
+
+
 def branch_exists(branch: str) -> bool:
     """Check if a git branch exists (local only)."""
     try:
@@ -123,25 +148,12 @@ def create(
             git("config", f"branch.{name}.lup-base", origin)
 
     if not no_copy_data:
-        for rel_path in GITIGNORED_EXTRAS:
-            src = current_dir / rel_path
-            if not src.exists():
-                continue
-            dst = worktree_path / rel_path
-            if src.is_dir():
-                shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=True)
-                typer.echo(f"Copied {rel_path}/")
-            else:
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dst)
-                typer.echo(f"Copied {rel_path}")
+        for rel_path in copy_gitignored_extras(current_dir, worktree_path):
+            typer.echo(f"Copied {rel_path}")
 
     if not no_sync:
         typer.echo("Running uv sync...")
-        try:
-            uv("sync", _cwd=str(worktree_path))
-        except sh.ErrorReturnCode as e:
-            typer.echo(f"Warning: uv sync failed: {decode_stderr(e)}")
+        sync_dependencies(worktree_path)
 
     typer.echo()
     typer.echo(f"Worktree path: {worktree_path}")

@@ -422,6 +422,7 @@ def test_both_native_trees_compile_deterministically() -> None:
     assert Path(".codex/plugins/lup/.codex-plugin/plugin.json") in {
         item.path for item in codex.artifacts
     }
+    assert Path(".codex/rules/lup.rules") in {item.path for item in codex.artifacts}
     assert Path("AGENTS.md") in {item.path for item in codex.artifacts}
 
     def shipped_kernel(artifacts: list[Artifact]) -> list[str]:
@@ -437,6 +438,22 @@ def test_both_native_trees_compile_deterministically() -> None:
     )
     assert shipped_kernel(claude.artifacts) == shipped_kernel(codex.artifacts)
     assert shipped_kernel(claude.artifacts) == canonical
+
+
+def test_codex_compiles_prefix_safe_shell_allows_to_native_rules() -> None:
+    artifacts = {
+        artifact.path: artifact.content
+        for artifact in compile_codex(portable_harness()).artifacts
+    }
+    rules = artifacts[Path(".codex/rules/lup.rules")]
+
+    assert 'pattern = ["uv", "run", "pytest"]' in rules
+    assert 'pattern = ["git", "status"]' in rules
+    assert 'pattern = ["gh", "pr", "view"]' in rules
+    assert 'pattern = ["uv"]' not in rules
+    assert 'pattern = ["env"]' not in rules
+    assert 'pattern = ["sort"]' not in rules
+    assert 'pattern = ["git", "push"]' not in rules
 
 
 def test_repository_generated_harness_is_drift_clean() -> None:
