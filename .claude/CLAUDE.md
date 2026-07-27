@@ -1,4 +1,4 @@
-<!-- Generated from src/lup_template/devtools/harness/content/guidance.py via `uv run lup-devtools harness generate all`; deliberately rendered as both .claude/CLAUDE.md and AGENTS.md — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from src/lup_template/devtools/harness/content/guidance.py via `uv run lup-devtools harness generate all`; deliberately rendered as .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex — edit the source, not this file. See docs/generated-artifacts.md. -->
 
 # Lup repository guidance
 
@@ -12,16 +12,16 @@ You are an AI agent. Every instinct you have about how long software takes — s
 - **The POC is superstition at your speed.** Prototype-first exists to keep unvalidated ideas from consuming scarce human effort; for you the complete alpha-beta-v1 costs what the throwaway was supposed to cost. Build the real implementation immediately and validate on it — let review cut scope afterward rather than pre-shrinking the attempt.
 - **Catch the reflex in the act.** "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, stop and ask what is actually expensive here besides the imagined schedule.
 
-**README.md is human-owned.** The root `README.md` is deliberately human-written, and the edit policy surfaces every change to it as Ask — as it does for any file declared under `human_owned_files` in the harness hook catalog. Never edit a human-owned file yourself — propose the exact change via AskUserQuestion and let the user apply or approve it.
+**README.md is human-owned.** The root `README.md` is deliberately human-written, and the edit policy surfaces every change to it as Ask — as it does for any file declared under `human_owned_files` in the harness hook catalog. Never edit a human-owned file yourself — propose the exact change as a question and let the user apply or approve it.
 
 ## Agent Vocabulary
 
 Two kinds of delegated agents look alike and must not be conflated:
 
-- A **native subagent** ("subagent" for short) is dispatched by the harness: Claude Code's `Agent`/`Task` tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics.
+- A **native subagent** ("subagent" for short) is dispatched by the harness: its delegation tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics.
 - A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool.
 
-Guidance that says "subagent" unqualified means the native kind. `.claude/PATTERNS.md` carries the full pattern catalog — subagent, nested, background, deferred tool schemas — and when to reach for each.
+Guidance that says "subagent" unqualified means the native kind. `PATTERNS.md` carries the full pattern catalog — subagent, nested, background, deferred tool schemas — and when to reach for each.
 
 ## Development Workflow
 
@@ -87,7 +87,7 @@ Use `/lup:merge` (with no argument) for guided conflict resolution. See the comm
 | `docs`     | Documentation only (README, standalone docs)                         |
 | `test`     | Adding or updating tests                                             |
 | `chore`    | Maintenance (dependencies, build config)                             |
-| `meta`     | Changes to `.claude/` files (CLAUDE.md, settings, scripts, commands) |
+| `meta`     | Changes to harness content and the trees it generates (guidance, settings, skills, hooks) |
 | `data`     | Generated data and outputs                                           |
 
 ### Editing Style
@@ -110,7 +110,7 @@ Use `/lup:merge` (with no argument) for guided conflict resolution. See the comm
 
 ### Model Selection
 
-Default to **Opus 4.6** (`claude-opus-4-6`) — or **Fable** (`claude-fable-5`) — for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for Sonnet only when latency or cost provably dominates and quality is non-critical, and for Haiku almost never. A role that genuinely warrants a cheaper model declares it explicitly with a reason; otherwise it inherits the Opus-class default.
+Default to the **strongest** tier for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for a **balanced** tier only when latency or cost provably dominates and quality is non-critical, and for the **fast** tier almost never. A role that genuinely warrants a cheaper model declares that tier explicitly with a reason; otherwise it inherits the strongest default. Agent declarations state the tier, not a model id — each runtime spells the tier in its own lineup.
 
 ### Type Safety
 
@@ -190,7 +190,7 @@ A note in a comment-less format (e.g. JSON) is the trap: you can't keep it there
 **Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places:
 
 - **A `# lup: defer[<wake condition>]: <text>` note** at the most relevant site — the code or config the work concerns. The bracket names the condition under which the work wakes, mirroring `# lup: ignore[rule-id]`. `dev comments` lists deferred notes in their own section and `dev check` stays red while any exist, so parked work remains visible pressure instead of silent debt. Each resolve pass triages them: a note whose wake condition reads as met is proposed to the user for waking; an unmet one is carried forward untouched, never re-litigated as ordinary feedback and never stripped by an editor whose concern doesn't wake it.
-- **AskUserQuestion** — when whether (or how) to defer is itself the open question, ask instead of filing.
+- **Ask instead of filing** — when whether (or how) to defer is itself the open question, put it to the user.
 
 ### DRY: Don't Repeat Yourself
 
@@ -252,14 +252,15 @@ If you find yourself running the same command repeatedly, **add a command** to `
 
 Sub-apps: `agent`, `dashboard`, `dev`, `feedback`, `harness`, `py`, `setup`, `sync`, `trace`, `usage`, `version`. Run `uv run lup-devtools --help` for the full command tree — the list above is rendered from the typed sub-app roster in `src/lup_template/devtools/subapps.py`.
 
-`lup-devtools harness claude` and `harness codex` regenerate, reconcile, and
-launch the native plugins. `lup-devtools usage claude` reports usage. Profiles
-(named Claude config dirs) are managed with `lup-devtools setup profile`.
+`lup-devtools harness generate all` regenerates and reconciles every native
+plugin; `harness <runtime>` regenerates one and launches it. `lup-devtools
+usage <runtime>` reports usage, and profiles — named per-runtime config homes —
+are managed with `lup-devtools setup profile`.
 
-Each repo names its plugin marketplace after the project. Claude launches the
-verified local plugin directory; Codex installs a separately cached copy and
-verifies its digest before launch. Personal cache and trust state are never
-committed.
+Each repo names its plugin marketplace after the project. How a launch reaches
+the plugin differs per runtime: one verifies the local directory in place, the
+other installs a separately cached copy and checks its digest first. Personal
+cache and trust state are never committed.
 
 ### Lup Skills & Agents
 
@@ -289,7 +290,7 @@ then regenerate.
 - /lup:install — Install lup plugin and scaffolding into a target repo
 - /lup:land — Land every branch that has not reached the integration branch, and clear the ones that have
 - /lup:merge — Merge a branch or resolve existing merge conflicts
-- /lup:meta — Review and modify .claude structure, brainstorm improvements interactively
+- /lup:meta — Review and modify the generated harness trees, brainstorm improvements interactively
 - /lup:modify-command — Modify an existing slash command based on a description or delta
 - /lup:principle — Propagate a general principle across the entire repo
 - /lup:rebase — Clean up commit history on the feature branch and open/update a PR
@@ -385,7 +386,7 @@ The `.env` file contains template configuration. Create `.env.local` for secrets
 
 Settings in `.env.local` override `.env`. Configuration is loaded via pydantic-settings — see `src/lup_template/agent/config.py`.
 
-All Claude Code settings modifications should be **project-level** (in `.claude/settings.json`), not user-level.
+Harness settings changes stay **project-level**, in the tree the harness owns (.claude/settings.json), never user-level.
 
 ---
 
@@ -393,9 +394,9 @@ All Claude Code settings modifications should be **project-level** (in `.claude/
 
 ### Asking Questions
 
-**Always use the `AskUserQuestion` tool** instead of asking questions in plain text. This applies to clarifying requirements, offering choices, confirming destructive actions, proposing changes, and any situation needing user input.
+**Always surface a question as a question**, through whatever structured question facility the harness gives you, rather than as narration the user has to notice. This applies to clarifying requirements, offering choices, confirming destructive actions, proposing changes, and any situation needing user input.
 
-Even for open-ended questions, use `AskUserQuestion` with options that include a custom input option. This allows structured notification parsing.
+Even for open-ended questions, attach concrete options plus a free-form one. Structured answers are what downstream notification parsing reads.
 
 **When proposing changes:** Propose (don't assume), show relevant current state, explain rationale, offer alternatives.
 
@@ -407,18 +408,18 @@ Even for open-ended questions, use `AskUserQuestion` with options that include a
 
 1. Compare intent vs usage
 2. Notice patterns — user corrections signal the command should evolve
-3. Proactively propose updates via AskUserQuestion
+3. Proactively propose updates, as a question the user answers
 
 **Evolution signals:** User provides external docs, corrects your approach, asks for something the command should cover, or ignores sections.
 
 ### External Resources
 
-When questions involve Claude Code, Agent SDK, or Claude API:
+When a question is about the harness you are running under, its agent SDK, or its model API, read that runtime's own documentation rather than answering from memory:
 
-1. Use the `claude-code-guide` subagent: `Agent(subagent_type="claude-code-guide", prompt="...")`
-2. Fetch docs directly: `WebFetch(url="https://docs.claude.com/en/agent-sdk/<topic>")`
+1. Delegate to the documentation subagent your harness ships, where it has one.
+2. Fetch the vendor's documentation directly — the Claude Code and Agent SDK documentation at https://docs.claude.com/ and https://code.claude.com/. The fetch scopes the permission policy admits are declared in `harness/catalog.py`.
 
-When the user provides documentation links, incorporate that knowledge into CLAUDE.md or relevant commands.
+When the user provides documentation links, incorporate that knowledge into the guidance source or the relevant skill declaration.
 
 ---
 
