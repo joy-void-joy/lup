@@ -203,6 +203,16 @@ def test_codex_thread_config_contains_project_mcp_and_writable_roots(
     }
 
 
+async def test_thread_parameters_omit_model_for_the_native_default(
+    tmp_path: Path,
+) -> None:
+    state = CodexConversationState(
+        CodexSessionConfig(cwd=tmp_path), CodexAppServer(Path("codex")), None
+    )
+
+    assert "model" not in state.thread_parameters()
+
+
 async def test_mcp_elicitation_accepts_composed_servers_declines_others(
     tmp_path: Path,
 ) -> None:

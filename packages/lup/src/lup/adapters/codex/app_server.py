@@ -98,6 +98,7 @@ class CodexAppServer:
         self.watcher: asyncio.Task[None] | None = None
         self.closing = False
         self.exit_error: Exception | None = None
+        self.connection_error: Exception | None = None
         self.server_request_handler: ServerRequestHandler | None = None
         self.notification_handler: NotificationHandler | None = None
         self.disconnect_handler: DisconnectHandler | None = None
@@ -181,6 +182,8 @@ class CodexAppServer:
                 watcher = None
             except Exception as error:
                 close_error = close_error or error
+        if self.connection_error is None:
+            self.connection_error = RuntimeError("app-server connection closed")
         for future in self.pending.values():
             if not future.done():
                 future.set_exception(RuntimeError("app-server connection closed"))
@@ -210,6 +213,10 @@ class CodexAppServer:
         self.input.put(encoded + "\n")
 
     async def request(self, method: str, params: JsonObject) -> JsonValue:
+        if self.connection_error is not None:
+            raise RuntimeError(
+                f"Codex app-server connection failed: {self.connection_error}"
+            ) from self.connection_error
         request_id = self.next_id
         self.next_id += 1
         future: asyncio.Future[JsonValue] = asyncio.get_running_loop().create_future()
@@ -248,6 +255,7 @@ class CodexAppServer:
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            self.connection_error = error
             for future in self.pending.values():
                 if not future.done():
                     future.set_exception(error)

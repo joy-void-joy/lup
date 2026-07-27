@@ -309,18 +309,15 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-def engine_for_settings() -> Engine:
-    """The engine the session runs: explicit ``AGENT_SDK``, else routed.
+def engine_for_model(model: str) -> Engine:
+    """The engine one model id routes to by vendor prefix alone.
 
-    Unset ``AGENT_SDK`` routes by the model's vendor prefix — ``claude-*``
-    runs the native Claude engine and ``gpt-*``/``o<digit>``/``codex*`` runs
-    Codex. Anything else runs a compat engine: ``claude-compat`` when
-    ``OPENROUTER_API_KEY`` selects OpenRouter's Anthropic-protocol endpoint,
-    ``openai-compat`` otherwise.
+    ``claude-*`` runs the native Claude engine and ``gpt-*``/``o<digit>``/
+    ``codex*`` runs Codex. Anything else runs a compat engine:
+    ``claude-compat`` when ``OPENROUTER_API_KEY`` selects OpenRouter's
+    Anthropic-protocol endpoint, ``openai-compat`` otherwise.
     """
-    if settings.agent_sdk is not None:
-        return settings.agent_sdk
-    match settings.model:
+    match model:
         case model if model.startswith("claude-"):
             return "claude"
         case model if model.startswith(("gpt-", "codex")) or (
@@ -329,6 +326,16 @@ def engine_for_settings() -> Engine:
             return "codex"
         case _:
             return "claude-compat" if settings.openrouter_api_key else "openai-compat"
+
+
+def engine_for_settings() -> Engine:
+    """The engine the session runs: explicit ``AGENT_SDK``, else routed.
+
+    Unset ``AGENT_SDK`` routes by the configured model's vendor prefix.
+    """
+    if settings.agent_sdk is not None:
+        return settings.agent_sdk
+    return engine_for_model(settings.model)
 
 
 def aux_model() -> str:

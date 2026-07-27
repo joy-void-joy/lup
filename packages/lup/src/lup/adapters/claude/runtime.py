@@ -77,7 +77,7 @@ class ClaudeSessionConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
-    model: str
+    model: str | None = None
     system_prompt: str = ""
     coding_harness_preset: bool = True
     tools: list[str] | None = None
