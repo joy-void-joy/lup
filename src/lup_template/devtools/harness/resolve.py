@@ -8,32 +8,48 @@ human acceptance of its review branch.
 
 import asyncio
 import os
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.markers import find_feedback
+from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
 from lup.resolver.contracts import (
-    QuestionBroker,
     ResolverAwaitingAnswers,
     ResolverObserver,
     WorktreePreparer,
 )
 from lup.resolver.core import ResolverCore
 from lup.resolver.models import (
-    AnswerBatch,
+    ACCEPT,
+    ACCEPTANCE_QUESTION_ID,
+    REJECT,
     ConcernProgress,
     InventoryNote,
-    QuestionAnswer,
-    QuestionBatch,
     ResolvePhase,
     ResolveRequest,
     ResolverConfig,
     SourceSnapshot,
     VerificationCommand,
+    WorkerContext,
+)
+from lup.resolver.mailbox import (
+    AnswerDoor,
+    AnswerOffer,
+    QuestionMailbox,
+    utc_now,
+)
+from lup.resolver.tools import (
+    RESOLVER_CONCERN_ENV,
+    RESOLVER_RUN_DIR_ENV,
+    ResolverToolContext,
+    create_question_tools,
+    read_resolver_tool_context,
 )
 from lup.runtime.contracts import SessionFactory
 from lup.types import EnvVars
@@ -105,30 +121,6 @@ class ConsoleResolverObserver(ResolverObserver):
         typer.echo(line)
 
 
-class ConsoleQuestionBroker(QuestionBroker):
-    """Deliver persisted resolver questions through the native terminal."""
-
-    async def ask(self, questions: QuestionBatch) -> AnswerBatch:
-        answers: list[QuestionAnswer] = []  # lup: ignore[empty-collection]
-        for question in questions.questions:
-            default = question.recommendation or (
-                question.choices[0] if question.choices else None
-            )
-            while True:
-                value = (
-                    await asyncio.to_thread(
-                        typer.prompt, question.prompt, default=default
-                    )
-                    if default is not None
-                    else await asyncio.to_thread(typer.prompt, question.prompt)
-                )
-                if not question.choices or value in question.choices:
-                    break
-                typer.echo("Choose one of: " + ", ".join(question.choices))
-            answers.append(QuestionAnswer(question_id=question.id, value=value))
-        return AnswerBatch(run_id=questions.run_id, answers=answers)
-
-
 def parse_answer_flags(
     flags: list[str],
 ) -> dict[str, str]:  # lup: ignore[dict-str-payload] — open question-id map
@@ -152,57 +144,102 @@ def parse_answer_flags(
     return {pair[0]: pair[1] for pair in pairs}
 
 
-class HeadlessQuestionBroker(QuestionBroker):
-    """Answer persisted resolver questions from pre-supplied flag values.
+def offer_flag_answers(
+    mailbox: QuestionMailbox,
+    run_id: str,
+    provided: dict[str, str],  # lup: ignore[dict-str-payload] — open id map
+) -> None:
+    """Offer every ``--answer`` value through the mailbox.
 
-    Every question must be answered explicitly — recommendations are never
-    assumed on behalf of the human. A batch with missing, invalid, or
-    unknown answers parks the run for a flag-carrying rerun.
+    Offers may precede their questions, so a flag answers a question this
+    run has not asked yet — which is why a fresh run no longer has to park
+    once before its answers can count.
     """
-
-    def __init__(
-        self,
-        provided: dict[str, str],  # lup: ignore[dict-str-payload] — open id map
-    ) -> None:
-        self.provided = provided
-
-    async def ask(self, questions: QuestionBatch) -> AnswerBatch:
-        known = [question.id for question in questions.questions]
-        missing = [
-            question
-            for question in questions.questions
-            if question.id not in self.provided
-        ]
-        invalid = [
-            question
-            for question in questions.questions
-            if question.id in self.provided
-            and question.choices
-            and self.provided[question.id] not in question.choices
-        ]
-        problems = [
-            *(
-                f"--answer {question.id}={self.provided[question.id]} is not one of: "
-                + ", ".join(question.choices)
-                for question in invalid
-            ),
-            *(
-                f"--answer {identifier}=... names no pending question"
-                for identifier in self.provided
-                if identifier not in known
-            ),
-        ]
-        if missing or problems:
-            raise ResolverAwaitingAnswers([*missing, *invalid], problems)
-        return AnswerBatch(
-            run_id=questions.run_id,
-            answers=[
-                QuestionAnswer(
-                    question_id=question.id, value=self.provided[question.id]
-                )
-                for question in questions.questions
-            ],
+    for identifier, value in provided.items():
+        mailbox.offer(
+            AnswerOffer(
+                run_id=run_id,
+                question_id=identifier,
+                value=value,
+                door=AnswerDoor.FLAG,
+                offered_at=utc_now(),
+            )
         )
+
+
+def run_resolver_tool_server() -> None:
+    """Serve the question tools to a worker whose tools run out of process.
+
+    The Codex runtime spawns MCP servers as subprocesses, so a handler there
+    cannot see any in-process object. It rebuilds the same mailbox from the
+    relayed run directory instead, which is why the mailbox is files.
+    """
+    context = read_resolver_tool_context()
+    if context is None:
+        raise typer.BadParameter(
+            f"{RESOLVER_RUN_DIR_ENV} and {RESOLVER_CONCERN_ENV} must both be set"
+        )
+    serve_stdio(
+        create_mcp_server(
+            "resolver",
+            tools=create_question_tools(
+                QuestionMailbox(context.run_dir),
+                context.concern_id,
+                run_id=context.run_dir.name,
+            ),
+        )
+    )
+
+
+SUPERVISED_WAIT_SECONDS = 3600.0
+
+
+class SupervisorSpawn(BaseModel):
+    """Whether a run opens a page beside itself, and on which port."""
+
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = False
+    port: int = 8766
+    linger: bool = False
+
+
+@asynccontextmanager
+async def spawned_supervisor(
+    spawn: SupervisorSpawn, run_id: str, adapter: str
+) -> AsyncGenerator[None]:
+    """Run the supervisor page beside this run, as a separate process.
+
+    The page is an ordinary reader of the run directory, so it does not
+    have to share this process — which is what removes the whole thread
+    split the in-process host needed. The run's own loop hosts nothing.
+    """
+    if not spawn.enabled:
+        yield
+        return
+    process = await asyncio.create_subprocess_exec(
+        "uv",
+        "run",
+        "lup-devtools",
+        "harness",
+        "resolve",
+        "supervise",
+        "--run-id",
+        run_id,
+        "--adapter",
+        adapter,
+        "--port",
+        str(spawn.port),
+    )
+    typer.echo(f"Resolver supervisor: http://127.0.0.1:{spawn.port}")
+    try:
+        yield
+    finally:
+        if spawn.linger:
+            typer.echo("Supervisor left running; stop it with Ctrl-C in its terminal.")
+        else:
+            process.terminate()
+            await process.wait()
 
 
 def report_awaiting(parked: ResolverAwaitingAnswers, adapter: str, run_id: str) -> None:
@@ -307,10 +344,13 @@ def run_resolve(
     run_id: str | None,
     human_decision: bool | None,
     answers: list[str],
-    interactive: bool = False,
+    wait_seconds: float = 0.0,
+    supervisor: SupervisorSpawn | None = None,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
+    if human_decision is not None:
+        provided[ACCEPTANCE_QUESTION_ID] = ACCEPT if human_decision else REJECT
     compositions = harness_compositions(adapter)
     if len(compositions) != 1:
         raise typer.BadParameter("resolve requires exactly one adapter")
@@ -333,6 +373,7 @@ def run_resolve(
             create_claude_session_factory,
         )
         from lup.adapters.codex.runtime import (
+            CodexMcpServerConfig,
             CodexSessionConfig,
             create_codex_session_factory,
         )
@@ -355,8 +396,30 @@ def run_resolve(
                 f"{adapter!r}; sessions use the adapter's native default model."
             )
 
-        def worker_factory(cwd: Path) -> SessionFactory:
+        state_root = root / ".lup" / "resolve"
+
+        def worker_factory(context: WorkerContext) -> SessionFactory:
+            """Open one worker session that can ask its own questions.
+
+            The tools are bound to this concern here rather than taking the
+            id as an argument, so a worker structurally cannot post against
+            a sibling. ``core`` is read at call time, which is after it is
+            built — the wake event only exists once the core does.
+            """
+            cwd = context.root
+            tool_context = ResolverToolContext(
+                run_dir=state_root / resolved_run_id, concern_id=context.concern_id
+            )
             if adapter == "claude":
+                server = create_mcp_server(
+                    "resolver",
+                    tools=create_question_tools(
+                        QuestionMailbox(tool_context.run_dir),
+                        context.concern_id,
+                        run_id=resolved_run_id,
+                        wake=core.wake,
+                    ),
+                )
                 return create_claude_session_factory(
                     ClaudeSessionConfig(
                         model=session_model,
@@ -364,6 +427,11 @@ def run_resolve(
                         cwd=cwd,
                         add_dirs=[cwd],
                         environment=session_environment,
+                        tool_servers={"resolver": server},
+                        allowed_tools=[
+                            f"mcp__resolver__{name}"
+                            for name in server_tool_names(server)
+                        ],
                         hooks=merge_hooks(
                             create_permission_hooks([cwd], []),
                             create_git_inspection_hook(),
@@ -380,6 +448,18 @@ def run_resolve(
                     sandbox="workspace-write",
                     approval_policy="never",
                     environment=session_environment,
+                    mcp_servers={
+                        "resolver": CodexMcpServerConfig(
+                            command="uv",
+                            args=[
+                                "run",
+                                "lup-devtools",
+                                "harness",
+                                "serve-resolver-tools",
+                            ],
+                            env={**session_environment, **tool_context.to_env()},
+                        )
+                    },
                     writable_roots=[cwd],
                 )
             )
@@ -413,14 +493,12 @@ def run_resolve(
 
         from lup_template.devtools.harness.catalog import portable_harness
 
-        broker: QuestionBroker = (
-            HeadlessQuestionBroker(provided)
-            if provided or not interactive
-            else ConsoleQuestionBroker()
+        offer_flag_answers(
+            QuestionMailbox(state_root / resolved_run_id), resolved_run_id, provided
         )
         core = ResolverCore(
             ResolverConfig(
-                state_root=root / ".lup" / "resolve",
+                state_root=state_root,
                 workspace=root,
                 worktree_root=(root.parent / f"{root.name}-resolve-{resolved_run_id}"),
                 run_id=resolved_run_id,
@@ -441,67 +519,64 @@ def run_resolve(
             worker_factory,
             reviewer_factory,
             composition.invocation_renderer,
-            broker,
             launcher,
             observer=ConsoleResolverObserver(),
             worktree_preparer=FeatureWorktreePreparer(root),
+            answer_wait_seconds=wait_seconds,
         )
-        try:
-            if core.repository.exists():
-                manifest = await core.resume()
-            else:
-                intake = resolver_intake(scan_tracked(find_feedback))
-                for carried in intake.carried:
-                    typer.echo(carried)
-                comments = intake.actionable
-                if not comments:
-                    typer.echo("No unresolved # lup: comments.")
-                    return
-                note_paths = sorted({Path(comment.file) for comment in comments})
-                source = resolver_source_snapshot(
-                    launcher,
-                    root,
-                    core.repository.root,
-                    note_paths,
-                )
-                manifest = await core.run(
-                    ResolveRequest(
-                        source=source,
-                        notes=[
-                            InventoryNote(
-                                file=Path(comment.file),
-                                line=comment.start_line,
-                                text=comment.marker_text(),
-                                context=comment.context,
-                            )
-                            for comment in comments
-                        ],
+
+        async def drive() -> None:
+            try:
+                if core.repository.exists():
+                    manifest = await core.resume()
+                else:
+                    intake = resolver_intake(scan_tracked(find_feedback))
+                    for carried in intake.carried:
+                        typer.echo(carried)
+                    comments = intake.actionable
+                    if not comments:
+                        typer.echo("No unresolved # lup: comments.")
+                        return
+                    note_paths = sorted({Path(comment.file) for comment in comments})
+                    source = resolver_source_snapshot(
+                        launcher,
+                        root,
+                        core.repository.root,
+                        note_paths,
                     )
-                )
-        except ResolverAwaitingAnswers as parked:
-            report_awaiting(parked, adapter, resolved_run_id)
-            return
-        if manifest.accepted is None and manifest.final_review is not None:
-            typer.echo(f"Review branch: {manifest.review_branch}")
-            typer.echo(manifest.final_review.model_dump_json(indent=2))
-            if human_decision is None and not interactive:
+                    manifest = await core.run(
+                        ResolveRequest(
+                            source=source,
+                            notes=[
+                                InventoryNote(
+                                    file=Path(comment.file),
+                                    line=comment.start_line,
+                                    text=comment.marker_text(),
+                                    context=comment.context,
+                                )
+                                for comment in comments
+                            ],
+                        )
+                    )
+            except ResolverAwaitingAnswers as parked:
+                report_awaiting(parked, adapter, resolved_run_id)
+                return
+            if manifest.final_review is None and human_decision is not None:
+                raise typer.BadParameter("the resolver run is not awaiting acceptance")
+            if manifest.accepted is None and manifest.final_review is not None:
+                typer.echo(f"Review branch: {manifest.review_branch}")
+                typer.echo(manifest.final_review.model_dump_json(indent=2))
                 typer.echo(
-                    "Run awaiting acceptance: relay the review to the human, "
-                    "then rerun with --accept or --reject."
+                    "Run awaiting acceptance: relay the review to the human, then "
+                    "answer from the page, `harness resolve answer`, or a rerun with "
+                    "--accept or --reject."
                 )
                 return
-            accepted = (
-                human_decision
-                if human_decision is not None
-                else await asyncio.to_thread(
-                    typer.confirm,
-                    "Accept this review branch for manual integration?",
-                    default=manifest.final_review.accepted,
-                )
-            )
-            manifest = core.record_human_acceptance(accepted)
-        elif human_decision is not None:
-            raise typer.BadParameter("the resolver run is not awaiting acceptance")
-        typer.echo(manifest.model_dump_json(indent=2))
+            typer.echo(manifest.model_dump_json(indent=2))
+
+        async with spawned_supervisor(
+            supervisor or SupervisorSpawn(), resolved_run_id, adapter
+        ):
+            await drive()
 
     asyncio.run(execute())

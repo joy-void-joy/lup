@@ -62,6 +62,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "lup_template.devtools.dev" = ["*.css"]
 "lup_template.devtools.dashboard" = ["assets/*.html"]
+"lup_template.devtools.supervisor" = ["assets/*.html"]
 "lup_template.devtools.harness.content" = ["assets/*.js", "assets/*.sh"]
 
 [tool.lup]

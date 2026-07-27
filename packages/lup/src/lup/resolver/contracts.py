@@ -3,20 +3,14 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from lup.resolver.models import (
-    AnswerBatch,
-    ConcernProgress,
-    MaterialQuestion,
-    QuestionBatch,
-    ResolvePhase,
-)
+from lup.resolver.models import ConcernProgress, MaterialQuestion, ResolvePhase
 
 
 class ResolverAwaitingAnswers(Exception):
-    """A run parked on material questions its broker has no answers for.
+    """A run parked on material questions no door answered in time.
 
-    Brokers raise this to park instead of guessing; the resolver records the
-    affected concerns as waiting and surfaces every pending question so one
+    The resolver raises this rather than guessing: it records the affected
+    concerns as waiting and surfaces every pending question, so one
     flag-carrying rerun can answer the complete set.
     """
 
@@ -24,14 +18,6 @@ class ResolverAwaitingAnswers(Exception):
         super().__init__(f"resolver run is awaiting {len(pending)} material answer(s)")
         self.pending = pending
         self.problems = problems
-
-
-class QuestionBroker(ABC):
-    """Deliver material resolver questions and return persisted answers."""
-
-    @abstractmethod
-    async def ask(self, questions: QuestionBatch) -> AnswerBatch:
-        """Ask one batch before worker execution."""
 
 
 class ResolverObserver(ABC):

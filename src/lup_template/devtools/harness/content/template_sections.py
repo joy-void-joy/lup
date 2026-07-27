@@ -580,6 +580,7 @@ src/
     │   ├── usage/              # Claude Code usage display (api/render/app)
     │   ├── setup.py            # Shared integration registry + terminal wizard
     │   ├── dashboard/          # Local setup API and packaged zero-build web UI
+    │   ├── supervisor/         # Live and read-only web supervision of resolver runs
     │   ├── sync.py             # Upstream sync tracking (feeds """
     ),
     models.SkillInvocation(plugin="lup", skill="update"),
