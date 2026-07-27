@@ -11,7 +11,7 @@ Clean up the commit history on the current feature branch, push it, and open (or
 
 ### Base branch (`<base>`)
 
-Run `uv run lup-devtools dev pr sync-base --json` (step 1 below) -- it reports the base branch and a `base_source`. `recorded` (from worktree creation) and `explicit` are authoritative. `guessed` means topology alone picked it: the command merges nothing and exits non-zero, so confirm the branch with AskUserQuestion and rerun as `sync-base --base <branch>`.
+Run `uv run lup-devtools dev pr sync-base --json` (step 1 below) -- it reports the base branch and a `base_source`. `recorded` (from worktree creation) and `explicit` are authoritative. `guessed` means topology alone picked it: the command merges nothing and exits non-zero. Ask the user directly, offering concrete options, and wait for the answer: which branch is the true base, then rerun as `sync-base --base <branch>`.
 
 Confirm against the divergence, not the name that sounds right. `git log --oneline <candidate>..HEAD` on the true base shows this branch's own commits; on a wrong one it shows hundreds, which is the tell that the whole history between the two branches is about to be treated as yours.
 
@@ -35,15 +35,15 @@ A `guessed` base exits non-zero having merged nothing -- settle the base as abov
 
 ### 3. Fold local grants into the canonical policy
 
-Check if `.claude/settings.local.json` exists. Its permission entries are ad-hoc grants one person accepted; leaving them there means the next person re-approves the same prompts.
+Check whether `.codex/config.local.toml` exists. Its permission entries are ad-hoc grants one person accepted; leaving them there means the next person re-approves the same prompts.
 
-`.claude/settings.json` is a generated artifact (`harness.project-settings`) -- never hand-merge into it. The next `lup-devtools harness claude` regenerates it from the policy and drops the edit. Shell, fetch, and edit permissions belong to the canonical semantic policy instead.
+`.codex/config.toml` is a generated artifact (`harness.project-settings`) -- never hand-merge into it. The next `lup-devtools harness generate all` regenerates it from the policy and drops the edit. Shell, fetch, and edit permissions belong to the canonical semantic policy instead.
 
 Classify each entry:
 
 - **Already covered by the policy** -- drop it from the local file. Most read-only commands are.
 - **A genuine gap** -- invoke `$lup:hooks` to add it to the canonical policy, regenerate both native plugins, and commit that as a separate commit.
-- **User-specific** (plugin toggles, personal model choice) -- leave it in `.claude/settings.local.json`.
+- **User-specific** (plugin toggles, personal model choice) -- leave it in `.codex/config.local.toml`.
 
 ### 4. Run checks
 

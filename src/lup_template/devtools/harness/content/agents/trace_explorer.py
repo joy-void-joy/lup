@@ -126,6 +126,6 @@ Traces worth the main agent reading in full (limit to 2-3):
         ]
     ),
     tools=["Read", "Grep", "Glob", "Bash"],
-    model="sonnet",
+    model="balanced",
     color="cyan",
 )

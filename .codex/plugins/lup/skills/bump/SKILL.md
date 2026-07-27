@@ -37,7 +37,7 @@ Read through the commits and categorize:
 
 - **Behavior changes** (require a bump): prompt changes, new/modified tools, scoring logic, subagent changes
 - **Data changes** (no bump needed): session outputs, notes, resolution updates
-- **Infrastructure changes** (no bump needed): dependencies, CI, scripts, CLAUDE.md
+- **Infrastructure changes** (no bump needed): dependencies, CI, scripts, `AGENTS.md`
 
 If there are NO behavior changes since the last bump, inform the user and stop.
 
@@ -49,7 +49,7 @@ If there are NO behavior changes since the last bump, inform the user and stop.
 | **minor** | Prompt changes, new tools, tool modifications | Added web search tool, rewrote system prompt |
 | **major** | Architecture changes                          | New LLM, new framework, fundamental redesign |
 
-If the user provided a level in `the arguments supplied with this skill invocation`, use it. Otherwise, recommend and confirm via AskUserQuestion.
+If the user provided a level in `the arguments supplied with this skill invocation`, use it. Otherwise recommend a level, then Ask the user directly, offering concrete options, and wait for the answer: which bump level to apply
 
 ### 5. Apply the bump
 
@@ -65,4 +65,4 @@ Show the user what was bumped and the behavioral changes that warranted it.
 
 - **Only bump for behavior changes** -- Data, docs, and infra commits don't warrant a bump
 - **Summarize what changed for the agent**, not the codebase
-- **When in doubt, ask** -- Use AskUserQuestion if the level is ambiguous
+- **When in doubt, ask** -- put an ambiguous level to the user rather than guessing

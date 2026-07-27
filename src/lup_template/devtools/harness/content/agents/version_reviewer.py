@@ -178,6 +178,6 @@ What the agent explicitly said it needed (from session outputs and trace reasoni
         ]
     ),
     tools=["Read", "Grep", "Glob", "Bash"],
-    model="sonnet",
+    model="balanced",
     color="yellow",
 )

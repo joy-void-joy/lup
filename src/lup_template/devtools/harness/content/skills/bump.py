@@ -67,7 +67,11 @@ Read through the commits and categorize:
 
 - **Behavior changes** (require a bump): prompt changes, new/modified tools, scoring logic, subagent changes
 - **Data changes** (no bump needed): session outputs, notes, resolution updates
-- **Infrastructure changes** (no bump needed): dependencies, CI, scripts, CLAUDE.md
+- **Infrastructure changes** (no bump needed): dependencies, CI, scripts, `"""
+            ),
+            models.NativePath(location="guidance_file"),
+            models.TextPart(
+                text=r"""`
 
 If there are NO behavior changes since the last bump, inform the user and stop.
 
@@ -82,8 +86,10 @@ If there are NO behavior changes since the last bump, inform the user and stop.
 If the user provided a level in `"""
             ),
             models.ArgumentsRef(),
+            models.TextPart(text=r"""`, use it. Otherwise recommend a level, then """),
+            models.AskUser(question="which bump level to apply"),
             models.TextPart(
-                text=r"""`, use it. Otherwise, recommend and confirm via AskUserQuestion.
+                text=r"""
 
 ### 5. Apply the bump
 
@@ -99,7 +105,7 @@ Show the user what was bumped and the behavioral changes that warranted it.
 
 - **Only bump for behavior changes** -- Data, docs, and infra commits don't warrant a bump
 - **Summarize what changed for the agent**, not the codebase
-- **When in doubt, ask** -- Use AskUserQuestion if the level is ambiguous
+- **When in doubt, ask** -- put an ambiguous level to the user rather than guessing
 """
             ),
         ]

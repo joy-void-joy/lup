@@ -189,6 +189,6 @@ Overview of the full version history.
         ]
     ),
     tools=["Read", "Grep", "Glob", "Bash"],
-    model="sonnet",
+    model="balanced",
     color="green",
 )

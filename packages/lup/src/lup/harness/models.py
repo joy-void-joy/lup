@@ -33,6 +33,11 @@ type NativeName = Annotated[
 """A declaration name portable across adapters: lowercase alphanumerics with
 interior hyphens or underscores."""
 
+type QualifiedAgentName = Annotated[
+    str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]*:[a-z0-9][a-z0-9_-]*$")
+]
+"""A delegation target, ``<plugin>:<agent>``, as a runtime addresses one."""
+
 
 class TextPart(BaseModel):
     model_config = FROZEN
@@ -57,6 +62,88 @@ class SkillInvocation(BaseModel):
     arguments: list[InvocationArgument] = Field(default_factory=list)
 
 
+type TreeLocation = Literal[
+    "tree_root",
+    "guidance_file",
+    "ownership_manifest",
+    "project_settings",
+    "personal_settings",
+    "marketplace",
+]
+"""One harness-tree location every runtime spells for itself."""
+
+
+type PluginLocation = Literal[
+    "root",
+    "manifest",
+    "skills",
+    "agents",
+    "hooks",
+    "guidance_template",
+]
+"""One location an installed plugin owns, or that a runtime keeps beside it."""
+
+
+type PathScope = Literal["this_tree", "every_tree"]
+"""Whether a path addresses the reader's own tree or teaches every tree."""
+
+
+type PathMember = Annotated[
+    str, StringConstraints(pattern=r"^(\*|<[a-z][a-z0-9-]*>|[a-z0-9][a-z0-9-]*)$")
+]
+"""One leaf inside a location: a name, a ``<placeholder>``, or ``*``."""
+
+
+class NativePath(BaseModel):
+    """One harness-tree location, spelled by whichever adapter renders it."""
+
+    model_config = FROZEN
+
+    type: Literal["native_path"] = "native_path"
+    location: TreeLocation
+    scope: PathScope = "this_tree"
+
+
+class PluginPath(BaseModel):
+    """One plugin-owned location, spelled by whichever adapter renders it.
+
+    ``member`` selects a leaf whose whole path differs per runtime — a skill is
+    one file under one runtime and a directory under another — while omitting
+    it names the containing directory.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["plugin_path"] = "plugin_path"
+    plugin: NativeName
+    location: PluginLocation
+    member: PathMember | None = None
+    scope: PathScope = "this_tree"
+
+
+class SkillPattern(BaseModel):
+    """An invocation shape standing in for a skill the reader will name.
+
+    ``SkillInvocation`` resolves against the declaration registry, so it cannot
+    express the placeholder or wildcard a prompt uses when it teaches the shape
+    of an invocation rather than issuing one.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["skill_pattern"] = "skill_pattern"
+    plugin: NativeName
+    placeholder: PathMember
+
+
+class RuntimeDocs(BaseModel):
+    """The reader's own runtime documentation, wherever that runtime is."""
+
+    model_config = FROZEN
+
+    type: Literal["runtime_docs"] = "runtime_docs"
+
+
 class AskUser(BaseModel):
     model_config = FROZEN
 
@@ -68,8 +155,8 @@ class Delegate(BaseModel):
     model_config = FROZEN
 
     type: Literal["delegate"] = "delegate"
-    role: str
-    task: str
+    subagent_type: QualifiedAgentName
+    prompt: str
 
 
 class RequestApproval(BaseModel):
@@ -110,6 +197,10 @@ class ArgumentsRef(BaseModel):
 type PromptPart = Annotated[
     TextPart
     | SkillInvocation
+    | NativePath
+    | PluginPath
+    | SkillPattern
+    | RuntimeDocs
     | AskUser
     | Delegate
     | RequestApproval
@@ -129,14 +220,20 @@ class PromptDocument(BaseModel):
 GUIDANCE_CHARACTER_BUDGET = 32_768
 """Ceiling on the guidance document every session loads before its first turn.
 
-Only literal text counts: a skill invocation renders to provider syntax whose
-length belongs to the adapter, not the declaration. Reference material that a
+What a session pays for is the rendered document, so that is what the adapters
+check as they compile it. A typed part costs whatever its adapter spells it as,
+however little literal text the declaration holds. Reference material that a
 skill or a denial message surfaces at the right moment belongs in a generated
 document under ``docs/`` instead, reached by a file-path pointer."""
 
 
 def document_text_size(document: PromptDocument) -> int:
-    """Total literal characters a document contributes to the guidance budget."""
+    """Lower bound on what a document costs a session, in literal characters.
+
+    Every part renders to something, so the rendered document is never smaller.
+    This is the share a neutral module can measure without reaching for an
+    adapter to spell the rest.
+    """
     return sum(len(part.text) for part in document.parts if isinstance(part, TextPart))
 
 
@@ -188,6 +285,14 @@ type AgentColor = Literal[
 """The closed agent accent-color palette native runtimes accept."""
 
 
+type ModelTier = Literal["inherit", "strongest", "balanced", "fast"]
+"""Portable model preference for one role.
+
+Runtimes name and version their own model lineups, so a declaration states the
+need and each adapter spells whichever tier it can honor — or omits the choice
+where it has no proven vocabulary to spell it in."""
+
+
 class Agent(BaseModel):
     model_config = FROZEN
 
@@ -196,7 +301,7 @@ class Agent(BaseModel):
     description: str = Field(min_length=1, max_length=1024)
     prompt: PromptDocument
     tools: list[ToolName] = Field(default_factory=list)
-    model: str | None = None
+    model: ModelTier | None = None
     color: AgentColor | None = None
 
 
@@ -398,6 +503,28 @@ class Harness(BaseModel):
                     f"skill invocation {invocation.plugin}:{invocation.skill} "
                     f"is missing required arguments: {missing}"
                 )
+
+        declared_agents = [
+            f"{plugin.name}:{agent.name}"
+            for plugin in self.plugins
+            for agent in plugin.agents
+        ]
+        parts = [part for prompt in prompts for part in prompt.parts]
+        unknown_plugins = [
+            part.plugin
+            for part in parts
+            if isinstance(part, PluginPath | SkillPattern)
+            and part.plugin not in plugin_names
+        ]
+        if unknown_plugins:
+            raise ValueError(f"prompt parts name unknown plugins: {unknown_plugins}")
+        unknown_agents = [
+            part.subagent_type
+            for part in parts
+            if isinstance(part, Delegate) and part.subagent_type not in declared_agents
+        ]
+        if unknown_agents:
+            raise ValueError(f"delegations name unknown agents: {unknown_agents}")
 
         used = document_text_size(self.guidance)
         if used > GUIDANCE_CHARACTER_BUDGET:

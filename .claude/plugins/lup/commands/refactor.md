@@ -14,7 +14,7 @@ Rewrite a file (or folder) from scratch, preserving intent but enforcing coding 
 
 ### Parse Arguments
 
-The argument is a **file or folder path**. If no path is provided, use AskUserQuestion to ask which file or folder to refactor.
+The argument is a **file or folder path**. If no path is provided, Ask the user with the AskUserQuestion tool, offering concrete options plus a free-text choice: which file or folder to refactor
 
 Resolve relative paths against the current working directory.
 
@@ -50,7 +50,7 @@ For each file being refactored:
 
 ### 4. Read coding conventions
 
-Read the project's CLAUDE.md (`.claude/CLAUDE.md`) to understand:
+Read the project's guidance file (`.claude/CLAUDE.md`) to understand:
 
 - Type safety requirements
 - Error handling philosophy
@@ -66,13 +66,13 @@ For each file, **write it fresh** using the Write tool — do not edit the origi
 
 - **Preserve the full public interface** (same exports, same function signatures, same behavior)
 - **Include everything the original included** — no features dropped, no edge cases lost
-- **Follow all coding conventions** from CLAUDE.md (types, error handling, style, etc.)
+- **Follow all coding conventions** from the guidance file (types, error handling, style, etc.)
 - **Improve structure** where the original was unclear or poorly organized
 - **Keep the same filename and location**
 
 ### Prompt Content Is Code
 
-Prompt strings (system prompts, agent instructions, guidance templates) are code — they have intent, structure, and conventions. When refactoring files containing prompts, apply the same CLAUDE.md principles:
+Prompt strings (system prompts, agent instructions, guidance templates) are code — they have intent, structure, and conventions. When refactoring files containing prompts, apply the same guidance principles:
 
 - **DRY**: If the same advice appears in multiple sections, consolidate. Every token in a system prompt is paid on every invocation.
 - **Code as Documentation**: No defensive language added after a single bad outcome. No references to historical performance. Instructions should be structural, not reactive.

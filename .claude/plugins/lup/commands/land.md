@@ -26,7 +26,7 @@ Invoke `/lup:commit` to commit any uncommitted work before the sweep.
 
 1. Run `uv run lup-devtools dev survey --json`.
 2. Find the named branch. If it is absent, report and stop.
-3. Show its `disposition` and `reason`, and confirm the matching action via AskUserQuestion.
+3. Show its `disposition` and `reason`, then Request explicit user approval before carrying out the action that disposition implies. Reason: the branch may hold work the user has not looked at.
 4. Carry out that disposition's action from the table below.
 
 ## Full Sweep Mode (no argument)
@@ -69,7 +69,7 @@ Never choose a route on the user's behalf: a `LAND` branch by definition carries
 
 ### 6. Confirm and execute
 
-Use AskUserQuestion before anything that deletes or pushes. Then carry out the approved actions.
+Request explicit user approval before deleting a branch or pushing to a remote. Reason: a LAND branch carries no PR expressing intent, so the intent has to come from the user. Then carry out the approved actions.
 
 ### 7. Report results
 
