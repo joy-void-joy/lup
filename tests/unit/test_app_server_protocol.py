@@ -178,3 +178,23 @@ async def test_disconnect_fails_pending_requests_and_notifies_the_handler() -> N
         await reader
     assert server.pending == {}
     assert len(disconnects) == 1
+
+
+async def test_request_after_idle_disconnect_fails_fast_instead_of_hanging() -> None:
+    """A death with no request in flight must still fail the next request.
+
+    The resolver sits idle between turns; if the app-server dies there, a
+    later ``request`` would otherwise enqueue into a dead stdin queue and
+    await a future nobody resolves.
+    """
+    server = CodexAppServer(Path("codex"))
+    server.exit_error = RuntimeError("Codex app-server exited with status 1: boom")
+    reader = asyncio.create_task(server.read_messages())
+    await asyncio.sleep(0)
+
+    server.output.put_nowait(None)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await reader
+    with pytest.raises(RuntimeError, match="boom"):
+        await asyncio.wait_for(server.request("thread/start", {}), timeout=1)

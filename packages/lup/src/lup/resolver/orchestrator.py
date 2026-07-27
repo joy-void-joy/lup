@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from lup.harness.process import LaunchRequest, ProcessLauncher
+from lup.resolver.contracts import WorktreePreparer
 from lup.resolver.models import (
     Concern,
     DependencyBase,
@@ -66,9 +67,15 @@ class WritableRootLeases:
 class WorktreeOrchestrator:
     """Run only orchestrator-authorized worktree, diff, and commit operations."""
 
-    def __init__(self, launcher: ProcessLauncher, workspace: Path) -> None:
+    def __init__(
+        self,
+        launcher: ProcessLauncher,
+        workspace: Path,
+        preparer: WorktreePreparer | None = None,
+    ) -> None:
         self.launcher = launcher
         self.workspace = workspace
+        self.preparer = preparer
 
     def create(self, lease: WritableRootLease, base_commit: str) -> None:
         status = self.launcher.launch(
@@ -87,6 +94,8 @@ class WorktreeOrchestrator:
         )
         if status.code != 0:
             raise RuntimeError(f"failed to create worktree for {lease.concern_id}")
+        if self.preparer is not None:
+            self.preparer.prepare(lease.root)
 
     def validate_and_commit(
         self,
@@ -237,6 +246,8 @@ class WorktreeOrchestrator:
         )
         if status.code != 0:
             raise RuntimeError(f"failed to restore worktree for {lease.concern_id}")
+        if self.preparer is not None:
+            self.preparer.prepare(lease.root)
 
     def branch_exists(self, lease: WritableRootLease) -> bool:
         """Report whether a persisted resolver branch exists locally."""

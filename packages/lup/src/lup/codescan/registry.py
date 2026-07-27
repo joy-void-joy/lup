@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 import lup.codescan.antipatterns as antipatterns
 import lup.codescan.boundaries as boundaries
 import lup.codescan.capabilities as capabilities
+import lup.codescan.portable as portable
 
 type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"]
 
@@ -70,6 +71,18 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
             "the native adapter boundary."
         ),
         defined_in=boundaries.__name__,
+    ),
+    RegisteredRule(
+        id=portable.RULE_ID,
+        family="spelling",
+        scope="Portable harness declarations",
+        example='models.TextPart(text="Edit `.claude/settings.json`")',
+        message=(
+            "Prose every native tree renders names no platform: the vocabulary is "
+            "whatever the adapters spell, so a location, product, or tool a runtime "
+            "can spell reaches prose through a typed part instead."
+        ),
+        defined_in=portable.__name__,
     ),
     RegisteredRule(
         id=boundaries.KERNEL_IMPORT_RULE_ID,

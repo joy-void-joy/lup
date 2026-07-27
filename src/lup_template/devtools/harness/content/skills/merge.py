@@ -125,10 +125,14 @@ Classify the merge into one of:
 - **Light conflicts**: A few files with small, clearly-resolvable conflicts. Proceed with `git merge`, then resolve in-place.
 - **Heavy conflicts**: Many files, structural reorganization on both sides, or changes that interleave in ways `git merge` handles poorly. Use **manual application** (step 4b).
 
-Present the assessment to the user via AskUserQuestion:
-- Show the conflict prediction
-- Recommend a strategy (merge vs manual)
-- Let the user choose
+Show the conflict prediction and recommend a strategy, then """
+            ),
+            models.AskUser(
+                question="whether to run a standard merge and resolve in place, or "
+                "apply the source branch manually file by file"
+            ),
+            models.TextPart(
+                text=r"""
 
 ### 5a. Standard merge (clean or light conflicts)
 
@@ -162,7 +166,7 @@ When the conflict surface is too large or structural, apply changes manually ins
    - If the source branch changed imports, merge the import lists
    - If both sides restructured, use the current branch's structure and port the source's features into it
 
-4. **For ambiguous cases**, use AskUserQuestion:
+4. **For ambiguous cases**, put the choice to the user:
    - Show both versions
    - Explain what each side intended
    - Recommend an approach
@@ -290,14 +294,14 @@ Classify each conflict hunk against the branch scopes:
 - **Identical intent** — Same change, trivially different wording. Take either.
 - **Refactoring vs features** — One side refactored, the other added features. **Keep both.**
 
-#### Ask the user (use AskUserQuestion)
+#### Ask the user
 
 - **Different approaches** — Both sides solve the same problem differently.
 - **Conflicting deletions vs additions** — One side removes code the other modifies.
 - **Structural reorganization** — Both sides restructured the same section differently.
 - **Ambiguous priority** — Can't tell which version is better without domain knowledge.
 
-**When asking:** Show the exact conflict as labeled code blocks before the AskUserQuestion call. Explain what each side was trying to do. Offer "combine both" when feasible.
+**When asking:** Show the exact conflict as labeled code blocks before you ask. Explain what each side was trying to do. Offer "combine both" when feasible.
 
 ---
 

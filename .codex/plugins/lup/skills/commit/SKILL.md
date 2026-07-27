@@ -52,7 +52,7 @@ EOF
 - `docs` — Documentation only
 - `test` — Adding or updating tests
 - `chore` — Maintenance (deps, config)
-- `meta` — Changes to `.claude/` files
+- `meta` — Changes to harness content and the native trees it generates
 - `data` — Generated outputs
 
 ### Examples

@@ -1,5 +1,3 @@
-# lup: ignore[native-spelling]
-# This installer skill documents the native manifest it configures.
 """Canonical declaration for the init skill."""
 
 import lup.harness.models as models
@@ -24,7 +22,7 @@ SKILL = models.Skill(
 
 This command sets up the project identity, renames the source package, and customizes the feedback collection, metrics, and trace analysis for your specific agent domain.
 
-**This project uses the Claude Agent SDK.** The Agent SDK is the default and expected framework. If the user wants to use the bare Anthropic API instead, ask them to explain why -- the Agent SDK provides structured outputs, tool use, subagents, and hooks out of the box.
+**This project builds on an agent SDK, not raw model API calls.** The SDK is the default and expected framework. If the user wants bare API calls instead, ask them to explain why -- the SDK provides structured outputs, tool use, subagents, and hooks out of the box.
 
 ## Your Task
 
@@ -46,7 +44,7 @@ Before starting the interview, check if `DESIGN.md` exists in the project root. 
 
 ## Phase 1: Project Identity
 
-Use AskUserQuestion to determine the project name:
+Determine the project name by asking:
 
 ### 1. Project Name
 
@@ -91,7 +89,7 @@ Use AskUserQuestion to determine the project name:
 
 ## Interviewing Style
 
-Use AskUserQuestion extensively -- don't make assumptions about the domain. Ask open-ended questions first, then drill into specifics. Example questions (adapt based on context):
+Ask extensively -- don't make assumptions about the domain. Ask open-ended questions first, then drill into specifics. Example questions (adapt based on context):
 
 - "What should this project be called? (valid Python package name, e.g., 'aib', 'forecast_bot')"
 - "What does your agent do and what does a single session look like?"
@@ -105,14 +103,14 @@ Let the conversation flow naturally. The goal is to understand the domain well e
 
 ## Phase 1.5: Prune Scaffolding
 
-Before customizing, decide which optional patterns this domain actually needs. The template ships them all wired; most domains use a subset, and **deleting the rest is the goal, not a failure** (see CLAUDE.md § Scaffolding Is a Menu, Not a Mandate). From the interview answers, classify each as KEEP-and-customize or DELETE-the-files:
+Before customizing, decide which optional patterns this domain actually needs. The template ships them all wired; most domains use a subset, and **deleting the rest is the goal, not a failure** (see the guidance file's § Scaffolding Is a Menu, Not a Mandate). From the interview answers, classify each as KEEP-and-customize or DELETE-the-files:
 
 - **Reflection** (`agent/tools/reflect.py` + the gate wiring in `core.py`) — keep only if the agent commits a consequential, judgment-bearing output where self-critique helps.
 - **Realtime / persistent mode** (`agent/tools/realtime.py`, `lup.realtime*`, the Stop-hook/sleep-wake wiring) — keep only for agents that live over time (chat, monitoring, games); delete for one-shot agents.
 - **Feedback loop** (`devtools/feedback/`, the feedback-loop command) — keep only if ground truth or a feedback signal resolves over time.
 - **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning. Session data is gitignored by default (the `notes/*` lines in `.gitignore`), so traces and outputs stay local; keeping this pattern means removing those two lines so session data can be committed. When deleting the pattern, leave the ignore lines in place.
 
-Use AskUserQuestion to confirm the keep/delete set, then **delete the files and their wiring** for everything not kept before proceeding. The customization steps below apply only to what you kept.
+Confirm the keep/delete set with the user, then **delete the files and their wiring** for everything not kept before proceeding. The customization steps below apply only to what you kept.
 
 ## Phase 2: Rename Package
 
@@ -123,15 +121,27 @@ uv run lup-devtools dev init rename-package <project> --dry-run
 uv run lup-devtools dev init rename-package <project>
 ```
 
-This handles directory rename (`src/lup_template/` -> `src/<project>/`), import updates, pyproject.toml entry points, CLI app name, and the plugin marketplace name -- all in one shot. The marketplace (`.claude/plugins/.claude-plugin/marketplace.json` + settings.json) is named `<project>` so it doesn't collide in the global marketplace namespace, while the plugin entry stays `lup` (so `"""
+This handles directory rename (`src/lup_template/` -> `src/<project>/`), import updates, pyproject.toml entry points, CLI app name, and the plugin marketplace name -- all in one shot. The marketplace registration in each tree ("""
             ),
-            models.TextPart(text="the corresponding Lup skill"),
+            models.NativePath(location="marketplace", scope="every_tree"),
+            models.TextPart(
+                text=r""") is named `<project>` so it doesn't collide in the global marketplace namespace, while the plugin entry stays `lup` (so `"""
+            ),
+            models.SkillPattern(plugin="lup", placeholder="*"),
             models.TextPart(
                 text=r"""` is identical everywhere). Framework vocabulary (`lup_tool`, `lup-devtools`, `.lup/`, etc.) is preserved automatically.
 
 ### After renaming:
 
-1. **Merge the guidance file from its template** -- Perform a section-level merge into the platform guidance file using its matching template flavor: `.claude/CLAUDE.md` from `.claude/plugins/lup/TEMPLATE_CLAUDE.md` under Claude Code, the repository-root `AGENTS.md` from `.codex/plugins/lup/TEMPLATE_AGENTS.md` under Codex (merge both when the project commits both harness trees):
+1. **Merge the guidance file from its template** -- Perform a section-level merge into each tree's guidance file ("""
+            ),
+            models.NativePath(location="guidance_file", scope="every_tree"),
+            models.TextPart(text=r""") from its matching template flavor ("""),
+            models.PluginPath(
+                plugin="lup", location="guidance_template", scope="every_tree"
+            ),
+            models.TextPart(
+                text=r"""), covering every tree the project commits:
    1. Read the template and replace `<project>` placeholders with the actual project name
    2. Read the existing guidance file
    3. Use the `<!-- section: ... -->` markers in the template to identify independent merge units
@@ -203,7 +213,7 @@ If this domain has no consequential, judgment-bearing output, you already delete
 
 - Extend `ReflectInput` with domain-specific fields (factor analysis, move evaluation, etc.)
 - Customize the reviewer prompt for the domain's common failure modes
-- The reviewer runs on the Opus-class aux model (see CLAUDE.md § Model Selection); pass `skip_reviewer=True` per call for speed-sensitive or trivial tasks
+- The reviewer runs on the strongest aux model available (see the guidance file's § Model Selection); pass `skip_reviewer=True` per call for speed-sensitive or trivial tasks
 
 The reflection gate (`lup.reflect`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
 
@@ -213,7 +223,11 @@ The feedback collection module (exposed via `uv run lup-devtools feedback collec
 
 ### 8. Update the guidance
 
-Edit `src/<project>/devtools/harness/content/guidance.py`, then regenerate with `uv run lup-devtools harness claude` and `harness codex` -- `.claude/CLAUDE.md` and the root `AGENTS.md` are its outputs, and editing them directly is undone by the next generation.
+Edit `src/<project>/devtools/harness/content/guidance.py`, then regenerate with `uv run lup-devtools harness generate all` -- """
+            ),
+            models.NativePath(location="guidance_file", scope="every_tree"),
+            models.TextPart(
+                text=r""" are its outputs, and editing them directly is undone by the next generation.
 
 The guidance should already carry the template sections from the Phase 2 merge. Now add domain-specific content based on the interview answers:
 

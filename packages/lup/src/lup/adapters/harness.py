@@ -5,21 +5,28 @@ from lup.adapters.claude.harness import (
     ClaudeGuidanceRenderer,
     ClaudeHookRenderer,
     ClaudePluginManifestRenderer,
-    ClaudePromptRenderer,
-    ClaudeSkillInvocationRenderer,
     ClaudeSkillRenderer,
+    ClaudeSpellings,
 )
 from lup.adapters.codex.harness import (
     CodexAgentRenderer,
     CodexGuidanceRenderer,
     CodexHookRenderer,
     CodexPluginManifestRenderer,
-    CodexPromptRenderer,
-    CodexSkillInvocationRenderer,
     CodexSkillRenderer,
+    CodexSpellings,
 )
+from lup.codescan.portable import prose_breaches
+from lup.harness.contracts import NativeSpellings
 from lup.harness.generation import ArtifactValidationError
-from lup.harness.models import Artifact, ArtifactTree, Harness, TextPart
+from lup.harness.prompts import SpelledPromptRenderer
+from lup.harness.models import (
+    GUIDANCE_CHARACTER_BUDGET,
+    Artifact,
+    ArtifactTree,
+    Harness,
+    TextPart,
+)
 from lup.harness.validation import DeterministicTreeValidator
 
 
@@ -36,6 +43,65 @@ def validated_tree(artifacts: list[Artifact]) -> ArtifactTree:
             )
         )
     return tree
+
+
+def prompt_renderer(own: NativeSpellings) -> SpelledPromptRenderer:
+    """Compose the one renderer around the vocabulary of one runtime.
+
+    Prose that teaches every tree names the runtimes in this order, so the
+    ordering is a single composition decision rather than a claim any one
+    adapter makes about the others.
+    """
+    return SpelledPromptRenderer(own=own, every=[ClaudeSpellings(), CodexSpellings()])
+
+
+def claude_prompt_renderer() -> SpelledPromptRenderer:
+    """Render prompts in Claude's vocabulary."""
+    return prompt_renderer(ClaudeSpellings())
+
+
+def codex_prompt_renderer() -> SpelledPromptRenderer:
+    """Render prompts in Codex's vocabulary."""
+    return prompt_renderer(CodexSpellings())
+
+
+def reject_oversized_guidance(tree: ArtifactTree) -> None:
+    """Hold the always-loaded document to its budget as a session sees it.
+
+    The declaration-time lower bound in ``Harness`` cannot know what the parts
+    render to, and the gap grows with every part that replaces literal prose.
+    """
+    for artifact in tree.artifacts:
+        used = len(artifact.content)
+        if artifact.semantic_id != "harness.guidance" or used <= (
+            GUIDANCE_CHARACTER_BUDGET
+        ):
+            continue
+        raise ValueError(
+            f"rendered guidance {artifact.path.as_posix()} is {used} characters, "
+            f"over the {GUIDANCE_CHARACTER_BUDGET} budget by "
+            f"{used - GUIDANCE_CHARACTER_BUDGET}. Move a section to a generated "
+            "document under docs/ and leave a file-path pointer, the way "
+            "Self-Improvement Loop and Permission Hooks were split."
+        )
+
+
+def reject_native_prose(source: Harness) -> None:
+    """Keep every native spelling inside the adapter that owns it.
+
+    Composition is the only place that sees the assembled text, so a
+    description built elsewhere and folded into a prompt is judged here too.
+    """
+    breaches = prose_breaches(source, [ClaudeSpellings(), CodexSpellings()])
+    if breaches:
+        named = ", ".join(
+            f"{breach.declaration_id} names {breach.spelling!r}"
+            for breach in breaches[:8]
+        )
+        raise ValueError(
+            "prose every tree renders must name no platform; a typed part "
+            f"spells these for each runtime instead: {named}"
+        )
 
 
 def reject_rendered_invocations(source: Harness, sigil: str) -> None:
@@ -66,14 +132,15 @@ def reject_rendered_invocations(source: Harness, sigil: str) -> None:
 def compile_claude(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Claude-owned artifacts."""
     reject_rendered_invocations(source, "/")
-    invocations = ClaudeSkillInvocationRenderer()
-    prompts = ClaudePromptRenderer(invocations)
+    reject_native_prose(source)
+    spellings = ClaudeSpellings()
+    prompts = prompt_renderer(spellings)
     manifest_renderer = ClaudePluginManifestRenderer()
     guidance_renderer = ClaudeGuidanceRenderer(prompts)
     artifacts: list[Artifact] = []  # lup: ignore[empty-collection]
     for plugin in source.plugins:
         skill_renderer = ClaudeSkillRenderer(prompts, plugin.name)
-        agent_renderer = ClaudeAgentRenderer(prompts, plugin.name)
+        agent_renderer = ClaudeAgentRenderer(prompts, plugin.name, spellings)
         for declaration in plugin.skills:
             artifacts.extend(skill_renderer.render(declaration).artifacts)
         for declaration in plugin.agents:
@@ -83,21 +150,24 @@ def compile_claude(source: Harness) -> ArtifactTree:
             artifacts.extend(
                 ClaudeHookRenderer(plugin.name).render(plugin.hooks).artifacts
             )
-    artifacts.extend(guidance_renderer.render(source).artifacts)
+    guidance = guidance_renderer.render(source)
+    reject_oversized_guidance(guidance)
+    artifacts.extend(guidance.artifacts)
     return validated_tree(artifacts)
 
 
 def compile_codex(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Codex-owned artifacts."""
     reject_rendered_invocations(source, "$")
-    invocations = CodexSkillInvocationRenderer()
-    prompts = CodexPromptRenderer(invocations)
+    reject_native_prose(source)
+    spellings = CodexSpellings()
+    prompts = prompt_renderer(spellings)
     manifest_renderer = CodexPluginManifestRenderer()
     guidance_renderer = CodexGuidanceRenderer(prompts)
     artifacts: list[Artifact] = []  # lup: ignore[empty-collection]
     for plugin in source.plugins:
         skill_renderer = CodexSkillRenderer(prompts, plugin.name)
-        agent_renderer = CodexAgentRenderer(prompts)
+        agent_renderer = CodexAgentRenderer(prompts, spellings)
         for declaration in plugin.skills:
             artifacts.extend(skill_renderer.render(declaration).artifacts)
         for declaration in plugin.agents:
@@ -107,5 +177,7 @@ def compile_codex(source: Harness) -> ArtifactTree:
             artifacts.extend(
                 CodexHookRenderer(plugin.name).render(plugin.hooks).artifacts
             )
-    artifacts.extend(guidance_renderer.render(source).artifacts)
+    guidance = guidance_renderer.render(source)
+    reject_oversized_guidance(guidance)
+    artifacts.extend(guidance.artifacts)
     return validated_tree(artifacts)

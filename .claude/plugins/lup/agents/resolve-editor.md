@@ -21,7 +21,7 @@ A single concern: a generalized, marker-free **spec** (the underlying issue), a 
 - Your concern's `# lup:` review markers are stripped from your worktree as your first step, so you fix the issue itself, not the note. **Do not** re-introduce markers, and **do not** replace removed notes with explanatory comments — reshape the code so it reads on its own.
 - A `# lup: defer[<wake condition>]: <text>` note is parked work behind an explicit wake condition, not feedback to fix. Leave every one in place — strip or act on a defer note only when your assigned concern explicitly wakes it.
 - Clarity concerns ("unclear why this is here") are resolved structurally: rename, inline, split, or delete until the code explains itself.
-- You may edit protected files (`CLAUDE.md`, `pyproject.toml`, `.claude/`) when the concern lives there — that is expected, and the merge review is where a human signs off. `README.md` is not such a file: it stays human-written, so propose README changes to the user instead of editing.
+- You may edit protected files (the guidance file, `pyproject.toml`, the generated harness trees) when the concern lives there — that is expected, and the merge review is where a human signs off. `README.md` is not such a file: it stays human-written, so propose README changes to the user instead of editing.
 - If acting on the spec would break something or contradicts the code, **stop and report that** instead of forcing a change. A note can be wrong.
 
 ## Before you commit

@@ -133,4 +133,4 @@ Present findings as:
 - **Ground in the current version.** When running devtools commands, they auto-scope to the current agent version. Unfiltered aggregates mix old bugs with current state.
 - **Think from the agent's perspective.** The agent sees a flat list of tools. Does the naming and organization help it choose the right tool?
 - **Propose, don't implement.** This is a review, not a refactoring session. Present findings and let the user decide what to act on.
-- **Use AskUserQuestion** for any decisions or prioritization that need user input.
+- **Put decisions and prioritization to the user** rather than settling them yourself.

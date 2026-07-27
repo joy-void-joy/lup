@@ -4,8 +4,9 @@ import sh
 import typer
 from pydantic import BaseModel
 
+from lup.adapters.harness import claude_prompt_renderer, codex_prompt_renderer
 from lup.codescan.markers import find_feedback
-from lup.harness.models import GUIDANCE_CHARACTER_BUDGET, document_text_size
+from lup.harness.models import GUIDANCE_CHARACTER_BUDGET
 
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
 from lup_template.devtools.dev.boundaries import scan_boundaries
@@ -153,7 +154,10 @@ def run_checks(fix: bool, no_test: bool) -> None:
         typer.echo("seam boundaries: ok")
         results.append(CheckOutcome(name="seam boundaries", passed=True))
 
-    used = document_text_size(GUIDANCE)
+    used = max(
+        len(claude_prompt_renderer().render(GUIDANCE)),
+        len(codex_prompt_renderer().render(GUIDANCE)),
+    )
     free = GUIDANCE_CHARACTER_BUDGET - used
     state = "ok" if free >= 0 else f"FAIL (over by {-free})"
     typer.echo(

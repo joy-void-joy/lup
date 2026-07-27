@@ -8,7 +8,6 @@ human acceptance of its review branch.
 
 import asyncio
 import os
-import sys
 from pathlib import Path
 
 import typer
@@ -17,14 +16,20 @@ from pydantic import BaseModel
 from lup.codescan.markers import find_feedback
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
-from lup.resolver.contracts import QuestionBroker
+from lup.resolver.contracts import (
+    QuestionBroker,
+    ResolverAwaitingAnswers,
+    ResolverObserver,
+    WorktreePreparer,
+)
 from lup.resolver.core import ResolverCore
 from lup.resolver.models import (
     AnswerBatch,
+    ConcernProgress,
     InventoryNote,
-    MaterialQuestion,
     QuestionAnswer,
     QuestionBatch,
+    ResolvePhase,
     ResolveRequest,
     ResolverConfig,
     SourceSnapshot,
@@ -35,6 +40,10 @@ from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup_template.devtools.dev.comments import FoundComment, scan_tracked
 from lup_template.devtools.dev.remote_auth import check_remote_auth
+from lup_template.devtools.dev.worktree import (
+    copy_gitignored_extras,
+    sync_dependencies,
+)
 from lup_template.devtools.harness.composition import harness_compositions
 
 
@@ -61,6 +70,39 @@ def resolver_intake(comments: list[FoundComment]) -> ResolverIntake:
             if comment.kind == "defer"
         ],
     )
+
+
+class FeatureWorktreePreparer(WorktreePreparer):
+    """Prepare leased resolver worktrees exactly like feature worktrees.
+
+    Copies the same gitignored extras and runs the same dependency sync as
+    ``dev worktree create``, so verification and tests inside a lease bind
+    to the leased checkout instead of the source tree's environment.
+    """
+
+    def __init__(self, source_root: Path) -> None:
+        self.source_root = source_root
+
+    def prepare(self, root: Path) -> None:
+        copy_gitignored_extras(self.source_root, root)
+        sync_dependencies(root)
+
+
+class ConsoleResolverObserver(ResolverObserver):
+    """Print one line per durably recorded resolver transition.
+
+    Long worker phases are otherwise silent; these lines are the liveness
+    signal that lets an operator stop polling state files and worktrees.
+    """
+
+    def phase_changed(self, phase: ResolvePhase) -> None:
+        typer.echo(f"[resolve] phase: {phase}")
+
+    def concern_changed(self, progress: ConcernProgress) -> None:
+        line = f"[resolve] {progress.concern_id}: {progress.status}"
+        if progress.reason:
+            line = f"{line} ({progress.reason})"
+        typer.echo(line)
 
 
 class ConsoleQuestionBroker(QuestionBroker):
@@ -108,15 +150,6 @@ def parse_answer_flags(
     if len(identifiers) != len(dict.fromkeys(identifiers)):
         raise typer.BadParameter("--answer question ids must be unique")
     return {pair[0]: pair[1] for pair in pairs}
-
-
-class ResolverAwaitingAnswers(Exception):
-    """A headless run parked on material questions it has no answers for."""
-
-    def __init__(self, pending: list[MaterialQuestion], problems: list[str]) -> None:
-        super().__init__(f"resolver run is awaiting {len(pending)} material answer(s)")
-        self.pending = pending
-        self.problems = problems
 
 
 class HeadlessQuestionBroker(QuestionBroker):
@@ -274,6 +307,7 @@ def run_resolve(
     run_id: str | None,
     human_decision: bool | None,
     answers: list[str],
+    interactive: bool = False,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
@@ -302,7 +336,7 @@ def run_resolve(
             CodexSessionConfig,
             create_codex_session_factory,
         )
-        from lup_template.agent.config import settings
+        from lup_template.agent.config import engine_for_model, settings
         from lup.hooks import (
             create_git_inspection_hook,
             create_permission_hooks,
@@ -312,12 +346,20 @@ def run_resolve(
         session_environment = non_interactive_environment(
             os.environ  # lup: ignore[os-environ] — sessions inherit the console
         )
+        session_model = (
+            settings.model if engine_for_model(settings.model) == adapter else None
+        )
+        if session_model is None:
+            typer.echo(
+                f"Configured model {settings.model!r} does not route to adapter "
+                f"{adapter!r}; sessions use the adapter's native default model."
+            )
 
         def worker_factory(cwd: Path) -> SessionFactory:
             if adapter == "claude":
                 return create_claude_session_factory(
                     ClaudeSessionConfig(
-                        model=settings.model,
+                        model=session_model,
                         system_prompt="Execute the persisted Lup resolver assignment.",
                         cwd=cwd,
                         add_dirs=[cwd],
@@ -330,7 +372,7 @@ def run_resolve(
                 )
             return create_codex_session_factory(
                 CodexSessionConfig(
-                    model=settings.model,
+                    model=session_model,
                     developer_instructions=(
                         "Execute the persisted Lup resolver assignment."
                     ),
@@ -346,7 +388,7 @@ def run_resolve(
             if adapter == "claude":
                 return create_claude_session_factory(
                     ClaudeSessionConfig(
-                        model=settings.model,
+                        model=session_model,
                         system_prompt=(
                             "Independently review the persisted resolver change."
                         ),
@@ -358,7 +400,7 @@ def run_resolve(
                 )
             return create_codex_session_factory(
                 CodexSessionConfig(
-                    model=settings.model,
+                    model=session_model,
                     developer_instructions=(
                         "Independently review the persisted resolver change."
                     ),
@@ -373,7 +415,7 @@ def run_resolve(
 
         broker: QuestionBroker = (
             HeadlessQuestionBroker(provided)
-            if provided or not sys.stdin.isatty()
+            if provided or not interactive
             else ConsoleQuestionBroker()
         )
         core = ResolverCore(
@@ -401,6 +443,8 @@ def run_resolve(
             composition.invocation_renderer,
             broker,
             launcher,
+            observer=ConsoleResolverObserver(),
+            worktree_preparer=FeatureWorktreePreparer(root),
         )
         try:
             if core.repository.exists():
@@ -440,7 +484,7 @@ def run_resolve(
         if manifest.accepted is None and manifest.final_review is not None:
             typer.echo(f"Review branch: {manifest.review_branch}")
             typer.echo(manifest.final_review.model_dump_json(indent=2))
-            if human_decision is None and not sys.stdin.isatty():
+            if human_decision is None and not interactive:
                 typer.echo(
                     "Run awaiting acceptance: relay the review to the human, "
                     "then rerun with --accept or --reject."

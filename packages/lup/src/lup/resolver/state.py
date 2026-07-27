@@ -60,6 +60,7 @@ CONCERN_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {
     ],
     ConcernStatus.RUNNING: [
         ConcernStatus.VALIDATING,
+        ConcernStatus.WAITING_FOR_ANSWERS,
         ConcernStatus.ELIGIBLE,
         ConcernStatus.FAILED,
     ],

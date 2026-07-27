@@ -50,11 +50,8 @@ When the conversation gets specific enough, read these to show the user what the
 - `src/lup_template/agent/tool_policy.py` — Tool availability logic
 - `src/lup_template/agent/prompts.py` — System prompt templates
 
-### SDK Documentation
-When you need to verify SDK capabilities or answer technical questions:
-- Agent SDK docs: `https://docs.claude.com/en/agent-sdk/`
-- Use `WebFetch` or `WebSearch` to check specifics
-- Use `Agent(subagent_type="claude-code-guide")` for Claude Code / SDK questions
+### Runtime and SDK documentation
+When you need to verify a capability or answer a technical question, read the Codex documentation at https://developers.openai.com/codex/ and https://learn.chatgpt.com/ rather than answering from memory. Fetch or search it for specifics, and delegate to whatever documentation agent your harness ships when it has one.
 
 ## Conversation Flow
 
@@ -134,4 +131,4 @@ Things still to figure out during init or implementation.
 - **Be concrete when possible.** "You'd have a tool called `fetch_market_data` that takes a ticker symbol" is better than "you'd have tools for data fetching."
 - **Flag when something is hard.** If the user wants something the template doesn't support well, say so and suggest alternatives.
 - **Scope at agent speed.** Implementation runs at agent pace, not human pace — a complete working version is hours away, not weeks. Don't steer the design toward a cut-down POC to "save time"; design the real thing.
-- **Use AskUserQuestion** for decision points where the user needs to choose between approaches. For open-ended exploration, regular conversation is fine.
+- **Put decision points to the user as questions** where they need to choose between approaches. For open-ended exploration, regular conversation is fine.

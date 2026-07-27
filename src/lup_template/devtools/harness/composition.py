@@ -12,12 +12,12 @@ from pathlib import Path
 import typer
 from pydantic import BaseModel, ConfigDict
 
-from lup.adapters.claude.harness import ClaudeSkillInvocationRenderer
+from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.claude.harness_runtime import (
     ClaudeCliEvidence,
     claude_capability_probes,
 )
-from lup.adapters.codex.harness import CodexSkillInvocationRenderer
+from lup.adapters.codex.harness import CodexSpellings
 from lup.adapters.codex.harness_runtime import (
     CodexCliEvidence,
     codex_capability_probes,
@@ -59,7 +59,7 @@ def claude_composition(root: Path) -> NativeHarnessComposition:
     return NativeHarnessComposition(
         recipe=claude_generation_recipe(root),
         readiness=readiness,
-        invocation_renderer=ClaudeSkillInvocationRenderer(),
+        invocation_renderer=ClaudeSpellings(),
     )
 
 
@@ -72,7 +72,7 @@ def codex_composition(root: Path) -> NativeHarnessComposition:
     return NativeHarnessComposition(
         recipe=codex_generation_recipe(root),
         readiness=readiness,
-        invocation_renderer=CodexSkillInvocationRenderer(),
+        invocation_renderer=CodexSpellings(),
     )
 
 

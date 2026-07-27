@@ -60,9 +60,19 @@ The first word is the **project name** (must match a tracked project in `sync.js
             models.TextPart(
                 text=r""" myapp lib/cache TTL invalidation` — project is `myapp`, pattern is "lib/cache TTL invalidation"
 
-If no arguments provided, use AskUserQuestion to ask for both the project name and what to import.
+If no arguments provided, """
+            ),
+            models.AskUser(
+                question="which project to import from, and what pattern to import"
+            ),
+            models.TextPart(
+                text=r"""
 
-If only a project name is provided (single word, no description), use AskUserQuestion to ask what pattern to import.
+If only a project name is provided (single word, no description), """
+            ),
+            models.AskUser(question="what pattern to import from that project"),
+            models.TextPart(
+                text=r"""
 
 ## Steps
 
@@ -112,7 +122,7 @@ cd refs/<project> && git log --all --oneline --grep="<keyword>" | head -20
 
 ### 4. Present what you found
 
-Use AskUserQuestion to present the relevant code you found, organized by file. For each piece:
+Present the relevant code you found, organized by file. For each piece:
 
 - Show which file(s) contain the pattern
 - Summarize what the code does
@@ -131,7 +141,15 @@ Before porting, analyze what needs to change:
 - **Integration points**: Where does this pattern connect to the rest of the codebase?
 - **Conflicts**: Does anything in the current project overlap with or contradict this pattern?
 
-Present your analysis and proposed adaptation plan via AskUserQuestion before making changes.
+Present your analysis and proposed adaptation plan, then """
+            ),
+            models.RequestApproval(
+                action="making any change to this repository",
+                reason="the pattern comes from another project and has to be adapted, "
+                "not copied",
+            ),
+            models.TextPart(
+                text=r"""
 
 ### 6. Port the pattern
 
@@ -141,7 +159,7 @@ For approved imports:
 2. Adapt the code:
    - Replace domain-specific identifiers with template-appropriate equivalents
    - Adjust import paths to match the current project structure
-   - Follow the current project's coding conventions (see CLAUDE.md)
+   - Follow the current project's coding conventions (see its guidance file)
    - Remove domain-specific logic, replace with generic scaffolding or placeholders
 3. Write or edit files in the current project
 4. Verify:
