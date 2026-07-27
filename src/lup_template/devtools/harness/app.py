@@ -22,6 +22,12 @@ import lup_template.devtools.harness.drift as drift
 import lup_template.devtools.harness.launch as launch
 import lup_template.devtools.harness.reconcile as reconcile
 import lup_template.devtools.harness.resolve as resolve
+from lup_template.devtools.supervisor.app import serve_supervisor
+from lup_template.devtools.supervisor.doors import (
+    answer_questions,
+    list_questions,
+    park_run,
+)
 
 app = typer.Typer(no_args_is_help=True, help="Generate and launch a native harness")
 
@@ -85,9 +91,30 @@ def doctor_command(
     doctor.run_doctor(target, strict_evidence)
 
 
-@app.command("resolve")
+@app.command("serve-resolver-tools")
+def serve_resolver_tools_command() -> None:
+    """Serve one worker's question tools over stdio, for out-of-process runtimes."""
+    resolve.run_resolver_tool_server()
+
+
+resolve_app = typer.Typer(
+    help="Drive the persisted resolver, and browse or answer its runs",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+resolve_app.command("supervise")(serve_supervisor)
+resolve_app.command("questions")(list_questions)
+resolve_app.command("answer")(answer_questions)
+resolve_app.command("park")(park_run)
+app.add_typer(resolve_app, name="resolve")
+
+
+@resolve_app.callback(invoke_without_command=True)
 def resolve_command(
-    adapter: Annotated[str, typer.Option("--adapter", help="claude or codex")],
+    context: typer.Context,
+    adapter: Annotated[
+        str | None, typer.Option("--adapter", help="claude or codex")
+    ] = None,
     run_id: Annotated[
         str | None,
         typer.Option("--run-id", help="Stable run id; defaults to the source commit"),
@@ -107,18 +134,50 @@ def resolve_command(
             "(repeatable)",
         ),
     ] = None,
-    interactive: Annotated[
+    wait: Annotated[
+        float,
+        typer.Option(
+            "--wait",
+            help="Seconds to wait for a human to answer a material question "
+            "before parking the run. Zero parks immediately, so an unattended "
+            "invocation is deterministic.",
+        ),
+    ] = 0.0,
+    supervise: Annotated[
         bool,
         typer.Option(
-            "--interactive/--headless",
-            help="Prompt on this console for material questions and acceptance "
-            "instead of parking the run (headless is the default; --answer "
-            "always answers headlessly)",
+            "--supervise",
+            help="Open the supervisor page beside this run. Sugar for a long "
+            "--wait plus `lup-devtools harness resolve supervise`, which you "
+            "can also run yourself against any run at any time.",
+        ),
+    ] = False,
+    supervise_port: Annotated[
+        int, typer.Option("--supervise-port", help="Port for the supervisor page")
+    ] = 8766,
+    supervise_linger: Annotated[
+        bool,
+        typer.Option(
+            "--supervise-linger",
+            help="Leave the supervisor page running after the run exits",
         ),
     ] = False,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
-    resolve.run_resolve(adapter, run_id, human_decision, answer or [], interactive)
+    if context.invoked_subcommand is not None:
+        return
+    if adapter is None:
+        raise typer.BadParameter("--adapter is required to drive a resolver run")
+    resolve.run_resolve(
+        adapter,
+        run_id,
+        human_decision,
+        answer or [],
+        max(wait, resolve.SUPERVISED_WAIT_SECONDS) if supervise else wait,
+        resolve.SupervisorSpawn(
+            enabled=supervise, port=supervise_port, linger=supervise_linger
+        ),
+    )
 
 
 @app.command(
