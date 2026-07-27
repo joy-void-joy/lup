@@ -22,6 +22,7 @@ from lup.harness.environment import non_interactive_environment
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.codex_home import select_codex_home
 from lup_template.devtools.harness.composition import (
     NativeHarnessComposition,
     claude_composition,
@@ -205,10 +206,10 @@ def launch_codex(
     runtime_preflight(composition)
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     envelope = codex_sandbox_arguments(environment, extra_args)
-    configured_home = environment["CODEX_HOME"] if "CODEX_HOME" in environment else None
-    selected_home = codex_home or (
-        Path(configured_home) if configured_home is not None else Path.home() / ".codex"
-    )
+    home = select_codex_home(codex_home, environment, project_root(), profile)
+    selected_home = home.path
+    if home.isolated:
+        typer.echo(f"Using worktree-scoped Codex home: {selected_home}")
     plugin = portable_harness().plugins[0]
     cache = CodexPluginInstaller(
         PluginCacheConfig(codex_home=selected_home, marketplace=plugin.marketplace)

@@ -62,7 +62,7 @@ This file provides guidance to Codex — and any agent that reads `AGENTS.md` �
         models.TextPart(
             text=r"""## Editing Style
 
-**Prefer small, atomic edits.** The permission policy cannot inspect patch contents (`apply_patch` input is opaque to it), so edits fall through to a fail-closed approval — disciplined, single-concern patches are what keeps that review tractable and the history auditable.
+**Prefer small, atomic edits.** The PreToolUse hook decodes `apply_patch`'s complete command into before/after documents and applies the canonical edit policy. Safe changes with up to three real added lines are automatically allowed; protected paths, anti-patterns, marker changes, and full-file writes keep their guardrails.
 
 - Split large changes into multiple small patches, one logical change each
 - Separate concerns -- move imports in one patch, change logic in another
@@ -82,9 +82,11 @@ There is no editor-integrated language server in this environment. Run `uv run p
         models.TextPart(
             text=r"""`lup-devtools harness codex` regenerates and verifies the Codex artifacts,
 installs a separately cached copy of the plugin after a digest check, and
-launches the Codex CLI. `CODEX_HOME` selects the account/config home.
+launches the Codex CLI in a persistent per-worktree home seeded from personal
+Codex authentication and settings.
 `lup-devtools usage claude` reports Claude usage; profiles are managed with
 `lup-devtools setup profile`.
+`--codex-home` or an inherited `CODEX_HOME` selects an explicit home instead.
 
 Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `$lup:*` is identical everywhere. Codex resolves the marketplace from the repository's `.agents/plugins/marketplace.json` and installs the plugin into its own cache, verifying the digest before every launch; `lup-devtools dev plugin name` (run by `"""
         ),
@@ -100,7 +102,9 @@ Each repo names its plugin **marketplace** after the project — the plugin entr
         models.TextPart(
             text=r"""## Settings & Configuration
 
-Project Codex configuration is the generated `.codex/config.toml`. Personal overrides belong in `.codex/config.local.toml` (gitignored) — never edit the generated file.
+Project Codex configuration is the generated `.codex/config.toml`, loaded only for a trusted project. Personal sandbox and approval defaults belong in `~/.codex/config.toml`; `sandbox_mode = "workspace-write"` with `approval_policy = "on-request"` is the low-friction guarded default. Never edit the generated project file.
+
+Prefix-safe shell allows from the canonical policy are generated as project-local rules in `.codex/rules/lup.rules`. A matching native `allow` runs outside the sandbox without prompting; the PreToolUse hook remains the semantic gate and blocks unsafe variants. Commands whose safety depends on flags, paths, shell structure, or runtime content stay under the sandbox and approval flow.
 
 ---
 

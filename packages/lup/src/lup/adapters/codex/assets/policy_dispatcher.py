@@ -81,7 +81,7 @@ def read_document(path_text):
     return path.read_text(encoding="utf-8") if path.exists() else None
 
 
-def edit_decision(path_text, before, after):
+def edit_decision(path_text, before, after, path_exists):
     path = Path(path_text)
     suffix = path.suffix.lower()
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else ()
@@ -89,7 +89,7 @@ def edit_decision(path_text, before, after):
         worktree_path(path_text),
         before,
         after,
-        path_exists=path.exists(),
+        path_exists=path_exists,
         path_rules=PATH_RULES,
         antipattern_rows=rows,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
@@ -130,7 +130,12 @@ def dispatch(payload, permission_request=False):
         changes = patched_files(tool_input["command"], read_document)
         return joined(
             [
-                edit_decision(change.path, change.before, change.after)
+                edit_decision(
+                    change.path,
+                    change.before,
+                    change.after,
+                    change.path_exists,
+                )
                 for change in changes
             ]
         )

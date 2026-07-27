@@ -257,9 +257,10 @@ launch the native plugins. `lup-devtools usage claude` reports usage. Profiles
 (named Claude config dirs) are managed with `lup-devtools setup profile`.
 
 Each repo names its plugin marketplace after the project. Claude launches the
-verified local plugin directory; Codex installs a separately cached copy and
-verifies its digest before launch. Personal cache and trust state are never
-committed.
+verified local plugin directory. Codex seeds a persistent per-worktree home from
+personal authentication and settings, installs the verified plugin there, and
+keeps its cache, trust, and session state outside the repository.
+`--codex-home` or an inherited `CODEX_HOME` selects an explicit home instead.
 
 ### Lup Skills & Agents
 
