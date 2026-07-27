@@ -523,6 +523,7 @@ src/
     │   ├── usage/              # Claude Code usage display (api/render/app)
     │   ├── setup.py            # Shared integration registry + terminal wizard
     │   ├── dashboard/          # Local setup API and packaged zero-build web UI
+    │   ├── supervisor/         # Live and read-only web supervision of resolver runs
     │   ├── sync.py             # Upstream sync tracking (feeds /lup:update)
     │   ├── utils.py            # Shared CLI helpers (git command, JSON output)
     │   └── version.py          # Version display, changelog, and bump

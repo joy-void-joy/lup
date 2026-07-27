@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "d27978c88e3b8a3e3e1c2f96d30278301eb967f270f7e0e763d5b8378301b483",
+  "source_digest": "5426945c949da4685955467f6d454aba4da7d1a0456d36eef47a678057ff0b06",
   "target_requirements": [
     "claude-code"
   ],
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "a4ab922e91278627302375f70d50d54c99125ce301eccb4c607861d658b96722",
+      "sha256": "89f87797e8bf2d77a34f17e5fbd57c0d0c65dde6b1dd1d2d534cdff02b96613a",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -177,7 +177,7 @@
     {
       "path": ".claude/plugins/lup/commands/implementer.md",
       "category": "generated",
-      "sha256": "51c4882222dd9cbacaa7ebae76491196aa520101924cf6c30945f2aed33791c4",
+      "sha256": "5e8adda9e35b72d583d1d0185c29a6ae234a833f28e99e0f5d4d63954292e25a",
       "semantic_id": "skill.implementer",
       "executable": false
     },
@@ -268,7 +268,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "b567748b00afa1779f681d442635a15708cd31b0591e7c024c6d229a66310b4e",
+      "sha256": "606cd4f2e0dd5fcebc0ff9384d8f2e14eb49b53881663cd11dff0a442e3c4616",
       "semantic_id": "skill.resolve",
       "executable": false
     },
