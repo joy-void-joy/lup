@@ -33,7 +33,7 @@ def test_extra_dirs_defaults_empty_and_skips_blank_parts(
 
 
 def test_engine_for_model_routes_by_vendor_prefix_alone() -> None:
-    assert engine_for_model("claude-opus-4-6") == "claude"
+    assert engine_for_model("claude-opus-5") == "claude"
     assert engine_for_model("gpt-5.6-sol") == "codex"
     assert engine_for_model("codex-mini-latest") == "codex"
     assert engine_for_model("o4-mini") == "codex"
