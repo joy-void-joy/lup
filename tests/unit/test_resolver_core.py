@@ -1595,6 +1595,168 @@ async def test_observer_receives_every_persisted_transition_in_order(
     assert {item.concern_id for item in observer.transitions} == {"a"}
 
 
+def noted_workspace(tmp_path: Path, launcher: LocalProcessLauncher) -> Path:
+    """A source tree whose module carries two concerns' notes at once."""
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    (workspace / "module.py").write_text(
+        "# lup: rework the dispatch\nvalue = 1\n# lup: belongs to another concern\n",
+        encoding="utf-8",
+    )
+    for arguments in (["add", "module.py"], ["commit", "-m", "noted"]):
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+    return workspace
+
+
+def noted_concern() -> Concern:
+    return Concern(
+        id="a",
+        title="A",
+        spec="Resolve a",
+        criteria=[AcceptanceCriterion(id="a-done", description="done")],
+        notes=[ReviewNote(file=Path("module.py"), line=1, text="rework the dispatch")],
+        integration_approved=True,
+    )
+
+
+def accepting_reviewer(_root: Path, output_name: str) -> JsonObject:
+    if output_name == FinalReview.__name__:
+        return {"accepted": True, "reason": "verified"}
+    return {
+        "concern_id": "a",
+        "accepted": True,
+        "generalized": True,
+        "reason": "criteria met",
+        "criteria_met": ["a-done"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_concerns_notes_are_cleared_before_its_worker_runs(
+    tmp_path: Path,
+) -> None:
+    """The regression this whole change exists for.
+
+    The worker used to be told to remove its own marker, which the edit
+    policy asks on unconditionally, so every concern parked. The
+    orchestrator now removes it first — and removes only what this concern
+    owns, leaving the sibling's note in the same file untouched.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = noted_workspace(tmp_path, launcher)
+    seen: list[str] = []
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        seen.append((root / "module.py").read_text(encoding="utf-8"))
+        (root / "a.txt").write_text("implemented\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "note-clearance",
+        worker_response,
+        accepting_reviewer,
+    )
+    seed_approvals(core, [noted_concern()])
+    manifest = await core.run(
+        ResolveInventory(
+            source=snapshot(workspace, launcher), concerns=[noted_concern()]
+        )
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    assert [note.text for note in outcome.notes_cleared] == ["rework the dispatch"]
+    assert seen and "rework the dispatch" not in seen[0]
+    assert "belongs to another concern" in seen[0]
+
+
+@pytest.mark.asyncio
+async def test_clearance_commits_separately_from_the_workers_change(
+    tmp_path: Path,
+) -> None:
+    """Its own commit is what keeps the diff-equality invariant strict."""
+    launcher = LocalProcessLauncher()
+    workspace = noted_workspace(tmp_path, launcher)
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        (root / "a.txt").write_text("implemented\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "note-commit",
+        worker_response,
+        accepting_reviewer,
+    )
+    seed_approvals(core, [noted_concern()])
+    manifest = await core.run(
+        ResolveInventory(
+            source=snapshot(workspace, launcher), concerns=[noted_concern()]
+        )
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.commit is not None
+    subjects = launcher.launch(
+        LaunchRequest(
+            arguments=["git", "log", "--format=%s", "-3", outcome.commit],
+            cwd=workspace,
+        )
+    )
+    assert "resolve: clear review notes for a" in subjects.stdout
+
+
+@pytest.mark.asyncio
+async def test_a_concern_with_no_notes_clears_nothing(tmp_path: Path) -> None:
+    """No note, no commit — the worker's base stays the dependency base."""
+    launcher = LocalProcessLauncher()
+    workspace = noted_workspace(tmp_path, launcher)
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        (root / "a.txt").write_text("implemented\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    core = failure_leg_core(
+        tmp_path, workspace, launcher, "note-free", worker_response, accepting_reviewer
+    )
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    assert outcome.notes_cleared == []
+
+
 class RecordingPreparer(WorktreePreparer):
     def __init__(self) -> None:
         self.prepared: list[Path] = []

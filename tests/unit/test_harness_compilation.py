@@ -10,6 +10,7 @@ import sh
 import typer
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.codex.harness import CodexSpellings
@@ -921,25 +922,32 @@ AUTONOMY_PROBE = {
 }
 
 
-def hook_decision(
-    payload: JsonObject, agent_type: str | None = None, identity: str | None = None
-) -> ClaudeHookDecision:
-    """Run the installed Claude hook over one payload and identity pair.
+def hook_environment(identity: str | None) -> EnvVars:
+    """Build the hook's environment, never inheriting a declared identity.
 
-    The environment is built explicitly rather than inherited so an operator
-    who exported the identity cannot decide the outcome of a test.
+    An operator with the identity exported would otherwise decide the
+    outcome of every autonomy assertion below.
     """
-    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
-    body = payload if agent_type is None else {**payload, "agent_type": agent_type}
-    environment = {
+    inherited = {
         key: value
         for key, value in os.environ.items()  # lup: ignore[os-environ] — test shell
         if key != "LUP_AGENT_IDENTITY"
     }
-    if identity is not None:
-        environment["LUP_AGENT_IDENTITY"] = identity
+    return (
+        inherited if identity is None else {**inherited, AGENT_IDENTITY_ENV: identity}
+    )
+
+
+def hook_decision(
+    payload: JsonObject, agent_type: str | None = None, identity: str | None = None
+) -> ClaudeHookDecision:
+    """Run the installed Claude hook over one payload and identity pair."""
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    body = payload if agent_type is None else {**payload, "agent_type": agent_type}
     result = sh.Command(str(script))(
-        _in=json.dumps(body), _env=environment, _return_cmd=True
+        _in=json.dumps(body),
+        _env=hook_environment(identity),
+        _return_cmd=True,
     )
     assert isinstance(result, sh.RunningCommand)
     output = ClaudeHookOutput.model_validate_json(result.stdout)

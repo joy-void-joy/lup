@@ -273,8 +273,8 @@ def render_policy_data(
             + shell_rule_rows_literal(runtime_shell_rules(shell_rule_extension or [])),
             "AUTONOMOUS_AGENT_IDENTITIES = "
             + string_rows_literal(autonomous_agent_identities),
-            f"AGENT_IDENTITY_ENV = {AGENT_IDENTITY_ENV!r}",
-            f"CONCERN_ALLOWANCES_ENV = {CONCERN_ALLOWANCES_ENV!r}",
+            "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
+            "CONCERN_ALLOWANCES_ENV = " + json.dumps(CONCERN_ALLOWANCES_ENV),
             "MAXIMUM_ADDED_LINES = 3",
         ]
     )
