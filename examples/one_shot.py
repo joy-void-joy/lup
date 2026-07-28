@@ -15,7 +15,7 @@ from examples.common import Summary
 async def main() -> None:
     factory = create_claude_session_factory(
         ClaudeSessionConfig(
-            model="claude-opus-4-6",
+            model="claude-opus-5",
             system_prompt="Return a concise summary through submit_output.",
         )
     )

@@ -15,7 +15,7 @@ from lup.runtime.routing import ModelRoute, ModelRouter, PrefixModelMatcher
 
 from examples.common import Summary
 
-MODEL = "claude-opus-4-6"
+MODEL = "claude-opus-5"
 
 
 def claude_factory() -> SessionFactory:

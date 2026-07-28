@@ -20,7 +20,7 @@ from examples.common import Summary
 
 async def main() -> None:
     base = ClaudeSessionConfig(
-        model="claude-opus-4-6",
+        model="claude-opus-5",
         system_prompt="Submit a concise structured summary.",
     )
     registry = ClaudeProfileRegistry(
