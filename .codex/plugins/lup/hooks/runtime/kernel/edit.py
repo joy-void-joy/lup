@@ -351,6 +351,7 @@ def antipattern_decision(
     after: str,
     rows: list[AntiPatternRow],
     python_source: bool,
+    allowances: list[str] | None = None,
 ) -> KernelDecision | None:
     """Reject newly added unsuppressed anti-patterns and ask on suppressions.
 
@@ -359,7 +360,13 @@ def antipattern_decision(
     blanked) so prose never trips it, while a "comment" rule targets comment
     directives and sees comments intact. Without a tokenizer (non-Python
     files, fragments that fail to tokenize) every rule scans the raw line.
+
+    A granted ``antipattern-suppression`` allowance turns the two suppression
+    asks into allows, because a human already approved the plan that needs
+    them. It never touches the deny below: an allowance justifies a typed,
+    argued suppression, never a bare anti-pattern.
     """
+    suppression = "allow" if "antipattern-suppression" in (allowances or []) else "ask"
     added = added_line_numbers(before, after)
     original_lines = after.splitlines()
     scanned_lines = (
@@ -380,7 +387,9 @@ def antipattern_decision(
                 and comment_columns[number] == directive.start()
             )
         ):
-            return KernelDecision("ask", "edit introduces an antipattern suppression")
+            return KernelDecision(
+                suppression, "edit introduces an antipattern suppression"
+            )
     tokenized = comment_columns is not None
     for number in added:
         masked = scanned_lines[number - 1].strip()
@@ -404,7 +413,7 @@ def antipattern_decision(
                 covered = ignore_rule_ids(directive)
                 if covered is None or rule_id in covered:
                     return KernelDecision(
-                        "ask", "edit introduces an antipattern suppression"
+                        suppression, "edit introduces an antipattern suppression"
                     )
             return KernelDecision(
                 "deny", f"{message} (rule {rule_id} — see docs/rules.md)"
@@ -463,19 +472,31 @@ def decide_edit(
     antipattern_rows: list[AntiPatternRow],
     maximum_added_lines: int = 3,
     autonomous: bool = False,
+    allowances: list[str] | None = None,
     python_source: bool = False,
 ) -> KernelDecision:
-    """Apply anti-pattern, path, marker, full-write, deletion, and size gates."""
+    """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
+
+    ``allowances`` names what a human already approved for the concern this
+    edit belongs to. A grant releases exactly the gate it names and nothing
+    adjacent, so an ungranted session sees the unchanged lattice.
+    """
+    granted = allowances or []
     previous = before or ""
     updated = after or ""
     if after is not None:
         antipattern = antipattern_decision(
-            before, after, antipattern_rows, python_source
+            before, after, antipattern_rows, python_source, granted
         )
         if antipattern is not None:
             return antipattern
     protected = next(
-        (row for row in path_rules if path_rule_matches(path, path_exists, row)),
+        (
+            row
+            for row in path_rules
+            if path_rule_matches(path, path_exists, row)
+            and not (row["kind"] == "new_devtools" and "new-devtools-module" in granted)
+        ),
         None,
     )
     if protected is not None and not (autonomous and protected["allow_autonomous"]):

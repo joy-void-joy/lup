@@ -25,6 +25,7 @@ from policy_data import (
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
     AUTONOMOUS_AGENT_IDENTITIES,
+    CONCERN_ALLOWANCES_ENV,
     DENIED_FETCH_SCOPES,
     MAXIMUM_ADDED_LINES,
     PATH_RULES,
@@ -89,6 +90,7 @@ def edit_decision(path_text, before, after, autonomous):
         antipattern_rows=rows,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
+        allowances=granted_allowances(),
         python_source=suffix in (".py", ".pyi"),
     )
 
@@ -111,6 +113,15 @@ def declared_identity():
     """The identity this session's launcher declared, if it declared one."""
     environ = os.environ  # lup: ignore[os-environ]
     return environ[AGENT_IDENTITY_ENV] if AGENT_IDENTITY_ENV in environ else ""
+
+
+def granted_allowances():
+    """Edit gates a human approved for the concern this session is working."""
+    environ = os.environ  # lup: ignore[os-environ]
+    if CONCERN_ALLOWANCES_ENV not in environ:
+        return []
+    declared = json.loads(environ[CONCERN_ALLOWANCES_ENV] or "[]")
+    return [str(name) for name in declared]
 
 
 def dispatch(payload):

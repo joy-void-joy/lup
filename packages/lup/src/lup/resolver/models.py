@@ -66,6 +66,18 @@ class ReviewNote(BaseModel):
     text: str
 
 
+class ConcernAllowance(StrEnum):
+    """One edit gate a concern's plan needs, granted with the concern itself.
+
+    These gates exist because the decision is a human's. Naming them at plan
+    time moves that decision to where the human is already deciding, instead
+    of parking the run to ask again for work they just approved.
+    """
+
+    NEW_DEVTOOLS_MODULE = "new-devtools-module"
+    ANTIPATTERN_SUPPRESSION = "antipattern-suppression"
+
+
 class NoteClearance(BaseModel):
     """What one lease's pre-worker note clearance removed and could not find."""
 
@@ -195,6 +207,7 @@ class ConcernShape(BaseModel):
     criteria: list[AcceptanceCriterion] = Field(min_length=1)
     dependencies: list[str] = Field(default_factory=list)
     questions: list[MaterialQuestion] = Field(default_factory=list)
+    allowances: list[ConcernAllowance] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def references_are_local_and_unique(self) -> "ConcernShape":
@@ -294,6 +307,9 @@ class WorkerContext(BaseModel):
 
     root: Path
     concern_id: str
+    allowances: list[ConcernAllowance] = Field(default_factory=list)
+    """Edit gates a human granted with this concern. The merge and
+    integration leases carry none: no concern approved them."""
 
 
 class WorkerReport(BaseModel):

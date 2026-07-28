@@ -14,10 +14,26 @@ CLI's own environment, so an agent exporting this inside a shell tool call
 cannot reach the dispatcher that judges it.
 """
 
+import json
+
 from lup.types import EnvVars
 
 AGENT_IDENTITY_ENV = "LUP_AGENT_IDENTITY"
 """Environment variable naming the declared identity of a launched session."""
+
+CONCERN_ALLOWANCES_ENV = "LUP_CONCERN_ALLOWANCES"
+"""Environment variable listing, as a JSON array, the edit gates granted."""
+
+
+def concern_allowances_environment(allowances: list[str]) -> EnvVars:
+    """Declare the gates a human granted this session, or none at all.
+
+    Written on every session for the same reason an identity is: a silent
+    one would inherit grants made to somebody else's run. The value is a
+    JSON array so the dispatchers read it with the parser they already have
+    rather than splitting a delimiter.
+    """
+    return {CONCERN_ALLOWANCES_ENV: json.dumps(allowances)}
 
 
 def agent_identity_environment(identity: str) -> EnvVars:

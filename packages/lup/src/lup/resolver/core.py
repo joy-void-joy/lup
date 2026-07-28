@@ -144,11 +144,17 @@ def merge_parked(parked: list[ResolverAwaitingAnswers]) -> ResolverAwaitingAnswe
 
 
 def approval_question(concern: Concern) -> MaterialQuestion:
-    """Build the persisted human integration gate for one planned concern."""
+    """Build the persisted human integration gate for one planned concern.
+
+    A concern's declared allowances are named in the prompt rather than asked
+    separately: approving the concern is approving the edit gates its own
+    plan requires, decided once with the title and spec in view.
+    """
+    grants = "".join(f"\nGrants: {allowance}" for allowance in concern.allowances)
     return MaterialQuestion(
         id=f"integration-approval-{concern.id}",
         concern_id=concern.id,
-        prompt=f"Include {concern.title!r} in this resolver run?",
+        prompt=f"Include {concern.title!r} in this resolver run?{grants}",
         choices=[APPROVE, DEFER],
         recommendation=APPROVE,
     )
@@ -238,8 +244,11 @@ class ResolverCore:
             "notes through note_indexes using each note's zero-based position in "
             "the evidence below; every index must appear exactly once across all "
             "concerns. Give each concern path-safe id, complete acceptance "
-            "criteria, dependencies, material questions, and starting files. Do not "
-            "decide eligibility or integration approval; the resolver asks the user."
+            "criteria, dependencies, material questions, and starting files. Declare "
+            "an allowance only when the plan cannot be carried out without the gate "
+            "it names, so approving the concern approves what it actually needs. Do "
+            "not decide eligibility or integration approval; the resolver asks the "
+            "user."
             f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
         )
         result = await query(
@@ -860,7 +869,9 @@ class ResolverCore:
         result = await query(
             self.worker_factory(
                 WorkerContext(
-                    root=assignment.lease.root, concern_id=assignment.concern.id
+                    root=assignment.lease.root,
+                    concern_id=assignment.concern.id,
+                    allowances=assignment.concern.allowances,
                 )
             ),
             turn_request(TurnInput(text=prompt), WorkerReport),

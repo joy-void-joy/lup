@@ -17,7 +17,10 @@ from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.markers import find_feedback
 from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
-from lup.policy.identity import agent_identity_environment
+from lup.policy.identity import (
+    agent_identity_environment,
+    concern_allowances_environment,
+)
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
 from lup.resolver.contracts import (
@@ -411,6 +414,7 @@ def run_resolve(
         reviewer_environment = {
             **session_environment,
             **agent_identity_environment(""),
+            **concern_allowances_environment([]),
         }
         session_model = (
             settings.model if engine_for_model(settings.model) == adapter else None
@@ -435,6 +439,14 @@ def run_resolve(
             tool_context = ResolverToolContext(
                 run_dir=state_root / resolved_run_id, concern_id=context.concern_id
             )
+            # Grants are per-concern: a lease carries only what the human
+            # approved with the concern it was leased for.
+            concern_environment = {
+                **worker_environment,
+                **concern_allowances_environment(
+                    [allowance.value for allowance in context.allowances]
+                ),
+            }
             if adapter == "claude":
                 server = create_mcp_server(
                     "resolver",
@@ -451,7 +463,7 @@ def run_resolve(
                         system_prompt="Execute the persisted Lup resolver assignment.",
                         cwd=cwd,
                         add_dirs=[cwd],
-                        environment=worker_environment,
+                        environment=concern_environment,
                         tool_servers={"resolver": server},
                         allowed_tools=[
                             f"mcp__resolver__{name}"
@@ -472,7 +484,7 @@ def run_resolve(
                     cwd=cwd,
                     sandbox="workspace-write",
                     approval_policy="never",
-                    environment=worker_environment,
+                    environment=concern_environment,
                     mcp_servers={
                         "resolver": CodexMcpServerConfig(
                             command="uv",
