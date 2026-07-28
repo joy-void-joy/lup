@@ -738,6 +738,7 @@ class ResolverCore:
             if not lease.root.exists():
                 self.worktrees.create(lease, base.commit)
 
+        cleared = self.worktrees.clear_notes(lease, concern, base.commit)
         answers = self.answers_for(concern.id)
         assignment = WorkAssignment(
             run_id=self.config.run_id,
@@ -750,7 +751,7 @@ class ResolverCore:
             answers=answers,
         )
         rounds: list[AgentRound] = []  # lup: ignore[empty-collection]
-        current_base = base.commit
+        current_base = cleared.commit
         feedback = ""
         maximum_round = self.config.max_revision_rounds + 1
         for round_number in range(1, maximum_round + 1):
@@ -811,6 +812,8 @@ class ResolverCore:
                         commit=diff.commit,
                         verified=True,
                         rounds=rounds,
+                        notes_cleared=cleared.clearance.cleared,
+                        notes_missing=cleared.clearance.missing,
                     ),
                 )
             await self.transition_concern(
@@ -829,6 +832,8 @@ class ResolverCore:
                 verified=False,
                 rounds=rounds,
                 failure="revision limit exhausted",
+                notes_cleared=cleared.clearance.cleared,
+                notes_missing=cleared.clearance.missing,
             ),
         )
 

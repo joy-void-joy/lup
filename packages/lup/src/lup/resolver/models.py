@@ -66,6 +66,25 @@ class ReviewNote(BaseModel):
     text: str
 
 
+class NoteClearance(BaseModel):
+    """What one lease's pre-worker note clearance removed and could not find."""
+
+    model_config = FROZEN
+
+    concern_id: str
+    cleared: list[ReviewNote] = Field(default_factory=list)
+    missing: list[ReviewNote] = Field(default_factory=list)
+
+
+class NoteClearanceCommit(BaseModel):
+    """A clearance and the commit the worker should treat as its base."""
+
+    model_config = FROZEN
+
+    clearance: NoteClearance
+    commit: str
+
+
 class InventoryNote(ReviewNote):
     """One review note together with the source context used for planning."""
 
@@ -343,6 +362,8 @@ class ConcernOutcome(BaseModel):
     integrated: bool = False
     rounds: list[AgentRound] = Field(default_factory=list)
     failure: str | None = None
+    notes_cleared: list[ReviewNote] = Field(default_factory=list)
+    notes_missing: list[ReviewNote] = Field(default_factory=list)
 
 
 class ConcernExecution(BaseModel):
