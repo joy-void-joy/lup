@@ -216,7 +216,7 @@ class Settings(BaseSettings):
         validation_alias="AGENT_AUX_MODEL",
         description=(
             "Model for auxiliary agents (reviewer, background agents). "
-            "None resolves per backend: a sonnet-class reviewer on claude, "
+            "None resolves per backend: an opus-class reviewer on claude, "
             "the session model on codex/openai — so AGENT_SDK=codex/openai "
             "runs without Anthropic credentials."
         ),
