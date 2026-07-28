@@ -28,6 +28,7 @@ from lup_template.devtools.usage.api import (
 
 # Open map: new model ids appear ahead of this table; .get falls back to the id.
 MODEL_NAMES: dict[str, str] = {  # lup: ignore[dict-str-payload]
+    "claude-opus-5": "Opus 5",
     "claude-opus-4-8": "Opus 4.8",
     "claude-opus-4-6": "Opus 4.6",
     "claude-opus-4-5-20251101": "Opus 4.5",
