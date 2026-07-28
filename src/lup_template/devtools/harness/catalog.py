@@ -91,6 +91,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         guidance=GUIDANCE,
         resolver=ResolveSpec(
             id="resolver.lup",
+            worker_identity="resolver-worker",
             worker_skill=SkillInvocation(plugin="lup", skill="implementer"),
             review_skill=SkillInvocation(plugin="lup", skill="resolve-reviewer"),
             merge_skill=SkillInvocation(plugin="lup", skill="merge"),

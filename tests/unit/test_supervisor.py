@@ -94,6 +94,7 @@ def persisted_state(
         source=SourceSnapshot(branch="dev", commit="source-sha"),
         spec=ResolveSpec(
             id="resolve",
+            worker_identity="resolver-worker",
             worker_skill=SkillInvocation(plugin="lup", skill="worker"),
             review_skill=SkillInvocation(plugin="lup", skill="review"),
             merge_skill=SkillInvocation(plugin="lup", skill="merge"),

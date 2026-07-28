@@ -4261,8 +4261,10 @@ SHELL_RULES = [
 ]
 
 AUTONOMOUS_AGENT_IDENTITIES = [
-    "resolve-editor",
-    "lup:resolve-editor",
+    "resolver-worker",
+    "lup:resolver-worker",
 ]
+
+AGENT_IDENTITY_ENV = 'LUP_AGENT_IDENTITY'
 
 MAXIMUM_ADDED_LINES = 3

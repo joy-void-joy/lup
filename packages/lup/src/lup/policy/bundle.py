@@ -14,6 +14,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
+from lup.policy.identity import AGENT_IDENTITY_ENV
 import lup.policy.kernel as kernel
 from lup.policy.kernel.rows import (
     AntiPatternRow,
@@ -272,6 +273,7 @@ def render_policy_data(
             + shell_rule_rows_literal(runtime_shell_rules(shell_rule_extension or [])),
             "AUTONOMOUS_AGENT_IDENTITIES = "
             + string_rows_literal(autonomous_agent_identities),
+            f"AGENT_IDENTITY_ENV = {AGENT_IDENTITY_ENV!r}",
             "MAXIMUM_ADDED_LINES = 3",
         ]
     )

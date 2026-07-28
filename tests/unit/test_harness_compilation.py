@@ -1,6 +1,7 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
 import json
+import os
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -9,6 +10,7 @@ import sh
 import typer
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.types import JsonObject
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.codex.harness import CodexSpellings
 from lup.adapters.codex.harness_runtime import (
@@ -910,31 +912,57 @@ def test_generated_claude_hook_executes_the_canonical_kernel() -> None:
     assert "interpreters" in output.hook_specific_output.permission_decision_reason
 
 
-def test_generated_claude_hook_maps_agent_type_to_editor_autonomy() -> None:
+AUTONOMY_PROBE = {
+    "tool_name": "Write",
+    "tool_input": {
+        "file_path": "packages/lup/src/lup/generated_probe.py",
+        "content": "".join(f"VALUE_{index} = {index}\n" for index in range(8)),
+    },
+}
+
+
+def hook_decision(
+    payload: JsonObject, agent_type: str | None = None, identity: str | None = None
+) -> str:
+    """Run the installed Claude hook over one payload and identity pair.
+
+    The environment is built explicitly rather than inherited so an operator
+    who exported the identity cannot decide the outcome of a test.
+    """
     script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
-    payload = {
-        "tool_name": "Write",
-        "tool_input": {
-            "file_path": "packages/lup/src/lup/generated_probe.py",
-            "content": "".join(f"VALUE_{index} = {index}\n" for index in range(8)),
-        },
+    body = payload if agent_type is None else {**payload, "agent_type": agent_type}
+    environment = {
+        key: value
+        for key, value in os.environ.items()  # lup: ignore[os-environ] — test shell
+        if key != "LUP_AGENT_IDENTITY"
     }
+    if identity is not None:
+        environment["LUP_AGENT_IDENTITY"] = identity
+    result = sh.Command(str(script))(
+        _in=json.dumps(body), _env=environment, _return_cmd=True
+    )
+    assert isinstance(result, sh.RunningCommand)
+    output = ClaudeHookOutput.model_validate_json(result.stdout)
+    return output.hook_specific_output.permission_decision
 
-    def decision(agent_type: str | None) -> str:
-        body = (
-            dict(payload)
-            if agent_type is None
-            else {**payload, "agent_type": agent_type}
-        )
-        result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
-        assert isinstance(result, sh.RunningCommand)
-        output = ClaudeHookOutput.model_validate_json(result.stdout)
-        return output.hook_specific_output.permission_decision
 
-    assert decision(None) == "ask"
-    assert decision("implementer") == "ask"
-    assert decision("resolve-editor") == "allow"
-    assert decision("lup:resolve-editor") == "allow"
+def test_generated_claude_hook_maps_agent_type_to_editor_autonomy() -> None:
+    assert hook_decision(AUTONOMY_PROBE) == "ask"
+    assert hook_decision(AUTONOMY_PROBE, agent_type="implementer") == "ask"
+    assert hook_decision(AUTONOMY_PROBE, agent_type="resolver-worker") == "allow"
+    assert hook_decision(AUTONOMY_PROBE, agent_type="lup:resolver-worker") == "allow"
+
+
+def test_generated_claude_hook_maps_declared_identity_to_editor_autonomy() -> None:
+    """The resolver's worker is a top-level session, so `agent_type` is empty.
+
+    Autonomy has to reach it through the identity its launcher declared, or
+    the mechanism is unreachable on the one path that needs it.
+    """
+    assert hook_decision(AUTONOMY_PROBE, identity="") == "ask"
+    assert hook_decision(AUTONOMY_PROBE, identity="implementer") == "ask"
+    assert hook_decision(AUTONOMY_PROBE, identity="resolver-worker") == "allow"
+    assert hook_decision(AUTONOMY_PROBE, identity="lup:resolver-worker") == "allow"
 
 
 def test_generated_claude_hook_asks_for_human_owned_readme_edits() -> None:

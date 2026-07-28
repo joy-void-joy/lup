@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.markers import find_feedback
 from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
+from lup.policy.identity import agent_identity_environment
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
 from lup.resolver.contracts import (
@@ -395,9 +396,22 @@ def run_resolve(
             merge_hooks,
         )
 
+        from lup_template.devtools.harness.catalog import portable_harness
+
         session_environment = non_interactive_environment(
             os.environ  # lup: ignore[os-environ] — sessions inherit the console
         )
+        # Both identities are written, never omitted: a runtime merges the
+        # session environment over the launching process's, so a reviewer
+        # that stayed silent would inherit an operator's exported identity.
+        worker_environment = {
+            **session_environment,
+            **agent_identity_environment(portable_harness().resolver.worker_identity),
+        }
+        reviewer_environment = {
+            **session_environment,
+            **agent_identity_environment(""),
+        }
         session_model = (
             settings.model if engine_for_model(settings.model) == adapter else None
         )
@@ -437,7 +451,7 @@ def run_resolve(
                         system_prompt="Execute the persisted Lup resolver assignment.",
                         cwd=cwd,
                         add_dirs=[cwd],
-                        environment=session_environment,
+                        environment=worker_environment,
                         tool_servers={"resolver": server},
                         allowed_tools=[
                             f"mcp__resolver__{name}"
@@ -458,7 +472,7 @@ def run_resolve(
                     cwd=cwd,
                     sandbox="workspace-write",
                     approval_policy="never",
-                    environment=session_environment,
+                    environment=worker_environment,
                     mcp_servers={
                         "resolver": CodexMcpServerConfig(
                             command="uv",
@@ -485,7 +499,7 @@ def run_resolve(
                         ),
                         cwd=cwd,
                         add_dirs=[cwd],
-                        environment=session_environment,
+                        environment=reviewer_environment,
                         hooks=create_permission_hooks([], [cwd]),
                     )
                 )
@@ -498,11 +512,9 @@ def run_resolve(
                     cwd=cwd,
                     sandbox="read-only",
                     approval_policy="never",
-                    environment=session_environment,
+                    environment=reviewer_environment,
                 )
             )
-
-        from lup_template.devtools.harness.catalog import portable_harness
 
         offer_flag_answers(
             QuestionMailbox(state_root / resolved_run_id), resolved_run_id, provided

@@ -300,8 +300,9 @@ CLAUDE_POLICY_DISPATCHER = (
 class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
     """Render Claude hooks, canonical kernel, and application policy rows."""
 
-    def __init__(self, plugin_name: str) -> None:
+    def __init__(self, plugin_name: str, worker_identity: str) -> None:
         self.plugin_name = plugin_name
+        self.worker_identity = worker_identity
 
     def render(self, source: HookSet) -> ArtifactTree:
         hooks = {
@@ -379,8 +380,8 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             path.as_posix() for path in source.human_owned_files
                         ],
                         autonomous_agent_identities=[
-                            "resolve-editor",
-                            "lup:resolve-editor",
+                            self.worker_identity,
+                            f"{self.plugin_name}:{self.worker_identity}",
                         ],
                         shell_rule_extension=list(source.shell_rules),
                     ),

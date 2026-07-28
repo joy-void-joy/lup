@@ -21,6 +21,7 @@ from kernel.fetch import decide_fetch
 from kernel.lex import shell_write_targets
 from kernel.shell import decide_shell
 from policy_data import (
+    AGENT_IDENTITY_ENV,
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
     AUTONOMOUS_AGENT_IDENTITIES,
@@ -106,11 +107,20 @@ def existing_write_targets(command):
     ]
 
 
+def declared_identity():
+    """The identity this session's launcher declared, if it declared one."""
+    environ = os.environ  # lup: ignore[os-environ]
+    return environ[AGENT_IDENTITY_ENV] if AGENT_IDENTITY_ENV in environ else ""
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
-    autonomous = agent_type in AUTONOMOUS_AGENT_IDENTITIES
+    autonomous = (
+        agent_type in AUTONOMOUS_AGENT_IDENTITIES
+        or declared_identity() in AUTONOMOUS_AGENT_IDENTITIES
+    )
     if name == "Bash":
         unsandboxed = (
             "dangerouslyDisableSandbox" in tool_input
