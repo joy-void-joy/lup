@@ -170,7 +170,7 @@ PATH_RULES = [
         "kind": "name_prefix",
         "value": ".env",
         "reason": "protected path requires approval",
-        "allow_autonomous": True,
+        "allow_autonomous": False,
     },
     {
         "kind": "new_devtools",
