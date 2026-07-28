@@ -21,7 +21,7 @@ SKILL = models.Skill(
         "Skill(lup:rebase)",
         "Skill(lup:merge)",
     ],
-    argument_hint="[branch-name]",
+    argument_hint="[branch-name ...]",
     prompt=models.PromptDocument(
         parts=[
             models.TextPart(
@@ -31,7 +31,7 @@ Drive every local branch to its terminal state. Each one is classified by whethe
 
 ## Arguments
 
-- **branch-name** (optional): a single branch to dispose of. If provided, runs in targeted mode. If omitted, sweeps every branch.
+- **branch-name ...** (optional): one or more branches to dispose of. If any are provided, runs in targeted mode over all of them. If omitted, sweeps every branch.
 
 Raw arguments: `"""
             ),
@@ -39,7 +39,7 @@ Raw arguments: `"""
             models.TextPart(
                 text=r"""`
 
-Parse the raw arguments: if non-empty, the first word is the **branch name**. Ignore remaining words.
+Parse the raw arguments into a list of **branch names**: split on whitespace and commas, dropping bare connectors (`and`, `&`, `+`). Every remaining token names a branch. An empty list means full sweep mode; otherwise targeted mode runs over the whole list.
 
 ## Process
 
@@ -51,19 +51,19 @@ Invoke `"""
             models.TextPart(
                 text=r"""` to commit any uncommitted work before the sweep.
 
-## Targeted Mode (branch name provided)
+## Targeted Mode (branch names provided)
 
 1. Run `uv run lup-devtools dev survey --json`.
-2. Find the named branch. If it is absent, report and stop.
-3. Show its `disposition` and `reason`, then """
+2. Resolve every named branch against the survey. Report each name that matches nothing; stop only when none of them resolve.
+3. Show every resolved branch's `disposition` and `reason` in one table, then """
             ),
             models.RequestApproval(
-                action="carrying out the action that disposition implies",
-                reason="the branch may hold work the user has not looked at",
+                action="carrying out the actions those dispositions imply",
+                reason="the branches may hold work the user has not looked at",
             ),
             models.TextPart(
                 text=r"""
-4. Carry out that disposition's action from the table below.
+4. Carry out each disposition's action from the table below, taking every `LAND` branch through step 5.
 
 ## Full Sweep Mode (no argument)
 
@@ -80,6 +80,8 @@ Every branch arrives with a `disposition` and a `reason` already computed. **Do 
 One table covering every branch, ordered `LAND` first (that is the work at risk), then `DELETE`/`STALE`, then `KEEP`/`CURRENT`:
 
 | Branch | Disposition | Unique | Diff | PR | Proposed action |
+
+## Acting on Dispositions (both modes)
 
 ### 4. Act on each disposition
 

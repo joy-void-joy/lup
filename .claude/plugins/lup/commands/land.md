@@ -1,7 +1,7 @@
 ---
 description: "Land every branch that has not reached the integration branch, and clear the ones that have"
 allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion, EnterWorktree, Skill(lup:commit), Skill(lup:rebase), Skill(lup:merge)
-argument-hint: "[branch-name]"
+argument-hint: "[branch-name ...]"
 ---
 
 # Land Every Branch
@@ -10,11 +10,11 @@ Drive every local branch to its terminal state. Each one is classified by whethe
 
 ## Arguments
 
-- **branch-name** (optional): a single branch to dispose of. If provided, runs in targeted mode. If omitted, sweeps every branch.
+- **branch-name ...** (optional): one or more branches to dispose of. If any are provided, runs in targeted mode over all of them. If omitted, sweeps every branch.
 
 Raw arguments: `$ARGUMENTS`
 
-Parse the raw arguments: if non-empty, the first word is the **branch name**. Ignore remaining words.
+Parse the raw arguments into a list of **branch names**: split on whitespace and commas, dropping bare connectors (`and`, `&`, `+`). Every remaining token names a branch. An empty list means full sweep mode; otherwise targeted mode runs over the whole list.
 
 ## Process
 
@@ -22,12 +22,12 @@ Parse the raw arguments: if non-empty, the first word is the **branch name**. Ig
 
 Invoke `/lup:commit` to commit any uncommitted work before the sweep.
 
-## Targeted Mode (branch name provided)
+## Targeted Mode (branch names provided)
 
 1. Run `uv run lup-devtools dev survey --json`.
-2. Find the named branch. If it is absent, report and stop.
-3. Show its `disposition` and `reason`, then Request explicit user approval before carrying out the action that disposition implies. Reason: the branch may hold work the user has not looked at.
-4. Carry out that disposition's action from the table below.
+2. Resolve every named branch against the survey. Report each name that matches nothing; stop only when none of them resolve.
+3. Show every resolved branch's `disposition` and `reason` in one table, then Request explicit user approval before carrying out the actions those dispositions imply. Reason: the branches may hold work the user has not looked at.
+4. Carry out each disposition's action from the table below, taking every `LAND` branch through step 5.
 
 ## Full Sweep Mode (no argument)
 
@@ -44,6 +44,8 @@ Every branch arrives with a `disposition` and a `reason` already computed. **Do 
 One table covering every branch, ordered `LAND` first (that is the work at risk), then `DELETE`/`STALE`, then `KEEP`/`CURRENT`:
 
 | Branch | Disposition | Unique | Diff | PR | Proposed action |
+
+## Acting on Dispositions (both modes)
 
 ### 4. Act on each disposition
 
