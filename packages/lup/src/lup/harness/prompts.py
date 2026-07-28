@@ -63,6 +63,18 @@ class SpelledPromptRenderer(PromptRenderer):
                     for runtime in self.every
                 )
 
+    # lup: Never dispatch on the type of our own models — no `isinstance` over a
+    # closed union, no `case ClassName()` arms, no `assert_never` net. Let the
+    # union's base declare the operation and let each subtype decline it, so a
+    # new variant is one class rather than an edit to every match. This method
+    # is the canonical violation; six more walks sit at `adapters/harness.py:124`,
+    # `codescan/portable.py:77`, and `harness/models.py:237,273,460,516,524`.
+    # `NativeSpellings` already closes the *runtime* axis this way ("closed by
+    # construction rather than by a reminder to edit two renderers") — make the
+    # part axis symmetric. Write the principle into the Type Safety conventions
+    # in guidance, and consider an antipattern rule for it, scoped to dispatch
+    # over project `BaseModel` unions: a blanket ban would swallow the ~160
+    # legitimate narrowing sites at untyped boundaries that guidance prescribes.
     def spell(self, part: PromptPart) -> str:
         """Render one part, reaching the runtime for every native word."""
         match part:
