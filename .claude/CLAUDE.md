@@ -306,7 +306,6 @@ then regenerate.
 **Agents:**
 
 - `implementer` — Implement production changes against established acceptance tests
-- `resolve-editor` — Resolve one concern within its leased isolated worktree
 - `trace-explorer` — Investigate trace evidence without changing production files
 - `version-explorer` — Inventory version-impact evidence across the repository
 - `version-reviewer` — Independently review a proposed version change

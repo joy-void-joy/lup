@@ -68,9 +68,19 @@ without being readable sources.
 Edit decisions cover protected paths, marker changes, size, and the canonical
 anti-pattern audit. An edit over the size gate alone is deferred — the hook
 emits no decision, so auto-accept applies while hard gates stay explicit. The
-resolver editor receives only its declared autonomous edit exceptions;
+resolver's worker receives only its declared autonomous edit exceptions;
 temporary paths, human-owned files like `README.md`, marker changes, and
 anti-pattern violations retain their guardrails in every mode.
+
+Autonomy follows the identity a launcher declares for the session it starts,
+carried in the environment and matched against the resolver's own
+`worker_identity`, so it reaches a top-level worker session on either runtime
+rather than only a natively dispatched subagent. A session that is not
+autonomous declares the empty identity rather than staying silent: runtimes
+merge a session's environment over the launching process's, so silence would
+inherit whatever the operator had exported. A hook script is spawned by the
+runtime with the runtime's environment, so an agent exporting the variable
+inside a shell tool call never reaches the dispatcher that judges it.
 """
         ),
     ]

@@ -137,7 +137,7 @@ def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
     plugin = harness.plugins[0]
 
     assert len(plugin.skills) == 30
-    assert len(plugin.agents) == 5
+    assert len(plugin.agents) == 4
     assert {skill.name for skill in plugin.skills} >= {
         "resolve",
         "implementer",
@@ -409,7 +409,7 @@ def test_typed_content_package_has_expected_module_inventory() -> None:
     content = Path("src/lup_template/devtools/harness/content")
     sources = list(content.rglob("*.py"))
 
-    assert len(sources) == 48
+    assert len(sources) == 47
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:
@@ -923,7 +923,7 @@ AUTONOMY_PROBE = {
 
 def hook_decision(
     payload: JsonObject, agent_type: str | None = None, identity: str | None = None
-) -> str:
+) -> ClaudeHookDecision:
     """Run the installed Claude hook over one payload and identity pair.
 
     The environment is built explicitly rather than inherited so an operator
@@ -943,14 +943,20 @@ def hook_decision(
     )
     assert isinstance(result, sh.RunningCommand)
     output = ClaudeHookOutput.model_validate_json(result.stdout)
-    return output.hook_specific_output.permission_decision
+    return output.hook_specific_output
+
+
+def autonomy_effect(agent_type: str | None = None, identity: str | None = None) -> str:
+    return hook_decision(
+        AUTONOMY_PROBE, agent_type=agent_type, identity=identity
+    ).permission_decision
 
 
 def test_generated_claude_hook_maps_agent_type_to_editor_autonomy() -> None:
-    assert hook_decision(AUTONOMY_PROBE) == "ask"
-    assert hook_decision(AUTONOMY_PROBE, agent_type="implementer") == "ask"
-    assert hook_decision(AUTONOMY_PROBE, agent_type="resolver-worker") == "allow"
-    assert hook_decision(AUTONOMY_PROBE, agent_type="lup:resolver-worker") == "allow"
+    assert autonomy_effect() == "ask"
+    assert autonomy_effect(agent_type="implementer") == "ask"
+    assert autonomy_effect(agent_type="resolver-worker") == "allow"
+    assert autonomy_effect(agent_type="lup:resolver-worker") == "allow"
 
 
 def test_generated_claude_hook_maps_declared_identity_to_editor_autonomy() -> None:
@@ -959,14 +965,18 @@ def test_generated_claude_hook_maps_declared_identity_to_editor_autonomy() -> No
     Autonomy has to reach it through the identity its launcher declared, or
     the mechanism is unreachable on the one path that needs it.
     """
-    assert hook_decision(AUTONOMY_PROBE, identity="") == "ask"
-    assert hook_decision(AUTONOMY_PROBE, identity="implementer") == "ask"
-    assert hook_decision(AUTONOMY_PROBE, identity="resolver-worker") == "allow"
-    assert hook_decision(AUTONOMY_PROBE, identity="lup:resolver-worker") == "allow"
+    assert autonomy_effect(identity="") == "ask"
+    assert autonomy_effect(identity="implementer") == "ask"
+    assert autonomy_effect(identity="resolver-worker") == "allow"
+    assert autonomy_effect(identity="lup:resolver-worker") == "allow"
 
 
 def test_generated_claude_hook_asks_for_human_owned_readme_edits() -> None:
-    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    """Autonomy is a release of named rules, never a blanket bypass.
+
+    Both channels are checked: an identity that grants autonomy through the
+    environment must not buy anything the payload channel would not.
+    """
     payload = {
         "tool_name": "Write",
         "tool_input": {
@@ -974,21 +984,13 @@ def test_generated_claude_hook_asks_for_human_owned_readme_edits() -> None:
             "content": "# Rewritten by an agent\n",
         },
     }
-
-    def decision(agent_type: str | None) -> ClaudeHookDecision:
-        body = (
-            dict(payload)
-            if agent_type is None
-            else {**payload, "agent_type": agent_type}
-        )
-        result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
-        assert isinstance(result, sh.RunningCommand)
-        return ClaudeHookOutput.model_validate_json(result.stdout).hook_specific_output
-
-    assert decision(None).permission_decision == "ask"
-    autonomous = decision("resolve-editor")
-    assert autonomous.permission_decision == "ask"
-    assert "human-authored" in autonomous.permission_decision_reason
+    assert hook_decision(payload).permission_decision == "ask"
+    for granted in (
+        hook_decision(payload, agent_type="resolver-worker"),
+        hook_decision(payload, identity="resolver-worker"),
+    ):
+        assert granted.permission_decision == "ask"
+        assert "human-authored" in granted.permission_decision_reason
 
 
 def test_generated_codex_hook_fails_closed_for_unknown_tools() -> None:
