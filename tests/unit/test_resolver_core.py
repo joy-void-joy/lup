@@ -1453,6 +1453,66 @@ async def test_unresolved_semantic_join_fails_the_dependent_concern(
 
 
 @pytest.mark.asyncio
+async def test_aborting_a_parked_run_frees_its_leases_and_refuses_resumption(
+    tmp_path: Path,
+) -> None:
+    """Cleanup used to be reachable only at acceptance, stranding leases."""
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(_root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        mailbox = QuestionMailbox(tmp_path / "state" / "abandoned")
+        worker_asks(mailbox, "abandoned", dynamic_question("a"))
+        return {
+            "concern_id": "a",
+            "changed": False,
+            "summary": "parked awaiting a material choice",
+        }
+
+    def build_core() -> ResolverCore:
+        return ResolverCore(
+            ResolverConfig(
+                state_root=tmp_path / "state",
+                workspace=workspace,
+                worktree_root=tmp_path / "resolver-worktrees",
+                run_id="abandoned",
+                integration_branch="resolve/abandoned/review",
+                verification_commands=[
+                    VerificationCommand(name="v", arguments=["git", "diff"])
+                ],
+            ),
+            resolve_spec(),
+            lambda context: ResolverTestFactory(context.root, worker_response),
+            lambda root: ResolverTestFactory(root, lambda *_: {}),
+            LiteralInvocationRenderer(),
+            launcher,
+        )
+
+    parked = build_core()
+    seed_approvals(parked, [concern("a")])
+    with pytest.raises(ResolverAwaitingAnswers):
+        await parked.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+    leased = [lease.root for lease in parked.repository.load().leases]
+    assert leased and all(root.exists() for root in leased)
+
+    manifest = build_core().abort("superseded by a re-plan")
+
+    assert [record.action for record in manifest.cleanup] == ["removed"]
+    assert not any(root.exists() for root in leased)
+    persisted = build_core().repository.load()
+    assert persisted.phase == ResolvePhase.ABORTED
+    assert persisted.abort_reason == "superseded by a re-plan"
+    with pytest.raises(ResolverInvariantError, match="was aborted"):
+        await build_core().resume()
+
+
+@pytest.mark.asyncio
 async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
     tmp_path: Path,
 ) -> None:

@@ -366,6 +366,10 @@ class ResolverCore:
             raise ResolverInvariantError(
                 "persisted resolver identity or specification does not match"
             )
+        if state.phase == ResolvePhase.ABORTED:
+            raise ResolverInvariantError(
+                f"resolver run {state.run_id!r} was aborted: {state.abort_reason}"
+            )
         if state.phase == ResolvePhase.COMPLETE:
             self.state = state
             return self.manifest(state)
@@ -1298,6 +1302,61 @@ class ResolverCore:
             result.answered[0].answer.value == ACCEPT
         )
         return self.require_state()
+
+    def abort(self, reason: str) -> ResolveManifest:
+        """End a run from any phase, freeing its leases but keeping its evidence.
+
+        Cleanup was reachable only at acceptance, so a run abandoned while its
+        concerns held leases stranded one worktree and one branch each with no
+        way back. Aborting frees those the same way acceptance does and retains
+        the integration lease, because the review branch may hold real work.
+        Concern statuses are left as they stood: what each concern reached is
+        the evidence an abort exists to preserve.
+        """
+        with self.repository.exclusive():
+            state = self.repository.load()
+            self.state = state
+            if state.phase in {ResolvePhase.ABORTED, ResolvePhase.COMPLETE}:
+                raise ResolverInvariantError(f"run is already {state.phase}")
+            cleanup = [
+                CleanupRecord(
+                    path=lease.root,
+                    branch=lease.branch,
+                    action="retained",
+                    reason=f"review branch retained after abort: {reason}",
+                )
+                if lease.concern_id == ACCEPTANCE_CONCERN_ID
+                else self.abort_lease(lease)
+                for lease in state.leases
+            ]
+            aborted = state.model_copy(
+                update={
+                    "phase": ResolvePhase.ABORTED,
+                    "abort_reason": reason,
+                    "resume_from": None,
+                    "cleanup": [*state.cleanup, *cleanup],
+                    "leases": [
+                        lease.model_copy(update={"active": False})
+                        for lease in state.leases
+                    ],
+                }
+            )
+            self.persist(aborted)
+            return self.manifest(aborted)
+
+    def abort_lease(self, lease: WritableRootLease) -> CleanupRecord:
+        """Free one concern lease, reporting a dirty tree instead of forcing it."""
+        removed = self.worktrees.remove(lease)
+        return CleanupRecord(
+            path=lease.root,
+            branch=lease.branch,
+            action="removed" if removed else "retained",
+            reason=(
+                "concern worktree freed by abort"
+                if removed
+                else "worktree holds uncommitted work; remove manually"
+            ),
+        )
 
     def record_human_acceptance(self, accepted: bool) -> ResolveManifest:
         """Record cleanup/retention after the human decides on the review branch."""

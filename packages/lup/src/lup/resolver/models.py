@@ -28,6 +28,7 @@ class ResolvePhase(StrEnum):
     ACCEPTANCE = "acceptance"
     CLEANUP = "cleanup"
     COMPLETE = "complete"
+    ABORTED = "aborted"
     FAILED = "failed"
 
 
@@ -557,6 +558,14 @@ class ResolveState(BaseModel):
     cleanup: list[CleanupRecord] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     resume_from: ResolvePhase | None = None
+    abort_reason: str = Field(
+        default="",
+        description=(
+            "Why a human ended this run. An abort is a decision rather than a "
+            "failure, so it is recorded apart from `failures` and never offers "
+            "a resume phase."
+        ),
+    )
 
     @model_validator(mode="after")
     def complete_progress_projection(self) -> "ResolveState":

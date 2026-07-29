@@ -61,13 +61,16 @@ from lup_template.devtools.supervisor.projection import (
 BASE_URL = "http://127.0.0.1:8766"
 
 
-def question(identifier: str, choices: list[str] | None = None) -> MaterialQuestion:
+def question(
+    identifier: str, choices: list[str] | None = None, closed: bool = False
+) -> MaterialQuestion:
     return MaterialQuestion(
         id=identifier,
         concern_id="alpha",
         prompt=f"Decide {identifier}?",
         choices=choices or [],
         recommendation=(choices or [None])[0],
+        closed_choices=closed,
     )
 
 
@@ -114,11 +117,16 @@ def build_run(tmp_path: Path, state: ResolveState | None = None) -> QuestionMail
     return QuestionMailbox(tmp_path / "run-1")
 
 
-def ask(mailbox: QuestionMailbox, identifier: str, choices: list[str] | None) -> None:
+def ask(
+    mailbox: QuestionMailbox,
+    identifier: str,
+    choices: list[str] | None,
+    closed: bool = False,
+) -> None:
     mailbox.queue(
         PendingQuestion(
             run_id="run-1",
-            question=question(identifier, choices),
+            question=question(identifier, choices, closed),
             asked_by="alpha",
             asked_at=utc_now(),
         )
@@ -203,10 +211,10 @@ async def test_a_partial_answer_set_is_accepted(tmp_path: Path) -> None:
     "answers",
     [
         [{"question_id": "q1", "value": "yes"}, {"question_id": "ghost", "value": "y"}],
-        [{"question_id": "q1", "value": "maybe"}],
+        [{"question_id": "gate", "value": "maybe"}],
         [{"question_id": "q1", "value": "yes"}, {"question_id": "q1", "value": "no"}],
     ],
-    ids=["unknown", "not-a-choice", "duplicate"],
+    ids=["unknown", "outside-a-closed-gate", "duplicate"],
 )
 async def test_a_bad_answer_set_is_correctable_instead_of_fatal(
     tmp_path: Path,
@@ -214,6 +222,7 @@ async def test_a_bad_answer_set_is_correctable_instead_of_fatal(
 ) -> None:
     mailbox = build_run(tmp_path)
     ask(mailbox, "q1", ["yes", "no"])
+    ask(mailbox, "gate", ["accept", "reject"], closed=True)
 
     async with client_for(tmp_path) as client:
         response = await client.post(
@@ -380,14 +389,15 @@ def test_console_doors_read_and_answer_without_the_run_lock(
 
 @pytest.mark.parametrize(
     "pairs",
-    [["ghost=yes"], ["q1=maybe"], ["q1"]],
-    ids=["unknown", "not-a-choice", "malformed"],
+    [["ghost=yes"], ["gate=maybe"], ["q1"]],
+    ids=["unknown", "outside-a-closed-gate", "malformed"],
 )
 def test_a_console_answer_is_refused_before_it_reaches_the_mailbox(
     tmp_path: Path, pairs: list[str]
 ) -> None:
     mailbox = build_run(tmp_path)
     ask(mailbox, "q1", ["yes", "no"])
+    ask(mailbox, "gate", ["accept", "reject"], closed=True)
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(doors, "resolve_state_root", lambda: tmp_path)
@@ -395,6 +405,22 @@ def test_a_console_answer_is_refused_before_it_reaches_the_mailbox(
             doors.answer_questions(pairs=pairs, run_id="run-1")
 
     assert mailbox.offers() == []
+
+
+def test_a_console_answer_may_reject_every_choice_a_design_question_offered(
+    tmp_path: Path,
+) -> None:
+    """The planner's choices are suggestions, so the door forwards free text."""
+    mailbox = build_run(tmp_path)
+    ask(mailbox, "q1", ["yes", "no"])
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(doors, "resolve_state_root", lambda: tmp_path)
+        doors.answer_questions(pairs=["q1=neither, split it in two"], run_id="run-1")
+
+    assert [(offer.question_id, offer.value) for offer in mailbox.offers()] == [
+        ("q1", "neither, split it in two")
+    ]
 
 
 def test_a_console_door_refuses_a_run_that_was_never_recorded(tmp_path: Path) -> None:

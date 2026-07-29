@@ -117,10 +117,10 @@ def answer_questions(
                 f"{identifier!r} names no question this run asked; "
                 f"run `harness resolve questions --run-id {run_id}`"
             )
-        choices = known[identifier].question.choices
-        if choices and value not in choices:
+        question = known[identifier].question
+        if question.closed_choices and value not in question.choices:
             raise typer.BadParameter(
-                f"{identifier!r} is not one of: " + ", ".join(choices)
+                f"{identifier!r} accepts only: " + ", ".join(question.choices)
             )
         mailbox.offer(
             AnswerOffer(

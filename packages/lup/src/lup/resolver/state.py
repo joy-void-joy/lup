@@ -211,7 +211,7 @@ class ResolverStateRepository:
                 and current.resume_from is not None
                 and state.phase == current.resume_from
             )
-            failed = state.phase == ResolvePhase.FAILED
+            terminal = state.phase in {ResolvePhase.FAILED, ResolvePhase.ABORTED}
             next_phase = (
                 PHASE_TRANSITIONS[current.phase]
                 if current.phase in PHASE_TRANSITIONS
@@ -220,7 +220,7 @@ class ResolverStateRepository:
             if (
                 state.phase != current.phase
                 and not resumed
-                and not failed
+                and not terminal
                 and state.phase != next_phase
             ):
                 raise StateTransitionError(

@@ -184,8 +184,9 @@ def answer_problems(
     Partial answers are legal — a question is answered by whoever knows that
     decision, whenever they know it — so an unanswered question is not a
     problem here. What remains a problem is an answer to something nothing
-    asked, the same question answered twice, or a value outside the choices
-    the question declared.
+    asked, the same question answered twice, or a value outside a gate whose
+    choices really are the whole domain — a design question's choices are
+    suggestions, so an answer in the reader's own words is not a problem.
     """
     expected = {question.id: question for question in questions}
     submitted = [answer.question_id for answer in answers]
@@ -194,11 +195,11 @@ def answer_problems(
     )
     unknown = sorted({name for name in submitted if name not in expected})
     invalid = [
-        f"{answer.question_id!r} is not one of: "
+        f"{answer.question_id!r} accepts only: "
         + ", ".join(expected[answer.question_id].choices)
         for answer in answers
         if answer.question_id in expected
-        and expected[answer.question_id].choices
+        and expected[answer.question_id].closed_choices
         and answer.value not in expected[answer.question_id].choices
     ]
     return [

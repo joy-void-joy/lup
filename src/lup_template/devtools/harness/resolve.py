@@ -390,6 +390,7 @@ def run_resolve(
     run_id: str | None,
     human_decision: bool | None,
     answers: list[str],
+    abort_reason: str | None = None,
     wait_seconds: float = 0.0,
     supervisor: SupervisorSpawn | None = None,
 ) -> None:
@@ -592,6 +593,18 @@ def run_resolve(
         )
 
         async def drive() -> None:
+            if abort_reason is not None:
+                if not core.repository.exists():
+                    raise typer.BadParameter(
+                        f"no resolver run {resolved_run_id!r} to abort"
+                    )
+                aborted = core.abort(abort_reason)
+                for record in aborted.cleanup:
+                    typer.echo(
+                        f"[abort] {record.action} {record.path}: {record.reason}"
+                    )
+                typer.echo(f"aborted {resolved_run_id}: {abort_reason}")
+                return
             try:
                 if core.repository.exists():
                     manifest = await core.resume()

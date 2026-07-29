@@ -134,6 +134,15 @@ def resolve_command(
             "(repeatable)",
         ),
     ] = None,
+    abort: Annotated[
+        str | None,
+        typer.Option(
+            "--abort",
+            help="End this run with the given reason, freeing every concern "
+            "worktree and branch. Retains the review branch and the run's "
+            "recorded evidence. Requires the run's process to have exited.",
+        ),
+    ] = None,
     wait: Annotated[
         float,
         typer.Option(
@@ -173,6 +182,7 @@ def resolve_command(
         run_id,
         human_decision,
         answer or [],
+        abort,
         max(wait, resolve.SUPERVISED_WAIT_SECONDS) if supervise else wait,
         resolve.SupervisorSpawn(
             enabled=supervise, port=supervise_port, linger=supervise_linger
