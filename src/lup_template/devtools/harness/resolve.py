@@ -33,6 +33,7 @@ from lup.resolver.models import (
     ACCEPT,
     ACCEPTANCE_QUESTION_ID,
     REJECT,
+    Concern,
     ConcernProgress,
     InventoryNote,
     ResolvePhase,
@@ -257,18 +258,48 @@ async def spawned_supervisor(
             await process.wait()
 
 
-def report_awaiting(parked: ResolverAwaitingAnswers, adapter: str, run_id: str) -> None:
-    """Print parked questions and the exact flag-carrying rerun recipe."""
+def report_concern_evidence(concern: Concern) -> None:
+    """Print what a concern was planned from, so its questions can be judged.
+
+    A question prompt alone reads as a decision with no stakes: whoever
+    answers it needs the `# lup:` notes that raised it and the spec the
+    planner wrote from them, or they are guessing on the asker's behalf.
+    """
+    typer.echo(f"concern {concern.id}: {concern.title}")
+    for note in concern.notes:
+        typer.echo(f"  note {note.file}:{note.line}: {note.text}")
+    for criterion in concern.criteria:
+        typer.echo(f"  criterion {criterion.id}: {criterion.description}")
+    for path in concern.files:
+        typer.echo(f"  starting file: {path}")
+    typer.echo(f"  spec: {concern.spec}")
+
+
+def report_awaiting(
+    parked: ResolverAwaitingAnswers,
+    adapter: str,
+    run_id: str,
+    concerns: list[Concern],
+) -> None:
+    """Print parked questions, their evidence, and the rerun recipe."""
     typer.echo("Resolver run parked awaiting material answers.")
     for problem in parked.problems:
         typer.echo(f"  problem: {problem}")
-    for question in parked.pending:
-        typer.echo(f"question {question.id} (concern {question.concern_id}):")
-        typer.echo(f"  {question.prompt}")
-        if question.choices:
-            typer.echo("  choices: " + " | ".join(question.choices))
-        if question.recommendation is not None:
-            typer.echo(f"  recommendation: {question.recommendation}")
+    evidence = {concern.id: concern for concern in concerns}
+    for concern_id in dict.fromkeys(question.concern_id for question in parked.pending):
+        if concern_id in evidence:
+            report_concern_evidence(evidence[concern_id])
+        for question in [
+            pending for pending in parked.pending if pending.concern_id == concern_id
+        ]:
+            typer.echo(f"question {question.id} (concern {concern_id}):")
+            typer.echo(f"  {question.prompt}")
+            if question.choices:
+                typer.echo("  choices: " + " | ".join(question.choices))
+            if question.recommendation is not None:
+                typer.echo(f"  recommendation: {question.recommendation}")
+            if not question.closed_choices:
+                typer.echo("  (choices are suggestions; any answer is accepted)")
     recipe = " ".join(
         [
             "uv run lup-devtools harness resolve",
@@ -594,7 +625,10 @@ def run_resolve(
                         )
                     )
             except ResolverAwaitingAnswers as parked:
-                report_awaiting(parked, adapter, resolved_run_id)
+                planned = (
+                    core.repository.load().concerns if core.repository.exists() else []
+                )
+                report_awaiting(parked, adapter, resolved_run_id, planned)
                 return
             if manifest.final_review is None and human_decision is not None:
                 raise typer.BadParameter("the resolver run is not awaiting acceptance")
