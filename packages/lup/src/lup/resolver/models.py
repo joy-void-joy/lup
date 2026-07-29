@@ -118,6 +118,15 @@ class MaterialQuestion(BaseModel):
     prompt: str
     choices: list[str] = Field(default_factory=list)
     recommendation: str | None = None
+    closed_choices: bool = Field(
+        default=False,
+        description=(
+            "Whether the choices are the complete answer domain. Planned design "
+            "questions must leave this false: their choices are suggestions, and "
+            "the human may answer in their own words. Only the reserved "
+            "integration gates, whose domain really is two words, close it."
+        ),
+    )
 
     @model_validator(mode="after")
     def identity_is_path_safe(self) -> "MaterialQuestion":
@@ -192,6 +201,7 @@ def acceptance_question() -> MaterialQuestion:
         concern_id=ACCEPTANCE_CONCERN_ID,
         prompt="Accept the review branch for manual integration?",
         choices=[ACCEPT, REJECT],
+        closed_choices=True,
     )
 
 
@@ -239,10 +249,18 @@ class PlannedConcern(ConcernShape):
     """One planned concern referencing review notes by zero-based position.
 
     The planner never echoes note content — positional references make copy
-    fidelity a mechanical property instead of a model obligation.
+    fidelity a mechanical property instead of a model obligation. References
+    are shared rather than exclusive: a note raising several issues is
+    referenced by each concern that answers one of them.
     """
 
     note_indexes: list[int] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def references_are_distinct(self) -> "PlannedConcern":
+        if len(self.note_indexes) != len(dict.fromkeys(self.note_indexes)):
+            raise ValueError("a concern may reference each note only once")
+        return self
 
 
 class ConcernEligibility(BaseModel):

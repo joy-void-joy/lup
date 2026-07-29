@@ -443,6 +443,160 @@ class LiteralInvocationRenderer(SkillInvocationRenderer):
         return f"{invocation.plugin}:{invocation.skill}"
 
 
+def two_note_request() -> ResolveRequest:
+    """Evidence wide enough that a plan can quietly leave one note behind."""
+    return ResolveRequest(
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        notes=[
+            InventoryNote(
+                file=Path("src/module.py"),
+                line=7,
+                text="close the union",
+                context="def render(self):  # lup: close the union",
+            ),
+            InventoryNote(
+                file=Path("docs/guide.md"),
+                line=1,
+                text="this guide repeats itself",
+                context="# Guide  <!-- lup: this guide repeats itself -->",
+            ),
+        ],
+    )
+
+
+def planning_core(tmp_path: Path, response: ResolverResponse) -> ResolverCore:
+    """A core wired for planning turns only."""
+    return ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=tmp_path,
+            worktree_root=tmp_path / "worktrees",
+            run_id="coverage",
+            integration_branch="resolve/coverage/review",
+            verification_commands=[
+                VerificationCommand(name="verify", arguments=["git", "diff"])
+            ],
+        ),
+        resolve_spec(),
+        lambda context: ResolverTestFactory(context.root, response),
+        lambda root: ResolverTestFactory(root, response),
+        LiteralInvocationRenderer(),
+        RecordingLauncher(),
+    )
+
+
+def concern_referencing(indexes: list[int]) -> JsonObject:
+    return {
+        "id": f"concern-{'-'.join(str(index) for index in indexes)}",
+        "title": "A concern",
+        "spec": "Do the thing",
+        "criteria": [{"id": "done", "description": "It is done"}],
+        "note_indexes": [index for index in indexes],
+    }
+
+
+def plan_of(*concerns: JsonObject) -> JsonObject:
+    return {"concerns": [concern for concern in concerns]}
+
+
+@pytest.mark.asyncio
+async def test_a_note_no_concern_claims_names_itself_and_stops_the_run(
+    tmp_path: Path,
+) -> None:
+    """Coverage is the surviving invariant: an ignored note goes unresolved."""
+    core = planning_core(tmp_path, lambda *_: plan_of(concern_referencing([0])))
+
+    with pytest.raises(ResolverInvariantError, match=r"no concern references: \[1\]"):
+        await core.plan_inventory(two_note_request())
+
+
+@pytest.mark.asyncio
+async def test_a_plan_that_ignored_a_note_is_corrected_rather_than_discarded(
+    tmp_path: Path,
+) -> None:
+    """The complaint names the gap, so the next attempt can close it."""
+    replies = iter(
+        [
+            plan_of(concern_referencing([0])),
+            plan_of(concern_referencing([0]), concern_referencing([1])),
+        ]
+    )
+    core = planning_core(tmp_path, lambda *_: next(replies))
+
+    inventory = await core.plan_inventory(two_note_request())
+
+    assert [note.line for concern in inventory.concerns for note in concern.notes] == [
+        7,
+        1,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_one_note_raising_two_issues_reaches_both_concerns(
+    tmp_path: Path,
+) -> None:
+    """A note is not a unit of work — several concerns may answer one note."""
+    request = ResolveRequest(
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        notes=[
+            InventoryNote(
+                file=Path("src/module.py"),
+                line=7,
+                text="close the union, and write the principle into guidance",
+                context="def render(self):  # lup: close the union",
+            )
+        ],
+    )
+
+    def reviewer_response(_root: Path, output_name: str) -> JsonObject:
+        assert output_name == ConcernInventory.__name__
+        return {
+            "concerns": [
+                {
+                    "id": "close-the-union",
+                    "title": "Close the union",
+                    "spec": "Let each variant answer for itself",
+                    "criteria": [{"id": "closed", "description": "No dispatch"}],
+                    "note_indexes": [0],
+                },
+                {
+                    "id": "write-the-principle",
+                    "title": "Write the principle into guidance",
+                    "spec": "State the convention where conventions live",
+                    "criteria": [{"id": "stated", "description": "Guidance says it"}],
+                    "note_indexes": [0],
+                },
+            ]
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=tmp_path,
+            worktree_root=tmp_path / "worktrees",
+            run_id="shared",
+            integration_branch="resolve/shared/review",
+            verification_commands=[
+                VerificationCommand(name="verify", arguments=["git", "diff"])
+            ],
+        ),
+        resolve_spec(),
+        lambda context: ResolverTestFactory(context.root, reviewer_response),
+        lambda root: ResolverTestFactory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        RecordingLauncher(),
+    )
+
+    inventory = await core.plan_inventory(request)
+
+    shared = ReviewNote(
+        file=Path("src/module.py"),
+        line=7,
+        text="close the union, and write the principle into guidance",
+    )
+    assert [concern.notes for concern in inventory.concerns] == [[shared], [shared]]
+
+
 @pytest.mark.asyncio
 async def test_inventory_planner_clusters_every_contextual_note_once(
     tmp_path: Path,
@@ -1493,8 +1647,51 @@ async def test_an_acceptance_offer_outside_its_choices_never_decides(
 
     assert core.mailbox.answers() == []
     assert problems == [
-        f"{ACCEPTANCE_QUESTION_ID} was answered 'maybe', which is not one of: "
-        "accept, reject"
+        f"{ACCEPTANCE_QUESTION_ID} was answered 'maybe', but that gate "
+        "accepts only: accept, reject"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_design_question_records_an_answer_in_the_humans_own_words(
+    tmp_path: Path,
+) -> None:
+    """A planner's choices are suggestions, so an answer outside them counts."""
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="own-words",
+            integration_branch="resolve/own-words/review",
+            verification_commands=[VerificationCommand(name="v", arguments=["git"])],
+        ),
+        resolve_spec(),
+        lambda context: ResolverTestFactory(context.root, lambda *_: {}),
+        lambda root: ResolverTestFactory(root, lambda *_: {}),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    core.queue_questions(
+        [
+            MaterialQuestion(
+                id="shape",
+                concern_id="design",
+                prompt="Which shape?",
+                choices=["a method", "a registry"],
+            )
+        ],
+        "design",
+    )
+    seed_offer(core, "shape", "neither — close the union at its base")
+
+    problems = core.promote_offers()
+
+    assert problems == []
+    assert [record.answer.value for record in core.mailbox.answers()] == [
+        "neither — close the union at its base"
     ]
 
 

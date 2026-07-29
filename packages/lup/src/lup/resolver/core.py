@@ -136,6 +136,25 @@ def failure_messages(error: BaseException) -> list[str]:
     return [str(error)]
 
 
+INVENTORY_PLAN_ATTEMPTS = 3
+
+
+def coverage_complaint(referenced: list[int], total: int) -> str | None:
+    """Name the notes a plan ignored and the evidence it invented.
+
+    A note is not a unit of work: one can raise several concerns and several
+    can raise one, so concerns reference notes rather than partitioning them.
+    What still cannot happen is a note no concern claims, because that note
+    goes unresolved with nothing to show for it.
+    """
+    faults = [
+        ("no concern references", [i for i in range(total) if i not in referenced]),
+        ("outside the evidence", [i for i in referenced if i not in range(total)]),
+    ]
+    named = [f"{label}: {sorted(indexes)}" for label, indexes in faults if indexes]
+    return "; ".join(named) if named else None
+
+
 def merge_parked(parked: list[ResolverAwaitingAnswers]) -> ResolverAwaitingAnswers:
     """Combine sibling parks so one rerun can answer every pending question."""
     pending = {question.id: question for park in parked for question in park.pending}
@@ -157,6 +176,7 @@ def approval_question(concern: Concern) -> MaterialQuestion:
         prompt=f"Include {concern.title!r} in this resolver run?{grants}",
         choices=[APPROVE, DEFER],
         recommendation=APPROVE,
+        closed_choices=True,
     )
 
 
@@ -237,13 +257,20 @@ class ResolverCore:
             return await self.run_exclusive(inventory)
 
     async def plan_inventory(self, request: ResolveRequest) -> ResolveInventory:
-        """Organize raw review evidence in one read-only structured turn."""
+        """Organize raw review evidence into concerns in a read-only turn.
+
+        A rejected partition is fed back to the planner by name rather than
+        ending the run: intake is the point where the least work is persisted
+        and the most would be lost.
+        """
         prompt = (
             "Organize every review note into generalized implementation concerns "
             "without editing. Cluster by underlying issue, not file. Reference "
             "notes through note_indexes using each note's zero-based position in "
-            "the evidence below; every index must appear exactly once across all "
-            "concerns. Give each concern path-safe id, complete acceptance "
+            "the evidence below. A note is not a unit of work: split one that "
+            "raises several issues across several concerns, and reference it "
+            "from each. Every index must appear at least once; none may repeat "
+            "within a single concern. Give each concern path-safe id, complete acceptance "
             "criteria, dependencies, material questions, and starting files. Declare "
             "an allowance only when the plan cannot be carried out without the gate "
             "it names, so approving the concern approves what it actually needs. Do "
@@ -251,18 +278,30 @@ class ResolverCore:
             "user."
             f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
         )
-        result = await query(
-            self.reviewer_factory(self.config.workspace),
-            turn_request(TurnInput(text=prompt), ConcernInventory),
-        )
-        assigned = sorted(
-            index
-            for planned in result.output.concerns
-            for index in planned.note_indexes
-        )
-        if assigned != list(range(len(request.notes))):
+        correction = ""
+        complaint: str | None = None
+        for _ in range(INVENTORY_PLAN_ATTEMPTS):
+            result = await query(
+                self.reviewer_factory(self.config.workspace),
+                turn_request(TurnInput(text=prompt + correction), ConcernInventory),
+            )
+            referenced = [
+                index
+                for planned in result.output.concerns
+                for index in planned.note_indexes
+            ]
+            complaint = coverage_complaint(referenced, len(request.notes))
+            if complaint is None:
+                break
+            correction = (
+                f"\n\nA previous attempt left review evidence unaccounted for — "
+                f"{complaint}. Every index from 0 to {len(request.notes) - 1} must "
+                "be referenced by at least one concern."
+            )
+        else:
             raise ResolverInvariantError(
-                "inventory planner must assign every review note exactly once"
+                "inventory planner left review notes unaccounted for across "
+                f"{INVENTORY_PLAN_ATTEMPTS} attempts — {complaint}"
             )
         concerns = [
             Concern(
@@ -980,9 +1019,11 @@ class ResolverCore:
     def promote_offers(self) -> list[str]:
         """Promote what the doors offered, and report what could not count.
 
-        This is the only writer of recorded answers. An offer outside its
-        question's declared choices is a correctable problem rather than a
-        fatal one — a door is a form, not a trusted caller.
+        This is the only writer of recorded answers. A design question's
+        choices are the planner's suggestions, so an answer in the human's own
+        words is recorded as given; only the reserved integration gates close
+        their domain, and an offer outside one is a correctable problem rather
+        than a fatal one — a door is a form, not a trusted caller.
         """
         questions = {
             item.question.id: item.question for item in self.mailbox.questions()
@@ -996,7 +1037,7 @@ class ResolverCore:
         valid = [
             offer
             for offer in fresh
-            if not questions[offer.question_id].choices
+            if not questions[offer.question_id].closed_choices
             or offer.value in questions[offer.question_id].choices
         ]
         for offer in valid:
@@ -1011,8 +1052,8 @@ class ResolverCore:
                 )
             )
         return [
-            f"{offer.question_id} was answered {offer.value!r}, which is not one of: "
-            + ", ".join(questions[offer.question_id].choices)
+            f"{offer.question_id} was answered {offer.value!r}, but that gate "
+            "accepts only: " + ", ".join(questions[offer.question_id].choices)
             for offer in fresh
             if offer not in valid
         ]
