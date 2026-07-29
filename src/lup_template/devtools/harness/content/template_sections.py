@@ -60,7 +60,7 @@ The single most important principle for improving this agent: **give it more too
 | Apply general principles                              | Apply specific pattern patches                     |
 | Communicate principles and the _why_                  | Prescribe rigid mechanical procedures              |
 | Provide state/context via tools                       | Use f-string prompt engineering                    |
-| Set `model=opus 4.6`, `max_thinking_tokens=128_000-1` | Compensate for weak reasoning with complex prompts |
+| Set `model=opus 5`, `max_thinking_tokens=128_000-1`   | Compensate for weak reasoning with complex prompts |
 | See what went wrong from first principles             | Make small edits to patch one mistake              |
 | Create subagents for specialized work                 | Build complex pipelines in main agent              |
 
@@ -606,7 +606,7 @@ src/
 
 ## Model Selection
 
-Default to **Opus 4.6** (`claude-opus-4-6`) — or **Fable** (`claude-fable-5`) — for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for Sonnet only when latency or cost provably dominates and quality is non-critical, and for Haiku almost never. A role that genuinely warrants a cheaper model declares it explicitly with a reason; otherwise it inherits the Opus-class default.
+Default to **Opus 5** (`claude-opus-5`) — or **Fable** (`claude-fable-5`) — for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for Sonnet only when latency or cost provably dominates and quality is non-critical, and for Haiku almost never. A role that genuinely warrants a cheaper model declares it explicitly with a reason; otherwise it inherits the Opus-class default.
 
 ## Type Safety Requirements
 
@@ -916,7 +916,7 @@ The `.env` file contains the template configuration. Create `.env.local` for you
 # .env.local - your secrets (ANTHROPIC_API_KEY is read directly by the SDK from env)
 
 # Optional overrides
-# AGENT_MODEL=claude-opus-4-6
+# AGENT_MODEL=claude-opus-5
 # AGENT_MAX_BUDGET_USD=5.00
 # AGENT_MAX_TURNS=50
 # AGENT_SANDBOX_ENABLED=false   # run without Docker (disables code execution tools)

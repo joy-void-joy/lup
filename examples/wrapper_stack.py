@@ -30,7 +30,7 @@ def reported_cost(usage: Usage) -> float:
 async def main() -> None:
     native = create_claude_session_factory(
         ClaudeSessionConfig(
-            model="claude-opus-4-6",
+            model="claude-opus-5",
             system_prompt="Submit a concise structured result.",
         )
     )

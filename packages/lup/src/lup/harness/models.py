@@ -371,6 +371,11 @@ class ResolveSpec(BaseModel):
     model_config = FROZEN
 
     id: str
+    worker_identity: NativeName
+    """The identity a worker session declares, and the one the edit policy
+    grants autonomy to. Both adapters derive their autonomous list from this
+    single fact, so a runtime cannot silently ship an empty one."""
+
     worker_skill: SkillInvocation
     review_skill: SkillInvocation
     merge_skill: SkillInvocation

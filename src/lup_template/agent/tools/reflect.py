@@ -195,7 +195,7 @@ async def run_reviewer(
     validated: ReflectInput,
     outputs_dir: Path | None,
     *,
-    model: str = "claude-opus-4-6",
+    model: str = "claude-opus-5",
 ) -> ReviewResult | None:
     """Run the nested reviewer agent and return its structured verdict.
 
@@ -207,7 +207,7 @@ async def run_reviewer(
     Args:
         validated: The reflection input from the main agent.
         outputs_dir: Path to past outputs for historical calibration.
-        model: Model to use for the reviewer (default: claude-opus-4-6).
+        model: Model to use for the reviewer (default: claude-opus-5).
     """
     prompt_sections = [
         "## Agent Assessment\n\n" + validated.assessment,
@@ -249,7 +249,7 @@ def create_reflect_tools(
     session_dir: Path,
     outputs_dir: Path | None = None,
     gate: ReviewGate | None = None,
-    reviewer_model: str = "claude-opus-4-6",
+    reviewer_model: str = "claude-opus-5",
 ) -> ReflectToolKit:
     """Create the reflection tool(s) and their gate state.
 

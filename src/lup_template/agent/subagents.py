@@ -98,7 +98,7 @@ researcher = SubagentSpec(
     ),
     prompt=RESEARCHER_PROMPT,
     tools=research_tools(),
-    model="claude-opus-4-6",
+    model="claude-opus-5",
 )
 
 
@@ -134,7 +134,7 @@ analyzer = SubagentSpec(
     ),
     prompt=ANALYZER_PROMPT,
     tools=analysis_tools(),
-    model="claude-opus-4-6",
+    model="claude-opus-5",
 )
 
 

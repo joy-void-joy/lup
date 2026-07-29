@@ -17,6 +17,10 @@ from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.markers import find_feedback
 from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
+from lup.policy.identity import (
+    agent_identity_environment,
+    concern_allowances_environment,
+)
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
 from lup.resolver.contracts import (
@@ -75,6 +79,17 @@ class ResolverIntake(BaseModel):
     carried: list[str]
 
 
+# lup: Intake fixes a run's concern set once, and nothing downstream can widen
+# it. A run parked at `questions` has its `concerns.json` written, `resume` only
+# restores the persisted phase, and the CLI offers no add-concern operation — so
+# a concern surfaced mid-run (by the user, or noticed by the agent relaying the
+# questions) cannot join the run it was discovered in. It waits for the next
+# inventory pass, which means committing a note and re-deriving from scratch,
+# discarding every material answer already collected. Give the orchestrating
+# agent a way to open work against a live run — admit a concern into an existing
+# inventory, or spawn a subagent for it that reports back into the same review
+# pipeline — so discovering work mid-run is not a choice between dropping it and
+# restarting.
 def resolver_intake(comments: list[FoundComment]) -> ResolverIntake:
     """Partition scanned notes into resolver work and carried deferrals."""
     return ResolverIntake(
@@ -384,9 +399,23 @@ def run_resolve(
             merge_hooks,
         )
 
+        from lup_template.devtools.harness.catalog import portable_harness
+
         session_environment = non_interactive_environment(
             os.environ  # lup: ignore[os-environ] — sessions inherit the console
         )
+        # Both identities are written, never omitted: a runtime merges the
+        # session environment over the launching process's, so a reviewer
+        # that stayed silent would inherit an operator's exported identity.
+        worker_environment = {
+            **session_environment,
+            **agent_identity_environment(portable_harness().resolver.worker_identity),
+        }
+        reviewer_environment = {
+            **session_environment,
+            **agent_identity_environment(""),
+            **concern_allowances_environment([]),
+        }
         session_model = (
             settings.model if engine_for_model(settings.model) == adapter else None
         )
@@ -410,6 +439,14 @@ def run_resolve(
             tool_context = ResolverToolContext(
                 run_dir=state_root / resolved_run_id, concern_id=context.concern_id
             )
+            # Grants are per-concern: a lease carries only what the human
+            # approved with the concern it was leased for.
+            concern_environment = {
+                **worker_environment,
+                **concern_allowances_environment(
+                    [allowance.value for allowance in context.allowances]
+                ),
+            }
             if adapter == "claude":
                 server = create_mcp_server(
                     "resolver",
@@ -426,7 +463,7 @@ def run_resolve(
                         system_prompt="Execute the persisted Lup resolver assignment.",
                         cwd=cwd,
                         add_dirs=[cwd],
-                        environment=session_environment,
+                        environment=concern_environment,
                         tool_servers={"resolver": server},
                         allowed_tools=[
                             f"mcp__resolver__{name}"
@@ -447,7 +484,7 @@ def run_resolve(
                     cwd=cwd,
                     sandbox="workspace-write",
                     approval_policy="never",
-                    environment=session_environment,
+                    environment=concern_environment,
                     mcp_servers={
                         "resolver": CodexMcpServerConfig(
                             command="uv",
@@ -474,7 +511,7 @@ def run_resolve(
                         ),
                         cwd=cwd,
                         add_dirs=[cwd],
-                        environment=session_environment,
+                        environment=reviewer_environment,
                         hooks=create_permission_hooks([], [cwd]),
                     )
                 )
@@ -487,11 +524,9 @@ def run_resolve(
                     cwd=cwd,
                     sandbox="read-only",
                     approval_policy="never",
-                    environment=session_environment,
+                    environment=reviewer_environment,
                 )
             )
-
-        from lup_template.devtools.harness.catalog import portable_harness
 
         offer_flag_answers(
             QuestionMailbox(state_root / resolved_run_id), resolved_run_id, provided

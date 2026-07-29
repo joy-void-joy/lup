@@ -170,7 +170,7 @@ PATH_RULES = [
         "kind": "name_prefix",
         "value": ".env",
         "reason": "protected path requires approval",
-        "allow_autonomous": True,
+        "allow_autonomous": False,
     },
     {
         "kind": "new_devtools",
@@ -4261,8 +4261,12 @@ SHELL_RULES = [
 ]
 
 AUTONOMOUS_AGENT_IDENTITIES = [
-    "resolve-editor",
-    "lup:resolve-editor",
+    "resolver-worker",
+    "lup:resolver-worker",
 ]
+
+AGENT_IDENTITY_ENV = "LUP_AGENT_IDENTITY"
+
+CONCERN_ALLOWANCES_ENV = "LUP_CONCERN_ALLOWANCES"
 
 MAXIMUM_ADDED_LINES = 3

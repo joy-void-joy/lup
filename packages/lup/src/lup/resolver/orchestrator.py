@@ -4,10 +4,12 @@ from pathlib import Path
 
 from lup.harness.process import LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import WorktreePreparer
+from lup.resolver.notes import clear_concern_notes
 from lup.resolver.models import (
     Concern,
     DependencyBase,
     DiffValidation,
+    NoteClearanceCommit,
     SourceSnapshot,
     WorkerReport,
     WritableRootLease,
@@ -96,6 +98,48 @@ class WorktreeOrchestrator:
             raise RuntimeError(f"failed to create worktree for {lease.concern_id}")
         if self.preparer is not None:
             self.preparer.prepare(lease.root)
+
+    def clear_notes(
+        self, lease: WritableRootLease, concern: Concern, base_commit: str
+    ) -> NoteClearanceCommit:
+        """Strip this concern's notes from its lease as a distinct commit.
+
+        Committing rather than leaving the strip in the working tree is what
+        keeps :meth:`validate_and_commit` strict: the worker's base already
+        has the notes gone, so its reported paths still equal the inspected
+        diff. A concern whose notes were all absent commits nothing and keeps
+        the base it was given.
+        """
+        clearance = clear_concern_notes(lease.root, concern)
+        if not clearance.cleared:
+            return NoteClearanceCommit(clearance=clearance, commit=base_commit)
+        added = self.launcher.launch(
+            LaunchRequest(arguments=["git", "add", "-A"], cwd=lease.root)
+        )
+        committed = self.launcher.launch(
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "commit",
+                    "-m",
+                    f"resolve: clear review notes for {concern.id}",
+                ],
+                cwd=lease.root,
+            )
+        )
+        identified = self.launcher.launch(
+            LaunchRequest(arguments=["git", "rev-parse", "HEAD"], cwd=lease.root)
+        )
+        commit_lines = identified.stdout.splitlines()
+        if (
+            added.code != 0
+            or committed.code != 0
+            or identified.code != 0
+            or len(commit_lines) != 1
+            or not commit_lines[0]
+        ):
+            raise RuntimeError(f"failed to clear review notes for {concern.id}")
+        return NoteClearanceCommit(clearance=clearance, commit=commit_lines[0])
 
     def validate_and_commit(
         self,

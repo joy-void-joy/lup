@@ -53,10 +53,12 @@ part of probing.
   A subagent spec with a non-empty native tool allowlist is rejected because
   app-server thread configuration cannot prove that per-subagent restriction;
   the restriction is never silently widened.
-- The generated Claude dispatcher maps hook-payload agent identity to
-  resolve-editor edit autonomy. Deterministic dispatcher fixtures pin the
-  mapping; live confirmation that the native hook payload carries the agent
-  identity is owed by the nightly lane.
+- Both generated dispatchers map a session's declared identity to edit
+  autonomy, taking it from the launcher's environment and, on Claude, from the
+  hook payload as well. Deterministic dispatcher fixtures pin both channels
+  against the installed hook; live confirmation that a native payload carries
+  the agent identity is owed by the nightly lane. The environment channel needs
+  no such confirmation — the launcher writes what it declares.
 - Live authenticated provider smoke tests remain locally opt-in through the
   integration marker, run on the credentials-gated nightly lane, and are not
   inferred from unit fixtures.

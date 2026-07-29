@@ -148,7 +148,9 @@ def compile_claude(source: Harness) -> ArtifactTree:
         artifacts.extend(manifest_renderer.render(plugin).artifacts)
         if plugin.hooks is not None:
             artifacts.extend(
-                ClaudeHookRenderer(plugin.name).render(plugin.hooks).artifacts
+                ClaudeHookRenderer(plugin.name, source.resolver.worker_identity)
+                .render(plugin.hooks)
+                .artifacts
             )
     guidance = guidance_renderer.render(source)
     reject_oversized_guidance(guidance)
@@ -175,7 +177,9 @@ def compile_codex(source: Harness) -> ArtifactTree:
         artifacts.extend(manifest_renderer.render(plugin).artifacts)
         if plugin.hooks is not None:
             artifacts.extend(
-                CodexHookRenderer(plugin.name).render(plugin.hooks).artifacts
+                CodexHookRenderer(plugin.name, source.resolver.worker_identity)
+                .render(plugin.hooks)
+                .artifacts
             )
     guidance = guidance_renderer.render(source)
     reject_oversized_guidance(guidance)

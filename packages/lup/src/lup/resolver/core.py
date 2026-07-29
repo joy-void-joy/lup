@@ -144,11 +144,17 @@ def merge_parked(parked: list[ResolverAwaitingAnswers]) -> ResolverAwaitingAnswe
 
 
 def approval_question(concern: Concern) -> MaterialQuestion:
-    """Build the persisted human integration gate for one planned concern."""
+    """Build the persisted human integration gate for one planned concern.
+
+    A concern's declared allowances are named in the prompt rather than asked
+    separately: approving the concern is approving the edit gates its own
+    plan requires, decided once with the title and spec in view.
+    """
+    grants = "".join(f"\nGrants: {allowance}" for allowance in concern.allowances)
     return MaterialQuestion(
         id=f"integration-approval-{concern.id}",
         concern_id=concern.id,
-        prompt=f"Include {concern.title!r} in this resolver run?",
+        prompt=f"Include {concern.title!r} in this resolver run?{grants}",
         choices=[APPROVE, DEFER],
         recommendation=APPROVE,
     )
@@ -238,8 +244,11 @@ class ResolverCore:
             "notes through note_indexes using each note's zero-based position in "
             "the evidence below; every index must appear exactly once across all "
             "concerns. Give each concern path-safe id, complete acceptance "
-            "criteria, dependencies, material questions, and starting files. Do not "
-            "decide eligibility or integration approval; the resolver asks the user."
+            "criteria, dependencies, material questions, and starting files. Declare "
+            "an allowance only when the plan cannot be carried out without the gate "
+            "it names, so approving the concern approves what it actually needs. Do "
+            "not decide eligibility or integration approval; the resolver asks the "
+            "user."
             f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
         )
         result = await query(
@@ -738,6 +747,7 @@ class ResolverCore:
             if not lease.root.exists():
                 self.worktrees.create(lease, base.commit)
 
+        cleared = self.worktrees.clear_notes(lease, concern, base.commit)
         answers = self.answers_for(concern.id)
         assignment = WorkAssignment(
             run_id=self.config.run_id,
@@ -750,7 +760,7 @@ class ResolverCore:
             answers=answers,
         )
         rounds: list[AgentRound] = []  # lup: ignore[empty-collection]
-        current_base = base.commit
+        current_base = cleared.commit
         feedback = ""
         maximum_round = self.config.max_revision_rounds + 1
         for round_number in range(1, maximum_round + 1):
@@ -811,6 +821,8 @@ class ResolverCore:
                         commit=diff.commit,
                         verified=True,
                         rounds=rounds,
+                        notes_cleared=cleared.clearance.cleared,
+                        notes_missing=cleared.clearance.missing,
                     ),
                 )
             await self.transition_concern(
@@ -829,6 +841,8 @@ class ResolverCore:
                 verified=False,
                 rounds=rounds,
                 failure="revision limit exhausted",
+                notes_cleared=cleared.clearance.cleared,
+                notes_missing=cleared.clearance.missing,
             ),
         )
 
@@ -838,9 +852,14 @@ class ResolverCore:
         prompt = (
             "Execute the portable worker skill below. You may edit only the assigned "
             "writable root. Do not create branches or commits; the orchestrator owns "
-            "that authority. Resolve every acceptance criterion, then remove each "
-            "assigned review-note marker as part of the same change. Never remove a "
-            "marker whose concern remains unresolved.\n\n"
+            "that authority. Resolve every acceptance criterion. Your concern's "
+            "review-note markers are already gone from this worktree — the "
+            "orchestrator removed them before you started, so the spec is the whole "
+            "of the feedback. Do not re-introduce a marker, and do not leave an "
+            "explanatory comment where one stood. Every `# lup:` marker still "
+            "present belongs to another concern or is parked work behind a wake "
+            "condition: leave it in place. If resolving your concern means deleting "
+            "or moving code that carries one, do so and name it in your summary.\n\n"
             f"{ASK_PREAMBLE}\n\n"
             f"{assignment.rendered_skill_invocation}\n\n"
             f"Assignment:\n{assignment.model_dump_json(indent=2)}"
@@ -850,7 +869,9 @@ class ResolverCore:
         result = await query(
             self.worker_factory(
                 WorkerContext(
-                    root=assignment.lease.root, concern_id=assignment.concern.id
+                    root=assignment.lease.root,
+                    concern_id=assignment.concern.id,
+                    allowances=assignment.concern.allowances,
                 )
             ),
             turn_request(TurnInput(text=prompt), WorkerReport),

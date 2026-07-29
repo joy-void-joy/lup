@@ -27,11 +27,12 @@ import sh
 import typer
 
 from lup.codescan.markers import (
-    MARKER_RE,
     TEMPLATE_MARKER_RE,
     MarkerComment,
+    NoteTarget,
     find_feedback,
     find_markers,
+    remove_notes,
     scan_mode_for,
 )
 from lup_template.devtools.utils import decode_stderr, git, output_json
@@ -77,10 +78,9 @@ def find_todos(text: str, mode: str) -> list[MarkerComment]:
 def clear_markers(targets: list[str], *, wake: bool = False) -> None:
     """Remove specific feedback markers named as `file:line` targets.
 
-    The execute workflow calls this at fork time to strip a concern's own
-    notes from an editor's throwaway worktree, so the editor fixes the
-    generalized spec without ever seeing — or being able to cheat by
-    deleting — its markers. A standalone comment line is dropped whole; an
+    This is the `file:line` door onto :func:`remove_notes`; the resolver's
+    own clearance path calls that primitive directly, carrying note text so
+    its match survives drift. A standalone comment line is dropped whole; an
     inline trailing marker keeps its code and loses only the comment.
 
     A `defer[...]` note is parked work, not open feedback: a target that
@@ -103,16 +103,6 @@ def clear_markers(targets: list[str], *, wake: bool = False) -> None:
         )
         raise typer.Exit(1)
 
-    def strip_span(lines: list[str], comment: MarkerComment) -> None:
-        head = lines[comment.start_line - 1]
-        match = MARKER_RE.search(head)
-        head_code = head[: match.start()] if match is not None else ""
-        prefix_code = head_code.strip()
-        if match is not None and prefix_code:
-            lines[comment.start_line - 1] = head[: match.start()].rstrip()
-        else:
-            del lines[comment.start_line - 1 : comment.end_line]
-
     by_file: defaultdict[str, list[int]] = defaultdict(list)
     for target in targets:
         rel, _, line_str = target.rpartition(":")  # lup: ignore[string-split] — CLI arg
@@ -129,26 +119,16 @@ def clear_markers(targets: list[str], *, wake: bool = False) -> None:
         except (OSError, UnicodeDecodeError):
             typer.echo(f"Skipping unreadable file: {rel}", err=True)
             continue
-        lines = text.splitlines()
-        spans = {c.start_line: c for c in find_feedback(text, scan_mode_for(path))}
-        removed = 0
-        for line_no in sorted(wanted, reverse=True):
-            comment = spans.get(line_no)  # lup: ignore[dict-get] — span lookup
-            if comment is None:
-                typer.echo(f"No marker at {rel}:{line_no}", err=True)
-                continue
-            if comment.kind == "defer" and not wake:
-                typer.echo(
-                    f"Skipping deferred note at {rel}:{line_no} — parked work "
-                    "is cleared only with --wake once its condition is met",
-                    err=True,
-                )
-                continue
-            strip_span(lines, comment)
-            removed += 1
-        trailing = "\n" if text.endswith("\n") else ""
-        path.write_text("\n".join(lines) + trailing, encoding="utf-8")
-        typer.echo(f"Cleared {removed} marker(s) from {rel}")
+        removal = remove_notes(
+            text,
+            scan_mode_for(path),
+            [NoteTarget(line=line_no) for line_no in wanted],
+            wake=wake,
+        )
+        for target in removal.missing:
+            typer.echo(f"No clearable marker at {rel}:{target.line}", err=True)
+        path.write_text(removal.text, encoding="utf-8")
+        typer.echo(f"Cleared {len(removal.removed)} marker(s) from {rel}")
 
 
 def commit_prompts() -> None:

@@ -197,7 +197,7 @@ class Settings(BaseSettings):
     # ==========================================================================
 
     model: str = Field(
-        default="claude-opus-4-6",
+        default="claude-opus-5",
         validation_alias="AGENT_MODEL",
         description="Model to use (provider-specific identifier)",
     )
@@ -216,7 +216,7 @@ class Settings(BaseSettings):
         validation_alias="AGENT_AUX_MODEL",
         description=(
             "Model for auxiliary agents (reviewer, background agents). "
-            "None resolves per backend: a sonnet-class reviewer on claude, "
+            "None resolves per backend: an opus-class reviewer on claude, "
             "the session model on codex/openai — so AGENT_SDK=codex/openai "
             "runs without Anthropic credentials."
         ),
@@ -349,7 +349,7 @@ def aux_model() -> str:
     if settings.aux_model:
         return settings.aux_model
     if engine_for_settings() == "claude" and compat_base_url() is None:
-        return "claude-opus-4-6"
+        return "claude-opus-5"
     return settings.model
 
 

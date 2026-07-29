@@ -14,6 +14,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
+from lup.policy.identity import AGENT_IDENTITY_ENV, CONCERN_ALLOWANCES_ENV
 import lup.policy.kernel as kernel
 from lup.policy.kernel.rows import (
     AntiPatternRow,
@@ -133,7 +134,7 @@ def runtime_path_rules(
             kind="name_prefix",
             value=".env",
             reason="protected path requires approval",
-            allow_autonomous=True,
+            allow_autonomous=False,
         ),
         PathRuleRow(
             kind="new_devtools",
@@ -272,6 +273,8 @@ def render_policy_data(
             + shell_rule_rows_literal(runtime_shell_rules(shell_rule_extension or [])),
             "AUTONOMOUS_AGENT_IDENTITIES = "
             + string_rows_literal(autonomous_agent_identities),
+            "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
+            "CONCERN_ALLOWANCES_ENV = " + json.dumps(CONCERN_ALLOWANCES_ENV),
             "MAXIMUM_ADDED_LINES = 3",
         ]
     )

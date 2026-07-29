@@ -92,8 +92,11 @@ id in a closure, so a worker structurally cannot post against a sibling.
 
 The orchestrator validates the diff and creates the real commit, then an
 independent reviewer checks every persisted acceptance criterion. Bounded
-revision rounds are persisted. A worker removes only the markers
-belonging to criteria it resolved, so deferred notes remain visible. Only
+revision rounds are persisted. The orchestrator strips a concern's own
+markers from its lease before the worker starts, as a dedicated commit, so
+the worker never edits a marker and never trips the gate that asks on every
+marker-count change. Clearance matches note identity rather than file, so a
+sibling's note in the same file — and every deferred note — stays put. Only
 verified commits reach the dedicated review-master worktree.
 
 Integration runs configured verification commands, requests an independent

@@ -67,9 +67,6 @@ from lup_template.devtools.harness.content.skills.resolve_reviewer import (
 from lup_template.devtools.harness.content.agents.implementer import (
     AGENT as AGENT_IMPLEMENTER,
 )
-from lup_template.devtools.harness.content.agents.resolve_editor import (
-    AGENT as AGENT_RESOLVE_EDITOR,
-)
 from lup_template.devtools.harness.content.agents.trace_explorer import (
     AGENT as AGENT_TRACE_EXPLORER,
 )
@@ -115,7 +112,6 @@ SKILLS = [
 
 AGENTS = [
     AGENT_IMPLEMENTER,
-    AGENT_RESOLVE_EDITOR,
     AGENT_TRACE_EXPLORER,
     AGENT_VERSION_EXPLORER,
     AGENT_VERSION_REVIEWER,

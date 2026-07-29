@@ -772,7 +772,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                 "downstream.json",
             ],
             human_owned_files=["README.md"],
-            autonomous_agent_identities=["resolve-editor"],
+            autonomous_agent_identities=["resolver-worker"],
         ),
         encoding="utf-8",
     )
@@ -1235,7 +1235,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
         assert canonical.effect == generated.effect == case.effect
 
 
-def test_bundled_resolve_editor_keeps_guardrails(tmp_path: Path) -> None:
+def test_bundled_autonomous_worker_keeps_guardrails(tmp_path: Path) -> None:
     bundled = load_bundled_kernel(tmp_path, "edit")
 
     cases = [item for item in EDIT_POLICY_CASES if item.autonomous]

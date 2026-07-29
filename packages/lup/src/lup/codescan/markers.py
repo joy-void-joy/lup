@@ -302,3 +302,86 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     """
     notes = find_markers(text, mode, marker=MARKER_RE, ignore=IGNORE_RE)
     return [classify_deferral(note) for note in notes]
+
+
+class NoteTarget(BaseModel):
+    """One note a caller means to remove, by recorded position and body.
+
+    ``text`` is the body as :meth:`MarkerComment.marker_text` spells it.
+    Supplying it makes the match identity-bearing: the target still finds its
+    note after surrounding lines drifted, and never removes a different note
+    that merely sits at the recorded line. Omitting it matches on position
+    alone, which is all a `file:line` caller can offer.
+    """
+
+    line: int
+    text: str | None = None
+
+
+class NoteRemoval(BaseModel):
+    """Rewritten text, the notes actually removed, and the targets not found."""
+
+    text: str
+    removed: list[MarkerComment]
+    missing: list[NoteTarget]
+
+
+def without_note(lines: list[str], note: MarkerComment) -> None:
+    """Drop a standalone note whole; leave an inline note's code behind."""
+    head = lines[note.start_line - 1]
+    match = MARKER_RE.search(head)
+    head_code = head[: match.start()] if match is not None else ""
+    if match is not None and head_code.strip():
+        lines[note.start_line - 1] = head_code.rstrip()
+    else:
+        del lines[note.start_line - 1 : note.end_line]
+
+
+def resolve_note(
+    candidates: list[MarkerComment], target: NoteTarget
+) -> MarkerComment | None:
+    """Find the note a target names, tolerating drift when it carries text.
+
+    A text-bearing target picks the nearest candidate whose body matches
+    exactly, so an unchanged line scores zero and wins outright while a note
+    pushed up or down by an earlier edit is still found.
+    """
+    if target.text is None:
+        return next(
+            (note for note in candidates if note.start_line == target.line), None
+        )
+    return min(
+        [note for note in candidates if note.marker_text() == target.text],
+        key=lambda note: abs(note.start_line - target.line),
+        default=None,
+    )
+
+
+def remove_notes(
+    text: str, mode: str, targets: list[NoteTarget], *, wake: bool = False
+) -> NoteRemoval:
+    """Strip each target's note from one file's text.
+
+    A `defer[...]` note is parked work rather than open feedback, so a target
+    landing on one leaves it in place unless *wake* is set. A target whose
+    note is absent is reported rather than raised — the code a note sat on may
+    already be gone, which is an outcome to record, not a failure.
+    """
+    candidates = find_feedback(text, mode)
+    lines = text.splitlines()
+    claimed: list[MarkerComment] = []
+    missing: list[NoteTarget] = []
+    for target in targets:
+        note = resolve_note(
+            [note for note in candidates if note not in claimed], target
+        )
+        if note is None or (note.kind == "defer" and not wake):
+            missing.append(target)
+            continue
+        claimed.append(note)
+    for note in sorted(claimed, key=lambda note: note.start_line, reverse=True):
+        without_note(lines, note)
+    trailing = "\n" if text.endswith("\n") else ""
+    return NoteRemoval(
+        text="\n".join(lines) + trailing, removed=claimed, missing=missing
+    )

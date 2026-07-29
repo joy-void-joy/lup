@@ -4,7 +4,7 @@
 
 Architectural patterns used in this project. For daily development guidance, see [CLAUDE.md](CLAUDE.md).
 
-**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 4.6 (`claude-opus-4-6`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see CLAUDE.md § Model Selection).
+**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 5 (`claude-opus-5`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see CLAUDE.md § Model Selection).
 
 **Vocabulary:** two kinds of delegated agents look alike and must not be conflated:
 
