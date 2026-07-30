@@ -8,6 +8,11 @@ spelling, architecture — is listed with its scope, diagnostic, and the module
 that defines and enforces it. `uv run lup-devtools dev rules` renders this
 registry into the checked-in `docs/rules.md` reference that deny messages
 point at, so no rule is discoverable only through the scanner that owns it.
+
+A rule the typed grammar refines carries that refinement on its card, because
+the reference is where the two surfaces are reconciled: the edit hook decides
+on the spelling alone and the whole-file audit may decide otherwise once a
+type oracle has resolved what the spelling refers to.
 """
 
 from typing import Literal
@@ -17,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 import lup.codescan.antipatterns as antipatterns
 import lup.codescan.boundaries as boundaries
 import lup.codescan.capabilities as capabilities
+import lup.codescan.grammar as grammar
 import lup.codescan.portable as portable
 
 type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"]
@@ -26,7 +32,14 @@ RULE_REFERENCE = "docs/rules.md"
 
 
 class RegisteredRule(BaseModel):
-    """One rule's discovery card: identity, family, diagnostic, and home."""
+    """One rule's discovery card: identity, family, diagnostic, and home.
+
+    ``refinement`` is empty for a rule that decides the same way everywhere.
+    Where it is set, the edit hook's verdict is the broad one the ``example``
+    shows and the whole-file audit narrows it — the card says how, so a
+    contributor who meets a denial the repository sweep does not report can
+    tell which surface is speaking.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -36,6 +49,7 @@ class RegisteredRule(BaseModel):
     example: str
     message: str
     defined_in: str
+    refinement: str = ""
 
 
 STRUCTURAL_RULES: list[RegisteredRule] = [
@@ -100,6 +114,7 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
 
 def anti_pattern_rules() -> list[RegisteredRule]:
     """Project every anti-pattern rule into its registry card."""
+    refined = {rule.id: rule.refinement for rule in grammar.GRAMMAR_RULES}
     return [
         RegisteredRule(
             id=rule.id,
@@ -108,6 +123,7 @@ def anti_pattern_rules() -> list[RegisteredRule]:
             example=rule.pattern.pattern,
             message=rule.message,
             defined_in=antipatterns.__name__,
+            refinement=refined[rule.id] if rule.id in refined else "",
         )
         for scope, rules in (
             ("Python", antipatterns.PYTHON_ANTI_PATTERNS),

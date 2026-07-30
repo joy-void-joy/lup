@@ -82,3 +82,11 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 | `ts-nocheck` | anti-pattern | TypeScript | <code>@ts-nocheck</code> | Never use @ts-nocheck — fix the type errors in the file | `lup.codescan.antipatterns` |
 | `tslint-disable` | anti-pattern | TypeScript | <code>//\s*tslint:disable</code> | Never use tslint:disable — migrate to eslint and fix the issue | `lup.codescan.antipatterns` |
 | `var-declaration` | anti-pattern | TypeScript | <code>\bvar\s+[A-Za-z_$]</code> | Use `const` or `let` instead of `var` — var is function-scoped and hoisted | `lup.codescan.antipatterns` |
+
+## Audit-side refinements
+
+The edit hook sees a fragment of a proposed edit: no parse tree, no types, and a hermetic kernel that may not reach a type checker. So it decides on the spelling alone, and every rule above means exactly its matching example there. The whole-file audit reads finished source and resolves what a matched name refers to through the type oracle in `lup.codescan.oracle`, so the rules below decide more narrowly in `lup-devtools dev check` than they do at edit time — a hook denial you believe is wrong is answered by the audit, which reports the declaration that settled it. Where the oracle is unavailable the audit falls back to the hook's broad verdict, and a `# lup: ignore` left guarding a refuted line is reported as a dead directive.
+
+### `dict-get`
+
+The whole-file audit resolves what the receiver's `get` is declared on and drops the finding when that class is proven outside the mapping family — an HTTP client, a route decorator. The edit hook keeps flagging every `.get(`, because an edit fragment carries no types and the hermetic kernel may not reach a checker.

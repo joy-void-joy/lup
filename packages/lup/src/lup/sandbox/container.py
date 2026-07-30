@@ -186,11 +186,7 @@ class Sandbox:
         if self.docker_client is None:
             return
         try:
-            old = (
-                self.docker_client.containers.get(  # lup: ignore[dict-get] — docker API
-                    self.container_name
-                )
-            )
+            old = self.docker_client.containers.get(self.container_name)
             logger.warning("Removing stale container: %s", self.container_name)
             old.remove(force=True)
         except NotFound:
@@ -261,9 +257,7 @@ class Sandbox:
                     self.VOLUME_LABEL
                 )
                 if volume_name:
-                    volume = self.docker_client.volumes.get(  # lup: ignore[dict-get] — docker API
-                        volume_name
-                    )
+                    volume = self.docker_client.volumes.get(volume_name)
                     volume.remove()
             except (NotFound, APIError, DockerException) as e:
                 logger.warning("Orphan cleanup of %s failed: %s", container.name, e)
@@ -282,9 +276,7 @@ class Sandbox:
 
         if self.docker_client is not None:
             try:
-                vol = self.docker_client.volumes.get(  # lup: ignore[dict-get] — docker API
-                    self.volume_name
-                )
+                vol = self.docker_client.volumes.get(self.volume_name)
                 vol.remove()
             except (NotFound, APIError):
                 pass
@@ -597,9 +589,7 @@ def sandbox_cleanup(session_id: str, shared_dir: Path) -> Generator[None]:
         sandbox.docker_client = client
         try:
             sandbox.remove_stale_container()
-            client.volumes.get(  # lup: ignore[dict-get] — docker API
-                sandbox.volume_name
-            ).remove()
+            client.volumes.get(sandbox.volume_name).remove()
         except NotFound:
             pass
         except (APIError, DockerException) as e:

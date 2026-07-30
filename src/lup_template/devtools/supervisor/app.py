@@ -174,25 +174,23 @@ def create_supervisor(
             )
         return run_id
 
-    @supervisor.get("/", response_class=HTMLResponse)  # lup: ignore[dict-get] — route
+    @supervisor.get("/", response_class=HTMLResponse)
     async def supervisor_home() -> HTMLResponse:
         return HTMLResponse(html)
 
-    @supervisor.get("/api/state")  # lup: ignore[dict-get] — route decorator
+    @supervisor.get("/api/state")
     async def read_state() -> SupervisorState:
         return read_run(state_root, selected_run(), adapter)
 
-    @supervisor.get("/api/runs")  # lup: ignore[dict-get] — route decorator
+    @supervisor.get("/api/runs")
     async def list_runs() -> RunIndex:
         return run_index(state_root, adapter)
 
-    @supervisor.get("/api/runs/{selected}")  # lup: ignore[dict-get] — route decorator
+    @supervisor.get("/api/runs/{selected}")
     async def read_selected(selected: str) -> SupervisorState:
         return read_run(state_root, selected, adapter)
 
-    @supervisor.get(  # lup: ignore[dict-get] — route decorator
-        "/api/runs/{selected}/events"
-    )
+    @supervisor.get("/api/runs/{selected}/events")
     async def read_events(selected: str) -> StreamingResponse:
         def observe() -> SupervisorState | None:
             try:

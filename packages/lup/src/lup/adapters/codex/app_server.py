@@ -234,7 +234,7 @@ class CodexAppServer:
     async def read_messages(self) -> None:
         try:
             while True:
-                line = await self.output.get()  # lup: ignore[dict-get] — asyncio.Queue
+                line = await self.output.get()
                 if line is None:
                     if self.closing:
                         return
