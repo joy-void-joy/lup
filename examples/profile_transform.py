@@ -35,7 +35,7 @@ async def main() -> None:
     result = await query(
         create_claude_session_factory(
             selected
-        ),  # lup: I feel like this too, shouldn't this be a property of ClaudeProfileResolver?
+        ),
         turn_request(TurnInput(text="Describe immutable configuration."), Summary),
     )
     print(result.output.summary)
