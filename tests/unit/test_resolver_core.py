@@ -77,7 +77,8 @@ from lup.resolver.state import (
     StateCorruptionError,
     StateTransitionError,
 )
-from lup.runtime.contracts import Session, SessionFactory, Turn
+from lup.runtime.contracts import Session, Turn
+from lup.runtime.factory import SessionFactory
 from lup.runtime.composition import is_output_model
 from lup.runtime.models import (
     SessionHandle,
@@ -368,11 +369,13 @@ class MissingBranchLauncher(ProcessLauncher):
         return ExitStatus(code=1)
 
 
-class UnusedSessionFactory(SessionFactory):
-    def open(
-        self, resume: SessionId | None = None
+def unused_session_factory() -> SessionFactory:
+    def refuse(
+        resume: SessionId | None = None,
     ) -> AbstractAsyncContextManager[SessionHandle]:
         raise AssertionError(f"session factory should not be opened: {resume}")
+
+    return SessionFactory(refuse)
 
 
 class UnusedInvocationRenderer(SkillInvocationRenderer):
@@ -423,19 +426,14 @@ class ResolverTestSession(Session):
         return TurnHandle[T](turn=StaticResultTurn(result))
 
 
-class ResolverTestFactory(SessionFactory):
-    def __init__(self, root: Path, response: ResolverResponse) -> None:
-        self.root = root
-        self.response = response
-
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_session()
-
+def resolver_test_factory(root: Path, response: ResolverResponse) -> SessionFactory:
     @asynccontextmanager
-    async def open_session(self) -> AsyncGenerator[SessionHandle]:
-        yield SessionHandle(session=ResolverTestSession(self.root, self.response))
+    async def open_session(
+        _resume: SessionId | None = None,
+    ) -> AsyncGenerator[SessionHandle]:
+        yield SessionHandle(session=ResolverTestSession(root, response))
+
+    return SessionFactory(open_session)
 
 
 class LiteralInvocationRenderer(SkillInvocationRenderer):
@@ -478,8 +476,8 @@ def planning_core(tmp_path: Path, response: ResolverResponse) -> ResolverCore:
             ],
         ),
         resolve_spec(),
-        lambda context: ResolverTestFactory(context.root, response),
-        lambda root: ResolverTestFactory(root, response),
+        lambda context: resolver_test_factory(context.root, response),
+        lambda root: resolver_test_factory(root, response),
         LiteralInvocationRenderer(),
         RecordingLauncher(),
     )
@@ -581,8 +579,8 @@ async def test_one_note_raising_two_issues_reaches_both_concerns(
             ],
         ),
         resolve_spec(),
-        lambda context: ResolverTestFactory(context.root, reviewer_response),
-        lambda root: ResolverTestFactory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
+        lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         RecordingLauncher(),
     )
@@ -641,8 +639,8 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
             ],
         ),
         resolve_spec(),
-        lambda context: ResolverTestFactory(context.root, reviewer_response),
-        lambda root: ResolverTestFactory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
+        lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         RecordingLauncher(),
     )
@@ -747,8 +745,8 @@ async def test_failed_integration_verification_is_not_marked_successful(
     core = ResolverCore(
         config,
         resolve_spec(),
-        lambda _cwd: UnusedSessionFactory(),
-        lambda _cwd: UnusedSessionFactory(),
+        lambda _cwd: unused_session_factory(),
+        lambda _cwd: unused_session_factory(),
         UnusedInvocationRenderer(),
         FailingVerificationLauncher(),
     )
@@ -830,8 +828,8 @@ def test_interrupted_concern_returns_to_persisted_lease_boundary(
             ],
         ),
         resolve_spec(),
-        lambda _cwd: UnusedSessionFactory(),
-        lambda _cwd: UnusedSessionFactory(),
+        lambda _cwd: unused_session_factory(),
+        lambda _cwd: unused_session_factory(),
         UnusedInvocationRenderer(),
         MissingBranchLauncher(),
     )
@@ -901,8 +899,8 @@ def test_human_decision_is_locked_persisted_and_cleans_ephemeral_branches(
             ],
         ),
         resolve_spec(),
-        lambda _cwd: UnusedSessionFactory(),
-        lambda _cwd: UnusedSessionFactory(),
+        lambda _cwd: unused_session_factory(),
+        lambda _cwd: unused_session_factory(),
         UnusedInvocationRenderer(),
         SuccessfulLauncher(),
     )
@@ -1006,8 +1004,8 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
             ],
         ),
         resolve_spec(),
-        lambda context: ResolverTestFactory(context.root, worker_response),
-        lambda root: ResolverTestFactory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, worker_response),
+        lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -1099,8 +1097,8 @@ def test_persist_clamps_phase_to_the_recorded_high_water_mark(tmp_path: Path) ->
             ],
         ),
         resolve_spec(),
-        lambda _cwd: UnusedSessionFactory(),
-        lambda _cwd: UnusedSessionFactory(),
+        lambda _cwd: unused_session_factory(),
+        lambda _cwd: unused_session_factory(),
         UnusedInvocationRenderer(),
         RecordingLauncher(),
     )
@@ -1177,8 +1175,8 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
                 ],
             ),
             resolve_spec(),
-            lambda context: ResolverTestFactory(context.root, worker_response),
-            lambda root: ResolverTestFactory(root, reviewer_response),
+            lambda context: resolver_test_factory(context.root, worker_response),
+            lambda root: resolver_test_factory(root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
         )
@@ -1252,8 +1250,8 @@ def failure_leg_core(
             max_revision_rounds=max_revision_rounds,
         ),
         resolve_spec(),
-        lambda context: ResolverTestFactory(context.root, worker_response),
-        lambda root: ResolverTestFactory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, worker_response),
+        lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -1484,8 +1482,8 @@ async def test_aborting_a_parked_run_frees_its_leases_and_refuses_resumption(
                 ],
             ),
             resolve_spec(),
-            lambda context: ResolverTestFactory(context.root, worker_response),
-            lambda root: ResolverTestFactory(root, lambda *_: {}),
+            lambda context: resolver_test_factory(context.root, worker_response),
+            lambda root: resolver_test_factory(root, lambda *_: {}),
             LiteralInvocationRenderer(),
             launcher,
         )
@@ -1569,8 +1567,8 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
                 ],
             ),
             resolve_spec(),
-            lambda context: ResolverTestFactory(context.root, worker_response),
-            lambda root: ResolverTestFactory(root, reviewer_response),
+            lambda context: resolver_test_factory(context.root, worker_response),
+            lambda root: resolver_test_factory(root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
         )
@@ -1653,8 +1651,8 @@ async def test_acceptance_is_answered_through_the_mailbox_like_any_question(
                 ],
             ),
             resolve_spec(),
-            lambda context: ResolverTestFactory(context.root, worker_response),
-            lambda root: ResolverTestFactory(root, reviewer_response),
+            lambda context: resolver_test_factory(context.root, worker_response),
+            lambda root: resolver_test_factory(root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
         )
@@ -1695,8 +1693,8 @@ async def test_an_acceptance_offer_outside_its_choices_never_decides(
             verification_commands=[VerificationCommand(name="v", arguments=["git"])],
         ),
         resolve_spec(),
-        lambda context: ResolverTestFactory(context.root, lambda *_: {}),
-        lambda root: ResolverTestFactory(root, lambda *_: {}),
+        lambda context: resolver_test_factory(context.root, lambda *_: {}),
+        lambda root: resolver_test_factory(root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -1729,8 +1727,8 @@ async def test_a_design_question_records_an_answer_in_the_humans_own_words(
             verification_commands=[VerificationCommand(name="v", arguments=["git"])],
         ),
         resolve_spec(),
-        lambda context: ResolverTestFactory(context.root, lambda *_: {}),
-        lambda root: ResolverTestFactory(root, lambda *_: {}),
+        lambda context: resolver_test_factory(context.root, lambda *_: {}),
+        lambda root: resolver_test_factory(root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -1812,8 +1810,8 @@ async def test_observer_receives_every_persisted_transition_in_order(
             ],
         ),
         resolve_spec(),
-        lambda context: ResolverTestFactory(context.root, worker_response),
-        lambda root: ResolverTestFactory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, worker_response),
+        lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
         observer=observer,

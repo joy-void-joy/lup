@@ -3,7 +3,7 @@
 import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -29,7 +29,7 @@ from lup.adapters.codex.runtime import (
     CodexSessionConfig,
     create_codex_session_factory,
 )
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.runtime.composition import submission_gate_resolver
 from lup.hooks import LupHooksConfig
 from lup.runtime.models import (
@@ -51,13 +51,13 @@ from lup.runtime.usage import per_mtok_usage_cost
 from lup.runtime.wrappers import (
     BudgetConfig,
     CorrectionConfig,
-    DecoratingSessionFactory,
     DisplayConfig,
     DisplayRecord,
     PersistenceConfig,
     TimeoutConfig,
     TraceRecord,
     TracingConfig,
+    decorated_session_factory,
 )
 from lup.mcp import McpServerEntry
 from lup.telemetry.metrics import (
@@ -111,27 +111,22 @@ class SessionBuild(BaseModel):
     trace_logger: TraceLogger
 
 
-class CleaningSessionFactory(SessionFactory):
+def cleaning_session_factory(
+    inner: SessionFactory, cleanup: Callable[[], None]
+) -> SessionFactory:
     """Run one application resource cleanup after every opened session."""
-
-    def __init__(self, inner: SessionFactory, cleanup: Callable[[], None]) -> None:
-        self.inner = inner
-        self.cleanup = cleanup
-
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_cleaned(resume)
 
     @asynccontextmanager
     async def open_cleaned(
-        self, resume: SessionId | None
+        resume: SessionId | None = None,
     ) -> AsyncGenerator[SessionHandle]:
         try:
-            async with self.inner.open(resume) as handle:
+            async with inner.open(resume) as handle:
                 yield handle
         finally:
-            self.cleanup()
+            cleanup()
+
+    return SessionFactory(open_cleaned)
 
 
 def reflection_submission_gate(gate: "ReviewGate") -> SubmissionGate[AgentOutput]:
@@ -418,7 +413,7 @@ def decorate_factory(
         persistence = PersistenceConfig(directory=notes.trace_log.parent / "turns")
         tracing = TracingConfig(sink=trace_result)
         display = DisplayConfig(sink=display_result)
-    return DecoratingSessionFactory(
+    return decorated_session_factory(
         factory,
         timeout=timeout,
         budget=budget,
@@ -580,7 +575,7 @@ def build_session_factory(
         subagents=subagents,
     )
     if sandbox is not None:
-        factory = CleaningSessionFactory(factory, sandbox.stop)
+        factory = cleaning_session_factory(factory, sandbox.stop)
     elif (
         not toolless
         and settings.sandbox_enabled
@@ -591,7 +586,7 @@ def build_session_factory(
             "openai-compat",
         )
     ):
-        factory = CleaningSessionFactory(factory, codex_sandbox_cleanup(notes))
+        factory = cleaning_session_factory(factory, codex_sandbox_cleanup(notes))
     trace_logger = TraceLogger(
         trace_path=notes.trace_log,
         title=f"Session {session_id}",

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup import TurnInput, query, turn_request
+from lup import TurnInput, turn_request
 from lup.adapters.codex.runtime import (
     CodexSessionConfig,
     create_codex_session_factory,
@@ -28,14 +28,15 @@ class Summary(BaseModel):
 factory = create_codex_session_factory(
     CodexSessionConfig(model="gpt-5.5", cwd=Path.cwd())
 )
-result = await query(
-    factory,
-    turn_request(TurnInput(text="Summarize the findings"), Summary),
+result = await factory.query(
+    turn_request(TurnInput(text="Summarize the findings"), Summary)
 )
 summary = result.output
 ```
 
-`SessionFactory.open()` yields a transparent `SessionHandle`. Await
+`SessionFactory` is a concrete class over one typed `SessionOpener` callable;
+`query()` is a member of it, and `lup.query(factory, request)` remains as a
+free alias. `SessionFactory.open()` yields a transparent `SessionHandle`. Await
 `handle.session.start(request)` to receive a `TurnHandle`, then await
 `turn.turn.result()`. Live events, interruption, steering, and forking are
 optional capabilities on those handles; absence is represented by `None`.

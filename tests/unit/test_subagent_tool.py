@@ -10,7 +10,7 @@ import pytest
 import lup.subagents
 from lup.mcp import ToolResponse
 from lup.runtime.models import TurnTextBlock
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import SessionHandle, SessionId
 from lup.subagents import create_run_subagent_tool
 from lup.types import SubagentSpec
@@ -24,11 +24,13 @@ RESEARCHER = SubagentSpec(
 )
 
 
-class MarkerFactory(SessionFactory):
-    def open(
-        self, resume: SessionId | None = None
+def marker_factory() -> SessionFactory:
+    def refuse(
+        resume: SessionId | None = None,
     ) -> AbstractAsyncContextManager[SessionHandle]:
         raise AssertionError(f"query should be replaced in this test: {resume}")
+
+    return SessionFactory(refuse)
 
 
 def response_text(response: ToolResponse) -> str:
@@ -38,7 +40,7 @@ def response_text(response: ToolResponse) -> str:
 class TestRunSubagentTool:
     async def test_unknown_role_lists_available(self) -> None:
         tool = create_run_subagent_tool(
-            [RESEARCHER], factory_recipe=lambda _spec: MarkerFactory()
+            [RESEARCHER], factory_recipe=lambda _spec: marker_factory()
         )
 
         result = await tool.handler({"name": "ghost", "task": "x"})
@@ -59,7 +61,7 @@ class TestRunSubagentTool:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         selected: list[SubagentSpec] = []
-        marker = MarkerFactory()
+        marker = marker_factory()
 
         def recipe(spec: SubagentSpec) -> SessionFactory:
             selected.append(spec)

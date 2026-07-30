@@ -21,13 +21,14 @@ from lup.adapters.codex.config import (
     CodexProfileSelection,
 )
 from lup.adapters.codex.runtime import CodexSessionConfig
+from lup.runtime.factory import SessionFactory
 from lup.runtime.routing import (
     ExactModelMatcher,
     ModelRoute,
     ModelRouter,
     PrefixModelMatcher,
 )
-from tests.unit.test_background_runtime import RecordingFactory
+from tests.unit.test_background_runtime import RecordingOpener
 
 
 def test_claude_profile_precedence_and_immutability(tmp_path: Path) -> None:
@@ -119,8 +120,8 @@ def test_codex_compatible_endpoint_uses_structured_provider_config(
 
 
 def test_model_router_uses_explicit_recipe_then_first_match() -> None:
-    broad = RecordingFactory()
-    exact = RecordingFactory()
+    broad = SessionFactory(RecordingOpener().session_context)
+    exact = SessionFactory(RecordingOpener().session_context)
     router = ModelRouter(
         [
             ModelRoute(

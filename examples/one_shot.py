@@ -1,4 +1,4 @@
-"""Run one typed Claude turn with the small ``query`` convenience API."""
+"""Run one typed Claude turn as an operation on the configured factory."""
 
 import asyncio
 
@@ -7,7 +7,6 @@ from lup.adapters.claude.runtime import (
     create_claude_session_factory,
 )
 from lup.runtime.models import TurnInput, turn_request
-from lup.runtime.query import query
 
 from examples.common import Summary
 
@@ -19,9 +18,8 @@ async def main() -> None:
             system_prompt="Return a concise summary through submit_output.",
         )
     )
-    result = await query(
-        factory,
-        turn_request(TurnInput(text="Summarize why typed boundaries help."), Summary),
+    result = await factory.query(
+        turn_request(TurnInput(text="Summarize why typed boundaries help."), Summary)
     )
     print(result.output.model_dump_json(indent=2))
 

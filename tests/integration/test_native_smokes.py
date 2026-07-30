@@ -38,7 +38,7 @@ from lup.resolver.models import (
     VerificationCommand,
     WorkerContext,
 )
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
 
 pytestmark = pytest.mark.integration

@@ -18,11 +18,11 @@ from lup.runtime.contracts import (
     EventStream,
     ForkSession,
     Interrupt,
-    SessionFactory,
     Steer,
     TurnToolBinder,
 )
 from lup.runtime.errors import ProviderTurnError, TurnFailure, TurnInterruptedError
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     BlockCompletedEvent,
     BlockDeltaEvent,
@@ -537,25 +537,20 @@ class CodexFork(ForkSession):
         thread_id = await self.state.ensure_thread()
         result = await self.state.server.request("thread/fork", {"threadId": thread_id})
         response = CodexThreadResponse.model_validate(result)
-        factory = CodexSessionFactory(self.state.config)
-        async with factory.open(SessionId(value=response.thread.id)) as handle:
+        opener = CodexSessionOpener(self.state.config)
+        async with opener.open_session(SessionId(value=response.thread.id)) as handle:
             yield handle
 
 
-class CodexSessionFactory(SessionFactory):
+class CodexSessionOpener:
     """Open one initialized app-server process per Lup session."""
 
     def __init__(self, config: CodexSessionConfig) -> None:
         self.config = config
 
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_session(resume)
-
     @asynccontextmanager
     async def open_session(
-        self, resume: SessionId | None
+        self, resume: SessionId | None = None
     ) -> AsyncGenerator[SessionHandle]:
         server = CodexAppServer(
             self.config.executable,
@@ -584,7 +579,7 @@ class CodexSessionFactory(SessionFactory):
 
 def create_codex_session_factory(config: CodexSessionConfig) -> SessionFactory:
     """Create the named Codex runtime composition root."""
-    return CodexSessionFactory(config)
+    return SessionFactory(CodexSessionOpener(config).open_session)
 
 
 def dynamic_tool(binding: TurnToolBinding[BaseModel]) -> JsonObject:

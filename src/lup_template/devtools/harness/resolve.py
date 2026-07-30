@@ -56,7 +56,7 @@ from lup.resolver.tools import (
     create_question_tools,
     read_resolver_tool_context,
 )
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup_template.devtools.dev.comments import FoundComment, scan_tracked
