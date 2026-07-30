@@ -80,17 +80,6 @@ class ResolverIntake(BaseModel):
     carried: list[str]
 
 
-# lup: Intake fixes a run's concern set once, and nothing downstream can widen
-# it. A run parked at `questions` has its `concerns.json` written, `resume` only
-# restores the persisted phase, and the CLI offers no add-concern operation — so
-# a concern surfaced mid-run (by the user, or noticed by the agent relaying the
-# questions) cannot join the run it was discovered in. It waits for the next
-# inventory pass, which means committing a note and re-deriving from scratch,
-# discarding every material answer already collected. Give the orchestrating
-# agent a way to open work against a live run — admit a concern into an existing
-# inventory, or spawn a subagent for it that reports back into the same review
-# pipeline — so discovering work mid-run is not a choice between dropping it and
-# restarting.
 def resolver_intake(comments: list[FoundComment]) -> ResolverIntake:
     """Partition scanned notes into resolver work and carried deferrals."""
     return ResolverIntake(
