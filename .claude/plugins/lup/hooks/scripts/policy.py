@@ -12,10 +12,10 @@ from pathlib import Path
 
 sys.path.insert(
     0, str(Path(__file__).parents[1] / "runtime")
-)  # lup: Why do we have sys.path.insert here?
+)
 from kernel.decision import (
     KernelDecision,
-)  # lup: I'm not comfortable having invalid python code here. Can't we compile it or something?
+)
 from kernel.edit import decide_edit
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_write_targets
