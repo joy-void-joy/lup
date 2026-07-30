@@ -93,16 +93,36 @@ markers = ["integration: tests requiring external services (Docker, APIs)"]
 # vendored lup library (packages/lup/src), and tests. Pyright reads only this
 # root config when invoked here — it does not discover the member config in
 # packages/lup/pyproject.toml — so every include the workspace needs is listed.
-include = ["src", "packages/lup/src", "tests"]
-# Adapter asset scripts are verbatim payloads for the generated plugin tree;
-# their imports resolve only in that runtime layout, not in this workspace.
-exclude = [
-    "packages/lup/src/lup/adapters/claude/assets",
-    "packages/lup/src/lup/adapters/codex/assets",
+include = [
+    "src",
+    "packages/lup/src",
+    "tests",
+    ".claude/plugins/lup/hooks",
+    ".codex/plugins/lup/hooks",
 ]
 pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"
+
+# `kernel`, `policy_data`, and `codex_patch` are top-level modules only inside
+# a generated plugin's `hooks/runtime`. Naming that directory as the search
+# path checks each dispatcher — the canonical asset and the script compiled
+# from it — against the exact runtime it is shipped beside.
+[[tool.pyright.executionEnvironments]]
+root = "packages/lup/src/lup/adapters/claude/assets"
+extraPaths = [".claude/plugins/lup/hooks/runtime"]
+
+[[tool.pyright.executionEnvironments]]
+root = ".claude/plugins/lup/hooks/scripts"
+extraPaths = [".claude/plugins/lup/hooks/runtime"]
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/lup/src/lup/adapters/codex/assets"
+extraPaths = [".codex/plugins/lup/hooks/runtime"]
+
+[[tool.pyright.executionEnvironments]]
+root = ".codex/plugins/lup/hooks/scripts"
+extraPaths = [".codex/plugins/lup/hooks/runtime"]
 
 [tool.ruff]
 # Pinned below requires-python (>=3.14) so ruff keeps `except (A, B):`

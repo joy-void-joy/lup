@@ -4,7 +4,10 @@ Generated native plugins must decide without lup installed, so the adapters'
 hook renderers call this module to read :mod:`lup.policy.kernel` verbatim and
 to erase validated application inputs — hook URL scopes, protected roots, the
 canonical anti-pattern set — into primitive rows rendered as one generated
-data file per plugin. No decision logic lives here; the kernel decides.
+data file per plugin. Each row list is declared against the shipped
+``kernel.rows`` shapes, so a generated runtime type-checks as one unit
+against the kernel beside it. No decision logic lives here; the kernel
+decides.
 """
 
 import json
@@ -153,7 +156,7 @@ def runtime_shell_rules(extension: list[ShellCommandRule]) -> list[ShellRuleRow]
 def dict_rows_literal(rows: list[list[str]]) -> str:
     """Render already-escaped ``"key": value`` rows in Ruff-stable form."""
     if not rows:
-        return "()"
+        return "[]"
     blocks = [
         "    {\n" + "".join(f"        {entry},\n" for entry in row) + "    },"
         for row in rows
@@ -216,7 +219,7 @@ def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
 def string_rows_literal(rows: list[str]) -> str:
     """Render a sequence of generated string identities."""
     if not rows:
-        return "()"
+        return "[]"
     return "[\n" + "".join(f"    {json.dumps(row)},\n" for row in rows) + "]"
 
 
@@ -261,17 +264,19 @@ def render_policy_data(
     """Render one plugin's canonical policy rows without executable logic."""
     body = "\n\n".join(
         [
-            "ALLOWED_FETCH_SCOPES = " + url_scope_rows_literal(allowed_fetch_scopes),
-            "DENIED_FETCH_SCOPES = " + url_scope_rows_literal(denied_fetch_scopes),
-            "PATH_RULES = "
+            "ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = "
+            + url_scope_rows_literal(allowed_fetch_scopes),
+            "DENIED_FETCH_SCOPES: list[UrlScopeRow] = "
+            + url_scope_rows_literal(denied_fetch_scopes),
+            "PATH_RULES: list[PathRuleRow] = "
             + path_rule_rows_literal(
                 runtime_path_rules(protected_roots, human_owned_files)
             ),
-            "ANTI_PATTERN_ROWS = "
+            "ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = "
             + antipattern_rows_literal(bundled_antipattern_rows()),
-            "SHELL_RULES = "
+            "SHELL_RULES: list[ShellRuleRow] = "
             + shell_rule_rows_literal(runtime_shell_rules(shell_rule_extension or [])),
-            "AUTONOMOUS_AGENT_IDENTITIES = "
+            "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
             + string_rows_literal(autonomous_agent_identities),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
             "CONCERN_ALLOWANCES_ENV = " + json.dumps(CONCERN_ALLOWANCES_ENV),
@@ -283,5 +288,7 @@ def render_policy_data(
         "\n"
         "Rendered from lup.policy.bundle by\n"
         "`uv run lup-devtools harness generate all` — do not edit directly.\n"
-        '"""\n\n' + body + "\n"
+        '"""\n\n'
+        "from kernel.rows import AntiPatternRow, PathRuleRow, ShellRuleRow, UrlScopeRow"
+        "\n\n\n" + body + "\n"
     )

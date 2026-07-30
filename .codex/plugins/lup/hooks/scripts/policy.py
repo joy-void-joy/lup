@@ -10,6 +10,11 @@ import os
 import sys
 from pathlib import Path
 
+# The hook is launched as a bare script, promised no cwd, PYTHONPATH, or
+# interpreter environment, and `runtime/` is a plain sibling directory holding
+# the kernel package and this plugin's policy data rather than an installed
+# distribution. Naming it as a search path is what lets the imports below
+# resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from kernel.decision import KernelDecision
 from kernel.edit import decide_edit
@@ -106,7 +111,7 @@ def granted_allowances():
 def edit_decision(path_text, before, after, path_exists):
     path = Path(path_text)
     suffix = path.suffix.lower()
-    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else ()
+    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
     return decide_edit(
         worktree_path(path_text),
         before,

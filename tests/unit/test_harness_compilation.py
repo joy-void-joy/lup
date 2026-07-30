@@ -2,6 +2,8 @@
 
 import json
 import os
+import sys
+import tomllib
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -131,6 +133,52 @@ class CodexPermissionOutput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     hook_specific_output: CodexPermissionHookOutput = Field(alias="hookSpecificOutput")
+
+
+class ShippedDispatcher(BaseModel):
+    """One hook dispatcher: its canonical asset, its script, its runtime."""
+
+    model_config = ConfigDict(frozen=True)
+
+    asset: Path
+    script: Path
+    runtime: Path
+
+
+SHIPPED_DISPATCHERS: dict[str, ShippedDispatcher] = {
+    "claude": ShippedDispatcher(
+        asset=Path("packages/lup/src/lup/adapters/claude/assets/policy_dispatcher.py"),
+        script=Path(".claude/plugins/lup/hooks/scripts/policy.py"),
+        runtime=Path(".claude/plugins/lup/hooks/runtime"),
+    ),
+    "codex": ShippedDispatcher(
+        asset=Path("packages/lup/src/lup/adapters/codex/assets/policy_dispatcher.py"),
+        script=Path(".codex/plugins/lup/hooks/scripts/policy.py"),
+        runtime=Path(".codex/plugins/lup/hooks/runtime"),
+    ),
+}
+"""Every script a session's permissions run through, canonical and shipped."""
+
+
+class PyrightExecutionEnvironment(BaseModel):
+    """One type-checking scope and the search paths it resolves imports on."""
+
+    model_config = ConfigDict(frozen=True)
+
+    root: Path
+    extra_paths: list[Path] = Field(alias="extraPaths", default=[])
+
+
+class PyrightConfiguration(BaseModel):
+    """The workspace type-checking scope, as pyproject.toml declares it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    include: list[Path]
+    exclude: list[Path] = []
+    execution_environments: list[PyrightExecutionEnvironment] = Field(
+        alias="executionEnvironments", default=[]
+    )
 
 
 def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
@@ -911,6 +959,64 @@ def test_generated_claude_hook_executes_the_canonical_kernel() -> None:
     output = ClaudeHookOutput.model_validate_json(result.stdout)
     assert output.hook_specific_output.permission_decision == "deny"
     assert "interpreters" in output.hook_specific_output.permission_decision_reason
+
+
+@pytest.mark.parametrize("target", sorted(SHIPPED_DISPATCHERS))
+def test_generated_dispatcher_resolves_its_runtime_from_anywhere(
+    target: str, tmp_path: Path
+) -> None:
+    """A plugin host spawns the hook as a bare script and arranges nothing.
+
+    Isolated mode drops the working directory, the script's own directory, and
+    every ``PYTHON*`` variable from the search path, and the environment is
+    empty, so reaching ``kernel.*`` and ``policy_data`` at all proves the
+    script finds its runtime from its own location.
+    """
+    result = sh.Command(sys.executable)(
+        "-I",
+        str(SHIPPED_DISPATCHERS[target].script.resolve()),
+        _in='{"tool_name":"Bash","tool_input":{"command":"python -c 1"}}',
+        _cwd=tmp_path,
+        _env={},
+        _ok_code=[0, 2],
+        _return_cmd=True,
+    )
+
+    assert isinstance(result, sh.RunningCommand)
+    match target:
+        case "claude":
+            decision = ClaudeHookOutput.model_validate_json(
+                result.stdout
+            ).hook_specific_output
+            assert decision.permission_decision == "deny"
+            reason = decision.permission_decision_reason
+        case _:
+            assert result.exit_code == 2
+            reason = result.stderr.decode()
+    assert "interpreters" in reason
+
+
+def test_static_checking_reaches_every_shipped_dispatcher() -> None:
+    """A dispatcher is the one artifact whose breakage is silent.
+
+    A plugin host runs these scripts, not the workspace, so an unresolved
+    import or a mistyped argument surfaces as a permission decision that never
+    happens — in a session that only sees the tool go through. Every scope
+    that could exempt one is asserted here rather than trusted.
+    """
+    declared = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    config = PyrightConfiguration.model_validate(declared["tool"]["pyright"])
+
+    for dispatcher in SHIPPED_DISPATCHERS.values():
+        for source in (dispatcher.asset, dispatcher.script):
+            assert any(source.is_relative_to(root) for root in config.include)
+            assert not any(source.is_relative_to(root) for root in config.exclude)
+            assert dispatcher.runtime in [
+                path
+                for environment in config.execution_environments
+                if source.is_relative_to(environment.root)
+                for path in environment.extra_paths
+            ]
 
 
 AUTONOMY_PROBE = {

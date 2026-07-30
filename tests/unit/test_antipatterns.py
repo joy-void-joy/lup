@@ -205,6 +205,8 @@ class Settings:
 
 CALL_KWARG = "result = Report(files=[], errors=0)\n"
 
+MODULE_DECLARATION = "DENIED_SCOPES: list[str] = []\n"
+
 LOCAL_SEED = """\
 def build() -> list[int]:
     items = []
@@ -299,6 +301,9 @@ def test_refiner_exempts_deliberate_defaults() -> None:
     assert empty_collection_exempt_lines(INIT_STATE) == {3, 4}
     assert empty_collection_exempt_lines(CLASS_FIELD) == {2}
     assert empty_collection_exempt_lines(CALL_KWARG) == {1}
+    # An annotated declaration states a shape; only the bare MODULE_SEED
+    # assignment below reads as a fold waiting for its appends.
+    assert empty_collection_exempt_lines(MODULE_DECLARATION) == {1}
 
 
 def test_refiner_exempts_except_body_fallback() -> None:
