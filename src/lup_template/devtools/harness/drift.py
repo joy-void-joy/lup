@@ -2,14 +2,18 @@
 
 Wraps the ``generate`` engine in the console surfaces the CLI shares: drift
 summaries, generation summaries, and conflict-aborted generation. Owns the
-bodies of the ``generate`` and ``check`` commands.
+bodies of the ``generate`` and ``check`` commands, and reaches the rule
+reference alongside them so one command settles every generated artifact
+rather than leaving the repository-wide one to be remembered separately.
 """
 
 from pathlib import Path
 
 import typer
 
+from lup_template.devtools.dev.rules import write_rule_reference
 from lup_template.devtools.harness.composition import (
+    EVERY_TARGET,
     NativeHarnessComposition,
     harness_compositions,
 )
@@ -62,10 +66,22 @@ def generate_with_report(composition: NativeHarnessComposition) -> None:
     report_generation(recipe.label, materialized.changed, materialized.removed)
 
 
+def clean_rule_reference() -> bool:
+    """Whether the repository-wide rule reference is already up to date."""
+    try:
+        write_rule_reference(check=True)
+    except RuntimeError as error:
+        typer.echo(str(error), err=True)
+        return False
+    return True
+
+
 def generate_targets(target: str) -> None:
     """Generate owned artifacts for every composition the selector names."""
     for composition in harness_compositions(target):
         generate_with_report(composition)
+    if target == EVERY_TARGET:
+        typer.echo(f"rule reference ready: {write_rule_reference()}")
 
 
 def check_targets(target: str) -> None:
@@ -76,5 +92,6 @@ def check_targets(target: str) -> None:
     ]
     for report in reports:
         report_drift(report)
-    if any(not report.clean for report in reports):
+    stale_reference = target == EVERY_TARGET and not clean_rule_reference()
+    if stale_reference or any(not report.clean for report in reports):
         raise typer.Exit(1)

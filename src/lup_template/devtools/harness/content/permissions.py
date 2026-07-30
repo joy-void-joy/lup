@@ -10,11 +10,10 @@ and ``# lup: ignore`` — stay in the guidance itself.
 import lup.harness.models as models
 
 DOCUMENT = models.PromptDocument(
+    source=__name__,
     parts=[
         models.TextPart(
-            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/permissions.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
-
-# Permission Policy
+            text=r"""# Permission Policy
 
 How the generated hooks decide allow, ask, defer, or deny. For the daily
 summary and the escalation syntax, see
@@ -83,5 +82,5 @@ runtime with the runtime's environment, so an agent exporting the variable
 inside a shell tool call never reaches the dispatcher that judges it.
 """
         ),
-    ]
+    ],
 )

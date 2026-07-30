@@ -17,11 +17,10 @@ from lup_template.devtools.harness.content.template_sections import (
 )
 
 DOCUMENT = models.PromptDocument(
+    source=__name__,
     parts=[
         models.TextPart(
-            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/template_claude.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
-
-# CLAUDE.md Template
+            text=r"""# CLAUDE.md Template
 
 This file exports portable sections from the upstream CLAUDE.md as a scaffold for downstream projects. It contains conventions, workflow patterns, and coding standards that apply to any project using lup.
 
@@ -191,5 +190,5 @@ When the user provides documentation links, incorporate that knowledge into CLAU
 """
         ),
         *SELF_IMPROVEMENT_THROUGH_END,
-    ]
+    ],
 )

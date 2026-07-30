@@ -21,6 +21,7 @@ from pydantic import (
     model_validator,
 )
 
+from lup.harness.banner import ArtifactBanner, GeneratedBanner
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.shell_rules import ShellCommandRule
 from lup.types import JsonValue, ToolGrant, ToolName
@@ -215,6 +216,16 @@ class PromptDocument(BaseModel):
     model_config = FROZEN
 
     parts: list[PromptPart]
+    source: str | None = None
+    """The module declaring this document, for the banner of an artifact
+    rendered from it alone. A document folded into a skill or agent prompt
+    reaches no artifact of its own and names no source."""
+
+    def declared_source(self) -> str:
+        """The declaring module, required because this document becomes a file."""
+        if self.source is None:
+            raise ValueError("a document rendered to its own artifact needs a source")
+        return self.source
 
 
 GUIDANCE_CHARACTER_BUDGET = 32_768
@@ -578,6 +589,38 @@ class Artifact(BaseModel):
     content: NormalizedText
     semantic_id: str = Field(min_length=1)
     executable: bool = False
+    banner: ArtifactBanner | None = None
+    """This artifact's provenance, or its declared reason for carrying none.
+    Leaving it unset states nothing, which :mod:`lup.harness.validation`
+    accepts only for a format that admits no comment at all."""
+
+    @classmethod
+    def generated(
+        cls,
+        *,
+        path: ArtifactPath,
+        body: str,
+        semantic_id: str,
+        banner: GeneratedBanner,
+        executable: bool = False,
+    ) -> "Artifact":
+        """Compose one artifact beneath the banner naming what produced it."""
+        return cls(
+            path=path,
+            content=banner.applied_to(path, body),
+            semantic_id=semantic_id,
+            executable=executable,
+            banner=banner,
+        )
+
+    @model_validator(mode="after")
+    def banner_opens_content(self) -> "Artifact":
+        if self.banner is not None and not self.banner.opens(self.path, self.content):
+            raise ValueError(
+                f"artifact {self.path.as_posix()} does not open with the banner "
+                "it declares"
+            )
+        return self
 
 
 class ArtifactTree(BaseModel):

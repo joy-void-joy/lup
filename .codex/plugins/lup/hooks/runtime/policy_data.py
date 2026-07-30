@@ -1,8 +1,7 @@
-"""Generated application-owned policy data.
+# Generated from lup.policy.bundle by `uv run lup-devtools harness generate all` — edit the source, not this file.
+# See docs/generated-artifacts.md.
 
-Rendered from lup.policy.bundle by
-`uv run lup-devtools harness generate all` — do not edit directly.
-"""
+"""Generated application-owned policy data."""
 
 ALLOWED_FETCH_SCOPES = [
     {

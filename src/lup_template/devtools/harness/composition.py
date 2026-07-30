@@ -76,6 +76,11 @@ def codex_composition(root: Path) -> NativeHarnessComposition:
     )
 
 
+EVERY_TARGET = "all"
+"""The selector that reaches every native tree, and the repository-wide
+artifacts that belong to no single one of them."""
+
+
 def harness_compositions(value: str) -> list[NativeHarnessComposition]:
     """Parse a generic CLI selector into already concrete compositions."""
     constructors: dict[str, Callable[[Path], NativeHarnessComposition]] = {
@@ -83,7 +88,7 @@ def harness_compositions(value: str) -> list[NativeHarnessComposition]:
         "codex": codex_composition,
     }
     root = project_root()
-    if value == "all":
+    if value == EVERY_TARGET:
         return [constructor(root) for constructor in constructors.values()]
     constructor = constructors.get(value)  # lup: ignore[dict-get]
     if constructor is not None:

@@ -25,7 +25,10 @@ from lup.adapters.harness import (
     compile_claude,
     compile_codex,
 )
+from lup.harness.banner import ARTIFACT_COMMENT_ROUTER, GeneratedBanner
+from lup.harness.generation import ArtifactValidationError
 from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
+from lup.harness.validation import validated_tree
 from lup.harness.models import (
     GUIDANCE_CHARACTER_BUDGET,
     Argument,
@@ -67,6 +70,7 @@ from lup.harness.reconciliation import (
 )
 from lup.policy.bundle import policy_kernel_modules
 from lup.types import EnvVars
+from lup_template.devtools.dev.rules import rule_reference_artifact
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
@@ -491,6 +495,56 @@ def test_codex_compiles_prefix_safe_shell_allows_to_native_rules() -> None:
     assert 'pattern = ["env"]' not in rules
     assert 'pattern = ["sort"]' not in rules
     assert 'pattern = ["git", "push"]' not in rules
+
+
+def test_every_commentable_generated_file_carries_the_one_banner_form() -> None:
+    harness = portable_harness()
+    root = Path.cwd()
+    trees = [
+        claude_generation_recipe(root).desired,
+        codex_generation_recipe(root).desired,
+        ArtifactTree(artifacts=[rule_reference_artifact()]),
+    ]
+    bannered = [
+        (artifact, artifact.banner)
+        for tree in trees
+        for artifact in tree.artifacts
+        if isinstance(artifact.banner, GeneratedBanner)
+    ]
+
+    assert {Path("docs/rules.md"), Path("docs/permissions.md")} <= {
+        artifact.path for artifact, _ in bannered
+    }
+    for artifact, banner in bannered:
+        assert banner.opens(artifact.path, artifact.content)
+        assert f"Generated from {banner.source} by " in artifact.content
+        assert f"`{banner.command}`" in artifact.content
+    for tree in trees:
+        for artifact in tree.artifacts:
+            spelled = ARTIFACT_COMMENT_ROUTER.route_for(artifact.path)
+            assert (artifact.banner is not None) == (spelled is not None)
+    assert harness == portable_harness()
+
+
+def test_a_generated_file_that_states_no_provenance_fails_the_check() -> None:
+    silent = Artifact(
+        path=Path("docs/invented.md"), content="# Invented\n", semantic_id="docs.new"
+    )
+
+    with pytest.raises(ArtifactValidationError, match="declares no generated-from"):
+        validated_tree([silent])
+
+
+def test_a_banner_the_content_does_not_open_with_is_rejected() -> None:
+    banner = GeneratedBanner(source="lup_template.invented", command="uv run invent")
+
+    with pytest.raises(ValueError, match="does not open with the banner"):
+        Artifact(
+            path=Path("docs/invented.md"),
+            content="# Invented\n",
+            semantic_id="docs.new",
+            banner=banner,
+        )
 
 
 def test_repository_generated_harness_is_drift_clean() -> None:

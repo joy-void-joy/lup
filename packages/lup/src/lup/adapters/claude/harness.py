@@ -4,6 +4,12 @@ import json
 import shlex
 from importlib import resources
 from pathlib import Path
+from lup.harness.banner import (
+    PROMPT_TEXT,
+    REGENERATE_COMMAND,
+    VERBATIM_COPY,
+    GeneratedBanner,
+)
 from lup.harness.contracts import (
     ArtifactRenderer,
     Atom,
@@ -12,6 +18,7 @@ from lup.harness.contracts import (
     PromptRenderer,
 )
 from lup.harness.generation import argument_text
+from lup.harness.prompts import guidance_banner
 from lup.harness.models import (
     Agent,
     Artifact,
@@ -27,6 +34,7 @@ from lup.harness.models import (
     TreeLocation,
 )
 from lup.policy.bundle import (
+    POLICY_DATA_BANNER,
     policy_kernel_modules,
     render_policy_data,
     runtime_url_scope,
@@ -194,6 +202,7 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
                     ),
                     content=content,
                     semantic_id=source.id,
+                    banner=PROMPT_TEXT,
                 )
             ]
         )
@@ -234,6 +243,7 @@ class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
                     ),
                     content=content,
                     semantic_id=source.id,
+                    banner=PROMPT_TEXT,
                 )
             ]
         )
@@ -286,10 +296,11 @@ class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
     def render(self, source: Harness) -> ArtifactTree:
         return ArtifactTree(
             artifacts=[
-                Artifact(
+                Artifact.generated(
                     path=Path(".claude/CLAUDE.md"),
-                    content=self.prompts.render(source.guidance),
+                    body=self.prompts.render(source.guidance),
                     semantic_id="harness.guidance",
+                    banner=guidance_banner(self.prompts, source.guidance),
                 )
             ]
         )
@@ -338,13 +349,17 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     content=json.dumps(hooks, indent=2, sort_keys=True),
                     semantic_id=source.id,
                 ),
-                Artifact(
+                Artifact.generated(
                     path=Path(
                         f".claude/plugins/{self.plugin_name}/hooks/scripts/policy.py"
                     ),
-                    content=CLAUDE_POLICY_DISPATCHER,
+                    body=CLAUDE_POLICY_DISPATCHER,
                     semantic_id=source.id,
                     executable=True,
+                    banner=GeneratedBanner(
+                        source="lup.adapters.claude.assets.policy_dispatcher",
+                        command=REGENERATE_COMMAND,
+                    ),
                 ),
                 *[
                     Artifact(
@@ -354,15 +369,17 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         ),
                         content=module.source,
                         semantic_id=source.id,
+                        banner=VERBATIM_COPY,
                     )
                     for module in policy_kernel_modules()
                 ],
-                Artifact(
+                Artifact.generated(
                     path=Path(
                         f".claude/plugins/{self.plugin_name}/hooks/runtime/"
                         "policy_data.py"
                     ),
-                    content=render_policy_data(
+                    banner=POLICY_DATA_BANNER,
+                    body=render_policy_data(
                         allowed_fetch_scopes=[
                             runtime_url_scope(
                                 str(scope.origin),

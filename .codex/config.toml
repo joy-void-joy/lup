@@ -1,6 +1,7 @@
-# Generated file — do not edit directly. Rendered from
-# lup.adapters.codex.harness by `uv run lup-devtools harness generate all`.
+# Generated from lup.adapters.codex.harness by `uv run lup-devtools harness generate all` — edit the source, not this file.
+# See docs/generated-artifacts.md.
 # Personal sandbox and approval defaults stay in ~/.codex/config.toml.
 # Native shell allows are generated under .codex/rules/.
+
 [features]
 hooks = true

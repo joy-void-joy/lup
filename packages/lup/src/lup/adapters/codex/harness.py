@@ -4,6 +4,12 @@ import json
 import shlex
 from importlib import resources
 from pathlib import Path
+from lup.harness.banner import (
+    PROMPT_TEXT,
+    REGENERATE_COMMAND,
+    VERBATIM_COPY,
+    GeneratedBanner,
+)
 from lup.harness.contracts import (
     ArtifactRenderer,
     Atom,
@@ -12,6 +18,7 @@ from lup.harness.contracts import (
     PromptRenderer,
 )
 from lup.harness.generation import argument_text
+from lup.harness.prompts import guidance_banner
 from lup.harness.models import (
     Agent,
     Artifact,
@@ -27,6 +34,7 @@ from lup.harness.models import (
     TreeLocation,
 )
 from lup.policy.bundle import (
+    POLICY_DATA_BANNER,
     policy_kernel_modules,
     render_policy_data,
     runtime_url_scope,
@@ -180,6 +188,7 @@ class CodexSkillRenderer(ArtifactRenderer[Skill]):
                     ),
                     content=content,
                     semantic_id=source.id,
+                    banner=PROMPT_TEXT,
                 )
             ]
         )
@@ -202,9 +211,6 @@ class CodexAgentRenderer(ArtifactRenderer[Agent]):
             None if source.model is None else self.spellings.model_alias(source.model)
         )
         rows = [
-            "# Generated file — do not edit directly. Rendered from the portable",
-            f"# agent declaration {source.id} by "
-            "`uv run lup-devtools harness generate all`.",
             f"name = {json.dumps(source.name)}",
             f"description = {json.dumps(source.description)}",
             (
@@ -216,10 +222,14 @@ class CodexAgentRenderer(ArtifactRenderer[Agent]):
             rows.append(f"model = {json.dumps(alias)}")
         return ArtifactTree(
             artifacts=[
-                Artifact(
+                Artifact.generated(
                     path=Path(f".codex/agents/{source.name}.toml"),
-                    content="\n".join(rows),
+                    body="\n".join(rows),
                     semantic_id=source.id,
+                    banner=GeneratedBanner(
+                        source=f"the portable agent declaration {source.id}",
+                        command=REGENERATE_COMMAND,
+                    ),
                 )
             ]
         )
@@ -282,24 +292,25 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
     def render(self, source: Harness) -> ArtifactTree:
         return ArtifactTree(
             artifacts=[
-                Artifact(
+                Artifact.generated(
                     path=Path("AGENTS.md"),
-                    content=self.prompts.render(source.guidance),
+                    body=self.prompts.render(source.guidance),
                     semantic_id="harness.guidance",
+                    banner=guidance_banner(self.prompts, source.guidance),
                 ),
-                Artifact(
+                Artifact.generated(
                     path=Path(".codex/config.toml"),
-                    content=(
-                        "# Generated file — do not edit directly. Rendered from\n"
-                        "# lup.adapters.codex.harness by "
-                        "`uv run lup-devtools harness generate all`.\n"
-                        "# Personal sandbox and approval defaults stay in "
-                        "~/.codex/config.toml.\n"
-                        "# Native shell allows are generated under "
-                        ".codex/rules/.\n"
-                        "[features]\nhooks = true\n"
-                    ),
+                    body="[features]\nhooks = true\n",
                     semantic_id="harness.project-config",
+                    banner=GeneratedBanner(
+                        source=__name__,
+                        command=REGENERATE_COMMAND,
+                        notes=[
+                            "Personal sandbox and approval defaults stay in "
+                            "~/.codex/config.toml.",
+                            "Native shell allows are generated under .codex/rules/.",
+                        ],
+                    ),
                 ),
             ]
         )
@@ -374,15 +385,10 @@ def codex_allow_prefixes(extension: list[ShellCommandRule]) -> list[list[str]]:
 def render_codex_rules(source: HookSet) -> str:
     """Render project-local native execution rules for prefix-safe allows."""
     rows = [
-        "# Generated file — do not edit directly. Rendered from the canonical",
-        "# Lup semantic shell policy by `uv run lup-devtools harness generate all`.",
-        "",
+        f"prefix_rule(pattern = {json.dumps(prefix)}, decision = "
+        '"allow", justification = "Allowed by Lup semantic shell policy")'
+        for prefix in codex_allow_prefixes(source.shell_rules)
     ]
-    for prefix in codex_allow_prefixes(source.shell_rules):
-        rows.append(
-            f"prefix_rule(pattern = {json.dumps(prefix)}, decision = "
-            '"allow", justification = "Allowed by Lup semantic shell policy")'
-        )
     return "\n".join([*rows, ""])
 
 
@@ -428,18 +434,26 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     content=json.dumps(hooks, indent=2, sort_keys=True),
                     semantic_id=source.id,
                 ),
-                Artifact(
+                Artifact.generated(
                     path=Path(f".codex/rules/{self.plugin_name}.rules"),
-                    content=render_codex_rules(source),
+                    body=render_codex_rules(source),
                     semantic_id=source.id,
+                    banner=GeneratedBanner(
+                        source="lup.policy.shell_rules",
+                        command=REGENERATE_COMMAND,
+                    ),
                 ),
-                Artifact(
+                Artifact.generated(
                     path=Path(
                         f".codex/plugins/{self.plugin_name}/hooks/scripts/policy.py"
                     ),
-                    content=CODEX_POLICY_DISPATCHER,
+                    body=CODEX_POLICY_DISPATCHER,
                     semantic_id=source.id,
                     executable=True,
+                    banner=GeneratedBanner(
+                        source="lup.adapters.codex.assets.policy_dispatcher",
+                        command=REGENERATE_COMMAND,
+                    ),
                 ),
                 *[
                     Artifact(
@@ -449,6 +463,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         ),
                         content=module.source,
                         semantic_id=source.id,
+                        banner=VERBATIM_COPY,
                     )
                     for module in policy_kernel_modules()
                 ],
@@ -459,13 +474,15 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     ),
                     content=CODEX_PATCH_RUNTIME,
                     semantic_id=source.id,
+                    banner=VERBATIM_COPY,
                 ),
-                Artifact(
+                Artifact.generated(
                     path=Path(
                         f".codex/plugins/{self.plugin_name}/hooks/runtime/"
                         "policy_data.py"
                     ),
-                    content=render_policy_data(
+                    banner=POLICY_DATA_BANNER,
+                    body=render_policy_data(
                         allowed_fetch_scopes=[
                             runtime_url_scope(
                                 str(scope.origin),

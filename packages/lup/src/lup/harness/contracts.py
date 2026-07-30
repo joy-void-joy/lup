@@ -22,7 +22,9 @@ if TYPE_CHECKING:
         ArtifactTree,
         CapabilityEvidence,
         ModelTier,
+        NativePath,
         PluginLocation,
+        PluginPath,
         PromptDocument,
         QualifiedAgentName,
         SkillInvocation,
@@ -161,6 +163,10 @@ class PromptRenderer(ABC):
     @abstractmethod
     def render(self, prompt: PromptDocument) -> str:
         """Render every semantic prompt part into native prompt text."""
+
+    @abstractmethod
+    def location(self, part: NativePath | PluginPath) -> str:
+        """Spell one location for the reader, or for every runtime at once."""
 
 
 class CurrentTreeReader(ABC):
