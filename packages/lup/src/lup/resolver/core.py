@@ -28,13 +28,16 @@ from lup.resolver.mailbox import (
 from lup.resolver.models import (
     ACCEPT,
     ACCEPTANCE_CONCERN_ID,
+    AdmissionRequest,
     AgentRound,
     AnswerBatch,
     CleanupRecord,
     acceptance_question,
     Concern,
+    ConcernAdmission,
     ConcernEligibility,
     ConcernInventory,
+    ConcernOrigin,
     ConcernProgress,
     ConcernStatus,
     ConcernExecution,
@@ -119,6 +122,15 @@ class ApprovalDecisions(BaseModel):
     eligible: list[str]
 
 
+class EvidenceCitation(BaseModel):
+    """One concern's evidence, named in the fields the concern carries."""
+
+    model_config = ConfigDict(frozen=True)
+
+    notes: list[ReviewNote]
+    evidence: str
+
+
 def resolver_config_digest(config: ResolverConfig) -> str:
     """Bind resumed state to the exact injected resolver composition inputs."""
     encoded = config.model_dump_json().encode("utf-8")
@@ -140,11 +152,11 @@ INVENTORY_PLAN_ATTEMPTS = 3
 
 
 def coverage_complaint(referenced: list[int], total: int) -> str | None:
-    """Name the notes a plan ignored and the evidence it invented.
+    """Name the evidence a plan ignored and the evidence it invented.
 
     A note is not a unit of work: one can raise several concerns and several
-    can raise one, so concerns reference notes rather than partitioning them.
-    What still cannot happen is a note no concern claims, because that note
+    can raise one, so concerns reference evidence rather than partitioning
+    it. What still cannot happen is evidence no concern claims, because it
     goes unresolved with nothing to show for it.
     """
     faults = [
@@ -153,6 +165,29 @@ def coverage_complaint(referenced: list[int], total: int) -> str | None:
     ]
     named = [f"{label}: {sorted(indexes)}" for label, indexes in faults if indexes]
     return "; ".join(named) if named else None
+
+
+def planned_evidence(request: ResolveRequest, indexes: list[int]) -> EvidenceCitation:
+    """Split one plan's positional references back into what it cites.
+
+    Positions below the note count name notes; the rest continue into the
+    statements, so a planner references either kind the same way and the
+    materialized concern still carries each in the form it came in.
+    """
+    return EvidenceCitation(
+        notes=[
+            ReviewNote.model_validate(
+                request.notes[index].model_dump(exclude={"context"})
+            )
+            for index in indexes
+            if index < len(request.notes)
+        ],
+        evidence="\n".join(
+            request.statements[index - len(request.notes)]
+            for index in indexes
+            if index >= len(request.notes)
+        ),
+    )
 
 
 def merge_parked(parked: list[ResolverAwaitingAnswers]) -> ResolverAwaitingAnswers:
@@ -256,18 +291,32 @@ class ResolverCore:
             )
             return await self.run_exclusive(inventory)
 
-    async def plan_inventory(self, request: ResolveRequest) -> ResolveInventory:
+    async def plan_inventory(
+        self,
+        request: ResolveRequest,
+        origin: ConcernOrigin = ConcernOrigin.INVENTORY,
+        taken: list[str] | None = None,
+    ) -> ResolveInventory:
         """Organize raw review evidence into concerns in a read-only turn.
 
         A rejected partition is fed back to the planner by name rather than
         ending the run: intake is the point where the least work is persisted
-        and the most would be lost.
+        and the most would be lost. ``taken`` names the ids a live run has
+        already recorded, so evidence planned into a run that is already
+        moving cannot collide with the concerns it joins.
         """
+        reserved = (
+            "\nThese ids already name a concern in this run and may not be "
+            "reused; depend on one by id instead: " + ", ".join(taken)
+            if taken
+            else ""
+        )
         prompt = (
-            "Organize every review note into generalized implementation concerns "
-            "without editing. Cluster by underlying issue, not file. Reference "
-            "notes through note_indexes using each note's zero-based position in "
-            "the evidence below. A note is not a unit of work: split one that "
+            "Organize every piece of review evidence into generalized "
+            "implementation concerns without editing. Cluster by underlying "
+            "issue, not file. Reference evidence through evidence_indexes using "
+            "its zero-based position in the evidence below — notes first, then "
+            "statements. A note is not a unit of work: split one that "
             "raises several issues across several concerns, and reference it "
             "from each. Every index must appear at least once; none may repeat "
             "within a single concern. Give each concern path-safe id, complete acceptance "
@@ -275,7 +324,7 @@ class ResolverCore:
             "an allowance only when the plan cannot be carried out without the gate "
             "it names, so approving the concern approves what it actually needs. Do "
             "not decide eligibility or integration approval; the resolver asks the "
-            "user."
+            f"user.{reserved}"
             f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
         )
         correction = ""
@@ -288,32 +337,29 @@ class ResolverCore:
             referenced = [
                 index
                 for planned in result.output.concerns
-                for index in planned.note_indexes
+                for index in planned.evidence_indexes
             ]
-            complaint = coverage_complaint(referenced, len(request.notes))
+            complaint = coverage_complaint(referenced, request.evidence_count())
             if complaint is None:
                 break
             correction = (
                 f"\n\nA previous attempt left review evidence unaccounted for — "
-                f"{complaint}. Every index from 0 to {len(request.notes) - 1} must "
-                "be referenced by at least one concern."
+                f"{complaint}. Every index from 0 to "
+                f"{request.evidence_count() - 1} must be referenced by at least "
+                "one concern."
             )
         else:
             raise ResolverInvariantError(
-                "inventory planner left review notes unaccounted for across "
+                "inventory planner left review evidence unaccounted for across "
                 f"{INVENTORY_PLAN_ATTEMPTS} attempts — {complaint}"
             )
         concerns = [
             Concern(
-                notes=[
-                    ReviewNote.model_validate(
-                        request.notes[index].model_dump(exclude={"context"})
-                    )
-                    for index in planned.note_indexes
-                ],
+                **planned_evidence(request, planned.evidence_indexes).model_dump(),
+                origin=origin,
                 eligible=True,
                 integration_approved=True,
-                **planned.model_dump(exclude={"note_indexes"}),
+                **planned.model_dump(exclude={"evidence_indexes"}),
             )
             for planned in result.output.concerns
         ]
@@ -422,36 +468,39 @@ class ResolverCore:
             await promoter
 
     async def advance_exclusive(self, state: ResolveState) -> ResolveManifest:
-        """Advance while a promoter is folding every door's answers in."""
-        if state.questions is None:
-            initial_questions = QuestionBatch(
-                run_id=state.run_id,
-                questions=[
-                    question
-                    for concern in state.concerns
-                    for question in concern.questions
-                ]
-                + [
-                    approval_question(concern)
-                    for concern in state.concerns
-                    if concern.eligible and concern.integration_approved
-                ],
-            )
-            self.queue_questions(initial_questions.questions, "planning")
+        """Advance while a promoter is folding every door's answers in.
+
+        Each stage asks what the current concern set still needs rather than
+        whether the stage has run before, so a concern admitted after the run
+        started reaches the same gates as one from intake instead of skipping
+        the stages its siblings already passed.
+        """
+        asked = {
+            question.id
+            for question in (state.questions.questions if state.questions else [])
+        }
+        unasked = [
+            question
+            for question in self.pending_questions(state.concerns)
+            if question.id not in asked
+        ]
+        if state.questions is None or unasked:
+            self.queue_questions(unasked, "planning")
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.QUESTIONS,
-                    "questions": initial_questions,
+                    "questions": QuestionBatch(
+                        run_id=state.run_id,
+                        questions=[
+                            *(state.questions.questions if state.questions else []),
+                            *unasked,
+                        ],
+                    ),
                 }
             )
             state = self.progress_state(
                 state,
-                [
-                    concern.id
-                    for concern in state.concerns
-                    if concern.questions
-                    or (concern.eligible and concern.integration_approved)
-                ],
+                [question.concern_id for question in unasked],
                 ConcernStatus.WAITING_FOR_ANSWERS,
             )
             self.persist(state)
@@ -469,7 +518,9 @@ class ResolverCore:
         approved_ids = decisions.eligible
         graph = ConcernGraph(state.concerns)
         approved = [concern for concern in state.concerns if concern.id in approved_ids]
-        if not state.eligibility:
+        settled = {item.concern_id for item in state.eligibility}
+        undecided = [concern for concern in state.concerns if concern.id not in settled]
+        if undecided:
             eligibility = [
                 ConcernEligibility(
                     concern_id=concern.id,
@@ -485,12 +536,12 @@ class ResolverCore:
                         )
                     ),
                 )
-                for concern in state.concerns
+                for concern in undecided
             ]
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.ELIGIBILITY,
-                    "eligibility": eligibility,
+                    "eligibility": [*state.eligibility, *eligibility],
                 }
             )
             state = self.progress_state(
@@ -519,19 +570,24 @@ class ResolverCore:
             for lease in state.leases
             if lease.concern_id != "integration"
         }
-        if not lease_by_concern:
-            for concern in approved:
-                branch = f"resolve/{self.config.run_id}/{concern.id}"
-                lease_by_concern[concern.id] = self.leases.acquire(concern.id, branch)
+        unleased = [
+            concern for concern in approved if concern.id not in lease_by_concern
+        ]
+        if unleased:
+            fresh = [
+                self.leases.acquire(concern.id, self.concern_branch(concern.id))
+                for concern in unleased
+            ]
+            lease_by_concern.update({lease.concern_id: lease for lease in fresh})
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.LEASES,
-                    "leases": list(lease_by_concern.values()),
+                    "leases": [*state.leases, *fresh],
                 }
             )
             state = self.progress_state(
                 state,
-                [concern.id for concern in approved],
+                [concern.id for concern in unleased],
                 ConcernStatus.LEASED,
             )
             self.persist(state)
@@ -646,9 +702,7 @@ class ResolverCore:
 
     def restore_leases(self, state: ResolveState) -> None:
         """Validate persisted authority and reset incomplete attempts for retry."""
-        self.leases.leases = {
-            lease.concern_id: lease for lease in state.leases if lease.active
-        }
+        self.leases.adopt(state.leases)
         outcomes = {outcome.concern_id: outcome for outcome in state.outcomes}
         bases = {base.concern_id: base for base in state.bases}
         concerns = {concern.id: concern for concern in state.concerns}
@@ -1302,6 +1356,85 @@ class ResolverCore:
             result.answered[0].answer.value == ACCEPT
         )
         return self.require_state()
+
+    async def admit(self, request: AdmissionRequest) -> ConcernAdmission:
+        """Plan evidence found mid-run into the run that found it.
+
+        Restarting was the only way to widen a concern set, and it re-derived
+        the inventory from scratch — discarding every material answer already
+        collected at exactly the moment a run holds the most of them. Only the
+        new evidence is planned here; the run keeps its id, its answers, and
+        its completed work, so nothing already decided is decided again.
+
+        Admission stops at integration, because past it the review branch is
+        assembled and a concern joining would have to reopen it. Everything
+        earlier is fair game: the admitted concern enters at ``discovered``
+        and walks the same question, approval, eligibility, and lease path as
+        one from intake.
+
+        Nothing is written until the widened set holds: a writable root the
+        run already handed out refuses the admission, and so does a graph
+        that would not be a unique-id, present-dependency, acyclic one.
+        """
+        with self.repository.exclusive():
+            state = self.repository.load()
+            self.state = state
+            if state.phase in {ResolvePhase.ABORTED, ResolvePhase.COMPLETE}:
+                raise ResolverInvariantError(f"run is already {state.phase}")
+            reached = (
+                state.resume_from or state.phase
+                if state.phase is ResolvePhase.FAILED
+                else state.phase
+            )
+            if PHASE_ORDER[reached] >= PHASE_ORDER[ResolvePhase.INTEGRATION]:
+                raise ResolverInvariantError(
+                    f"run has reached {reached}; a concern may only join a run "
+                    "before its review branch is assembled"
+                )
+            planned = await self.plan_inventory(
+                ResolveRequest(
+                    source=state.source,
+                    notes=request.notes,
+                    statements=request.statements,
+                ),
+                origin=ConcernOrigin.ADMITTED,
+                taken=[concern.id for concern in state.concerns],
+            )
+            self.leases.adopt(state.leases)
+            for concern in planned.concerns:
+                self.leases.plan(concern.id, self.concern_branch(concern.id))
+            concerns = [*state.concerns, *planned.concerns]
+            ConcernGraph(concerns)
+            widened = state.model_copy(
+                update={
+                    "concerns": concerns,
+                    "progress": [
+                        *state.progress,
+                        *[
+                            ConcernProgress(concern_id=concern.id)
+                            for concern in planned.concerns
+                        ],
+                    ],
+                }
+            )
+            self.persist(widened)
+            return ConcernAdmission(
+                run_id=state.run_id,
+                phase=self.require_state().phase,
+                concerns=planned.concerns,
+                questions=self.pending_questions(planned.concerns),
+            )
+
+    def concern_branch(self, concern_id: str) -> str:
+        return f"resolve/{self.config.run_id}/{concern_id}"
+
+    def pending_questions(self, concerns: list[Concern]) -> list[MaterialQuestion]:
+        """Every gate these concerns must pass before any work begins."""
+        return [question for concern in concerns for question in concern.questions] + [
+            approval_question(concern)
+            for concern in concerns
+            if concern.eligible and concern.integration_approved
+        ]
 
     def abort(self, reason: str) -> ResolveManifest:
         """End a run from any phase, freeing its leases but keeping its evidence.
