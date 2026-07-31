@@ -38,7 +38,6 @@ from lup.policy.kernel.rows import ShellRuleRow
 
 type CommandEffect = Literal["allow", "ask", "deny"]
 
-# lup: Like, the harness should go under lup_template near (or in) the devtools, no?
 
 
 class ShellOperationRule(BaseModel):
