@@ -25,7 +25,6 @@ from lup.harness.models import (
     Artifact,
     ArtifactTree,
     Harness,
-    document_prose,
 )
 from lup.harness.validation import DeterministicTreeValidator
 
@@ -104,33 +103,8 @@ def reject_native_prose(source: Harness) -> None:
         )
 
 
-def reject_rendered_invocations(source: Harness, sigil: str) -> None:
-    """Keep native invocation spelling inside typed adapter rendering only."""
-    prefixes = tuple(
-        f"{sigil}{plugin.name}:" for plugin in source.plugins
-    )  # lup: tuple() is an antipattern, please run a full antipattern sweep
-    prompts = [
-        source.guidance,
-        *[
-            declaration.prompt
-            for plugin in source.plugins
-            for declaration in [*plugin.skills, *plugin.agents]
-        ],
-    ]
-    if any(
-        prefix in text
-        for prompt in prompts
-        for text in document_prose(prompt)
-        for prefix in prefixes
-    ):
-        raise ValueError(
-            "provider invocation syntax must be represented by SkillInvocation"
-        )
-
-
 def compile_claude(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Claude-owned artifacts."""
-    reject_rendered_invocations(source, "/")
     reject_native_prose(source)
     spellings = ClaudeSpellings()
     prompts = prompt_renderer(spellings)
@@ -159,7 +133,6 @@ def compile_claude(source: Harness) -> ArtifactTree:
 
 def compile_codex(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Codex-owned artifacts."""
-    reject_rendered_invocations(source, "$")
     reject_native_prose(source)
     spellings = CodexSpellings()
     prompts = prompt_renderer(spellings)

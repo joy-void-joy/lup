@@ -7,6 +7,7 @@ evidence shared by every pipeline stage. A model owned by one concern lives
 beside its managing module instead (see the package docstring).
 """
 
+import re  # lup: ignore[import-re] — prose has no parser; its shape is the rule
 from abc import abstractmethod
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
@@ -41,6 +42,42 @@ type QualifiedAgentName = Annotated[
     str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]*:[a-z0-9][a-z0-9_-]*$")
 ]
 """A delegation target, ``<plugin>:<agent>``, as a runtime addresses one."""
+
+INVOCATION_SIGILS = "/$"
+"""Every character a runtime writes in front of a skill invocation.
+
+Which words a runtime spells is the adapter's to know, but that an invocation
+is a sigil followed by a qualified name is a shape prose can be held to on its
+own — no plugin registry required. Each runtime proves its own sigil is one of
+these, so the syntax the declaration layer refuses cannot drift from the syntax
+the adapters render.
+"""
+
+RENDERED_INVOCATION = re.compile(  # lup: ignore[re-call] — a shape, not a parse
+    f"[{INVOCATION_SIGILS}]"
+    r"[a-z0-9][a-z0-9_-]*:(?:[a-z0-9][a-z0-9_-]*|\*|<[a-z][a-z0-9-]*>)"
+)
+"""What ``SkillInvocation`` and ``SkillPattern`` render to, in either sigil."""
+
+
+def portable_prose(value: str) -> str:
+    """Refuse text spelling an invocation only one runtime would understand."""
+    spelled = RENDERED_INVOCATION.search(value)
+    if spelled is None:
+        return value
+    raise ValueError(
+        f"portable prose spells the invocation {spelled.group()!r}, which the "
+        "other runtime's reader cannot use: issue one with SkillInvocation, or "
+        "teach its shape with SkillPattern"
+    )
+
+
+type PortableText = Annotated[str, AfterValidator(portable_prose)]
+"""Free text proven to spell no runtime's invocation syntax.
+
+Every declaration field a native tree renders as prose is one of these, so the
+invariant is answered where an author writes the words rather than by a scan
+over the harness they eventually compose into."""
 
 
 class SemanticPart(BaseModel):
@@ -95,7 +132,7 @@ class SemanticPart(BaseModel):
 
 class TextPart(SemanticPart):
     type: Literal["text"] = "text"
-    text: str
+    text: PortableText
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return self.text
@@ -242,7 +279,7 @@ class RuntimeDocs(SemanticPart):
 
 class AskUser(SemanticPart):
     type: Literal["ask_user"] = "ask_user"
-    question: str
+    question: PortableText
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.ask_user(self.question)
@@ -251,7 +288,7 @@ class AskUser(SemanticPart):
 class Delegate(SemanticPart):
     type: Literal["delegate"] = "delegate"
     subagent_type: QualifiedAgentName
-    prompt: str
+    prompt: PortableText
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.delegate(self.subagent_type, self.prompt)
@@ -263,8 +300,8 @@ class Delegate(SemanticPart):
 
 class RequestApproval(SemanticPart):
     type: Literal["request_approval"] = "request_approval"
-    action: str
-    reason: str
+    action: PortableText
+    reason: PortableText
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.request_approval(self.action, self.reason)
@@ -279,7 +316,7 @@ class RelocateSession(SemanticPart):
     """
 
     type: Literal["relocate_session"] = "relocate_session"
-    path: str
+    path: PortableText
     """Where the reader finds the path, e.g. "the path step 1 prints"."""
 
     def spell(self, renderer: "PromptRenderer") -> str:
@@ -356,7 +393,7 @@ class Argument(BaseModel):
     model_config = FROZEN
 
     name: NativeName
-    description: str = Field(min_length=1, max_length=1024)
+    description: PortableText = Field(min_length=1, max_length=1024)
     required: bool = False
 
 
@@ -365,10 +402,10 @@ class Skill(BaseModel):
 
     id: str
     name: NativeName
-    description: str = Field(min_length=1, max_length=1024)
+    description: PortableText = Field(min_length=1, max_length=1024)
     arguments: list[Argument] = Field(default_factory=list)
     tools: list[ToolGrant] = Field(default_factory=list)
-    argument_hint: str | None = None
+    argument_hint: PortableText | None = None
     prompt: PromptDocument
 
     @model_validator(mode="after")
@@ -413,7 +450,7 @@ class Agent(BaseModel):
 
     id: str
     name: NativeName
-    description: str = Field(min_length=1, max_length=1024)
+    description: PortableText = Field(min_length=1, max_length=1024)
     prompt: PromptDocument
     tools: list[ToolName] = Field(default_factory=list)
     model: ModelTier | None = None
@@ -505,7 +542,7 @@ class Plugin(BaseModel):
     # for callers that deliberately share one home across projects.
     marketplace: NativeName
     version: str
-    description: str = Field(min_length=1, max_length=1024)
+    description: PortableText = Field(min_length=1, max_length=1024)
     skills: list[Skill]
     agents: list[Agent]
     hooks: HookSet | None = None

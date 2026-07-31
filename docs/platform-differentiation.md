@@ -12,12 +12,20 @@ recipes (`claude_generation_recipe` / `codex_generation_recipe` in
 `src/lup_template/devtools/harness/generate.py`). A per-platform declaration
 layer was considered and rejected: it would let semantic content fork silently,
 whereas the adapter seam forces every difference to be a rendering decision
-over the same declarations. `compile_claude` / `compile_codex` enforce that:
-`reject_rendered_invocations` refuses native invocation sigils in canonical
-text, and `reject_native_prose` refuses any word an adapter would have spelled
-— so a difference cannot hide in prose.
+over the same declarations. Two invariants enforce that, so a difference cannot
+hide in prose. Native invocation syntax is refused where the words are written:
+every free-text declaration field is a `PortableText`
+(`packages/lup/src/lup/harness/models.py`), and a sigil from `INVOCATION_SIGILS`
+followed by a qualified name fails construction, naming the field and the
+spelling. Adapter vocabulary is refused at compile time instead, by
+`reject_native_prose` in `compile_claude` / `compile_codex`.
 
-That second check writes down no vocabulary of its own. It asks each
+The split is what each check needs to know. An invocation is a shape — a sigil
+and a qualified name — that a single string can be held to on its own, so the
+declaration layer refuses one without knowing which plugins exist or which
+runtime will read it, and each runtime proves its own sigil is one of the set.
+Adapter vocabulary is the opposite: it is whatever the runtimes spell, so the
+check has to see them. It writes down no vocabulary of its own but asks each
 `NativeSpellings` what it spells and forbids exactly that
 (`packages/lup/src/lup/codescan/portable.py`, rule `portable-content`), which
 is why adding a location to `TreeLocation` or `PluginLocation` forbids it in
