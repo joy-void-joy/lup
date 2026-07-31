@@ -38,6 +38,7 @@ class RegisteredRule(BaseModel):
     defined_in: str
 
 
+# lup: ignore[library-default] — one card per rule the library's own scanners define
 STRUCTURAL_RULES: list[RegisteredRule] = [
     RegisteredRule(
         id=capabilities.RULE_ID,
@@ -83,6 +84,20 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
             "can spell reaches prose through a typed part instead."
         ),
         defined_in=portable.__name__,
+    ),
+    RegisteredRule(
+        id=boundaries.LIBRARY_DEFAULT_RULE_ID,
+        family="boundary",
+        scope="Neutral library modules",
+        example='READ_ONLY_COMMANDS = ("ls", "cat", "grep")',
+        message=(
+            "A data table a library declares is a choice made for every adopter: it "
+            "reaches them as an overridable default — a parameter default, a pydantic "
+            "field default, or the sentinel a mutable default is written as — so they "
+            "replace the vocabulary instead of editing the library. Suppress only a "
+            "canonical table, whose value is fixed outside this repository."
+        ),
+        defined_in=boundaries.__name__,
     ),
     RegisteredRule(
         id=boundaries.KERNEL_IMPORT_RULE_ID,

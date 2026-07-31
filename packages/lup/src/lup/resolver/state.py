@@ -25,6 +25,7 @@ from lup.resolver.models import (
 PHASE_ORDER: dict[ResolvePhase, int] = {
     phase: index for index, phase in enumerate(ResolvePhase)
 }
+# lup: ignore[library-default] — the successor of each phase in this library's own closed enum
 PHASE_TRANSITIONS: dict[ResolvePhase, ResolvePhase] = {
     ResolvePhase.INVENTORY: ResolvePhase.QUESTIONS,
     ResolvePhase.QUESTIONS: ResolvePhase.ELIGIBILITY,
@@ -39,6 +40,7 @@ PHASE_TRANSITIONS: dict[ResolvePhase, ResolvePhase] = {
     ResolvePhase.ACCEPTANCE: ResolvePhase.CLEANUP,
     ResolvePhase.CLEANUP: ResolvePhase.COMPLETE,
 }
+# lup: ignore[library-default] — the legal successors of each status in this library's own closed enum
 CONCERN_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {
     ConcernStatus.DISCOVERED: [
         ConcernStatus.WAITING_FOR_ANSWERS,

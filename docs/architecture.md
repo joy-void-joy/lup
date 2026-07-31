@@ -39,6 +39,36 @@ consume an injected immutable recipe; adapter selection is confined to the CLI
 composition root. The generic path never compares a target name or provider
 value.
 
+## Library mechanism, application data
+
+The library/application split runs the other way too: `packages/lup` owns
+mechanism, and the application supplies the data it operates on. A library may
+declare a value only when it could not have chosen otherwise — when a second
+implementer with the same intent would have written the same thing, because a
+language, a tool, a grammar, or one of this library's own closed enums dictates
+it. A value that is a judgement is application data, and reaches the library as
+an **overridable default**: shipping a default is not the defect, shipping a
+choice with no parameter to replace it is. `HookSet` is the shape — a pydantic
+surface the template fills with fetch scopes, protected roots, and shell-rule
+extensions.
+
+Half of this is mechanical. The audited `library-default` rule in
+`lup.codescan.boundaries` requires every multi-entry data table declared under
+`packages/lup/src/lup` (outside `lup/adapters`, where provider spellings are
+canonical by definition) to be reachable somewhere in the library as a
+caller-replaceable default — a parameter default, a pydantic field default or
+factory, or the sentinel a mutable default is written as. Reachability is
+computed across the whole library, so a table defaulted by a distant consumer
+still passes.
+
+The other half is not checkable and is not meant to be: whether a value is
+dictated from outside the repository is a fact about curl's flags or Python's
+suffixes, not about the syntax. Canonicity is therefore declared at the site
+with `# lup: ignore[library-default]` and a reason naming what fixes the value.
+`docs/library-boundary.md` carries the criterion in full, the classification of
+every library table against it, the reverse-direction audit, and the target
+layout the relocation work executes against.
+
 Structured output has one mechanism. Each typed turn binds `submit_output` to
 its Pydantic schema and fresh store; native structured-output modes remain off.
 Validation and an optional reflection gate run before persistence. A missing

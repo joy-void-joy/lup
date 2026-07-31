@@ -1,8 +1,11 @@
-"""Seam-boundary scan behavior: what breaches, what is sanctioned, what escapes.
+"""Boundary scan behavior: what breaches, what is sanctioned, what escapes.
 
-The scan (:mod:`lup.codescan.boundaries`) is the regression guard that keeps
-per-engine adapter imports from creeping outside ``lup.adapters``; the final
-test pins the live tree at zero breaches.
+The scan (:mod:`lup.codescan.boundaries`) guards two directions. Inward, it is
+the regression guard that keeps per-engine adapter imports from creeping
+outside ``lup.adapters``, and the live tree is pinned at zero breaches.
+Outward, the placement rule judges whether a library data table reaches its
+adopters as an overridable default; the live tree still carries known
+violations, so those tests work from fixtures rather than pinning a count.
 """
 
 from pathlib import Path
@@ -10,9 +13,13 @@ from pathlib import Path
 from lup.codescan.boundaries import (
     audit_boundaries,
     audit_kernel_imports,
+    audit_library_defaults,
     audit_path_boundaries,
+    default_position_names,
     find_boundary_breaches,
+    find_library_default_breaches,
     find_native_spelling_breaches,
+    library_placement_path_is_audited,
     native_spelling_path_is_sanctioned,
     path_is_sanctioned,
 )
@@ -137,3 +144,81 @@ def test_policy_kernel_imports_are_pinned_to_hermetic_stdlib() -> None:
 
 def test_live_tree_has_zero_breaches() -> None:
     assert scan_boundaries() == []
+
+
+TABLE = 'READ_ONLY_COMMANDS = ("ls", "cat", "grep")\n'
+NOTHING_OVERRIDABLE = ()
+"""A library where no caller can replace anything."""
+
+
+def test_a_library_table_no_caller_can_replace_breaches() -> None:
+    breaches = find_library_default_breaches(TABLE, NOTHING_OVERRIDABLE)
+
+    assert [(item.line, item.module) for item in breaches] == [
+        (1, "READ_ONLY_COMMANDS")
+    ]
+
+
+def test_only_declared_multi_entry_tables_are_judged() -> None:
+    text = (
+        'PREAMBLE = "one long prompt contract"\n'
+        'SINGLETON = ("only",)\n'
+        "DERIVED = [name.upper() for name in OTHER]\n"
+        "lowercase = (1, 2)\n"
+    )
+
+    assert find_library_default_breaches(text, NOTHING_OVERRIDABLE) == []
+
+
+def test_every_admitted_default_spelling_clears_a_table() -> None:
+    reached = {
+        "SIGNATURE": "def build(rules: list[str] = SIGNATURE) -> None: ...\n",
+        "FIELD": "class Set(BaseModel):\n    rules: list[str] = Field(default=FIELD)\n",
+        "FACTORY": (
+            "class Set(BaseModel):\n"
+            "    rules: list[str] = Field(default_factory=lambda: FACTORY)\n"
+        ),
+        "SENTINEL": "def build(rules=None):\n    return SENTINEL if rules is None else rules\n",
+        "FALLBACK": "def build(rules=None):\n    return rules or FALLBACK\n",
+    }
+
+    for name, consumer in reached.items():
+        declaration = f'{name} = ("a", "b")\n'
+        overridable = default_position_names(consumer)
+
+        assert name in overridable, name
+        assert find_library_default_breaches(declaration, overridable) == [], name
+
+
+def test_a_directive_heading_a_multi_line_table_suppresses_it() -> None:
+    heading = "# lup: ignore[library-default] — canonical\n" + TABLE
+    assert find_library_default_breaches(heading, NOTHING_OVERRIDABLE) == []
+
+    spread = (
+        "# lup: ignore[library-default] — canonical\n"
+        "READ_ONLY_COMMANDS = (\n"
+        '    "ls",\n'
+        '    "cat",\n'
+        ")\n"
+    )
+    assert find_library_default_breaches(spread, NOTHING_OVERRIDABLE) == []
+    assert audit_library_defaults(spread, NOTHING_OVERRIDABLE) == []
+
+
+def test_a_directive_two_lines_above_a_table_stays_spurious() -> None:
+    detached = "# lup: ignore[library-default] — canonical\n\n" + TABLE
+    findings = audit_library_defaults(detached, NOTHING_OVERRIDABLE)
+
+    assert sorted(item.kind for item in findings) == ["missing", "spurious"]
+
+
+def test_adapter_packages_are_exempt_from_the_placement_rule() -> None:
+    assert library_placement_path_is_audited(
+        Path("packages/lup/src/lup/policy/shell_rules.py")
+    )
+    assert not library_placement_path_is_audited(
+        Path("packages/lup/src/lup/adapters/codex/harness.py")
+    )
+    assert not library_placement_path_is_audited(
+        Path("src/lup_template/devtools/harness/catalog.py")
+    )

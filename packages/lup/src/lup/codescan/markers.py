@@ -63,11 +63,14 @@ TEMPLATE_MARKER_RE = re.compile(r"(?:(#|//)\s*)?TEMPLATE\s*:")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
 
+# lup: ignore[library-default] — Python's own source suffixes
 PYTHON_SUFFIXES = {".py", ".pyi"}
+# lup: ignore[library-default] — Markdown's own suffixes
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
 # Languages where `#` does not open a comment (`//` does), so a `# lup:` is
 # always string content (e.g. a Python marker quoted inside a JS template) —
 # only `//` markers count as notes there.
+# lup: ignore[library-default] — the suffixes where `#` opens no comment, a language fact
 JS_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
 
 CONTEXT_BEFORE = 2
