@@ -6,6 +6,8 @@ outside ``lup.adapters``, and the live tree is pinned at zero breaches.
 Outward, the placement rule judges whether a library data table reaches its
 adopters as an overridable default; the live tree still carries known
 violations, so those tests work from fixtures rather than pinning a count.
+The shell vocabulary is the exception: it has moved out of the library, and
+two tests hold it there against the live tree.
 """
 
 from pathlib import Path
@@ -24,7 +26,12 @@ from lup.codescan.boundaries import (
     path_is_sanctioned,
 )
 
-from lup_template.devtools.dev.boundaries import scan_boundaries
+from lup_template.devtools.dev.boundaries import (
+    library_sources,
+    overridable_names,
+    scan_boundaries,
+    scan_library_placement,
+)
 
 BREACHING = "from lup.adapters.claude.runtime import ClaudeSessionFactory\n"
 
@@ -210,6 +217,44 @@ def test_a_directive_two_lines_above_a_table_stays_spurious() -> None:
     findings = audit_library_defaults(detached, NOTHING_OVERRIDABLE)
 
     assert sorted(item.kind for item in findings) == ["missing", "spurious"]
+
+
+SHELL_VOCABULARY = Path("src/lup_template/devtools/harness/content/shell_vocabulary.py")
+"""Where this project's shell command tables live, outside the library."""
+
+MOVED_TABLES = [
+    "READ_ONLY_COMMANDS",
+    "JUDGED_ASK_COMMANDS",
+    "REDIRECTED_DENY_COMMANDS",
+    "GIT_READ_ONLY_SUBCOMMANDS",
+    "GIT_REVERSIBLE_SUBCOMMANDS",
+    "SHELL_RULES",
+]
+
+
+def test_the_shell_rule_models_declare_no_vocabulary_of_their_own() -> None:
+    """The library module keeps the models and the erasure, and no table."""
+    breaches = [
+        breach
+        for breach in scan_library_placement()
+        if breach.file == "packages/lup/src/lup/policy/shell_rules.py"
+    ]
+
+    assert breaches == []
+
+
+def test_the_rule_names_every_table_if_the_vocabulary_returns_to_the_library() -> None:
+    """Judge the relocated source against the real library, as if it moved back.
+
+    Nothing in ``packages/lup`` reaches these names as a replaceable default,
+    so each one is a choice made for every adopter the moment it lands there.
+    """
+    breaches = find_library_default_breaches(
+        SHELL_VOCABULARY.read_text(encoding="utf-8"),
+        overridable_names(library_sources()),
+    )
+
+    assert [breach.module for breach in breaches] == MOVED_TABLES
 
 
 def test_adapter_packages_are_exempt_from_the_placement_rule() -> None:

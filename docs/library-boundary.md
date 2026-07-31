@@ -64,9 +64,7 @@ four spellings count:
 
 Reachability is a property of the library as a whole, so the names callers can
 replace are collected across every library module — adapters included — before
-any one module is judged. `BASE_SHELL_RULES` is not flagged for this reason:
-`ShellPolicy` takes it through the sentinel spelling. Its five component tables
-are flagged, because nothing does.
+any one module is judged.
 
 The rule **cannot** check the **canonicity** half. Whether "another implementer
 could have written a different value" is a judgement about the world outside the
@@ -94,8 +92,8 @@ Two further things the rule does not see, both deliberate:
 
 ## Classification: every table under `packages/lup`
 
-Thirty-one tables are in scope. Twenty-one are canonical and carry their reason
-at the site. Ten are application data with no parameter — these are the
+Twenty-six tables are in scope. Twenty-one are canonical and carry their reason
+at the site. Five are application data with no parameter — these are the
 violations, and `dev check` stays red naming them until they move.
 
 ### Canonical — recorded, suppressed at the site
@@ -128,22 +126,20 @@ violations, and `dev check` stays red naming them until they move.
 
 | Table | Entries | Why it is a choice |
 |---|---|---|
-| `policy/shell_rules.py` `READ_ONLY_COMMANDS` | 62 | which shell tools are safe to run unattended; no canonical form |
-| `policy/shell_rules.py` `JUDGED_ASK_COMMANDS` | 36 | which commands need approval, with this repo's reasons |
-| `policy/shell_rules.py` `GIT_READ_ONLY_SUBCOMMANDS` | 19 | a judgement about which git subcommands only read |
-| `policy/shell_rules.py` `GIT_REVERSIBLE_SUBCOMMANDS` | 8 | a judgement about which git writes are reversible |
-| `policy/shell_rules.py` `REDIRECTED_DENY_COMMANDS` | 2 | "use uv add instead of pip" is this repo's package-manager policy |
 | `policy/kernel/words.py` `UV_RUN_ALLOWED_TARGETS` | 4 | names this repo's own CLI (`lup-devtools`) and chosen toolchain |
 | `codescan/antipatterns.py` `PYTHON_ANTI_PATTERNS` | 42 | this repo's Python conventions; another project's differ |
 | `codescan/antipatterns.py` `TS_ANTI_PATTERNS` | 14 | the same, for TypeScript |
 | `policy/kernel/commands.py` `CURL_SAFE_FLAGS` | 19 | which curl flags are *safe* is a judgement, not curl's grammar |
 | `telemetry/display.py` `TOOL_COLORS` | 12 | a terminal palette — presentation, and a theme or accessibility concern |
 
-The note that opened this audit landed on `policy/shell_rules.py`, and the
-classification confirms it: that module is the largest concentration of decided
-vocabulary in the library. It is not wholly misplaced, though — its three rule
-models and `erase_shell_rules` are the mechanism that gives the vocabulary
-meaning. The split runs *through* the module, not around it.
+The note that opened this audit landed on `policy/shell_rules.py`, which held
+the largest concentration of decided vocabulary in the library. It was not
+wholly misplaced, and the split ran *through* the module rather than around
+it: the three rule models and `erase_shell_rules` are the mechanism that gives
+a vocabulary meaning and stay, while the words — every command, subcommand and
+reason — are declared by
+`lup_template.devtools.harness.content.shell_vocabulary` and reach the engine
+as `HookSet.shell_rules`, beside the fetch scopes and protected roots.
 
 ## The reverse direction: application modules the library wants
 
@@ -180,23 +176,20 @@ project writes its own.
 Ordered largest first. Each stage stands alone: it names its own tables, its own
 seam, and can land without the others.
 
-### 1. The shell policy vocabulary — six tables, `policy/shell_rules.py` and `kernel/words.py`
+### 1. The two policy tables the kernel still reads directly — `kernel/commands.py` and `kernel/words.py`
 
-The mechanism stays: `ShellCommandRule`, `ShellSubcommandRule`,
-`ShellOperationRule`, and `erase_shell_rules` are how any vocabulary becomes
-kernel rows. The vocabulary leaves.
+`policy/shell_rules.py` is settled. It keeps `ShellCommandRule`,
+`ShellSubcommandRule`, `ShellOperationRule`, and `erase_shell_rules` — how any
+vocabulary becomes kernel rows — and declares none of its own; `HookSet.shell_rules`
+carries the whole table rather than an extension, so a generated dispatcher is
+built on the adopter's vocabulary and nothing else.
 
-- The baseline reaches the library as a default the caller replaces. `ShellPolicy`
-  already admits one through its sentinel; the generation path does not —
-  `policy.bundle.runtime_shell_rules` and `HookSet.shell_rules` only *extend*
-  `BASE_SHELL_RULES`, so a generated dispatcher cannot be built on a different
-  baseline. Closing that gap is the substance of this stage.
-- The entries that name this repo — `REDIRECTED_DENY_COMMANDS` (pip → uv) and
-  `UV_RUN_ALLOWED_TARGETS` (`lup-devtools`) — move to the template's `HookSet`,
-  beside the fetch scopes and protected roots that already live there.
-- `CURL_SAFE_FLAGS` travels with them: it is the same kind of judgement, and
-  leaving it in the kernel would keep one policy table behind after the rest
-  moved.
+`UV_RUN_ALLOWED_TARGETS` (`lup-devtools`) and `CURL_SAFE_FLAGS` (which curl
+flags are *safe* is a judgement, not curl's grammar) did not travel with it,
+because they are read by the hermetic kernel rather than passed to it. Each
+needs a new primitive row in the generated `policy_data.py` and a parameter
+threaded through the kernel signature that reads it — a wider change than a
+relocation, and independent of one.
 
 ### 2. The anti-pattern rule set — two tables, `codescan/antipatterns.py`
 

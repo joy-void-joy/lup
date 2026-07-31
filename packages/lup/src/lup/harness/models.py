@@ -360,8 +360,8 @@ class HookSet(BaseModel):
     shell_rules: list[ShellCommandRule] = Field(
         default_factory=list,
         description=(
-            "Application-specific shell command rules appended to the baseline "
-            "vocabulary; extend a downstream toolchain here, not in the kernel"
+            "The whole shell vocabulary this project judges safe, asked, or "
+            "denied; declare a downstream toolchain here, not in the kernel"
         ),
     )
     sandbox: HookSandbox | None = None

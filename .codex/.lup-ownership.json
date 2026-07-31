@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "a2d05b25d3387c9f6b2b59d9d9540b3c9dba43deafaf98d3e1d98373828f1f3f",
+  "source_digest": "691ddfb8b911545792f536bb2b858e32176fd918da9e2ad697ff9fc89583cd64",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "61cd773badc4bb1df39357487bba1132831349e15466b53a033575225969ad8a",
+      "sha256": "7250199ec70c4ce478404a43d42f49c7e93c7d5e8dbc6cdaeb031b8fc8aa3f15",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -254,7 +254,7 @@
     {
       "path": ".codex/plugins/lup/skills/hooks/SKILL.md",
       "category": "generated",
-      "sha256": "116117093ff97eea972c815361f386043b5fde52e8795ced299aa9cb1ff9eeae",
+      "sha256": "0506c5c3c709ad0fa89db55c3e143ae4370d9b762ab51c89bc64dc5f701f746b",
       "semantic_id": "skill.hooks",
       "executable": false
     },
@@ -282,7 +282,7 @@
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "c9404c8ed523a66e872e653968d550b1d34e84ba9058f4ad948cfba1030c223a",
+      "sha256": "df41e68d1912c5bf987193270cc48309c9b0b01576ff6d6976aa5798786838dd",
       "semantic_id": "skill.install",
       "executable": false
     },

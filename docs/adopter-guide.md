@@ -104,15 +104,17 @@ generated data, policy control flow is one copied module.
 
 ## Change the shell classification
 
-The shell auto-allow vocabulary is data too. The baseline lives in
-`lup.policy.shell_rules` (`BASE_SHELL_RULES`) as a readable table: a read-only
-command allows unless a listed `ask_flags` writer flag appears, and a
-subcommand command (`git`, `gh`) allows only the subcommands and operations it
-lists. To teach the fleet a downstream toolchain, append rules through the
-`HookSet` in `catalog.py` — never edit the kernel:
+The shell auto-allow vocabulary is data too, and it is yours: lup ships the
+rule models and the erasure, not the words. This project's table lives in
+`devtools/harness/content/shell_vocabulary.py` and reaches the engine as
+`HookSet.shell_rules` — a read-only command allows unless a listed `ask_flags`
+writer flag appears, and a subcommand command (`git`, `gh`) allows only the
+subcommands and operations it lists. To teach the fleet a downstream
+toolchain, add rules to your own table — never edit the kernel:
 
 ```python
-shell_rules=[
+SHELL_RULES: list[ShellCommandRule] = [
+    ...,
     ShellCommandRule(name="cargo", default_effect="ask", subcommands=[
         ShellSubcommandRule(name="check"),
         ShellSubcommandRule(name="build"),
@@ -121,10 +123,10 @@ shell_rules=[
 ]
 ```
 
-The extension is concatenated onto the baseline and erased into the same
-`SHELL_RULES` rows the kernel interprets. Add a universal command (one every
-repo should trust) to `BASE_SHELL_RULES` instead. Regenerate and run the
-policy fixtures exactly as for the fetch allowlist. Destructive forms should
+The whole table is erased into the `SHELL_RULES` rows the kernel interprets,
+so a command lup never heard of and one it happens to ship in this template
+are the same kind of entry. Regenerate and run the policy fixtures exactly as
+for the fetch allowlist. Destructive forms should
 stay `ask`: guard a writer flag with `ask_flags`, or a destructive
 sub-operation with an `ask` `ShellOperationRule`, rather than widening a
 `default_effect`.

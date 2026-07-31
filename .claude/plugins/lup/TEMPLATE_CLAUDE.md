@@ -753,7 +753,7 @@ application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 
-The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary, every URL scope, and each edit in a batch. Ask is
+The policy classifies each shell command against the vocabulary declared in `devtools/harness/content/shell_vocabulary.py`, every URL scope, and each edit in a batch. Ask is
 reserved for judged risk; an unjudged command or unparsed construct denies with
 a hint naming the `# lup: escalate: <why>` marker, and that leading marker
 promotes the classified decision to an approval question carrying the agent's

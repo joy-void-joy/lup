@@ -389,7 +389,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             self.worker_identity,
                             f"{self.plugin_name}:{self.worker_identity}",
                         ],
-                        shell_rule_extension=list(source.shell_rules),
+                        shell_rules=list(source.shell_rules),
                     ),
                     semantic_id=source.id,
                 ),
