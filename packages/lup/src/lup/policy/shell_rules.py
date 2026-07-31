@@ -38,7 +38,6 @@ from lup.policy.kernel.rows import ShellRuleRow
 
 type CommandEffect = Literal["allow", "ask", "deny"]
 
-# lup: I feel like this is conflating things. This is a harness file, which should live under the lup_template part, not the library. It has a lot of constants, which is the tell-tale sign for this. Please inspect more in general so we can recreate this folder architecture
 # lup: Like, the harness should go under lup_template near (or in) the devtools, no?
 
 
