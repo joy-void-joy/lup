@@ -1,5 +1,6 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
+import ast
 import json
 import os
 import sys
@@ -14,8 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
-from lup.adapters.claude.harness import ClaudeSpellings
-from lup.adapters.codex.harness import CodexSpellings
+from lup.adapters.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
+from lup.adapters.codex.harness import CODEX_DISPATCHER, CodexSpellings
 from lup.adapters.codex.harness_runtime import (
     PluginCacheConfig,
     directory_digest,
@@ -68,6 +69,17 @@ from lup.harness.reconciliation import (
     source_patch_base_digest,
 )
 from lup.policy.bundle import policy_kernel_modules
+from lup.policy.dispatcher import (
+    SHARED_MEMBER,
+    SHARED_PACKAGE,
+    DispatcherDeclaration,
+    SourceHalf,
+    compile_dispatcher,
+    half_functions,
+    half_imports,
+    resolvable,
+    source_half,
+)
 from lup.types import EnvVars
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
@@ -136,10 +148,11 @@ class CodexPermissionOutput(BaseModel):
 
 
 class ShippedDispatcher(BaseModel):
-    """One hook dispatcher: its canonical asset, its script, its runtime."""
+    """One hook dispatcher: its declaration, its half, its script, its runtime."""
 
     model_config = ConfigDict(frozen=True)
 
+    declaration: DispatcherDeclaration
     asset: Path
     script: Path
     runtime: Path
@@ -147,17 +160,36 @@ class ShippedDispatcher(BaseModel):
 
 SHIPPED_DISPATCHERS: dict[str, ShippedDispatcher] = {
     "claude": ShippedDispatcher(
+        declaration=CLAUDE_DISPATCHER,
         asset=Path("packages/lup/src/lup/adapters/claude/assets/policy_dispatcher.py"),
         script=Path(".claude/plugins/lup/hooks/scripts/policy.py"),
         runtime=Path(".claude/plugins/lup/hooks/runtime"),
     ),
     "codex": ShippedDispatcher(
+        declaration=CODEX_DISPATCHER,
         asset=Path("packages/lup/src/lup/adapters/codex/assets/policy_dispatcher.py"),
         script=Path(".codex/plugins/lup/hooks/scripts/policy.py"),
         runtime=Path(".codex/plugins/lup/hooks/runtime"),
     ),
 }
 """Every script a session's permissions run through, canonical and shipped."""
+
+SHARED_DISPATCHER_HALF = Path("packages/lup/src/lup/policy/assets/host.py")
+"""The host-side half both dispatchers above are compiled from."""
+
+
+def compiled_functions(script: str) -> dict[str, str]:  # lup: ignore[dict-str-payload]
+    """Every top-level function of a compiled dispatcher, by name.
+
+    Open keys by construction: whatever the compiled source happens to define
+    is what a reader of it can compare, which is the point of reading it back.
+    """
+    tree = ast.parse(script)
+    return {
+        node.name: ast.get_source_segment(script, node) or ""
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+    }
 
 
 class PyrightExecutionEnvironment(BaseModel):
@@ -1006,17 +1038,98 @@ def test_static_checking_reaches_every_shipped_dispatcher() -> None:
     """
     declared = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     config = PyrightConfiguration.model_validate(declared["tool"]["pyright"])
+    halves = [SHARED_DISPATCHER_HALF]
 
     for dispatcher in SHIPPED_DISPATCHERS.values():
+        halves.append(dispatcher.asset)
         for source in (dispatcher.asset, dispatcher.script):
-            assert any(source.is_relative_to(root) for root in config.include)
-            assert not any(source.is_relative_to(root) for root in config.exclude)
             assert dispatcher.runtime in [
                 path
                 for environment in config.execution_environments
                 if source.is_relative_to(environment.root)
                 for path in environment.extra_paths
             ]
+        assert SHARED_DISPATCHER_HALF.parent in [
+            path
+            for environment in config.execution_environments
+            if dispatcher.asset.is_relative_to(environment.root)
+            for path in environment.extra_paths
+        ]
+    for source in [*halves, *[item.script for item in SHIPPED_DISPATCHERS.values()]]:
+        assert any(source.is_relative_to(root) for root in config.include)
+        assert not any(source.is_relative_to(root) for root in config.exclude)
+
+
+def test_both_dispatchers_are_compiled_from_one_shared_host_half() -> None:
+    """The half neither runtime spells differently is written exactly once.
+
+    Every function the two scripts genuinely share must be a function the
+    shared half offers — anything else is the same code living in two places,
+    which is how the halves drifted apart before they were compiled.
+    """
+    shared = [
+        node.name for node in half_functions(source_half(SHARED_PACKAGE, SHARED_MEMBER))
+    ]
+    claude = compiled_functions(compile_dispatcher(CLAUDE_DISPATCHER))
+    codex = compiled_functions(compile_dispatcher(CODEX_DISPATCHER))
+
+    assert "sandbox_active" in shared and "existing_write_targets" in shared
+    assert "granted_allowances" in shared and "declared_identity" in shared
+    identical = [
+        name
+        for name in claude
+        if name in codex
+        and ast.dump(ast.parse(claude[name])) == ast.dump(ast.parse(codex[name]))
+    ]
+    assert sorted(identical) == sorted(shared)
+    assert all(claude[name] == codex[name] for name in shared)
+
+
+@pytest.mark.parametrize("target", sorted(SHIPPED_DISPATCHERS))
+def test_compiled_dispatcher_reaches_only_what_a_bare_script_resolves(
+    target: str,
+) -> None:
+    """The compiled script keeps the hermeticity floor its runtime promises.
+
+    ``host`` is deliberately absent: the shared half is compiled in rather
+    than shipped beside the script, so there is no second runtime module to
+    keep in step with the one this dispatcher was type-checked against.
+    """
+    dispatcher = SHIPPED_DISPATCHERS[target]
+    script = compile_dispatcher(dispatcher.declaration)
+    modules = [
+        item.module
+        for item in half_imports(
+            SourceHalf(module=target, text=script, tree=ast.parse(script))
+        )
+    ]
+
+    assert modules
+    assert all(resolvable(module, dispatcher.declaration) for module in modules)
+    assert SHARED_MEMBER not in modules
+    assert not any(module == "lup" or module.startswith("lup.") for module in modules)
+    assert script == dispatcher.script.read_text(encoding="utf-8")
+
+
+def test_compilation_refuses_a_dispatcher_that_breaks_its_declaration() -> None:
+    """A dispatcher that cannot be proven is a session without a boundary.
+
+    Every axis is read back out of the syntax rather than trusted, so a tool
+    the plugin registers the hook for but the router never reaches stops
+    generation instead of reaching a session as a decision that never happens.
+    """
+    unrouted = CLAUDE_DISPATCHER.model_copy(
+        update={"routed_tools": [*CLAUDE_DISPATCHER.routed_tools, "NotebookEdit"]}
+    )
+    misread = CODEX_DISPATCHER.model_copy(update={"managed_root_env": "CODEX_ROOT"})
+    unregistered = CODEX_DISPATCHER.model_copy(update={"hook_events": ["PreToolUse"]})
+
+    with pytest.raises(ValueError, match="routes"):
+        compile_dispatcher(unrouted)
+    with pytest.raises(ValueError, match="never reads CODEX_ROOT"):
+        compile_dispatcher(misread)
+    with pytest.raises(ValueError, match="not registered for"):
+        compile_dispatcher(unregistered)
 
 
 AUTONOMY_PROBE = {

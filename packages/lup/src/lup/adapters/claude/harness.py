@@ -2,7 +2,6 @@
 
 import json
 import shlex
-from importlib import resources
 from pathlib import Path
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -31,6 +30,7 @@ from lup.policy.bundle import (
     render_policy_data,
     runtime_url_scope,
 )
+from lup.policy.dispatcher import DispatcherDeclaration, compile_dispatcher
 
 
 CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
@@ -295,12 +295,22 @@ class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
         )
 
 
-CLAUDE_POLICY_DISPATCHER = (
-    resources.files("lup.adapters.claude")
-    .joinpath("assets/policy_dispatcher.py")
-    .read_text("utf-8")
+CLAUDE_DISPATCHER = DispatcherDeclaration(
+    runtime_name="Claude Code",
+    package="lup.adapters.claude",
+    managed_root_env="CLAUDE_CONFIG_DIR",
+    relativizer="workspace_path",
+    routed_tools=["Bash", "WebFetch", "Edit", "Write"],
+    hook_events=["PreToolUse"],
+    failure="conservative_ask",
+    runtime_modules=["policy_data"],
 )
-"""Hermetic hook dispatcher script, shipped verbatim into the plugin tree."""
+"""Everything Claude Code spells differently from every other runtime.
+
+The tools named here are both what the plugin registers the hook for and
+what the compiler proves the dispatcher routes, so a tool cannot be handed
+to the hook without a branch that decides it.
+"""
 
 
 class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
@@ -311,24 +321,23 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         self.worker_identity = worker_identity
 
     def render(self, source: HookSet) -> ArtifactTree:
+        registration = [
+            {
+                "matcher": "|".join(CLAUDE_DISPATCHER.routed_tools),
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": (
+                            'python3 "$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py"'
+                        ),
+                        "timeout": 30,
+                    }
+                ],
+            }
+        ]
         hooks = {
             "description": "Lup semantic permission policy",
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "WebFetch|Bash|Edit|Write",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": (
-                                    'python3 "$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py"'
-                                ),
-                                "timeout": 30,
-                            }
-                        ],
-                    }
-                ]
-            },
+            "hooks": {event: registration for event in CLAUDE_DISPATCHER.hook_events},
         }
         evidence = {"schemaVersion": 1, "policyIds": source.policy_ids}
         return ArtifactTree(
@@ -342,7 +351,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     path=Path(
                         f".claude/plugins/{self.plugin_name}/hooks/scripts/policy.py"
                     ),
-                    content=CLAUDE_POLICY_DISPATCHER,
+                    content=compile_dispatcher(CLAUDE_DISPATCHER),
                     semantic_id=source.id,
                     executable=True,
                 ),

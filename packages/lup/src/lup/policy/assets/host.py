@@ -1,0 +1,74 @@
+"""The host-side half every generated hook dispatcher answers identically.
+
+The kernel decides from primitive rows alone: it never reads the filesystem
+and never reads the environment. Everything a decision needs from the host —
+whether the sandbox confines this session, which write targets already exist,
+what the launcher declared about the agent — is resolved here and passed in,
+which keeps the decision itself a pure function of its inputs.
+
+No runtime spells any of this differently, so :mod:`lup.policy.dispatcher`
+compiles this module into both generated scripts from this one source and
+each dispatcher keeps only its own words. Nothing here may reach the kernel,
+the ``lup`` package, or anything outside the dispatcher's pinned standard
+library: the compiled script runs as a bare script, promised no working
+directory, ``PYTHONPATH``, or interpreter environment. What varies by runtime
+arrives as an argument — the managed root to enumerate, the environment
+variable to read — never as a branch on which runtime is asking.
+"""
+
+import json
+import os
+from pathlib import Path
+
+
+def sandbox_active() -> bool:
+    """Whether the launcher confined this session to an OS sandbox."""
+    environ = os.environ  # lup: ignore[os-environ]
+    return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
+
+
+def managed_script_roots(root: Path | None) -> list[str]:
+    """Name the package roots a runtime installed and therefore trusts.
+
+    The workspace-local plugin directory is deliberately not a root: it is
+    agent-adjacent and verified only at launch, so an approved write there
+    must not grant silent execution rights for the rest of the session.
+    """
+    if root is None or not root.is_absolute():
+        return []
+    return [str(root / "skills"), str(root / "plugins" / "cache")]
+
+
+def existing_write_targets(targets: list[str]) -> list[str]:
+    """Report which of a command's write targets already exist on disk.
+
+    The kernel never reads the filesystem, so it cannot tell creating a file
+    from overwriting one. Resolving that here keeps the decision itself a
+    pure function of the command text and this list.
+    """
+    return [target for target in targets if (Path.cwd() / target).exists()]
+
+
+def read_document(path_text: str) -> str | None:
+    """Read a path's current text, or None when nothing is there yet."""
+    path = Path(path_text)
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
+def declared_identity(identity_env: str) -> str:
+    """The identity this session's launcher declared, if it declared one.
+
+    A hook payload need not carry an agent identity at all, so the
+    environment is the only channel every launcher is guaranteed to have.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    return environ[identity_env] if identity_env in environ else ""
+
+
+def granted_allowances(allowances_env: str) -> list[str]:
+    """Edit gates a human approved for the concern this session is working."""
+    environ = os.environ  # lup: ignore[os-environ]
+    if allowances_env not in environ:
+        return []
+    declared = json.loads(environ[allowances_env] or "[]")
+    return [str(name) for name in declared]

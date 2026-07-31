@@ -93,8 +93,11 @@ identically to the library:
    adapters' `native` modules decode wire payloads into
    `lup.policy.models` events and render decisions back.
 3. **Assembly** — `lup.policy.bundle` reads the kernel source verbatim and
-   renders the erased rows as data files; the adapter hook renderers emit
-   `hooks/hooks.json`, the dispatcher `hooks/scripts/policy.py`, and
+   renders the erased rows as data files; `lup.policy.dispatcher` compiles
+   `hooks/scripts/policy.py` from `lup.policy.assets.host` — the host-side
+   half every runtime answers identically — plus one adapter-owned half and
+   the `DispatcherDeclaration` whose axes it proves that half keeps; the
+   adapter hook renderers emit `hooks/hooks.json` and
    `hooks/runtime/{kernel.py,policy_data.py}` under `.claude/plugins/lup/`
    and `.codex/plugins/lup/`.
 4. **Equivalence** — the shared fixture suite runs the same cases through
