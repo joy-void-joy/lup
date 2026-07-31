@@ -35,7 +35,6 @@ from policy_data import (
 )
 
 
-# lup: This seems very close to claude's policy_dispatcher, we shoud DRY this
 
 
 def sandbox_active():
