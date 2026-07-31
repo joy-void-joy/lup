@@ -1,8 +1,9 @@
-<!-- Generated from src/lup_template/devtools/harness/content/guidance.py via `uv run lup-devtools harness generate all`; deliberately rendered as .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from src/lup_template/devtools/harness/content/guidance.py by `uv run lup-devtools harness generate all` — edit the source, not this file. -->
+<!-- See docs/harness.md. -->
 
 # Lup repository guidance
 
-Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
+Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts. This one document is deliberately rendered as .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex — edit the source, not either copy.
 
 ## Plan at Agent Speed
 

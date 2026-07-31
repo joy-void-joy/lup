@@ -50,7 +50,7 @@ Other modules provide independently composable runtime decorators, semantic
 policy, deterministic harness generation/reconciliation, the persisted
 resolver, MCP helpers, workspace/history support, scheduling, telemetry, and
 sandboxing. See the repository's
-[architecture guide](../../docs/architecture.md) and
-[0.2 migration guide](../../docs/migration-0.2.md). Runnable factory,
+[library guide](../../docs/library.md) and
+[architecture guide](../../docs/architecture.md). Runnable factory,
 wrapper, background, profile, endpoint, route, and policy compositions live in
 the repository [examples](../../examples/README.md).

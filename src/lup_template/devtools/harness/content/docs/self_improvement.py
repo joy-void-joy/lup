@@ -10,9 +10,7 @@ import lup.harness.models as models
 DOCUMENT = models.PromptDocument(
     parts=[
         models.TextPart(
-            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/self_improvement.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
-
-# Self-Improvement Loop
+            text=r"""# Self-Improvement Loop
 
 How to diagnose agent failures and turn them into durable changes. For daily
 development guidance, see [.claude/CLAUDE.md](../.claude/CLAUDE.md); for the

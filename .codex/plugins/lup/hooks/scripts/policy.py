@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Generated Codex hook dispatcher over the canonical semantic kernel.
+# Generated from lup.adapters.codex.assets.policy_dispatcher by `uv run lup-devtools harness generate all` — edit the source, not this file.
 
-Rendered from lup.adapters.codex.assets.policy_dispatcher by
-`uv run lup-devtools harness generate all` — do not edit directly.
+"""Codex hook dispatcher over the canonical semantic kernel.
+
+Copied verbatim into every generated plugin tree, so it may import only the
+kernel shipped beside it — never lup, this checkout, or its virtual
+environment.
 """
 
 import json

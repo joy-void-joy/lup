@@ -1,4 +1,5 @@
-<!-- Generated from src/lup_template/devtools/harness/content/template_codex.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from src/lup_template/devtools/harness/content/template_codex.py by `uv run lup-devtools harness generate all` — edit the source, not this file. -->
+<!-- See docs/harness.md. -->
 
 # AGENTS.md Template
 

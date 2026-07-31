@@ -11,7 +11,7 @@ from lup.harness.contracts import (
     NativeSpellings,
     PromptRenderer,
 )
-from lup.harness.generation import argument_text
+from lup.harness.generation import argument_text, banner_over_asset
 from lup.harness.models import (
     Agent,
     Artifact,
@@ -295,10 +295,12 @@ class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
         )
 
 
-CLAUDE_POLICY_DISPATCHER = (
+CLAUDE_POLICY_DISPATCHER = banner_over_asset(
     resources.files("lup.adapters.claude")
     .joinpath("assets/policy_dispatcher.py")
-    .read_text("utf-8")
+    .read_text("utf-8"),
+    Path("policy.py"),
+    source="lup.adapters.claude.assets.policy_dispatcher",
 )
 """Hermetic hook dispatcher script, shipped verbatim into the plugin tree."""
 

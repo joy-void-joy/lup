@@ -1,7 +1,11 @@
-<!-- Generated from src/lup_template/devtools/harness/content/docs/supervisor.py by `uv run lup-devtools harness generate all` — edit the source, not this file. -->
-<!-- See docs/harness.md. -->
+"""The local page that watches and answers a resolver run."""
 
-# Resolver supervisor
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    parts=[
+        models.TextPart(
+            text=r"""# Resolver supervisor
 
 A resolver run drives nested agents through `query()`, so the harness never
 sees them and the operator has nothing to watch. `ConsoleResolverObserver`
@@ -114,3 +118,7 @@ only a token would address.
 
 Like the dashboard, the page is zero-build — one packaged HTML asset with
 inline CSS and vanilla ES2021, so downstream projects need no Node.
+"""
+        )
+    ]
+)

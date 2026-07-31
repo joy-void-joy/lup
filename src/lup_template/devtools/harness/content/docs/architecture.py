@@ -1,7 +1,11 @@
-<!-- Generated from src/lup_template/devtools/harness/content/docs/architecture.py by `uv run lup-devtools harness generate all` — edit the source, not this file. -->
-<!-- See docs/harness.md. -->
+"""Why the seams sit where they do: capability composition across the repo."""
 
-# Capability-composition architecture
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    parts=[
+        models.TextPart(
+            text=r"""# Capability-composition architecture
 
 Lup uses one independently constructible capability per ABC. A capability has
 one to three cohesive abstract behavior methods, no concrete behavior or
@@ -67,3 +71,7 @@ The capability rules above are what let the three components stay separable:
 [permissions.md](permissions.md) describes the one decision path that has to
 hold identically inside the library and inside a generated plugin that cannot
 import it.
+"""
+        )
+    ]
+)

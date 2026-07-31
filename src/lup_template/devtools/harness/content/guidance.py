@@ -2,26 +2,41 @@
 # This portable guide discusses native hook vocabulary as its subject matter.
 """Canonical repository guidance."""
 
-import lup.harness.models as models
+from pathlib import Path
 
+import lup.harness.models as models
+from lup.harness.generation import generated_banner
+
+from lup_template.devtools.harness.content.docs.catalog import (
+    CONTENT_ROOT,
+    banner_notes,
+)
 from lup_template.devtools.harness.content.catalog import (
     agent_roster_text,
     skill_roster_parts,
 )
 from lup_template.devtools.subapps import subapp_summary
 
+GUIDANCE_PATH = Path("guidance.md")
+"""Stand-in path selecting the Markdown banner syntax for both renderings."""
+
 DOCUMENT = models.PromptDocument(
     parts=[
         models.TextPart(
-            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/guidance.py via `uv run lup-devtools harness generate all`; deliberately rendered as """
+            text=generated_banner(
+                GUIDANCE_PATH,
+                source=f"{CONTENT_ROOT}/guidance.py",
+                notes=banner_notes(GUIDANCE_PATH),
+            )
+        ),
+        models.TextPart(
+            text=r"""# Lup repository guidance
+
+Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts. This one document is deliberately rendered as """
         ),
         models.NativePath(location="guidance_file", scope="every_tree"),
         models.TextPart(
-            text=r""" — edit the source, not this file. See docs/generated-artifacts.md. -->
-
-# Lup repository guidance
-
-Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
+            text=r""" — edit the source, not either copy.
 
 ## Plan at Agent Speed
 

@@ -34,14 +34,14 @@ from lup.harness.reconciliation import (
     ReconciliationProposal,
 )
 from lup.harness.contracts import CurrentTreeReader, Reconciler
+from lup.harness.generation import generated_banner
 from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.docs.catalog import (
+    CONTENT_ROOT,
+    DOCUMENTS,
+    banner_notes,
+)
 from lup_template.devtools.harness.content.patterns import DOCUMENT as PATTERNS
-from lup_template.devtools.harness.content.permissions import (
-    DOCUMENT as PERMISSIONS,
-)
-from lup_template.devtools.harness.content.self_improvement import (
-    DOCUMENT as SELF_IMPROVEMENT,
-)
 from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
@@ -132,25 +132,40 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
     compiled = compile_claude(source)
     prompts = claude_prompt_renderer()
     content_root = Path(__file__).parent / "content"
+    patterns_path = Path(".claude/PATTERNS.md")
+    template_path = Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md")
     support_artifacts = [
         Artifact(
-            path=Path(".claude/PATTERNS.md"),
-            content=prompts.render(PATTERNS),
+            path=patterns_path,
+            content=generated_banner(
+                patterns_path,
+                source=f"{CONTENT_ROOT}/patterns.py",
+                notes=banner_notes(patterns_path),
+            )
+            + prompts.render(PATTERNS),
             semantic_id="harness.patterns",
         ),
+        *[
+            Artifact(
+                path=document.path,
+                content=generated_banner(
+                    document.path,
+                    source=document.source,
+                    notes=banner_notes(document.path),
+                )
+                + prompts.render(document.document),
+                semantic_id=document.semantic_id,
+            )
+            for document in DOCUMENTS
+        ],
         Artifact(
-            path=Path("docs/self-improvement.md"),
-            content=prompts.render(SELF_IMPROVEMENT),
-            semantic_id="harness.self-improvement",
-        ),
-        Artifact(
-            path=Path("docs/permissions.md"),
-            content=prompts.render(PERMISSIONS),
-            semantic_id="harness.permissions",
-        ),
-        Artifact(
-            path=Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md"),
-            content=prompts.render(TEMPLATE_CLAUDE),
+            path=template_path,
+            content=generated_banner(
+                template_path,
+                source=f"{CONTENT_ROOT}/template_claude.py",
+                notes=banner_notes(template_path),
+            )
+            + prompts.render(TEMPLATE_CLAUDE),
             semantic_id="harness.template-guidance",
         ),
         Artifact(
@@ -199,10 +214,16 @@ def codex_generation_recipe(root: Path) -> GenerationRecipe:
     """Compose the Codex renderers, reader, and ownership location."""
     source = portable_harness(root=root)
     prompts = codex_prompt_renderer()
+    template_path = Path(".codex/plugins/lup/TEMPLATE_AGENTS.md")
     support_artifacts = [
         Artifact(
-            path=Path(".codex/plugins/lup/TEMPLATE_AGENTS.md"),
-            content=prompts.render(TEMPLATE_CODEX),
+            path=template_path,
+            content=generated_banner(
+                template_path,
+                source=f"{CONTENT_ROOT}/template_codex.py",
+                notes=banner_notes(template_path),
+            )
+            + prompts.render(TEMPLATE_CODEX),
             semantic_id="harness.template-guidance",
         ),
     ]

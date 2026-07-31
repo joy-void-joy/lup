@@ -1,6 +1,13 @@
-<!-- Generated from src/lup_template/devtools/harness/content/docs/harness.py by `uv run lup-devtools harness generate all` — edit the source, not this file. -->
+# lup: ignore[native-spelling]
+# The harness guide's subject matter is the generated native trees themselves.
+"""Guide to the harness: authoring typed declarations and generating trees."""
 
-# The harness
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    parts=[
+        models.TextPart(
+            text=r'''# The harness
 
 The committed `.claude/`, `.codex/`, `.agents/`, and root `AGENTS.md` trees are
 build products. Skills, agents, guidance, permission policy, and this
@@ -342,3 +349,7 @@ native hooks surface after generation.
 
 Commit generated artifacts together with the catalog changes that produced
 them. [contributing.md](contributing.md) covers what review looks for.
+'''
+        )
+    ]
+)

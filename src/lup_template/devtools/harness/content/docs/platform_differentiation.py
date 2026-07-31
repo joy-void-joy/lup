@@ -1,7 +1,13 @@
-<!-- Generated from src/lup_template/devtools/harness/content/docs/platform_differentiation.py by `uv run lup-devtools harness generate all` — edit the source, not this file. -->
-<!-- See docs/harness.md. -->
+# lup: ignore[native-spelling]
+# This map's subject matter is the native spellings themselves.
+"""Every intended Claude/Codex difference and the parity audit."""
 
-# Platform differentiation and parity
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    parts=[
+        models.TextPart(
+            text=r"""# Platform differentiation and parity
 
 One portable declaration, two native renderings. `portable_harness()` in
 `src/lup_template/devtools/harness/catalog.py` is deliberately singular: the
@@ -89,3 +95,7 @@ to declare names them as the closed type spells them. And the SDK symbols in
 the guidance's Type Safety section stay literal too — they are importable names
 from the library this template builds on, needed verbatim by a reader on either
 runtime.
+"""
+        )
+    ]
+)

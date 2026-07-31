@@ -14,6 +14,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
+from lup.harness.generation import generated_banner
 from lup.policy.identity import AGENT_IDENTITY_ENV, CONCERN_ALLOWANCES_ENV
 import lup.policy.kernel as kernel
 from lup.policy.kernel.rows import (
@@ -278,10 +279,9 @@ def render_policy_data(
             "MAXIMUM_ADDED_LINES = 3",
         ]
     )
-    return (
-        '"""Generated application-owned policy data.\n'
-        "\n"
-        "Rendered from lup.policy.bundle by\n"
-        "`uv run lup-devtools harness generate all` — do not edit directly.\n"
-        '"""\n\n' + body + "\n"
+    banner = generated_banner(
+        Path("policy_data.py"),
+        source="lup.policy.bundle",
+        notes=["Application-owned policy rows; the kernel beside it decides."],
     )
+    return banner + body + "\n"

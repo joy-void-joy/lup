@@ -39,11 +39,11 @@ Breaking capability-composition and semantic-policy release.
   clearing; tracking files are retired and `dev check` stays red while any
   deferred note exists.
 - Renamed the downstream registry to `sync.json` with a documented contract
-  (docs/sync.md) and a legacy fallback.
+  (docs/template.md) and a legacy fallback.
 - Added human-owned file protection compiled from the hook catalog: README.md
   edits always ask and never auto-allow.
 - Added generated-artifact provenance banners with ownership documentation
-  (docs/generated-artifacts.md), and extracted the resolver entry and hook
+  (docs/harness.md), and extracted the resolver entry and hook
   dispatchers into real source assets.
 - Retyped the harness catalog around annotated domain types, decomposed the
   harness CLI into composition, drift, reconcile, doctor, resolve, and launch
@@ -52,8 +52,8 @@ Breaking capability-composition and semantic-policy release.
 - Hardened the resolver entry's argument normalization and pinned
   worker-crash, revision-exhaustion, and join-conflict recovery legs.
 - Added the pre-commit generation gate and the native-nightly workflow
-  (deterministic evidence checks plus secrets-gated live smokes), and recorded
-  the test-suite audit (docs/test-suite-audit.md).
+  (deterministic evidence checks plus secrets-gated live smokes), and audited
+  the test suite for load-bearing coverage.
 - Removed all legacy engine, client, broad options, profile, background-driver,
   replay-stream, and provider-wide tool-registry modules. There is no legacy
   facade.
@@ -62,4 +62,6 @@ Breaking capability-composition and semantic-policy release.
   treat the persisted phase as a monotonic high-water mark so hard-killed runs
   recover from every mid-phase kill window.
 
-See [docs/migration-0.2.md](docs/migration-0.2.md).
+This was a clean breaking release with no compatibility facade: every removed
+surface above has a replacement in the current API, which
+[docs/library.md](docs/library.md) describes directly.

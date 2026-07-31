@@ -1,7 +1,13 @@
-<!-- Generated from src/lup_template/devtools/harness/content/docs/contributing.py by `uv run lup-devtools harness generate all` — edit the source, not this file. -->
-<!-- See docs/harness.md. -->
+# lup: ignore[native-spelling]
+# Contributing names the owned native trees a change has to regenerate.
+"""How to contribute to this repository, whichever component you land in."""
 
-# Contributing
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    parts=[
+        models.TextPart(
+            text=r"""# Contributing
 
 This page is for a contributor arriving cold. It covers getting a working
 checkout, deciding where a change belongs, and what has to be green before it
@@ -175,3 +181,7 @@ consecutive scheduled nightly runs in which:
 
 Review the probe output together with the evidence ledger rather than updating
 the ledger mechanically.
+"""
+        )
+    ]
+)

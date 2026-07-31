@@ -11,7 +11,11 @@ from lup.harness.contracts import (
     NativeSpellings,
     PromptRenderer,
 )
-from lup.harness.generation import argument_text
+from lup.harness.generation import (
+    argument_text,
+    banner_over_asset,
+    generated_banner,
+)
 from lup.harness.models import (
     Agent,
     Artifact,
@@ -201,10 +205,11 @@ class CodexAgentRenderer(ArtifactRenderer[Agent]):
         alias = (
             None if source.model is None else self.spellings.model_alias(source.model)
         )
+        path = Path(f".codex/agents/{source.name}.toml")
+        banner = generated_banner(
+            path, source=f"the portable agent declaration {source.id}"
+        )
         rows = [
-            "# Generated file — do not edit directly. Rendered from the portable",
-            f"# agent declaration {source.id} by "
-            "`uv run lup-devtools harness generate all`.",
             f"name = {json.dumps(source.name)}",
             f"description = {json.dumps(source.description)}",
             (
@@ -217,8 +222,8 @@ class CodexAgentRenderer(ArtifactRenderer[Agent]):
         return ArtifactTree(
             artifacts=[
                 Artifact(
-                    path=Path(f".codex/agents/{source.name}.toml"),
-                    content="\n".join(rows),
+                    path=path,
+                    content=banner + "\n".join(rows),
                     semantic_id=source.id,
                 )
             ]
@@ -290,14 +295,17 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
                 Artifact(
                     path=Path(".codex/config.toml"),
                     content=(
-                        "# Generated file — do not edit directly. Rendered from\n"
-                        "# lup.adapters.codex.harness by "
-                        "`uv run lup-devtools harness generate all`.\n"
-                        "# Personal sandbox and approval defaults stay in "
-                        "~/.codex/config.toml.\n"
-                        "# Native shell allows are generated under "
-                        ".codex/rules/.\n"
-                        "[features]\nhooks = true\n"
+                        generated_banner(
+                            Path(".codex/config.toml"),
+                            source="lup.adapters.codex.harness",
+                            notes=[
+                                "Personal sandbox and approval defaults stay in "
+                                "~/.codex/config.toml.",
+                                "Native shell allows are generated under "
+                                ".codex/rules/.",
+                            ],
+                        )
+                        + "[features]\nhooks = true\n"
                     ),
                     semantic_id="harness.project-config",
                 ),
@@ -305,10 +313,12 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
         )
 
 
-CODEX_POLICY_DISPATCHER = (
+CODEX_POLICY_DISPATCHER = banner_over_asset(
     resources.files("lup.adapters.codex")
     .joinpath("assets/policy_dispatcher.py")
-    .read_text("utf-8")
+    .read_text("utf-8"),
+    Path("policy.py"),
+    source="lup.adapters.codex.assets.policy_dispatcher",
 )
 """Hermetic hook dispatcher script, shipped verbatim into the plugin tree."""
 
@@ -373,17 +383,15 @@ def codex_allow_prefixes(extension: list[ShellCommandRule]) -> list[list[str]]:
 
 def render_codex_rules(source: HookSet) -> str:
     """Render project-local native execution rules for prefix-safe allows."""
+    banner = generated_banner(
+        Path("shell.conf"), source="the canonical Lup semantic shell policy"
+    )
     rows = [
-        "# Generated file — do not edit directly. Rendered from the canonical",
-        "# Lup semantic shell policy by `uv run lup-devtools harness generate all`.",
-        "",
+        f"prefix_rule(pattern = {json.dumps(prefix)}, decision = "
+        '"allow", justification = "Allowed by Lup semantic shell policy")'
+        for prefix in codex_allow_prefixes(source.shell_rules)
     ]
-    for prefix in codex_allow_prefixes(source.shell_rules):
-        rows.append(
-            f"prefix_rule(pattern = {json.dumps(prefix)}, decision = "
-            '"allow", justification = "Allowed by Lup semantic shell policy")'
-        )
-    return "\n".join([*rows, ""])
+    return banner + "\n".join([*rows, ""])
 
 
 class CodexHookRenderer(ArtifactRenderer[HookSet]):

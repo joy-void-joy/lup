@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Generated Claude hook dispatcher over the canonical semantic kernel.
+"""Claude hook dispatcher over the canonical semantic kernel.
 
-Rendered from lup.adapters.claude.assets.policy_dispatcher by
-`uv run lup-devtools harness generate all` — do not edit directly.
+Copied verbatim into every generated plugin tree, so it may import only the
+kernel shipped beside it — never lup, this checkout, or its virtual
+environment.
 """
 
 import json

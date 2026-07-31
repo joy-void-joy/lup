@@ -1,7 +1,11 @@
-<!-- Generated from src/lup_template/devtools/harness/content/docs/quality_pipeline.py by `uv run lup-devtools harness generate all` — edit the source, not this file. -->
-<!-- See docs/harness.md. -->
+"""The three check layers and what each uniquely catches."""
 
-# Quality pipeline
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    parts=[
+        models.TextPart(
+            text=r"""# Quality pipeline
 
 Three layers guard the repository. Each runs at a different moment and
 catches a class of problem the others cannot.
@@ -60,3 +64,7 @@ decision: the
 per-push CI drift check is the gate that binds, so commit-time regeneration
 runs only where it can change the outcome — harness-relevant commits — and
 everything the pattern might miss still fails `harness check all` in CI.
+"""
+        )
+    ]
+)

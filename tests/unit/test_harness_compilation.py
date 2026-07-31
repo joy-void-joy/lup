@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -25,6 +26,8 @@ from lup.adapters.harness import (
     compile_claude,
     compile_codex,
 )
+from lup.codescan.registry import RULE_REFERENCE
+from lup.harness.generation import generated_banner
 from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
 from lup.harness.models import (
     GUIDANCE_CHARACTER_BUDGET,
@@ -68,6 +71,7 @@ from lup.harness.reconciliation import (
 from lup.policy.bundle import policy_kernel_modules
 from lup.types import EnvVars
 from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness import launch
@@ -160,8 +164,30 @@ def test_claude_tree_renders_every_typed_support_document() -> None:
     assert Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md") in paths
     assert Path(".claude/plugins/lup/scripts/file_suggest.sh") in paths
     assert Path(".claude/settings.json") in paths
-    assert Path("docs/self-improvement.md") in paths
-    assert Path("docs/permissions.md") in paths
+    assert {document.path for document in DOCUMENTS} <= paths
+
+
+def test_every_published_document_is_generated_and_banners_itself() -> None:
+    """A document under docs/ that generation does not own could be hand-edited.
+
+    The roster is the only source of documents, so an entry missing from the
+    tree, a stray file beside them, or a page whose banner does not name its
+    own module all mean a reader cannot trust the banner to be true.
+    """
+    artifacts = {
+        artifact.path: artifact
+        for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
+    }
+    published = {document.path for document in DOCUMENTS}
+    unmanaged = sorted(
+        path for path in Path("docs").glob("*.md") if path not in published
+    )
+
+    assert unmanaged == [Path(RULE_REFERENCE)]
+    for document in DOCUMENTS:
+        assert artifacts[document.path].content.startswith(
+            generated_banner(document.path, source=document.source).splitlines()[0]
+        )
 
 
 def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
@@ -406,11 +432,29 @@ def test_skill_argument_declarations_require_a_matching_reference(
         )
 
 
-def test_typed_content_package_has_expected_module_inventory() -> None:
-    content = Path("src/lup_template/devtools/harness/content")
-    sources = list(content.rglob("*.py"))
+def test_every_typed_content_module_is_reachable_from_a_catalog() -> None:
+    """An orphaned content module renders into no tree and drifts unnoticed.
 
-    assert len(sources) == 47
+    Importing the generation recipes pulls in every declaration a catalog
+    aggregates, so a module still on disk but absent from ``sys.modules`` is
+    one no artifact is rendered from — a retired skill left behind, or a
+    document nobody listed.
+    """
+    content = Path("src/lup_template/devtools/harness/content")
+    loaded = {
+        Path(source).resolve()
+        for source in (
+            getattr(module, "__file__", None) for module in list(sys.modules.values())
+        )
+        if source is not None
+    }
+    orphans = [
+        path.as_posix()
+        for path in sorted(content.rglob("*.py"))
+        if path.name != "__init__.py" and path.resolve() not in loaded
+    ]
+
+    assert not orphans
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:
