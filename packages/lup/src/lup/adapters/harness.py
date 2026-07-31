@@ -123,7 +123,7 @@ def reject_rendered_invocations(source: Harness, sigil: str) -> None:
         for text in document_prose(prompt)
         for prefix in prefixes
     ):
-        raise ValueError(  # lup: I feel like this is failing the "parse, don't validate" principle
+        raise ValueError(
             "provider invocation syntax must be represented by SkillInvocation"
         )
 
