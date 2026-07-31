@@ -25,8 +25,7 @@ def main() -> None:
     )
     print(
         allowed.model_dump_json()
-    )  # lup: This example should demontrate how to plug it in the query
-    # lup: We'd also want a fle that does it for tool call
+    )
     print(denied.model_dump_json())
 
 
