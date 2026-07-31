@@ -1,6 +1,6 @@
 # lup: ignore[dict-str-object, bare-object, set-shape]
 # Monkeypatch fixtures intentionally accept and record arbitrary call boundaries.
-"""Reviewer composition receives a factory and a strict typed request."""
+"""Reviewer composition receives a factory, a prompt, and a strict output model."""
 
 from types import SimpleNamespace
 
@@ -32,8 +32,8 @@ async def test_reviewer_uses_explicit_factory_and_typed_request(
 
     requested: dict[str, object] = {}
 
-    async def query(factory: object, request: object) -> object:
-        requested.update(factory=factory, request=request)
+    async def query(factory: object, prompt: object, output_type: object) -> object:
+        requested.update(factory=factory, prompt=prompt, output_type=output_type)
         return SimpleNamespace(
             output=ReviewResult(
                 verdict=ReviewVerdict.approve,
@@ -51,8 +51,8 @@ async def test_reviewer_uses_explicit_factory_and_typed_request(
     assert built["model"] == "review-model"
     assert built["tools"] == ["Read", "Glob", "Grep", "WebFetch"]
     assert requested["factory"] is marker
-    request = requested["request"]
-    assert getattr(request, "output_type") is ReviewResult
+    assert requested["output_type"] is ReviewResult
+    assert isinstance(requested["prompt"], str)
 
 
 async def test_reviewer_factory_shape_does_not_depend_on_model_family(
@@ -64,7 +64,7 @@ async def test_reviewer_factory_shape_does_not_depend_on_model_family(
         calls.append(kwargs)
         return object()
 
-    async def query(_factory: object, _request: object) -> object:
+    async def query(_factory: object, _prompt: object, _output_type: object) -> object:
         return SimpleNamespace(
             output=ReviewResult(
                 verdict=ReviewVerdict.approve,

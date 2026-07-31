@@ -6,7 +6,6 @@ from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
     create_claude_session_factory,
 )
-from lup.runtime.models import TurnInput, turn_request
 
 from examples.common import Summary
 
@@ -18,9 +17,7 @@ async def main() -> None:
             system_prompt="Return a concise summary through submit_output.",
         )
     )
-    result = await factory.query(
-        turn_request(TurnInput(text="Summarize why typed boundaries help."), Summary)
-    )
+    result = await factory.query("Summarize why typed boundaries help.", Summary)
     print(result.output.model_dump_json(indent=2))
 
 

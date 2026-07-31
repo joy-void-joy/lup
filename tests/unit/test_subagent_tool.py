@@ -69,8 +69,8 @@ class TestRunSubagentTool:
 
         captured: dict[str, object] = {}
 
-        async def query(factory: object, request: object) -> object:
-            captured.update(factory=factory, request=request)
+        async def query(factory: object, prompt: object) -> object:
+            captured.update(factory=factory, prompt=prompt)
             return SimpleNamespace(blocks=[TurnTextBlock(text="findings")])
 
         monkeypatch.setattr(lup.subagents, "query", query)
@@ -82,4 +82,4 @@ class TestRunSubagentTool:
         assert "findings" in response_text(result)
         assert selected == [RESEARCHER]
         assert captured["factory"] is marker
-        assert getattr(captured["request"], "input").text == "look this up"
+        assert captured["prompt"] == "look this up"

@@ -6,9 +6,9 @@ them; no runtime compatibility facade exists.
 | Removed surface | Replacement |
 |---|---|
 | `Engine.client()` / `Client.session()` | adapter `create_*_session_factory(config)`, then `SessionFactory.open()` |
-| `Client.query()` / broad `query(**options)` | `SessionFactory.query(TurnRequest[T])`, or the free `query(factory, request)` alias |
+| `Client.query()` / broad `query(**options)` | `SessionFactory.query(prompt, OutputModel)`, or the free `query(factory, prompt, OutputModel)` alias |
 | `Client.stream()` / `ReplayStream` | optional `TurnHandle.events`; completed `TurnResult.blocks` |
-| old `Session.send(text)` | `handle = await Session.start(turn_request(TurnInput(text=...)))`; then `await handle.turn.result()` |
+| old `Session.send(text)` | `handle = await Session.start(turn_request(text))`; then `await handle.turn.result()` |
 | `Session.interrupt()` | optional `TurnHandle.interrupt.interrupt()` |
 | `LupResponse.output(Model)` | strict `TurnResult[Model].output` |
 | `output_schema` / `output_format` | `TurnRequest(output_type=Model)` and turn-bound `submit_output` |
@@ -40,7 +40,7 @@ After:
 
 ```python
 factory = create_claude_session_factory(ClaudeSessionConfig(model="..."))
-result = await factory.query(turn_request(TurnInput(text="summarize"), Summary))
+result = await factory.query("summarize", Summary)
 summary = result.output
 ```
 

@@ -8,10 +8,18 @@ session, running one turn on it — lives here once.
 
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from typing import overload
 
 from pydantic import BaseModel
 
-from lup.runtime.models import SessionHandle, SessionId, TurnRequest, TurnResult
+from lup.runtime.models import (
+    SessionHandle,
+    SessionId,
+    TurnInput,
+    TurnRequest,
+    TurnResult,
+    turn_request,
+)
 
 type SessionOpener = Callable[
     [SessionId | None], AbstractAsyncContextManager[SessionHandle]
@@ -30,10 +38,35 @@ class SessionFactory:
         """Open a new or resumed session."""
         return self.opener(resume)
 
+    @overload
     async def query[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnResult[T]:
-        """Open one session, run one turn, and always close the session."""
+    ) -> TurnResult[T]: ...
+
+    @overload
+    async def query(self, request: str | TurnInput) -> TurnResult[None]: ...
+
+    @overload
+    async def query[T: BaseModel](
+        self, request: str | TurnInput, output_type: type[T]
+    ) -> TurnResult[T]: ...
+
+    async def query[T: BaseModel | None](
+        self,
+        request: TurnRequest[T] | str | TurnInput,
+        output_type: type[BaseModel] | None = None,
+    ) -> TurnResult[T] | TurnResult[BaseModel] | TurnResult[None]:
+        """Open one session, run one turn, and always close the session.
+
+        The overloads carry the same inference `turn_request` protects: a
+        prepared request keeps its own parameter, a bare prompt resolves to
+        `None`, and a prompt plus a model resolves to that model.
+        """
         async with self.open() as handle:
-            turn = await handle.session.start(request)
+            if isinstance(request, TurnRequest):
+                turn = await handle.session.start(request)
+            elif output_type is None:
+                turn = await handle.session.start(turn_request(request))
+            else:
+                turn = await handle.session.start(turn_request(request, output_type))
             return await turn.turn.result()

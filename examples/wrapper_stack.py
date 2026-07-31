@@ -7,7 +7,6 @@ from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
     create_claude_session_factory,
 )
-from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.wrappers import (
     BudgetConfig,
     CorrectionConfig,
@@ -42,9 +41,7 @@ async def main() -> None:
         persistence=PersistenceConfig(directory=Path("tmp/example-results")),
         serialized=True,
     )
-    result = await factory.query(
-        turn_request(TurnInput(text="Explain this wrapper stack."), Summary)
-    )
+    result = await factory.query("Explain this wrapper stack.", Summary)
     print(result.output.summary)
 
 

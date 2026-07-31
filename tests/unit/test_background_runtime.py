@@ -16,7 +16,6 @@ from lup.runtime.models import (
     SessionId,
     TurnIdentifiers,
     TurnId,
-    TurnInput,
     TurnRequest,
     TurnResult,
     turn_request,
@@ -72,7 +71,7 @@ async def test_background_agent_coalesces_to_latest_state() -> None:
     errors: list[TurnError] = []
 
     def request(state: BackgroundState) -> TurnRequest[None]:
-        return turn_request(TurnInput(text=f"state={state.value}"))
+        return turn_request(f"state={state.value}")
 
     async def result_handler(result: TurnResult[None]) -> None:
         results.append(result)

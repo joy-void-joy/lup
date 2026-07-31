@@ -12,10 +12,13 @@ one typed `SessionOpener` callable: opening a session is a callback, and the
 class holding it is the surface applications construct and pass around, so
 adapters, wrappers, and tests build `SessionFactory(opener)` rather than derive
 from an ABC. Shared behavior then lives where every caller reaches it —
-`SessionFactory.query(request)` runs one turn on one session, and the free
-`lup.query(factory, request)` alias spells the same operation where a
-composition root reads better with the factory as an argument. `ModelRouter`
-is the same shape over the `ModelMatcher` capability.
+`SessionFactory.query(prompt, OutputModel)` runs one turn on one session, and
+the free `lup.query` alias is bound to that same function object, so it spells
+the operation identically — overloads, inference, and all — where a composition
+root reads better with the factory as an argument. Both accept a prompt string,
+a `TurnInput`, or a request prepared with `turn_request()`, which stays the one
+place that normalisation lives. `ModelRouter` is the same shape over the
+`ModelMatcher` capability.
 
 Rich behavior is explicit data flow. `SessionHandle` contains a `Session` and
 an optional `ForkSession`; `TurnHandle[T]` contains a `Turn[T]` and optional

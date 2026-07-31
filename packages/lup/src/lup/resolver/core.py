@@ -68,7 +68,6 @@ from lup.resolver.orchestrator import (
 from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
 from lup.resolver.tools import WAIT_CONTRACT
 from lup.runtime.factory import SessionFactory
-from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.query import query
 from lup.runtime.wrappers import CorrectionConfig, decorated_session_factory
 
@@ -283,7 +282,8 @@ class ResolverCore:
         for _ in range(INVENTORY_PLAN_ATTEMPTS):
             result = await query(
                 self.reviewer_factory(self.config.workspace),
-                turn_request(TurnInput(text=prompt + correction), ConcernInventory),
+                prompt + correction,
+                ConcernInventory,
             )
             referenced = [
                 index
@@ -917,7 +917,8 @@ class ResolverCore:
                     allowances=assignment.concern.allowances,
                 )
             ),
-            turn_request(TurnInput(text=prompt), WorkerReport),
+            prompt,
+            WorkerReport,
         )
         if result.output.concern_id != assignment.concern.id:
             raise ResolverInvariantError("worker returned a foreign concern id")
@@ -964,7 +965,8 @@ class ResolverCore:
         )
         result = await query(
             self.reviewer_factory(worktree),
-            turn_request(TurnInput(text=prompt), ReviewReport),
+            prompt,
+            ReviewReport,
         )
         if result.output.concern_id != concern.id:
             raise ResolverInvariantError("reviewer returned a foreign concern id")
@@ -987,7 +989,8 @@ class ResolverCore:
             self.worker_factory(
                 WorkerContext(root=lease.root, concern_id=lease.concern_id)
             ),
-            turn_request(TurnInput(text=prompt), MergeReport),
+            prompt,
+            MergeReport,
         )
         return result.output
 
@@ -1265,7 +1268,8 @@ class ResolverCore:
         )
         reviewed = await query(
             self.reviewer_factory(integration.worktree),
-            turn_request(TurnInput(text=review_prompt), FinalReview),
+            review_prompt,
+            FinalReview,
         )
         state = state.model_copy(
             update={
