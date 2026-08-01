@@ -39,6 +39,11 @@ from lup.policy.bundle import (
     render_policy_data,
     runtime_url_scope,
 )
+from lup.policy.dispatcher import (
+    DispatcherDeclaration,
+    compile_dispatcher,
+    dispatcher_banner,
+)
 from lup.policy.kernel.words import (
     INTERPRETERS,
     PASS_THROUGH_WORDS,
@@ -314,12 +319,23 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
         )
 
 
-CODEX_POLICY_DISPATCHER = (
-    resources.files("lup.adapters.codex")
-    .joinpath("assets/policy_dispatcher.py")
-    .read_text("utf-8")
+CODEX_DISPATCHER = DispatcherDeclaration(
+    runtime_name="Codex",
+    package="lup.adapters.codex",
+    managed_root_env="CODEX_HOME",
+    relativizer="worktree_path",
+    routed_tools=["Bash", "web_fetch", "apply_patch"],
+    hook_events=["PermissionRequest", "PreToolUse"],
+    failure="stderr_exit",
+    runtime_modules=["codex_patch", "policy_data"],
 )
-"""Hermetic hook dispatcher script, shipped verbatim into the plugin tree."""
+"""Everything Codex spells differently from every other runtime.
+
+Both hook events reach the same dispatcher: the permission request carries
+the approval channel an ask needs, and the pre-tool event covers the paths
+that never raise one. The tools named here are both what the plugin
+registers the hook for and what the compiler proves the dispatcher routes.
+"""
 
 CODEX_PATCH_RUNTIME = (
     resources.files("lup.adapters.codex").joinpath("patch.py").read_text("utf-8")
@@ -404,21 +420,14 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
             "statusMessage": "Checking Lup policy",
             "timeout": 30,
         }
-        hooks = {
-            "hooks": {
-                "PermissionRequest": [
-                    {
-                        "matcher": "Bash|apply_patch|web_fetch",
-                        "hooks": [policy_hook],
-                    }
-                ],
-                "PreToolUse": [
-                    {
-                        "matcher": "Bash|apply_patch|web_fetch",
-                        "hooks": [policy_hook],
-                    }
-                ],
+        registration = [
+            {
+                "matcher": "|".join(CODEX_DISPATCHER.routed_tools),
+                "hooks": [policy_hook],
             }
+        ]
+        hooks = {
+            "hooks": {event: registration for event in CODEX_DISPATCHER.hook_events}
         }
         evidence = {
             "schemaVersion": 1,
@@ -441,17 +450,14 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         command=REGENERATE_COMMAND,
                     ),
                 ),
-                Artifact.generated(
+                Artifact(
                     path=Path(
                         f".codex/plugins/{self.plugin_name}/hooks/scripts/policy.py"
                     ),
-                    body=CODEX_POLICY_DISPATCHER,
+                    content=compile_dispatcher(CODEX_DISPATCHER),
                     semantic_id=source.id,
                     executable=True,
-                    banner=GeneratedBanner(
-                        source="lup.adapters.codex.assets.policy_dispatcher",
-                        command=REGENERATE_COMMAND,
-                    ),
+                    banner=dispatcher_banner(CODEX_DISPATCHER),
                 ),
                 *[
                     Artifact(

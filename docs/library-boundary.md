@@ -94,7 +94,7 @@ Two further things the rule does not see, both deliberate:
 
 ## Classification: every table under `packages/lup`
 
-Thirty-one tables are in scope. Twenty-one are canonical and carry their reason
+Thirty-two tables are in scope. Twenty-two are canonical and carry their reason
 at the site. Ten are application data with no parameter — these are the
 violations, and `dev check` stays red naming them until they move.
 
@@ -111,6 +111,7 @@ violations, and `dev check` stays red naming them until they move.
 | `codescan/markers.py` `JS_SUFFIXES` | the suffixes where `#` opens no comment |
 | `codescan/registry.py` `STRUCTURAL_RULES` | one card per rule the library's own scanners define |
 | `harness/environment.py` `NON_INTERACTIVE_SHELL_ENV` | the variable and off-value git, ssh, gh, and keyring document |
+| `policy/dispatcher.py` `DISPATCHER_STDLIB` | the stdlib a compiled dispatcher actually imports — a boundary, not a choice: widening it is the hazard the pin exists to prevent |
 | `policy/kernel/commands.py` `SED_SAFE_LONG_OPTIONS` | sed's own long spellings of its short flags |
 | `policy/kernel/commands.py` `CURL_VALUE_FLAGS` | curl's own value-taking flags |
 | `policy/kernel/decision.py` `KERNEL_IMPORT_ALLOWLIST` | the stdlib the kernel actually imports |
@@ -222,5 +223,5 @@ The classification is not the record of the work — the rule is.
 `lup-devtools dev check --placement` prints the live list, and `dev check`
 stays red while any entry stands, naming each by file, line, and constant. The
 violations table above is that list at the time of the audit, kept here only to
-explain *why* those ten and not the other twenty-one. The pressure to act lives
+explain *why* those ten and not the other twenty-two. The pressure to act lives
 in the check, and lifts on its own when the last table moves.

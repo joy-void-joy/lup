@@ -110,10 +110,15 @@ venv = ".venv"
 # `kernel`, `policy_data`, and `codex_patch` are top-level modules only inside
 # a generated plugin's `hooks/runtime`. Naming that directory as the search
 # path checks each dispatcher — the canonical asset and the script compiled
-# from it — against the exact runtime it is shipped beside.
+# from it — against the exact runtime it is shipped beside. `host` is the half
+# the compiler links in rather than ships, so an asset resolves it against the
+# canonical module both scripts are compiled from.
 [[tool.pyright.executionEnvironments]]
 root = "packages/lup/src/lup/adapters/claude/assets"
-extraPaths = [".claude/plugins/lup/hooks/runtime"]
+extraPaths = [
+    ".claude/plugins/lup/hooks/runtime",
+    "packages/lup/src/lup/policy/assets",
+]
 
 [[tool.pyright.executionEnvironments]]
 root = ".claude/plugins/lup/hooks/scripts"
@@ -121,7 +126,10 @@ extraPaths = [".claude/plugins/lup/hooks/runtime"]
 
 [[tool.pyright.executionEnvironments]]
 root = "packages/lup/src/lup/adapters/codex/assets"
-extraPaths = [".codex/plugins/lup/hooks/runtime"]
+extraPaths = [
+    ".codex/plugins/lup/hooks/runtime",
+    "packages/lup/src/lup/policy/assets",
+]
 
 [[tool.pyright.executionEnvironments]]
 root = ".codex/plugins/lup/hooks/scripts"
