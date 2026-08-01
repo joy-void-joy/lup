@@ -21,10 +21,9 @@ if TYPE_CHECKING:
     from lup.harness.models import (
         ArtifactTree,
         CapabilityEvidence,
+        LocatedPart,
         ModelTier,
-        NativePath,
         PluginLocation,
-        PluginPath,
         PromptDocument,
         QualifiedAgentName,
         SkillInvocation,
@@ -158,14 +157,22 @@ class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
 
 
 class PromptRenderer(ABC):
-    """Own one native runtime's complete prompt-document spelling."""
+    """Own one native runtime's complete prompt-document spelling.
+
+    A part spells itself against this, so what a renderer offers is the whole
+    of what a part may reach for: the reader's vocabulary, and the one question
+    — scope — that no single vocabulary can answer alone.
+    """
+
+    own: NativeSpellings
+    """The vocabulary of the runtime that will read what this renders."""
 
     @abstractmethod
     def render(self, prompt: PromptDocument) -> str:
         """Render every semantic prompt part into native prompt text."""
 
     @abstractmethod
-    def location(self, part: NativePath | PluginPath) -> str:
+    def location(self, part: LocatedPart) -> str:
         """Spell one location for the reader, or for every runtime at once."""
 
 

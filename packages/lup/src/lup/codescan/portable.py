@@ -16,7 +16,12 @@ from typing import get_args
 from pydantic import BaseModel, ConfigDict
 
 from lup.harness.contracts import NativeSpellings
-from lup.harness.models import Harness, PluginLocation, TextPart, TreeLocation
+from lup.harness.models import (
+    Harness,
+    PluginLocation,
+    TreeLocation,
+    document_prose,
+)
 
 RULE_ID = "portable-content"
 
@@ -71,10 +76,9 @@ def prose_breaches(
         ),
     ]
     prose = [
-        (declaration_id, part.text)
+        (declaration_id, text)
         for declaration_id, document in documents
-        for part in document.parts
-        if isinstance(part, TextPart)
+        for text in document_prose(document)
     ]
     prose.extend(
         (declaration.id, declaration.description)

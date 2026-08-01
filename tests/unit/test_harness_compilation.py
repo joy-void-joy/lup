@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -49,12 +50,14 @@ from lup.harness.models import (
     RequestApproval,
     ResolverEntry,
     RuntimeDocs,
+    SemanticPart,
     Skill,
     SkillInvocation,
     SkillPattern,
     TextPart,
     document_text_size,
 )
+from lup.harness.contracts import PromptRenderer
 from lup.harness.ownership import (
     OwnershipManifestError,
     build_manifest,
@@ -395,9 +398,9 @@ PART_CONTRACT: dict[str, PartExpectation] = {
 def test_every_prompt_part_states_what_it_promises_across_runtimes() -> None:
     """A part neither renderer handles renders as nothing, silently.
 
-    Pyright's ``assert_never`` catches the arm nobody wrote; this catches the
-    part nobody decided about — whether its two renderings agree is a design
-    choice no type can hold.
+    The base catches the kind that never says how it is spelled; this catches
+    the kind nobody decided about — whether its two renderings agree is a
+    design choice no type can hold.
     """
     union, _ = get_args(PromptPart.__value__)
 
@@ -416,6 +419,137 @@ def test_each_prompt_part_keeps_its_cross_runtime_promise(name: str) -> None:
 
     assert claude.strip() and codex.strip()
     assert (claude != codex) is expectation.diverges
+
+
+class PartQuestion(BaseModel):
+    """One question the harness asks a part, and the kinds that answer it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ask: Callable[[SemanticPart], bool]
+    answered_by: list[str]
+
+
+PART_QUESTIONS: dict[str, PartQuestion] = {
+    "text_payload": PartQuestion(
+        ask=lambda part: part.text_payload is not None, answered_by=["TextPart"]
+    ),
+    "invocation": PartQuestion(
+        ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]
+    ),
+    "named_plugin": PartQuestion(
+        ask=lambda part: part.named_plugin is not None,
+        answered_by=["SkillInvocation", "PluginPath", "SkillPattern"],
+    ),
+    "named_agent": PartQuestion(
+        ask=lambda part: part.named_agent is not None, answered_by=["Delegate"]
+    ),
+    "references_arguments": PartQuestion(
+        ask=lambda part: part.references_arguments, answered_by=["ArgumentsRef"]
+    ),
+}
+"""Every question a walk asks a part rather than deciding about it from outside."""
+
+
+@pytest.mark.parametrize("question", sorted(PART_QUESTIONS))
+def test_each_question_is_answered_by_exactly_the_parts_that_carry_it(
+    question: str,
+) -> None:
+    """A kind that carries something and declines to say so is the silent bug.
+
+    Every question here defaults to declining, so a walk that asks it can never
+    miss a kind by omission — but a kind that carries prose, or names a plugin,
+    and forgets to answer would go unseen. Pinning who answers turns that into
+    a failure the moment a new kind joins ``PART_CONTRACT``.
+    """
+    asked = PART_QUESTIONS[question]
+
+    answering = [
+        name
+        for name, expectation in PART_CONTRACT.items()
+        if asked.ask(expectation.part)
+    ]
+
+    assert answering == asked.answered_by
+
+
+@pytest.mark.parametrize("name", sorted(PART_CONTRACT))
+def test_each_prompt_part_round_trips_through_its_discriminator(name: str) -> None:
+    """Answering for itself leaves a part exactly as parseable as it was."""
+    document = PromptDocument(parts=[PART_CONTRACT[name].part])
+
+    restored = PromptDocument.model_validate_json(document.model_dump_json())
+
+    assert restored == document
+    assert type(restored.parts[0]) is type(document.parts[0])
+
+
+def test_prompt_documents_parse_every_part_from_its_discriminator() -> None:
+    """One document holding every kind still validates through ``type`` alone."""
+    payload = {
+        "parts": [
+            expectation.part.model_dump() for expectation in PART_CONTRACT.values()
+        ]
+    }
+
+    document = PromptDocument.model_validate(payload)
+
+    assert [type(part).__name__ for part in document.parts] == list(PART_CONTRACT)
+
+
+def test_an_undeclared_plugin_behind_an_invocation_names_the_invocation() -> None:
+    """One part answers two questions, and the sharper gate must speak first.
+
+    An invocation names a plugin, so both the plugin gate and the invocation
+    gate see it — but only one of them can say which skill went missing.
+    """
+    source = portable_harness().model_dump()
+    source["guidance"]["parts"].append(
+        SkillInvocation(plugin="absent", skill="merge").model_dump()
+    )
+
+    with pytest.raises(ValueError, match="unknown declaration: absent:merge"):
+        Harness.model_validate(source)
+
+
+class UnansweredPart(SemanticPart):
+    """A thirteenth kind that declines to say how it should be spelled."""
+
+    type: Literal["unanswered"] = "unanswered"
+
+
+class AnsweredPart(SemanticPart):
+    """A thirteenth kind that answers the base and declines everything else."""
+
+    type: Literal["answered"] = "answered"
+
+    def spell(self, renderer: PromptRenderer) -> str:
+        return f"{renderer.own.runtime_name} answered"
+
+
+def test_a_part_that_answers_nothing_cannot_be_constructed() -> None:
+    """The base is what forces a new kind to decide, not a walk that meets it."""
+
+    def construct(kind: type[SemanticPart]) -> SemanticPart:
+        return kind()
+
+    assert construct(AnsweredPart)
+
+    with pytest.raises(TypeError, match="abstract"):
+        construct(UnansweredPart)
+
+
+def test_a_new_kind_of_part_renders_without_editing_a_renderer_or_walk() -> None:
+    """The walk hands over the reader's vocabulary and never names a kind."""
+    document = PromptDocument.model_construct(parts=[AnsweredPart()])
+
+    assert claude_prompt_renderer().render(document) == (
+        f"{ClaudeSpellings().runtime_name} answered\n"
+    )
+    assert codex_prompt_renderer().render(document) == (
+        f"{CodexSpellings().runtime_name} answered\n"
+    )
+    assert document_text_size(document) == 0
 
 
 def test_every_tree_paths_read_the_same_under_either_runtime() -> None:

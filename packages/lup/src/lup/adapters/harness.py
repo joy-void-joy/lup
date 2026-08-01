@@ -24,7 +24,7 @@ from lup.harness.models import (
     Artifact,
     ArtifactTree,
     Harness,
-    TextPart,
+    document_prose,
 )
 from lup.harness.validation import validated_tree
 
@@ -102,10 +102,9 @@ def reject_rendered_invocations(source: Harness, sigil: str) -> None:
         ],
     ]
     if any(
-        prefix in part.text
+        prefix in text
         for prompt in prompts
-        for part in prompt.parts
-        if isinstance(part, TextPart)
+        for text in document_prose(prompt)
         for prefix in prefixes
     ):
         raise ValueError(  # lup: I feel like this is failing the "parse, don't validate" principle
