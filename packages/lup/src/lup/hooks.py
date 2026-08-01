@@ -13,6 +13,7 @@ construction.
 
 Output helpers:
 - allow_hook() — PreToolUse allow decision
+- ask_hook() — PreToolUse approval-required decision
 - deny_hook() — PreToolUse deny decision
 - block_hook() — block decision (Stop or PreToolUse)
 
@@ -74,9 +75,12 @@ Claude Code's event vocabulary is adopted as the framework's lingua franca: an
 adapter translates its backend's native lifecycle events into these names, so
 the factories here register against one spelling regardless of engine."""
 
-type LupHookDecision = Literal["allow", "deny", "block"]
-"""A hook's verdict: allow the action, deny it (a PreToolUse permission
-refusal), or block it (the cross-event stop/redirect decision)."""
+type LupHookDecision = Literal["allow", "ask", "deny", "block"]
+"""A hook's verdict: allow the action, ask a human to approve it, deny it (a
+permission refusal), or block it (the cross-event stop/redirect decision).
+
+``None`` is the fifth answer and means the hook declines to decide, so the
+session's ambient permission flow applies untouched."""
 
 
 class LupHookInput(BaseModel):
@@ -158,6 +162,11 @@ class LupHooksConfig(BaseModel):
 def allow_hook() -> LupHookOutput:
     """Create a generic allow decision."""
     return LupHookOutput(decision="allow")
+
+
+def ask_hook(reason: str) -> LupHookOutput:
+    """Create a generic approval-required decision."""
+    return LupHookOutput(decision="ask", reason=reason)
 
 
 def deny_hook(reason: str) -> LupHookOutput:
@@ -468,9 +477,11 @@ def create_tool_gate(
             *unlocked* via OR. The internal flag never resets — for
             per-cycle gates, track the state yourself and pass *unlocked*.
         event: Hook event to gate: ``"PreToolUse"`` (default) or ``"Stop"``.
-        style: Locked response shape. ``"deny"`` uses the PreToolUse
-            permission decision; ``"block"`` uses the cross-event
-            block decision (required for Stop).
+        style: Locked response shape. ``"deny"`` uses the permission
+            decision; ``"block"`` uses the cross-event block decision
+            (required for Stop). A PreToolUse gate refuses on the
+            permission channel either way — that is the only channel the
+            event reads — so the two differ for Stop alone.
         allow_when_unlocked: When True, return an explicit allow decision
             once unlocked instead of passing through to later hooks
             (PreToolUse only).

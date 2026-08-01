@@ -1,9 +1,9 @@
-"""Refuse a denied fetch inside a live session, not on a printout.
+"""Refuse a denied command inside a live session — the tool-call path.
 
-The fetch half of the policy pair; ``semantic_policy_shell`` is the
-tool-call half. Both declare the same origin table and enforce it through
-the session's own hook seam, so the URL a policy denies is a URL the
-session cannot retrieve.
+The tool-call half of the policy pair; ``semantic_policy`` is the fetch
+half. The shell policy consults the same declared origin table, so the URL
+refused to a fetch is refused to ``curl`` as well and no command reaches a
+shell by taking the other route.
 
 The session runs with permissions bypassed, which is the mode where this
 hook is the only gate the call meets: what the policy denies is refused,
@@ -21,29 +21,29 @@ from lup.adapters.claude.runtime import (
 )
 from lup.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
-from lup.policy.rules import FetchPolicy, UrlScope
+from lup.policy.rules import ShellPolicy, UrlScope
 from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.query import query
 
 from examples.common import Summary
 
 DOCS_ORIGIN = AnyHttpUrl("https://docs.example.com")
-DENIED_URL = "https://docs.example.com/private/token"
+DENIED_COMMAND = "curl https://docs.example.com/private/token"
 
 
 def policy_hooks() -> LupHooksConfig:
-    """Enforce one declared fetch scope on every call the session attempts.
+    """Enforce the shell lattice, scoped by the same declared origins.
 
-    Only the fetch family is declared, so a shell command here answers ask
-    rather than allow — an undeclared family is a missing rule, not a
-    permission.
+    The rules are the canonical set: read-only commands allow, destructive
+    ones ask, and anything the lattice cannot judge denies with the recipe
+    for reshaping or escalating it.
     """
-    policy = FetchPolicy(
-        allowed=[UrlScope(origin=DOCS_ORIGIN, path_prefix="/api")],
-        denied=[UrlScope(origin=DOCS_ORIGIN, path_prefix="/private")],
+    policy = ShellPolicy(
+        allowed_urls=[UrlScope(origin=DOCS_ORIGIN, path_prefix="/api")],
+        denied_urls=[UrlScope(origin=DOCS_ORIGIN, path_prefix="/private")],
     )
     return create_policy_hooks(
-        SemanticToolPolicy(fetch=policy), claude_hook_semantic_tool
+        SemanticToolPolicy(shell=policy), claude_hook_semantic_tool
     )
 
 
@@ -51,7 +51,7 @@ def session_config() -> ClaudeSessionConfig:
     """Carry the enforcing hooks into the session the factory will open."""
     return ClaudeSessionConfig(
         model="claude-opus-5",
-        system_prompt="Fetch what you are asked for and report what happened.",
+        system_prompt="Run what you are asked to run and report what happened.",
         hooks=policy_hooks(),
     )
 
@@ -61,7 +61,8 @@ async def main() -> None:
     result = await query(
         factory,
         turn_request(
-            TurnInput(text=f"Fetch {DENIED_URL} and summarize the page."), Summary
+            TurnInput(text=f"Run `{DENIED_COMMAND}` and summarize the output."),
+            Summary,
         ),
     )
     print(result.output.summary)
