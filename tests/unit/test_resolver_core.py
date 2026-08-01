@@ -39,11 +39,13 @@ from lup.resolver.core import (
 from lup.resolver.models import (
     ACCEPT,
     ACCEPTANCE_QUESTION_ID,
+    AdmissionRequest,
     AnswerBatch,
     AcceptanceCriterion,
     Concern,
     acceptance_question,
     ConcernInventory,
+    ConcernOrigin,
     ConcernOutcome,
     ConcernProgress,
     ConcernStatus,
@@ -491,7 +493,7 @@ def concern_referencing(indexes: list[int]) -> JsonObject:
         "title": "A concern",
         "spec": "Do the thing",
         "criteria": [{"id": "done", "description": "It is done"}],
-        "note_indexes": [index for index in indexes],
+        "evidence_indexes": [index for index in indexes],
     }
 
 
@@ -557,14 +559,14 @@ async def test_one_note_raising_two_issues_reaches_both_concerns(
                     "title": "Close the union",
                     "spec": "Let each variant answer for itself",
                     "criteria": [{"id": "closed", "description": "No dispatch"}],
-                    "note_indexes": [0],
+                    "evidence_indexes": [0],
                 },
                 {
                     "id": "write-the-principle",
                     "title": "Write the principle into guidance",
                     "spec": "State the convention where conventions live",
                     "criteria": [{"id": "stated", "description": "Guidance says it"}],
-                    "note_indexes": [0],
+                    "evidence_indexes": [0],
                 },
             ]
         }
@@ -624,7 +626,7 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
                     "criteria": [
                         {"id": "typed", "description": "Domain type is explicit"}
                     ],
-                    "note_indexes": [0],
+                    "evidence_indexes": [0],
                 }
             ]
         }
@@ -1753,6 +1755,412 @@ async def test_a_design_question_records_an_answer_in_the_humans_own_words(
     assert [record.answer.value for record in core.mailbox.answers()] == [
         "neither — close the union at its base"
     ]
+
+
+def admitted_plan(*concerns: JsonObject) -> JsonObject:
+    """One planner reply admitting concerns against a run's new evidence."""
+    return {"concerns": [item for item in concerns]}
+
+
+def admitted_concern(
+    identifier: str,
+    dependencies: list[str] | None = None,
+    questions: list[JsonObject] | None = None,
+) -> JsonObject:
+    return {
+        "id": identifier,
+        "title": identifier.title(),
+        "spec": f"Resolve {identifier}",
+        "criteria": [{"id": f"{identifier}-done", "description": "done"}],
+        "dependencies": [parent for parent in dependencies or []],
+        "questions": [question for question in questions or []],
+        "evidence_indexes": [0],
+    }
+
+
+def admitting_core(
+    tmp_path: Path,
+    workspace: Path,
+    launcher: LocalProcessLauncher,
+    run_id: str,
+    worker_response: ResolverResponse,
+    reviewer_response: ResolverResponse,
+) -> ResolverCore:
+    return ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id=run_id,
+            integration_branch=f"resolve/{run_id}/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff", arguments=["git", "diff", "--check", "HEAD"]
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda context: ResolverTestFactory(context.root, worker_response),
+        lambda root: ResolverTestFactory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+
+
+def admitted(identifier: str, evidence: str = "a human said so") -> Concern:
+    """One concern as an admission records it: origin and evidence carried."""
+    return concern(identifier).model_copy(
+        update={"origin": ConcernOrigin.ADMITTED, "evidence": evidence}
+    )
+
+
+def implementing_worker(
+    parks: dict[str, str],  # lup: ignore[dict-str-payload] — concern-id index
+    state_root: Path,
+    run_id: str,
+) -> ResolverResponse:
+    """A worker that parks each named concern once, then implements it.
+
+    ``parks`` maps a concern id to the question it asks before doing any
+    work, which is what puts a run at the boundary a human discovers more
+    work from.
+    """
+
+    def respond(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        if output_name != WorkerReport.__name__:
+            raise AssertionError(output_name)
+        identifier = root.name
+        if identifier in parks:
+            mailbox = QuestionMailbox(state_root / run_id)
+            worker_asks(mailbox, run_id, dynamic_question(identifier))
+            if parks[identifier] not in mailbox.answered_ids():
+                return {
+                    "concern_id": identifier,
+                    "changed": False,
+                    "summary": "parked awaiting a material choice",
+                }
+        (root / f"{identifier}.txt").write_text("durable\n", encoding="utf-8")
+        return {
+            "concern_id": identifier,
+            "changed": True,
+            "summary": f"implemented {identifier}",
+            "files_changed": [f"{identifier}.txt"],
+        }
+
+    return respond
+
+
+def planning_reviewer(plan: JsonObject) -> ResolverResponse:
+    """A reviewer that plans admitted evidence and accepts every concern."""
+
+    def respond(root: Path, output_name: str) -> JsonObject:
+        if output_name == ConcernInventory.__name__:
+            return plan
+        if output_name == FinalReview.__name__:
+            return {"accepted": True, "reason": "combined branch verified"}
+        return {
+            "concern_id": root.name,
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": [f"{root.name}-done"],
+        }
+
+    return respond
+
+
+@pytest.mark.asyncio
+async def test_a_concern_admitted_into_a_parked_run_finishes_beside_the_originals(
+    tmp_path: Path,
+) -> None:
+    """Discovery mid-run cost a restart, which threw away every answer.
+
+    The run keeps its id, its recorded answers, and its completed work; the
+    admitted concern still passes the approval and material-question gates
+    its siblings passed.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def build_core() -> ResolverCore:
+        return admitting_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "admit-parked",
+            implementing_worker({"a": "a-dynamic"}, tmp_path / "state", "admit-parked"),
+            planning_reviewer(
+                admitted_plan(
+                    admitted_concern(
+                        "b",
+                        questions=[
+                            {
+                                "id": "b-shape",
+                                "concern_id": "b",
+                                "prompt": "Which shape?",
+                                "choices": ["a method"],
+                            }
+                        ],
+                    )
+                )
+            ),
+        )
+
+    parked = build_core()
+    seed_approvals(parked, [concern("a")])
+    with pytest.raises(ResolverAwaitingAnswers):
+        await parked.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+    before = parked.repository.load()
+
+    admission = await build_core().admit(
+        AdmissionRequest(statements=["the relay has to investigate before it asks"])
+    )
+
+    assert admission.run_id == "admit-parked"
+    assert [item.id for item in admission.concerns] == ["b"]
+    assert admission.concerns[0].origin is ConcernOrigin.ADMITTED
+    assert admission.concerns[0].evidence == (
+        "the relay has to investigate before it asks"
+    )
+    assert [question.id for question in admission.questions] == [
+        "b-shape",
+        "integration-approval-b",
+    ]
+    widened = build_core().repository.load()
+    assert [item.id for item in widened.concerns] == ["a", "b"]
+    assert widened.answers == before.answers
+    assert widened.phase == before.phase
+
+    ungated = build_core()
+    seed_offer(ungated, "a-dynamic", "durable")
+    seed_offer(ungated, "b-shape", "a method")
+    with pytest.raises(ResolverAwaitingAnswers) as gated:
+        await ungated.resume()
+    assert [question.id for question in gated.value.pending] == [
+        "integration-approval-b"
+    ]
+
+    resumed = build_core()
+    seed_offer(resumed, "integration-approval-b", APPROVE)
+    manifest = await resumed.resume()
+
+    assert sorted(
+        outcome.concern_id for outcome in manifest.outcomes if outcome.verified
+    ) == ["a", "b"]
+    assert manifest.final_review is not None
+    persisted = resumed.repository.load()
+    assert persisted.answers is not None
+    assert {answer.question_id for answer in persisted.answers.answers} == {
+        "integration-approval-a",
+        "a-dynamic",
+        "b-shape",
+        "integration-approval-b",
+    }
+    assert [item.status for item in persisted.progress if item.concern_id == "b"] == [
+        ConcernStatus.INTEGRATED
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_admitted_concern_bases_on_a_completed_concerns_recorded_commit(
+    tmp_path: Path,
+) -> None:
+    """Work discovered *because* an earlier concern landed may depend on it.
+
+    One admission carries as many concerns as its evidence needs, so `d`
+    rides in beside `c` rather than costing a second pass.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def build_core() -> ResolverCore:
+        return admitting_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "admit-dependent",
+            implementing_worker(
+                {"b": "b-dynamic"}, tmp_path / "state", "admit-dependent"
+            ),
+            planning_reviewer(
+                admitted_plan(admitted_concern("c", ["a"]), admitted_concern("d"))
+            ),
+        )
+
+    parked = build_core()
+    seed_approvals(parked, [concern("a"), concern("b")])
+    with pytest.raises(ResolverAwaitingAnswers):
+        await parked.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher),
+                concerns=[concern("a"), concern("b")],
+            )
+        )
+    completed = next(
+        outcome
+        for outcome in parked.repository.load().outcomes
+        if outcome.concern_id == "a"
+    )
+    assert completed.verified and completed.commit is not None
+
+    admission = await build_core().admit(
+        AdmissionRequest(statements=["the landed change needs a follow-up"])
+    )
+    assert [item.id for item in admission.concerns] == ["c", "d"]
+
+    resumed = build_core()
+    seed_offer(resumed, "b-dynamic", "durable")
+    seed_offer(resumed, "integration-approval-c", APPROVE)
+    seed_offer(resumed, "integration-approval-d", APPROVE)
+    manifest = await resumed.resume()
+
+    assert sorted(
+        outcome.concern_id for outcome in manifest.outcomes if outcome.verified
+    ) == ["a", "b", "c", "d"]
+    base = next(
+        item for item in resumed.repository.load().bases if item.concern_id == "c"
+    )
+    assert base.parent_concerns == ["a"]
+    assert base.parent_commits == [completed.commit]
+    assert base.commit == completed.commit
+
+
+@pytest.mark.asyncio
+async def test_admission_refuses_a_reused_lease_a_cycle_and_a_missing_parent(
+    tmp_path: Path,
+) -> None:
+    """Nothing is persisted unless the widened graph and leases both hold."""
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def build_core(plan: JsonObject) -> ResolverCore:
+        return admitting_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "admit-refused",
+            implementing_worker(
+                {"a": "a-dynamic"}, tmp_path / "state", "admit-refused"
+            ),
+            planning_reviewer(plan),
+        )
+
+    parked = build_core(admitted_plan(admitted_concern("b")))
+    seed_approvals(parked, [concern("a")])
+    with pytest.raises(ResolverAwaitingAnswers):
+        await parked.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+    evidence = AdmissionRequest(statements=["something else is broken"])
+
+    with pytest.raises(LeaseViolationError, match="already has a lease"):
+        await build_core(admitted_plan(admitted_concern("a"))).admit(evidence)
+    with pytest.raises(ConcernGraphError, match="contains a cycle"):
+        await build_core(
+            admitted_plan(admitted_concern("c", ["d"]), admitted_concern("d", ["c"]))
+        ).admit(evidence)
+    with pytest.raises(ConcernGraphError, match="missing nodes"):
+        await build_core(admitted_plan(admitted_concern("e", ["absent"]))).admit(
+            evidence
+        )
+
+    survivor = build_core(admitted_plan(admitted_concern("b")))
+    assert [item.id for item in survivor.repository.load().concerns] == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_admission_is_refused_once_the_review_branch_is_assembled(
+    tmp_path: Path,
+) -> None:
+    """Past integration a joining concern would have to reopen the branch."""
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def build_core() -> ResolverCore:
+        return admitting_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "admit-late",
+            implementing_worker({}, tmp_path / "state", "admit-late"),
+            planning_reviewer(admitted_plan(admitted_concern("b"))),
+        )
+
+    integrated = build_core()
+    seed_approvals(integrated, [concern("a")])
+    manifest = await integrated.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+    assert manifest.final_review is not None
+
+    with pytest.raises(ResolverInvariantError, match="review branch is assembled"):
+        await build_core().admit(AdmissionRequest(statements=["too late"]))
+
+
+def test_a_recorded_concern_is_immutable_while_a_later_one_may_join(
+    tmp_path: Path,
+) -> None:
+    """Widening is the only edit the concern set accepts."""
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="run-1",
+        phase=ResolvePhase.INVENTORY,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("a")],
+        progress=[ConcernProgress(concern_id="a")],
+    )
+    repository = ResolverStateRepository(tmp_path, "run-1")
+    repository.save(state)
+    joined = admitted("b")
+
+    repository.save(
+        state.model_copy(
+            update={
+                "concerns": [concern("a"), joined],
+                "progress": [
+                    ConcernProgress(concern_id="a"),
+                    ConcernProgress(concern_id="b"),
+                ],
+            }
+        )
+    )
+
+    assert [item.id for item in repository.load().concerns] == ["a", "b"]
+    with pytest.raises(StateTransitionError, match="recorded resolver concern"):
+        repository.save(
+            state.model_copy(
+                update={
+                    "concerns": [joined],
+                    "progress": [ConcernProgress(concern_id="b")],
+                }
+            )
+        )
+    with pytest.raises(StateTransitionError, match="cover every concern"):
+        repository.save(
+            state.model_copy(
+                update={
+                    "concerns": [concern("a"), joined],
+                    "progress": [ConcernProgress(concern_id="a")],
+                }
+            )
+        )
+
+
+def test_an_admitted_concern_must_cite_what_raised_it() -> None:
+    """A concern from intake is grounded in notes; an admitted one says so."""
+    with pytest.raises(ValueError, match="cites no evidence"):
+        Concern.model_validate(
+            concern("a").model_dump() | {"origin": ConcernOrigin.ADMITTED}
+        )
 
 
 class RecordingObserver(ResolverObserver):

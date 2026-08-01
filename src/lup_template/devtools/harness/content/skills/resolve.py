@@ -14,6 +14,30 @@ SKILL = models.Skill(
 """
             ),
             models.ResolverEntry(),
+            models.TextPart(
+                text="""
+
+## Relaying a parked question
+
+The run parks rather than guessing, so every material question is a decision that belongs to the human. Never answer one yourself — and never merely transcribe one either. A prompt and a choice list, handed over as printed, reads as a decision with no stakes and cannot be judged.
+
+**Measure before you relay.** The planner writes from notes, not from the tree, so every question's framing is a hypothesis you can check: read the code it concerns and measure what it asserts. A type probe shows whether the "redundant" overload is load-bearing or whether removing it widens every call site. A grep bounds how many sites a proposed rule would actually catch, and how many of those are correct by design. A count of the thing a note named as the worst case can demote it to a false positive outright. Measurement changes the answer often enough that relaying from the planner's prose alone is guessing with extra steps.
+
+**Relay what it takes to judge cold.** For each option: what it means concretely, what it costs, what it collides with elsewhere in this same run, and which of the concern's acceptance criteria it satisfies or fails. Explain the underlying problem from scratch when the question is unfamiliar rather than building on context the human does not have, and put it in the terms they reason in rather than the planner's vocabulary.
+
+**Give your own recommendation, marked as yours.** It is allowed to differ from the planner's, and it should when your investigation says so. When the option set mis-carves the problem, say that and offer the corrected option instead of defending the list — a wrong framing costs a whole extra round even when every detail in it is accurate. The choices are suggestions, not a menu: say so, and pass an answer in the user's own words whenever they give one.
+
+**Relay the whole batch at once.** A run parks with all of its open questions together; asking them one at a time makes the human re-establish the same context for each.
+
+## Work discovered while a run is parked
+
+A parked run is when the most is known about what else needs doing. Admit that work into the run that found it: hand the run the new evidence and only that evidence is planned, so the run keeps its id, every answer already recorded, and every concern already completed. The admitted concern then passes the same approval and material-question gates as one from intake, and may depend on a concern this run has already finished.
+
+The evidence is either a `# lup:` note you write in the file it concerns, which keeps the concern traceable to code, or the human's own words when nothing in the tree carries them; the run records which, so a statement-grounded concern is distinguishable in review. Admission is accepted at any phase before integration — past that the review branch is assembled, and a fresh run is the honest answer.
+
+So a concern discovered mid-run is never dropped and never a reason to restart. Restarting re-derives the inventory from scratch and discards every material answer already collected, which is the most expensive thing you can do at exactly the moment the run holds the most of them.
+"""
+            ),
         ]
     ),
 )

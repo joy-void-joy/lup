@@ -134,11 +134,16 @@ def progress_index(progress: list[ConcernProgress]) -> dict[str, ConcernProgress
 def validate_progress_transition(
     current: ResolveState, candidate: ResolveState
 ) -> None:
-    """Require one legal persisted lifecycle transition per changed concern."""
+    """Require one legal persisted lifecycle transition per changed concern.
+
+    An admitted concern widens the projection, so the candidate covers the
+    current run's concerns plus whatever joined it. What may never happen is
+    a concern leaving the projection: that would drop recorded work.
+    """
     before = progress_index(current.progress)
     after = progress_index(candidate.progress)
     concern_ids = {concern.id for concern in candidate.concerns}
-    if before.keys() != concern_ids or after.keys() != concern_ids:
+    if after.keys() != concern_ids or not before.keys() <= after.keys():
         raise StateTransitionError("resolver progress must cover every concern exactly")
     for identifier, prior in before.items():
         next_item = after[identifier]
@@ -199,11 +204,15 @@ class ResolverStateRepository:
             if (
                 state.source != current.source
                 or state.spec != current.spec
-                or state.concerns != current.concerns
                 or state.config_digest != current.config_digest
             ):
                 raise StateTransitionError(
-                    "resolver source, specification, and concerns are immutable"
+                    "resolver source and specification are immutable"
+                )
+            if state.concerns[: len(current.concerns)] != current.concerns:
+                raise StateTransitionError(
+                    "a recorded resolver concern is immutable; a concern "
+                    "discovered later joins the run beside them"
                 )
             validate_progress_transition(current, state)
             resumed = (

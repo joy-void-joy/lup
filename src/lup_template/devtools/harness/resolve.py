@@ -2,8 +2,9 @@
 
 Owns the console question broker, resolver-scoped Git snapshotting of
 review-note files, the per-adapter worker and reviewer session factories,
-and the driver that starts or resumes a persisted resolver run and records
-human acceptance of its review branch.
+and the driver that starts a persisted resolver run, resumes it, widens it
+with work discovered while it ran, and records human acceptance of its
+review branch.
 """
 
 import asyncio
@@ -33,9 +34,12 @@ from lup.resolver.models import (
     ACCEPT,
     ACCEPTANCE_QUESTION_ID,
     REJECT,
+    AdmissionRequest,
     Concern,
+    ConcernAdmission,
     ConcernProgress,
     InventoryNote,
+    MaterialQuestion,
     ResolvePhase,
     ResolveRequest,
     ResolverConfig,
@@ -80,17 +84,6 @@ class ResolverIntake(BaseModel):
     carried: list[str]
 
 
-# lup: Intake fixes a run's concern set once, and nothing downstream can widen
-# it. A run parked at `questions` has its `concerns.json` written, `resume` only
-# restores the persisted phase, and the CLI offers no add-concern operation — so
-# a concern surfaced mid-run (by the user, or noticed by the agent relaying the
-# questions) cannot join the run it was discovered in. It waits for the next
-# inventory pass, which means committing a note and re-deriving from scratch,
-# discarding every material answer already collected. Give the orchestrating
-# agent a way to open work against a live run — admit a concern into an existing
-# inventory, or spawn a subagent for it that reports back into the same review
-# pipeline — so discovering work mid-run is not a choice between dropping it and
-# restarting.
 def resolver_intake(comments: list[FoundComment]) -> ResolverIntake:
     """Partition scanned notes into resolver work and carried deferrals."""
     return ResolverIntake(
@@ -158,6 +151,66 @@ def parse_answer_flags(
     if len(identifiers) != len(dict.fromkeys(identifiers)):
         raise typer.BadParameter("--answer question ids must be unique")
     return {pair[0]: pair[1] for pair in pairs}
+
+
+class NoteTargetRef(BaseModel):
+    """One `file:line` target naming a note already written in the tree."""
+
+    model_config = ConfigDict(frozen=True)
+
+    file: Path
+    line: int
+
+
+def parse_note_targets(targets: list[str]) -> list[NoteTargetRef]:
+    """Split repeatable ``--admit-note`` flags into located note targets."""
+    parsed = [
+        target.rpartition(":")  # lup: ignore[string-split] — this CLI's flag grammar
+        for target in targets
+    ]
+    malformed = [
+        target
+        for target, pair in zip(targets, parsed, strict=True)
+        if not pair[0] or not pair[2].isdigit()
+    ]
+    if malformed:
+        raise typer.BadParameter(
+            "--admit-note takes <file>:<line>; got: " + ", ".join(malformed)
+        )
+    return [NoteTargetRef(file=Path(pair[0]), line=int(pair[2])) for pair in parsed]
+
+
+def admission_notes(
+    targets: list[NoteTargetRef], actionable: list[FoundComment]
+) -> list[InventoryNote]:
+    """Locate each named note among the notes a scan found actionable.
+
+    The note's own text and surrounding context are carried rather than
+    retyped, so a concern admitted from a note is grounded in exactly what
+    intake would have planned from. Deferred notes never reach ``actionable``,
+    so a target landing on parked work is refused with the rest.
+    """
+    located = {
+        f"{comment.file}:{comment.start_line}": comment for comment in actionable
+    }
+    missing = [
+        f"{target.file}:{target.line}"
+        for target in targets
+        if f"{target.file}:{target.line}" not in located
+    ]
+    if missing:
+        raise typer.BadParameter(
+            "no actionable `# lup:` note at: " + ", ".join(missing)
+        )
+    return [
+        InventoryNote(
+            file=target.file,
+            line=located[f"{target.file}:{target.line}"].start_line,
+            text=located[f"{target.file}:{target.line}"].marker_text(),
+            context=located[f"{target.file}:{target.line}"].context,
+        )
+        for target in targets
+    ]
 
 
 def offer_flag_answers(
@@ -275,6 +328,37 @@ def report_concern_evidence(concern: Concern) -> None:
     typer.echo(f"  spec: {concern.spec}")
 
 
+def report_questions(
+    questions: list[MaterialQuestion], concerns: list[Concern]
+) -> None:
+    """Print each open question under the concern evidence that raised it."""
+    evidence = {concern.id: concern for concern in concerns}
+    for concern_id in dict.fromkeys(question.concern_id for question in questions):
+        if concern_id in evidence:
+            report_concern_evidence(evidence[concern_id])
+        for question in [item for item in questions if item.concern_id == concern_id]:
+            typer.echo(f"question {question.id} (concern {concern_id}):")
+            typer.echo(f"  {question.prompt}")
+            if question.choices:
+                typer.echo("  choices: " + " | ".join(question.choices))
+            if question.recommendation is not None:
+                typer.echo(f"  recommendation: {question.recommendation}")
+            if not question.closed_choices:
+                typer.echo("  (choices are suggestions; any answer is accepted)")
+
+
+def rerun_recipe(adapter: str, run_id: str, questions: list[MaterialQuestion]) -> str:
+    """The exact command that answers these questions and drives the run on."""
+    return " ".join(
+        [
+            "uv run lup-devtools harness resolve",
+            f"--adapter {adapter}",
+            f"--run-id {run_id}",
+            *(f"--answer {question.id}=<value>" for question in questions),
+        ]
+    )
+
+
 def report_awaiting(
     parked: ResolverAwaitingAnswers,
     adapter: str,
@@ -285,31 +369,20 @@ def report_awaiting(
     typer.echo("Resolver run parked awaiting material answers.")
     for problem in parked.problems:
         typer.echo(f"  problem: {problem}")
-    evidence = {concern.id: concern for concern in concerns}
-    for concern_id in dict.fromkeys(question.concern_id for question in parked.pending):
-        if concern_id in evidence:
-            report_concern_evidence(evidence[concern_id])
-        for question in [
-            pending for pending in parked.pending if pending.concern_id == concern_id
-        ]:
-            typer.echo(f"question {question.id} (concern {concern_id}):")
-            typer.echo(f"  {question.prompt}")
-            if question.choices:
-                typer.echo("  choices: " + " | ".join(question.choices))
-            if question.recommendation is not None:
-                typer.echo(f"  recommendation: {question.recommendation}")
-            if not question.closed_choices:
-                typer.echo("  (choices are suggestions; any answer is accepted)")
-    recipe = " ".join(
-        [
-            "uv run lup-devtools harness resolve",
-            f"--adapter {adapter}",
-            f"--run-id {run_id}",
-            *(f"--answer {question.id}=<value>" for question in parked.pending),
-        ]
-    )
+    report_questions(parked.pending, concerns)
     typer.echo("Relay the questions to the human, then rerun:")
-    typer.echo(f"  {recipe}")
+    typer.echo(f"  {rerun_recipe(adapter, run_id, parked.pending)}")
+
+
+def report_admission(admission: ConcernAdmission, adapter: str, run_id: str) -> None:
+    """Print what joined the run and the gates it still has to pass."""
+    typer.echo(
+        f"Admitted {len(admission.concerns)} concern(s) into {run_id} "
+        f"at phase {admission.phase}."
+    )
+    report_questions(admission.questions, admission.concerns)
+    typer.echo("Relay the new questions to the human, then rerun:")
+    typer.echo(f"  {rerun_recipe(adapter, run_id, admission.questions)}")
 
 
 def resolver_git(
@@ -385,6 +458,19 @@ def resolver_source_snapshot(
     return SourceSnapshot(branch=branch, commit=commit)
 
 
+def admission_request(
+    statements: list[str], note_targets: list[str]
+) -> AdmissionRequest | None:
+    """Build the evidence one invocation asked to admit, if it asked at all."""
+    if not statements and not note_targets:
+        return None
+    targets = parse_note_targets(note_targets)
+    scanned = resolver_intake(scan_tracked(find_feedback)).actionable if targets else []
+    return AdmissionRequest(
+        notes=admission_notes(targets, scanned), statements=statements
+    )
+
+
 def run_resolve(
     adapter: str,
     run_id: str | None,
@@ -393,9 +479,12 @@ def run_resolve(
     abort_reason: str | None = None,
     wait_seconds: float = 0.0,
     supervisor: SupervisorSpawn | None = None,
+    admission: AdmissionRequest | None = None,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
+    if abort_reason is not None and admission is not None:
+        raise typer.BadParameter("a run cannot be widened and ended in one command")
     if human_decision is not None:
         provided[ACCEPTANCE_QUESTION_ID] = ACCEPT if human_decision else REJECT
     compositions = harness_compositions(adapter)
@@ -604,6 +693,13 @@ def run_resolve(
                         f"[abort] {record.action} {record.path}: {record.reason}"
                     )
                 typer.echo(f"aborted {resolved_run_id}: {abort_reason}")
+                return
+            if admission is not None:
+                if not core.repository.exists():
+                    raise typer.BadParameter(
+                        f"no resolver run {resolved_run_id!r} to admit into"
+                    )
+                report_admission(await core.admit(admission), adapter, resolved_run_id)
                 return
             try:
                 if core.repository.exists():
