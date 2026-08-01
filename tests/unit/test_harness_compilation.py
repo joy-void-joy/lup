@@ -35,6 +35,8 @@ from lup.harness.materialization import AtomicMaterializer, MaterializationConfl
 from lup.harness.validation import validated_tree
 from lup.harness.models import (
     GUIDANCE_CHARACTER_BUDGET,
+    INVOCATION_SIGILS,
+    Agent,
     Argument,
     Artifact,
     ArgumentsRef,
@@ -44,6 +46,7 @@ from lup.harness.models import (
     Harness,
     InvocationArgument,
     NativePath,
+    Plugin,
     PluginPath,
     PromptDocument,
     PromptPart,
@@ -646,15 +649,139 @@ def test_retired_native_catalog_paths_stay_deleted() -> None:
     assert not (harness / "importer.py").exists()
 
 
-def test_canonical_text_rejects_provider_invocation_spelling() -> None:
-    harness = portable_harness()
-    payload = harness.model_dump(mode="python")
-    payload["guidance"] = PromptDocument(parts=[TextPart(text="Run $lup:merge")])
+INVOCATION_IN_PROSE = "then run /lup:merge and wait"
 
-    source = Harness.model_validate(payload)
+PROSE_DECLARATIONS: dict[
+    str, Callable[[str], Agent | Argument | Plugin | SemanticPart | Skill]
+] = {
+    "Agent.description": lambda prose: Agent(
+        id="agent.probe",
+        name="probe",
+        description=prose,
+        prompt=PromptDocument(parts=[TextPart(text="body")]),
+    ),
+    "Argument.description": lambda prose: Argument(name="target", description=prose),
+    "AskUser.question": lambda prose: AskUser(question=prose),
+    "Delegate.prompt": lambda prose: Delegate(
+        subagent_type="lup:trace-explorer", prompt=prose
+    ),
+    "Plugin.description": lambda prose: Plugin(
+        id="plugin.probe",
+        name="probe",
+        marketplace="probe",
+        version="0.0.0",
+        description=prose,
+        skills=[],
+        agents=[],
+    ),
+    "RelocateSession.path": lambda prose: RelocateSession(path=prose),
+    "RequestApproval.action": lambda prose: RequestApproval(
+        action=prose, reason="it is visible"
+    ),
+    "RequestApproval.reason": lambda prose: RequestApproval(
+        action="pushing", reason=prose
+    ),
+    "Skill.argument_hint": lambda prose: Skill(
+        id="skill.probe",
+        name="probe",
+        description="Probe",
+        argument_hint=prose,
+        prompt=PromptDocument(parts=[TextPart(text="body")]),
+    ),
+    "Skill.description": lambda prose: Skill(
+        id="skill.probe",
+        name="probe",
+        description=prose,
+        prompt=PromptDocument(parts=[TextPart(text="body")]),
+    ),
+    "TextPart.text": lambda prose: TextPart(text=prose),
+}
+"""Every field a declaration holds as free text, and how one is declared.
 
-    with pytest.raises(ValueError, match="provider invocation syntax"):
-        compile_codex(source)
+A native tree renders each of these as prose, so each is the whole of the way
+an invocation could reach a reader who cannot use it."""
+
+
+NAMES_RATHER_THAN_PROSE = [
+    "Agent.id",
+    "Harness.generator_version",
+    "Plugin.id",
+    "Plugin.version",
+    "Skill.id",
+]
+"""Declared strings that identify or version a declaration instead of teaching it.
+
+None of these reaches a reader as words, so none is portable prose. Every other
+free-text field a prompt or its discovery metadata carries is, and a new field
+has to join one list or the other rather than quietly accepting anything."""
+
+
+def test_every_free_text_declaration_field_is_portable_prose() -> None:
+    """A field typed plain ``str`` is the one way back to scanning afterwards."""
+    union, _ = get_args(PromptPart.__value__)
+    declarations = [*get_args(union), Argument, Skill, Agent, Plugin, Harness]
+
+    unconstrained = [
+        f"{declaration.__name__}.{name}"
+        for declaration in declarations
+        for name, field in declaration.model_fields.items()
+        if not field.metadata and field.annotation in (str, str | None)
+    ]
+
+    assert sorted(unconstrained) == NAMES_RATHER_THAN_PROSE
+
+
+@pytest.mark.parametrize("field", sorted(PROSE_DECLARATIONS))
+def test_declaring_an_invocation_in_prose_is_refused(field: str) -> None:
+    """The words are refused where an author writes them, not where they compile."""
+    declare = PROSE_DECLARATIONS[field]
+
+    assert declare("then run the merge skill and wait")
+
+    with pytest.raises(ValueError, match="portable prose spells"):
+        declare(INVOCATION_IN_PROSE)
+
+
+def test_a_refused_declaration_names_its_field_and_the_offending_spelling() -> None:
+    """Naming both is what lets a contributor go straight to the words."""
+    with pytest.raises(ValueError) as refusal:
+        Agent(
+            id="agent.probe",
+            name="probe",
+            description=INVOCATION_IN_PROSE,
+            prompt=PromptDocument(parts=[TextPart(text="body")]),
+        )
+
+    report = str(refusal.value)
+    assert "Agent" in report
+    assert "description" in report
+    assert "'/lup:merge'" in report
+
+
+def test_no_runtime_spells_an_invocation_portable_prose_would_admit() -> None:
+    """The shape is syntax, so each runtime proves its own sigil is one of them.
+
+    That is what lets the declaration layer refuse an invocation without
+    knowing which plugins exist or which runtime will read the words.
+    """
+    for runtime in (ClaudeSpellings(), CodexSpellings()):
+        for spelling in (
+            runtime.render(SkillInvocation(plugin="lup", skill="merge")),
+            runtime.invocation_pattern("lup", "*"),
+            runtime.invocation_pattern("lup", "<name>"),
+        ):
+            assert spelling[0] in INVOCATION_SIGILS
+            with pytest.raises(ValueError, match="portable prose spells"):
+                TextPart(text=f"Run {spelling}")
+
+
+def test_deserializing_a_harness_refuses_an_invocation_in_guidance() -> None:
+    """Reading a harness back is a declaration too, and refuses the same words."""
+    source = portable_harness().model_dump()
+    source["guidance"]["parts"].append({"type": "text", "text": "Run $lup:merge"})
+
+    with pytest.raises(ValueError, match="portable prose spells"):
+        Harness.model_validate(source)
 
 
 def test_artifact_paths_reject_backslash_traversal() -> None:

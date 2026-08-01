@@ -87,7 +87,11 @@ Codex authentication and settings.
 `lup-devtools setup profile`.
 `--codex-home` or an inherited `CODEX_HOME` selects an explicit home instead.
 
-Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `$lup:*` is identical everywhere. Codex resolves the marketplace from the repository's `.agents/plugins/marketplace.json` and installs the plugin into its own cache, verifying the digest before every launch; `lup-devtools dev plugin name` (run by `"""
+Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `"""
+        ),
+        models.SkillPattern(plugin="lup", placeholder="*"),
+        models.TextPart(
+            text=r"""` is identical everywhere. Codex resolves the marketplace from the repository's `.agents/plugins/marketplace.json` and installs the plugin into its own cache, verifying the digest before every launch; `lup-devtools dev plugin name` (run by `"""
         ),
         models.SkillInvocation(plugin="lup", skill="init"),
         models.TextPart(text=r"""` and `"""),

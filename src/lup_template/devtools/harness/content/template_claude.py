@@ -114,7 +114,11 @@ the local Lup plugin and the active profile's account (`CLAUDE_CONFIG_DIR`).
 `lup-devtools usage claude` reports usage for the chosen profile. Profiles are managed
 with `lup-devtools setup profile`.
 
-Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `/lup:*` is identical everywhere. Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name like `lup`/`local` collides across repos and an install from one shadows the others; `lup-devtools dev plugin name` (run by `"""
+Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `"""
+        ),
+        models.SkillPattern(plugin="lup", placeholder="*"),
+        models.TextPart(
+            text=r"""` is identical everywhere. Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name like `lup`/`local` collides across repos and an install from one shadows the others; `lup-devtools dev plugin name` (run by `"""
         ),
         models.SkillInvocation(plugin="lup", skill="init"),
         models.TextPart(text=r"""` and `"""),
