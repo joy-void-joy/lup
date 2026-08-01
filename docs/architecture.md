@@ -7,6 +7,16 @@ with another capability through multiple inheritance. Small callbacks remain
 typed callables. `lup.codescan.capabilities` enforces the mechanical shape
 across resolved project imports with the audited `abc-capability` rule.
 
+An entry point is not a capability. `SessionFactory` is a concrete class over
+one typed `SessionOpener` callable: opening a session is a callback, and the
+class holding it is the surface applications construct and pass around, so
+adapters, wrappers, and tests build `SessionFactory(opener)` rather than derive
+from an ABC. Shared behavior then lives where every caller reaches it —
+`SessionFactory.query(request)` runs one turn on one session, and the free
+`lup.query(factory, request)` alias spells the same operation where a
+composition root reads better with the factory as an argument. `ModelRouter`
+is the same shape over the `ModelMatcher` capability.
+
 Rich behavior is explicit data flow. `SessionHandle` contains a `Session` and
 an optional `ForkSession`; `TurnHandle[T]` contains a `Turn[T]` and optional
 live events, interrupt, and steer capabilities. These frozen Pydantic values
@@ -15,7 +25,8 @@ do not implement behavior or hide a provider. Unsupported behavior is absent.
 The runtime sequence is:
 
 1. an application builds a validated Claude or Codex config;
-2. immutable profile/endpoint transforms run before factory construction;
+2. immutable profile/endpoint transforms run before factory construction,
+   applied directly or through a resolver's `session_factory()`;
 3. `SessionFactory.open()` owns provider resources;
 4. `Session.start()` creates a fresh output store, finishes tool binding, and
    waits for native turn acknowledgement;

@@ -8,14 +8,13 @@ from lup.adapters.claude.runtime import (
     create_claude_session_factory,
 )
 from lup.runtime.models import TurnInput, turn_request
-from lup.runtime.query import query
 from lup.runtime.wrappers import (
     BudgetConfig,
     CorrectionConfig,
-    DecoratingSessionFactory,
     PersistenceConfig,
     RecoveryConfig,
     TimeoutConfig,
+    decorated_session_factory,
 )
 from lup.types import Usage
 
@@ -34,7 +33,7 @@ async def main() -> None:
             system_prompt="Submit a concise structured result.",
         )
     )
-    factory = DecoratingSessionFactory(
+    factory = decorated_session_factory(
         native,
         timeout=TimeoutConfig(seconds=120),
         budget=BudgetConfig(maximum_usd=1.0, usage_cost=reported_cost),
@@ -43,9 +42,8 @@ async def main() -> None:
         persistence=PersistenceConfig(directory=Path("tmp/example-results")),
         serialized=True,
     )
-    result = await query(
-        factory,
-        turn_request(TurnInput(text="Explain this wrapper stack."), Summary),
+    result = await factory.query(
+        turn_request(TurnInput(text="Explain this wrapper stack."), Summary)
     )
     print(result.output.summary)
 

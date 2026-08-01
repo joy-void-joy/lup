@@ -6,14 +6,14 @@ them; no runtime compatibility facade exists.
 | Removed surface | Replacement |
 |---|---|
 | `Engine.client()` / `Client.session()` | adapter `create_*_session_factory(config)`, then `SessionFactory.open()` |
-| `Client.query()` / broad `query(**options)` | `query(factory, TurnRequest[T])` |
+| `Client.query()` / broad `query(**options)` | `SessionFactory.query(TurnRequest[T])`, or the free `query(factory, request)` alias |
 | `Client.stream()` / `ReplayStream` | optional `TurnHandle.events`; completed `TurnResult.blocks` |
 | old `Session.send(text)` | `handle = await Session.start(turn_request(TurnInput(text=...)))`; then `await handle.turn.result()` |
 | `Session.interrupt()` | optional `TurnHandle.interrupt.interrupt()` |
 | `LupResponse.output(Model)` | strict `TurnResult[Model].output` |
 | `output_schema` / `output_format` | `TurnRequest(output_type=Model)` and turn-bound `submit_output` |
 | template `create_output_tool()` finalization | session-owned per-turn binding and store |
-| `Engine.profiles()` / `Profile.select()` | adapter profile resolver plus immutable `ConfigTransform.apply()` |
+| `Engine.profiles()` / `Profile.select()` | adapter `ProfileResolver.session_factory(base, name)`, or `resolve(name)` plus immutable `ConfigTransform.apply()` |
 | `Engine.background()` / `BackgroundDriver` | `runtime.background.BackgroundAgent(factory, state_to_request, ...)` |
 | `Engine.builtin_tools()` / provider tables | adapter `NativeEventDecoder` plus semantic events; explicit local native names only where an SDK config requires them |
 | `claude-compat` / `openai-compat` engines | `ClaudeCompatibilityTransform` / `CodexCompatibilityTransform` |
@@ -40,17 +40,14 @@ After:
 
 ```python
 factory = create_claude_session_factory(ClaudeSessionConfig(model="..."))
-result = await query(
-    factory,
-    turn_request(TurnInput(text="summarize"), Summary),
-)
+result = await factory.query(turn_request(TurnInput(text="summarize"), Summary))
 summary = result.output
 ```
 
 Put provider selection in one concrete application composition root. Pass the
 resulting `SessionFactory` into neutral orchestration, background agents,
 subagent recipes, and resolver entries. Apply timeout, budget, recovery,
-correction, persistence, and serialization with `DecoratingSessionFactory`.
+correction, persistence, and serialization with `decorated_session_factory()`.
 
 Codex dynamic tools are currently thread-start scoped. Typed resume and schema
 changes in one thread fail before input; this is an explicit native capability

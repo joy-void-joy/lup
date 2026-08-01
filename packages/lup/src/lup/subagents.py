@@ -20,7 +20,7 @@ from collections.abc import Callable
 from pydantic import BaseModel, Field
 
 from lup.mcp import LupMcpTool, ToolError, lup_tool
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
 from lup.runtime.query import query
 from lup.types import SubagentSpec

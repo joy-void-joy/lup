@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
@@ -14,7 +14,6 @@ from lup.runtime.contracts import (
     EventStream,
     Interrupt,
     Session,
-    SessionFactory,
     Steer,
     Turn,
 )
@@ -27,6 +26,7 @@ from lup.runtime.errors import (
     TurnTimeoutError,
     ValidationAttempt,
 )
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
@@ -622,58 +622,42 @@ class SerializedSession(Session):
         )
 
 
-class DecoratingSessionFactory(SessionFactory):
+def decorated_session_factory(
+    inner: SessionFactory,
+    *,
+    timeout: TimeoutConfig | None = None,
+    budget: BudgetConfig | None = None,
+    recovery: RecoveryConfig | None = None,
+    correction: CorrectionConfig | None = None,
+    persistence: PersistenceConfig | None = None,
+    tracing: TracingConfig | None = None,
+    usage: UsageConfig | None = None,
+    display: DisplayConfig | None = None,
+    serialized: bool = False,
+) -> SessionFactory:
     """Apply configured whole-turn decorators to every opened session."""
-
-    def __init__(
-        self,
-        inner: SessionFactory,
-        *,
-        timeout: TimeoutConfig | None = None,
-        budget: BudgetConfig | None = None,
-        recovery: RecoveryConfig | None = None,
-        correction: CorrectionConfig | None = None,
-        persistence: PersistenceConfig | None = None,
-        tracing: TracingConfig | None = None,
-        usage: UsageConfig | None = None,
-        display: DisplayConfig | None = None,
-        serialized: bool = False,
-    ) -> None:
-        self.inner = inner
-        self.timeout = timeout
-        self.budget = budget
-        self.recovery = recovery
-        self.correction = correction
-        self.persistence = persistence
-        self.tracing = tracing
-        self.usage = usage
-        self.display = display
-        self.serialized = serialized
-
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_decorated(resume)
 
     @asynccontextmanager
     async def open_decorated(
-        self, resume: SessionId | None
+        resume: SessionId | None = None,
     ) -> AsyncGenerator[SessionHandle]:
-        async with self.inner.open(resume) as handle:
+        async with inner.open(resume) as handle:
             session: Session = DecoratingSession(
                 handle.session,
-                timeout=self.timeout,
-                budget=self.budget,
-                recovery=self.recovery,
-                correction=self.correction,
-                persistence=self.persistence,
-                tracing=self.tracing,
-                usage=self.usage,
-                display=self.display,
+                timeout=timeout,
+                budget=budget,
+                recovery=recovery,
+                correction=correction,
+                persistence=persistence,
+                tracing=tracing,
+                usage=usage,
+                display=display,
             )
-            if self.serialized:
+            if serialized:
                 session = SerializedSession(session)
             yield SessionHandle(session=session, fork=handle.fork)
+
+    return SessionFactory(open_decorated)
 
 
 def failure_from_result[T: BaseModel | None](

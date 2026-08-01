@@ -2,6 +2,8 @@
 
 import asyncio
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
@@ -23,6 +25,7 @@ from lup.runtime.composition import (
     submission_gate_resolver,
 )
 from lup.runtime.contracts import Interrupt, TurnToolBinder
+from lup.runtime.factory import SessionFactory
 from lup.runtime.errors import (
     ProviderTurnError,
     StructuredOutputError,
@@ -31,6 +34,7 @@ from lup.runtime.errors import (
     TurnInterruptedError,
 )
 from lup.runtime.models import (
+    SessionHandle,
     SessionId,
     TurnIdentifiers,
     TurnId,
@@ -41,6 +45,7 @@ from lup.runtime.models import (
 )
 from lup.runtime.output import FileSubmittedOutputStore, submit_output
 from lup.runtime.output import InMemorySubmittedOutputStore
+from lup.runtime.query import query
 
 
 class OutputA(BaseModel):
@@ -104,6 +109,35 @@ def accepted_turn(sequence: int, interrupt: Interrupt | None = None) -> Accepted
         complete=complete,
         interrupt=interrupt,
     )
+
+
+@pytest.mark.asyncio
+async def test_factory_query_runs_one_typed_turn_and_closes_the_session() -> None:
+    binder = RecordingBinder()
+    closed: list[bool] = []
+
+    async def start(_text: str) -> AcceptedTurn:
+        assert binder.current is not None
+        binder.current.store.write(OutputA(value=7))
+        return accepted_turn(1)
+
+    @asynccontextmanager
+    async def open_session(
+        _resume: SessionId | None = None,
+    ) -> AsyncGenerator[SessionHandle]:
+        try:
+            yield SessionHandle(session=ComposedSession(start, binder))
+        finally:
+            closed.append(True)
+
+    factory = SessionFactory(open_session)
+
+    result = await factory.query(turn_request(TurnInput(text="a"), OutputA))
+    aliased = await query(factory, turn_request(TurnInput(text="a"), OutputA))
+
+    assert result.output.value == 7
+    assert aliased.output.value == result.output.value
+    assert closed == [True, True]
 
 
 @pytest.mark.asyncio

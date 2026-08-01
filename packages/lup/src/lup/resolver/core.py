@@ -70,10 +70,10 @@ from lup.resolver.orchestrator import (
 )
 from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
 from lup.resolver.tools import WAIT_CONTRACT
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.query import query
-from lup.runtime.wrappers import CorrectionConfig, DecoratingSessionFactory
+from lup.runtime.wrappers import CorrectionConfig, decorated_session_factory
 
 
 class ResolverInvariantError(RuntimeError):
@@ -96,7 +96,7 @@ def corrective[T](
     """
 
     def factory(argument: T) -> SessionFactory:
-        return DecoratingSessionFactory(
+        return decorated_session_factory(
             recipe(argument), correction=CorrectionConfig(cycles=2)
         )
 

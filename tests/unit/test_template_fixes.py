@@ -1,19 +1,34 @@
 """Regression tests for the provider-neutral application template."""
 
-from datetime import datetime
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncGenerator
+from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from lup_template.agent import prompts
 from lup.reflect import ReviewGate
 from lup_template.agent.config import aux_model, engine_for_settings, settings
 from lup_template.agent.core import reflection_submission_gate
-from lup.runtime.contracts import SessionFactory
-from lup.runtime.models import SessionHandle, SessionId
-from lup.runtime.wrappers import DecoratingSessionFactory
+from lup.runtime.contracts import Session, Turn
+from lup.runtime.factory import SessionFactory
+from lup.runtime.models import (
+    SessionHandle,
+    SessionId,
+    TurnBlock,
+    TurnHandle,
+    TurnId,
+    TurnIdentifiers,
+    TurnInput,
+    TurnRequest,
+    TurnResult,
+    TurnTextBlock,
+    turn_request,
+)
 from lup.telemetry.trace import TraceLogger
+from lup.types import Usage
 from lup.workspace.notes import NotesConfig
 from lup_template.agent.core import decorate_factory, provider_factory
 from lup_template.agent.models import AgentOutput
@@ -148,15 +163,52 @@ async def test_reflection_gate_is_the_typed_submission_gate() -> None:
     assert (await gate(output)).accepted
 
 
-class UnopenedFactory(SessionFactory):
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        raise RuntimeError(f"fixture factory is not opened: {resume}")
+class StaticTurn[T: BaseModel | None](Turn[T]):
+    def __init__(self, result: TurnResult[T]) -> None:
+        self.value = result
+
+    async def result(self) -> TurnResult[T]:
+        return self.value
 
 
-def test_main_factory_decoration_wires_persistence_display_and_trace(
-    tmp_path: Path,
+class StaticSession(Session):
+    """Complete every turn with the same successful canned result."""
+
+    def __init__(self, blocks: list[TurnBlock]) -> None:
+        self.blocks = blocks
+
+    async def start[T: BaseModel | None](
+        self, request: TurnRequest[T]
+    ) -> TurnHandle[T]:
+        result = TurnResult[T].model_validate(
+            {
+                "output": None,
+                "messages": [],
+                "blocks": self.blocks,
+                "usage": Usage(),
+                "duration": timedelta(),
+                "identifiers": TurnIdentifiers(
+                    session=SessionId(value="decorated"),
+                    turn=TurnId(value="turn-1"),
+                ),
+            }
+        )
+        return TurnHandle[T](turn=StaticTurn(result))
+
+
+def static_session_factory(blocks: list[TurnBlock]) -> SessionFactory:
+    @asynccontextmanager
+    async def open_static(
+        _resume: SessionId | None = None,
+    ) -> AsyncGenerator[SessionHandle]:
+        yield SessionHandle(session=StaticSession(blocks))
+
+    return SessionFactory(open_static)
+
+
+@pytest.mark.asyncio
+async def test_main_factory_decoration_wires_persistence_display_and_trace(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     notes = NotesConfig(
         session=tmp_path / "session",
@@ -164,13 +216,15 @@ def test_main_factory_decoration_wires_persistence_display_and_trace(
         trace_log=tmp_path / "logs" / "trace.md",
     )
     trace = TraceLogger(trace_path=notes.trace_log, title="test")
+    inner = static_session_factory([TurnTextBlock(text="decorated turn")])
 
-    decorated = decorate_factory(UnopenedFactory(), notes=notes, trace_logger=trace)
+    decorated = decorate_factory(inner, notes=notes, trace_logger=trace)
+    result = await decorated.query(turn_request(TurnInput(text="run one turn")))
 
-    assert isinstance(decorated, DecoratingSessionFactory)
-    assert decorated.persistence is not None
-    assert decorated.display is not None
-    assert decorated.tracing is not None
+    assert result.blocks == [TurnTextBlock(text="decorated turn")]
+    assert len(list((notes.trace_log.parent / "turns").glob("*.json"))) == 1
+    assert notes.trace_log.exists()
+    assert "decorated turn" in capsys.readouterr().out
 
 
 def test_codex_rejects_explicit_claude_only_options(

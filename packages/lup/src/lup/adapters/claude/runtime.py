@@ -22,10 +22,10 @@ from lup.runtime.contracts import (
     EventStream,
     ForkSession,
     Interrupt,
-    SessionFactory,
     TurnToolBinder,
 )
 from lup.runtime.errors import ProviderTurnError, TurnFailure
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     BlockCompletedEvent,
     BlockDeltaEvent,
@@ -109,11 +109,9 @@ class ClaudeSessionConfig(BaseModel):
 class ClaudeConversationState:
     """Adapter-private reconnect/resume state for one Lup session."""
 
-    def __init__(
-        self, factory: "ClaudeSessionFactory", resume: SessionId | None
-    ) -> None:
-        self.factory = factory
-        self.config = factory.config
+    def __init__(self, opener: "ClaudeSessionOpener", resume: SessionId | None) -> None:
+        self.opener = opener
+        self.config = opener.config
         self.resume = resume.value if resume is not None else None
         self.session_id = self.resume or str(uuid4())
         self.client: claude.ClaudeSDKClient | None = None
@@ -132,7 +130,7 @@ class ClaudeConversationState:
             return self.client
         import claude_agent_sdk as claude
 
-        options = self.factory.build_options(
+        options = self.opener.build_options(
             binding=self.binding,
             resume=self.resume,
             session_id=None if self.resume is not None else self.session_id,
@@ -368,12 +366,12 @@ class ClaudeFork(ForkSession):
                 self.state.session_id,
                 directory,
             )
-        factory = self.state.factory
-        async with factory.open(SessionId(value=result.session_id)) as handle:
+        opener = self.state.opener
+        async with opener.open_session(SessionId(value=result.session_id)) as handle:
             yield handle
 
 
-class ClaudeSessionFactory(SessionFactory):
+class ClaudeSessionOpener:
     """Open independently configured reconnecting Claude sessions."""
 
     def __init__(self, config: ClaudeSessionConfig) -> None:
@@ -395,14 +393,9 @@ class ClaudeSessionFactory(SessionFactory):
             self.config, binding=binding, resume=resume, session_id=session_id
         )
 
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_session(resume)
-
     @asynccontextmanager
     async def open_session(
-        self, resume: SessionId | None
+        self, resume: SessionId | None = None
     ) -> AsyncGenerator[SessionHandle]:
         state = self.create_state(resume)
         session = ComposedSession(
@@ -423,7 +416,7 @@ def create_claude_session_factory(
     config: ClaudeSessionConfig,
 ) -> SessionFactory:
     """Create the named Claude runtime composition root."""
-    return ClaudeSessionFactory(config)
+    return SessionFactory(ClaudeSessionOpener(config).open_session)
 
 
 # The fully qualified name of the turn-bound submission tool as Claude Code
