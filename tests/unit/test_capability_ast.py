@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from lup.codescan.capabilities import PythonSource, audit_capabilities
+from lup.codescan.capabilities import audit_capabilities
+from lup.codescan.project import PythonSource
 
 
 def source(text: str, name: str = "sample") -> PythonSource:

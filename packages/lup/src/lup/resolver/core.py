@@ -50,6 +50,7 @@ from lup.resolver.models import (
     ResolveManifest,
     ResolvePhase,
     ResolveRequest,
+    ResolverSource,
     ReviewNote,
     ResolverConfig,
     ResolveState,
@@ -79,7 +80,6 @@ class ResolverInvariantError(RuntimeError):
 
 type WorkerFactoryRecipe = Callable[[WorkerContext], SessionFactory]
 type ReviewerFactoryRecipe = Callable[[Path], SessionFactory]
-type ResolverInput = ResolveRequest | ResolveInventory
 
 
 def corrective[T](
@@ -246,14 +246,10 @@ class ResolverCore:
         self.state_lock = asyncio.Lock()
         self.state: ResolveState | None = None
 
-    async def run(self, source: ResolverInput) -> ResolveManifest:
+    async def run(self, source: ResolverSource) -> ResolveManifest:
         """Run through final review and stop at the human acceptance boundary."""
         with self.repository.exclusive():
-            inventory = (
-                await self.plan_inventory(source)
-                if isinstance(source, ResolveRequest)
-                else source
-            )
+            inventory = await source.inventory(self.plan_inventory)
             return await self.run_exclusive(inventory)
 
     async def plan_inventory(self, request: ResolveRequest) -> ResolveInventory:
@@ -582,11 +578,13 @@ class ResolverCore:
                     ],
                     return_exceptions=True,
                 )
-                executions = [
-                    result for result in results if isinstance(result, ConcernExecution)
-                ]
                 failures = [
                     result for result in results if isinstance(result, BaseException)
+                ]
+                executions = [
+                    result
+                    for result in results
+                    if not isinstance(result, BaseException)
                 ]
                 for execution in executions:
                     outcomes.append(execution.outcome)

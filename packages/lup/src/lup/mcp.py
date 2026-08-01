@@ -148,7 +148,14 @@ type McpServerEntry = LupMcpServerConfig | RawMcpServerConfig
 """One MCP server in a session: an in-process ``LupMcpServerConfig`` carrying a
 live ``Server`` instance, or a transport config for an external one. An adapter
 narrows by ``isinstance(entry, LupMcpServerConfig)`` — the in-process case has a
-``.server`` to register, the external case is passed to the SDK as-is."""
+``.server`` to register, the external case is passed to the SDK as-is.
+
+This is a seam, not a union we declare variants of: the external arm is a
+``TypedDict`` mirroring a vendor's wire shape, which has no base and can carry
+no method to answer with. Narrowing it separates something we host from a
+foreign payload, and each adapter projects the hosted case into its own native
+config — a conversion that would drag that vendor's spelling back across the
+boundary if the neutral model answered it."""
 
 
 def create_mcp_server(
@@ -230,7 +237,7 @@ def server_tool_names(server: McpServerEntry) -> list[str]:
     introspected without connecting, so they yield an empty list.
     """
     match server:
-        case LupMcpServerConfig():
+        case LupMcpServerConfig():  # lup: ignore[own-model-dispatch] — seam arm
             return list(server.tool_names)
         case _:
             return []

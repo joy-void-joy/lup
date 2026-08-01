@@ -16,7 +16,7 @@ A spec without a ``model`` inherits the session's main model on every
 backend; pinning one (as the specs below do) is a deliberate cost/skill
 choice that holds regardless of ``AGENT_SDK``.
 
-Subagents are one of several agent shapes — ``.claude/PATTERNS.md`` is
+Subagents are one of several agent shapes — ``docs/orchestration.md`` is
 the full catalog. Where the siblings live:
 
 - Nested agents: a one-shot :func:`lup.runtime.query.query` inside a

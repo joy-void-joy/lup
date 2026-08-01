@@ -1,6 +1,5 @@
 """Application composition roots over Lup's provider-neutral runtime."""
 
-import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -38,13 +37,8 @@ from lup.runtime.models import (
     SubmissionDecision,
     SubmissionGate,
     SubmissionGateResolver,
-    TurnBlock,
     TurnInput,
     TurnResult,
-    TurnTextBlock,
-    TurnThinkingBlock,
-    TurnToolCallBlock,
-    TurnToolResultBlock,
     turn_request,
 )
 from lup.runtime.usage import per_mtok_usage_cost
@@ -67,11 +61,6 @@ from lup.telemetry.metrics import (
 )
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
-    LupContentBlock,
-    LupTextBlock,
-    LupThinkingBlock,
-    LupToolResultBlock,
-    LupToolUseBlock,
     SubagentSpec,
     Usage,
     UsageCost,
@@ -396,7 +385,7 @@ def decorate_factory(
         async def display_result(record: DisplayRecord) -> None:
             for block in record.blocks:
                 print_block(
-                    telemetry_block(block),
+                    block.telemetry_block,
                     trace=trace_logger,
                     colors=colors,
                 )
@@ -404,7 +393,7 @@ def decorate_factory(
         async def trace_result(record: TraceRecord) -> None:
             if not record.succeeded and record.failure is not None:
                 for block in record.failure.blocks:
-                    trace_logger.log_block(telemetry_block(block))
+                    trace_logger.log_block(block.telemetry_block)
                 trace_logger.log_text(record.failure.message, heading="Turn error")
                 trace_logger.emit_event(
                     TraceEvent(
@@ -427,26 +416,6 @@ def decorate_factory(
         tracing=tracing,
         display=display,
     )
-
-
-def telemetry_block(block: TurnBlock) -> LupContentBlock:
-    """Project one portable completed block into the existing telemetry view."""
-    match block:
-        case TurnTextBlock(text=text):
-            return LupTextBlock(text=text)
-        case TurnThinkingBlock(thinking=thinking, redacted=redacted):
-            return LupThinkingBlock(thinking=thinking, redacted=redacted)
-        case TurnToolCallBlock(id=identifier, name=name, arguments=arguments):
-            return LupToolUseBlock(id=identifier, name=name, input=arguments)
-        case TurnToolResultBlock(
-            tool_call_id=identifier, content=content, is_error=is_error
-        ):
-            rendered = (
-                json.dumps({"is_error": True, "content": content})
-                if is_error
-                else content
-            )
-            return LupToolResultBlock(tool_use_id=identifier, content=rendered)
 
 
 def build_session_factory(
@@ -642,7 +611,7 @@ def resolve_resume_token(reference: str) -> SessionId:
 def result_text[T: BaseModel | None](result: TurnResult[T]) -> str:
     """Concatenate completed portable text blocks."""
     return "\n\n".join(
-        block.text for block in result.blocks if isinstance(block, TurnTextBlock)
+        text for block in result.blocks if (text := block.text_payload) is not None
     )
 
 
@@ -650,12 +619,13 @@ def result_sources[T: BaseModel | None](result: TurnResult[T]) -> list[str]:
     """Extract source URLs and search queries from semantic tool calls."""
     sources: list[str] = []  # lup: ignore[empty-collection]
     for block in result.blocks:
-        if not isinstance(block, TurnToolCallBlock):
+        arguments = block.tool_arguments
+        if arguments is None:
             continue
-        if block.name in ("FetchUrl", "WebFetch"):
-            value = block.arguments.get("url")  # lup: ignore[dict-get]
-        elif block.name in ("SearchWeb", "WebSearch"):
-            value = block.arguments.get("query")  # lup: ignore[dict-get]
+        if block.tool_call_name in ("FetchUrl", "WebFetch"):
+            value = arguments.get("url")  # lup: ignore[dict-get]
+        elif block.tool_call_name in ("SearchWeb", "WebSearch"):
+            value = arguments.get("query")  # lup: ignore[dict-get]
         else:
             continue
         if isinstance(value, str) and value:

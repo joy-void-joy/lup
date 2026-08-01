@@ -13,6 +13,7 @@ from lup.harness.contracts import (
 )
 from lup.harness.generation import argument_text
 from lup.harness.models import (
+    GUIDANCE_BYTE_BUDGET,
     Agent,
     Artifact,
     ArtifactTree,
@@ -276,8 +277,11 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
 class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
     """Render root project guidance at Codex's documented repository location."""
 
-    def __init__(self, prompts: PromptRenderer) -> None:
+    def __init__(
+        self, prompts: PromptRenderer, budget: int = GUIDANCE_BYTE_BUDGET
+    ) -> None:
         self.prompts = prompts
+        self.budget = budget
 
     def render(self, source: Harness) -> ArtifactTree:
         return ArtifactTree(
@@ -298,6 +302,11 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
                         "# Native shell allows are generated under "
                         ".codex/rules/.\n"
                         "[features]\nhooks = true\n"
+                        "\n# The ceiling the guidance check enforces at "
+                        "generation time, stated\n"
+                        "# here too so the runtime cannot silently truncate "
+                        "what generation passed.\n"
+                        f"project_doc_max_bytes = {self.budget}\n"
                     ),
                     semantic_id="harness.project-config",
                 ),

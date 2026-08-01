@@ -19,7 +19,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.telemetry.display import format_duration
-from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.models import TurnInput, turn_request
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
 
@@ -164,7 +164,7 @@ def print_response_stats(response: "TurnResult[None]", console: "Console") -> fl
     parts: list[str] = []
     cost = 0.0
     text = "\n\n".join(
-        block.text for block in response.blocks if isinstance(block, TurnTextBlock)
+        text for block in response.blocks if (text := block.text_payload) is not None
     )
     if text:
         console.print(text)

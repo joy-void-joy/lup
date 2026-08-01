@@ -30,7 +30,7 @@ from lup.runtime.models import (
     SessionId,
     SubmissionDecision,
     SubmissionGateResolver,
-    TurnBlock,
+    AnyTurnBlock,
     TurnCompletedEvent,
     TurnEvent,
     TurnStartedEvent,
@@ -168,7 +168,7 @@ class CodexTurnChannel:
         self.completed: asyncio.Future[CompletedTurn] = (
             asyncio.get_running_loop().create_future()
         )
-        self.blocks: list[TurnBlock] = []
+        self.blocks: list[AnyTurnBlock] = []
         self.usage = Usage()
         self.started = perf_counter()
 
@@ -630,7 +630,7 @@ def decode_usage(payload: JsonObject) -> Usage:
     )
 
 
-def decode_completed_item(payload: JsonObject) -> list[TurnBlock]:
+def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
     """Decode one typed completed app-server item into canonical blocks."""
     from lup.runtime.models import (
         TurnTextBlock,
@@ -653,7 +653,7 @@ def decode_completed_item(payload: JsonObject) -> list[TurnBlock]:
             "aggregatedOutput": output,
             "status": status,
         }:
-            blocks: list[TurnBlock] = [
+            blocks: list[AnyTurnBlock] = [
                 TurnToolCallBlock(
                     id=identifier,
                     name="ShellCommand",

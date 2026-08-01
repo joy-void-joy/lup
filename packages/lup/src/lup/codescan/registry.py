@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 import lup.codescan.antipatterns as antipatterns
 import lup.codescan.boundaries as boundaries
 import lup.codescan.capabilities as capabilities
+import lup.codescan.dispatch as dispatch
 import lup.codescan.portable as portable
 
 type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"]
@@ -49,6 +50,22 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
             "implementations do not inherit multiple capabilities or reusable behavior."
         ),
         defined_in=capabilities.__name__,
+    ),
+    RegisteredRule(
+        id=dispatch.RULE_ID,
+        family="architecture",
+        scope="Python architecture",
+        example="if isinstance(part, TextPart): ...",
+        message=(
+            "A union we declare answers through its members: the base names the "
+            "operation and each variant answers or declines it. Branching on the "
+            "variant's own type — isinstance, a case arm, an assert_never net — "
+            "leaves a filter that goes stale the moment a variant is added. "
+            "Narrowing untyped data at a boundary is the different case and is "
+            "not reported: the rule fires only on project classes that inherit "
+            "pydantic.BaseModel."
+        ),
+        defined_in=dispatch.__name__,
     ),
     RegisteredRule(
         id=boundaries.RULE_ID,

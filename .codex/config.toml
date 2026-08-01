@@ -4,3 +4,7 @@
 # Native shell allows are generated under .codex/rules/.
 [features]
 hooks = true
+
+# The ceiling the guidance check enforces at generation time, stated
+# here too so the runtime cannot silently truncate what generation passed.
+project_doc_max_bytes = 32768

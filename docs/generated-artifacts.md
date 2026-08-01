@@ -54,7 +54,8 @@ renderers and the policy bundle).
 | Generated path | Canonical source |
 | --- | --- |
 | `.claude/CLAUDE.md`, `AGENTS.md` | `content/guidance.py` |
-| `.claude/PATTERNS.md` | `content/patterns.py` |
+| `docs/orchestration.md` | `content/orchestration.py` |
+| `docs/patterns.md` | `content/patterns.py` |
 | `.claude/plugins/lup/TEMPLATE_CLAUDE.md` | `content/template_claude.py` |
 | `.codex/plugins/lup/TEMPLATE_AGENTS.md` | `content/template_codex.py` |
 | `.claude/settings.json` | `content/settings.py` |

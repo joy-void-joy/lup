@@ -17,7 +17,6 @@ Examples:
 """
 
 import itertools
-import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -25,14 +24,7 @@ from pydantic import BaseModel
 from rich.console import Console
 
 from lup.telemetry.blocks import extract_block_info, format_tool_result
-from lup.types import (
-    LupAssistantMessage,
-    LupContentBlock,
-    LupMessage,
-    LupToolResultBlock,
-    LupToolUseBlock,
-    LupUserMessage,
-)
+from lup.types import LupContentBlock, LupMessage
 
 if TYPE_CHECKING:
     from lup.telemetry.trace import TraceLogger
@@ -101,20 +93,17 @@ def resolve_color_tag(
 ) -> ColorTag | None:
     """Assign or retrieve a color for tool use/result pairing.
 
-    LupToolUseBlock gets a fresh color from the rotating palette and
-    stores it by ID. LupToolResultBlock pops the matching color. Other
-    blocks return None (no colored tag).
+    A block that opens a pairing takes a fresh color from the rotating
+    palette, stored by the id it opened; the block that closes that pairing
+    pops the same color back. A block that does neither has no colored tag.
     """
-    match block:
-        case LupToolUseBlock():
-            color = next(colors.cycle)
-            colors.by_id[block.id] = color
-            return ColorTag(id=block.id, color=color)
-        case LupToolResultBlock():
-            color = colors.by_id.pop(block.tool_use_id, "default")
-            return ColorTag(id=block.tool_use_id, color=color)
-        case _:
-            return None
+    if (opened := block.opens_pairing) is not None:
+        color = next(colors.cycle)
+        colors.by_id[opened] = color
+        return ColorTag(id=opened, color=color)
+    if (closed := block.closes_pairing) is not None:
+        return ColorTag(id=closed, color=colors.by_id.pop(closed, "default"))
+    return None
 
 
 def print_block(
@@ -136,11 +125,8 @@ def print_block(
     info = extract_block_info(block)
     tag = resolve_color_tag(block, colors or DEFAULT_COLORS)
 
-    display_content = (
-        format_tool_result(block.content)
-        if isinstance(block, LupToolResultBlock)
-        else info.content
-    )
+    payload = block.result_payload
+    display_content = info.content if payload is None else format_tool_result(payload)
 
     if tag:
         print(f"{prefix}{info.emoji} {info.label} ", end="")
@@ -150,24 +136,7 @@ def print_block(
     else:
         print(f"{prefix}{info.emoji} {display_content}")
 
-    match block:
-        case LupToolUseBlock():
-            stream_log.info(
-                "%sTOOL_USE [%s] %s: %s",
-                prefix,
-                block.id,
-                block.name,
-                json.dumps(block.input) if block.input else "",
-            )
-        case LupToolResultBlock():
-            stream_log.info(
-                "%sTOOL_RESULT [%s]: %s",
-                prefix,
-                block.tool_use_id,
-                display_content,
-            )
-        case _:
-            stream_log.info("%s%s: %s", prefix, info.label.upper(), display_content)
+    stream_log.info("%s%s", prefix, block.log_summary(display_content))
 
     if trace:
         trace.log_block(block)
@@ -181,12 +150,8 @@ def print_message(
 ) -> None:
     """Print all content blocks in a message.
 
-    Handles LupAssistantMessage and LupUserMessage (which carry content
-    blocks). Other message types are silently ignored. If *trace* is
-    provided, blocks are also logged to it.
+    A message that carries no content blocks — a status line — prints
+    nothing. If *trace* is provided, blocks are also logged to it.
     """
-    match message:
-        case LupAssistantMessage() | LupUserMessage():
-            blocks = message.content if isinstance(message.content, list) else []
-            for block in blocks:
-                print_block(block, prefix=prefix, trace=trace, colors=colors)
+    for block in message.content_blocks:
+        print_block(block, prefix=prefix, trace=trace, colors=colors)

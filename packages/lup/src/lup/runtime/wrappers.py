@@ -30,7 +30,7 @@ from lup.runtime.errors import (
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
-    TurnBlock,
+    AnyTurnBlock,
     TurnHandle,
     TurnIdentifiers,
     TurnEvent,
@@ -114,7 +114,7 @@ class DisplayRecord(BaseModel):
 
     identifiers: TurnIdentifiers
     messages: list[TurnMessage]
-    blocks: list[TurnBlock]
+    blocks: list[AnyTurnBlock]
 
 
 type TraceSink = Callable[[TraceRecord], Awaitable[None]]

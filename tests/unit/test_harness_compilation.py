@@ -28,7 +28,7 @@ from lup.adapters.harness import (
 )
 from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
 from lup.harness.models import (
-    GUIDANCE_CHARACTER_BUDGET,
+    GUIDANCE_BYTE_BUDGET,
     Argument,
     Artifact,
     ArgumentsRef,
@@ -50,6 +50,7 @@ from lup.harness.models import (
     SkillInvocation,
     SkillPattern,
     TextPart,
+    document_byte_size,
     document_text_size,
 )
 from lup.harness.contracts import PromptRenderer
@@ -159,7 +160,8 @@ def test_claude_tree_renders_every_typed_support_document() -> None:
         for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
     }
 
-    assert Path(".claude/PATTERNS.md") in paths
+    assert Path("docs/orchestration.md") in paths
+    assert Path("docs/patterns.md") in paths
     assert Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md") in paths
     assert Path(".claude/plugins/lup/scripts/file_suggest.sh") in paths
     assert Path(".claude/settings.json") in paths
@@ -180,7 +182,13 @@ def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
 
 
 def test_guidance_stays_within_its_always_loaded_budget() -> None:
-    """The budget bounds what a session loads, not what the declaration holds."""
+    """The budget bounds what a session loads, not what the declaration holds.
+
+    Measured in UTF-8 bytes, because that is the unit the runtime's own
+    ceiling counts in — a character count runs looser than the real cap
+    wherever the document uses non-ASCII punctuation, and would pass a
+    document the runtime would silently truncate.
+    """
     declared = document_text_size(GUIDANCE)
     rendered = {
         "claude": claude_prompt_renderer().render(GUIDANCE),
@@ -188,12 +196,22 @@ def test_guidance_stays_within_its_always_loaded_budget() -> None:
     }
 
     for runtime, document in rendered.items():
-        used = len(document)
+        used = document_byte_size(document)
         assert used >= declared
-        assert used <= GUIDANCE_CHARACTER_BUDGET, (
-            f"{runtime} guidance is {used} characters, over budget by "
-            f"{used - GUIDANCE_CHARACTER_BUDGET}"
+        assert used <= GUIDANCE_BYTE_BUDGET, (
+            f"{runtime} guidance is {used} bytes, over budget by "
+            f"{used - GUIDANCE_BYTE_BUDGET}"
         )
+
+
+def test_codex_config_states_the_same_ceiling_the_check_enforces() -> None:
+    """A generated config that disagreed with the check would truncate silently."""
+    config = next(
+        artifact
+        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+        if artifact.path.as_posix() == ".codex/config.toml"
+    )
+    assert f"project_doc_max_bytes = {GUIDANCE_BYTE_BUDGET}" in config.content
 
 
 def test_codex_tree_renders_the_agents_flavored_template() -> None:
@@ -544,7 +562,7 @@ def test_typed_content_package_has_expected_module_inventory() -> None:
     content = Path("src/lup_template/devtools/harness/content")
     sources = list(content.rglob("*.py"))
 
-    assert len(sources) == 47
+    assert len(sources) == 48
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:

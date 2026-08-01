@@ -1,10 +1,10 @@
-<!-- Generated from src/lup_template/devtools/harness/content/patterns.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from src/lup_template/devtools/harness/content/orchestration.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
 
-# Design Patterns
+# Agent Orchestration Patterns
 
-Architectural patterns used in this project. For daily development guidance, see [CLAUDE.md](CLAUDE.md).
+How work is delegated across agents in this project — what runs where, and who sees it. The recurring *code* shapes live in [docs/patterns.md](patterns.md); daily development guidance is in the agent guidance document your runtime loads.
 
-**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 5 (`claude-opus-5`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see CLAUDE.md § Model Selection).
+**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 5 (`claude-opus-5`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see § Model Selection in the agent guidance).
 
 **Vocabulary:** two kinds of delegated agents look alike and must not be conflated:
 

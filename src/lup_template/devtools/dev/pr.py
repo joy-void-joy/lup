@@ -100,20 +100,82 @@ class PRInfo(BaseModel):
     reviews: list[ReviewInfo]
     checks: list[CheckInfo]
 
+    def render(self) -> None:
+        """Pretty-print PR status with formatted reviews and checks."""
+        typer.echo(f"\n  PR #{self.number}: {self.title}")
+        typer.echo(f"  {self.url}")
+        typer.echo(f"  Review: {self.review_decision or 'pending'}")
+        typer.echo(f"  Mergeable: {self.mergeable}")
 
-class PRStatusResult(BaseModel):
+        if self.reviews:
+            typer.echo(f"\n  Reviews ({len(self.reviews)}):")
+            author_width = max(len(r.author) for r in self.reviews)
+            for r in self.reviews:
+                typer.echo(f"    {r.author:<{author_width}} {r.state}")
+
+        if self.checks:
+            typer.echo(f"\n  Checks ({len(self.checks)}):")
+            passed = sum(
+                1
+                for c in self.checks
+                if c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
+            )
+            typer.echo(f"    {passed}/{len(self.checks)} passing")
+            for c in self.checks:
+                marker = (
+                    "✓"
+                    if c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
+                    else "✗"
+                )
+                typer.echo(f"    {marker} {c.name}: {c.conclusion or c.status}")
+
+
+class PRResult(BaseModel):
+    """One PR command's outcome, rendering itself for a human reader.
+
+    The only question the CLI asks of a result is how to print it, so the base
+    declares that and each variant answers it — a new command's result is one
+    class rather than an edit to a printer that would have to notice it. The
+    default answer names each field in turn, which is the whole of what a flat
+    result has to say; a variant whose shape deserves a layout overrides it.
+    """
+
+    def render(self) -> None:
+        """Print this result as plain lines, one per field."""
+        for key, value in self.model_dump().items():
+            match value:
+                case list():
+                    typer.echo(f"{key}:")
+                    for item in value:
+                        typer.echo(f"  - {item}")
+                case dict():
+                    typer.echo(f"{key}:")
+                    for k, v in value.items():
+                        typer.echo(f"  {k}: {v}")
+                case _:
+                    typer.echo(f"{key}: {value}")
+
+
+class PRStatusResult(PRResult):
     branch: str
     pr: PRInfo | None
 
+    def render(self) -> None:
+        if self.pr is None:
+            typer.echo(f"branch: {self.branch}")
+            typer.echo("pr: no open PR")
+            return
+        self.pr.render()
 
-class MergeResult(BaseModel):
+
+class MergeResult(PRResult):
     pr_number: int
     merged: bool
     integration_branch: str
     pulled: bool
 
 
-class SyncBaseResult(BaseModel):
+class SyncBaseResult(PRResult):
     feature_branch: str
     base_branch: str
     base_source: Literal["explicit", "recorded", "guessed"]
@@ -126,81 +188,23 @@ class ExistingPR(BaseModel):
     url: str
 
 
-class PushResult(BaseModel):
+class PushResult(PRResult):
     branch: str
     pushed: bool
     force: bool
     existing_pr: ExistingPR | None
 
 
-class CreateResult(BaseModel):
+class CreateResult(PRResult):
     number: int
     url: str
-
-
-type PRResult = (
-    PRStatusResult | MergeResult | SyncBaseResult | PushResult | CreateResult
-)
 
 
 def output_result(result: PRResult, as_json: bool) -> None:
     if as_json:
         output_json(result)
         return
-
-    match result:
-        case PRStatusResult(pr=PRInfo()):
-            format_pr_status(result)
-        case PRStatusResult():
-            typer.echo(f"branch: {result.branch}")
-            typer.echo("pr: no open PR")
-        case _:
-            for key, value in result.model_dump().items():
-                match value:
-                    case list():
-                        typer.echo(f"{key}:")
-                        for item in value:
-                            typer.echo(f"  - {item}")
-                    case dict():
-                        typer.echo(f"{key}:")
-                        for k, v in value.items():
-                            typer.echo(f"  {k}: {v}")
-                    case _:
-                        typer.echo(f"{key}: {value}")
-
-
-def format_pr_status(result: PRStatusResult) -> None:
-    """Pretty-print PR status with formatted reviews and checks."""
-    pr = result.pr
-    if not pr:
-        return
-
-    typer.echo(f"\n  PR #{pr.number}: {pr.title}")
-    typer.echo(f"  {pr.url}")
-    typer.echo(f"  Review: {pr.review_decision or 'pending'}")
-    typer.echo(f"  Mergeable: {pr.mergeable}")
-
-    if pr.reviews:
-        typer.echo(f"\n  Reviews ({len(pr.reviews)}):")
-        author_width = max(len(r.author) for r in pr.reviews)
-        for r in pr.reviews:
-            typer.echo(f"    {r.author:<{author_width}} {r.state}")
-
-    if pr.checks:
-        typer.echo(f"\n  Checks ({len(pr.checks)}):")
-        passed = sum(
-            1
-            for c in pr.checks
-            if c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
-        )
-        typer.echo(f"    {passed}/{len(pr.checks)} passing")
-        for c in pr.checks:
-            marker = (
-                "✓"
-                if c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
-                else "✗"
-            )
-            typer.echo(f"    {marker} {c.name}: {c.conclusion or c.status}")
+    result.render()
 
 
 class DetectedBase(BaseModel):

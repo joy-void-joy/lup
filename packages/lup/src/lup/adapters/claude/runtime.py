@@ -33,7 +33,7 @@ from lup.runtime.models import (
     SessionId,
     SubmissionDecision,
     SubmissionGateResolver,
-    TurnBlock,
+    AnyTurnBlock,
     TurnIdentifiers,
     TurnId,
     TurnCompletedEvent,
@@ -484,8 +484,17 @@ def build_claude_options(
         allowed.append(SUBMISSION_TOOL)
 
     def native_server(server: McpServerEntry) -> "claude_types.McpServerConfig":
+        """Project one entry into the server config this SDK's options take.
+
+        The projection belongs here because it is this provider's spelling: a
+        server we host becomes an SDK config, while an external one already is
+        the SDK's transport shape and passes through. Asking the neutral entry
+        to convert itself would move that spelling into library code, beside a
+        second adapter that projects the same entry into an unrelated
+        subprocess shape.
+        """
         match server:
-            case LupMcpServerConfig():
+            case LupMcpServerConfig():  # lup: ignore[own-model-dispatch] — seam
                 return claude_types.McpSdkServerConfig(
                     type="sdk", name=server.name, instance=server.server
                 )
@@ -549,7 +558,7 @@ def build_claude_options(
     )
 
 
-def convert_claude_block(block: "claude.ContentBlock") -> TurnBlock:
+def convert_claude_block(block: "claude.ContentBlock") -> AnyTurnBlock:
     """Convert one SDK block directly into the portable runtime vocabulary."""
     import claude_agent_sdk as claude
     from claude_agent_sdk import types as claude_types

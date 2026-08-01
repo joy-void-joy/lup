@@ -1,11 +1,4 @@
-"""Canonical code-structure design approaches."""
-
-import lup.harness.models as models
-
-DOCUMENT = models.PromptDocument(
-    parts=[
-        models.TextPart(
-            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/patterns.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from src/lup_template/devtools/harness/content/patterns.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
 
 # Design Patterns
 
@@ -112,7 +105,3 @@ declared at the wrong level. `GUIDANCE_BYTE_BUDGET`
 mirrors a real vendor default, so the number is not arbitrary — but *which*
 number a given project wants is still its own call, so it is a parameter with
 that default rather than a constant.
-"""
-        ),
-    ],
-)

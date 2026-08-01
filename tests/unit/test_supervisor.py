@@ -1,3 +1,8 @@
+# lup: ignore[own-model-dispatch]
+# Which event a projection difference produced is the claim these tests make:
+# asserting `ConcernEvent` is the assertion, not a branch taken on the way to
+# one. Letting the event name itself would hand the code under test the answer
+# the test exists to check.
 """Web supervision of persisted resolver runs, through the mailbox alone.
 
 There is no session, no hub, and no thread here because the supervisor no

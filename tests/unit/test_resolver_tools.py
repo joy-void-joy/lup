@@ -1,3 +1,7 @@
+# lup: ignore[own-model-dispatch]
+# Each question tool answers with one of several typed outputs, and these
+# tests pin which one a call produced before reading its fields — the returned
+# type is the contract under test, observed from the caller's side.
 """The material-question tools a resolver worker asks through."""
 
 import asyncio

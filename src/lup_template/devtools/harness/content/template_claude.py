@@ -54,7 +54,7 @@ This file provides guidance to Claude Code when working with code in this reposi
             text=r""""Lup" is the framework's name for the inner agent, not a project-specific term. Use "Claude" when referring to the outer development agent and "Lup" when referring to the inner SDK agent, regardless of the project's package name."""
         ),
         *PRINCIPLES_THROUGH_PATTERN_MENU,
-        models.TextPart(text=r""" `.claude/PATTERNS.md` carries the full catalog."""),
+        models.TextPart(text=r""" `docs/orchestration.md` carries the full catalog."""),
         *PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP,
         models.TextPart(
             text=r"""`lup-devtools harness claude` regenerates and launches the verified local plugin"""

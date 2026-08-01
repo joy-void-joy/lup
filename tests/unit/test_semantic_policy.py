@@ -1,3 +1,8 @@
+# lup: ignore[own-model-dispatch]
+# Which semantic tool a native payload decodes to is exactly what these parity
+# tests claim: `UnknownTool` is the fail-closed outcome for a novel or
+# malformed operation, `ShellCommand` the recognized one. The decoded type is
+# the assertion, observed from outside both decoders.
 """Cross-native semantic decoding and conservative policy parity tests."""
 
 import ast

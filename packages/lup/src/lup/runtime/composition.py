@@ -24,7 +24,7 @@ from lup.runtime.errors import (
     TurnFailure,
 )
 from lup.runtime.models import (
-    TurnBlock,
+    AnyTurnBlock,
     TurnHandle,
     TurnIdentifiers,
     TurnMessage,
@@ -45,7 +45,7 @@ class CompletedTurn(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     messages: list[TurnMessage] = Field(default_factory=list)
-    blocks: list[TurnBlock] = Field(default_factory=list)
+    blocks: list[AnyTurnBlock] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)
     duration: timedelta = timedelta()
 

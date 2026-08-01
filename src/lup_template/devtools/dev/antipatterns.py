@@ -24,7 +24,9 @@ from lup.codescan.antipatterns import (
     audit_text,
     patterns_for_suffix,
 )
-from lup.codescan.capabilities import audit_capabilities, sources_from_paths
+from lup.codescan.capabilities import audit_capabilities
+from lup.codescan.dispatch import audit_own_model_dispatch
+from lup.codescan.project import sources_from_paths
 from lup.codescan.boundaries import audit_path_boundaries
 from lup.codescan.registry import RULE_REFERENCE
 from lup_template.devtools.utils import git, output_json
@@ -53,7 +55,8 @@ def scan_antipatterns() -> list[FoundAntiPattern]:
             python_paths.append(path)
         for finding in audit_text(text, patterns):
             results.append(FoundAntiPattern(file=rel, **finding.model_dump()))
-    for finding in audit_capabilities(sources_from_paths(python_paths)):
+    sources = sources_from_paths(python_paths)
+    for finding in [*audit_capabilities(sources), *audit_own_model_dispatch(sources)]:
         results.append(
             FoundAntiPattern(
                 file=finding.path.as_posix(),

@@ -167,7 +167,7 @@ def run(
             "--persistent",
             help="Persistent (sleep/wake) session via the file relay — "
             "AGENT_SDK=codex/openai; replies print to stdout "
-            "(see PATTERNS.md, Persistent Agent)",
+            "(see docs/orchestration.md, Persistent Agent)",
         ),
     ] = False,
     verbose: Annotated[
