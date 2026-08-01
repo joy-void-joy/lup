@@ -18,7 +18,6 @@ from lup.adapters.codex.harness import (
 )
 from lup.codescan.portable import prose_breaches
 from lup.harness.contracts import NativeSpellings
-from lup.harness.generation import ArtifactValidationError
 from lup.harness.prompts import SpelledPromptRenderer
 from lup.harness.models import (
     GUIDANCE_CHARACTER_BUDGET,
@@ -27,22 +26,7 @@ from lup.harness.models import (
     Harness,
     TextPart,
 )
-from lup.harness.validation import DeterministicTreeValidator
-
-
-def validated_tree(artifacts: list[Artifact]) -> ArtifactTree:
-    """Sort a complete output tree and reject any deterministic issue."""
-    tree = ArtifactTree(
-        artifacts=sorted(artifacts, key=lambda item: item.path.as_posix())
-    )
-    result = DeterministicTreeValidator().validate(tree)
-    if not result.valid:
-        raise ArtifactValidationError(
-            "; ".join(
-                f"{issue.semantic_id}: {issue.message}" for issue in result.issues
-            )
-        )
-    return tree
+from lup.harness.validation import validated_tree
 
 
 def prompt_renderer(own: NativeSpellings) -> SpelledPromptRenderer:

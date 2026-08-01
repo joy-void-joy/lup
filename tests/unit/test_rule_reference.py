@@ -4,15 +4,15 @@ from pathlib import Path
 
 from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
 from lup.codescan.registry import STRUCTURAL_RULES, all_rules
-from lup_template.devtools.dev.rules import render_rule_reference
+from lup_template.devtools.dev.rules import rule_reference_artifact
 
 
 def test_checked_in_rule_reference_matches_canonical_objects() -> None:
-    rendered = render_rule_reference()
+    artifact = rule_reference_artifact()
 
-    assert Path("docs/rules.md").read_text(encoding="utf-8") == rendered
+    assert Path("docs/rules.md").read_text(encoding="utf-8") == artifact.content
     for rule in [*PYTHON_ANTI_PATTERNS, *TS_ANTI_PATTERNS, *STRUCTURAL_RULES]:
-        assert f"`{rule.id}`" in rendered
+        assert f"`{rule.id}`" in artifact.content
 
 
 def test_registry_covers_every_family_with_unique_ids_and_homes() -> None:

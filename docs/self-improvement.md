@@ -1,4 +1,4 @@
-<!-- Generated from src/lup_template/devtools/harness/content/self_improvement.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from lup_template.devtools.harness.content.self_improvement by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
 
 # Self-Improvement Loop
 

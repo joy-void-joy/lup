@@ -11,15 +11,10 @@ from lup_template.devtools.harness.content.catalog import (
 from lup_template.devtools.subapps import subapp_summary
 
 DOCUMENT = models.PromptDocument(
+    source=__name__,
     parts=[
         models.TextPart(
-            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/guidance.py via `uv run lup-devtools harness generate all`; deliberately rendered as """
-        ),
-        models.NativePath(location="guidance_file", scope="every_tree"),
-        models.TextPart(
-            text=r""" — edit the source, not this file. See docs/generated-artifacts.md. -->
-
-# Lup repository guidance
+            text=r"""# Lup repository guidance
 
 Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
 
@@ -480,5 +475,5 @@ input or the workflow step where the wrong decision entered, and change that.
 A prompt rule coexists peacefully with the failure it warns about.
 """
         ),
-    ]
+    ],
 )

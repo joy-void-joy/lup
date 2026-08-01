@@ -5,11 +5,10 @@
 import lup.harness.models as models
 
 DOCUMENT = models.PromptDocument(
+    source=__name__,
     parts=[
         models.TextPart(
-            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/patterns.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
-
-# Design Patterns
+            text=r"""# Design Patterns
 
 Architectural patterns used in this project. For daily development guidance, see [CLAUDE.md](CLAUDE.md).
 
@@ -198,5 +197,5 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 **Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API wrappers. Extraction uses `query(factory, request)` (see [Nested Agent Pattern](#nested-agent-pattern)).
 """
         ),
-    ]
+    ],
 )

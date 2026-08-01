@@ -19,8 +19,13 @@ from lup.adapters.harness import (
     compile_claude,
     compile_codex,
 )
+from lup.harness.banner import (
+    REGENERATE_COMMAND,
+    VERBATIM_COPY,
+    GeneratedBanner,
+)
 from lup.harness.materialization import AtomicMaterializer
-from lup.harness.models import Artifact, ArtifactTree, Harness
+from lup.harness.models import Artifact, ArtifactTree, Harness, PromptDocument
 from lup.harness.ownership import (
     OwnershipManifest,
     build_manifest,
@@ -33,7 +38,8 @@ from lup.harness.reconciliation import (
     ReconciliationConflict,
     ReconciliationProposal,
 )
-from lup.harness.contracts import CurrentTreeReader, Reconciler
+from lup.harness.contracts import CurrentTreeReader, PromptRenderer, Reconciler
+from lup.harness.validation import validated_tree
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.patterns import DOCUMENT as PATTERNS
 from lup_template.devtools.harness.content.permissions import (
@@ -104,6 +110,24 @@ class DriftReport(BaseModel):
         )
 
 
+def rendered_document(
+    *,
+    path: Path,
+    document: PromptDocument,
+    prompts: PromptRenderer,
+    semantic_id: str,
+) -> Artifact:
+    """Render one canonical document below the banner naming its module."""
+    return Artifact.generated(
+        path=path,
+        body=prompts.render(document),
+        semantic_id=semantic_id,
+        banner=GeneratedBanner(
+            source=document.declared_source(), command=REGENERATE_COMMAND
+        ),
+    )
+
+
 def managed_paths(desired: ArtifactTree, prior: OwnershipManifest | None) -> list[Path]:
     """Combine desired and formerly owned paths for deletion detection."""
     paths = [artifact.path for artifact in desired.artifacts]
@@ -133,24 +157,28 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
     prompts = claude_prompt_renderer()
     content_root = Path(__file__).parent / "content"
     support_artifacts = [
-        Artifact(
+        rendered_document(
             path=Path(".claude/PATTERNS.md"),
-            content=prompts.render(PATTERNS),
+            document=PATTERNS,
+            prompts=prompts,
             semantic_id="harness.patterns",
         ),
-        Artifact(
+        rendered_document(
             path=Path("docs/self-improvement.md"),
-            content=prompts.render(SELF_IMPROVEMENT),
+            document=SELF_IMPROVEMENT,
+            prompts=prompts,
             semantic_id="harness.self-improvement",
         ),
-        Artifact(
+        rendered_document(
             path=Path("docs/permissions.md"),
-            content=prompts.render(PERMISSIONS),
+            document=PERMISSIONS,
+            prompts=prompts,
             semantic_id="harness.permissions",
         ),
-        Artifact(
+        rendered_document(
             path=Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md"),
-            content=prompts.render(TEMPLATE_CLAUDE),
+            document=TEMPLATE_CLAUDE,
+            prompts=prompts,
             semantic_id="harness.template-guidance",
         ),
         Artifact(
@@ -160,6 +188,7 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
             ),
             semantic_id="harness.file-suggestion",
             executable=True,
+            banner=VERBATIM_COPY,
         ),
         Artifact(
             path=Path(".claude/settings.json"),
@@ -169,12 +198,7 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
             semantic_id="harness.project-settings",
         ),
     ]
-    desired = ArtifactTree(
-        artifacts=sorted(
-            [*compiled.artifacts, *support_artifacts],
-            key=lambda artifact: artifact.path.as_posix(),
-        )
-    )
+    desired = validated_tree([*compiled.artifacts, *support_artifacts])
     manifest_path = root / ".claude" / ".lup-ownership.json"
     prior = load_manifest(manifest_path)
     reader = current_reader(
@@ -200,19 +224,15 @@ def codex_generation_recipe(root: Path) -> GenerationRecipe:
     source = portable_harness(root=root)
     prompts = codex_prompt_renderer()
     support_artifacts = [
-        Artifact(
+        rendered_document(
             path=Path(".codex/plugins/lup/TEMPLATE_AGENTS.md"),
-            content=prompts.render(TEMPLATE_CODEX),
+            document=TEMPLATE_CODEX,
+            prompts=prompts,
             semantic_id="harness.template-guidance",
         ),
     ]
     compiled = compile_codex(source)
-    desired = ArtifactTree(
-        artifacts=sorted(
-            [*compiled.artifacts, *support_artifacts],
-            key=lambda artifact: artifact.path.as_posix(),
-        )
-    )
+    desired = validated_tree([*compiled.artifacts, *support_artifacts])
     manifest_path = root / ".codex" / ".lup-ownership.json"
     prior = load_manifest(manifest_path)
     return GenerationRecipe(

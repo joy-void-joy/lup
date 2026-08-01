@@ -1,4 +1,3 @@
-# lup: The generated header at @rules.md is not the same header as @permissions.md. Why? shouldn't the generated header be the same everywhere?
 # lup: In general, I find the docs a bit hard to read and repetitive, can you refactor it out?
 
 # Adopting and extending the Lup harness

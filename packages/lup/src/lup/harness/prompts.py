@@ -4,11 +4,14 @@ Rendering a prompt document is the same walk for every runtime: which parts
 appear and in what order is portable, and only the words differ. Making that
 walk once and asking a :class:`NativeSpellings` for each native word keeps a
 new runtime a vocabulary rather than another copy of the walk, and keeps the
-walk itself free of any platform's spelling.
+walk itself free of any platform's spelling. The guidance banner is composed
+here for the same reason: what it has to say about the other trees is a
+spelling question.
 """
 
 from typing import assert_never
 
+from lup.harness.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.harness.contracts import NativeSpellings, PromptRenderer
 from lup.harness.models import (
     ArgumentsRef,
@@ -26,6 +29,24 @@ from lup.harness.models import (
     SkillPattern,
     TextPart,
 )
+
+
+def guidance_banner(
+    prompts: PromptRenderer, guidance: PromptDocument
+) -> GeneratedBanner:
+    """Name the one guidance source, and every tree that renders a copy of it.
+
+    Each runtime reads guidance under its own name, so a reader who opens one
+    copy has to be told the other is not a second document to keep in step.
+    """
+    every_tree = prompts.location(
+        NativePath(location="guidance_file", scope="every_tree")
+    )
+    return GeneratedBanner(
+        source=guidance.declared_source(),
+        command=REGENERATE_COMMAND,
+        notes=[f"Deliberately rendered as {every_tree}."],
+    )
 
 
 class SpelledPromptRenderer(PromptRenderer):

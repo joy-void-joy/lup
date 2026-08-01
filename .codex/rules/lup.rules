@@ -1,5 +1,5 @@
-# Generated file — do not edit directly. Rendered from the canonical
-# Lup semantic shell policy by `uv run lup-devtools harness generate all`.
+# Generated from lup.policy.shell_rules by `uv run lup-devtools harness generate all` — edit the source, not this file.
+# See docs/generated-artifacts.md.
 
 prefix_rule(pattern = ["["], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["basename"], decision = "allow", justification = "Allowed by Lup semantic shell policy")

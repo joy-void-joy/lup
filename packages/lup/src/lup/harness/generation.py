@@ -1,8 +1,8 @@
 """Small deterministic helpers shared across pipeline stages.
 
 Invocation-argument serialization for the adapter renderers, tree indexing
-for reconciliation, and the validation-failure error the compilation roots
-in :mod:`lup.adapters.harness` raise.
+for reconciliation, and the validation-failure error
+:mod:`lup.harness.validation` raises.
 """
 
 import json
