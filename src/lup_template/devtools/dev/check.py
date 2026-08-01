@@ -9,7 +9,10 @@ from lup.codescan.markers import find_feedback
 from lup.harness.models import GUIDANCE_CHARACTER_BUDGET
 
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
-from lup_template.devtools.dev.boundaries import scan_boundaries
+from lup_template.devtools.dev.boundaries import (
+    scan_boundaries,
+    scan_library_placement,
+)
 from lup_template.devtools.dev.branches import unlanded_siblings
 from lup_template.devtools.dev.comments import FoundComment, scan_tracked
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
@@ -154,6 +157,16 @@ def run_checks(fix: bool, no_test: bool) -> None:
     else:
         typer.echo("seam boundaries: ok")
         results.append(CheckOutcome(name="seam boundaries", passed=True))
+
+    tables = scan_library_placement()
+    if tables:
+        typer.echo(f"library placement: FAIL ({len(tables)} baked-in table(s))")
+        for table in tables:
+            typer.echo(f"  {table.file}:{table.line}  {table.module}")
+        results.append(CheckOutcome(name="library placement", passed=False))
+    else:
+        typer.echo("library placement: ok")
+        results.append(CheckOutcome(name="library placement", passed=True))
 
     used = max(
         len(claude_prompt_renderer().render(GUIDANCE)),

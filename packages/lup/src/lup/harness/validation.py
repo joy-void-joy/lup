@@ -125,17 +125,20 @@ TREE_VALIDATORS: list[ArtifactValidator] = [
     DeterministicTreeValidator(),
     BannerValidator(),
 ]
-"""Every gate a complete output tree passes, whichever command built it."""
+"""Every gate a complete output tree passes unless the caller supplies its own."""
 
 
-def validated_tree(artifacts: list[Artifact]) -> ArtifactTree:
+def validated_tree(
+    artifacts: list[Artifact],
+    validators: list[ArtifactValidator] | None = None,
+) -> ArtifactTree:
     """Sort a complete output tree and reject any deterministic issue."""
     tree = ArtifactTree(
         artifacts=sorted(artifacts, key=lambda item: item.path.as_posix())
     )
     issues = [
         issue
-        for validator in TREE_VALIDATORS
+        for validator in validators or TREE_VALIDATORS
         for issue in validator.validate(tree).issues
     ]
     if issues:

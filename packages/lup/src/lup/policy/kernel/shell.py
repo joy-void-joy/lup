@@ -481,6 +481,7 @@ def decide_loop(
     return unjudged("loop construct does not parse")
 
 
+# lup: ignore[library-default] — POSIX shell `case` clause terminators
 CASE_TERMINATORS = (";;", ";&", ";;&")
 
 

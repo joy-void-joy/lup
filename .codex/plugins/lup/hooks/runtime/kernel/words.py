@@ -6,7 +6,7 @@ import posixpath
 
 from .decision import KernelDecision, SUBSTITUTION_SENTINEL
 
-PASS_THROUGH_WORDS = (
+PASS_THROUGH_WORDS = (  # lup: ignore[library-default] — real wrappers that exec the argument after them
     "env",
     "command",
     "exec",
@@ -15,7 +15,7 @@ PASS_THROUGH_WORDS = (
     "setsid",
     "stdbuf",
 )
-DANGEROUS_ENV_NAMES = (
+DANGEROUS_ENV_NAMES = (  # lup: ignore[library-default] — variables the shell and language runtimes read to redirect execution
     "PATH",
     "IFS",
     "ENV",
@@ -34,9 +34,11 @@ DANGEROUS_ENV_NAMES = (
     "RUBYLIB",
     "RUBYOPT",
 )
+# lup: ignore[library-default] — loader and interpreter variable prefixes fixed by the OS and those runtimes
 DANGEROUS_ENV_PREFIXES = ("LD_", "DYLD_", "PYTHON", "GIT_", "BASH_FUNC_")
+# lup: ignore[library-default] — the native runtimes' own plugin directory names
 GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
-INTERPRETERS = (
+INTERPRETERS = (  # lup: ignore[library-default] — real interpreter executables; omitting one is a hole, not a preference
     "python",
     "python3",
     "perl",

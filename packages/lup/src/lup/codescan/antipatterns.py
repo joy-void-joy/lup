@@ -47,6 +47,7 @@ import re
 from pydantic import BaseModel
 
 from lup.codescan.boundaries import (
+    LIBRARY_DEFAULT_RULE_ID,
     NATIVE_SPELLING_RULE_ID,
     RULE_ID as SEAM_BOUNDARY_RULE_ID,
 )
@@ -481,11 +482,18 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
 """Anti-patterns checked against added lines of TypeScript/JavaScript files."""
 
 
+# lup: ignore[library-default] — Python's own source suffixes
 PY_SUFFIXES = (".py", ".pyi")
+# lup: ignore[library-default] — the suffixes those ecosystems compile
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 
 FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
-    {ABC_CAPABILITY_RULE_ID, NATIVE_SPELLING_RULE_ID, SEAM_BOUNDARY_RULE_ID}
+    {
+        ABC_CAPABILITY_RULE_ID,
+        LIBRARY_DEFAULT_RULE_ID,
+        NATIVE_SPELLING_RULE_ID,
+        SEAM_BOUNDARY_RULE_ID,
+    }
 )
 """Rule ids owned by other codescan scanners.
 

@@ -243,6 +243,14 @@ A note in a comment-less format (e.g. JSON) is the trap: you can't keep it there
   in `packages/lup/`. If it only makes sense for this application, it belongs in
   `src/lup_template/`.
 
+### A Constant Should Be an Overridable Default
+
+The placement test applies to values, not only to code. `packages/lup` may declare a value only when it could not have chosen otherwise — a language's file suffixes, a tool's own flag names, a provider's wire spelling, a grammar, a closed enum the library itself defines. Ask: *could a second implementer with the same intent have written a different value?* If yes it is a judgement, and the library takes the caller's instead of making it for every adopter.
+
+**Having defaults is fine; assuming a non-canonical choice with no parameter to replace it is the defect.** `HookSet` is the shape — a generic engine the application fills.
+
+The audited `library-default` rule checks the mechanical half: every multi-entry table under `packages/lup/src/lup` (outside `lup/adapters`) must be reachable as a parameter default, a pydantic field default or factory, or the sentinel a mutable default is written as. Canonicity it cannot check, so declare that at the site with `# lup: ignore[library-default]` and a reason naming what fixes the value. `docs/library-boundary.md` carries the criterion, the classification of every library table, and the target layout.
+
 ### Imports: No Barrel Files
 
 **Never use `__init__.py` re-exports or `__all__` in internal packages.** Import directly from the module that defines the symbol.
