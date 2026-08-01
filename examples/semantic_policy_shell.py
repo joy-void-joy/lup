@@ -24,6 +24,7 @@ from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy, UrlScope
 from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.query import query
+from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 from examples.common import Summary
 
@@ -34,11 +35,12 @@ DENIED_COMMAND = "curl https://docs.example.com/private/token"
 def policy_hooks() -> LupHooksConfig:
     """Enforce the shell lattice, scoped by the same declared origins.
 
-    The rules are the canonical set: read-only commands allow, destructive
-    ones ask, and anything the lattice cannot judge denies with the recipe
-    for reshaping or escalating it.
+    The vocabulary is this project's own: read-only commands allow,
+    destructive ones ask, and anything the lattice cannot judge denies with
+    the recipe for reshaping or escalating it.
     """
     policy = ShellPolicy(
+        SHELL_RULES,
         allowed_urls=[UrlScope(origin=DOCS_ORIGIN, path_prefix="/api")],
         denied_urls=[UrlScope(origin=DOCS_ORIGIN, path_prefix="/private")],
     )

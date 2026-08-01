@@ -31,6 +31,7 @@ from lup.policy.models import (
     UnknownTool,
 )
 from lup.policy.rules import FetchPolicy, ShellPolicy, UrlScope
+from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 DOCS_ORIGIN = AnyHttpUrl("https://docs.example.com")
 DENIED_URL = AnyHttpUrl("https://docs.example.com/private/token")
@@ -84,7 +85,7 @@ def test_no_effect_reaches_codex_as_a_silent_allow() -> None:
 def test_router_sends_each_tool_to_the_policy_that_judges_it() -> None:
     router = SemanticToolPolicy(
         fetch=docs_fetch_policy(),
-        shell=ShellPolicy(),
+        shell=ShellPolicy(SHELL_RULES),
         edit=None,
     )
 

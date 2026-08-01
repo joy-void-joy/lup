@@ -5,8 +5,8 @@ assets — live under ``content/``, aggregated by ``content.catalog``. This
 module assembles those leaves with the hook policy and the resolver spec
 into the portable ``Harness`` that ``generate`` compiles into both native
 trees. Generated guidance and the adopter docs point here as the file that
-owns URL scopes and protected edit roots, so its path is part of the
-documented surface.
+owns URL scopes, protected edit roots, and the shell vocabulary declared in
+``content.shell_vocabulary``, so its path is part of the documented surface.
 """
 
 from pathlib import Path
@@ -25,6 +25,7 @@ from lup.harness.models import (
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
+from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 
 def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harness:
@@ -78,6 +79,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 Path("downstream.json"),
             ],
             human_owned_files=[Path("README.md")],
+            shell_rules=SHELL_RULES,
             sandbox=HookSandbox(
                 extra_domains=["api.anthropic.com"],
                 credential_paths=["~/.ssh", "~/.aws/credentials"],

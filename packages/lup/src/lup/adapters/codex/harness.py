@@ -49,7 +49,7 @@ from lup.policy.kernel.words import (
     PASS_THROUGH_WORDS,
     UV_RUN_ALLOWED_TARGETS,
 )
-from lup.policy.shell_rules import BASE_SHELL_RULES, ShellCommandRule
+from lup.policy.shell_rules import ShellCommandRule
 
 
 class CodexSpellings(NativeSpellings):
@@ -361,7 +361,7 @@ CODEX_DYNAMIC_COMMANDS = (
 """Executables whose semantic decision cannot be represented by one prefix."""
 
 
-def codex_allow_prefixes(extension: list[ShellCommandRule]) -> list[list[str]]:
+def codex_allow_prefixes(rules: list[ShellCommandRule]) -> list[list[str]]:
     """Compile semantic allows that stay allowed for every suffix.
 
     Codex prefix rules bypass the sandbox, so flag-guarded rows cannot be
@@ -374,7 +374,7 @@ def codex_allow_prefixes(extension: list[ShellCommandRule]) -> list[list[str]]:
             prefixes.append(prefix)
 
     prefixes: list[list[str]] = []
-    for command in [*BASE_SHELL_RULES, *extension]:
+    for command in rules:
         if not command.subcommands:
             if (
                 command.name not in CODEX_DYNAMIC_COMMANDS
@@ -510,7 +510,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                             path.as_posix() for path in source.human_owned_files
                         ],
                         autonomous_agent_identities=[self.worker_identity],
-                        shell_rule_extension=list(source.shell_rules),
+                        shell_rules=list(source.shell_rules),
                     ),
                     semantic_id=source.id,
                 ),

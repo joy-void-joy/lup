@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "d9fe0c942bd84a4d0919be9968665133dd565171a4c5748b51daadec638e8cca",
+  "source_digest": "349c9a9d47f32e87755450198477a8f9731f8ba1c7868dcc6bc28bde61626ac9",
   "target_requirements": [
     "claude-code"
   ],
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "7ff3728e5b3b4d5e587b1c36f9fe7d9ff958b28cd83a145d4693d12b69211fec",
+      "sha256": "32f83c51569df318b870767ce11c09b23762791e277a793e28d1f81cba09d457",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -163,7 +163,7 @@
     {
       "path": ".claude/plugins/lup/commands/hooks.md",
       "category": "generated",
-      "sha256": "5dbcaac649dd55ec97a36689934a594309b3caabe2cdc38504c13a4328fcc3ed",
+      "sha256": "e7e0272ada4c2e8f4c088dbb58770c24e4fc6f80da2f831d56fcb56bac0a43ca",
       "semantic_id": "skill.hooks",
       "executable": false
     },
@@ -191,7 +191,7 @@
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "929af80168fec61dd70e2e00ec41e7c706eeb5a65328bce7dcc63902d400f103",
+      "sha256": "aa3dd780caae4e1d57cc833a2cd3f9c6ff526a75cf16266d25342d075c85c596",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -387,7 +387,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "41b4d61426b41ba09c9e15a4947bd6123a711aa99da87dd273b90bbedaafc91a",
+      "sha256": "18b546ce4f6108c648795493720172ac4085eb0e58947778c8d1f3db78ad1e70",
       "semantic_id": "harness.permissions",
       "executable": false
     },

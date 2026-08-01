@@ -3,11 +3,11 @@
 Generated native plugins must decide without lup installed, so the adapters'
 hook renderers call this module to read :mod:`lup.policy.kernel` verbatim and
 to erase validated application inputs — hook URL scopes, protected roots, the
-canonical anti-pattern set — into primitive rows rendered as one generated
-data file per plugin. Each row list is declared against the shipped
-``kernel.rows`` shapes, so a generated runtime type-checks as one unit
-against the kernel beside it. No decision logic lives here; the kernel
-decides.
+shell vocabulary, the canonical anti-pattern set — into primitive rows
+rendered as one generated data file per plugin. Each row list is declared
+against the shipped ``kernel.rows`` shapes, so a generated runtime type-checks
+as one unit against the kernel beside it. No decision logic lives here; the
+kernel decides.
 """
 
 import json
@@ -26,11 +26,7 @@ from lup.policy.kernel.rows import (
     ShellRuleRow,
     UrlScopeRow,
 )
-from lup.policy.shell_rules import (
-    BASE_SHELL_RULES,
-    ShellCommandRule,
-    erase_shell_rules,
-)
+from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
 from lup.policy.rules import human_owned_path_rule, path_rule_row
 
 
@@ -149,11 +145,6 @@ def runtime_path_rules(
     ]
 
 
-def runtime_shell_rules(extension: list[ShellCommandRule]) -> list[ShellRuleRow]:
-    """Compile the baseline shell vocabulary plus an application extension."""
-    return erase_shell_rules([*BASE_SHELL_RULES, *extension])
-
-
 def dict_rows_literal(rows: list[list[str]]) -> str:
     """Render already-escaped ``"key": value`` rows in Ruff-stable form."""
     if not rows:
@@ -264,7 +255,7 @@ def render_policy_data(
     protected_roots: list[str],
     human_owned_files: list[str],
     autonomous_agent_identities: list[str],
-    shell_rule_extension: list[ShellCommandRule] | None = None,
+    shell_rules: list[ShellCommandRule],
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
     body = "\n\n".join(
@@ -280,7 +271,7 @@ def render_policy_data(
             "ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = "
             + antipattern_rows_literal(bundled_antipattern_rows()),
             "SHELL_RULES: list[ShellRuleRow] = "
-            + shell_rule_rows_literal(runtime_shell_rules(shell_rule_extension or [])),
+            + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
             + string_rows_literal(autonomous_agent_identities),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),

@@ -26,11 +26,7 @@ from lup.policy.kernel.lex import parse_shell_words, shell_write_targets
 from lup.policy.kernel.rows import AntiPatternRow, PathRuleRow, UrlScopeRow
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment
 from lup.policy.kernel.words import command_words as kernel_command_words
-from lup.policy.shell_rules import (
-    BASE_SHELL_RULES,
-    ShellCommandRule,
-    erase_shell_rules,
-)
+from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -113,20 +109,22 @@ def parse_shell_segments(command: str) -> list[ShellSegment] | None:
 class ShellPolicy(DecisionPolicy[ShellCommand]):
     """Delegate shell classification to the shared hermetic kernel.
 
-    URL scopes feed the kernel's curl screen, so shell reads and WebFetch
-    consult one declared origin table.
+    The vocabulary is the caller's: ``rules`` is the whole table this project
+    judges, not an extension of one the library chose. URL scopes feed the
+    kernel's curl screen, so shell reads and WebFetch consult one declared
+    origin table.
     """
 
     def __init__(
         self,
-        rules: list[ShellCommandRule] | None = None,
+        rules: list[ShellCommandRule],
         allowed_urls: list[UrlScope] | None = None,
         denied_urls: list[UrlScope] | None = None,
         sandbox_active: bool = False,
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
     ) -> None:
-        self.rules = erase_shell_rules(BASE_SHELL_RULES if rules is None else rules)
+        self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
         self.sandbox_active = sandbox_active

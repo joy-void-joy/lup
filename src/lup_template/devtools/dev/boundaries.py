@@ -54,6 +54,22 @@ def tracked_python_sources() -> list[TrackedSource]:
     ]
 
 
+def library_sources() -> list[TrackedSource]:
+    """Every tracked Python file that ships inside ``packages/lup``."""
+    return [
+        source
+        for source in tracked_python_sources()
+        if source.rel.startswith(LIBRARY_ROOT)
+    ]
+
+
+def overridable_names(
+    sources: list[TrackedSource],
+) -> set[str]:  # lup: ignore[set-shape] — name identity membership
+    """Constant names a caller can replace, pooled across whole modules."""
+    return {name for source in sources for name in default_position_names(source.text)}
+
+
 def scan_library_placement() -> list[FoundBreach]:
     """Every library data table no adopter can replace, across ``packages/lup``.
 
@@ -62,14 +78,8 @@ def scan_library_placement() -> list[FoundBreach]:
     callers can replace are collected across every library module — adapters
     included — before any one module is judged against them.
     """
-    sources = [
-        source
-        for source in tracked_python_sources()
-        if source.rel.startswith(LIBRARY_ROOT)
-    ]
-    overridable = {
-        name for source in sources for name in default_position_names(source.text)
-    }
+    sources = library_sources()
+    overridable = overridable_names(sources)
     return [
         FoundBreach(file=source.rel, **breach.model_dump())
         for source in sources
