@@ -45,7 +45,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 
 from lup.mcp import ToolError, lup_tool
-from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.models import TurnTextBlock
 from lup.runtime.query import query
 from lup_template.agent.config import aux_model
 
@@ -218,10 +218,7 @@ async def extract_answer(content: str, question: str) -> str:
             "not contain one."
         ),
     )
-    result = await query(
-        factory,
-        turn_request(TurnInput(text=f"Question: {question}\n\nDocument:\n{content}")),
-    )
+    result = await query(factory, f"Question: {question}\n\nDocument:\n{content}")
     text = "\n\n".join(
         block.text for block in result.blocks if isinstance(block, TurnTextBlock)
     )

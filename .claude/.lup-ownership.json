@@ -16,7 +16,7 @@
     {
       "path": ".claude/PATTERNS.md",
       "category": "generated",
-      "sha256": "4005f22c613f2fce1ccc2aecfe54910e07becf36f9fe2202b68932f2c310bf78",
+      "sha256": "8e4e9f176557845259ba18f03cdc17fa34038c2922f60a79b463f5715b532485",
       "semantic_id": "harness.patterns",
       "executable": false
     },

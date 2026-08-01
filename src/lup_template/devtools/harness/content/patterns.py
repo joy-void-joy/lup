@@ -93,15 +93,13 @@ folds the result into its response.
 ```python
 @lup_tool("Review code quality and return structured assessment")
 async def review(params: ReviewInput) -> ReviewOutput:
-    result = await query(
-        review_factory,
-        turn_request(TurnInput(text=build_review_prompt(params)), ReviewResult),
-    )
+    result = await query(review_factory, build_review_prompt(params), ReviewResult)
     return ReviewOutput(critique=result.output.assessment)
 ```
 
-**Library support:** `lup.runtime.query.query(factory, request)` opens one
-configured session and returns a strict `TurnResult[T]`. Provider selection,
+**Library support:** `lup.runtime.query.query(factory, prompt, OutputModel)`
+opens one configured session and returns a strict `TurnResult[T]`; it also
+accepts a `TurnInput` or a prepared `turn_request(...)` in place of the prompt. Provider selection,
 tools, limits, and compatible endpoints are validated when the application
 constructs the factory; unsupported settings are never silently dropped.
 
@@ -194,7 +192,7 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 
 **Example:** `src/lup_template/agent/tools/example.py` is the template for all three forms — `fetch_example` routes known hosts to a specialized handler (`fetch_wiki_article`, domain dispatch) and distills fetched pages through a nested `query()` call (`extract_answer`, extraction); `search_example` recovers missing snippet fields from a fallback source (`fill_missing_snippets`, null-filling).
 
-**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API wrappers. Extraction uses `query(factory, request)` (see [Nested Agent Pattern](#nested-agent-pattern)).
+**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API wrappers. Extraction uses `query(factory, prompt)` (see [Nested Agent Pattern](#nested-agent-pattern)).
 """
         ),
     ],

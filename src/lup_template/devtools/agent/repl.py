@@ -20,7 +20,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.telemetry.display import format_duration
-from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.models import TurnTextBlock, turn_request
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
 
@@ -112,7 +112,7 @@ async def send_interruptible(
     loop = asyncio.get_running_loop()
     interrupt_count = 0
 
-    handle = await conv.start(turn_request(TurnInput(text=prompt)))
+    handle = await conv.start(turn_request(prompt))
     send_task = asyncio.create_task(handle.turn.result())
 
     def on_sigint() -> None:

@@ -190,25 +190,33 @@ class TurnRequest[T: BaseModel | None](BaseModel):
     output_type: type[T] | None = None
 
 
-@overload  # lup: The overload seems superfluous? Can't we just TurnRequest[T: BaseModel | None] ?
-def turn_request(input: TurnInput) -> TurnRequest[None]: ...
+@overload
+def turn_request(input: str | TurnInput) -> TurnRequest[None]: ...
 
 
 @overload
 def turn_request[T: BaseModel](
-    input: TurnInput,
+    input: str | TurnInput,
     output_type: type[T],
 ) -> TurnRequest[T]: ...
 
 
 def turn_request[T: BaseModel](
-    input: TurnInput,
+    input: str | TurnInput,
     output_type: type[T] | None = None,
 ) -> TurnRequest[T] | TurnRequest[None]:
-    """Construct a request while preserving its output type relationship."""
+    """Construct a request while preserving its output type relationship.
+
+    The overload pair is what preserves it. Collapsed into this single
+    implementation signature, ``T`` is left unsolved when the argument is
+    omitted, and pyright infers ``TurnRequest[Unknown] | TurnRequest[None]``
+    there and ``TurnRequest[Summary] | TurnRequest[None]`` when a model is
+    passed. The overloads pin each direction to one exact type.
+    """
+    prompt = input if isinstance(input, TurnInput) else TurnInput(text=input)
     if output_type is None:
-        return TurnRequest[None](input=input)
-    return TurnRequest[T](input=input, output_type=output_type)
+        return TurnRequest[None](input=prompt)
+    return TurnRequest[T](input=prompt, output_type=output_type)
 
 
 class TurnResult[T: BaseModel | None](BaseModel):

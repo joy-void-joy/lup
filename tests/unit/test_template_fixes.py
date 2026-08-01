@@ -21,7 +21,6 @@ from lup.runtime.models import (
     TurnHandle,
     TurnId,
     TurnIdentifiers,
-    TurnInput,
     TurnRequest,
     TurnResult,
     TurnTextBlock,
@@ -219,7 +218,7 @@ async def test_main_factory_decoration_wires_persistence_display_and_trace(
     inner = static_session_factory([TurnTextBlock(text="decorated turn")])
 
     decorated = decorate_factory(inner, notes=notes, trace_logger=trace)
-    result = await decorated.query(turn_request(TurnInput(text="run one turn")))
+    result = await decorated.query(turn_request("run one turn"))
 
     assert result.blocks == [TurnTextBlock(text="decorated turn")]
     assert len(list((notes.trace_log.parent / "turns").glob("*.json"))) == 1

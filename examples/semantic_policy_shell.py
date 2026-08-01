@@ -22,7 +22,6 @@ from lup.adapters.claude.runtime import (
 from lup.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy, UrlScope
-from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.query import query
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
@@ -62,10 +61,8 @@ async def main() -> None:
     factory = create_claude_session_factory(session_config())
     result = await query(
         factory,
-        turn_request(
-            TurnInput(text=f"Run `{DENIED_COMMAND}` and summarize the output."),
-            Summary,
-        ),
+        f"Run `{DENIED_COMMAND}` and summarize the output.",
+        Summary,
     )
     print(result.output.summary)
 

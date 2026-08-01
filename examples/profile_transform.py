@@ -9,7 +9,6 @@ from lup.adapters.claude.config import (
     ClaudeProfileSelection,
 )
 from lup.adapters.claude.runtime import ClaudeSessionConfig
-from lup.runtime.models import TurnInput, turn_request
 
 from examples.common import Summary
 
@@ -28,9 +27,7 @@ async def main() -> None:
         active="work",
     )
     factory = ClaudeProfileResolver(registry).session_factory(base)
-    result = await factory.query(
-        turn_request(TurnInput(text="Describe immutable configuration."), Summary)
-    )
+    result = await factory.query("Describe immutable configuration.", Summary)
     print(result.output.summary)
 
 

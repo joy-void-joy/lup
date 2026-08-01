@@ -39,7 +39,6 @@ from lup.runtime.models import (
     SubmissionGate,
     SubmissionGateResolver,
     TurnBlock,
-    TurnInput,
     TurnResult,
     TurnTextBlock,
     TurnThinkingBlock,
@@ -695,9 +694,7 @@ async def run_agent(
     reset_metrics()
     build = build_session_factory(identifier, task_id)
     async with build.factory.open(resume) as handle:
-        turn = await handle.session.start(
-            turn_request(TurnInput(text=task), AgentOutput)
-        )
+        turn = await handle.session.start(turn_request(task, AgentOutput))
         result = await turn.turn.result()
     log_metrics_summary()
     projected = application_result(
