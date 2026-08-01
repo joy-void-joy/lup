@@ -56,7 +56,16 @@ lup = ["py.typed"]
 # to packages/lup/src. The root config re-lists this path under its own include
 # for the workspace-wide run; the two configs do not merge or conflict.
 include = ["src"]
-# Adapter asset scripts are verbatim payloads for the generated plugin tree;
-# their imports resolve only in that runtime layout, not in this workspace.
-exclude = ["src/lup/adapters/claude/assets", "src/lup/adapters/codex/assets"]
 pythonVersion = "3.14"
+
+# `kernel`, `policy_data`, and `codex_patch` are top-level modules only inside
+# a generated plugin's `hooks/runtime`, so each dispatcher asset resolves them
+# against the tree the surrounding repository generates — the same layout the
+# workspace-root config names, reached from this directory.
+[[tool.pyright.executionEnvironments]]
+root = "src/lup/adapters/claude/assets"
+extraPaths = ["../../.claude/plugins/lup/hooks/runtime"]
+
+[[tool.pyright.executionEnvironments]]
+root = "src/lup/adapters/codex/assets"
+extraPaths = ["../../.codex/plugins/lup/hooks/runtime"]

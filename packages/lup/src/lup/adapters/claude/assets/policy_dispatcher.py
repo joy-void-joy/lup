@@ -10,12 +10,13 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(
-    0, str(Path(__file__).parents[1] / "runtime")
-)  # lup: Why do we have sys.path.insert here?
-from kernel.decision import (
-    KernelDecision,
-)  # lup: I'm not comfortable having invalid python code here. Can't we compile it or something?
+# The hook is launched as a bare script, promised no cwd, PYTHONPATH, or
+# interpreter environment, and `runtime/` is a plain sibling directory holding
+# the kernel package and this plugin's policy data rather than an installed
+# distribution. Naming it as a search path is what lets the imports below
+# resolve, for the interpreter and for a type checker alike.
+sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
+from kernel.decision import KernelDecision
 from kernel.edit import decide_edit
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_write_targets
@@ -80,7 +81,7 @@ def workspace_path(path_text):
 def edit_decision(path_text, before, after, autonomous):
     path = Path(path_text)
     suffix = path.suffix.lower()
-    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else ()
+    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
     return decide_edit(
         workspace_path(path_text),
         before,

@@ -214,8 +214,9 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         # Broad regex trigger, refined by the AST: empty_collection_exempt_lines
         # exempts deliberate defaults (__init__ state, call kwargs, annotated
-        # class fields), so what reaches a verdict is the build-then-append
-        # seed. The lookbehind keeps `==`/`!=`/`<=`/`>=` comparisons out.
+        # module and class declarations), so what reaches a verdict is the
+        # build-then-append seed. The lookbehind keeps `==`/`!=`/`<=`/`>=`
+        # comparisons out.
         id="empty-collection",
         pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
         message="Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an "
