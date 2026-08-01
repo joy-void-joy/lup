@@ -143,7 +143,7 @@ def client_for(state_root: Path) -> AsyncClient:
 async def test_supervisor_serves_the_packaged_page(tmp_path: Path) -> None:
     build_run(tmp_path)
     async with client_for(tmp_path) as client:
-        response = await client.get("/")  # lup: ignore[dict-get] — HTTP client
+        response = await client.get("/")
 
     assert response.status_code == 200
     assert "Resolver supervision" in response.text
@@ -155,8 +155,8 @@ async def test_a_run_reads_back_from_its_mailbox(tmp_path: Path) -> None:
     ask(mailbox, "q1", ["yes", "no"])
 
     async with client_for(tmp_path) as client:
-        listing = await client.get("/api/runs")  # lup: ignore[dict-get] — HTTP client
-        read = await client.get("/api/state")  # lup: ignore[dict-get] — HTTP client
+        listing = await client.get("/api/runs")
+        read = await client.get("/api/state")
     index = RunIndex.model_validate(listing.json())
     state = SupervisorState.model_validate(read.json())
 
@@ -265,7 +265,7 @@ async def test_an_answered_question_reports_its_promoted_value(tmp_path: Path) -
     )
 
     async with client_for(tmp_path) as client:
-        read = await client.get("/api/state")  # lup: ignore[dict-get] — HTTP client
+        read = await client.get("/api/state")
     state = SupervisorState.model_validate(read.json())
 
     assert state.pending[0].answered == "yes"
@@ -313,9 +313,7 @@ async def test_the_decision_is_offered_as_the_reserved_acceptance_question(
 
 async def test_a_missing_run_is_reported_rather_than_invented(tmp_path: Path) -> None:
     async with client_for(tmp_path) as client:
-        response = await client.get(  # lup: ignore[dict-get] — HTTP client
-            "/api/runs/ghost"
-        )
+        response = await client.get("/api/runs/ghost")
 
     assert response.status_code == 404
 
@@ -336,8 +334,8 @@ async def test_no_door_takes_the_run_lock(tmp_path: Path) -> None:
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(ResolverStateRepository, "exclusive", refuse)
         async with client_for(tmp_path) as client:
-            await client.get("/api/runs")  # lup: ignore[dict-get] — HTTP client
-            await client.get("/api/state")  # lup: ignore[dict-get] — HTTP client
+            await client.get("/api/runs")
+            await client.get("/api/state")
             await client.post(
                 "/api/runs/run-1/answers",
                 json={"answers": [{"question_id": "q1", "value": "yes"}]},
@@ -436,7 +434,7 @@ async def test_an_unexpected_host_header_is_refused(tmp_path: Path) -> None:
         transport=ASGITransport(app=create_supervisor(tmp_path, BASE_URL, "run-1")),
         base_url="http://evil.example",
     ) as client:
-        response = await client.get("/")  # lup: ignore[dict-get] — HTTP client
+        response = await client.get("/")
 
     assert response.status_code == 421
 

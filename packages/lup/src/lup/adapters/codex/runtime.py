@@ -308,10 +308,7 @@ class CodexLiveEventStream(EventStream):
         if self.consumed:
             raise RuntimeError("live event stream can only be consumed once")
         self.consumed = True
-        while (
-            event
-            := await self.channel.events.get()  # lup: ignore[dict-get] — asyncio.Queue
-        ) is not None:
+        while (event := await self.channel.events.get()) is not None:
             yield event
 
     def events(self) -> AsyncIterator[TurnEvent]:

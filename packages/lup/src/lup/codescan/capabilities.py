@@ -10,28 +10,19 @@ anti-pattern registry re-exports the rule id so deny messages name it.
 """
 
 import ast
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from lup.codescan.common import (
     IGNORE_RE,
     PythonContext,
+    PythonSource,
     file_level_ignore,
     ignore_rule_ids,
 )
 
 RULE_ID = "abc-capability"
-
-
-class PythonSource(BaseModel):
-    """One import-resolvable Python module supplied to the project index."""
-
-    model_config = ConfigDict(frozen=True)
-
-    path: Path
-    module: str
-    text: str
 
 
 class CapabilityFinding(BaseModel):
@@ -83,33 +74,6 @@ class Directive(BaseModel):
     line: int
     rule_ids: set[str] | None
     file_level: bool = False
-
-
-def module_name(path: Path) -> str:
-    """Infer a dotted module name from a repository-relative Python path."""
-    parts = list(PurePosixPath(path.as_posix()).parts)
-    start = next(
-        (index for index, part in enumerate(parts) if part in {"lup", "lup_template"}),
-        0,
-    )
-    selected = parts[start:]
-    if selected[-1] == "__init__.py":
-        selected = selected[:-1]
-    else:
-        selected[-1] = PurePosixPath(selected[-1]).stem
-    return ".".join(selected)
-
-
-def sources_from_paths(paths: list[Path]) -> list[PythonSource]:
-    """Read source files and assign import-resolvable module names."""
-    return [
-        PythonSource(
-            path=path,
-            module=module_name(path),
-            text=path.read_text(encoding="utf-8"),
-        )
-        for path in paths
-    ]
 
 
 def dotted_name(node: ast.expr) -> str | None:

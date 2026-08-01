@@ -294,7 +294,7 @@ class ClaudeLiveEventStream(EventStream):
         if self.consumed:
             raise RuntimeError("live event stream can only be consumed once")
         self.consumed = True
-        while (event := await self.queue.get()) is not None:  # lup: ignore[dict-get]
+        while (event := await self.queue.get()) is not None:
             yield event
 
     def events(self) -> AsyncIterator[TurnEvent]:

@@ -1,9 +1,10 @@
 """Audit repository source for missing and spurious `# lup: ignore` markers.
 
 Backs `lup-devtools dev check --antipatterns` (and the standalone
-`dev check`-row). Walks every tracked or untracked `.py`/TS-family file and runs the
-single `lup.codescan.antipatterns` set over it — the same set the edit hook enforces —
-reporting three classes the hook cannot catch after the fact:
+`dev check`-row). Walks every tracked or untracked `.py`/TS-family file and
+runs the single `lup.codescan.antipatterns` set over it — the same set the
+edit hook enforces — reporting three classes the hook cannot catch after the
+fact:
 
 - **missing**: a line trips a rule but carries no `# lup: ignore` covering it
   (it slipped in past the hook, or predates the rule). Blocking.
@@ -12,21 +13,33 @@ reporting three classes the hook cannot catch after the fact:
 - **untyped**: a bare `# lup: ignore` validly silences a line but names no
   rule. Advisory (does not fail the check) — surfaced so the migration to
   typed `# lup: ignore[id]` directives is gradual.
+
+The set is shared with the hook; the verdicts need not be. This sweep reads
+whole parseable files, so it hands `lup.codescan.grammar` a type oracle and
+decides some rules more narrowly than a hook judging an untyped edit fragment
+ever could. Every finding that narrowing drops is reported as a **refuted**
+row carrying the declaration that settled it, and the directive that used to
+guard it turns up as spurious on the next line of the report.
 """
 
 from collections import Counter, defaultdict
 from pathlib import Path
 
 import typer
+from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.antipatterns import (
+    AntiPattern,
     AntiPatternFinding,
     audit_text,
     patterns_for_suffix,
 )
-from lup.codescan.capabilities import audit_capabilities, sources_from_paths
+from lup.codescan.capabilities import audit_capabilities
 from lup.codescan.boundaries import audit_path_boundaries
+from lup.codescan.common import PythonSource, Refutation, module_name
+from lup.codescan.grammar import refute
 from lup.codescan.registry import RULE_REFERENCE
+from lup_template.devtools.dev.pyright_oracle import default_oracle
 from lup_template.devtools.utils import git, output_json
 
 
@@ -36,10 +49,42 @@ class FoundAntiPattern(AntiPatternFinding):
     file: str
 
 
-def scan_antipatterns() -> list[FoundAntiPattern]:
-    """Every missing/spurious marker across tracked `.py`/TS-family files."""
-    results: list[FoundAntiPattern] = []  # lup: ignore[empty-collection] — scan fold
-    python_paths: list[Path] = []
+class FoundRefutation(Refutation):
+    """A :class:`~lup.codescan.common.Refutation` tagged with its file."""
+
+    file: str
+
+
+class ScannedFile(BaseModel):
+    """One tracked file the sweep reads once and audits against its table."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    rel: str
+    path: Path
+    patterns: list[AntiPattern]
+    text: str
+
+
+class AntiPatternScan(BaseModel):
+    """One repository sweep: the findings it kept, and the ones it refuted."""
+
+    findings: list[FoundAntiPattern]
+    refuted: list[FoundRefutation]
+
+
+def scan_antipatterns() -> AntiPatternScan:
+    """Every missing/spurious marker across tracked `.py`/TS-family files.
+
+    The typed grammar resolves receivers before the tables run, so a finding
+    a type oracle proved the rule is not about never reaches a verdict — and
+    a `# lup: ignore` that guarded one becomes the dead directive the audit
+    reports. Resolution costs a language-server session and `dev check` pays
+    it every run; where the checker is absent the grammar refutes nothing and
+    every broad regex verdict stands.
+    """
+    scanned: list[ScannedFile] = []
+    sources: list[PythonSource] = []
     for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):
         path = Path(rel)
         patterns = patterns_for_suffix(path.suffix.lower())
@@ -49,25 +94,35 @@ def scan_antipatterns() -> list[FoundAntiPattern]:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        scanned.append(ScannedFile(rel=rel, path=path, patterns=patterns, text=text))
         if path.suffix.lower() in {".py", ".pyi"}:
-            python_paths.append(path)
-        for finding in audit_text(text, patterns):
-            results.append(FoundAntiPattern(file=rel, **finding.model_dump()))
-    for finding in audit_capabilities(sources_from_paths(python_paths)):
-        results.append(
-            FoundAntiPattern(
-                file=finding.path.as_posix(),
-                kind=finding.kind,
-                line=finding.line,
-                text="",
-                message=finding.message,
-                rule_id=finding.rule_id,
-            )
+            sources.append(PythonSource(path=path, module=module_name(path), text=text))
+
+    refuted = refute(sources, default_oracle())
+    results = [
+        FoundAntiPattern(file=item.rel, **finding.model_dump())
+        for item in scanned
+        for finding in audit_text(
+            item.text,
+            item.patterns,
+            refuted[item.path.as_posix()] if item.path.as_posix() in refuted else None,
         )
+    ]
+    results.extend(
+        FoundAntiPattern(
+            file=finding.path.as_posix(),
+            kind=finding.kind,
+            line=finding.line,
+            text="",
+            message=finding.message,
+            rule_id=finding.rule_id,
+        )
+        for finding in audit_capabilities(sources)
+    )
     boundary_findings = [
-        (path, finding)
-        for path in python_paths
-        for finding in audit_path_boundaries(path, path.read_text(encoding="utf-8"))
+        (source.path, finding)
+        for source in sources
+        for finding in audit_path_boundaries(source.path, source.text)
     ]
     foreign_untyped = {
         (path.as_posix(), finding.line)
@@ -94,7 +149,14 @@ def scan_antipatterns() -> list[FoundAntiPattern]:
         )
         for path, finding in boundary_findings
     )
-    return results
+    return AntiPatternScan(
+        findings=results,
+        refuted=[
+            FoundRefutation(file=file, **refutation.model_dump())
+            for file, refutations in sorted(refuted.items())
+            for refutation in refutations
+        ],
+    )
 
 
 ADVISORY_KINDS = {"untyped"}
@@ -105,9 +167,11 @@ def summarize(as_json: bool) -> None:
 
     A per-rule count (most-frequent first, with how many files each spans) and
     a per-kind split, so a cleanup targets the noisiest rules first instead of
-    reading the whole listing. ``--json`` emits the same tally for tooling.
+    reading the whole listing, plus how many findings the typed grammar
+    refuted. ``--json`` emits the same tally for tooling.
     """
-    found = scan_antipatterns()
+    scan = scan_antipatterns()
+    found = scan.findings
     by_rule: Counter[str] = Counter()
     by_kind: Counter[str] = Counter()
     files_by_rule: defaultdict[str, list[str]] = defaultdict(list)
@@ -127,6 +191,7 @@ def summarize(as_json: bool) -> None:
                 "total": len(found),
                 "blocking": blocking,
                 "files": file_count,
+                "refuted": len(scan.refuted),
                 "by_kind": dict(by_kind),
                 "by_rule": {
                     rule: {"count": count, "files": len(files_by_rule[rule])}
@@ -146,6 +211,8 @@ def summarize(as_json: bool) -> None:
     typer.echo("  by rule:")
     for rule, count in by_rule.most_common():
         typer.echo(f"    {count:5}  {rule}  ({len(files_by_rule[rule])} file(s))")
+    if scan.refuted:
+        typer.echo(f"  refuted by receiver type: {len(scan.refuted)}")
     typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
 
 
@@ -153,15 +220,28 @@ def report(as_json: bool) -> None:
     """List anti-pattern findings; exit non-zero when a blocking one remains.
 
     "untyped" findings are advisory (a bare `# lup: ignore` to migrate to a
-    typed one) and never fail the command; "missing" and "spurious" do.
+    typed one) and never fail the command; "missing" and "spurious" do. Every
+    finding the typed grammar refuted is listed with the declaration that
+    settled it, so a dropped verdict is accountable rather than invisible.
     """
-    found = scan_antipatterns()
+    scan = scan_antipatterns()
+    found = scan.findings
     blocking = [finding for finding in found if finding.kind not in ADVISORY_KINDS]
     if as_json:
-        output_json([finding.model_dump() for finding in found])
+        output_json(
+            {
+                "findings": [finding.model_dump() for finding in found],
+                "refuted": [refutation.model_dump() for refutation in scan.refuted],
+            }
+        )
         if blocking:
             raise typer.Exit(1)
         return
+    for refutation in scan.refuted:
+        typer.echo(
+            f"{refutation.file}:{refutation.line} [refuted {refutation.rule_id}] "
+            f"{refutation.evidence}"
+        )
     if not found:
         typer.echo("No anti-pattern findings.")
         return

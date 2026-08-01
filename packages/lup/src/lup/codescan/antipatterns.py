@@ -21,9 +21,15 @@ syntactic ``context`` it inspects, and Python source is tokenized once (via
 literals and comments blanked while "comment" directive rules see comments
 intact. The detectors themselves stay regexes because that is the primitive
 form the hermetic hook runtime can carry (ruff has no plugin API, and engines
-that do — flake8, pylint, semgrep — could not run inside the hook); AST
-refiners such as `empty_collection_exempt_lines` sharpen individual rules, and
-regex alone remains only where a rule is genuinely text-shaped. The
+that do — flake8, pylint, semgrep — could not run inside the hook).
+
+Refiners sharpen individual rules on top of that floor, and every one of them
+is audit-side: the hook classifies fragments of a proposed edit, which carry
+neither a parse tree nor types. `empty_collection_exempt_lines` reads the AST;
+`lup.codescan.grammar` goes further and resolves what a matched receiver is
+declared on, so `dict-get` can distinguish a mapping from an HTTP client. Both
+return `Refutation` rows this module drops — and reports the surviving
+directives for. Regex alone remains where a rule is genuinely text-shaped. The
 `lup.codescan.registry` index and the generated `docs/rules.md` reference list
 this family beside the boundary, spelling, and architecture rules.
 
@@ -49,6 +55,7 @@ from lup.codescan.common import (
     IGNORE_RE,
     LineProjections,
     PythonContext,
+    Refutation,
     RuleContext,
     file_level_ignore,
     ignore_rule_ids,
@@ -155,12 +162,6 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # Flags every `.get(` — the user's explicit broad choice over a narrow
         # rule. On payload/TypedDict-shaped data use typed attribute access; on
         # a genuinely open dict (a registry or cache) it is one comment.
-        # lup: refute whole-file dict-get findings by receiver type — ask
-        # pyright (textDocument/definition on the matched attribute) whether it
-        # resolves into the mapping family's stubs, and drop confirmed
-        # non-mapping sites (HTTP clients, route decorators). Audit-side only;
-        # the hook kernel keeps this broad line rule because edit fragments
-        # have no types.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
         message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
@@ -496,6 +497,30 @@ reports it spurious — while an id no scanner owns still is.
 EMPTY_COLLECTION_RULE_ID = "empty-collection"
 
 
+def empty_collection_refutations(
+    text: str, patterns: list[AntiPattern]
+) -> list[Refutation]:
+    """The empty-collection AST refiner's exemptions, as refutations.
+
+    The oldest refiner predates the shared shape; projecting it here means the
+    audit has exactly one notion of "matched, but refuted", whether the proof
+    came from the AST alone or from the typed grammar's type oracle.
+    """
+    if not any(ap.id == EMPTY_COLLECTION_RULE_ID for ap in patterns):
+        return []
+    lines = text.splitlines()
+    return [
+        Refutation(
+            rule_id=EMPTY_COLLECTION_RULE_ID,
+            line=line,
+            subject=lines[line - 1].strip()[:80],
+            evidence="a deliberate default, not a build-then-append seed",
+        )
+        for line in sorted(empty_collection_exempt_lines(text))
+        if line <= len(lines)
+    ]
+
+
 def patterns_for_suffix(suffix: str) -> list[AntiPattern] | None:
     """The anti-pattern table that applies to a file suffix, or None to skip it.
 
@@ -556,7 +581,11 @@ class AntiPatternFinding(BaseModel):
     rule_id: str = ""
 
 
-def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFinding]:
+def audit_text(
+    text: str,
+    patterns: list[AntiPattern],
+    refutations: list[Refutation] | None = None,
+) -> list[AntiPatternFinding]:
     """Audit one file's current text for per-rule ignore-marker health.
 
     A bare file-level `# lup: ignore` opts the whole file out (matching the
@@ -576,10 +605,15 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
       bare ignore on a line that trips nothing -> "spurious";
     - a bare `# lup: ignore` that does silence the line -> "untyped".
 
-    An empty-collection hit on a line the AST refiner exempts (see
-    :func:`empty_collection_exempt_lines`) is not a trip at all, so a
-    directive naming the rule there reports "spurious" — the audit drives
-    the cleanup of markers the refiner made unnecessary.
+    A hit a refiner refuted is not a trip at all, so a directive naming that
+    rule there reports "spurious" — the audit drives the cleanup of markers
+    refinement made unnecessary. Two refiners feed this: the AST exemptions
+    for deliberate empty-collection defaults (see
+    :func:`empty_collection_exempt_lines`), computed here, and whatever
+    `refutations` the caller resolved — the typed grammar in
+    `lup.codescan.grammar` passes the sites whose receiver a type oracle
+    proved outside the rule's family. With no refutations supplied and no
+    oracle behind them, every broad regex verdict stands.
 
     An ignore counts as a guard only where a comment actually starts (per the
     tokenizer), so a docstring or string literal that merely *mentions*
@@ -602,8 +636,11 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
         file_disabled = file_ignore.rule_ids
 
     context = PythonContext.parse(text)
-    refined = any(ap.id == EMPTY_COLLECTION_RULE_ID for ap in patterns)
-    exempt = empty_collection_exempt_lines(text) if refined else set()
+    refuted = {
+        (refutation.rule_id, refutation.line)
+        for refutation in empty_collection_refutations(text, patterns)
+        + (refutations or [])
+    }
 
     def inline_directive(line_no: int, line: str) -> re.Match[str] | None:
         match = IGNORE_RE.search(line)
@@ -625,9 +662,11 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
         if index in context.docstring_lines:
             continue  # docstring prose is not code, and no comment can guard it
         preview = line.strip()[:80]
-        hits = line_hits(projections, index, patterns)
-        if index in exempt:
-            hits = [ap for ap in hits if ap.id != EMPTY_COLLECTION_RULE_ID]
+        hits = [
+            ap
+            for ap in line_hits(projections, index, patterns)
+            if (ap.id, index) not in refuted
+        ]
         hit_ids = {ap.id for ap in hits}
         directive = inline_directive(index, line)
         inline_ids = ignore_rule_ids(directive) if directive is not None else None
