@@ -411,9 +411,18 @@ class WorktreeOrchestrator:
                 cwd=lease.root,
             )
         )
-        if checked.code != 0 or unresolved.code != 0 or unresolved.stdout.splitlines():
+        # `git diff --check` is the conflict guard: it exits non-zero on a
+        # marker left in the content. A path can also sit unmerged in the index
+        # while its content is fully resolved, which is what the merger leaves
+        # behind when it edits the file without staging it — `git add -A` below
+        # settles exactly that, so an unmerged path is only a failure when the
+        # content still carries markers. Naming both conditions here rejected
+        # resolved work and stopped one line short of the call that would have
+        # accepted it.
+        if checked.code != 0 or unresolved.code != 0:
             raise RuntimeError(
-                f"semantic join for {lease.concern_id} still has invalid changes"
+                f"semantic join for {lease.concern_id} still has "
+                f"invalid changes: {checked.stdout.strip() or unresolved.stderr.strip()}"
             )
         status = self.launcher.launch(
             LaunchRequest(arguments=["git", "status", "--porcelain"], cwd=lease.root)

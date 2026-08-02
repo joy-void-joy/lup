@@ -660,6 +660,26 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
     ]
 
 
+class JoinLauncher(ProcessLauncher):
+    """Answer the join probes, reporting one unmerged path with chosen markers."""
+
+    def __init__(self, marker_check_code: int) -> None:
+        self.marker_check_code = marker_check_code
+
+    def launch(self, request: LaunchRequest) -> ExitStatus:
+        match request.arguments[1:3]:
+            case ["diff", "--check"]:
+                return ExitStatus(code=self.marker_check_code, stdout="leftover marker")
+            case ["diff", "--name-only"]:
+                return ExitStatus(code=0, stdout="src/module.py\n")
+            case ["status", "--porcelain"]:
+                return ExitStatus(code=0, stdout="UU src/module.py\n")
+            case ["rev-parse", "HEAD"]:
+                return ExitStatus(code=0, stdout="joined-sha\n")
+            case _:
+                return ExitStatus(code=0)
+
+
 class AncestryLauncher(ProcessLauncher):
     """Answer merge-base ancestry with a fixed verdict, recording every call."""
 
@@ -731,6 +751,25 @@ def test_already_joined_reports_containment_from_merge_base(tmp_path: Path) -> N
 
     absent = AncestryLauncher(is_ancestor=False)
     assert not WorktreeOrchestrator(absent, tmp_path).already_joined(lease, "sha")
+
+
+def test_join_accepts_a_resolved_path_the_merger_left_unstaged(
+    tmp_path: Path,
+) -> None:
+    orchestrator = WorktreeOrchestrator(JoinLauncher(marker_check_code=0), tmp_path)
+    lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+
+    assert orchestrator.commit_join(lease, "resolve: integrate") == "joined-sha"
+
+
+def test_join_still_refuses_a_path_whose_content_carries_markers(
+    tmp_path: Path,
+) -> None:
+    orchestrator = WorktreeOrchestrator(JoinLauncher(marker_check_code=2), tmp_path)
+    lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+
+    with pytest.raises(RuntimeError, match="invalid changes"):
+        orchestrator.commit_join(lease, "resolve: integrate")
 
 
 def test_only_orchestrator_creates_commits_and_reads_their_identity(

@@ -1006,8 +1006,11 @@ class ResolverCore:
         purpose: str,
     ) -> MergeReport:
         prompt = (
-            "Resolve the prepared semantic merge in the assigned worktree. Do not "
-            "commit or change branches; the orchestrator owns commit authority.\n\n"
+            "Resolve the prepared semantic merge in the assigned worktree. Stage "
+            "every resolution with `git add` — settling the index is your work "
+            "and the merge cannot complete without it. Do not commit and do not "
+            "change branches; the orchestrator owns commit authority, which "
+            "covers committing only.\n\n"
             f"{invocation}\n\nPurpose: {purpose}\nWorktree: {lease.root}\n"
             f"Parent commits:\n" + "\n".join(commits)
         )
