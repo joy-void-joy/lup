@@ -330,7 +330,7 @@
           const decision = run.accepted === null ? "—" : run.accepted ? "accepted" : "rejected";
           const badge = run.live ? ' <span class="badge">live</span>' : "";
           const detail = run.unreadable ? `<div class="error">${escapeHtml(run.detail)}</div>` : "";
-          const current = run.run_id === state.run_id ? " strong" : "";
+          const current = run.run_id === state?.run_id ? " strong" : "";
           return `<tr><td><button type="button" class="pill${current}" data-run="${escapeHtml(run.run_id)}">${escapeHtml(run.run_id)}</button>${badge}${detail}</td><td class="muted">${escapeHtml(run.phase || "—")}</td><td>${run.concerns}</td><td>${run.pending_questions}</td><td class="muted">${decision}</td></tr>`;
         });
         element("run-rows").innerHTML = rows.join("");
@@ -411,7 +411,11 @@
         if (listing.ok) runs = (await listing.json()).runs;
         const path = state ? `/api/runs/${state.run_id}` : "/api/state";
         const response = await fetch(path);
-        if (!response.ok) return;
+        if (!response.ok) {
+          renderRuns();
+          setConnection("select a run", "");
+          return;
+        }
         state = await response.json();
         render();
       }
