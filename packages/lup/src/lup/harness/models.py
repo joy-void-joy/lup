@@ -324,9 +324,11 @@ class HookUrlScope(BaseModel):
 class HookSandbox(BaseModel):
     """OS sandbox declaration compiled into native settings and launchers.
 
-    Fetch-scope hostnames join extra_domains as the network allowlist, and
-    human-owned files become OS-level write denials, so one declaration
-    feeds both the semantic policy and the kernel-enforced boundary.
+    Fetch-scope hostnames join extra_domains as the network allowlist,
+    human-owned files become OS-level write denials, and writable_paths become
+    the grants that let a sandboxed toolchain reach its caches, so one
+    declaration feeds both the semantic policy and the kernel-enforced
+    boundary.
 
     That makes allowed_fetch the home for any origin an agent should be able
     to read: declaring it there grants both the fetch and the egress. Reserve
@@ -338,21 +340,18 @@ class HookSandbox(BaseModel):
 
     model_config = FROZEN
 
-    # lup: defer[when the resolver review loop is next revised]: this declares
-    # network allowances but only filesystem DENIALS, so a toolchain needing a
-    # writable path outside the workspace cannot be granted one. `uv` keeps its
-    # cache at ~/.cache/uv and takes a lock there whenever it must resolve
-    # dependencies, which is precisely what a changed pyproject.toml forces —
-    # and changing pyproject.toml is what an integration merge does. A worker
-    # then loses every uv-mediated command at once: the test suite, pyright,
-    # harness regeneration, `dev check`, and the conflict audit, so it is asked
-    # to verify work with tooling it cannot start. It fails only when the cache
-    # must be written, so warm runs succeed and the failure looks intermittent
-    # rather than declared. Give the sandbox a writable-paths field and name the
-    # cache in it, so the requirement is stated where the rest of the boundary
-    # is stated rather than discovered by a worker mid-merge.
     extra_domains: list[str] = Field(default_factory=list)
     credential_paths: list[str] = Field(default_factory=list)
+    writable_paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Paths outside the workspace a sandboxed toolchain must write. "
+            "A tool that cannot reach its cache fails only when the cache is "
+            "cold, so an undeclared path reads as an intermittent fault rather "
+            "than a boundary; declaring it here states the requirement where "
+            "the rest of the boundary is stated."
+        ),
+    )
 
 
 class HookSet(BaseModel):

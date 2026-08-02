@@ -81,6 +81,11 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             sandbox=HookSandbox(
                 extra_domains=["api.anthropic.com"],
                 credential_paths=["~/.ssh", "~/.aws/credentials"],
+                # Every command in this project reaches its toolchain through
+                # `uv`, which locks its cache whenever it resolves dependencies
+                # — which a changed pyproject.toml forces, and an integration
+                # merge is what changes pyproject.toml.
+                writable_paths=["~/.cache/uv"],
             ),
         ),
     )

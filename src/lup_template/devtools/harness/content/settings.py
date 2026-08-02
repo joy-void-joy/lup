@@ -79,7 +79,8 @@ def project_settings(hooks: HookSet | None) -> JsonObject:
         "enabled": True,
         "network": {"allowedDomains": domains},
         "filesystem": {
-            "denyWrite": [path.as_posix() for path in hooks.human_owned_files]
+            "denyWrite": [path.as_posix() for path in hooks.human_owned_files],
+            "allowWrite": list(hooks.sandbox.writable_paths),
         },
         "credentials": {
             "files": [
