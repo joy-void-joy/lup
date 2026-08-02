@@ -998,6 +998,34 @@ class ResolverCore:
             raise ResolverInvariantError("reviewer returned a foreign concern id")
         return result.output
 
+    def settled_merge_decisions(self, lease: WritableRootLease) -> str:
+        """Recite what earlier merge turns on this lease were already told.
+
+        Each join opens a fresh session, so an answer to a question one turn
+        asked arrives after that turn has ended and the next turn re-derives
+        the question under an id no recorded answer matches. Reciting the
+        settled ones is continuity, not context: it carries only what this
+        same role was told in this same run, and no concern's specification.
+        """
+        answered = {
+            record.answer.question_id: record.answer.value
+            for record in self.mailbox.answers()
+        }
+        settled = [
+            f"- Asked: {item.question.prompt.splitlines()[0]}\n  Settled: {value}"
+            for item in self.mailbox.questions()
+            if item.question.concern_id == lease.concern_id
+            for value in [answered[item.question.id]]
+            if item.question.id in answered
+        ]
+        if not settled:
+            return ""
+        return (
+            "Decisions already settled for this merge in this run — treat each "
+            "as binding and do not re-ask it, however you would have worded the "
+            "question:\n" + "\n".join(settled) + "\n\n"
+        )
+
     async def merge_turn(
         self,
         lease: WritableRootLease,
@@ -1011,8 +1039,10 @@ class ResolverCore:
             "and the merge cannot complete without it. Do not commit and do not "
             "change branches; the orchestrator owns commit authority, which "
             "covers committing only.\n\n"
-            f"{invocation}\n\nPurpose: {purpose}\nWorktree: {lease.root}\n"
-            f"Parent commits:\n" + "\n".join(commits)
+            + self.settled_merge_decisions(lease)
+            + f"{invocation}\n\nPurpose: {purpose}\nWorktree: {lease.root}\n"
+            + "Parent commits:\n"
+            + "\n".join(commits)
         )
         result = await query(
             self.worker_factory(
