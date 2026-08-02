@@ -239,6 +239,8 @@ A note in a comment-less format (e.g. JSON) is the trap: you can't keep it there
 - **A `# lup: defer[<wake condition>]: <text>` note** at the most relevant site — the code or config the work concerns. The bracket names the condition under which the work wakes, mirroring `# lup: ignore[rule-id]`. `dev comments` lists deferred notes in their own section and `dev check` stays red while any exist, so parked work remains visible pressure instead of silent debt. Each resolve pass triages them: a note whose wake condition reads as met is proposed to the user for waking; an unmet one is carried forward untouched, never re-litigated as ordinary feedback and never stripped by an editor whose concern doesn't wake it.
 - **Ask instead of filing** — when whether (or how) to defer is itself the open question, put it to the user.
 
+A briefing under `tmp/` is the one exception, and it is not a backlog. Its whole purpose is to start a *fresh* session from scratch on a situation the current one cannot finish, so it states the situation as it stands now: what is wrong, what is left to do, and what a reader needs to act. Never append to one, never patch it, and never let it accumulate a history of what was tried — rewrite it whole, the way § Code as Documentation asks of the codebase itself. A file that records its own past has become the tracking file this rule forbids.
+
 ### DRY: Don't Repeat Yourself
 
 - If logic exists in `lup` (the library), import it. Don't copy-paste.
