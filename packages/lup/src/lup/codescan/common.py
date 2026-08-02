@@ -1,4 +1,4 @@
-# lup: ignore[import-re, re-call, set-shape, empty-collection, tuple-shape, dict-get, string-split]
+# lup: ignore[import-re, re-call, set-shape, empty-collection, tuple-shape, dict-get, string-split] — the scanner that enforces these rules is written in the vocabulary they govern
 """Shared scanning core for the review-marker and anti-pattern scanners.
 
 Both `lup.codescan.markers` and `lup.codescan.antipatterns` walk a file line by
@@ -37,8 +37,15 @@ type RuleContext = Literal["code", "comment"]
 IGNORE_RE = re.compile(
     r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?", re.IGNORECASE
 )
+# The file-level form is the same directive standing alone on its own line, so
+# the leading anchor is what separates it from a trailing inline one. It may
+# carry a reason after the ids, introduced by a dash or a colon the way the
+# inline form and `defer[<condition>]:` already do — a suppression that cannot
+# say why it exists is the shape these rules were written to discourage.
 FILE_IGNORE_RE = re.compile(
-    r"^\s*(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?\s*$", re.IGNORECASE
+    r"^\s*(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?"
+    r"\s*(?:[-—–:]\s*(?P<reason>\S.*?))?\s*$",
+    re.IGNORECASE,
 )
 
 

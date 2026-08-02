@@ -118,6 +118,22 @@ def test_file_level_ignore_reads_bare_typed_and_absent() -> None:
     assert file_level_ignore("x = 1\n") is None
 
 
+def test_file_level_ignore_carries_a_reason_after_the_ids() -> None:
+    for line in (
+        "# lup: ignore[dict-get] — the receiver is an HTTP client\n",
+        "# lup: ignore[dict-get]: the receiver is an HTTP client\n",
+        "# lup: ignore[dict-get] - the receiver is an HTTP client\n",
+    ):
+        stated = file_level_ignore(line + "x = 1\n")
+        assert stated is not None and stated.rule_ids == {"dict-get"}
+    bare = file_level_ignore("# lup: ignore — every rule, and here is why\nx = 1\n")
+    assert bare is not None and bare.rule_ids is None
+
+
+def test_file_level_ignore_still_refuses_a_trailing_inline_directive() -> None:
+    assert file_level_ignore("x = 1  # lup: ignore[dict-get]\n") is None
+
+
 def test_scan_mode_for_routes_by_suffix() -> None:
     assert scan_mode_for(Path("a.py")) == ScanMode.PYTHON
     assert scan_mode_for(Path("a.pyi")) == ScanMode.PYTHON
