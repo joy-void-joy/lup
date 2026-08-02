@@ -416,6 +416,7 @@ def run_resolve(
 
     async def execute() -> None:
         from lup.adapters.claude.runtime import (
+            ClaudeSandboxConfig,
             ClaudeSessionConfig,
             create_claude_session_factory,
         )
@@ -459,6 +460,21 @@ def run_resolve(
 
         state_root = root / ".lup" / "resolve"
 
+        def toolchain_writable_paths() -> list[Path]:
+            """Absolute paths a sandboxed worker's toolchain must be able to write.
+
+            A worker is contained to its lease, which is where its work belongs
+            — but every command it verifies with reaches the toolchain through
+            `uv`, whose cache lives outside any worktree. Granting the declared
+            paths is what keeps containment from disarming verification.
+            """
+            hooks = portable_harness().plugins[0].hooks
+            declared = hooks.sandbox if hooks is not None else None
+            return [
+                Path(path).expanduser()
+                for path in (declared.writable_paths if declared is not None else [])
+            ]
+
         def worker_factory(context: WorkerContext) -> SessionFactory:
             """Open one worker session that can ask its own questions.
 
@@ -494,7 +510,8 @@ def run_resolve(
                         model=session_model,
                         system_prompt="Execute the persisted Lup resolver assignment.",
                         cwd=cwd,
-                        add_dirs=[cwd],
+                        add_dirs=[cwd, *toolchain_writable_paths()],
+                        sandbox=ClaudeSandboxConfig(),
                         environment=concern_environment,
                         tool_servers={"resolver": server},
                         allowed_tools=[
