@@ -253,9 +253,37 @@ def create_permission_hooks(
 
 def create_git_inspection_hook() -> LupHooksConfig:
     """Permit workers to inspect Git while reserving mutations for orchestration."""
+    # Settling the index is not mutating history: `add` and `rm` create no
+    # commit and move no branch, and a worker assigned a merge cannot finish
+    # one without them. History verbs stay reserved for the orchestrator.
+    # lup: defer[when LupHookDecision gains an ask verdict]: every deny here is
+    # terminal — a worker cannot promote one with `# lup: escalate: <why>` the
+    # way the shell lattice allows, because that marker is read by the policy
+    # kernel and this gate returns before any of it runs. So a worker that
+    # meets a genuine need outside the allowlist has no route at all, which is
+    # exactly how a merge worker spent this run unable to stage its own
+    # resolutions. The fix is to honour ESCALATE_RE here and answer `ask`, but
+    # the neutral vocabulary is allow/deny/block today and `block` renders on a
+    # channel PreToolUse does not read — so the command would silently RUN.
+    # Wire this to the ask verdict rather than approximating it.
+    # Also wanted: writes under ./tmp should carry no friction at all, since it
+    # is the sanctioned scratch space the conventions already point work at.
     inspection_commands = dict.fromkeys(
-        ["status", "log", "diff", "show", "rev-parse", "ls-files", "grep"]
+        [
+            "status",
+            "log",
+            "diff",
+            "show",
+            "rev-parse",
+            "ls-files",
+            "grep",
+            # Computes an ancestor; writes nothing. A merge worker needs it to
+            # tell an already-joined parent from an unmerged one, and reading
+            # `merge` in the name as history mutation denied exactly that.
+            "merge-base",
+        ]
     )
+    index_commands = dict.fromkeys(["add", "rm"])
     shell_wrappers = dict.fromkeys(["bash", "dash", "fish", "sh", "zsh"])
 
     async def git_inspection_hook(event: LupHookInput) -> LupHookOutput:
@@ -287,10 +315,12 @@ def create_git_inspection_hook() -> LupHooksConfig:
                             "resolver workers cannot hide commands in a shell wrapper"
                         )
                     if executable == "git" and (
-                        len(words) < 2 or words[1] not in inspection_commands
+                        len(words) < 2
+                        or words[1] not in {**inspection_commands, **index_commands}
                     ):
                         return deny_hook(
-                            "resolver workers may inspect Git but cannot mutate it"
+                            "resolver workers may inspect Git and settle its "
+                            "index, but cannot mutate history"
                         )
                 return allow_hook()
             case _:
