@@ -660,6 +660,79 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
     ]
 
 
+class AncestryLauncher(ProcessLauncher):
+    """Answer merge-base ancestry with a fixed verdict, recording every call."""
+
+    def __init__(self, is_ancestor: bool) -> None:
+        self.is_ancestor = is_ancestor
+        self.arguments: list[list[str]] = []
+
+    def launch(self, request: LaunchRequest) -> ExitStatus:
+        self.arguments.append(request.arguments)
+        if request.arguments[1:3] == ["merge-base", "--is-ancestor"]:
+            return ExitStatus(code=0 if self.is_ancestor else 1)
+        return ExitStatus(code=0)
+
+
+class MergingLauncher(ProcessLauncher):
+    """Report an open merge against a chosen parent, recording every call."""
+
+    def __init__(self, merge_head: str) -> None:
+        self.merge_head = merge_head
+        self.arguments: list[list[str]] = []
+
+    def launch(self, request: LaunchRequest) -> ExitStatus:
+        self.arguments.append(request.arguments)
+        if request.arguments[1:3] == ["rev-parse", "-q"]:
+            if not self.merge_head:
+                return ExitStatus(code=1)
+            return ExitStatus(code=0, stdout=f"{self.merge_head}\n")
+        return ExitStatus(code=0)
+
+
+def test_preparing_the_same_join_twice_leaves_the_open_merge_alone(
+    tmp_path: Path,
+) -> None:
+    launcher = MergingLauncher("parent-sha")
+    orchestrator = WorktreeOrchestrator(launcher, tmp_path)
+    lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+
+    orchestrator.prepare_join(lease, ["head-sha", "parent-sha"])
+
+    assert ["git", "merge", "--no-commit", "--no-ff", "parent-sha"] not in (
+        launcher.arguments
+    )
+
+
+def test_preparing_a_different_join_still_opens_the_merge(tmp_path: Path) -> None:
+    launcher = MergingLauncher("")
+    orchestrator = WorktreeOrchestrator(launcher, tmp_path)
+    lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+
+    orchestrator.prepare_join(lease, ["head-sha", "parent-sha"])
+
+    assert [
+        "git",
+        "merge",
+        "--no-commit",
+        "--no-ff",
+        "parent-sha",
+    ] in launcher.arguments
+
+
+def test_already_joined_reports_containment_from_merge_base(tmp_path: Path) -> None:
+    lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+
+    contained = AncestryLauncher(is_ancestor=True)
+    assert WorktreeOrchestrator(contained, tmp_path).already_joined(lease, "sha")
+    assert contained.arguments == [
+        ["git", "merge-base", "--is-ancestor", "sha", "HEAD"]
+    ]
+
+    absent = AncestryLauncher(is_ancestor=False)
+    assert not WorktreeOrchestrator(absent, tmp_path).already_joined(lease, "sha")
+
+
 def test_only_orchestrator_creates_commits_and_reads_their_identity(
     tmp_path: Path,
 ) -> None:

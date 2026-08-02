@@ -309,6 +309,27 @@ class WorktreeOrchestrator:
         )
         return status.code == 0
 
+    def merging(self, lease: WritableRootLease) -> str | None:
+        """The parent of a merge left in progress, or ``None`` when settled."""
+        status = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+                cwd=lease.root,
+            )
+        )
+        lines = status.stdout.splitlines()
+        return lines[0] if status.code == 0 and lines else None
+
+    def already_joined(self, lease: WritableRootLease, commit: str) -> bool:
+        """Report whether a parent is already contained in the worktree's HEAD."""
+        status = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "merge-base", "--is-ancestor", commit, "HEAD"],
+                cwd=lease.root,
+            )
+        )
+        return status.code == 0
+
     def branch(self, lease: WritableRootLease) -> str:
         """Read the current branch for an orchestrated worktree."""
         identified = self.launcher.launch(
@@ -356,6 +377,12 @@ class WorktreeOrchestrator:
         """Stage a no-commit merge so the portable merger can resolve semantics."""
         if len(parent_commits) != 2:
             raise ValueError("one semantic join step requires exactly two commits")
+        # Preparing is idempotent: a merge already open against this same parent
+        # is the one a previous turn was resolving, and re-running `git merge`
+        # over it would fail on the existing MERGE_HEAD anyway. Leaving it in
+        # place is what lets a resolution survive the park that interrupted it.
+        if self.merging(lease) == parent_commits[1]:
+            return
         status = self.launcher.launch(
             LaunchRequest(
                 arguments=[

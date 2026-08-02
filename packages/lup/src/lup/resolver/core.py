@@ -666,8 +666,20 @@ class ResolverCore:
                     recorded = True
                     expected = state.integration.commit
                 else:
+                    # Joins already committed are progress, not a failed
+                    # attempt. `reset` exists to discard an uncommitted attempt,
+                    # and resetting to the worktree's own HEAD does exactly
+                    # that: a half-finished merge and its index go, every
+                    # completed join stays. Naming the source commit here
+                    # discarded all of them on every resume, so a run that
+                    # parked mid-integration replayed every join and re-derived
+                    # the same questions under fresh ids.
                     recorded = False
-                    expected = state.source.commit
+                    expected = (
+                        self.worktrees.head(lease)
+                        if lease.root.exists()
+                        else state.source.commit
+                    )
                 self.restore_worktree(lease, expected, recorded)
                 continue
             outcome = (
@@ -708,6 +720,14 @@ class ResolverCore:
                 raise ResolverInvariantError(
                     f"persisted commit changed for {lease.concern_id}"
                 )
+            return
+        # A merge left open is not an abandoned attempt: it is the join a turn
+        # was resolving when the run parked to ask about it, and the resolution
+        # lives in the working tree the reset would wipe. Preparing the same
+        # join is idempotent, so leaving this alone is what lets an answered
+        # question resume the work it interrupted rather than recreate the
+        # conflict it was asked about.
+        if self.worktrees.merging(lease) is not None:
             return
         self.worktrees.reset(lease, expected)
 
@@ -937,6 +957,14 @@ class ResolverCore:
             self.worktrees.create(lease, commits[0])
         current = self.worktrees.head(lease)
         for parent in commits[1:]:
+            # The loop carries no resumption point, so a resumed join re-enters
+            # at the first parent. One already contained in HEAD has nothing to
+            # merge, and a merge turn spent on it is not free: the session
+            # cannot tell "already joined" from "something upstream is wrong",
+            # so it reasonably asks rather than reporting success, and every
+            # such round costs a question and a resume. Skip what is already in.
+            if self.worktrees.already_joined(lease, parent):
+                continue
             self.worktrees.prepare_join(lease, [current, parent])
             merge = await self.merge_turn(
                 lease,
