@@ -338,6 +338,19 @@ class HookSandbox(BaseModel):
 
     model_config = FROZEN
 
+    # lup: defer[when the resolver review loop is next revised]: this declares
+    # network allowances but only filesystem DENIALS, so a toolchain needing a
+    # writable path outside the workspace cannot be granted one. `uv` keeps its
+    # cache at ~/.cache/uv and takes a lock there whenever it must resolve
+    # dependencies, which is precisely what a changed pyproject.toml forces —
+    # and changing pyproject.toml is what an integration merge does. A worker
+    # then loses every uv-mediated command at once: the test suite, pyright,
+    # harness regeneration, `dev check`, and the conflict audit, so it is asked
+    # to verify work with tooling it cannot start. It fails only when the cache
+    # must be written, so warm runs succeed and the failure looks intermittent
+    # rather than declared. Give the sandbox a writable-paths field and name the
+    # cache in it, so the requirement is stated where the rest of the boundary
+    # is stated rather than discovered by a worker mid-merge.
     extra_domains: list[str] = Field(default_factory=list)
     credential_paths: list[str] = Field(default_factory=list)
 

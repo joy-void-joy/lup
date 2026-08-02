@@ -570,6 +570,15 @@ def run_resolve(
                 worktree_root=(root.parent / f"{root.name}-resolve-{resolved_run_id}"),
                 run_id=resolved_run_id,
                 integration_branch=f"resolve/{resolved_run_id}/review",
+                # lup: defer[when the resolver's verification set is next revised]:
+                # these three are a strict subset of `lup-devtools dev check`,
+                # which also runs `scan_antipatterns` and the comments gate. A
+                # worker can therefore introduce an anti-pattern, or leave an
+                # unresolved `# lup:` note, and still verify green — the two
+                # gates most specific to this repository are the ones the
+                # resolver does not apply to its own output. Run `dev check`
+                # instead of restating part of it, so a rule that gates for a
+                # human also gates for a worker.
                 verification_commands=[
                     VerificationCommand(
                         name="ruff", arguments=["uv", "run", "ruff", "check", "."]

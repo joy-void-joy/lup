@@ -75,6 +75,16 @@ class ConcernAllowance(StrEnum):
     of parking the run to ask again for work they just approved.
     """
 
+    # lup: defer[when the resolver review loop is next revised]: these are
+    # granted when a concern is PLANNED, on the reasoning that the decision is
+    # a human's and naming it upfront beats parking the run to re-ask. A
+    # semantic merge breaks that assumption: a rule one branch adds can first
+    # meet a constant another branch adds only when the two are joined, so the
+    # suppression is newly required by work nobody could have foreseen. A merge
+    # session holds no plan-time allowance and has no channel to satisfy an ask,
+    # so the refusal is terminal — observed here on a library-default marker
+    # that only existed because of the merge. Either let a join carry
+    # allowances, or give the merger a route to request one.
     NEW_DEVTOOLS_MODULE = "new-devtools-module"
     ANTIPATTERN_SUPPRESSION = "antipattern-suppression"
 

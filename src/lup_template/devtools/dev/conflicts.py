@@ -6,6 +6,17 @@
 After a failed merge or rebase, classifies conflicted files as in-scope
 (touched by this branch) or out-of-scope (only changed on the other side).
 
+.. note::
+
+   ``lup: defer[when the resolver review loop is next revised]``: every one of
+   these commands is reached through ``uv run``, which parses ``pyproject.toml``
+   before it will run anything. So the moment the conflict is *in* that file the
+   whole conflict toolchain is unavailable, precisely when a resolver worker is
+   assigned to settle it — the tooling withdraws exactly where the manifest that
+   configures the project is at stake, and the worker falls back to bare ``git``.
+   Reach these through an entry point that does not re-read the manifest, or
+   detect the case and say so rather than failing to start.
+
 The `conflicts`, `conflict_status`, `conflict_audit`, and `conflict_complete`
 entry points back the `lup-devtools dev conflict` subcommands wired in
 `lup_template.devtools.dev.app`.

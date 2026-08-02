@@ -10,6 +10,26 @@ stdio subprocess that rebuilds the same mailbox from the relayed run
 directory. Only where the mailbox comes from differs.
 """
 
+# lup: defer[when mid-run-concern-admission lands]: every tool here runs
+# worker to human, and nothing runs the other way, so a human can only tell a
+# worker something the worker thought to ask. Information discovered after a
+# concern's questions are answered cannot reach it: `Mailbox.record` opens with
+# "x" so first answer wins by design, and a concern whose questions are all
+# answered has no channel left at all. Widen the interface so the orchestrating
+# side can act on a live run — spawn a new worker carrying its own concern, and
+# reshape the worker/concern mapping itself (split one concern across workers,
+# merge several into one, retarget a worker that has not started). Admission of
+# a new concern is the narrow case of this; the general case is that run shape
+# stays editable while the run is alive. A worked example from the run that
+# raised this: `library-application-boundary` was planned as an audit whose
+# criterion 6 forbids it from moving any code, with `policy-data-to-template`
+# depending on it to act — so the audit wrote a rule, found real violations,
+# and was not permitted to fix them. Two concerns that should have been one,
+# discovered only once both were leased and unmergeable. The planning half of
+# that is its own defect: an audit that deliberately produces no code is the
+# human-scarcity reflex the Plan at Agent Speed guidance already rejects, so
+# criteria should scope analysis and action together rather than staging them.
+
 import asyncio
 from pathlib import Path
 from typing import Literal

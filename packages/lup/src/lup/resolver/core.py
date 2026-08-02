@@ -659,6 +659,27 @@ class ResolverCore:
         }
         for lease in self.leases.leases.values():
             if lease.concern_id == "integration":
+                # lup: defer[when the resolver review loop is next revised]: an
+                # integration that has not finished has no `IntegrationRecord`
+                # — it is written only once `join_commits` returns — so this
+                # falls to the source commit and `restore_worktree` hard-resets
+                # the worktree, discarding every join already completed. A run
+                # that parks partway through integration therefore redoes all
+                # of them on each resume, re-running a merge turn per parent and
+                # re-deriving the same conflicts. Observed: six joins built and
+                # thrown away, and the same semantic question re-asked under a
+                # fresh id because the whole integration restarted beneath it,
+                # so the human answered it twice. Record join progress as it is
+                # made, and resume from the last completed join rather than from
+                # the source commit. The reset below now preserves committed
+                # joins, but the deeper shape is still wrong: `IntegrationRecord`
+                # carries one `commit` that means "all joins done, verification
+                # pending", so there is nowhere to record "joined 6 of 12".
+                # Persisting that record mid-join would make `integrate` skip
+                # the join block entirely and verify a half-merged tree — worse
+                # than replaying. Give join progress its own field so a resume
+                # can start at the next unjoined parent instead of re-running a
+                # merge turn for every parent already in HEAD.
                 if (
                     state.integration is not None
                     and state.integration.commit is not None
@@ -702,6 +723,19 @@ class ResolverCore:
             if not lease.root.exists() and not self.worktrees.branch_exists(lease):
                 self.restore_concern_progress(lease.concern_id)
                 continue
+            # lup: defer[when the resolver review loop is next revised]: a
+            # concern with no outcome yet has not finished a round, which is
+            # exactly the state a worker parks in when it asks a question — so
+            # every park discards that turn's entire work and the concern
+            # re-runs from a clean base. That is coherent as retry semantics,
+            # since the rerun has the answer in hand, but it prices asking at
+            # one wasted turn per question while the guidance tells workers to
+            # ask the moment a decision is not theirs. Nothing reports the cost,
+            # and a rerun re-derives its question under a new id that no
+            # recorded answer matches, so the same decision can be answered
+            # repeatedly — observed four times for one question in a single run.
+            # Decide deliberately whether a park should preserve the attempt or
+            # keep discarding it, and either way surface what it costs.
             self.restore_worktree(lease, expected, False)
             self.restore_concern_progress(lease.concern_id)
 
@@ -715,6 +749,18 @@ class ResolverCore:
             else:
                 self.worktrees.create(lease, expected)
         self.worktrees.branch(lease)
+        # lup: defer[when the resolver review loop is next revised]: this
+        # invariant bricks a run whose concern failed. The caller passes
+        # `outcome.commit or expected`, and a concern that never verified has
+        # no commit, so `expected` falls back to the run's source commit — but
+        # the orchestrator has already moved that worktree's HEAD with its own
+        # `resolve: clear review notes` commit. Every later resume then raises,
+        # naming an invariant the resolver itself violated, and no CLI
+        # operation repairs it. Observed on docs-set-restructure: HEAD sat at
+        # the note-clearing commit while expected was the source commit, so the
+        # whole run could not resume until the worktree was reset by hand. A
+        # failed concern's restore should expect whatever HEAD its own recorded
+        # commits left, or record that commit when it clears notes.
         if terminal:
             if self.worktrees.head(lease) != expected:
                 raise ResolverInvariantError(
@@ -998,6 +1044,49 @@ class ResolverCore:
             raise ResolverInvariantError("reviewer returned a foreign concern id")
         return result.output
 
+    # lup: defer[when the resolver review loop is next revised]: the join is the
+    # one place where N parallel concerns meet, and it is the least accountable
+    # step in the run. This turn is a fresh one-shot session whose entire input
+    # is a purpose string, a worktree path and two shas — it never sees the
+    # concern specs it is merging, their acceptance criteria, or the human's
+    # recorded answers, so it can read what changed but not which behaviour was
+    # a deliberate decision. `MergeReport` then cannot express what it did:
+    # `completed`, `summary`, `unresolved_paths` and nothing for what it kept
+    # from each side, dropped, or chose between, and nothing validates it
+    # against the diff the way `validate_and_commit` checks `WorkerReport`.
+    # `WorkerReport` is even FROZEN_STRICT for the stated reason that a retired
+    # field must fail loudly rather than vanish; this one is only FROZEN. The
+    # classic failure of parallel edits is one feature silently overriding
+    # another, and the pipeline would not report it — an observed conflict was
+    # confirmed correct only because a human audited it by hand. Three
+    # questions, not one answer: whether the merger should receive the concerns
+    # it is joining, whether its report should declare every semantic choice and
+    # be validated like a worker's, and whether a context-free one-shot is the
+    # right shape at all. The isolation may be deliberate, so weigh that before
+    # widening it. Weigh this too: observed, the merger's judgement was good and
+    # its bookkeeping was not. It caught a semantic conflict neither parent could
+    # see, cited the sibling precedent by line, measured the blast radius, ran
+    # the deletion audit, and declined to guess a classification that writes into
+    # a hand-maintained table — then left the file it had correctly resolved
+    # unstaged, twice, because this prompt told it not to. The shell policy
+    # allows `git add` (a reversible-local subcommand), and the /lup:merge skill
+    # tells it to stage; the prompt below said the orchestrator owns commit
+    # authority, and the agent read staging as part of that. Two instructions,
+    # opposite answers, and the agent obeyed the nearer one — which cost most of
+    # this run's integration failures. The prompt now separates staging from
+    # committing, but a contract this load-bearing should not live only in
+    # sentences: the report has no field for "I resolved but could not stage",
+    # so the orchestrator saw an unexplained incompletion each time.
+    # And because each join is a fresh session, a question it
+    # asks cannot be answered to the session that asked it: the answer lands
+    # after that turn ends, the next turn re-derives a differently-worded
+    # question under a different id, and the human answers the same thing twice.
+    # So the gap that cost real time here was continuity and mechanics, not
+    # context. The accountability question stands untouched regardless: nothing
+    # in the pipeline would have reported a silent override, and the one merge
+    # audited by hand was confirmed correct only because a human looked. `lup-devtools dev conflict audit` and the /lup:merge skill
+    # already carry deletion-audit guidance, but both are prompt-level, and the
+    # guidance itself says a prompt rule coexists with the failure it warns of.
     def settled_merge_decisions(self, lease: WritableRootLease) -> str:
         """Recite what earlier merge turns on this lease were already told.
 

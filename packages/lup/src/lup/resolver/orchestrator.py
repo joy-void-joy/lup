@@ -209,6 +209,21 @@ class WorktreeOrchestrator:
         actual = {path.as_posix() for path in changed}
         reported = {path.as_posix() for path in report.files_changed}
         swept = {path.as_posix() for path in report.swept_beyond_scope}
+        # lup: defer[when the resolver review loop is next revised]: this gate
+        # discarded 71 files of correct work over two stale entries, three
+        # rounds running, and the worker could not have learned why. Two
+        # separable defects. First, `reported != actual` rejects a worker that
+        # over-reports, but the safety property here is that nothing changes
+        # undeclared — `actual <= reported` states that, while equality also
+        # punishes a stale path the worker believed it had touched. The
+        # observed failure was exactly that: reported minus actual held two
+        # content modules the worker ended up creating elsewhere, and actual
+        # minus reported was empty, so nothing was hidden. Second, the reason
+        # names no path, so a revision round cannot converge — every retry
+        # re-derives the same report and fails identically until the budget is
+        # spent. Name the symmetric difference in the reason, and treat an
+        # unchanged verdict across rounds as grounds to escalate rather than to
+        # spend another round.
         if reported != actual or not swept <= actual:
             return DiffValidation(
                 concern_id=concern.id,
