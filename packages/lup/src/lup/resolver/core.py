@@ -17,6 +17,14 @@ from lup.resolver.contracts import (
     WorktreePreparer,
 )
 from lup.resolver.dag import ConcernGraph
+from lup.resolver.journal import (
+    AnswerSettledEvent,
+    ConcernProgressedEvent,
+    Journal,
+    PhaseChangedEvent,
+    QuestionAskedEvent,
+    RunFailedEvent,
+)
 from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     ANSWER_POLL_SECONDS,
@@ -242,6 +250,7 @@ class ResolverCore:
             process_launcher, config.workspace, worktree_preparer
         )
         self.mailbox = QuestionMailbox(self.repository.root)
+        self.journal = Journal(self.repository.root)
         self.wake = asyncio.Event()
         self.state_lock = asyncio.Lock()
         self.state: ResolveState | None = None
@@ -801,6 +810,8 @@ class ResolverCore:
         resume_from = (
             state.resume_from if state.phase == ResolvePhase.FAILED else state.phase
         )
+        for message in failure_messages(error):
+            self.journal.record(RunFailedEvent(reason=message))
         self.persist(
             state.model_copy(
                 update={
@@ -1169,6 +1180,9 @@ class ResolverCore:
                     asked_at=utc_now(),
                 )
             )
+            self.journal.record(
+                QuestionAskedEvent(question=question, asked_by=asked_by)
+            )
 
     def promote_offers(self) -> list[str]:
         """Promote what the doors offered, and report what could not count.
@@ -1195,16 +1209,16 @@ class ResolverCore:
             or offer.value in questions[offer.question_id].choices
         ]
         for offer in valid:
+            answer = QuestionAnswer(question_id=offer.question_id, value=offer.value)
             self.mailbox.record(
                 RecordedAnswer(
                     run_id=self.config.run_id,
-                    answer=QuestionAnswer(
-                        question_id=offer.question_id, value=offer.value
-                    ),
+                    answer=answer,
                     door=offer.door,
                     answered_at=utc_now(),
                 )
             )
+            self.journal.record(AnswerSettledEvent(answer=answer, door=offer.door))
         return [
             f"{offer.question_id} was answered {offer.value!r}, but that gate "
             "accepts only: " + ", ".join(questions[offer.question_id].choices)
@@ -1591,11 +1605,16 @@ class ResolverCore:
     def emit_transitions(
         self, previous: ResolveState | None, state: ResolveState
     ) -> None:
-        """Report only durably saved phase and concern changes to the observer."""
-        if self.observer is None:
-            return
+        """Report only durably saved phase and concern changes.
+
+        The journal takes the same transitions the observer does, so a page
+        following the record sees state moves interleaved with the turns
+        that caused them rather than having to correlate two sources.
+        """
         if previous is None or previous.phase != state.phase:
-            self.observer.phase_changed(state.phase)
+            self.journal.record(PhaseChangedEvent(phase=state.phase))
+            if self.observer is not None:
+                self.observer.phase_changed(state.phase)
         before = (
             {item.concern_id: item for item in previous.progress}
             if previous is not None
@@ -1603,7 +1622,10 @@ class ResolverCore:
         )
         for item in state.progress:
             prior = before[item.concern_id] if item.concern_id in before else None
-            if prior != item:
+            if prior == item:
+                continue
+            self.journal.record(ConcernProgressedEvent(progress=item))
+            if self.observer is not None:
                 self.observer.concern_changed(item)
 
     def progress_state(
