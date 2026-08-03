@@ -55,11 +55,35 @@ def comments_gate_lines(found: list[FoundComment]) -> list[str]:
     return lines
 
 
-def run_checks(fix: bool, no_test: bool) -> None:
+def changed_paths(since: str) -> list[str]:
+    """Every tracked path this tree changed since a ref, as posix strings."""
+    named = sh.Command("git")("diff", "--name-only", since, _ok_code=list(range(256)))
+    return [line for line in str(named).splitlines() if line]
+
+
+def owned_comments(
+    found: list[FoundComment], scope: list[str] | None
+) -> list[FoundComment]:
+    """Which unresolved notes this check is answerable for.
+
+    A resolver worker's own notes are already cleared from its worktree
+    before it starts, so every note it can still see belongs to a sibling
+    concern it has no lease on. Gating the whole tree would fail it for work
+    it cannot touch; gating what it changed asks the only question it can
+    answer, which is whether it left a note in its own code.
+    """
+    if scope is None:
+        return found
+    owned = dict.fromkeys(scope)
+    return [item for item in found if str(item.file) in owned]
+
+
+def run_checks(fix: bool, no_test: bool, scope: list[str] | None = None) -> None:
     """Run ruff format, ruff check, pyright, and pytest in sequence.
 
     Read-only by default (reports issues without modifying files).
-    Pass *fix* to auto-fix formatting and lint issues.
+    Pass *fix* to auto-fix formatting and lint issues. ``scope`` narrows the
+    note and anti-pattern gates to paths this tree is answerable for.
     """
     results: list[CheckOutcome] = []
 
@@ -122,7 +146,7 @@ def run_checks(fix: bool, no_test: bool) -> None:
                 typer.echo(e.stdout.decode().rstrip())
             results.append(CheckOutcome(name="pytest", passed=False))
 
-    found = scan_tracked(find_feedback)
+    found = owned_comments(scan_tracked(find_feedback), scope)
     if found:
         for line in comments_gate_lines(found):
             typer.echo(line)

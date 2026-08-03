@@ -324,6 +324,14 @@ def check_cmd(
         bool,
         typer.Option("--json", help="Output findings as JSON (with --antipatterns)"),
     ] = False,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help="Scope the note gate to paths changed since this ref, for a "
+            "tree that holds work it is not answerable for",
+        ),
+    ] = None,
 ) -> None:
     """Run ruff format, ruff check, pyright, and pytest. Read-only by default."""
     if antipatterns:
@@ -335,7 +343,9 @@ def check_cmd(
     if boundaries:
         boundaries_mod.report(as_json)
         return
-    check.run_checks(fix, no_test)
+    check.run_checks(
+        fix, no_test, check.changed_paths(since) if since is not None else None
+    )
 
 
 # -- comments command --

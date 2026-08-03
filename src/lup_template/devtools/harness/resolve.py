@@ -458,6 +458,9 @@ def run_resolve(
     resolved_run_id = run_id or (
         "resolve-" + resolver_git(launcher, root, ["rev-parse", "--short=12", "HEAD"])
     )
+    # Every concern worktree is created from here, so it is what a worker's
+    # own diff is measured against when scoping the note gate.
+    base_commit = resolver_git(launcher, root, ["rev-parse", "HEAD"])
 
     async def execute() -> None:
         from lup.adapters.claude.runtime import (
@@ -638,24 +641,25 @@ def run_resolve(
                 worktree_root=(root.parent / f"{root.name}-resolve-{resolved_run_id}"),
                 run_id=resolved_run_id,
                 integration_branch=integration_branch(launcher, root, resolved_run_id),
-                # lup: defer[when the resolver's verification set is next revised]:
-                # these three are a strict subset of `lup-devtools dev check`,
-                # which also runs `scan_antipatterns` and the comments gate. A
-                # worker can therefore introduce an anti-pattern, or leave an
-                # unresolved `# lup:` note, and still verify green — the two
-                # gates most specific to this repository are the ones the
-                # resolver does not apply to its own output. Run `dev check`
-                # instead of restating part of it, so a rule that gates for a
-                # human also gates for a worker.
+                # The whole gate rather than part of it restated. Naming three
+                # of its checks let a worker introduce an anti-pattern or
+                # leave an unresolved note and still verify green — the two
+                # rules most specific to this repository were the ones its own
+                # output was not held to. `--since` scopes the note gate to
+                # what this tree changed, because a concern's worktree holds
+                # every sibling's notes and it has no lease on any of them.
                 verification_commands=[
                     VerificationCommand(
-                        name="ruff", arguments=["uv", "run", "ruff", "check", "."]
-                    ),
-                    VerificationCommand(
-                        name="pyright", arguments=["uv", "run", "pyright"]
-                    ),
-                    VerificationCommand(
-                        name="pytest", arguments=["uv", "run", "pytest", "-q"]
+                        name="dev check",
+                        arguments=[
+                            "uv",
+                            "run",
+                            "lup-devtools",
+                            "dev",
+                            "check",
+                            "--since",
+                            base_commit,
+                        ],
                     ),
                 ],
             ),
