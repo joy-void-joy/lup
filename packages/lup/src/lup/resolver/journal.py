@@ -24,12 +24,18 @@ from pydantic import BaseModel, Field, TypeAdapter
 
 from lup.channels.models import utc_now
 from lup.channels.stream import Stream
-from lup.resolver.models import FROZEN
+from lup.resolver.models import (
+    FROZEN,
+    ConcernProgress,
+    MaterialQuestion,
+    QuestionAnswer,
+    ResolvePhase,
+)
 from lup.runtime.models import TurnEvent
 
 JOURNAL_FILE = "journal.jsonl"
 
-type ActorKind = Literal["worker", "reviewer", "merger", "planner"]
+type ActorKind = Literal["worker", "reviewer", "merger", "planner", "run"]
 
 
 class ActorRef(BaseModel):
@@ -50,6 +56,87 @@ class ActorRef(BaseModel):
         return f"{self.kind}:{self.id}#{self.round}"
 
 
+class PhaseChangedEvent(BaseModel):
+    """The run moved to a new phase."""
+
+    model_config = FROZEN
+
+    type: Literal["phase_changed"] = "phase_changed"
+    phase: ResolvePhase
+
+
+class ConcernProgressedEvent(BaseModel):
+    """One concern reached a new status."""
+
+    model_config = FROZEN
+
+    type: Literal["concern_progressed"] = "concern_progressed"
+    progress: ConcernProgress
+
+
+class QuestionAskedEvent(BaseModel):
+    """An actor put a material question to the humans."""
+
+    model_config = FROZEN
+
+    type: Literal["question_asked"] = "question_asked"
+    question: MaterialQuestion
+    asked_by: str
+
+
+class AnswerSettledEvent(BaseModel):
+    """A question took its answer, from whichever door supplied it."""
+
+    model_config = FROZEN
+
+    type: Literal["answer_settled"] = "answer_settled"
+    answer: QuestionAnswer
+    door: str
+
+
+class MessagePostedEvent(BaseModel):
+    """A door volunteered something to an actor, or an actor replied.
+
+    An intervention belongs in the record beside what it interrupted. A
+    reader scrolling one actor's trace sees the moment someone redirected
+    it, in order, against what it was doing — which is the difference
+    between a trace and an audit filed somewhere else.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["message_posted"] = "message_posted"
+    text: str
+    door: str
+    in_reply_to: str | None = None
+
+
+class RunFailedEvent(BaseModel):
+    """The run reached a terminal failure."""
+
+    model_config = FROZEN
+
+    type: Literal["run_failed"] = "run_failed"
+    reason: str
+
+
+type RunEvent = (
+    PhaseChangedEvent
+    | ConcernProgressedEvent
+    | QuestionAskedEvent
+    | AnswerSettledEvent
+    | MessagePostedEvent
+    | RunFailedEvent
+)
+"""What the run did, as opposed to what one actor's session did.
+
+These share the sequence with turn events rather than living in a file of
+their own, because the one thing a reader wants from a merged view is to
+know what actually happened first — and an ordering invented between two
+logs cannot answer that.
+"""
+
+
 class JournalEntry(BaseModel):
     """One event, stamped and attributed."""
 
@@ -58,10 +145,19 @@ class JournalEntry(BaseModel):
     seq: int
     at: datetime
     actor: ActorRef
-    event: TurnEvent
+    event: TurnEvent | RunEvent
 
 
 ENTRY_ADAPTER: TypeAdapter[JournalEntry] = TypeAdapter(JournalEntry)
+
+
+class JournalTail(BaseModel):
+    """What one follower read, and where it should resume."""
+
+    model_config = FROZEN
+
+    entries: list[JournalEntry]
+    offset: int
 
 
 class Journal:
@@ -70,12 +166,24 @@ class Journal:
     def __init__(self, root: Path) -> None:
         self.stream: Stream[JournalEntry] = Stream(root / JOURNAL_FILE, ENTRY_ADAPTER)
         self.next_seq = len(self.stream.read_all())
+        self.run = ActorRef(kind="run", id=root.name)
 
-    def append(self, actor: ActorRef, event: TurnEvent) -> JournalEntry:
+    def append(self, actor: ActorRef, event: TurnEvent | RunEvent) -> JournalEntry:
+        """Record one event.
+
+        Appending reaches no await, so concurrent actors draining their own
+        sessions into the same journal interleave between entries and never
+        within one. That is what keeps the single-writer claim true once
+        every actor holds a live session instead of taking turns.
+        """
         entry = JournalEntry(seq=self.next_seq, at=utc_now(), actor=actor, event=event)
         self.stream.append(entry)
         self.next_seq += 1
         return entry
+
+    def record(self, event: RunEvent) -> JournalEntry:
+        """Record something the run did rather than something an actor did."""
+        return self.append(self.run, event)
 
     def read(self, after_seq: int = -1) -> list[JournalEntry]:
         """Every entry after ``after_seq``, which is what an SSE resume wants.
@@ -85,6 +193,21 @@ class Journal:
         connection blinks.
         """
         return [entry for entry in self.stream.read_all() if entry.seq > after_seq]
+
+    def tail(self, offset: int) -> JournalTail:
+        """Whatever arrived after ``offset``, and where to resume.
+
+        A follower reads by byte offset rather than by sequence number so
+        that watching a run costs the size of what is new. Filtering by
+        ``seq`` re-parses the whole file on every poll, which turns a long
+        run into quadratic work exactly as it becomes interesting.
+        """
+        found = self.stream.read_from(offset)
+        if not found:
+            return JournalTail(entries=[], offset=offset)
+        return JournalTail(
+            entries=[pair.item for pair in found], offset=found[-1].commit_offset
+        )
 
     def entry(self, seq: int) -> JournalEntry | None:
         """One entry whole, for a reader expanding a truncated block."""
