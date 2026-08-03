@@ -39,6 +39,7 @@ from lup.policy.bundle import (
     runtime_url_scope,
 )
 from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.models import (
     Decision,
@@ -50,6 +51,7 @@ from lup.policy.models import (
 )
 from lup.policy.rules import (
     EditPolicy,
+    antipattern_rows,
     FetchPolicy,
     PathRule,
     ShellPolicy,
@@ -1133,6 +1135,113 @@ def test_edit_policy_checks_every_file_before_allowing_batch() -> None:
         changes=[EditChange(path=Path("pyproject.toml"), after="version = '2'")]
     )
     assert policy.decide(protected).effect == "ask"
+
+
+def test_retiring_a_stale_suppression_needs_no_approval() -> None:
+    """Removing an `ignore` whose violation is gone is ordinary tidying."""
+    policy = EditPolicy(protected=[])
+    retired = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="value: Any  # lup: ignore[any-type]",
+                after="value: str",
+            )
+        ]
+    )
+    assert policy.decide(retired).effect == "allow"
+
+
+def test_removing_a_live_suppression_is_caught_by_the_anti_pattern_gate() -> None:
+    """No marker gate is needed: the violation it covered resurfaces first."""
+    policy = EditPolicy(protected=[])
+    exposed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="value: Any  # lup: ignore[any-type]",
+                after="value: Any",
+            )
+        ]
+    )
+    decision = policy.decide(exposed)
+    assert decision.effect == "deny"
+    assert "any-type" in decision.reason
+
+
+def test_declaring_a_suppression_still_asks() -> None:
+    """Silencing a rule is a decision a human makes, not a small safe edit."""
+    policy = EditPolicy(protected=[])
+    declared = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="value: str",
+                after="value: Any  # lup: ignore[any-type]",
+            )
+        ]
+    )
+    decision = policy.decide(declared)
+    assert decision.effect == "ask"
+    assert decision.reason == "edit introduces an antipattern suppression"
+
+
+def test_prose_mentioning_a_suppression_is_not_declaring_one() -> None:
+    """Documenting the escape hatch is neither a note nor a directive."""
+    policy = EditPolicy(protected=[])
+    documented = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before='NOTE_RE = compile(r"lup")',
+                after=(
+                    "# Matching `# lup: ignore` here is prose, not a directive.\n"
+                    'NOTE_RE = compile(r"lup")'
+                ),
+            )
+        ]
+    )
+    assert policy.decide(documented).effect == "allow"
+
+
+def test_a_granted_suppression_releases_only_its_own_gate() -> None:
+    """An allowance answers the gate it names, never the rest of the lattice."""
+    change = EditChange(
+        path=Path("a.py"),
+        before="x = 1  # lup: fix",
+        after="value: Any  # lup: ignore[any-type]",
+    )
+    decision = decide_edit(
+        "a.py",
+        change.before,
+        change.after,
+        path_exists=False,
+        path_rules=[],
+        antipattern_rows=antipattern_rows(change),
+        allowances=["antipattern-suppression"],
+        python_source=True,
+    )
+    assert decision.effect == "ask"
+    assert decision.reason == "edit changes inline review markers"
+
+
+def test_review_notes_still_gate_in_both_directions() -> None:
+    """A note is feedback: deleting one before it is resolved stays gated."""
+    policy = EditPolicy(protected=[])
+    removed = EditBatch(
+        changes=[
+            EditChange(path=Path("a.py"), before="x = 1  # lup: fix", after="x = 1")
+        ]
+    )
+    added = EditBatch(
+        changes=[
+            EditChange(path=Path("a.py"), before="x = 1", after="x = 1  # lup: fix")
+        ]
+    )
+    for batch in (removed, added):
+        decision = policy.decide(batch)
+        assert decision.effect == "ask"
+        assert decision.reason == "edit changes inline review markers"
 
 
 def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:

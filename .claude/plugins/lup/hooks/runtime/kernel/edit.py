@@ -12,6 +12,12 @@ from .decision import KernelDecision
 from .rows import AntiPatternRow, PathRuleRow
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
+# A review note is any marker whose keyword is not `ignore`, which is the
+# anti-pattern escape hatch rather than feedback — the same split
+# `lup.codescan.markers` makes when it gathers notes.
+# The whitespace sits inside the lookahead: leaving it outside lets the regex
+# backtrack to zero width and match `# lup: ignore` after all.
+NOTE_RE = re.compile(r"(#|//)\s*lup\s*:(?!\s*ignore\b)", re.IGNORECASE)
 IGNORE_RE = re.compile(
     r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?",
     re.IGNORECASE,
@@ -108,16 +114,18 @@ def python_code_lines(source: str) -> list[str]:
     return ["".join(line) for line in lines]
 
 
-def marker_count(source: str, python_source: bool = False) -> int:
-    """Count review markers, excluding markers inside ordinary Python strings."""
+def count_in_prose(
+    source: str, pattern: re.Pattern[str], python_source: bool = False
+) -> int:
+    """Count pattern matches where prose belongs, not inside ordinary strings."""
     if not python_source:
-        return len(MARKER_RE.findall(source))
+        return len(pattern.findall(source))
     tokens = python_tokens(source)
     if tokens is None:
-        return len(MARKER_RE.findall(source))
+        return len(pattern.findall(source))
     documentation = docstring_lines(source)
     return sum(
-        len(MARKER_RE.findall(token.string))
+        len(pattern.findall(token.string))
         for token in tokens
         if token.type == tokenize.COMMENT
         or (
@@ -128,6 +136,11 @@ def marker_count(source: str, python_source: bool = False) -> int:
             )
         )
     )
+
+
+def review_marker_count(source: str, python_source: bool = False) -> int:
+    """Count review notes — the feedback whose removal is the gated act."""
+    return count_in_prose(source, NOTE_RE, python_source)
 
 
 def empty_collection_exempt_lines(source: str) -> set[int]:
@@ -480,6 +493,16 @@ def decide_edit(
     ``allowances`` names what a human already approved for the concern this
     edit belongs to. A grant releases exactly the gate it names and nothing
     adjacent, so an ungranted session sees the unchanged lattice.
+
+    The marker gate counts review notes only, because the two marker families
+    are gated by different things. Deleting feedback before its concern is
+    resolved is the act the conventions forbid, so notes gate on a changed
+    count. Suppressions are already gated where they belong: declaring one is
+    an added line carrying an `ignore` directive, which
+    :func:`antipattern_decision` asks about, and retiring a stale one is
+    ordinary tidying. Removing a suppression that still covers a live
+    violation needs no gate either — the same decision sees the violation
+    resurface and denies.
     """
     granted = allowances or []
     previous = before or ""
@@ -488,7 +511,9 @@ def decide_edit(
         antipattern = antipattern_decision(
             before, after, antipattern_rows, python_source, granted
         )
-        if antipattern is not None:
+        # A granted suppression answers this gate and no other, so an allow
+        # falls through to the rest of the lattice rather than ending it.
+        if antipattern is not None and antipattern.effect != "allow":
             return antipattern
     protected = next(
         (
@@ -501,7 +526,9 @@ def decide_edit(
     )
     if protected is not None and not (autonomous and protected["allow_autonomous"]):
         return KernelDecision("ask", protected["reason"])
-    if marker_count(previous, python_source) != marker_count(updated, python_source):
+    if review_marker_count(previous, python_source) != review_marker_count(
+        updated, python_source
+    ):
         return KernelDecision("ask", "edit changes inline review markers")
     if before is None:
         if autonomous:

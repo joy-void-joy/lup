@@ -7,8 +7,8 @@
   `defer[<wake condition>]:` head marks the note as parked work rather than
   open feedback; the scanner classifies it and parses the condition out. The
   `lup-devtools dev comments` scanner uses this to list unresolved feedback;
-  the edit-permission hook mirrors `MARKER_RE` to prompt whenever an edit
-  adds or removes a marker.
+  the edit-permission hook makes the same note/suppression split, prompting
+  whenever an edit changes the note count or adds a suppression.
 - Customization todos (`# TEMPLATE:` in comments, bare `TEMPLATE:` in
   docstrings): the template's domain decision points, gathered by
   `lup-devtools dev todos` so `/lup:init` walks every one.
@@ -42,7 +42,6 @@ from typing import Literal, Self
 from pydantic import BaseModel, model_validator
 
 from lup.codescan.common import IGNORE_RE, LineCursor, PythonContext
-from lup.policy.kernel.edit import marker_count as kernel_marker_count
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # A deferral note parks work until a stated wake condition is met:
@@ -139,11 +138,6 @@ class MarkerComment(BaseModel):
                 return f"defer[{self.condition}]: {self.text}"
             case "note":
                 return self.text
-
-
-def marker_count(text: str) -> int:
-    """Count markers (feedback or ignore) — drives the hook's add/remove check."""
-    return kernel_marker_count(text)
 
 
 def inside_inline_code(line: str, pos: int) -> bool:
