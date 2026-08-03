@@ -23,6 +23,7 @@ from lup.runtime.errors import (
 from lup.runtime.contracts import EventStream, Steer
 from lup.runtime.models import (
     BlockCompletedEvent,
+    LiveTurnEvent,
     SessionId,
     TurnEvent,
     TurnIdentifiers,
@@ -516,6 +517,9 @@ class ScriptedEventStream(EventStream):
         self.drained.set()
 
     def events(self) -> AsyncIterator[TurnEvent]:
+        return self.iterate()
+
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
         return self.iterate()
 
 

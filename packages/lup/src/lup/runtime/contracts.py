@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from lup.runtime.models import (
+        LiveTurnEvent,
         SessionHandle,
         SessionId,
         TurnEvent,
@@ -52,11 +53,30 @@ class Turn[T: BaseModel | None](ABC):
 
 
 class EventStream(ABC):
-    """Expose native live events for an active turn."""
+    """Expose a turn's events, durable or live, in native arrival order.
+
+    Two accessors over one ordering. ``live()`` yields everything
+    ``events()`` does *plus* deltas, so the two are a subset and a superset
+    rather than two views that can disagree — a consumer picks one and gets
+    consistent behaviour either way.
+    """
 
     @abstractmethod
     def events(self) -> AsyncIterator[TurnEvent]:
-        """Iterate live events once, in native arrival order."""
+        """Iterate the durable events once, in native arrival order.
+
+        Everything that happened and nothing in flight, so the result folds
+        into an exact transcript.
+        """
+
+    @abstractmethod
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
+        """Iterate durable events and in-flight deltas once, interleaved.
+
+        Raises :class:`DeltaStreamingDisabled` when the session was not
+        built to stream partials, because silently yielding no deltas would
+        read as a quiet turn rather than as a session built without them.
+        """
 
 
 class Interrupt(ABC):

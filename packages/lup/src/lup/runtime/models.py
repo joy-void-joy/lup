@@ -148,6 +148,22 @@ class BlockCompletedEvent(BaseModel):
     block: TurnBlock
 
 
+class MessageCompletedEvent(BaseModel):
+    """One whole transcript message completed.
+
+    The message is carried rather than reconstructed. Folding loose blocks
+    back into messages would need contiguous-role grouping, which silently
+    merges two consecutive assistant messages into one; carrying the whole
+    message makes the fold exact.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["message_completed"] = "message_completed"
+    identifiers: TurnIdentifiers
+    message: TurnMessage
+
+
 class TurnCompletedEvent(BaseModel):
     """A native turn reached a terminal state."""
 
@@ -160,10 +176,24 @@ class TurnCompletedEvent(BaseModel):
 type TurnEvent = (
     TurnStartedEvent
     | BlockStartedEvent
-    | BlockDeltaEvent
     | BlockCompletedEvent
+    | MessageCompletedEvent
     | TurnCompletedEvent
 )
+"""Everything durable. A transcript folds from exactly these.
+
+Deltas are deliberately absent: :func:`lup.runtime.transcript.fold_transcript`
+takes this union, so a partial fragment cannot reach the fold at all rather
+than being filtered out inside it.
+"""
+
+type LiveTurnEvent = TurnEvent | BlockDeltaEvent
+"""Everything durable, plus in-flight deltas, in order.
+
+A strict superset of :data:`TurnEvent`, so a consumer picks one accessor and
+gets consistent behaviour either way instead of two views that disagree
+about what happened.
+"""
 
 
 class SubmissionDecision(BaseModel):

@@ -34,6 +34,7 @@ from lup.types import JsonObject, JsonValue, SubagentSpec
 from lup.runtime.models import (
     SubmissionDecision,
     TurnInput,
+    TurnMessage,
     TurnTextBlock,
     TurnToolBinding,
     TurnToolCallBlock,
@@ -346,16 +347,109 @@ async def test_claude_partial_events_are_live_and_completed_replay_is_preserved(
 
     accepted = await state.start_turn("hello")
     assert accepted.events is not None
-    observed = [event async for event in accepted.events.events()]
+    observed = [event async for event in accepted.events.live()]
     completed = await accepted.complete()
 
     assert [event.type for event in observed] == [
         "turn_started",
         "block_delta",
         "block_completed",
+        "message_completed",
         "turn_completed",
     ]
     assert completed.blocks == [TurnTextBlock(text="hello")]
+    assert completed.messages == [
+        TurnMessage(role="assistant", blocks=[TurnTextBlock(text="hello")])
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_durable_view_is_the_live_one_without_its_deltas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Subset and superset of one ordering, never two disagreeing records."""
+    import claude_agent_sdk as claude
+    from claude_agent_sdk import types as claude_types
+
+    class FixtureClient:
+        def __init__(self, options: claude.ClaudeAgentOptions) -> None:
+            self.options = options
+
+        async def connect(self) -> None:
+            return None
+
+        async def disconnect(self) -> None:
+            return None
+
+        async def interrupt(self) -> None:
+            return None
+
+        async def query(self, prompt: str, session_id: str = "default") -> None:
+            return None
+
+        async def receive_response(
+            self,
+        ) -> AsyncIterator[
+            claude_types.StreamEvent
+            | claude_types.AssistantMessage
+            | claude_types.UserMessage
+            | claude_types.ResultMessage
+        ]:
+            yield claude_types.StreamEvent(
+                uuid="event",
+                session_id="session",
+                event={
+                    "type": "content_block_delta",
+                    "delta": {"text": "partial"},
+                },
+            )
+            yield claude_types.AssistantMessage(
+                content=[
+                    claude_types.ToolUseBlock(id="t1", name="Read", input={"p": "x"})
+                ],
+                model="claude",
+            )
+            yield claude_types.UserMessage(
+                content=[
+                    claude_types.ToolResultBlock(
+                        tool_use_id="t1", content="file body", is_error=False
+                    )
+                ]
+            )
+            yield claude_types.ResultMessage(
+                subtype="success",
+                duration_ms=1,
+                duration_api_ms=1,
+                is_error=False,
+                num_turns=1,
+                session_id="session",
+                total_cost_usd=0.0,
+                usage={},
+                result="done",
+            )
+
+    monkeypatch.setattr(claude, "ClaudeSDKClient", FixtureClient)
+    state = ClaudeConversationState(
+        ClaudeSessionFactory(ClaudeSessionConfig(model="claude")), None
+    )
+
+    accepted = await state.start_turn("hello")
+    assert accepted.events is not None
+    durable = [event async for event in accepted.events.events()]
+    completed = await accepted.complete()
+
+    # A tool call and its result both reach the durable record. The old
+    # stream carried the call and never the result, which is what made it
+    # unusable as a trace.
+    assert [event.type for event in durable] == [
+        "turn_started",
+        "block_completed",
+        "message_completed",
+        "block_completed",
+        "message_completed",
+        "turn_completed",
+    ]
+    assert [message.role for message in completed.messages] == ["assistant", "tool"]
 
 
 @pytest.mark.asyncio

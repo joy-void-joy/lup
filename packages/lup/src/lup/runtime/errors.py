@@ -63,3 +63,12 @@ class StructuredOutputError(TurnError):
 
 class TurnAlreadyActiveError(RuntimeError):
     """A session was asked to start a second concurrent turn."""
+
+
+class DeltaStreamingDisabled(RuntimeError):
+    """A live view was asked of a session built without partial streaming.
+
+    Raised rather than yielding a delta-free stream, because a stream that
+    is quiet because nothing was configured looks exactly like one that is
+    quiet because nothing happened.
+    """

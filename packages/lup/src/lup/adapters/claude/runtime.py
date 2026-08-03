@@ -25,10 +25,16 @@ from lup.runtime.contracts import (
     SessionFactory,
     TurnToolBinder,
 )
-from lup.runtime.errors import ProviderTurnError, TurnFailure
+from lup.runtime.errors import (
+    DeltaStreamingDisabled,
+    ProviderTurnError,
+    TurnFailure,
+)
 from lup.runtime.models import (
     BlockCompletedEvent,
     BlockDeltaEvent,
+    LiveTurnEvent,
+    MessageCompletedEvent,
     SessionHandle,
     SessionId,
     SubmissionDecision,
@@ -42,6 +48,7 @@ from lup.runtime.models import (
     TurnMessage,
     TurnToolBinding,
 )
+from lup.runtime.transcript import fold_blocks, fold_transcript
 from lup.runtime.output import submit_output
 from lup.types import (
     EnvVars,
@@ -90,6 +97,9 @@ class ClaudeSessionConfig(BaseModel):
         | None
     ) = "bypassPermissions"
     max_turns: int | None = None
+    delta_streaming: bool = True
+    """Whether partial-message deltas are streamed, which gates `live()`."""
+
     max_thinking_tokens: int | None = SESSION_THINKING_TOKENS
     effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
     cwd: Path | None = None
@@ -149,37 +159,44 @@ class ClaudeConversationState:
             session=SessionId(value=self.session_id),
             turn=TurnId(value=uuid4().hex),
         )
-        events: asyncio.Queue[TurnEvent | None] = asyncio.Queue()
+        events: asyncio.Queue[LiveTurnEvent | None] = asyncio.Queue()
         events.put_nowait(TurnStartedEvent(identifiers=identifiers))
 
         async def complete() -> CompletedTurn:
             from claude_agent_sdk import types as claude_types
 
-            messages: list[TurnMessage] = []  # lup: ignore[empty-collection]
+            durable: list[TurnEvent] = []  # lup: ignore[empty-collection]
             result: claude_types.ResultMessage | None = None
             started = perf_counter()
+
+            def record(message: TurnMessage) -> None:
+                """Emit one message and its blocks, so both views agree."""
+                for block in message.blocks:
+                    completed = BlockCompletedEvent(
+                        identifiers=identifiers, block=block
+                    )
+                    durable.append(completed)
+                    events.put_nowait(completed)
+                whole = MessageCompletedEvent(identifiers=identifiers, message=message)
+                durable.append(whole)
+                events.put_nowait(whole)
+
             try:
                 async for message in client.receive_response():
                     match message:
                         case claude_types.AssistantMessage(content=content):
-                            blocks = [convert_claude_block(block) for block in content]
-                            messages.append(
+                            record(
                                 TurnMessage(
                                     role="assistant",
-                                    blocks=blocks,
+                                    blocks=[
+                                        convert_claude_block(block) for block in content
+                                    ],
                                 )
                             )
-                            for block in blocks:
-                                events.put_nowait(
-                                    BlockCompletedEvent(
-                                        identifiers=identifiers,
-                                        block=block,
-                                    )
-                                )
                         case claude_types.UserMessage(content=content) if isinstance(
                             content, list
                         ):
-                            messages.append(
+                            record(
                                 TurnMessage(
                                     role="tool",
                                     blocks=[
@@ -190,7 +207,7 @@ class ClaudeConversationState:
                         case claude_types.UserMessage(content=str(text)):
                             from lup.runtime.models import TurnTextBlock
 
-                            messages.append(
+                            record(
                                 TurnMessage(
                                     role="user", blocks=[TurnTextBlock(text=text)]
                                 )
@@ -216,9 +233,7 @@ class ClaudeConversationState:
                 raise ProviderTurnError(
                     TurnFailure(
                         message=str(error),
-                        blocks=[
-                            block for message in messages for block in message.blocks
-                        ],
+                        blocks=fold_blocks(durable),
                         duration=timedelta(seconds=perf_counter() - started),
                         identifiers=identifiers,
                     )
@@ -228,16 +243,15 @@ class ClaudeConversationState:
                 raise ProviderTurnError(
                     TurnFailure(
                         message="Claude completed without a terminal result",
-                        blocks=[
-                            block for message in messages for block in message.blocks
-                        ],
+                        blocks=fold_blocks(durable),
                         identifiers=identifiers,
                     )
                 )
             if result.session_id is not None:
                 self.session_id = result.session_id
                 self.resume = result.session_id
-            blocks = [block for message in messages for block in message.blocks]
+            messages = fold_transcript(durable)
+            blocks = fold_blocks(durable)
             usage = claude_usage(result.usage, total_cost_usd=result.total_cost_usd)
             duration = timedelta(milliseconds=result.duration_ms or 0)
             if result.is_error:
@@ -278,26 +292,47 @@ class ClaudeConversationState:
         return AcceptedTurn(
             identifiers=identifiers,
             complete=await_completion,
-            events=ClaudeLiveEventStream(events),
+            events=ClaudeLiveEventStream(events, self.config.delta_streaming),
             interrupt=ClaudeInterrupt(self),
         )
 
 
 class ClaudeLiveEventStream(EventStream):
-    """Expose SDK partial-message events separately from completed replay."""
+    """One ordered queue, viewed either with in-flight deltas or without.
 
-    def __init__(self, events: asyncio.Queue[TurnEvent | None]) -> None:
+    The durable view filters the same sequence rather than reading a second
+    one, so the two can never report different histories.
+    """
+
+    def __init__(
+        self,
+        events: asyncio.Queue[LiveTurnEvent | None],
+        delta_streaming: bool = False,
+    ) -> None:
         self.queue = events
         self.consumed = False
+        self.delta_streaming = delta_streaming
 
-    async def iterate(self) -> AsyncIterator[TurnEvent]:
+    async def iterate(self) -> AsyncIterator[LiveTurnEvent]:
         if self.consumed:
             raise RuntimeError("live event stream can only be consumed once")
         self.consumed = True
         while (event := await self.queue.get()) is not None:  # lup: ignore[dict-get]
             yield event
 
+    async def durable(self) -> AsyncIterator[TurnEvent]:
+        async for event in self.iterate():
+            if not isinstance(event, BlockDeltaEvent):
+                yield event
+
     def events(self) -> AsyncIterator[TurnEvent]:
+        return self.durable()
+
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
+        if not self.delta_streaming:
+            raise DeltaStreamingDisabled(
+                "this session was built without partial message streaming"
+            )
         return self.iterate()
 
 
@@ -539,7 +574,7 @@ def build_claude_options(
             if config.hooks is not None and config.hooks.by_event()
             else None
         ),
-        include_partial_messages=True,
+        include_partial_messages=config.delta_streaming,
         resume=resume,
         session_id=session_id,
         output_format=None,

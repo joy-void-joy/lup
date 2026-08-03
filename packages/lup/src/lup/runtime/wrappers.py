@@ -33,6 +33,8 @@ from lup.runtime.models import (
     TurnBlock,
     TurnHandle,
     TurnIdentifiers,
+    BlockDeltaEvent,
+    LiveTurnEvent,
     TurnEvent,
     TurnInput,
     TurnMessage,
@@ -190,7 +192,7 @@ class SwitchingEventStream(EventStream):
         self.closed = True
         self.changed.set()
 
-    async def iterate(self) -> AsyncIterator[TurnEvent]:
+    async def iterate(self, deltas: bool) -> AsyncIterator[LiveTurnEvent]:
         if self.consumed:
             raise RuntimeError("logical live event stream can only be consumed once")
         self.consumed = True
@@ -200,7 +202,8 @@ class SwitchingEventStream(EventStream):
             version = self.version
             if current is not None and version != observed:
                 observed = version
-                async for event in current.events():
+                view = current.live() if deltas else current.events()
+                async for event in view:
                     yield event
                 continue
             if self.closed:
@@ -210,8 +213,16 @@ class SwitchingEventStream(EventStream):
                 continue
             await self.changed.wait()
 
+    async def durable(self) -> AsyncIterator[TurnEvent]:
+        async for event in self.iterate(deltas=False):
+            if not isinstance(event, BlockDeltaEvent):
+                yield event
+
     def events(self) -> AsyncIterator[TurnEvent]:
-        return self.iterate()
+        return self.durable()
+
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
+        return self.iterate(deltas=True)
 
 
 class TimeoutTurn[T: BaseModel | None](Turn[T]):

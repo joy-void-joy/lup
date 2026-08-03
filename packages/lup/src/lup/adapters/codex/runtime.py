@@ -26,6 +26,8 @@ from lup.runtime.errors import ProviderTurnError, TurnFailure, TurnInterruptedEr
 from lup.runtime.models import (
     BlockCompletedEvent,
     BlockDeltaEvent,
+    LiveTurnEvent,
+    MessageCompletedEvent,
     SessionHandle,
     SessionId,
     SubmissionDecision,
@@ -41,6 +43,7 @@ from lup.runtime.models import (
     TurnToolBinding,
 )
 from lup.runtime.output import submission_schema, submit_output
+from lup.runtime.transcript import fold_transcript
 from lup.types import EnvVars, JsonObject, JsonValue, Usage
 
 
@@ -164,10 +167,11 @@ class CodexTurnChannel:
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         self.turn_id: str | None = None
-        self.events: asyncio.Queue[TurnEvent | None] = asyncio.Queue()
+        self.events: asyncio.Queue[LiveTurnEvent | None] = asyncio.Queue()
         self.completed: asyncio.Future[CompletedTurn] = (
             asyncio.get_running_loop().create_future()
         )
+        self.durable: list[TurnEvent] = []
         self.blocks: list[TurnBlock] = []
         self.usage = Usage()
         self.started = perf_counter()
@@ -179,6 +183,11 @@ class CodexTurnChannel:
             session=SessionId(value=self.session_id),
             turn=TurnId(value=self.turn_id),
         )
+
+    def emit(self, event: TurnEvent) -> None:
+        """Record one durable event and publish it, so both views agree."""
+        self.durable.append(event)
+        self.events.put_nowait(event)
 
     def feed(self, notification: RpcNotification) -> None:
         try:
@@ -228,12 +237,19 @@ class CodexTurnChannel:
                 "turnId": str(),
                 "item": item,
             } if isinstance(item, dict):
-                for block in decode_completed_item(item):
+                completed = decode_completed_item(item)
+                for block in completed:
                     self.blocks.append(block)
-                    self.events.put_nowait(
-                        BlockCompletedEvent(
+                    self.emit(
+                        BlockCompletedEvent(identifiers=self.identifiers(), block=block)
+                    )
+                if completed:
+                    self.emit(
+                        MessageCompletedEvent(
                             identifiers=self.identifiers(),
-                            block=block,
+                            message=TurnMessage(
+                                role=message_role(item), blocks=completed
+                            ),
                         )
                     )
             case "thread/tokenUsage/updated", {
@@ -251,11 +267,7 @@ class CodexTurnChannel:
                     else (perf_counter() - self.started) * 1000
                 )
                 if status == "completed":
-                    messages = (
-                        [TurnMessage(role="assistant", blocks=self.blocks)]
-                        if self.blocks
-                        else []
-                    )
+                    messages = fold_transcript(self.durable)
                     if not self.completed.done():
                         self.completed.set_result(
                             CompletedTurn(
@@ -298,13 +310,17 @@ class CodexTurnChannel:
 
 
 class CodexLiveEventStream(EventStream):
-    """Expose only notifications observed while the native turn is live."""
+    """One ordered channel, viewed either with in-flight deltas or without.
+
+    The durable view filters the same sequence rather than reading a second
+    one, so the two can never report different histories.
+    """
 
     def __init__(self, channel: CodexTurnChannel) -> None:
         self.channel = channel
         self.consumed = False
 
-    async def iterate(self) -> AsyncIterator[TurnEvent]:
+    async def iterate(self) -> AsyncIterator[LiveTurnEvent]:
         if self.consumed:
             raise RuntimeError("live event stream can only be consumed once")
         self.consumed = True
@@ -314,7 +330,15 @@ class CodexLiveEventStream(EventStream):
         ) is not None:
             yield event
 
+    async def durable(self) -> AsyncIterator[TurnEvent]:
+        async for event in self.iterate():
+            if not isinstance(event, BlockDeltaEvent):
+                yield event
+
     def events(self) -> AsyncIterator[TurnEvent]:
+        return self.durable()
+
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
         return self.iterate()
 
 
@@ -628,6 +652,22 @@ def decode_usage(payload: JsonObject) -> Usage:
         output_tokens=native.output_tokens,
         cache_read_input_tokens=native.cached_input_tokens,
     )
+
+
+def message_role(payload: JsonObject) -> Literal["user", "assistant", "tool", "system"]:
+    """Which transcript role one completed item belongs to.
+
+    A tool call and its result are the model's own act and the environment's
+    reply, and collapsing both into one assistant message is what made a
+    trace unable to show a call beside the result it produced.
+    """
+    match payload:
+        case (
+            {"type": "commandExecution"} | {"type": "fileChange"} | {"type": "mcpTool"}
+        ):
+            return "tool"
+        case _:
+            return "assistant"
 
 
 def decode_completed_item(payload: JsonObject) -> list[TurnBlock]:
