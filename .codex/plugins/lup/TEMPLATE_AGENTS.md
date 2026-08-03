@@ -407,15 +407,13 @@ Use `$lup:merge` (with no argument) for guided conflict resolution. See the comm
 
 ### Commit Guidelines
 
-- **Commit before responding** -- Always commit your work before responding to the user. Don't accumulate multiple changes across responses.
-- **Commit early, commit often** -- Frequent commits provide checkpoints and make rebasing easier.
-- **Keep commits atomic** -- Each commit should do one thing. If you need "and" in your message, it should be two commits.
-- **History will be rebased** -- Don't worry about perfect messages during development. The history will be cleaned up before merge.
-- **Meaningful final commits** -- After rebasing, each commit should tell a story: what changed and why.
+- **Commit before responding** — Don't accumulate changes across responses
+- **Commit early, commit often** — Frequent commits provide checkpoints
+- **Keep commits atomic** — If you need "and" in your message, it should be two commits
+- **History will be rebased** — Don't worry about perfect messages during development
+- **Meaningful final commits** — After rebasing, each commit should tell what changed and why
 
-### Commit Message Format
-
-Use conventional commit syntax: `type(scope): description`
+**Format:** `type(scope): description`
 
 **Types:**
 

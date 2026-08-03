@@ -4,6 +4,8 @@
 
 import lup.harness.models as models
 
+import lup_template.devtools.harness.content.conventions as conventions
+
 from lup_template.devtools.harness.content.catalog import (
     agent_roster_text,
     skill_roster_parts,
@@ -107,30 +109,17 @@ Worktrees typically branch from `dev`, but can also branch from other feature br
 
 **Note:** The `worktrees/` and `refs/` directories are gitignored. `refs/` contains symlinks to downstream projects.
 
-### Merge Conflict Resolution
-
-**Never silently drop code during conflict resolution.** The bias is toward inclusion — keeping both sides is always safer than losing features. A rename on one side must not swallow an addition on the other.
-
-Before completing any merge, **audit for deletions**: compare the result against both parents and verify that every removed function, parameter, or command was intentionally removed, not lost as a side effect of choosing one conflict side.
-
-Use `"""
+"""
         ),
-        models.SkillInvocation(plugin="lup", skill="merge"),
+        *conventions.MERGE_CONFLICT_RESOLUTION,
         models.TextPart(
-            text=r"""` (with no argument) for guided conflict resolution. See the command for the full decision tree.
+            text=r"""**Generated artifacts are regenerated, never hand-merged.** A digest manifest (`.lup-ownership.json`) conflicts on every parallel branch because each field is derived, so `.gitattributes` gives it a driver that keeps one side; `lup-devtools dev merge-driver` registers it in a clone that has not run `worktree create`. Reconciling such a file hunk by hunk produces a proof that matches neither tree — take either side, then `lup-devtools harness generate all` and let `harness check all` confirm it settled.
 
-**Generated artifacts are regenerated, never hand-merged.** A digest manifest (`.lup-ownership.json`) conflicts on every parallel branch because each field is derived, so `.gitattributes` gives it a driver that keeps one side; `lup-devtools dev merge-driver` registers it in a clone that has not run `worktree create`. Reconciling such a file hunk by hunk produces a proof that matches neither tree — take either side, then `lup-devtools harness generate all` and let `harness check all` confirm it settled.
-
-### Commit Guidelines
-
-- **Commit before responding** — Don't accumulate changes across responses
-- **Commit early, commit often** — Frequent commits provide checkpoints
-- **Keep commits atomic** — If you need "and" in your message, it should be two commits
-- **History will be rebased** — Don't worry about perfect messages during development
-
-**Format:** `type(scope): description`
-
-| Type       | Use                                                                  |
+"""
+        ),
+        *conventions.COMMIT_GUIDELINES,
+        models.TextPart(
+            text=r"""| Type       | Use                                                                  |
 | ---------- | -------------------------------------------------------------------- |
 | `feat`     | New feature or capability                                            |
 | `fix`      | Bug fix                                                              |

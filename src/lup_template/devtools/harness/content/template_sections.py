@@ -5,6 +5,8 @@
 
 import lup.harness.models as models
 
+import lup_template.devtools.harness.content.conventions as conventions
+
 SETUP_THROUGH_NAMING: list[models.PromptPart] = [
     models.TextPart(
         text=r"""<!-- section: First Setup -->
@@ -452,31 +454,12 @@ WORKFLOW_THROUGH_COMMIT_FORMAT: list[models.PromptPart] = [
     models.TextPart(
         text=r"""`** -- Once the PR is approved, merges it and cleans up the branch.
 
-### Merge Conflict Resolution
-
-**Never silently drop code during conflict resolution.** The bias is toward inclusion — keeping both sides is always safer than losing features. A rename on one side must not swallow an addition on the other.
-
-Before completing any merge, **audit for deletions**: compare the result against both parents and verify that every removed function, parameter, or command was intentionally removed, not lost as a side effect of choosing one conflict side.
-
-Use `"""
+"""
     ),
-    models.SkillInvocation(plugin="lup", skill="merge"),
+    *conventions.MERGE_CONFLICT_RESOLUTION,
+    *conventions.COMMIT_GUIDELINES,
     models.TextPart(
-        text=r"""` (with no argument) for guided conflict resolution. See the command for the full decision tree.
-
-### Commit Guidelines
-
-- **Commit before responding** -- Always commit your work before responding to the user. Don't accumulate multiple changes across responses.
-- **Commit early, commit often** -- Frequent commits provide checkpoints and make rebasing easier.
-- **Keep commits atomic** -- Each commit should do one thing. If you need "and" in your message, it should be two commits.
-- **History will be rebased** -- Don't worry about perfect messages during development. The history will be cleaned up before merge.
-- **Meaningful final commits** -- After rebasing, each commit should tell a story: what changed and why.
-
-### Commit Message Format
-
-Use conventional commit syntax: `type(scope): description`
-
-**Types:**
+        text=r"""**Types:**
 
 - `feat` -- New feature or capability
 - `fix` -- Bug fix

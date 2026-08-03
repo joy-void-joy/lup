@@ -76,6 +76,7 @@ Use `$lup:merge` (with no argument) for guided conflict resolution. See the comm
 - **Commit early, commit often** — Frequent commits provide checkpoints
 - **Keep commits atomic** — If you need "and" in your message, it should be two commits
 - **History will be rebased** — Don't worry about perfect messages during development
+- **Meaningful final commits** — After rebasing, each commit should tell what changed and why
 
 **Format:** `type(scope): description`
 

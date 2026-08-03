@@ -410,7 +410,7 @@ def test_typed_content_package_has_expected_module_inventory() -> None:
     content = Path("src/lup_template/devtools/harness/content")
     sources = list(content.rglob("*.py"))
 
-    assert len(sources) == 47
+    assert len(sources) == 48
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:
