@@ -104,7 +104,7 @@ class ActorSession:
         self.handle: SessionHandle | None = None
         self.interrupt: Interrupt | None = None
         self.steering: Steer | None = None
-        self.pending: list[str] = []  # lup: ignore[empty-collection] — delivery queue
+        self.pending: list[str] = []
 
     async def opened(self) -> SessionHandle:
         """Open this actor's session once, resuming where one was persisted."""

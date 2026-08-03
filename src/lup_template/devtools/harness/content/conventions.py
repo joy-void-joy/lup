@@ -1,5 +1,3 @@
-# lup: ignore[native-spelling]
-# Skill mentions are typed invocation parts, rendered natively per platform.
 """Convention text that is portable, held once and rendered by every flavor.
 
 This repository's guidance and the downstream template used to restate the

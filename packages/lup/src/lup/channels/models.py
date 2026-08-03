@@ -73,7 +73,10 @@ class Offset[T](BaseModel):
     commit_offset: int
 
 
-def publish_atomic(path: Path, record: BaseModel) -> None:
+def publish_atomic(
+    path: Path,
+    record: BaseModel,  # lup: ignore[bare-basemodel] — any model to disk
+) -> None:
     """Write one record so no reader can ever observe it half-written.
 
     Every channel publishes this way, and so does anything else in a run

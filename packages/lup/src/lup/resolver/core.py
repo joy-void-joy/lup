@@ -343,7 +343,7 @@ class ResolverCore:
         self.mailbox = QuestionMailbox(self.repository.root)
         self.journal = Journal(self.repository.root)
         self.actors = ActorSessions(self.repository.root, self.journal, self.mailbox)
-        self.ledger: list[LedgerEntry] = []  # lup: ignore[empty-collection] — joins
+        self.ledger: list[LedgerEntry] = []
         self.wake = asyncio.Event()
         self.state_lock = asyncio.Lock()
         self.state: ResolveState | None = None
