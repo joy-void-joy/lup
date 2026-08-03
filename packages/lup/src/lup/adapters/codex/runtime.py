@@ -366,10 +366,12 @@ class CodexConversationState:
         if self.thread_id is not None:
             return self.thread_id
         if self.resume is not None:
-            if self.binding is not None:
-                raise CodexSchemaRebindingError(
-                    "Codex thread/resume cannot attach a fresh dynamic-tool handler"
-                )
+            # Codex persists dynamic tools in the thread's rollout metadata and
+            # restores them on resume when none are supplied, so a resumed
+            # thread keeps the submission tool by saying nothing about it.
+            # Refusing to resume with a binding at all was self-imposed: the
+            # digest carried in from the persisted record is what still catches
+            # a genuine schema change, in `bind` rather than here.
             params = self.thread_parameters()
             params["threadId"] = self.resume.value
             result = await self.server.request("thread/resume", params)
@@ -503,7 +505,7 @@ class CodexTurnToolBinder(TurnToolBinder):
             if binding is not None
             else None
         )
-        if self.state.thread_id is not None and digest != self.state.schema_digest:
+        if self.state.schema_digest is not None and digest != self.state.schema_digest:
             raise CodexSchemaRebindingError(
                 "the installed Codex app-server exposes dynamicTools only on "
                 "thread/start; changing or removing submit_output would lose "
