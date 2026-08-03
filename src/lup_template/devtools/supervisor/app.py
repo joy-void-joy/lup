@@ -39,6 +39,7 @@ from urllib.parse import urlsplit
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry
 from lup.resolver.mailbox import (
+    ActorMessage,
     AnswerDoor,
     AnswerOffer,
     ParkRequest,
@@ -51,6 +52,7 @@ from lup_template.devtools.supervisor.events import stream
 from lup_template.devtools.supervisor.projection import (
     ActorIndex,
     AnswerSubmission,
+    MessageSubmission,
     ParkSubmission,
     RunIndex,
     RunSummary,
@@ -256,6 +258,27 @@ def create_supervisor(
         if problems:
             raise HTTPException(status_code=400, detail="; ".join(problems))
         offer_answers(state_root, selected, submission.answers, AnswerDoor.PAGE)
+        return read_run(state_root, selected, adapter)
+
+    @supervisor.post("/api/runs/{selected}/messages")
+    async def send_to_actor(
+        selected: str, submission: MessageSubmission
+    ) -> SupervisorState:
+        """Say something to one actor, or to all of them, without deciding.
+
+        A message settles nothing, so this can never park a run — which is
+        the whole reason messages are a stream and decisions are slots.
+        """
+        run_mailbox(state_root, selected).send(
+            ActorMessage(
+                run_id=selected,
+                to_actor=submission.to_actor,
+                text=submission.text,
+                door=AnswerDoor.PAGE,
+                sent_at=utc_now(),
+                in_reply_to=submission.in_reply_to,
+            )
+        )
         return read_run(state_root, selected, adapter)
 
     @supervisor.post("/api/runs/{selected}/park")

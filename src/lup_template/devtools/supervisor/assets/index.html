@@ -228,6 +228,11 @@
         <div class="chips" id="actor-chips"></div>
         <div id="trace-body"></div>
         <p class="muted" id="trace-empty">Nothing recorded yet.</p>
+        <div class="actions">
+          <input id="message-text" type="text" placeholder="Say something to this actor — it decides nothing and never parks the run" />
+          <button class="primary" type="button" id="message-button">Send</button>
+        </div>
+        <p class="error" id="message-error" hidden></p>
       </section>
 
       <section id="questions-section" hidden>
@@ -633,6 +638,23 @@
         actorFilter = actorLabel(worker);
         renderTrace();
         element("trace-section").scrollIntoView({ behavior: "smooth" });
+      });
+
+      // Addressed to whichever actor the trace is filtered to, and to every
+      // actor when it is not. The filter is the conversation you are in.
+      element("message-button").addEventListener("click", async () => {
+        const field = element("message-text");
+        if (!field.value.trim()) return;
+        element("message-error").hidden = true;
+        try {
+          await post(`/api/runs/${state.run_id}/messages`, {
+            text: field.value,
+            to_actor: actorFilter ?? "",
+          });
+          field.value = "";
+        } catch (error) {
+          showError("message-error", error);
+        }
       });
 
       function connect() {

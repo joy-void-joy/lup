@@ -29,7 +29,13 @@ from pathlib import Path
 from pydantic import BaseModel, TypeAdapter
 
 from lup.channels.models import publish_atomic
-from lup.resolver.journal import ActorRef, Journal, record_turn
+from lup.resolver.journal import (
+    ActorRef,
+    Journal,
+    MessagePostedEvent,
+    record_turn,
+)
+from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import FROZEN
 from lup.runtime.contracts import Interrupt, SessionFactory, Steer
 from lup.runtime.models import (
@@ -86,10 +92,13 @@ class ActorSession:
         factory: SessionFactory,
         journal: Journal,
         record: ActorRecord | None = None,
+        inbox: QuestionMailbox | None = None,
     ) -> None:
         self.actor = actor
         self.factory = factory
         self.journal = journal
+        self.inbox = inbox
+        self.inbox_offset = inbox.stream_offset() if inbox is not None else 0
         self.record = record or ActorRecord(actor=actor)
         self.stack = AsyncExitStack()
         self.handle: SessionHandle | None = None
@@ -115,6 +124,7 @@ class ActorSession:
         than a trace.
         """
         self.check_schema(request)
+        self.collect_inbox()
         handle = await self.opened()
         started = await handle.session.start(self.with_pending(request))
         self.interrupt = started.interrupt
@@ -140,6 +150,30 @@ class ActorSession:
             update={"session": result.identifiers.session}
         )
         return result
+
+    def collect_inbox(self) -> None:
+        """Take anything a door said to this actor since its last turn.
+
+        Between turns there is nothing to append to, so a message waits here
+        and lands at the head of the next one. Mid-turn delivery is the
+        hook's job instead: the actor calls any tool and the message is in
+        its context, which is what makes it impossible to forget — the actor
+        was never involved in receiving it.
+        """
+        if self.inbox is None:
+            return
+        arrived = self.inbox.messages_for(self.actor.label(), self.inbox_offset)
+        self.inbox_offset = self.inbox.stream_offset()
+        for message in arrived:
+            self.pending.append(f"[{message.door}] {message.text}")
+            self.journal.append(
+                self.actor,
+                MessagePostedEvent(
+                    text=message.text,
+                    door=message.door,
+                    in_reply_to=message.in_reply_to,
+                ),
+            )
 
     def with_pending[T: BaseModel | None](
         self, request: TurnRequest[T]
@@ -214,9 +248,12 @@ class ActorSessions:
     job and happens once, at the end of the run or at a park.
     """
 
-    def __init__(self, root: Path, journal: Journal) -> None:
+    def __init__(
+        self, root: Path, journal: Journal, inbox: QuestionMailbox | None = None
+    ) -> None:
         self.root = root / SESSION_DIR
         self.journal = journal
+        self.inbox = inbox
         self.sessions: dict[str, ActorSession] = {}
 
     def key(self, actor: ActorRef) -> str:
@@ -250,7 +287,9 @@ class ActorSessions:
         if held is not None:
             held.actor = actor
             return held
-        opened = ActorSession(actor, factory, self.journal, self.persisted(actor))
+        opened = ActorSession(
+            actor, factory, self.journal, self.persisted(actor), self.inbox
+        )
         self.sessions[self.key(actor)] = opened
         return opened
 

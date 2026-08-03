@@ -164,12 +164,26 @@ def resolve_command(
             help="Leave the supervisor page running after the run exits",
         ),
     ] = False,
+    detach: Annotated[
+        bool,
+        typer.Option(
+            "--detach",
+            help=(
+                "Start the run and return, instead of holding this terminal "
+                "until it parks. The run directory is the only contract, so "
+                "the page and an agent reach it as peers afterwards"
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     if context.invoked_subcommand is not None:
         return
     if adapter is None:
         raise typer.BadParameter("--adapter is required to drive a resolver run")
+    if detach:
+        resolve.detach_resolve(adapter, run_id, answer or [])
+        return
     resolve.run_resolve(
         adapter,
         run_id,

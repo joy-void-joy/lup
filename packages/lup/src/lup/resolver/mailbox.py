@@ -213,6 +213,16 @@ class QuestionMailbox:
             if pair.item.to_actor in (actor, "")
         ]
 
+    def stream_offset(self) -> int:
+        """Where a reader that has consumed everything should resume.
+
+        Taken rather than derived from the last message read, because a
+        reader filtering by actor must still skip past the ones addressed
+        elsewhere or it re-reads them on every turn.
+        """
+        found = self.stream.read_from(0)
+        return found[-1].commit_offset if found else 0
+
     def park(self, request: ParkRequest) -> None:
         self.park_slot.clear()
         self.park_slot.settle(request)

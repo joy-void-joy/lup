@@ -106,6 +106,14 @@ def lup_hook_output_to_claude(
     from claude_agent_sdk import types as claude_types
 
     match event, output.decision:
+        case "PreToolUse", "allow" if output.additional_context:
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="allow",
+                    additionalContext=output.additional_context,
+                )
+            )
         case "PreToolUse", "allow":
             return claude_types.SyncHookJSONOutput(
                 hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(

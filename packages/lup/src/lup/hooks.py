@@ -103,6 +103,16 @@ class LupHookOutput(BaseModel):
     decision: LupHookDecision | None = None
     reason: str = ""
     system_message: str | None = None
+    additional_context: str = Field(
+        default="",
+        description=(
+            "Text to put in front of the agent mid-turn, without deciding "
+            "anything. This is the non-cooperative delivery route: the agent "
+            "calls any tool and the message is in its context, so it cannot "
+            "be forgotten because the agent was never involved in receiving "
+            "it."
+        ),
+    )
 
 
 type LupHookFn = Callable[[LupHookInput], Awaitable[LupHookOutput]]

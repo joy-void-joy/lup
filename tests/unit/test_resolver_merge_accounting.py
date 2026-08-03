@@ -50,9 +50,7 @@ def test_a_declared_rewrite_settles_a_candidate() -> None:
                 rationale="folded into the signature the sibling introduced",
             )
         ],
-        out_of_conflict_edits=[
-            DeclaredEdit(path=Path("src/api.py"), rationale="same")
-        ],
+        out_of_conflict_edits=[DeclaredEdit(path=Path("src/api.py"), rationale="same")],
     )
 
     assert merge_problems(settled, [], [candidate("src/api.py")]) == []

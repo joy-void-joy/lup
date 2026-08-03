@@ -37,10 +37,18 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
+from lup.hooks import (
+    LupHookInput,
+    LupHookMatcher,
+    LupHookOutput,
+    LupHooksConfig,
+)
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     ANSWER_POLL_SECONDS,
+    ActorMessage,
+    AnswerDoor,
     MailboxConflictError,
     PendingQuestion,
     QuestionMailbox,
@@ -139,6 +147,44 @@ class AwaitAnswersOutput(BaseModel):
     answers: list[AnsweredQuestion]
     unanswered: list[str]
     instruction: str
+
+
+def create_inbox_hooks(mailbox: QuestionMailbox, actor: str) -> LupHooksConfig:
+    """Put anything said to this actor in front of it, mid-turn.
+
+    Non-cooperative by construction. The actor calls any tool at all and the
+    message is in its context — it never chooses to check, so it cannot fail
+    to. Waiting for the next turn would mean a directive sits unread for as
+    long as the current one runs, which on a resolver turn is most of the
+    run.
+    """
+    offset = [mailbox.stream_offset()]
+
+    async def deliver(_input: LupHookInput) -> LupHookOutput:
+        arrived = mailbox.messages_for(actor, offset[0])
+        offset[0] = mailbox.stream_offset()
+        if not arrived:
+            return LupHookOutput(decision="allow")
+        return LupHookOutput(
+            decision="allow",
+            additional_context="\n".join(
+                f"[message from {message.door}] {message.text}" for message in arrived
+            ),
+        )
+
+    return LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=deliver, tag="inbox")])
+
+
+class SendMessageInput(BaseModel):
+    text: str = Field(description="What to tell the humans watching this run")
+    in_reply_to: str = Field(
+        default="",
+        description="The id of a message or question this answers, if any",
+    )
+
+
+class SendMessageOutput(BaseModel):
+    sent: bool = Field(description="Whether the message reached the run's record")
 
 
 def create_question_tools(
@@ -272,4 +318,25 @@ def create_question_tools(
         posted = await queue_questions(params)
         return await await_answers(AwaitAnswersInput(question_ids=posted.question_ids))
 
-    return [queue_questions, await_answers, ask_questions]
+    @lup_tool(
+        "Tell the humans watching this run something, without waiting for a "
+        "reply. Use this to volunteer what you have found, flag a consequence "
+        "for whoever merges your work, or answer something you were asked. "
+        "This never blocks and never parks the run — if you need a decision "
+        "before you can continue, that is a question, not a message.",
+        name="send_message",
+    )
+    async def send_message(params: SendMessageInput) -> SendMessageOutput:
+        mailbox.send(
+            ActorMessage(
+                run_id=run_id,
+                to_actor="",
+                text=params.text,
+                door=AnswerDoor.AGENT,
+                sent_at=utc_now(),
+                in_reply_to=params.in_reply_to,
+            )
+        )
+        return SendMessageOutput(sent=True)
+
+    return [queue_questions, await_answers, ask_questions, send_message]

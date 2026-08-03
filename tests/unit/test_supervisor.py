@@ -279,6 +279,38 @@ async def test_parking_from_the_page_writes_the_park_request(tmp_path: Path) -> 
     assert request.reason == "answering tomorrow"
 
 
+async def test_a_message_reaches_an_actor_without_parking_the_run(
+    tmp_path: Path,
+) -> None:
+    """A message settles nothing, so no amount of messaging can park a run.
+
+    That is the whole reason messages are a stream and decisions are slots.
+    """
+    mailbox = build_run(tmp_path)
+
+    async with client_for(tmp_path) as client:
+        sent = await client.post(
+            "/api/runs/run-1/messages",
+            json={"text": "the sibling already renamed that", "to_actor": "worker:a#1"},
+        )
+
+    assert sent.status_code == 200
+    assert [message.text for message in mailbox.messages_for("worker:a#1")] == [
+        "the sibling already renamed that"
+    ]
+    assert sent.json()["status"] != "awaiting_answers"
+
+
+async def test_a_broadcast_reaches_every_actor(tmp_path: Path) -> None:
+    mailbox = build_run(tmp_path)
+
+    async with client_for(tmp_path) as client:
+        await client.post("/api/runs/run-1/messages", json={"text": "stop rewriting"})
+
+    assert len(mailbox.messages_for("merger:integration#1")) == 1
+    assert len(mailbox.messages_for("reviewer:b#2")) == 1
+
+
 async def test_the_review_branch_is_reported_with_no_decision_to_take(
     tmp_path: Path,
 ) -> None:
@@ -568,6 +600,7 @@ def test_the_page_posts_only_routes_the_app_serves() -> None:
     assert sorted(dict.fromkeys(posted)) == [
         "answers",
         "events",
+        "messages",
         "park",
         "resume",
     ]

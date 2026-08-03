@@ -161,6 +161,19 @@ class ParkSubmission(BaseModel):
     )
 
 
+class MessageSubmission(BaseModel):
+    """Something a door is telling an actor. This decides nothing."""
+
+    text: str = Field(description="What to say")
+    to_actor: str = Field(
+        default="",
+        description="Actor label to address, or empty to reach every actor",
+    )
+    in_reply_to: str = Field(
+        default="", description="Question or message id this answers, if any"
+    )
+
+
 def answer_recipe(adapter: str, run_id: str, questions: list[MaterialQuestion]) -> str:
     """Build the flag-carrying rerun that answers exactly these questions."""
     return " ".join(

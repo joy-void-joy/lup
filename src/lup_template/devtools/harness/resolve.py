@@ -12,6 +12,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import sh
 import typer
 from pydantic import BaseModel, ConfigDict
 
@@ -50,6 +51,7 @@ from lup.resolver.tools import (
     RESOLVER_CONCERN_ENV,
     RESOLVER_RUN_DIR_ENV,
     ResolverToolContext,
+    create_inbox_hooks,
     create_question_tools,
     read_resolver_tool_context,
 )
@@ -399,6 +401,49 @@ def integration_branch(launcher: ProcessLauncher, root: Path, run_id: str) -> st
     return f"resolve/{run_id}{REVIEW_BRANCH_SUFFIX}"
 
 
+def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None:
+    """Start a run that outlives this command, and say where to reach it.
+
+    A blocking run holds the launching agent's only turn, so nothing could
+    write to a run while it moved — which made every delivery route in the
+    design unreachable, however well the channels underneath worked. Once
+    launching returns, the run directory is the whole contract: the page and
+    an orchestrating agent are peers on it, exactly as two pages would be.
+    """
+    root = project_root()
+    resolved = run_id or (
+        "resolve-"
+        + resolver_git(
+            LocalProcessLauncher(), root, ["rev-parse", "--short=12", "HEAD"]
+        )
+    )
+    arguments = [
+        "uv",
+        "run",
+        "lup-devtools",
+        "harness",
+        "resolve",
+        "--adapter",
+        adapter,
+        "--run-id",
+        resolved,
+        *(part for answer in answers for part in ("--answer", answer)),
+    ]
+    sh.Command(arguments[0])(
+        *arguments[1:],
+        _cwd=str(root),
+        _bg=True,
+        _bg_exc=False,
+        _new_session=True,
+        _out="/dev/null",
+        _err="/dev/null",
+    )
+    typer.echo(f"Run {resolved} started detached.")
+    typer.echo(
+        f"Follow it: uv run lup-devtools harness resolve supervise --run-id {resolved}"
+    )
+
+
 def run_resolve(
     adapter: str,
     run_id: str | None,
@@ -530,8 +575,14 @@ def run_resolve(
                             for name in server_tool_names(server)
                         ],
                         hooks=merge_hooks(
-                            create_permission_hooks([cwd], []),
-                            create_git_inspection_hook(),
+                            merge_hooks(
+                                create_permission_hooks([cwd], []),
+                                create_git_inspection_hook(),
+                            ),
+                            create_inbox_hooks(
+                                QuestionMailbox(tool_context.run_dir),
+                                context.concern_id,
+                            ),
                         ),
                     )
                 )
