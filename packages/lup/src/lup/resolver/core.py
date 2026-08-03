@@ -22,6 +22,8 @@ from lup.resolver.journal import (
     ActorRef,
     AnswerSettledEvent,
     ConcernProgressedEvent,
+    JoinAuditEvent,
+    JoinCompletedEvent,
     Journal,
     PhaseChangedEvent,
     QuestionAskedEvent,
@@ -48,6 +50,7 @@ from lup.resolver.models import (
     ConcernProgress,
     ConcernAllowance,
     ConcernStatus,
+    DropCandidate,
     ConcernExecution,
     ConcernOutcome,
     DependencyBase,
@@ -118,6 +121,94 @@ ASK_PREAMBLE = (
     "tools — queue_questions, await_answers, ask_questions — rather than "
     "guessing or ending your turn to report it. " + WAIT_CONTRACT
 )
+
+
+def merge_problems(
+    merge: MergeReport, conflicted: list[Path], owed: list[DropCandidate]
+) -> list[str]:
+    """Every obligation this merge report left unmet.
+
+    Two obligations rather than two prohibitions. Every candidate the
+    detector raised must be dispositioned — containment, never equality,
+    because a legitimate resolution rewrites hunks and requiring the exact
+    candidate set back would reject the right answer. And every edit outside
+    the conflict set must be declared, because that is where a silent
+    override lives: the merger is handed an already-correct tree with
+    unrestricted write access, and the canonical joint failure is fixed in a
+    file that never conflicted.
+    """
+    dispositioned = {
+        (disposition.parent, disposition.path.as_posix())
+        for disposition in merge.dispositions
+    }
+    undispositioned = sorted(
+        f"{candidate.path.as_posix()} from {candidate.parent[:12]}"
+        for candidate in owed
+        if (candidate.parent, candidate.path.as_posix()) not in dispositioned
+    )
+    unreasoned = sorted(
+        disposition.path.as_posix()
+        for disposition in merge.dispositions
+        if not disposition.rationale.strip()
+    )
+    declared = {edit.path.as_posix() for edit in merge.out_of_conflict_edits}
+    conflicting = {path.as_posix() for path in conflicted}
+    undeclared = sorted(
+        disposition.path.as_posix()
+        for disposition in merge.dispositions
+        if disposition.fate in {"rewritten", "superseded", "dropped"}
+        and disposition.path.as_posix() not in conflicting
+        and disposition.path.as_posix() not in declared
+    )
+    return [
+        *(
+            [f"content lost with nothing said about it: {', '.join(undispositioned)}"]
+            if undispositioned
+            else []
+        ),
+        *(
+            [f"dispositioned without a rationale: {', '.join(unreasoned)}"]
+            if unreasoned
+            else []
+        ),
+        *(
+            [f"changed outside the conflict set undeclared: {', '.join(undeclared)}"]
+            if undeclared
+            else []
+        ),
+    ]
+
+
+def format_paths(paths: list[Path]) -> str:
+    return "\n".join(f"- {path.as_posix()}" for path in paths) or "- (none)"
+
+
+def format_candidates(owed: list[DropCandidate]) -> str:
+    """Show each parent's unaccounted content, capped so the list stays read.
+
+    A merger handed four hundred lines reads none of them, and the obligation
+    is per path rather than per line — the sample is enough to recognize what
+    went missing and find the rest.
+    """
+    return (
+        "\n".join(
+            f"- {candidate.path.as_posix()} (from {candidate.parent[:12]}), "
+            f"{len(candidate.missing)} lines, first: "
+            + " / ".join(candidate.missing[:3])
+            for candidate in owed
+        )
+        or "- (none)"
+    )
+
+
+class LedgerEntry(BaseModel):
+    """One join, as the merger accounted for it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    parent: str
+    summary: str
+    merge: MergeReport
 
 
 class ApprovalDecisions(BaseModel):
@@ -254,6 +345,7 @@ class ResolverCore:
         self.mailbox = QuestionMailbox(self.repository.root)
         self.journal = Journal(self.repository.root)
         self.actors = ActorSessions(self.repository.root, self.journal)
+        self.ledger: list[LedgerEntry] = []  # lup: ignore[empty-collection] — joins
         self.wake = asyncio.Event()
         self.state_lock = asyncio.Lock()
         self.state: ResolveState | None = None
@@ -917,8 +1009,26 @@ class ResolverCore:
                 )
             else:
                 await self.transition_concern(concern.id, ConcernStatus.REVIEWING)
-                review = await self.review_turn(
-                    concern, worker, diff.commit, lease.root, round_number
+                # Verification ran exactly once in a run, over the fully
+                # integrated tree, so a concern could reach VERIFIED with a
+                # red suite and the breakage surfaced after every join with
+                # nothing to attribute it to.
+                broke = [
+                    record.name
+                    for record in self.verify(lease.root)
+                    if not record.passed
+                ]
+                review = (
+                    ReviewReport(
+                        concern_id=concern.id,
+                        accepted=False,
+                        generalized=False,
+                        reason="verification failed: " + ", ".join(broke),
+                    )
+                    if broke
+                    else await self.review_turn(
+                        concern, worker, diff.commit, lease.root, round_number
+                    )
                 )
                 expected_criteria = {criterion.id for criterion in concern.criteria}
                 if (
@@ -1030,13 +1140,21 @@ class ResolverCore:
         purpose: str,
         title: str,
     ) -> str:
-        """Join parents one at a time so every conflict reaches semantic review."""
+        """Join parents one at a time, spending a turn only where one is owed.
+
+        Every join is pairwise because git cannot merge N branches at once
+        when it matters — octopus refuses on conflict — so the boundary that
+        moves is the session rather than the sequence. One merger sees every
+        parent, and by parent six it has genuinely seen one through five.
+        """
         if len(commits) < 2:
             raise ValueError("a semantic join requires at least two commits")
         if not lease.root.exists():
             self.worktrees.create(lease, commits[0])
-        current = self.worktrees.head(lease)
-        for parent in commits[1:]:
+        base = self.worktrees.head(lease)
+        current = base
+        joined: list[str] = []  # lup: ignore[empty-collection] — audit input
+        for parent in self.join_order(lease, base, commits[1:]):
             # The loop carries no resumption point, so a resumed join re-enters
             # at the first parent. One already contained in HEAD has nothing to
             # merge, and a merge turn spent on it is not free: the session
@@ -1044,20 +1162,186 @@ class ResolverCore:
             # so it reasonably asks rather than reporting success, and every
             # such round costs a question and a resume. Skip what is already in.
             if self.worktrees.already_joined(lease, parent):
+                joined.append(parent)
                 continue
-            self.worktrees.prepare_join(lease, [current, parent])
-            merge = await self.merge_turn(
-                lease,
-                [current, parent],
-                self.invocation_renderer.render(self.spec.merge_skill),
-                purpose,
-            )
-            if not merge.completed or merge.unresolved_paths:
-                raise ResolverInvariantError(
-                    f"semantic join failed for {lease.concern_id}: {merge.summary}"
-                )
+            before = current
+            conflicted = self.worktrees.prepare_join(lease, [before, parent])
+            if conflicted:
+                await self.adjudicate(lease, parent, purpose, [])
             current = self.worktrees.commit_join(lease, title)
+            # What this parent added since it forked, and whether the join
+            # still holds it. Asking against the fork point rather than the
+            # previous head is what keeps a dependency's own content out of
+            # the obligation list.
+            fork = self.worktrees.merge_base(lease, before, parent)
+            owed = self.worktrees.drop_candidates(lease, fork, parent, current)
+            if owed:
+                await self.adjudicate(lease, parent, purpose, owed)
+                current = self.worktrees.commit_join(lease, title)
+            joined.append(parent)
+            # Verifying after every join is what makes a red result name a
+            # join. Running it once over the finished tree gave the same
+            # failure with twelve candidates and no way to tell which one
+            # introduced it.
+            failed = [
+                record.name for record in self.verify(lease.root) if not record.passed
+            ]
+            if failed:
+                await self.adjudicate(
+                    lease,
+                    parent,
+                    f"{purpose} — joining {parent[:12]} broke: {', '.join(failed)}",
+                    [],
+                )
+                current = self.worktrees.commit_join(lease, title)
+            self.journal.record(
+                JoinCompletedEvent(
+                    parent=parent,
+                    commit=current,
+                    conflicted=conflicted,
+                    broke=failed,
+                )
+            )
+        await self.audit_join(lease, base, joined, current, purpose)
         return current
+
+    def join_order(
+        self, lease: WritableRootLease, base: str, parents: list[str]
+    ) -> list[str]:
+        """Order the joins so related work meets while the session is on it.
+
+        Completion order is the order concerns happened to finish, which
+        scatters related work across the sequence and puts a merger's own
+        precedent behind five unrelated joins. Parents that overlap no file
+        with anything already placed go first — those are the ones git
+        settles alone — and the rest follow in dependency order, so each
+        contested join lands next to the work it contests.
+        """
+        touched = {
+            parent: {
+                path.as_posix()
+                for path in self.worktrees.changed_between(lease, base, parent)
+            }
+            for parent in parents
+        }
+        ranked = sorted(
+            parents,
+            key=lambda parent: (
+                sum(
+                    1
+                    for other in parents
+                    if other != parent and touched[parent] & touched[other]
+                ),
+                self.dependency_depth(parent),
+                parent,
+            ),
+        )
+        return ranked
+
+    def verify(self, root: Path) -> list[VerificationRecord]:
+        """Run the whole verification set against one tree.
+
+        The full set every time, never a fast subset. Per-join verification
+        is the only mechanical detector of a clean merge that is jointly
+        wrong — one branch changes a signature, another adds a caller, and
+        the type error exists in neither parent alone — and a subset chosen
+        for speed is exactly the one that misses it.
+        """
+        records: list[VerificationRecord] = []  # lup: ignore[empty-collection]
+        for command in self.config.verification_commands:
+            status = self.process_launcher.launch(
+                LaunchRequest(arguments=command.arguments, cwd=root)
+            )
+            records.append(
+                VerificationRecord(
+                    name=command.name,
+                    arguments=command.arguments,
+                    passed=status.code == 0,
+                    exit_code=status.code,
+                )
+            )
+        return records
+
+    async def adjudicate(
+        self,
+        lease: WritableRootLease,
+        parent: str,
+        purpose: str,
+        owed: list[DropCandidate],
+    ) -> None:
+        """Put one join to the merger and hold its report to what it declared."""
+        conflicted = self.worktrees.conflicted_paths(lease)
+        merge = await self.merge_turn(lease, parent, purpose, conflicted, owed)
+        # An incompletion is the merger's considered answer and spending
+        # another turn on it only re-derives it. An accounting gap is
+        # different: the tree may be right and the declaration short, which
+        # is precisely what a second turn can settle.
+        if not merge.completed or merge.unresolved_paths:
+            raise ResolverInvariantError(
+                f"semantic join failed for {lease.concern_id}: "
+                + (merge.blocked or merge.summary)
+            )
+        problems = merge_problems(merge, conflicted, owed)
+        if problems:
+            merge = await self.merge_turn(
+                lease, parent, purpose, conflicted, owed, problems
+            )
+            problems = merge_problems(merge, conflicted, owed)
+        if problems:
+            raise ResolverInvariantError(
+                f"semantic join for {lease.concern_id} was not accounted for: "
+                + "; ".join(problems)
+            )
+        self.ledger.append(
+            LedgerEntry(parent=parent, summary=merge.summary, merge=merge)
+        )
+
+    async def audit_join(
+        self,
+        lease: WritableRootLease,
+        base: str,
+        joined: list[str],
+        result: str,
+        purpose: str,
+    ) -> None:
+        """Re-check every parent against the finished tree, not just the last.
+
+        A hunk lost at join three and never noticed is invisible to the
+        per-join check, which only ever looked at one parent against one
+        result. Running the same detector over every parent once the tree is
+        final is what catches it.
+        """
+        owed = [
+            candidate
+            for parent in joined
+            for candidate in self.worktrees.drop_candidates(
+                lease, self.worktrees.merge_base(lease, base, parent), parent, result
+            )
+        ]
+        if not owed:
+            return
+        self.journal.record(
+            JoinAuditEvent(parents=joined, outstanding=len(owed), commit=result)
+        )
+        await self.adjudicate(lease, joined[-1], f"{purpose} — final audit", owed)
+        self.worktrees.commit_join(lease, "resolve: settle the final join audit")
+
+    def dependency_depth(self, commit: str) -> int:
+        """How deep in the concern graph the concern that produced this sits."""
+        state = self.state
+        if state is None:
+            return 0
+        owner = next(
+            (
+                outcome.concern_id
+                for outcome in state.outcomes
+                if outcome.commit == commit
+            ),
+            None,
+        )
+        if owner is None:
+            return 0
+        return len(ConcernGraph(state.concerns).ancestors(owner))
 
     async def review_turn(
         self,
@@ -1132,6 +1416,114 @@ class ResolverCore:
     # audited by hand was confirmed correct only because a human looked. `lup-devtools dev conflict audit` and the /lup:merge skill
     # already carry deletion-audit guidance, but both are prompt-level, and the
     # guidance itself says a prompt rule coexists with the failure it warns of.
+    async def merge_retry(
+        self, lease: WritableRootLease, problems: list[str]
+    ) -> MergeReport:
+        """Name what the last report left unmet, on the session that wrote it."""
+        result = await self.actors.session(
+            ActorRef(kind="merger", id=lease.concern_id),
+            self.worker_factory(
+                WorkerContext(
+                    root=lease.root,
+                    concern_id=lease.concern_id,
+                    allowances=self.merge_allowances(),
+                )
+            ),
+        ).turn(
+            turn_request(
+                TurnInput(
+                    text=(
+                        "Your merge report did not account for everything this "
+                        "join changed:\n- " + "\n- ".join(problems) + "\n\nFix "
+                        "the tree where it is wrong and resubmit a report that "
+                        "accounts for each item. Declaring a rewrite or a "
+                        "deliberate supersession with a reason is a complete "
+                        "answer; leaving one unmentioned is not."
+                    )
+                ),
+                MergeReport,
+            )
+        )
+        return result.output
+
+    def merge_context(self, parent: str) -> str:
+        """What the concern behind this parent was for, and what it decided.
+
+        A merger that knows only the diff can tell what changed but not what
+        was deliberate. What it gets is the concern's own specification, the
+        criteria it had to meet, the answers a human gave it, and the merge
+        notes its worker left for whoever would join it — the last being the
+        one thing only that worker could know.
+        """
+        state = self.state
+        if state is None:
+            return ""
+        owner = next(
+            (
+                outcome.concern_id
+                for outcome in state.outcomes
+                if outcome.commit == parent
+            ),
+            None,
+        )
+        if owner is None:
+            return ""
+        concern = next(
+            (item for item in state.concerns if item.id == owner),
+            None,
+        )
+        if concern is None:
+            return ""
+        answers = [
+            f"- {record.answer.question_id}: {record.answer.value}"
+            for record in self.mailbox.answers()
+            for item in self.mailbox.questions()
+            if item.question.id == record.answer.question_id
+            and item.question.concern_id == owner
+        ]
+        notes = [
+            note
+            for outcome in state.outcomes
+            if outcome.concern_id == owner
+            for round_record in outcome.rounds
+            for note in round_record.worker.merge_notes
+        ]
+        return (
+            f"Concern behind this parent:\n{concern.model_dump_json(indent=2)}\n\n"
+            + (
+                "Answers this concern was given:\n" + "\n".join(answers) + "\n\n"
+                if answers
+                else ""
+            )
+            + (
+                "Merge notes its worker left for whoever joins it — these are "
+                "consequences only that worker could know:\n- "
+                + "\n- ".join(notes)
+                + "\n\n"
+                if notes
+                else ""
+            )
+            + self.ledger_recital()
+        )
+
+    def ledger_recital(self) -> str:
+        """What this merger has already settled, carried forward as a record.
+
+        The accumulating session means it was there for all of them, but
+        attention is not memory: by parent ten the earliest joins are far
+        behind, and a decision it made at join two is exactly what it needs
+        at join nine to stay consistent.
+        """
+        if not self.ledger:
+            return ""
+        return (
+            "Joins you have already settled in this run:\n"
+            + "\n".join(
+                f"- {entry.parent[:12]}: {entry.summary}" for entry in self.ledger
+            )
+            + "\n\n"
+        )
+
     def merge_allowances(self) -> list[ConcernAllowance]:
         """Every gate the joined concerns were approved to pass.
 
@@ -1155,19 +1547,43 @@ class ResolverCore:
     async def merge_turn(
         self,
         lease: WritableRootLease,
-        commits: list[str],
-        invocation: str,
+        parent: str,
         purpose: str,
+        conflicted: list[Path],
+        owed: list[DropCandidate],
+        problems: list[str] | None = None,
     ) -> MergeReport:
+        """Put one join to the merger, with what each side meant by it.
+
+        The merger used to receive a purpose string, a worktree and two
+        shas, so it could read what changed but not which behaviour was a
+        deliberate decision. The argument against telling it more is that a
+        merger who knows what each side intended can rationalize a bad merge
+        as intended; what settled it the other way is that the observed
+        failure was declining to classify something it had no basis for,
+        which is missing context rather than misused context.
+        """
+        if problems is not None:
+            return await self.merge_retry(lease, problems)
         prompt = (
             "Resolve the prepared semantic merge in the assigned worktree. Stage "
             "every resolution with `git add` — settling the index is your work "
             "and the merge cannot complete without it. Do not commit and do not "
             "change branches; the orchestrator owns commit authority, which "
-            "covers committing only.\n\n"
-            + f"{invocation}\n\nPurpose: {purpose}\nWorktree: {lease.root}\n"
-            + "Parent commits:\n"
-            + "\n".join(commits)
+            "covers committing only. If you resolve the content but cannot "
+            "stage it, say so in `blocked` rather than reporting completion.\n\n"
+            "Two things you must account for. Every candidate below is content "
+            "one parent contributed that this tree no longer holds — disposition "
+            "each as kept, rewritten, superseded or dropped, with a reason. A "
+            "rewrite is a legitimate answer; silence is not. And any file you "
+            "edit that is not in the conflict set must be declared, with a "
+            "reason: fixing a caller whose file merged clean is correct and "
+            "expected, and is exactly what has to be visible.\n\n"
+            + f"{self.invocation_renderer.render(self.spec.merge_skill)}\n\n"
+            + f"Purpose: {purpose}\nWorktree: {lease.root}\nJoining: {parent}\n\n"
+            + self.merge_context(parent)
+            + f"Conflicted paths:\n{format_paths(conflicted)}\n\n"
+            + f"Unaccounted content:\n{format_candidates(owed)}"
         )
         result = await self.actors.session(
             ActorRef(kind="merger", id=lease.concern_id),
@@ -1394,22 +1810,7 @@ class ResolverCore:
                 ) from error
 
         if not integration.completed:
-            verification: list[VerificationRecord] = []  # lup: ignore[empty-collection]
-            for command in self.config.verification_commands:
-                status = self.process_launcher.launch(
-                    LaunchRequest(
-                        arguments=command.arguments,
-                        cwd=integration_lease.root,
-                    )
-                )
-                verification.append(
-                    VerificationRecord(
-                        name=command.name,
-                        arguments=command.arguments,
-                        passed=status.code == 0,
-                        exit_code=status.code,
-                    )
-                )
+            verification = self.verify(integration_lease.root)
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.VERIFICATION,

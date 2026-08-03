@@ -357,6 +357,16 @@ class WorkerReport(BaseModel):
     summary: str
     files_changed: list[Path] = Field(default_factory=list)
     swept_beyond_scope: list[Path] = Field(default_factory=list)
+    merge_notes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What anyone joining this work needs to know that the diff does "
+            "not say — a changed signature whose callers live elsewhere, an "
+            "invariant now enforced in one place. This is not a message to a "
+            "sibling worker, which could not act on it anyway since the "
+            "changed code is not in its worktree; it reaches whoever merges."
+        ),
+    )
 
 
 class DiffValidation(BaseModel):
@@ -379,12 +389,82 @@ class ReviewReport(BaseModel):
     criteria_met: list[str] = Field(default_factory=list)
 
 
-class MergeReport(BaseModel):
+class DropCandidate(BaseModel):
+    """Content one parent contributed that the joined tree does not hold.
+
+    A candidate is an obligation, never a verdict. A legitimate resolution
+    rewrites what it merges, so a line going missing is exactly as likely to
+    be correct as to be a loss — which is why the merger has to say which,
+    and why nothing here decides on its own.
+    """
+
     model_config = FROZEN
+
+    parent: str
+    path: Path
+    missing: list[str]
+
+
+type HunkFate = Literal["kept", "rewritten", "superseded", "dropped"]
+
+
+class HunkDisposition(BaseModel):
+    """What became of one candidate hunk, and why.
+
+    Containment rather than equality is the gate: a legitimate resolution
+    rewrites hunks, so requiring the result to hold exactly the candidates
+    would reject the correct answer. What must not happen is a candidate
+    disappearing with nothing said about it.
+    """
+
+    model_config = FROZEN
+
+    path: Path
+    parent: str
+    fate: HunkFate
+    rationale: str
+
+
+class DeclaredEdit(BaseModel):
+    """One edit made outside the conflict set, and the reason for it.
+
+    A hard subset rule — changed files within conflicted files — is wrong,
+    because the canonical joint failure is fixed in a file that never
+    conflicted: one branch changes a signature, another adds a caller, and
+    the caller's file merges clean and still needs updating. So edits
+    outside the conflict set are permitted and undeclared ones are the
+    rejection.
+    """
+
+    model_config = FROZEN
+
+    path: Path
+    rationale: str
+
+
+class MergeReport(BaseModel):
+    """What one join did, declared in a form the orchestrator can check.
+
+    Strict for the same reason ``WorkerReport`` is: a retired field must
+    fail loudly rather than vanish, and the whole point of this report is
+    that a semantic choice cannot go unrecorded.
+    """
+
+    model_config = FROZEN_STRICT
 
     completed: bool
     summary: str
     unresolved_paths: list[Path] = Field(default_factory=list)
+    dispositions: list[HunkDisposition] = Field(default_factory=list)
+    out_of_conflict_edits: list[DeclaredEdit] = Field(default_factory=list)
+    blocked: str = Field(
+        default="",
+        description=(
+            "Why a resolution that is complete in the working tree could not "
+            "be staged. An incompletion with a cause attached is answerable; "
+            "one without a cause was read as an unexplained failure."
+        ),
+    )
 
 
 class AgentRound(BaseModel):

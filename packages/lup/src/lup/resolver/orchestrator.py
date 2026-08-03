@@ -9,11 +9,35 @@ from lup.resolver.models import (
     Concern,
     DependencyBase,
     DiffValidation,
+    DropCandidate,
     NoteClearanceCommit,
     SourceSnapshot,
     WorkerReport,
     WritableRootLease,
 )
+
+
+def report_mismatch(undeclared: list[str], unswept: list[str]) -> str:
+    """Name exactly which paths a worker must reconcile to pass this gate.
+
+    A revision round can only converge on something it can read. The prior
+    wording named no path at all, so a worker re-derived the same report and
+    failed identically until the round budget ran out.
+    """
+    return "; ".join(
+        [
+            *(
+                [f"changed but not declared: {', '.join(undeclared)}"]
+                if undeclared
+                else []
+            ),
+            *(
+                [f"declared swept but not changed: {', '.join(unswept)}"]
+                if unswept
+                else []
+            ),
+        ]
+    )
 
 
 class LeaseViolationError(RuntimeError):
@@ -209,26 +233,20 @@ class WorktreeOrchestrator:
         actual = {path.as_posix() for path in changed}
         reported = {path.as_posix() for path in report.files_changed}
         swept = {path.as_posix() for path in report.swept_beyond_scope}
-        # lup: defer[when the resolver review loop is next revised]: this gate
-        # discarded 71 files of correct work over two stale entries, three
-        # rounds running, and the worker could not have learned why. Two
-        # separable defects. First, `reported != actual` rejects a worker that
-        # over-reports, but the safety property here is that nothing changes
-        # undeclared — `actual <= reported` states that, while equality also
-        # punishes a stale path the worker believed it had touched. The
-        # observed failure was exactly that: reported minus actual held two
-        # content modules the worker ended up creating elsewhere, and actual
-        # minus reported was empty, so nothing was hidden. Second, the reason
-        # names no path, so a revision round cannot converge — every retry
-        # re-derives the same report and fails identically until the budget is
-        # spent. Name the symmetric difference in the reason, and treat an
-        # unchanged verdict across rounds as grounds to escalate rather than to
-        # spend another round.
-        if reported != actual or not swept <= actual:
+        # The safety property is that nothing changes undeclared, which is
+        # containment and not equality. Requiring equality also punished a
+        # worker for a stale path it believed it had touched, and cost 71
+        # files of correct work over two such entries — nothing was hidden in
+        # either. Over-reporting is named back rather than rejected, because a
+        # reason that names no path cannot converge: every retry re-derives
+        # the same report and fails identically until the budget is spent.
+        undeclared = sorted(actual - reported)
+        unswept = sorted(swept - actual)
+        if undeclared or unswept:
             return DiffValidation(
                 concern_id=concern.id,
                 valid=False,
-                reason="worker report does not match the inspected changed paths",
+                reason=report_mismatch(undeclared, unswept),
             )
         if not changed:
             return DiffValidation(
@@ -388,8 +406,14 @@ class WorktreeOrchestrator:
             raise RuntimeError(f"failed to identify worktree {lease.concern_id}")
         return lines[0]
 
-    def prepare_join(self, lease: WritableRootLease, parent_commits: list[str]) -> None:
-        """Stage a no-commit merge so the portable merger can resolve semantics."""
+    def prepare_join(self, lease: WritableRootLease, parent_commits: list[str]) -> bool:
+        """Stage a no-commit merge, reporting whether git had to leave a conflict.
+
+        The answer is what decides whether an agent turn is spent at all.
+        Accepting exit 0 and exit 1 identically meant a merger was invoked on
+        every parent, handed an already-correct tree it could edit, with
+        nothing to decide — ten such turns in a twelve-parent run.
+        """
         if len(parent_commits) != 2:
             raise ValueError("one semantic join step requires exactly two commits")
         # Preparing is idempotent: a merge already open against this same parent
@@ -397,7 +421,9 @@ class WorktreeOrchestrator:
         # over it would fail on the existing MERGE_HEAD anyway. Leaving it in
         # place is what lets a resolution survive the park that interrupted it.
         if self.merging(lease) == parent_commits[1]:
-            return
+            # A merge left open is one a turn was already resolving, so the
+            # question it was invoked over stands whatever git reported then.
+            return True
         status = self.launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -414,6 +440,97 @@ class WorktreeOrchestrator:
             raise RuntimeError(
                 f"failed to prepare semantic join for {lease.concern_id}"
             )
+        return status.code == 1
+
+    def conflicted_paths(self, lease: WritableRootLease) -> list[Path]:
+        """Every path git left unmerged, which git already knows exactly."""
+        unmerged = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "diff", "--name-only", "--diff-filter=U"],
+                cwd=lease.root,
+            )
+        )
+        return [Path(line) for line in unmerged.stdout.splitlines() if line]
+
+    def merge_base(self, lease: WritableRootLease, left: str, right: str) -> str:
+        """Where two commits forked, so a contribution can be read from there."""
+        found = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "merge-base", left, right],
+                cwd=lease.root,
+            )
+        )
+        lines = found.stdout.splitlines()
+        if found.code != 0 or not lines:
+            raise RuntimeError(f"{left} and {right} share no history")
+        return lines[0]
+
+    def changed_between(
+        self, lease: WritableRootLease, base: str, commit: str
+    ) -> list[Path]:
+        """Every path that differs between two commits."""
+        named = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "diff", "--name-only", base, commit],
+                cwd=lease.root,
+            )
+        )
+        return [Path(line) for line in named.stdout.splitlines() if line]
+
+    def added_lines(
+        self, lease: WritableRootLease, base: str, parent: str, path: Path
+    ) -> list[str]:
+        """Every substantive line one parent adds to one path.
+
+        Blank and near-punctuation lines are excluded because they carry no
+        identity: a closing brace surviving proves nothing about the hunk
+        that added it, and including them would bury a real loss under noise
+        the merger then has to account for.
+        """
+        diffed = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "diff", "-U0", base, parent, "--", path.as_posix()],
+                cwd=lease.root,
+            )
+        )
+        return [
+            stripped
+            for line in diffed.stdout.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+            for stripped in [line[1:].strip()]
+            if len(stripped) > 3 and any(character.isalnum() for character in stripped)
+        ]
+
+    def file_at(self, lease: WritableRootLease, commit: str, path: Path) -> str:
+        """One path's content at one commit, empty where it does not exist."""
+        shown = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "show", f"{commit}:{path.as_posix()}"],
+                cwd=lease.root,
+            )
+        )
+        return shown.stdout if shown.code == 0 else ""
+
+    def drop_candidates(
+        self, lease: WritableRootLease, base: str, parent: str, result: str
+    ) -> list[DropCandidate]:
+        """What this parent contributed that the joined tree no longer holds.
+
+        Line presence rather than hunk identity, so a resolution that merely
+        moved code within its file still reads as kept. A line that was
+        genuinely rewritten does read as missing — which is the point, since
+        a rewrite is exactly the choice the merger has to declare.
+        """
+        found: list[DropCandidate] = []  # lup: ignore[empty-collection]
+        for path in self.changed_between(lease, base, parent):
+            contributed = self.added_lines(lease, base, parent, path)
+            if not contributed:
+                continue
+            held = self.file_at(lease, result, path)
+            missing = [line for line in contributed if line not in held]
+            if missing:
+                found.append(DropCandidate(parent=parent, path=path, missing=missing))
+        return found
 
     def commit_join(self, lease: WritableRootLease, title: str) -> str:
         """Create and read the orchestrator-owned semantic join commit."""

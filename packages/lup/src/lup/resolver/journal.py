@@ -111,6 +111,29 @@ class MessagePostedEvent(BaseModel):
     in_reply_to: str | None = None
 
 
+class JoinCompletedEvent(BaseModel):
+    """One parent was joined, and whether git had to be adjudicated for it."""
+
+    model_config = FROZEN
+
+    type: Literal["join_completed"] = "join_completed"
+    parent: str
+    commit: str
+    conflicted: bool
+    broke: list[str] = Field(default_factory=list)
+
+
+class JoinAuditEvent(BaseModel):
+    """The finished tree was re-checked against every parent that built it."""
+
+    model_config = FROZEN
+
+    type: Literal["join_audit"] = "join_audit"
+    parents: list[str]
+    outstanding: int
+    commit: str
+
+
 class RunFailedEvent(BaseModel):
     """The run reached a terminal failure."""
 
@@ -126,6 +149,8 @@ type RunEvent = (
     | QuestionAskedEvent
     | AnswerSettledEvent
     | MessagePostedEvent
+    | JoinCompletedEvent
+    | JoinAuditEvent
     | RunFailedEvent
 )
 """What the run did, as opposed to what one actor's session did.
