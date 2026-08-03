@@ -37,6 +37,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from urllib.parse import urlsplit
 
 from lup.channels.models import utc_now
+from lup.resolver.journal import Journal, JournalEntry
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -53,6 +54,7 @@ from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.workspace.paths import project_root
 from lup_template.devtools.supervisor.events import stream
 from lup_template.devtools.supervisor.projection import (
+    ActorIndex,
     AnswerSubmission,
     DecisionSubmission,
     ParkSubmission,
@@ -88,6 +90,24 @@ def allowed_host_values(url: str) -> list[str]:
 def run_mailbox(state_root: Path, run_id: str) -> QuestionMailbox:
     """The mailbox for one run, whether or not that run ever existed."""
     return QuestionMailbox(state_root / run_id)
+
+
+def run_journal(state_root: Path, run_id: str) -> Journal:
+    """The record for one run, whether or not that run ever existed."""
+    return Journal(state_root / run_id)
+
+
+def last_seq(header: str) -> int:
+    """Where a reconnecting reader got to, or the beginning if it says nothing.
+
+    A malformed id replays everything rather than being rejected. The reader
+    is a browser reconnecting on its own, so the recoverable reading of a
+    value it cannot explain is that it has seen nothing.
+    """
+    try:
+        return int(header)
+    except ValueError:
+        return -1
 
 
 def read_run(state_root: Path, run_id: str, adapter: str) -> SupervisorState:
@@ -207,18 +227,31 @@ def create_supervisor(
     @supervisor.get(  # lup: ignore[dict-get] — route decorator
         "/api/runs/{selected}/events"
     )
-    async def read_events(selected: str) -> StreamingResponse:
-        def observe() -> SupervisorState | None:
-            try:
-                return read_run(state_root, selected, adapter)
-            except HTTPException:
-                return None
-
+    async def read_events(selected: str, request: Request) -> StreamingResponse:
+        """Follow one run's record, resuming from whatever the reader last saw."""
+        resume = request.headers.get("last-event-id", "")  # lup: ignore[dict-get]
         return StreamingResponse(
-            stream(observe),
+            stream(run_journal(state_root, selected), last_seq(resume)),
             media_type="text/event-stream",
             headers=SSE_HEADERS,
         )
+
+    @supervisor.get(  # lup: ignore[dict-get] — route decorator
+        "/api/runs/{selected}/actors"
+    )
+    async def read_actors(selected: str) -> ActorIndex:
+        """Every actor that has produced an entry, in first-seen order."""
+        return ActorIndex(actors=run_journal(state_root, selected).actors())
+
+    @supervisor.get(  # lup: ignore[dict-get] — route decorator
+        "/api/runs/{selected}/journal/{seq}"
+    )
+    async def read_entry(selected: str, seq: int) -> JournalEntry:
+        """One entry whole, for a reader expanding a truncated block."""
+        found = run_journal(state_root, selected).entry(seq)
+        if found is None:
+            raise HTTPException(status_code=404, detail=f"no journal entry {seq}")
+        return found
 
     @supervisor.post("/api/runs/{selected}/answers")
     async def submit_answers(

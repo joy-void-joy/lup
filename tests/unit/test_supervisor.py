@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.channels.models import utc_now
+from lup.resolver.journal import Journal, PhaseChangedEvent
 from lup.resolver.mailbox import (
     AnswerDoor,
     PendingQuestion,
@@ -41,14 +42,7 @@ from lup.resolver.models import (
 from lup.resolver.state import ResolverStateRepository
 from lup_template.devtools.supervisor import doors
 from lup_template.devtools.supervisor.app import create_supervisor
-from lup_template.devtools.supervisor.events import (
-    ConcernEvent,
-    PhaseEvent,
-    QuestionsEvent,
-    StatusEvent,
-    run_events,
-    stream,
-)
+from lup_template.devtools.supervisor.events import stream
 from lup_template.devtools.supervisor.projection import (
     LIVENESS_WINDOW_SECONDS,
     RunIndex,
@@ -490,47 +484,44 @@ def projection(
     return supervisor_state(state, QuestionMailbox(Path("/nonexistent")), "claude")
 
 
-def test_the_first_observation_emits_nothing() -> None:
-    """A page hydrates before it connects, so replaying the run restates it."""
-    assert run_events(None, projection()) == []
+async def test_the_stream_replays_the_record_then_follows_it(tmp_path: Path) -> None:
+    journal = Journal(tmp_path / "run-1")
+    journal.record(PhaseChangedEvent(phase=ResolvePhase.REVIEW))
+
+    body = stream(journal, interval=0.0, heartbeat=0.0)
+    opening = await anext(body)
+    replayed = await anext(body)
+    journal.record(PhaseChangedEvent(phase=ResolvePhase.COMPLETE))
+    followed = await anext(body)
+    await body.aclose()
+
+    assert opening.startswith("retry:")
+    assert replayed.startswith("id: 0\n")
+    assert '"phase":"review"' in replayed
+    assert followed.startswith("id: 1\n")
+    assert '"phase":"complete"' in followed
 
 
-def test_only_observed_differences_become_events() -> None:
-    before = projection()
-    after = projection(phase=ResolvePhase.REVIEW, status=ConcernStatus.VERIFIED)
+async def test_a_reconnect_replays_only_what_it_missed(tmp_path: Path) -> None:
+    """The sequence number a reader last saw is what makes a resume exact."""
+    journal = Journal(tmp_path / "run-1")
+    journal.record(PhaseChangedEvent(phase=ResolvePhase.REVIEW))
+    journal.record(PhaseChangedEvent(phase=ResolvePhase.COMPLETE))
 
-    events = run_events(before, after)
-
-    assert PhaseEvent(phase=ResolvePhase.REVIEW) in events
-    assert any(isinstance(event, ConcernEvent) for event in events)
-    assert run_events(before, projection()) == []
-
-
-def test_a_new_question_becomes_a_questions_event(tmp_path: Path) -> None:
-    mailbox = QuestionMailbox(tmp_path / "run-1")
-    before = supervisor_state(persisted_state(), mailbox, "claude")
-    ask(mailbox, "q1", None)
-    after = supervisor_state(persisted_state(), mailbox, "claude")
-
-    events = run_events(before, after)
-
-    assert any(isinstance(event, QuestionsEvent) for event in events)
-    assert any(isinstance(event, StatusEvent) for event in events)
-
-
-async def test_the_stream_frames_events_and_keeps_the_connection_alive() -> None:
-    states = [projection(), projection(phase=ResolvePhase.REVIEW), projection()]
-
-    def read() -> SupervisorState | None:
-        return states.pop(0) if states else None
-
-    body = stream(read, interval=0.0, heartbeat=0.0)
-    frames = [await anext(body) for _ in range(3)]
+    body = stream(journal, after_seq=0, interval=0.0, heartbeat=0.0)
+    frames = [await anext(body) for _ in range(2)]
     await body.aclose()
 
     assert frames[0].startswith("retry:")
+    assert frames[1].startswith("id: 1\n")
+
+
+async def test_the_stream_keeps_a_quiet_connection_alive(tmp_path: Path) -> None:
+    body = stream(Journal(tmp_path / "run-1"), interval=0.0, heartbeat=0.0)
+    frames = [await anext(body) for _ in range(2)]
+    await body.aclose()
+
     assert frames[1] == ": keep-alive\n\n"
-    assert '"phase":"review"' in frames[2]
 
 
 class ElementIds(HTMLParser):

@@ -90,6 +90,19 @@
         font-size: 12px;
       }
 
+      tr.openable { cursor: pointer; }
+      tr.openable:hover td { background: var(--panel-raised); }
+      #trace-body { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; max-height: 60vh; overflow-y: auto; }
+      .entry { border-left: 2px solid var(--border); padding-left: 10px; }
+      .entry.note { border-left-color: var(--accent); }
+      .entry-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; font-size: 12px; }
+      .say { white-space: pre-wrap; }
+      .think { white-space: pre-wrap; color: var(--muted); font-style: italic; }
+      .call { margin-top: 4px; }
+      .call strong { color: var(--accent-strong); }
+      .result pre { color: var(--muted); }
+      .result.bad pre { color: var(--danger); }
+      .entry pre { margin: 4px 0 0; padding: 6px 8px; background: var(--panel-raised); border-radius: 6px; overflow-x: auto; font-size: 12px; max-height: 16em; }
       .chip.done { color: var(--ok); border-color: #2c5a46; }
       .chip.current { color: var(--text); background: var(--panel-raised); border-color: var(--accent); }
 
@@ -210,6 +223,13 @@
         <p class="muted" id="concerns-empty" hidden>No concerns planned yet.</p>
       </section>
 
+      <section id="trace-section">
+        <h2>Trace</h2>
+        <div class="chips" id="actor-chips"></div>
+        <div id="trace-body"></div>
+        <p class="muted" id="trace-empty">Nothing recorded yet.</p>
+      </section>
+
       <section id="questions-section" hidden>
         <h2>Pending questions</h2>
         <form id="questions-form"></form>
@@ -246,6 +266,8 @@
       let state = null;
       let source = null;
       let runs = [];
+      let entries = [];
+      let actorFilter = null;
 
       const element = (id) => document.getElementById(id);
 
@@ -341,10 +363,80 @@
         const rows = state.concerns.map((concern) => {
           const failure = concern.failure ? `<div class="error">${escapeHtml(concern.failure)}</div>` : "";
           const approved = concern.integration_approved ? "" : ' <span class="badge">deferred</span>';
-          return `<tr><td><strong>${escapeHtml(concern.id)}</strong>${approved}<div class="muted">${escapeHtml(concern.title)}</div></td><td>${escapeHtml(concern.status)}</td><td class="reason">${escapeHtml(concern.reason || concern.eligibility_reason || "")}${failure}</td><td class="muted">${escapeHtml(concern.dependencies.join(", ") || "—")}</td><td class="muted">${escapeHtml(concern.branch || "—")}</td><td>${concern.rounds}</td></tr>`;
+          return `<tr data-concern="${escapeHtml(concern.id)}" class="openable"><td><strong>${escapeHtml(concern.id)}</strong>${approved}<div class="muted">${escapeHtml(concern.title)}</div></td><td>${escapeHtml(concern.status)}</td><td class="reason">${escapeHtml(concern.reason || concern.eligibility_reason || "")}${failure}</td><td class="muted">${escapeHtml(concern.dependencies.join(", ") || "—")}</td><td class="muted">${escapeHtml(concern.branch || "—")}</td><td>${concern.rounds}</td></tr>`;
         });
         element("concern-rows").innerHTML = rows.join("");
         element("concerns-empty").hidden = rows.length > 0;
+      }
+
+      function actorLabel(actor) {
+        return `${actor.kind}:${actor.id}#${actor.round}`;
+      }
+
+      function blockMarkup(block) {
+        switch (block.type) {
+          case "text":
+            return `<div class="say">${escapeHtml(block.text)}</div>`;
+          case "thinking":
+            return `<div class="think">${escapeHtml(block.redacted ? "[redacted reasoning]" : block.thinking)}</div>`;
+          case "tool_call":
+            return `<div class="call"><strong>${escapeHtml(block.name)}</strong><pre>${escapeHtml(JSON.stringify(block.arguments, null, 2))}</pre></div>`;
+          case "tool_result":
+            return `<div class="result ${block.is_error ? "bad" : ""}"><pre>${escapeHtml(block.content)}</pre></div>`;
+          default:
+            return "";
+        }
+      }
+
+      // A run event and a block are rendered by the same component on purpose.
+      // The merged view is this list unfiltered, so a phase move has to sit in
+      // the same column as the turn that caused it or the ordering buys nothing.
+      function entryMarkup(entry) {
+        const event = entry.event;
+        const stamp = new Date(entry.at).toLocaleTimeString();
+        const who = actorLabel(entry.actor);
+        const head = `<div class="entry-head"><span class="muted">${escapeHtml(stamp)}</span> <span class="pill">${escapeHtml(who)}</span></div>`;
+        switch (event.type) {
+          case "message_completed":
+            return `<div class="entry">${head}${event.message.blocks.map(blockMarkup).join("")}</div>`;
+          case "phase_changed":
+            return `<div class="entry note">${head}<div>phase → <strong>${escapeHtml(event.phase)}</strong></div></div>`;
+          case "concern_progressed":
+            return `<div class="entry note">${head}<div><strong>${escapeHtml(event.progress.concern_id)}</strong> → ${escapeHtml(event.progress.status)} ${escapeHtml(event.progress.reason || "")}</div></div>`;
+          case "question_asked":
+            return `<div class="entry note">${head}<div>asked: ${escapeHtml(event.question.prompt)}</div></div>`;
+          case "answer_settled":
+            return `<div class="entry note">${head}<div>answered ${escapeHtml(event.answer.question_id)} = ${escapeHtml(event.answer.value)} <span class="muted">(${escapeHtml(event.door)})</span></div></div>`;
+          case "message_posted":
+            return `<div class="entry note"><div class="entry-head"><span class="muted">${escapeHtml(stamp)}</span> <span class="pill strong">${escapeHtml(event.door)} → ${escapeHtml(who)}</span></div><div class="say">${escapeHtml(event.text)}</div></div>`;
+          case "run_failed":
+            return `<div class="entry note">${head}<div class="error">${escapeHtml(event.reason)}</div></div>`;
+          default:
+            return "";
+        }
+      }
+
+      function renderActors() {
+        const seen = [];
+        for (const entry of entries) {
+          const label = actorLabel(entry.actor);
+          if (!seen.includes(label)) seen.push(label);
+        }
+        const chip = (label, active) =>
+          `<button type="button" class="chip${active ? " current" : ""}" data-actor="${escapeHtml(label)}">${escapeHtml(label)}</button>`;
+        element("actor-chips").innerHTML = [
+          chip("merged", actorFilter === null),
+          ...seen.map((label) => chip(label, actorFilter === label)),
+        ].join("");
+      }
+
+      function renderTrace() {
+        const shown = entries.filter(
+          (entry) => actorFilter === null || actorLabel(entry.actor) === actorFilter
+        );
+        element("trace-body").innerHTML = shown.map(entryMarkup).join("");
+        element("trace-empty").hidden = shown.length > 0;
+        renderActors();
       }
 
       function renderPhases() {
@@ -424,38 +516,44 @@
         const response = await fetch(`/api/runs/${runId}`);
         if (!response.ok) return;
         state = await response.json();
+        entries = [];
+        actorFilter = null;
         if (source) source.close();
         connect();
         render();
+        renderTrace();
       }
 
-      function apply(payload) {
+      // Applying the record directly is what removed the re-project-and-diff
+      // tick. A phase or concern move is folded here because the event carries
+      // exactly what changed; anything derived from the mailbox — offers, the
+      // operator-facing status — is re-read, because the run does not author
+      // an offer and cannot have recorded it.
+      const REPROJECTS = ["question_asked", "answer_settled", "run_failed"];
+
+      function apply(entry) {
+        entries.push(entry);
+        renderTrace();
         if (!state) return;
-        switch (payload.type) {
-          case "phase":
-            state = { ...state, phase: payload.phase };
+        const event = entry.event;
+        switch (event.type) {
+          case "phase_changed":
+            state = { ...state, phase: event.phase };
+            render();
             break;
-          case "concern":
+          case "concern_progressed":
             state = {
               ...state,
               concerns: state.concerns.map((concern) =>
-                concern.id === payload.progress.concern_id
-                  ? { ...concern, status: payload.progress.status, reason: payload.progress.reason }
+                concern.id === event.progress.concern_id
+                  ? { ...concern, status: event.progress.status, reason: event.progress.reason }
                   : concern
               ),
             };
-            break;
-          case "questions":
-            state = { ...state, pending: payload.pending };
-            break;
-          case "review":
-            state = { ...state, review: payload.review };
-            break;
-          case "status":
-            state = { ...state, status: payload.status };
+            render();
             break;
         }
-        render();
+        if (REPROJECTS.includes(event.type)) hydrate();
       }
 
       async function post(path, body) {
@@ -529,6 +627,29 @@
           }
         });
       }
+
+      element("actor-chips").addEventListener("click", (click) => {
+        const chosen = click.target.closest("[data-actor]");
+        if (!chosen) return;
+        const label = chosen.dataset.actor;
+        actorFilter = label === "merged" ? null : label;
+        renderTrace();
+      });
+
+      // A concern row opens into its worker's trace. The chips stay the way
+      // back to the merged view, so the two are one component and not two.
+      element("concern-rows").addEventListener("click", (click) => {
+        const chosen = click.target.closest("[data-concern]");
+        if (!chosen) return;
+        const worker = entries
+          .map((entry) => entry.actor)
+          .filter((actor) => actor.id === chosen.dataset.concern)
+          .pop();
+        if (!worker) return;
+        actorFilter = actorLabel(worker);
+        renderTrace();
+        element("trace-section").scrollIntoView({ behavior: "smooth" });
+      });
 
       function connect() {
         source = new EventSource(`/api/runs/${state.run_id}/events`);

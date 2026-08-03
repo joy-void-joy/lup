@@ -16,6 +16,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.resolver.journal import ActorRef
 from lup.resolver.mailbox import (
     MESSAGE_FILE,
     QUESTION_DIR,
@@ -136,6 +137,14 @@ class RunIndex(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     runs: list[RunSummary]
+
+
+class ActorIndex(BaseModel):
+    """Every actor a run's record names, which is every trace it can open."""
+
+    model_config = ConfigDict(frozen=True)
+
+    actors: list[ActorRef]
 
 
 class AnswerSubmission(BaseModel):
