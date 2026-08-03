@@ -43,11 +43,11 @@ from lup.resolver.models import (
     VerificationCommand,
     WorkerContext,
 )
+from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
     QuestionMailbox,
-    utc_now,
 )
 from lup.resolver.tools import (
     RESOLVER_CONCERN_ENV,

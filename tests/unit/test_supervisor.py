@@ -16,12 +16,12 @@ import typer
 from httpx import ASGITransport, AsyncClient
 
 from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     AnswerDoor,
     PendingQuestion,
     QuestionMailbox,
     RecordedAnswer,
-    utc_now,
 )
 from lup.resolver.models import (
     ACCEPTANCE_QUESTION_ID,

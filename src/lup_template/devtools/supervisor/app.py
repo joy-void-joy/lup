@@ -36,12 +36,12 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from starlette.middleware.base import RequestResponseEndpoint
 from urllib.parse import urlsplit
 
+from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
     ParkRequest,
     QuestionMailbox,
-    utc_now,
 )
 from lup.resolver.models import (
     ACCEPT,

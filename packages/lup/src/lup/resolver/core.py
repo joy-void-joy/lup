@@ -17,12 +17,12 @@ from lup.resolver.contracts import (
     WorktreePreparer,
 )
 from lup.resolver.dag import ConcernGraph
+from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     ANSWER_POLL_SECONDS,
     PendingQuestion,
     QuestionMailbox,
     RecordedAnswer,
-    utc_now,
     wait_for_answers,
 )
 from lup.resolver.models import (

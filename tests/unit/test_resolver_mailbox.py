@@ -110,11 +110,13 @@ def test_a_half_written_record_is_never_read(tmp_path: Path) -> None:
 
 
 def test_a_corrupt_record_is_named_rather_than_skipped(tmp_path: Path) -> None:
+    """A slot decides something, so an unreadable one must not read as absent."""
     mailbox = QuestionMailbox(tmp_path)
-    (tmp_path / "questions").mkdir()
-    (tmp_path / "questions" / "q1.json").write_text("{}", encoding="utf-8")
+    slot = tmp_path / "questions" / "q1"
+    slot.mkdir(parents=True)
+    (slot / "declared.json").write_text("[]", encoding="utf-8")
 
-    with pytest.raises(MailboxCorruptionError, match="q1.json"):
+    with pytest.raises(MailboxCorruptionError, match="declared.json"):
         mailbox.questions()
 
 

@@ -17,8 +17,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from lup.resolver.mailbox import (
-    ANSWER_DIR,
-    OFFER_DIR,
+    MESSAGE_FILE,
     QUESTION_DIR,
     QuestionMailbox,
 )
@@ -297,12 +296,18 @@ def unanswered_questions(views: list[PendingQuestionView]) -> list[MaterialQuest
 
 
 def last_activity(run_root: Path) -> float:
-    """When this run last wrote anything a supervisor reads."""
+    """When this run last wrote anything a supervisor reads.
+
+    Each question is a directory of its own, so the questions root only
+    moves when one is added. Its children carry declaring, offering, and
+    settling, which is most of what a live run does.
+    """
+    questions = run_root / QUESTION_DIR
     watched = [
         run_root / STATE_FILE,
-        run_root / QUESTION_DIR,
-        run_root / OFFER_DIR,
-        run_root / ANSWER_DIR,
+        run_root / MESSAGE_FILE,
+        questions,
+        *(questions.iterdir() if questions.is_dir() else []),
     ]
     stamps = [path.stat().st_mtime for path in watched if path.exists()]
     return max(stamps) if stamps else 0.0

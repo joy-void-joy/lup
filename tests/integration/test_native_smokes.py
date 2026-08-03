@@ -23,11 +23,11 @@ from lup.adapters.codex.runtime import CodexSessionConfig, create_codex_session_
 from lup.harness.process import LocalProcessLauncher
 from lup.resolver.core import ResolverCore
 from lup.mcp import create_mcp_server, server_tool_names
+from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
     QuestionMailbox,
-    utc_now,
 )
 from lup.resolver.tools import create_question_tools
 from lup.resolver.models import (

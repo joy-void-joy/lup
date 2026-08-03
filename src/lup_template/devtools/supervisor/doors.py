@@ -14,12 +14,12 @@ from pathlib import Path
 
 import typer
 
+from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
     ParkRequest,
     QuestionMailbox,
-    utc_now,
 )
 from lup.workspace.paths import project_root
 from lup_template.devtools.harness.resolve import parse_answer_flags

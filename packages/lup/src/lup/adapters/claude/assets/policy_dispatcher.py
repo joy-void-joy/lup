@@ -73,7 +73,8 @@ def edit_documents(path, old_text, new_text, replace_all):
     if replace_all:
         # Reproducing the Edit tool's own splice: source text has no parser
         # here, and the preimage is a literal the caller already chose.
-        return current, current.replace(old_text, new_text)  # lup: ignore[string-replace]
+        spliced = current.replace(old_text, new_text)  # lup: ignore[string-replace]
+        return current, spliced
     if occurrences != 1:
         raise ValueError("Edit preimage must occur exactly once")
     position = current.find(old_text)

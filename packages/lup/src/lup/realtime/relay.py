@@ -65,6 +65,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
+from lup.channels.models import ChannelOverflowError
+from lup.channels.stream import Stream
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime.models import (
     ContextInput,
@@ -235,6 +237,9 @@ class RealtimeMailbox:
         self.meta_flag_path = root / META_FLAG_FILENAME
         self.max_actions_bytes = max_actions_bytes
         self.read_offset = 0
+        self.actions: Stream[RelayEvent] = Stream(
+            self.actions_path, RELAY_EVENT_ADAPTER, max_actions_bytes
+        )
 
     # -- tool side (subprocess) -----------------------------------------
 
@@ -242,21 +247,18 @@ class RealtimeMailbox:
         """Append one event line for the parent to apply.
 
         Raises :class:`RelayOverflowError` once the actions file reaches
-        ``max_actions_bytes`` (None disables the cap).
+        ``max_actions_bytes`` (None disables the cap). The stream reports
+        overflow in its own vocabulary; the agent has to see a tool error,
+        so the cap is restated as one here rather than escaping raw.
         """
-        self.root.mkdir(parents=True, exist_ok=True)
-        if (
-            self.max_actions_bytes is not None
-            and self.actions_path.exists()
-            and self.actions_path.stat().st_size >= self.max_actions_bytes
-        ):
+        try:
+            self.actions.append(event)
+        except ChannelOverflowError as error:
             raise RelayOverflowError(
                 f"Relay actions file reached {self.max_actions_bytes} bytes; "
                 "the parent is not consuming events. Stop emitting and end "
                 "the turn."
-            )
-        with self.actions_path.open("a", encoding="utf-8") as f:
-            f.write(event.model_dump_json() + "\n")
+            ) from error
 
     def write_sleep_request(self, request: SleepInput) -> None:
         """Record the sleep parameters the parent applies after the turn."""
@@ -287,36 +289,10 @@ class RealtimeMailbox:
         whole complete region. The caller commits per event so a crash or
         cancellation between events never drops an un-applied one.
         """
-        if not self.actions_path.exists():
-            return []
-        with self.actions_path.open("rb") as f:
-            f.seek(self.read_offset)
-            data = f.read()
-        end = data.rfind(b"\n")
-        if end < 0:
-            return []
-        region = data[: end + 1]
-        region_end = self.read_offset + len(region)
-
-        pairs: list[EventOffset] = []
-        consumed = self.read_offset
-        for raw_line in region.splitlines(keepends=True):
-            consumed += len(raw_line)
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                pairs.append(
-                    EventOffset(
-                        event=RELAY_EVENT_ADAPTER.validate_json(line),
-                        commit_offset=consumed,
-                    )
-                )
-            except ValidationError:
-                logger.exception("Skipping malformed relay event: %r", line)
-        if pairs:
-            pairs[-1] = pairs[-1].model_copy(update={"commit_offset": region_end})
-        return pairs
+        return [
+            EventOffset(event=pair.item, commit_offset=pair.commit_offset)
+            for pair in self.actions.read_from(self.read_offset)
+        ]
 
     def read_new_events(self) -> list[RelayEvent]:
         """Return events appended since the last read (complete lines only)."""
