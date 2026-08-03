@@ -121,6 +121,14 @@ def lup_hook_output_to_claude(
                     permissionDecision="allow",
                 )
             )
+        case "PreToolUse", "ask":
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="ask",
+                    permissionDecisionReason=output.reason,
+                )
+            )
         case "PreToolUse", "deny":
             return claude_types.SyncHookJSONOutput(
                 hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(

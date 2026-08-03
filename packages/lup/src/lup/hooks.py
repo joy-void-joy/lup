@@ -74,9 +74,15 @@ Claude Code's event vocabulary is adopted as the framework's lingua franca: an
 adapter translates its backend's native lifecycle events into these names, so
 the factories here register against one spelling regardless of engine."""
 
-type LupHookDecision = Literal["allow", "deny", "block"]
-"""A hook's verdict: allow the action, deny it (a PreToolUse permission
-refusal), or block it (the cross-event stop/redirect decision)."""
+type LupHookDecision = Literal["allow", "ask", "deny", "block"]
+"""A hook's verdict: allow the action, ask whoever can answer, deny it (a
+PreToolUse permission refusal), or block it (the cross-event stop/redirect
+decision).
+
+``ask`` is what makes a denial recoverable. Without it every refusal is
+terminal for an agent with no interactive human attached — a worker meeting
+a genuine need outside its allowlist has no route at all, which is how a
+merge worker once spent a whole run unable to stage its own resolutions."""
 
 
 class LupHookInput(BaseModel):
@@ -168,6 +174,11 @@ class LupHooksConfig(BaseModel):
 def allow_hook() -> LupHookOutput:
     """Create a generic allow decision."""
     return LupHookOutput(decision="allow")
+
+
+def ask_hook(reason: str) -> LupHookOutput:
+    """Create a decision that defers to whoever is entitled to make it."""
+    return LupHookOutput(decision="ask", reason=reason)
 
 
 def deny_hook(reason: str) -> LupHookOutput:
@@ -266,18 +277,12 @@ def create_git_inspection_hook() -> LupHooksConfig:
     # Settling the index is not mutating history: `add` and `rm` create no
     # commit and move no branch, and a worker assigned a merge cannot finish
     # one without them. History verbs stay reserved for the orchestrator.
-    # lup: defer[when LupHookDecision gains an ask verdict]: every deny here is
-    # terminal — a worker cannot promote one with `# lup: escalate: <why>` the
-    # way the shell lattice allows, because that marker is read by the policy
-    # kernel and this gate returns before any of it runs. So a worker that
-    # meets a genuine need outside the allowlist has no route at all, which is
-    # exactly how a merge worker spent this run unable to stage its own
-    # resolutions. The fix is to honour ESCALATE_RE here and answer `ask`, but
-    # the neutral vocabulary is allow/deny/block today and `block` renders on a
-    # channel PreToolUse does not read — so the command would silently RUN.
-    # Wire this to the ask verdict rather than approximating it.
-    # Also wanted: writes under ./tmp should carry no friction at all, since it
-    # is the sanctioned scratch space the conventions already point work at.
+    #
+    # A refusal here is recoverable rather than terminal. A worker that meets
+    # a genuine need outside this list promotes its command with
+    # `# lup: escalate: <why>` exactly as the shell lattice allows, and the
+    # verdict becomes an ask carrying that reason — which is what a merge
+    # worker unable to stage its own resolutions had no route to.
     inspection_commands = dict.fromkeys(
         [
             "status",
@@ -308,8 +313,12 @@ def create_git_inspection_hook() -> LupHooksConfig:
             return LupHookOutput()
         match event.tool_input:
             case {"command": str(command)}:
+                from lup.policy.kernel.shell import ESCALATE_RE
                 from lup.policy.rules import command_words, parse_shell_segments
 
+                escalation = ESCALATE_RE.match(command)
+                if escalation is not None and escalation.group("why").strip():
+                    return ask_hook(escalation.group("why").strip())
                 segments = parse_shell_segments(command)
                 if segments is None:
                     return deny_hook(

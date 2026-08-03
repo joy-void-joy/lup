@@ -23,6 +23,11 @@ from lup.hooks import (
     LupHookOutput,
     LupHooksConfig,
 )
+from lup.harness.process import (
+    LaunchRequest,
+    LocalProcessLauncher,
+    ProcessLauncher,
+)
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
@@ -127,6 +132,41 @@ class AwaitAnswersOutput(BaseModel):
     answers: list[AnsweredQuestion]
     unanswered: list[str]
     instruction: str
+
+
+IRREVERSIBLE_VERBS = dict.fromkeys(
+    ["push", "reset", "checkout", "restore", "clean", "rebase", "filter-branch"]
+)
+
+
+def agent_may_approve(
+    command: str, root: Path, launcher: ProcessLauncher | None = None
+) -> bool:
+    """Whether an orchestrating agent may answer this ask, or only a human.
+
+    Recoverability decides, not the verb. Removing a tracked, committed file
+    is recoverable from the object store, so an agent may approve it;
+    removing an untracked one is not, and neither is a hard reset over
+    uncommitted work, a force-push, or anything that leaves this machine.
+    ``git ls-files`` settles the tracked question at hook time, which makes
+    this structural rather than a list somebody has to maintain.
+    """
+    words = command.split()
+    if not words:
+        return False
+    if any(word in IRREVERSIBLE_VERBS for word in words[:2]):
+        return False
+    if words[0] != "rm":
+        return True
+    targets = [word for word in words[1:] if not word.startswith("-")]
+    if not targets:
+        return False
+    tracked = (launcher or LocalProcessLauncher()).launch(
+        LaunchRequest(
+            arguments=["git", "ls-files", "--error-unmatch", *targets], cwd=root
+        )
+    )
+    return tracked.code == 0
 
 
 def create_inbox_hooks(mailbox: QuestionMailbox, actor: str) -> LupHooksConfig:

@@ -28,6 +28,7 @@ from lup.resolver.models import (
 )
 from lup.resolver.orchestrator import report_mismatch
 from lup.resolver.state import StateTransitionError, validate_concern_admission
+from lup.resolver.tools import agent_may_approve
 from lup_template.devtools.harness.resolve import integration_branch
 
 PARENT = "a1b2c3d4e5f6"
@@ -234,6 +235,38 @@ def test_superseding_leaves_the_predecessor_in_the_record() -> None:
     corrected = run_state([planned("a"), planned("b", supersedes="a")])
 
     validate_concern_admission(started, corrected)
+
+
+class TrackedLauncher(ProcessLauncher):
+    """Answer `git ls-files --error-unmatch` for one known-tracked path."""
+
+    def __init__(self, tracked: str) -> None:
+        self.tracked = tracked
+
+    def launch(self, request: LaunchRequest) -> ExitStatus:
+        matched = self.tracked in request.arguments
+        return ExitStatus(code=0 if matched else 1)
+
+
+def test_an_agent_may_approve_removing_a_committed_file() -> None:
+    """The object store is the recovery, so the deletion is not permanent."""
+    assert agent_may_approve("rm src/old.py", Path("."), TrackedLauncher("src/old.py"))
+
+
+def test_only_a_human_may_approve_removing_an_untracked_file() -> None:
+    """Nothing holds a copy, so nobody can undo it afterwards."""
+    assert not agent_may_approve(
+        "rm scratch.txt", Path("."), TrackedLauncher("src/old.py")
+    )
+
+
+def test_only_a_human_may_approve_discarding_uncommitted_work() -> None:
+    assert not agent_may_approve("git reset --hard HEAD", Path("."), None)
+    assert not agent_may_approve("git checkout -- .", Path("."), None)
+
+
+def test_only_a_human_may_approve_anything_that_leaves_this_machine() -> None:
+    assert not agent_may_approve("git push --force origin main", Path("."), None)
 
 
 class BranchLauncher(ProcessLauncher):
