@@ -9,18 +9,56 @@ choice visible.
 
 from pathlib import Path
 
+import pytest
+
+from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.resolver.core import merge_problems
 from lup.resolver.models import (
+    AcceptanceCriterion,
+    Concern,
+    ConcernProgress,
     DeclaredEdit,
     DropCandidate,
     HunkDisposition,
     MergeReport,
+    ResolvePhase,
+    ResolveState,
+    SourceSnapshot,
 )
 from lup.resolver.orchestrator import report_mismatch
+from lup.resolver.state import StateTransitionError, validate_concern_admission
 from lup_template.devtools.harness.resolve import integration_branch
 
 PARENT = "a1b2c3d4e5f6"
+
+
+def planned(identifier: str, title: str = "work", supersedes: str = "") -> Concern:
+    return Concern(
+        id=identifier,
+        title=title,
+        spec="do the thing",
+        criteria=[AcceptanceCriterion(id=f"{identifier}-done", description="done")],
+        supersedes=supersedes,
+    )
+
+
+def run_state(concerns: list[Concern]) -> ResolveState:
+    return ResolveState(
+        config_digest="digest",
+        run_id="run-1",
+        phase=ResolvePhase.WORKERS,
+        source=SourceSnapshot(branch="dev", commit="source"),
+        spec=ResolveSpec(
+            id="resolve",
+            worker_identity="resolver-worker",
+            worker_skill=SkillInvocation(plugin="lup", skill="worker"),
+            review_skill=SkillInvocation(plugin="lup", skill="review"),
+            merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+        ),
+        concerns=concerns,
+        progress=[ConcernProgress(concern_id=item.id) for item in concerns],
+    )
 
 
 def candidate(path: str, missing: str = "value = compute()") -> DropCandidate:
@@ -155,6 +193,47 @@ def test_the_containment_gate_names_the_paths_it_rejected_over() -> None:
 def test_over_reporting_alone_passes_the_containment_gate() -> None:
     """Nothing changed undeclared is containment; equality cost 71 files."""
     assert report_mismatch([], []) == ""
+
+
+def test_a_concern_may_join_a_run_that_has_already_started() -> None:
+    """Discovering work mid-run was a choice between dropping it and restarting."""
+    started = run_state([planned("a")])
+    widened = run_state([planned("a"), planned("b")])
+
+    validate_concern_admission(started, widened)
+
+
+def test_an_admitted_concern_can_never_change() -> None:
+    """Resume integrity is what append-only preserves and editing would break."""
+    started = run_state([planned("a")])
+    edited = run_state([planned("a", title="something else")])
+
+    with pytest.raises(StateTransitionError, match="immutable"):
+        validate_concern_admission(started, edited)
+
+
+def test_a_concern_can_never_be_dropped() -> None:
+    started = run_state([planned("a"), planned("b")])
+    narrowed = run_state([planned("a")])
+
+    with pytest.raises(StateTransitionError, match="append-only"):
+        validate_concern_admission(started, narrowed)
+
+
+def test_a_successor_must_name_a_concern_this_run_holds() -> None:
+    started = run_state([planned("a")])
+    orphaned = run_state([planned("a"), planned("b", supersedes="ghost")])
+
+    with pytest.raises(StateTransitionError, match="no concern in this run"):
+        validate_concern_admission(started, orphaned)
+
+
+def test_superseding_leaves_the_predecessor_in_the_record() -> None:
+    """A run is evidence of what was tried; a correction must not erase that."""
+    started = run_state([planned("a")])
+    corrected = run_state([planned("a"), planned("b", supersedes="a")])
+
+    validate_concern_admission(started, corrected)
 
 
 class BranchLauncher(ProcessLauncher):

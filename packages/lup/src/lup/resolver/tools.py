@@ -10,26 +10,6 @@ stdio subprocess that rebuilds the same mailbox from the relayed run
 directory. Only where the mailbox comes from differs.
 """
 
-# lup: defer[when mid-run-concern-admission lands]: every tool here runs
-# worker to human, and nothing runs the other way, so a human can only tell a
-# worker something the worker thought to ask. Information discovered after a
-# concern's questions are answered cannot reach it: `Mailbox.record` opens with
-# "x" so first answer wins by design, and a concern whose questions are all
-# answered has no channel left at all. Widen the interface so the orchestrating
-# side can act on a live run — spawn a new worker carrying its own concern, and
-# reshape the worker/concern mapping itself (split one concern across workers,
-# merge several into one, retarget a worker that has not started). Admission of
-# a new concern is the narrow case of this; the general case is that run shape
-# stays editable while the run is alive. A worked example from the run that
-# raised this: `library-application-boundary` was planned as an audit whose
-# criterion 6 forbids it from moving any code, with `policy-data-to-template`
-# depending on it to act — so the audit wrote a rule, found real violations,
-# and was not permitted to fix them. Two concerns that should have been one,
-# discovered only once both were leased and unmergeable. The planning half of
-# that is its own defect: an audit that deliberately produces no code is the
-# human-scarcity reflex the Plan at Agent Speed guidance already rejects, so
-# criteria should scope analysis and action together rather than staging them.
-
 import asyncio
 from pathlib import Path
 from typing import Literal
@@ -54,7 +34,7 @@ from lup.resolver.mailbox import (
     QuestionMailbox,
     wait_for_answers,
 )
-from lup.resolver.models import MaterialQuestion
+from lup.resolver.models import ConcernAllowance, MaterialQuestion
 from lup.types import EnvVars
 
 RESOLVER_RUN_DIR_ENV = "LUP_RESOLVER_RUN_DIR"
@@ -173,6 +153,15 @@ def create_inbox_hooks(mailbox: QuestionMailbox, actor: str) -> LupHooksConfig:
         )
 
     return LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=deliver, tag="inbox")])
+
+
+class RequestAllowanceInput(BaseModel):
+    allowance: ConcernAllowance = Field(
+        description="The gate you need, which must be one this run knows"
+    )
+    reason: str = Field(
+        description="Why the work cannot be done without it, stated concretely"
+    )
 
 
 class SendMessageInput(BaseModel):
@@ -339,4 +328,34 @@ def create_question_tools(
         )
         return SendMessageOutput(sent=True)
 
-    return [queue_questions, await_answers, ask_questions, send_message]
+    @lup_tool(
+        "Ask for a gate your concern was not approved for. A plan-time "
+        "allowance is granted when a concern is planned, and a need nobody "
+        "could have foreseen — a rule that only meets its exception once two "
+        "branches are joined — has no other route. This asks a human and "
+        "waits, like any other question.",
+        name="request_allowance",
+    )
+    async def request_allowance(params: RequestAllowanceInput) -> AwaitAnswersOutput:
+        return await ask_questions(
+            QueueQuestionsInput(
+                questions=[
+                    AskedQuestion(
+                        id=f"allow-{params.allowance}",
+                        prompt=(
+                            f"Grant `{params.allowance}` to {concern_id}?\n\n"
+                            f"{params.reason}"
+                        ),
+                        choices=["grant", "refuse"],
+                    )
+                ]
+            )
+        )
+
+    return [
+        queue_questions,
+        await_answers,
+        ask_questions,
+        send_message,
+        request_allowance,
+    ]

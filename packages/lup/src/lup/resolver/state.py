@@ -130,16 +130,64 @@ def progress_index(progress: list[ConcernProgress]) -> dict[str, ConcernProgress
     return indexed
 
 
+def validate_concern_admission(current: ResolveState, candidate: ResolveState) -> None:
+    """Allow new concerns to join a live run, and none to change or vanish.
+
+    A concern discovered mid-run could not join the run that discovered it,
+    so the work waited for the next inventory pass — which meant committing
+    a note, re-deriving from scratch, and discarding every material answer
+    already collected. Append-only keeps what resume integrity needed: an
+    existing entry is still immutable, so a resumed run reads back exactly
+    what it persisted. A successor names its predecessor rather than editing
+    it, which is what lets a plan be corrected without rewriting history.
+    """
+    existing = {concern.id: concern for concern in current.concerns}
+    admitted = {concern.id: concern for concern in candidate.concerns}
+    missing = sorted(
+        identifier for identifier in existing if identifier not in admitted
+    )
+    if missing:
+        raise StateTransitionError(
+            "resolver concerns are append-only; dropped: " + ", ".join(missing)
+        )
+    altered = sorted(
+        identifier
+        for identifier, concern in existing.items()
+        if admitted[identifier] != concern
+    )
+    if altered:
+        raise StateTransitionError(
+            "an admitted concern is immutable; supersede it instead of editing "
+            "it: " + ", ".join(altered)
+        )
+    unknown = sorted(
+        concern.supersedes
+        for concern in admitted.values()
+        if concern.supersedes and concern.supersedes not in admitted
+    )
+    if unknown:
+        raise StateTransitionError(
+            "a successor names no concern in this run: " + ", ".join(unknown)
+        )
+
+
 def validate_progress_transition(
     current: ResolveState, candidate: ResolveState
 ) -> None:
-    """Require one legal persisted lifecycle transition per changed concern."""
+    """Require one legal persisted lifecycle transition per changed concern.
+
+    A concern admitted mid-run appears here for the first time, so the
+    covering check runs against the candidate alone: requiring both sides to
+    cover the same set is what made admission impossible.
+    """
     before = progress_index(current.progress)
     after = progress_index(candidate.progress)
     concern_ids = {concern.id for concern in candidate.concerns}
-    if before.keys() != concern_ids or after.keys() != concern_ids:
+    if after.keys() != concern_ids:
         raise StateTransitionError("resolver progress must cover every concern exactly")
     for identifier, prior in before.items():
+        if identifier not in after:
+            raise StateTransitionError(f"concern {identifier!r} lost its progress")
         next_item = after[identifier]
         if next_item.status == prior.status:
             continue
@@ -198,12 +246,12 @@ class ResolverStateRepository:
             if (
                 state.source != current.source
                 or state.spec != current.spec
-                or state.concerns != current.concerns
                 or state.config_digest != current.config_digest
             ):
                 raise StateTransitionError(
-                    "resolver source, specification, and concerns are immutable"
+                    "resolver source, specification, and configuration are immutable"
                 )
+            validate_concern_admission(current, state)
             validate_progress_transition(current, state)
             resumed = (
                 current.phase == ResolvePhase.FAILED

@@ -373,7 +373,12 @@ class ResolverCore:
             "raises several issues across several concerns, and reference it "
             "from each. Every index must appear at least once; none may repeat "
             "within a single concern. Give each concern path-safe id, complete acceptance "
-            "criteria, dependencies, material questions, and starting files. Declare "
+            "criteria, dependencies, material questions, and starting files. Every "
+            "concern's criteria must scope analysis and action together — never "
+            "plan one concern to audit and a second to act on what it found. That "
+            "splits one piece of work across two leases that cannot see each "
+            "other, and the auditing half finds real violations it is forbidden "
+            "to fix. Declare "
             "an allowance only when the plan cannot be carried out without the gate "
             "it names, so approving the concern approves what it actually needs. Do "
             "not decide eligibility or integration approval; the resolver asks the "
@@ -1438,44 +1443,6 @@ class ResolverCore:
             raise ResolverInvariantError("reviewer returned a foreign concern id")
         return result.output
 
-    # lup: defer[when the resolver review loop is next revised]: the join is the
-    # one place where N parallel concerns meet, and it is the least accountable
-    # step in the run. This turn's entire input
-    # is a purpose string, a worktree path and two shas — it never sees the
-    # concern specs it is merging, their acceptance criteria, or the human's
-    # recorded answers, so it can read what changed but not which behaviour was
-    # a deliberate decision. `MergeReport` then cannot express what it did:
-    # `completed`, `summary`, `unresolved_paths` and nothing for what it kept
-    # from each side, dropped, or chose between, and nothing validates it
-    # against the diff the way `validate_and_commit` checks `WorkerReport`.
-    # `WorkerReport` is even FROZEN_STRICT for the stated reason that a retired
-    # field must fail loudly rather than vanish; this one is only FROZEN. The
-    # classic failure of parallel edits is one feature silently overriding
-    # another, and the pipeline would not report it — an observed conflict was
-    # confirmed correct only because a human audited it by hand. Three
-    # questions, not one answer: whether the merger should receive the concerns
-    # it is joining, whether its report should declare every semantic choice and
-    # be validated like a worker's, and whether a context-free one-shot is the
-    # right shape at all. The isolation may be deliberate, so weigh that before
-    # widening it. Weigh this too: observed, the merger's judgement was good and
-    # its bookkeeping was not. It caught a semantic conflict neither parent could
-    # see, cited the sibling precedent by line, measured the blast radius, ran
-    # the deletion audit, and declined to guess a classification that writes into
-    # a hand-maintained table — then left the file it had correctly resolved
-    # unstaged, twice, because this prompt told it not to. The shell policy
-    # allows `git add` (a reversible-local subcommand), and the /lup:merge skill
-    # tells it to stage; the prompt below said the orchestrator owns commit
-    # authority, and the agent read staging as part of that. Two instructions,
-    # opposite answers, and the agent obeyed the nearer one — which cost most of
-    # this run's integration failures. The prompt now separates staging from
-    # committing, but a contract this load-bearing should not live only in
-    # sentences: the report has no field for "I resolved but could not stage",
-    # so the orchestrator saw an unexplained incompletion each time.
-    # The accountability question stands untouched regardless: nothing
-    # in the pipeline would have reported a silent override, and the one merge
-    # audited by hand was confirmed correct only because a human looked. `lup-devtools dev conflict audit` and the /lup:merge skill
-    # already carry deletion-audit guidance, but both are prompt-level, and the
-    # guidance itself says a prompt rule coexists with the failure it warns of.
     async def merge_retry(
         self, lease: WritableRootLease, problems: list[str]
     ) -> MergeReport:
@@ -1583,6 +1550,41 @@ class ResolverCore:
             )
             + "\n\n"
         )
+
+    async def admit_concern(self, concern: Concern) -> None:
+        """Take a concern discovered mid-run into the run that discovered it.
+
+        The worked example this exists for: an audit concern whose criteria
+        forbade it from moving code, with a second concern depending on it to
+        act — two concerns that should have been one, discovered only once
+        both were leased. Without admission the choice was to drop the
+        finding or restart the run and lose every answer already given.
+        """
+        async with self.state_lock:
+            state = self.require_state()
+            if any(item.id == concern.id for item in state.concerns):
+                raise ResolverInvariantError(
+                    f"concern {concern.id!r} is already in this run"
+                )
+            self.persist(
+                state.model_copy(
+                    update={
+                        "concerns": [*state.concerns, concern],
+                        "progress": [
+                            *state.progress,
+                            ConcernProgress(
+                                concern_id=concern.id,
+                                status=ConcernStatus.DISCOVERED,
+                                reason=(
+                                    f"admitted mid-run, superseding {concern.supersedes}"
+                                    if concern.supersedes
+                                    else "admitted mid-run"
+                                ),
+                            ),
+                        ],
+                    }
+                )
+            )
 
     def merge_allowances(self) -> list[ConcernAllowance]:
         """Every gate the joined concerns were approved to pass.

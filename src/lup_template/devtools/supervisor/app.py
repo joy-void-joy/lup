@@ -9,20 +9,6 @@ Nothing here takes the resolver's state lock. A run holds that lock for its
 entire life, so a door that wanted it could only ever serve dead runs.
 """
 
-# lup: defer[when the human-to-worker channel in resolver/tools.py lands]: a
-# concern is a status row here and nothing more — there is no way to open one
-# and read what its worker actually did. The data is already persisted and
-# merely unserved: `ResolverStateRepository.write_round` writes every worker
-# turn to `agents/<concern>-round-<n>.json` and every review to
-# `reviews/<...>`, while `ConcernView` carries only `rounds` as a count and no
-# route exposes either directory. Serve them, and make a concern row open into
-# its rounds. The second half is shape, not plumbing: this page is built around
-# a run that parks, asks a batch of questions, and waits. If communication with
-# workers becomes continuous — a worker asking mid-flight while others run, a
-# human volunteering information or retargeting a worker — a form that submits
-# one batch of answers stops fitting, and the page needs a per-worker
-# conversation view rather than a questions section.
-
 import asyncio
 import webbrowser
 from importlib import resources
