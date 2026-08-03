@@ -88,11 +88,15 @@ class Directive(BaseModel):
 def module_name(path: Path) -> str:
     """Infer a dotted module name from a repository-relative Python path."""
     parts = list(PurePosixPath(path.as_posix()).parts)
-    start = next(
-        (index for index, part in enumerate(parts) if part in {"lup", "lup_template"}),
-        0,
-    )
-    selected = parts[start:]
+    # The innermost match is the package root. Taking the first one made
+    # `packages/lup/src/lup/x.py` resolve to `lup.src.lup.x` — the
+    # distribution directory rather than the package — so every cross-module
+    # symbol lookup missed. It degrades to fewer findings rather than wrong
+    # ones, which is why it went unnoticed.
+    roots = [
+        index for index, part in enumerate(parts) if part in {"lup", "lup_template"}
+    ]
+    selected = parts[roots[-1] :] if roots else parts
     if selected[-1] == "__init__.py":
         selected = selected[:-1]
     else:
