@@ -23,7 +23,12 @@ from lup.policy.kernel.edit import (
 )
 from lup.policy.kernel.fetch import decide_fetch
 from lup.policy.kernel.lex import parse_shell_words, shell_write_targets
-from lup.policy.kernel.rows import AntiPatternRow, PathRuleRow, UrlScopeRow
+from lup.policy.kernel.rows import (
+    AntiPatternRow,
+    PathRoleRow,
+    PathRuleRow,
+    UrlScopeRow,
+)
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment
 from lup.policy.kernel.words import command_words as kernel_command_words
 from lup.policy.shell_rules import (
@@ -125,7 +130,9 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         sandbox_active: bool = False,
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
+        path_roles: list[PathRoleRow] | None = None,
     ) -> None:
+        self.path_roles = path_roles or []
         self.rules = erase_shell_rules(BASE_SHELL_RULES if rules is None else rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
@@ -143,6 +150,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 self.denied_scopes,
                 sandboxed=self.sandbox_active and not event.unsandboxed,
                 trusted_script_roots=self.trusted_script_roots,
+                path_roles=self.path_roles,
                 interactive=self.interactive,
                 existing_targets=[
                     target
@@ -226,7 +234,9 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         protected: list[PathRule],
         maximum_added_lines: int = 3,
         autonomous: bool = False,
+        path_roles: list[PathRoleRow] | None = None,
     ) -> None:
+        self.path_roles = path_roles or []
         self.protected = list(protected)
         self.maximum_added_lines = maximum_added_lines
         self.autonomous = autonomous
@@ -254,6 +264,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 path_exists=change.path.exists(),
                 path_rules=[path_rule_row(rule) for rule in self.protected],
                 antipattern_rows=antipattern_rows(change),
+                path_roles=self.path_roles,
                 maximum_added_lines=self.maximum_added_lines,
                 autonomous=self.autonomous,
                 python_source=suffix in (".py", ".pyi"),

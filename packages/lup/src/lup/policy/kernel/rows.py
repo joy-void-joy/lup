@@ -42,6 +42,23 @@ class PathRuleRow(TypedDict):
     allow_autonomous: bool
 
 
+type PathRoleName = Literal["production", "test", "scratch"]
+
+
+class PathRoleRow(TypedDict):
+    """One erased declaration of what a repository root is for.
+
+    A role names the purpose a tree serves, which is what decides how much of
+    the lattice applies to it. ``test`` code is judged by whether it exercises
+    production, not by production's own conventions; ``scratch`` is disposable
+    by construction, so the verbs that ask before destroying something have
+    nothing to protect there.
+    """
+
+    root: str
+    role: PathRoleName
+
+
 class AntiPatternRow(TypedDict):
     """One erased anti-pattern rule and the syntactic context it inspects."""
 

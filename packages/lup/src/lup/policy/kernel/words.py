@@ -5,6 +5,8 @@
 import posixpath
 
 from .decision import KernelDecision, SUBSTITUTION_SENTINEL
+from .roles import path_role
+from .rows import PathRoleRow
 
 PASS_THROUGH_WORDS = (
     "env",
@@ -132,10 +134,17 @@ def uv_run_words(words: list[str]) -> list[str]:
     return words[position:]
 
 
-def is_repository_tmp_script(word: str) -> bool:
-    """Recognize only a script beneath the repository-relative ``tmp`` root."""
-    normalized = posixpath.normpath(word)
-    return not normalized.startswith("/") and normalized.split("/")[0] == "tmp"
+# Every judged-ask verb that acts on paths, paired with the short flags whose
+# presence does not change what the verb does to them. A long flag or an
+# unrecognized cluster falls through to the verb's own ask.
+SCRATCH_VERB_FLAGS = {
+    "rm": "rfv",
+    "rmdir": "pv",
+    "mv": "fnv",
+    "cp": "aprRvL",
+    "mkdir": "pv",
+    "touch": "acm",
+}
 
 
 def is_trusted_script(word: str, roots: list[str]) -> bool:
@@ -182,33 +191,40 @@ def is_generated_plugin_target(word: str) -> bool:
     )
 
 
-def rm_confined_to_recoverable_roots(words: list[str]) -> KernelDecision | None:
-    """Recognize ``rm`` whose every target is scratch or regenerable.
+def confined_to_recoverable_roots(
+    words: list[str], path_roles: list[PathRoleRow]
+) -> KernelDecision | None:
+    """Recognize a path-taking judged-ask verb whose every target is disposable.
 
-    Scratch roots exist for disposable files, so clearing them is as safe as
-    writing them; a generated plugin tree costs a regeneration rather than any
-    information. A long flag, an opaque word, or a single target outside those
-    roots falls through to the rm row's ask, so a mixed removal still asks.
+    A scratch role names a tree of disposable files, so destroying one is as
+    safe as writing it and creating one there settles nothing; a generated
+    plugin tree costs a regeneration rather than any information. A long flag,
+    an opaque word, or a single target outside those roots falls through to
+    the verb's ask, so a mixed command still asks.
     """
+    executable = posixpath.basename(words[0])
+    if executable not in SCRATCH_VERB_FLAGS:
+        return None
+    allowed = SCRATCH_VERB_FLAGS[executable]
     targets: list[str] = []
     for word in words[1:]:
         if word == "--":
             continue
         if word.startswith("-"):
             short = not word.startswith("--") and len(word) > 1
-            if short and all(letter in "rfv" for letter in word[1:]):
+            if short and all(letter in allowed for letter in word[1:]):
                 continue
             return None
         targets.append(word)
     if not targets:
         return None
     if all(
-        is_repository_tmp_script(word)
+        path_role(word, path_roles) == "scratch"
         or is_session_scratch_target(word)
         or is_generated_plugin_target(word)
         for word in targets
     ):
-        return KernelDecision("allow", "removal confined to recoverable roots")
+        return KernelDecision("allow", "confined to recoverable roots")
     return None
 
 

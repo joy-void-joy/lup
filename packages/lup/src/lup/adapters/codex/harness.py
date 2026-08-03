@@ -31,6 +31,7 @@ from lup.policy.bundle import (
     render_policy_data,
     runtime_url_scope,
 )
+from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.kernel.words import (
     INTERPRETERS,
     PASS_THROUGH_WORDS,
@@ -489,6 +490,10 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                             path.as_posix() for path in source.human_owned_files
                         ],
                         autonomous_agent_identities=[self.worker_identity],
+                        path_roles=[
+                            PathRoleRow(root=role.root.as_posix(), role=role.role)
+                            for role in source.path_roles
+                        ],
                         shell_rule_extension=list(source.shell_rules),
                     ),
                     semantic_id=source.id,

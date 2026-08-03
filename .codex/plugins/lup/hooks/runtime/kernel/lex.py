@@ -12,7 +12,9 @@ from .decision import (
     SUBSTITUTION_SENTINEL,
     unjudged,
 )
-from .words import is_repository_tmp_script, is_session_scratch_target
+from .roles import path_role
+from .rows import PathRoleRow
+from .words import is_session_scratch_target
 
 
 class ShellToken:
@@ -454,6 +456,7 @@ def resolve_redirection(
     index: int,
     heredoc_fed: bool = False,
     existing_targets: list[str] | None = None,
+    path_roles: list[PathRoleRow] | None = None,
 ) -> tuple[KernelDecision | None, int]:
     """Classify one redirection, consuming its target and stripping safe forms.
 
@@ -482,7 +485,7 @@ def resolve_redirection(
         return None, target + 1
     if posixpath.normpath(tokens[target].text) == "/dev/null":
         return None, target + 1
-    if is_repository_tmp_script(tokens[target].text):
+    if path_role(tokens[target].text, path_roles or []) == "scratch":
         return None, target + 1
     if is_session_scratch_target(tokens[target].text):
         return None, target + 1
@@ -508,7 +511,10 @@ def resolve_redirection(
 
 
 def parse_shell_words(
-    command: str, depth: int = 0, existing_targets: list[str] | None = None
+    command: str,
+    depth: int = 0,
+    existing_targets: list[str] | None = None,
+    path_roles: list[PathRoleRow] | None = None,
 ) -> list[list[str]] | KernelDecision:
     """Group lexed tokens into command segments, resolving safe redirections.
 
@@ -525,7 +531,7 @@ def parse_shell_words(
     def substituted_segments(text: str) -> list[list[str]] | KernelDecision:
         if depth >= 2:
             return unjudged("command substitution nests too deeply")
-        return parse_shell_words(text, depth + 1, existing_targets)
+        return parse_shell_words(text, depth + 1, existing_targets, path_roles)
 
     heredoc_fed = any(
         token.kind == "op" and "<<" in token.text and "<<<" not in token.text
@@ -577,7 +583,9 @@ def parse_shell_words(
         if token.kind == "procsub":
             if depth >= 2:
                 return unjudged("process substitution nests too deeply")
-            inner = parse_shell_words(token.text, depth + 1, existing_targets)
+            inner = parse_shell_words(
+                token.text, depth + 1, existing_targets, path_roles
+            )
             if isinstance(inner, KernelDecision):
                 return inner
             segments.extend(inner)
@@ -598,7 +606,7 @@ def parse_shell_words(
             index += 1
             continue
         verdict, index = resolve_redirection(
-            tokens, index, heredoc_fed, existing_targets
+            tokens, index, heredoc_fed, existing_targets, path_roles
         )
         if verdict is not None:
             return verdict

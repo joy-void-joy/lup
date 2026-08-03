@@ -25,6 +25,7 @@ from policy_data import (
     CONCERN_ALLOWANCES_ENV,
     DENIED_FETCH_SCOPES,
     MAXIMUM_ADDED_LINES,
+    PATH_ROLES,
     PATH_RULES,
     SHELL_RULES,
 )
@@ -114,6 +115,7 @@ def edit_decision(path_text, before, after, path_exists):
         path_exists=path_exists,
         path_rules=PATH_RULES,
         antipattern_rows=rows,
+        path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=declared_identity() in AUTONOMOUS_AGENT_IDENTITIES,
         allowances=granted_allowances(),
@@ -141,6 +143,7 @@ def dispatch(payload, permission_request=False):
             DENIED_FETCH_SCOPES,
             sandboxed=False if permission_request else sandbox_active(),
             trusted_script_roots=managed_script_roots(),
+            path_roles=PATH_ROLES,
             existing_targets=existing_write_targets(tool_input["command"]),
             interactive=permission_request,
         )

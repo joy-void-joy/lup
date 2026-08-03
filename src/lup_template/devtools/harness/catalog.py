@@ -15,6 +15,7 @@ from pydantic import AnyHttpUrl
 
 from lup.harness.models import (
     Harness,
+    HookPathRole,
     HookSandbox,
     HookSet,
     HookUrlScope,
@@ -72,10 +73,13 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             ],
             protected_edit_roots=[
                 Path(".claude"),
-                Path("tmp"),
                 Path("pyproject.toml"),
                 Path("sync.json"),
                 Path("downstream.json"),
+            ],
+            path_roles=[
+                HookPathRole(root=Path("tests"), role="test"),
+                HookPathRole(root=Path("tmp"), role="scratch"),
             ],
             human_owned_files=[Path("README.md")],
             sandbox=HookSandbox(

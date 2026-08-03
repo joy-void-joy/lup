@@ -18,6 +18,7 @@ from lup.policy.identity import AGENT_IDENTITY_ENV, CONCERN_ALLOWANCES_ENV
 import lup.policy.kernel as kernel
 from lup.policy.kernel.rows import (
     AntiPatternRow,
+    PathRoleRow,
     PathRuleRow,
     ShellRuleRow,
     UrlScopeRow,
@@ -213,6 +214,19 @@ def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
     return "\n".join(lines)
 
 
+def path_role_rows_literal(rows: list[PathRoleRow]) -> str:
+    """Render declared path roles as primitive runtime rows."""
+    return dict_rows_literal(
+        [
+            [
+                f'"root": {json.dumps(row["root"])}',
+                f'"role": {json.dumps(row["role"])}',
+            ]
+            for row in rows
+        ]
+    )
+
+
 def string_rows_literal(rows: list[str]) -> str:
     """Render a sequence of generated string identities."""
     if not rows:
@@ -256,6 +270,7 @@ def render_policy_data(
     protected_roots: list[str],
     human_owned_files: list[str],
     autonomous_agent_identities: list[str],
+    path_roles: list[PathRoleRow],
     shell_rule_extension: list[ShellCommandRule] | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
@@ -269,6 +284,7 @@ def render_policy_data(
             ),
             "ANTI_PATTERN_ROWS = "
             + antipattern_rows_literal(bundled_antipattern_rows()),
+            "PATH_ROLES = " + path_role_rows_literal(path_roles),
             "SHELL_RULES = "
             + shell_rule_rows_literal(runtime_shell_rules(shell_rule_extension or [])),
             "AUTONOMOUS_AGENT_IDENTITIES = "

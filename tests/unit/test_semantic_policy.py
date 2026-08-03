@@ -40,6 +40,7 @@ from lup.policy.bundle import (
 )
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import decide_edit
+from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.models import (
     Decision,
@@ -86,10 +87,20 @@ class EditDecisionCase(BaseModel):
     path_exists: bool = True
 
 
+# The roles this repository declares, mirrored so the fixtures judge the same
+# vocabulary the generated runtime is rendered with.
+FIXTURE_PATH_ROLES = [
+    PathRoleRow(root="tests", role="test"),
+    PathRoleRow(root="tmp", role="scratch"),
+]
+
 SHELL_POLICY_CASES = [
     DecisionCase(input="env MODE=test python script.py", effect="deny"),
     DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
-    DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="allow"),
+    # A scratch root is gitignored, so a script there reaches no reviewer and
+    # no diff; the escalation ladder routes one-off work to devtools instead.
+    DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="deny"),
+    DecisionCase(input="uv run python tmp/oneoff.py", effect="deny"),
     DecisionCase(input="find . -name '*.py' | xargs grep TODO", effect="allow"),
     DecisionCase(input="echo x | xargs rm -rf", effect="ask"),
     DecisionCase(input="cd /tmp/worktree && uv run pytest", effect="allow"),
@@ -153,8 +164,8 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
-    # Removal confined to the disposable roots is as safe as writing them;
-    # any long flag, opaque word, or outside target keeps the rm ask.
+    # Housekeeping confined to the disposable roots is as safe as writing
+    # them; any long flag, opaque word, or outside target keeps the verb's ask.
     # A generated plugin tree joins them: regeneration restores it byte for
     # byte, while its parent keeps settings, trust state, and authored skills
     # that nothing can restore, so the grant stops at the plugins root.
@@ -172,6 +183,18 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rm .claude/settings.local.json", effect="ask"),
     DecisionCase(input="rm -rf .claude/skills", effect="ask"),
     DecisionCase(input="rm .claude/plugins/../settings.json", effect="ask"),
+    # Every path-taking judged-ask verb reads the same role, so a scratch root
+    # is housekept without friction while production keeps the verb's ask.
+    DecisionCase(input="cp tmp/a.json tmp/b.json", effect="allow"),
+    DecisionCase(input="mv tmp/draft.md tmp/final.md", effect="allow"),
+    DecisionCase(input="mkdir -p tmp/run/logs", effect="allow"),
+    DecisionCase(input="touch tmp/marker", effect="allow"),
+    DecisionCase(input="rmdir tmp/run", effect="allow"),
+    DecisionCase(input="mv tmp/draft.md src/final.md", effect="ask"),
+    DecisionCase(input="cp src/a.py tmp/a.py", effect="ask"),
+    DecisionCase(input="mkdir src/newpkg", effect="ask"),
+    DecisionCase(input="touch src/newfile.py", effect="ask"),
+    DecisionCase(input="cp --archive tmp/a tmp/b", effect="ask"),
     DecisionCase(input="rm /home/u/.claude/plugins/lup/x", effect="ask"),
     DecisionCase(input="rm .codex/config.local.toml", effect="ask"),
     # Quote-aware substitution: inert inside single quotes; a live $(...)
@@ -597,12 +620,34 @@ EDIT_POLICY_CASES = [
         effect="deny",
         autonomous=True,
     ),
+    # A scratch root gates nothing: with execution closed there is no longer a
+    # path from authoring a file there to running it.
     EditDecisionCase(
         path="tmp/scratch.py",
         before="value = 1",
         after="value = 2",
-        effect="ask",
+        effect="allow",
         autonomous=True,
+    ),
+    # The conventions describe how production reads, so neither a scratch nor
+    # a test file is judged against them.
+    EditDecisionCase(
+        path="tmp/probe.py",
+        before="value: str",
+        after="value: Any",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="tests/unit/test_thing.py",
+        before="value: str",
+        after="value: Any",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value: str",
+        after="value: Any",
+        effect="deny",
     ),
     EditDecisionCase(
         path="README.md",
@@ -742,6 +787,7 @@ def assembled_edit_decision(
         path_exists=Path(path).exists(),
         path_rules=runtime_path_rules(protected_roots, human_owned_files),
         antipattern_rows=rows,
+        path_roles=FIXTURE_PATH_ROLES,
         autonomous=autonomous,
         python_source=suffix in (".py", ".pyi"),
     )
@@ -768,13 +814,13 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             ],
             protected_roots=[
                 ".claude",
-                "tmp",
                 "pyproject.toml",
                 "sync.json",
                 "downstream.json",
             ],
             human_owned_files=["README.md"],
             autonomous_agent_identities=["resolver-worker"],
+            path_roles=FIXTURE_PATH_ROLES,
         ),
         encoding="utf-8",
     )
@@ -800,7 +846,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from kernel.shell import decide_shell\n"
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
-        "    MAXIMUM_ADDED_LINES, PATH_RULES, SHELL_RULES,\n"
+        "    MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES, SHELL_RULES,\n"
         ")\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
@@ -809,6 +855,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "    result = decide_shell(\n"
         "        case['input'], SHELL_RULES, sandboxed=case['sandboxed'],\n"
         "        interactive=case['interactive'],\n"
+        "        path_roles=PATH_ROLES,\n"
         "        existing_targets=case['existing'],\n"
         "    )\n"
         "    assert result.effect == case['effect'], case\n"
@@ -823,7 +870,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "    decision = decide_edit(\n"
         "        case['path'], case['before'], case['after'],\n"
         "        path_exists=case['path_exists'], path_rules=PATH_RULES,\n"
-        "        antipattern_rows=rows, maximum_added_lines=MAXIMUM_ADDED_LINES,\n"
+        "        antipattern_rows=rows, path_roles=PATH_ROLES,\n"
+        "        maximum_added_lines=MAXIMUM_ADDED_LINES,\n"
         "        autonomous=case['autonomous'],\n"
         "        python_source=suffix in ('.py', '.pyi'),\n"
         "    )\n"
@@ -1021,14 +1069,18 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     tmp_path: Path,
 ) -> None:
     bundled = load_bundled_kernel(tmp_path, "shell")
-    policy = ShellPolicy()
-    sandboxed_policy = ShellPolicy(sandbox_active=True)
+    policy = ShellPolicy(path_roles=FIXTURE_PATH_ROLES)
+    sandboxed_policy = ShellPolicy(sandbox_active=True, path_roles=FIXTURE_PATH_ROLES)
 
     for index, case in enumerate(SHELL_POLICY_CASES):
         if case.interactive:
             active = sandboxed_policy if case.sandboxed else policy
         else:
-            active = ShellPolicy(sandbox_active=case.sandboxed, interactive=False)
+            active = ShellPolicy(
+                sandbox_active=case.sandboxed,
+                interactive=False,
+                path_roles=FIXTURE_PATH_ROLES,
+            )
         # Each case judges a tree of its own, so a file one case declares
         # present never leaks into the next case's create-versus-overwrite.
         root = tmp_path / f"case{index}"
@@ -1044,6 +1096,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             policy.rules,
             sandboxed=case.sandboxed,
             interactive=case.interactive,
+            path_roles=FIXTURE_PATH_ROLES,
             existing_targets=case.existing,
         ).effect
         assert bundled_effect == case.effect, case.input
@@ -1252,11 +1305,6 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
             reason="protected path requires approval",
             allow_autonomous=True,
         ),
-        PathRule(
-            kind="subtree",
-            value="tmp",
-            reason="scratch path requires approval",
-        ),
         human_owned_path_rule("README.md"),
         PathRule(
             kind="subtree",
@@ -1273,7 +1321,11 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
     ]
 
     for case in EDIT_POLICY_CASES:
-        policy = EditPolicy(protected=protected, autonomous=case.autonomous)
+        policy = EditPolicy(
+            protected=protected,
+            autonomous=case.autonomous,
+            path_roles=FIXTURE_PATH_ROLES,
+        )
         decision = policy.decide(
             EditBatch(
                 changes=[
@@ -1298,11 +1350,6 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
                 reason="protected path requires approval",
                 allow_autonomous=True,
             ),
-            PathRule(
-                kind="subtree",
-                value="tmp",
-                reason="scratch path requires approval",
-            ),
             human_owned_path_rule("README.md"),
             PathRule(
                 kind="subtree",
@@ -1316,7 +1363,8 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
                 reason="protected path requires approval",
                 allow_autonomous=True,
             ),
-        ]
+        ],
+        path_roles=FIXTURE_PATH_ROLES,
     )
     cases = [
         item
@@ -1338,7 +1386,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             case.path,
             case.before,
             case.after,
-            [".claude", "tmp", "pyproject.toml", "sync.json", "downstream.json"],
+            [".claude", "pyproject.toml", "sync.json", "downstream.json"],
             ["README.md"],
         )
         assert canonical.effect == generated.effect == case.effect
@@ -1354,7 +1402,7 @@ def test_bundled_autonomous_worker_keeps_guardrails(tmp_path: Path) -> None:
             case.path,
             case.before,
             case.after,
-            [".claude", "tmp"],
+            [".claude"],
             ["README.md"],
             autonomous=True,
         )

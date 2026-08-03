@@ -11,7 +11,6 @@ from .words import (
     INTERPRETERS,
     UV_RUN_ALLOWED_TARGETS,
     flag_matches,
-    is_repository_tmp_script,
     opaque_argument,
     uv_run_words,
 )
@@ -481,13 +480,6 @@ def decide_uv(words: list[str]) -> KernelDecision:
             return unjudged("uv run has no command")
         run_command = posixpath.basename(run_words[0])
         bare_target = "/" not in run_words[0]
-        script = (
-            run_words[1]
-            if bare_target and run_command in INTERPRETERS and len(run_words) > 1
-            else run_words[0]
-        )
-        if is_repository_tmp_script(script):
-            return KernelDecision("allow", "declared temporary script")
         if run_command in INTERPRETERS or run_command in ("-c", "-m", "--script"):
             return KernelDecision("deny", "inline code is not allowed")
         risky = ("--with", "--with-editable", "--with-requirements", "--env-file")

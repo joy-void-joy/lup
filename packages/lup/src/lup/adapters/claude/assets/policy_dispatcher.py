@@ -28,6 +28,7 @@ from policy_data import (
     CONCERN_ALLOWANCES_ENV,
     DENIED_FETCH_SCOPES,
     MAXIMUM_ADDED_LINES,
+    PATH_ROLES,
     PATH_RULES,
     SHELL_RULES,
 )
@@ -57,9 +58,23 @@ def managed_script_roots() -> list[str]:
     return [str(home / "skills"), str(home / "plugins" / "cache")]
 
 
-def edit_documents(path, old_text, new_text):
+def edit_documents(path, old_text, new_text, replace_all):
+    """Build the before and after documents one Edit call would produce.
+
+    A `replace_all` edit rewrites every occurrence, so requiring exactly one
+    would reject the tool's own semantics — and a rejection here is not a
+    judgment: it reaches the agent as an approval prompt that no rule
+    produced, which is how a whole class of edit went ungoverned.
+    """
     current = Path(path).read_text(encoding="utf-8")
-    if current.count(old_text) != 1:
+    occurrences = current.count(old_text)
+    if occurrences == 0:
+        raise ValueError("Edit preimage does not occur in the file")
+    if replace_all:
+        # Reproducing the Edit tool's own splice: source text has no parser
+        # here, and the preimage is a literal the caller already chose.
+        return current, current.replace(old_text, new_text)  # lup: ignore[string-replace]
+    if occurrences != 1:
         raise ValueError("Edit preimage must occur exactly once")
     position = current.find(old_text)
     updated = current[:position] + new_text + current[position + len(old_text) :]
@@ -88,6 +103,7 @@ def edit_decision(path_text, before, after, autonomous):
         path_exists=path.exists(),
         path_rules=PATH_RULES,
         antipattern_rows=rows,
+        path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
         allowances=granted_allowances(),
@@ -144,6 +160,7 @@ def dispatch(payload):
             DENIED_FETCH_SCOPES,
             sandboxed=sandbox_active() and not unsandboxed,
             trusted_script_roots=managed_script_roots(),
+            path_roles=PATH_ROLES,
             existing_targets=existing_write_targets(tool_input["command"]),
         )
     if name == "WebFetch":
@@ -157,6 +174,7 @@ def dispatch(payload):
             tool_input["file_path"],
             tool_input["old_string"],
             tool_input["new_string"],
+            "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
         return edit_decision(tool_input["file_path"], before, after, autonomous)
     if name == "Write":

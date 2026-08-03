@@ -9,7 +9,8 @@ import re
 import tokenize
 
 from .decision import KernelDecision
-from .rows import AntiPatternRow, PathRuleRow
+from .roles import path_role
+from .rows import AntiPatternRow, PathRoleRow, PathRuleRow
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # A review note is any marker whose keyword is not `ignore`, which is the
@@ -483,6 +484,7 @@ def decide_edit(
     path_exists: bool,
     path_rules: list[PathRuleRow],
     antipattern_rows: list[AntiPatternRow],
+    path_roles: list[PathRoleRow] | None = None,
     maximum_added_lines: int = 3,
     autonomous: bool = False,
     allowances: list[str] | None = None,
@@ -507,7 +509,10 @@ def decide_edit(
     granted = allowances or []
     previous = before or ""
     updated = after or ""
-    if after is not None:
+    # The conventions describe how production code should read. A test's
+    # subject is production's behaviour, and scratch is disposable, so
+    # neither is judged against them.
+    if after is not None and path_role(path, path_roles or []) == "production":
         antipattern = antipattern_decision(
             before, after, antipattern_rows, python_source, granted
         )

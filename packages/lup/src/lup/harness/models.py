@@ -21,6 +21,7 @@ from pydantic import (
     model_validator,
 )
 
+from lup.policy.kernel.rows import PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.shell_rules import ShellCommandRule
 from lup.types import JsonValue, ToolGrant, ToolName
@@ -321,6 +322,22 @@ class HookUrlScope(BaseModel):
     )
 
 
+class HookPathRole(BaseModel):
+    """One repository root and the purpose the tree beneath it serves.
+
+    Production is the default and needs no declaration: it is what the
+    conventions are written about. A ``test`` root is judged by whether it
+    exercises production rather than by production's own shape, and a
+    ``scratch`` root holds files that are disposable by construction, so the
+    verbs that ask before destroying something have nothing to protect there.
+    """
+
+    model_config = FROZEN
+
+    root: Path
+    role: PathRoleName
+
+
 class HookSandbox(BaseModel):
     """OS sandbox declaration compiled into native settings and launchers.
 
@@ -362,6 +379,14 @@ class HookSet(BaseModel):
     allowed_fetch: list[HookUrlScope] = Field(default_factory=list)
     denied_fetch: list[HookUrlScope] = Field(default_factory=list)
     protected_edit_roots: list[Path] = Field(default_factory=list)
+    path_roles: list[HookPathRole] = Field(
+        default_factory=list,
+        description=(
+            "What each repository root is for. The lattice judges an action by "
+            "what it does; a role supplies what the thing acted upon is for, "
+            "which is what decides how much of the lattice applies"
+        ),
+    )
     human_owned_files: list[Path] = Field(
         default_factory=list,
         description=(

@@ -137,12 +137,6 @@ PATH_RULES = [
         "allow_autonomous": True,
     },
     {
-        "kind": "contains_part",
-        "value": "tmp",
-        "reason": "scratch path requires approval",
-        "allow_autonomous": False,
-    },
-    {
         "kind": "subtree",
         "value": "pyproject.toml",
         "reason": "protected path requires approval",
@@ -1206,6 +1200,17 @@ ANTI_PATTERN_ROWS = {
         },
     ],
 }
+
+PATH_ROLES = [
+    {
+        "root": "tests",
+        "role": "test",
+    },
+    {
+        "root": "tmp",
+        "role": "scratch",
+    },
+]
 
 SHELL_RULES = [
     {

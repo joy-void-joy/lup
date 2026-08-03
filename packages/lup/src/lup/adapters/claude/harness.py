@@ -31,6 +31,7 @@ from lup.policy.bundle import (
     render_policy_data,
     runtime_url_scope,
 )
+from lup.policy.kernel.rows import PathRoleRow
 
 
 CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
@@ -388,6 +389,10 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         autonomous_agent_identities=[
                             self.worker_identity,
                             f"{self.plugin_name}:{self.worker_identity}",
+                        ],
+                        path_roles=[
+                            PathRoleRow(root=role.root.as_posix(), role=role.role)
+                            for role in source.path_roles
                         ],
                         shell_rule_extension=list(source.shell_rules),
                     ),

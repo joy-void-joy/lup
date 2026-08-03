@@ -158,24 +158,11 @@ READ_ONLY_COMMANDS = (
     "[",
 )
 
-# lup: defer[when the human decides the scratch-path question below]: these ask
-# on every path, so housekeeping inside the repository's own scratch directory
-# — removing a one-off script, copying over a previous run's output — prompts
-# exactly as deleting production code does. The conventions send one-off work to
-# `tmp/`, so the friction lands on the path the guidance itself recommends.
-# ASK THE HUMAN BEFORE BUILDING THIS; the shape is a design decision, not a
-# lookup. What is settled: `tmp` must STAY in `protected_edit_roots`, because
-# that gates Write/Edit and authoring a file there is how an agent gets code it
-# can then execute — an earlier pass removed it and that was wrong. So any
-# exemption is for shell verbs operating on paths already inside the scratch
-# root, never for creating new content there. What is open: whether the kernel
-# should learn a scratch-root concept at all (a new HookSet field threaded
-# through `render_policy_data`, since the path is the application's to name, not
-# the library's); whether it covers only `rm`/`mv`/`cp` or every judged-ask verb;
-# whether `mkdir` and `touch` belong, given `touch` is already steered toward the
-# Write tool that stays gated; and whether an exemption keyed on a path prefix is
-# defeatable by `..` traversal or a symlink, which the kernel would have to
-# settle without a filesystem call.
+# These ask on every production path. Inside a root a `HookPathRole` declares
+# as scratch they allow instead, which `lup.policy.kernel.words` settles by
+# resolving each target's role. Closing the scratch execution path is what
+# makes that safe: authoring a file there no longer earns an agent code it can
+# run, so creating content is as harmless as destroying it.
 JUDGED_ASK_COMMANDS = (
     ("rm", "deleting files requires approval"),
     ("rmdir", "deleting directories requires approval"),

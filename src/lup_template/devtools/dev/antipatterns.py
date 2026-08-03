@@ -27,7 +27,21 @@ from lup.codescan.antipatterns import (
 from lup.codescan.capabilities import audit_capabilities, sources_from_paths
 from lup.codescan.boundaries import audit_path_boundaries
 from lup.codescan.registry import RULE_REFERENCE
+from lup.policy.kernel.roles import path_role
+from lup.policy.kernel.rows import PathRoleRow
+from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.utils import git, output_json
+
+
+def declared_path_roles() -> list[PathRoleRow]:
+    """The path roles this repository's hook set declares."""
+    hooks = portable_harness().plugins[0].hooks
+    if hooks is None:
+        return []
+    return [
+        PathRoleRow(root=role.root.as_posix(), role=role.role)
+        for role in hooks.path_roles
+    ]
 
 
 class FoundAntiPattern(AntiPatternFinding):
@@ -37,13 +51,20 @@ class FoundAntiPattern(AntiPatternFinding):
 
 
 def scan_antipatterns() -> list[FoundAntiPattern]:
-    """Every missing/spurious marker across tracked `.py`/TS-family files."""
+    """Every missing/spurious marker across tracked production `.py`/TS files.
+
+    The audit reads the same declared path roles the edit hook does, so a rule
+    the hook never enforces in a test or scratch tree is not reported there
+    either. A gate that fires only after the fact is a gate agents cannot act
+    on.
+    """
+    roles = declared_path_roles()
     results: list[FoundAntiPattern] = []  # lup: ignore[empty-collection] — scan fold
     python_paths: list[Path] = []
     for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):
         path = Path(rel)
         patterns = patterns_for_suffix(path.suffix.lower())
-        if patterns is None:
+        if patterns is None or path_role(rel, roles) != "production":
             continue
         try:
             text = path.read_text(encoding="utf-8")
