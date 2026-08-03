@@ -9,6 +9,7 @@ itself: which doors it accepts at all.
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -70,6 +71,21 @@ class Offset[T](BaseModel):
 
     item: T
     commit_offset: int
+
+
+def publish_atomic(path: Path, record: BaseModel) -> None:
+    """Write one record so no reader can ever observe it half-written.
+
+    Every channel publishes this way, and so does anything else in a run
+    directory that a door may read while the run is writing it. A reader
+    holds no lock, so the rename is the whole guarantee.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        record.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
+    temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
 
 
 def utc_now() -> datetime:

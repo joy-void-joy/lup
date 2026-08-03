@@ -25,6 +25,7 @@ from lup.channels.models import (
     ChannelCorruptionError,
     Door,
     DoorPolicy,
+    publish_atomic,
 )
 
 DECLARATION_FILE = "declared.json"
@@ -54,14 +55,7 @@ class Slot[T: BaseModel]:
             ) from error
 
     def publish(self, name: str, record: T) -> None:
-        """Write one record so no reader can observe it half-written."""
-        path = self.root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name(f".{path.name}.tmp")
-        temporary.write_text(
-            record.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n"
-        )
-        temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
+        publish_atomic(self.root / name, record)
 
     def admit(self, door: Door, act: str) -> None:
         if not self.doors.accepts(door):
