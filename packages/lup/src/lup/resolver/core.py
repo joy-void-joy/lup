@@ -1238,6 +1238,73 @@ class ResolverCore:
         )
         return ranked
 
+    async def recheck_criteria(
+        self, state: ResolveState, integration: IntegrationRecord
+    ) -> None:
+        """Re-run each concern's reviewer against the tree its siblings built.
+
+        ``review_turn`` runs against a concern's own worktree before
+        integration, so nothing re-checked a criterion that stopped holding
+        once a sibling landed. This is the only instrument aimed at "concern
+        three's criterion two no longer holds now that concern seven merged"
+        — the final audit is about content that went missing, which is a
+        different failure.
+
+        A failed criterion opens a question rather than failing the run,
+        because later work can legitimately supersede an earlier criterion
+        and only a human can say whether this did.
+        """
+        integrated = {identifier: True for identifier in integration.concerns}
+        for concern in state.concerns:
+            if concern.id not in integrated:
+                continue
+            reviewer = self.actors.session(
+                ActorRef(kind="reviewer", id=concern.id),
+                self.reviewer_factory(integration.worktree),
+            )
+            result = await reviewer.turn(
+                turn_request(
+                    TurnInput(
+                        text=(
+                            "Every concern in this run is now integrated into one "
+                            "tree. Re-check your concern's acceptance criteria "
+                            "against that tree rather than the worktree you "
+                            "reviewed. A criterion you passed before may no "
+                            "longer hold now that a sibling has landed; say so "
+                            "plainly if it does not.\n\n"
+                            f"Integrated concerns: {', '.join(integration.concerns)}\n"
+                            f"Worktree: {integration.worktree}"
+                        )
+                    ),
+                    ReviewReport,
+                )
+            )
+            met = {identifier: True for identifier in result.output.criteria_met}
+            lost = [
+                criterion.id
+                for criterion in concern.criteria
+                if criterion.id not in met
+            ]
+            if not lost:
+                continue
+            self.queue_questions(
+                [
+                    MaterialQuestion(
+                        id=f"{concern.id}-superseded",
+                        concern_id=concern.id,
+                        prompt=(
+                            f"{concern.id} no longer meets {', '.join(lost)} once "
+                            f"every sibling is integrated. The reviewer says: "
+                            f"{result.output.reason}. Was this criterion "
+                            "superseded by later work, or is this a regression?"
+                        ),
+                        choices=["superseded", "regression"],
+                        closed_choices=True,
+                    )
+                ],
+                concern.id,
+            )
+
     def verify(self, root: Path) -> list[VerificationRecord]:
         """Run the whole verification set against one tree.
 
@@ -1823,6 +1890,7 @@ class ResolverCore:
                 raise ResolverInvariantError(
                     "integration verification failed: " + ", ".join(failed)
                 )
+            await self.recheck_criteria(state, integration)
             integrated_ids = {identifier: True for identifier in integration.concerns}
             integration = integration.model_copy(update={"completed": True})
             integrated_outcomes = [
