@@ -16,8 +16,10 @@ from lup.resolver.contracts import (
     ResolverObserver,
     WorktreePreparer,
 )
+from lup.resolver.actors import ActorSessions
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
+    ActorRef,
     AnswerSettledEvent,
     ConcernProgressedEvent,
     Journal,
@@ -44,6 +46,7 @@ from lup.resolver.models import (
     ConcernEligibility,
     ConcernInventory,
     ConcernProgress,
+    ConcernAllowance,
     ConcernStatus,
     ConcernExecution,
     ConcernOutcome,
@@ -77,7 +80,6 @@ from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
 from lup.resolver.tools import WAIT_CONTRACT
 from lup.runtime.contracts import SessionFactory
 from lup.runtime.models import TurnInput, turn_request
-from lup.runtime.query import query
 from lup.runtime.wrappers import CorrectionConfig, DecoratingSessionFactory
 
 
@@ -251,6 +253,7 @@ class ResolverCore:
         )
         self.mailbox = QuestionMailbox(self.repository.root)
         self.journal = Journal(self.repository.root)
+        self.actors = ActorSessions(self.repository.root, self.journal)
         self.wake = asyncio.Event()
         self.state_lock = asyncio.Lock()
         self.state: ResolveState | None = None
@@ -287,12 +290,19 @@ class ResolverCore:
             "user."
             f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
         )
-        correction = ""
+        planner = self.actors.session(
+            ActorRef(kind="planner", id=self.config.run_id),
+            self.reviewer_factory(self.config.workspace),
+        )
+        # A retry is a second turn on the planner's own session, so the
+        # correction is the whole input: it already holds the evidence and the
+        # partition it just proposed, and restating both would invite it to
+        # re-derive from scratch what it should be revising.
+        attempt = prompt
         complaint: str | None = None
         for _ in range(INVENTORY_PLAN_ATTEMPTS):
-            result = await query(
-                self.reviewer_factory(self.config.workspace),
-                turn_request(TurnInput(text=prompt + correction), ConcernInventory),
+            result = await planner.turn(
+                turn_request(TurnInput(text=attempt), ConcernInventory)
             )
             referenced = [
                 index
@@ -302,10 +312,10 @@ class ResolverCore:
             complaint = coverage_complaint(referenced, len(request.notes))
             if complaint is None:
                 break
-            correction = (
-                f"\n\nA previous attempt left review evidence unaccounted for — "
+            attempt = (
+                f"That partition left review evidence unaccounted for — "
                 f"{complaint}. Every index from 0 to {len(request.notes) - 1} must "
-                "be referenced by at least one concern."
+                "be referenced by at least one concern. Revise and resubmit."
             )
         else:
             raise ResolverInvariantError(
@@ -420,6 +430,10 @@ class ResolverCore:
 
         Waiting reads ``answers/``, and only a promoter writes there, so any
         wait that runs without this is a wait no door can satisfy.
+
+        Every actor's session is released here too. A park is an exit like
+        any other: the session ids are persisted on the way out, so resuming
+        reattaches to the conversations rather than starting new ones.
         """
         self.mailbox.clear_park()
         stop = asyncio.Event()
@@ -429,6 +443,7 @@ class ResolverCore:
         finally:
             stop.set()
             await promoter
+            await self.actors.close()
 
     async def advance_exclusive(self, state: ResolveState) -> ResolveManifest:
         """Advance while a promoter is folding every door's answers in."""
@@ -885,7 +900,7 @@ class ResolverCore:
         maximum_round = self.config.max_revision_rounds + 1
         for round_number in range(1, maximum_round + 1):
             await self.transition_concern(concern.id, ConcernStatus.RUNNING)
-            worker = await self.worker_turn(assignment, feedback)
+            worker = await self.worker_turn(assignment, feedback, round_number)
             outstanding = await self.unanswered_for(concern.id)
             if outstanding:
                 raise ResolverAwaitingAnswers(outstanding, [])
@@ -903,7 +918,7 @@ class ResolverCore:
             else:
                 await self.transition_concern(concern.id, ConcernStatus.REVIEWING)
                 review = await self.review_turn(
-                    concern, worker, diff.commit, lease.root
+                    concern, worker, diff.commit, lease.root, round_number
                 )
                 expected_criteria = {criterion.id for criterion in concern.criteria}
                 if (
@@ -967,7 +982,7 @@ class ResolverCore:
         )
 
     async def worker_turn(
-        self, assignment: WorkAssignment, feedback: str
+        self, assignment: WorkAssignment, feedback: str, round_number: int
     ) -> WorkerReport:
         prompt = (
             "Execute the portable worker skill below. You may edit only the assigned "
@@ -984,9 +999,18 @@ class ResolverCore:
             f"{assignment.rendered_skill_invocation}\n\n"
             f"Assignment:\n{assignment.model_dump_json(indent=2)}"
         )
-        if feedback:
-            prompt += f"\n\nPersisted review feedback:\n{feedback}"
-        result = await query(
+        if round_number > 1:
+            # The worker holds the session that produced the work under
+            # review, so the assignment and its own reasoning are already in
+            # front of it. Restating both would invite it to start over
+            # instead of revising what a reviewer just read.
+            prompt = (
+                "Your submitted work was reviewed and did not pass. Revise it in "
+                "the same worktree and submit an updated report.\n\n"
+                f"Review feedback:\n{feedback}"
+            )
+        result = await self.actors.session(
+            ActorRef(kind="worker", id=assignment.concern.id, round=round_number),
             self.worker_factory(
                 WorkerContext(
                     root=assignment.lease.root,
@@ -994,8 +1018,7 @@ class ResolverCore:
                     allowances=assignment.concern.allowances,
                 )
             ),
-            turn_request(TurnInput(text=prompt), WorkerReport),
-        )
+        ).turn(turn_request(TurnInput(text=prompt), WorkerReport))
         if result.output.concern_id != assignment.concern.id:
             raise ResolverInvariantError("worker returned a foreign concern id")
         return result.output
@@ -1037,7 +1060,12 @@ class ResolverCore:
         return current
 
     async def review_turn(
-        self, concern: Concern, worker: WorkerReport, commit: str, worktree: Path
+        self,
+        concern: Concern,
+        worker: WorkerReport,
+        commit: str,
+        worktree: Path,
+        round_number: int,
     ) -> ReviewReport:
         invocation = self.invocation_renderer.render(self.spec.review_skill)
         prompt = (
@@ -1047,17 +1075,28 @@ class ResolverCore:
             f"Worker report:\n{worker.model_dump_json(indent=2)}\n\n"
             f"Commit: {commit}"
         )
-        result = await query(
+        if round_number > 1:
+            # This reviewer wrote the criticism the worker was revising, so
+            # it knows what it asked for. Re-reading its own concern cold on
+            # every round was one of the costs of a one-shot session.
+            prompt = (
+                "The worker revised in response to your review. Review the "
+                "updated work against the same acceptance criteria, and say "
+                "explicitly whether each point you raised was addressed.\n\n"
+                f"Worker report:\n{worker.model_dump_json(indent=2)}\n\n"
+                f"Commit: {commit}"
+            )
+        result = await self.actors.session(
+            ActorRef(kind="reviewer", id=concern.id, round=round_number),
             self.reviewer_factory(worktree),
-            turn_request(TurnInput(text=prompt), ReviewReport),
-        )
+        ).turn(turn_request(TurnInput(text=prompt), ReviewReport))
         if result.output.concern_id != concern.id:
             raise ResolverInvariantError("reviewer returned a foreign concern id")
         return result.output
 
     # lup: defer[when the resolver review loop is next revised]: the join is the
     # one place where N parallel concerns meet, and it is the least accountable
-    # step in the run. This turn is a fresh one-shot session whose entire input
+    # step in the run. This turn's entire input
     # is a purpose string, a worktree path and two shas — it never sees the
     # concern specs it is merging, their acceptance criteria, or the human's
     # recorded answers, so it can read what changed but not which behaviour was
@@ -1088,42 +1127,29 @@ class ResolverCore:
     # committing, but a contract this load-bearing should not live only in
     # sentences: the report has no field for "I resolved but could not stage",
     # so the orchestrator saw an unexplained incompletion each time.
-    # And because each join is a fresh session, a question it
-    # asks cannot be answered to the session that asked it: the answer lands
-    # after that turn ends, the next turn re-derives a differently-worded
-    # question under a different id, and the human answers the same thing twice.
-    # So the gap that cost real time here was continuity and mechanics, not
-    # context. The accountability question stands untouched regardless: nothing
+    # The accountability question stands untouched regardless: nothing
     # in the pipeline would have reported a silent override, and the one merge
     # audited by hand was confirmed correct only because a human looked. `lup-devtools dev conflict audit` and the /lup:merge skill
     # already carry deletion-audit guidance, but both are prompt-level, and the
     # guidance itself says a prompt rule coexists with the failure it warns of.
-    def settled_merge_decisions(self, lease: WritableRootLease) -> str:
-        """Recite what earlier merge turns on this lease were already told.
+    def merge_allowances(self) -> list[ConcernAllowance]:
+        """Every gate the joined concerns were approved to pass.
 
-        Each join opens a fresh session, so an answer to a question one turn
-        asked arrives after that turn has ended and the next turn re-derives
-        the question under an id no recorded answer matches. Reciting the
-        settled ones is continuity, not context: it carries only what this
-        same role was told in this same run, and no concern's specification.
+        A join can newly require a suppression that neither parent needed: a
+        rule one branch adds first meets a constant another branch adds only
+        once the two are together. Nobody could have declared that at plan
+        time, and a merge session carrying no allowance at all had no route
+        to it except failing.
         """
-        answered = {
-            record.answer.question_id: record.answer.value
-            for record in self.mailbox.answers()
-        }
-        settled = [
-            f"- Asked: {item.question.prompt.splitlines()[0]}\n  Settled: {value}"
-            for item in self.mailbox.questions()
-            if item.question.concern_id == lease.concern_id
-            for value in [answered[item.question.id]]
-            if item.question.id in answered
-        ]
-        if not settled:
-            return ""
-        return (
-            "Decisions already settled for this merge in this run — treat each "
-            "as binding and do not re-ask it, however you would have worded the "
-            "question:\n" + "\n".join(settled) + "\n\n"
+        state = self.state
+        if state is None:
+            return []
+        return list(
+            dict.fromkeys(
+                allowance
+                for concern in state.concerns
+                for allowance in concern.allowances
+            )
         )
 
     async def merge_turn(
@@ -1139,17 +1165,20 @@ class ResolverCore:
             "and the merge cannot complete without it. Do not commit and do not "
             "change branches; the orchestrator owns commit authority, which "
             "covers committing only.\n\n"
-            + self.settled_merge_decisions(lease)
             + f"{invocation}\n\nPurpose: {purpose}\nWorktree: {lease.root}\n"
             + "Parent commits:\n"
             + "\n".join(commits)
         )
-        result = await query(
+        result = await self.actors.session(
+            ActorRef(kind="merger", id=lease.concern_id),
             self.worker_factory(
-                WorkerContext(root=lease.root, concern_id=lease.concern_id)
+                WorkerContext(
+                    root=lease.root,
+                    concern_id=lease.concern_id,
+                    allowances=self.merge_allowances(),
+                )
             ),
-            turn_request(TurnInput(text=prompt), MergeReport),
-        )
+        ).turn(turn_request(TurnInput(text=prompt), MergeReport))
         return result.output
 
     async def unanswered_for(self, concern_id: str) -> list[MaterialQuestion]:
@@ -1427,10 +1456,10 @@ class ResolverCore:
             f"Verification:\n"
             + "\n".join(record.model_dump_json() for record in verification)
         )
-        reviewed = await query(
+        reviewed = await self.actors.session(
+            ActorRef(kind="reviewer", id="integration"),
             self.reviewer_factory(integration.worktree),
-            turn_request(TurnInput(text=review_prompt), FinalReview),
-        )
+        ).turn(turn_request(TurnInput(text=review_prompt), FinalReview))
         state = state.model_copy(
             update={
                 "phase": ResolvePhase.ACCEPTANCE,

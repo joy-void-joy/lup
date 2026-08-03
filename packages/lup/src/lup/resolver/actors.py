@@ -219,8 +219,19 @@ class ActorSessions:
         self.journal = journal
         self.sessions: dict[str, ActorSession] = {}
 
+    def key(self, actor: ActorRef) -> str:
+        """Which conversation this actor belongs to.
+
+        Deliberately not the round. A worker on round two is the agent that
+        wrote round one's code and was told what was wrong with it, and a
+        reviewer that re-read its concern cold each round is one of the
+        symptoms this exists to remove. The round attributes what happened
+        in the journal; it does not fork the conversation.
+        """
+        return f"{actor.kind}-{actor.id}"
+
     def path(self, actor: ActorRef) -> Path:
-        return self.root / f"{actor.kind}-{actor.id}-{actor.round}.json"
+        return self.root / f"{self.key(actor)}.json"
 
     def persisted(self, actor: ActorRef) -> ActorRecord | None:
         """The identity this actor left behind, if it has run before."""
@@ -235,16 +246,17 @@ class ActorSessions:
 
     def session(self, actor: ActorRef, factory: SessionFactory) -> ActorSession:
         """This actor's session, resumed from its record the first time."""
-        held = self.sessions.get(actor.label())  # lup: ignore[dict-get] — presence check
+        held = self.sessions.get(self.key(actor))  # lup: ignore[dict-get] — presence
         if held is not None:
+            held.actor = actor
             return held
         opened = ActorSession(actor, factory, self.journal, self.persisted(actor))
-        self.sessions[actor.label()] = opened
+        self.sessions[self.key(actor)] = opened
         return opened
 
     def save(self, actor: ActorRef) -> None:
         """Persist one actor's identity so a resumed run reattaches to it."""
-        held = self.sessions.get(actor.label())  # lup: ignore[dict-get] — presence check
+        held = self.sessions.get(self.key(actor))  # lup: ignore[dict-get] — presence
         if held is not None:
             publish_atomic(self.path(actor), held.record)
 
