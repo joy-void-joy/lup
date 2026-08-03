@@ -25,7 +25,6 @@ from lup.resolver.mailbox import (
     RecordedAnswer,
 )
 from lup.resolver.models import (
-    ACCEPTANCE_QUESTION_ID,
     AcceptanceCriterion,
     AnswerBatch,
     Concern,
@@ -82,7 +81,6 @@ def persisted_state(
     questions: QuestionBatch | None = None,
     answers: AnswerBatch | None = None,
     final_review: FinalReview | None = None,
-    accepted: bool | None = None,
 ) -> ResolveState:
     return ResolveState(
         config_digest="config-sha",
@@ -101,7 +99,6 @@ def persisted_state(
         questions=questions,
         answers=answers,
         final_review=final_review,
-        accepted=accepted,
     )
 
 
@@ -282,27 +279,24 @@ async def test_parking_from_the_page_writes_the_park_request(tmp_path: Path) -> 
     assert request.reason == "answering tomorrow"
 
 
-async def test_the_decision_is_offered_as_the_reserved_acceptance_question(
+async def test_the_review_branch_is_reported_with_no_decision_to_take(
     tmp_path: Path,
 ) -> None:
-    mailbox = build_run(
+    """The gate retired, so the page reports the verdict rather than asking."""
+    build_run(
         tmp_path,
         persisted_state(
-            phase=ResolvePhase.ACCEPTANCE,
+            phase=ResolvePhase.VERIFICATION,
             final_review=FinalReview(accepted=True, reason="clean"),
         ),
     )
 
     async with client_for(tmp_path) as client:
-        response = await client.post(
-            "/api/runs/run-1/decision", json={"accepted": True}
-        )
+        response = await client.get("/api/runs/run-1")
+        gone = await client.post("/api/runs/run-1/decision", json={"accepted": True})
 
-    assert response.status_code == 200
-    offers = mailbox.offers()
-    assert [(offer.question_id, offer.value) for offer in offers] == [
-        (ACCEPTANCE_QUESTION_ID, "accept")
-    ]
+    assert response.json()["review"]["final_review"]["reason"] == "clean"
+    assert gone.status_code == 404
 
 
 async def test_a_missing_run_is_reported_rather_than_invented(tmp_path: Path) -> None:
@@ -336,12 +330,9 @@ async def test_no_door_takes_the_run_lock(tmp_path: Path) -> None:
                 "/api/runs/run-1/answers",
                 json={"answers": [{"question_id": "q1", "value": "yes"}]},
             )
-            await client.post("/api/runs/run-1/park", json={})
-            decision = await client.post(
-                "/api/runs/run-1/decision", json={"accepted": False}
-            )
+            parked = await client.post("/api/runs/run-1/park", json={})
 
-    assert decision.status_code == 200
+    assert parked.status_code == 200
 
 
 async def test_resuming_a_moving_run_is_refused(tmp_path: Path) -> None:
@@ -576,7 +567,6 @@ def test_the_page_posts_only_routes_the_app_serves() -> None:
 
     assert sorted(dict.fromkeys(posted)) == [
         "answers",
-        "decision",
         "events",
         "park",
         "resume",

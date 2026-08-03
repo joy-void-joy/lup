@@ -30,9 +30,6 @@ from lup.resolver.contracts import (
 )
 from lup.resolver.core import ResolverCore
 from lup.resolver.models import (
-    ACCEPT,
-    ACCEPTANCE_QUESTION_ID,
-    REJECT,
     Concern,
     ConcernProgress,
     InventoryNote,
@@ -385,10 +382,26 @@ def resolver_source_snapshot(
     return SourceSnapshot(branch=branch, commit=commit)
 
 
+REVIEW_BRANCH_SUFFIX = "/review"
+
+
+def integration_branch(launcher: ProcessLauncher, root: Path, run_id: str) -> str:
+    """Where this run integrates: onto a standing review branch, or a fresh one.
+
+    A resolve run started while HEAD is already a review branch is resolving
+    that branch's own feedback, so minting a second one strands the work on a
+    branch nobody asked for and leaves the human to reconcile two. Advancing
+    the branch it was launched from is what makes a nested run compose.
+    """
+    current = resolver_git(launcher, root, ["branch", "--show-current"])
+    if current.startswith("resolve/") and current.endswith(REVIEW_BRANCH_SUFFIX):
+        return current
+    return f"resolve/{run_id}{REVIEW_BRANCH_SUFFIX}"
+
+
 def run_resolve(
     adapter: str,
     run_id: str | None,
-    human_decision: bool | None,
     answers: list[str],
     abort_reason: str | None = None,
     wait_seconds: float = 0.0,
@@ -396,8 +409,6 @@ def run_resolve(
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
-    if human_decision is not None:
-        provided[ACCEPTANCE_QUESTION_ID] = ACCEPT if human_decision else REJECT
     compositions = harness_compositions(adapter)
     if len(compositions) != 1:
         raise typer.BadParameter("resolve requires exactly one adapter")
@@ -586,7 +597,7 @@ def run_resolve(
                 workspace=root,
                 worktree_root=(root.parent / f"{root.name}-resolve-{resolved_run_id}"),
                 run_id=resolved_run_id,
-                integration_branch=f"resolve/{resolved_run_id}/review",
+                integration_branch=integration_branch(launcher, root, resolved_run_id),
                 # lup: defer[when the resolver's verification set is next revised]:
                 # these three are a strict subset of `lup-devtools dev check`,
                 # which also runs `scan_antipatterns` and the comments gate. A
@@ -669,17 +680,9 @@ def run_resolve(
                 )
                 report_awaiting(parked, adapter, resolved_run_id, planned)
                 return
-            if manifest.final_review is None and human_decision is not None:
-                raise typer.BadParameter("the resolver run is not awaiting acceptance")
-            if manifest.accepted is None and manifest.final_review is not None:
+            if manifest.final_review is not None:
                 typer.echo(f"Review branch: {manifest.review_branch}")
                 typer.echo(manifest.final_review.model_dump_json(indent=2))
-                typer.echo(
-                    "Run awaiting acceptance: relay the review to the human, then "
-                    "answer from the page, `harness resolve answer`, or a rerun with "
-                    "--accept or --reject."
-                )
-                return
             typer.echo(manifest.model_dump_json(indent=2))
 
         async with spawned_supervisor(

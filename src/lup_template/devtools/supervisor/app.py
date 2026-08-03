@@ -44,19 +44,13 @@ from lup.resolver.mailbox import (
     ParkRequest,
     QuestionMailbox,
 )
-from lup.resolver.models import (
-    ACCEPT,
-    ACCEPTANCE_QUESTION_ID,
-    REJECT,
-    QuestionAnswer,
-)
+from lup.resolver.models import QuestionAnswer
 from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.workspace.paths import project_root
 from lup_template.devtools.supervisor.events import stream
 from lup_template.devtools.supervisor.projection import (
     ActorIndex,
     AnswerSubmission,
-    DecisionSubmission,
     ParkSubmission,
     RunIndex,
     RunSummary,
@@ -132,7 +126,6 @@ def run_summary(state_root: Path, run_id: str, adapter: str) -> RunSummary:
             phase=None,
             concerns=0,
             pending_questions=0,
-            accepted=None,
             unreadable=True,
             detail=str(error),
         )
@@ -141,7 +134,6 @@ def run_summary(state_root: Path, run_id: str, adapter: str) -> RunSummary:
         phase=projected.phase,
         concerns=len(projected.concerns),
         pending_questions=len(unanswered_questions(projected.pending)),
-        accepted=projected.decision,
         live=projected.live,
     )
 
@@ -298,23 +290,6 @@ def create_supervisor(
             selected,
         )
         return projected
-
-    @supervisor.post("/api/runs/{selected}/decision")
-    async def record_decision(
-        selected: str, submission: DecisionSubmission
-    ) -> SupervisorState:
-        offer_answers(
-            state_root,
-            selected,
-            [
-                QuestionAnswer(
-                    question_id=ACCEPTANCE_QUESTION_ID,
-                    value=ACCEPT if submission.accepted else REJECT,
-                )
-            ],
-            AnswerDoor.PAGE,
-        )
-        return read_run(state_root, selected, adapter)
 
     return supervisor
 

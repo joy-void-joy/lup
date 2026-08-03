@@ -25,7 +25,6 @@ class ResolvePhase(StrEnum):
     REVIEW = "review"
     INTEGRATION = "integration"
     VERIFICATION = "verification"
-    ACCEPTANCE = "acceptance"
     CLEANUP = "cleanup"
     COMPLETE = "complete"
     ABORTED = "aborted"
@@ -194,26 +193,7 @@ class AnswerBatch(BaseModel):
         return self
 
 
-ACCEPTANCE_QUESTION_ID = "integration-acceptance"
-ACCEPTANCE_CONCERN_ID = "integration"
-ACCEPT = "accept"
-REJECT = "reject"
-
-
-def acceptance_question() -> MaterialQuestion:
-    """The reserved question every acceptance door answers through.
-
-    Making the review decision an ordinary mailbox question is what lets the
-    page, the CLI, and ``--accept``/``--reject`` share one form instead of
-    each carrying its own path into :meth:`record_human_acceptance`.
-    """
-    return MaterialQuestion(
-        id=ACCEPTANCE_QUESTION_ID,
-        concern_id=ACCEPTANCE_CONCERN_ID,
-        prompt="Accept the review branch for manual integration?",
-        choices=[ACCEPT, REJECT],
-        closed_choices=True,
-    )
+INTEGRATION_CONCERN_ID = "integration"
 
 
 class ConcernShape(BaseModel):
@@ -644,7 +624,6 @@ class ResolveState(BaseModel):
     integration: IntegrationRecord | None = None
     verification: list[VerificationRecord] = Field(default_factory=list)
     final_review: FinalReview | None = None
-    accepted: bool | None = None
     cleanup: list[CleanupRecord] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     resume_from: ResolvePhase | None = None
@@ -676,5 +655,4 @@ class ResolveManifest(BaseModel):
     outcomes: list[ConcernOutcome]
     verification: list[VerificationRecord]
     final_review: FinalReview | None = None
-    accepted: bool | None = None
     cleanup: list[CleanupRecord] = Field(default_factory=list)

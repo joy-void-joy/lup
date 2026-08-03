@@ -9,6 +9,7 @@ choice visible.
 
 from pathlib import Path
 
+from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.resolver.core import merge_problems
 from lup.resolver.models import (
     DeclaredEdit,
@@ -17,6 +18,7 @@ from lup.resolver.models import (
     MergeReport,
 )
 from lup.resolver.orchestrator import report_mismatch
+from lup_template.devtools.harness.resolve import integration_branch
 
 PARENT = "a1b2c3d4e5f6"
 
@@ -155,3 +157,39 @@ def test_the_containment_gate_names_the_paths_it_rejected_over() -> None:
 def test_over_reporting_alone_passes_the_containment_gate() -> None:
     """Nothing changed undeclared is containment; equality cost 71 files."""
     assert report_mismatch([], []) == ""
+
+
+class BranchLauncher(ProcessLauncher):
+    """Report one checked-out branch and refuse anything else."""
+
+    def __init__(self, branch: str) -> None:
+        self.branch = branch
+
+    def launch(self, request: LaunchRequest) -> ExitStatus:
+        assert request.arguments == ["git", "branch", "--show-current"]
+        return ExitStatus(code=0, stdout=f"{self.branch}\n", stderr="")
+
+
+def test_a_fresh_run_mints_its_own_review_branch() -> None:
+    branch = integration_branch(BranchLauncher("dev"), Path("."), "r1")
+
+    assert branch == "resolve/r1/review"
+
+
+def test_a_run_launched_on_a_review_branch_advances_that_branch() -> None:
+    """A nested run is resolving that branch's own feedback.
+
+    Minting a second review branch strands the work somewhere nobody asked
+    for and leaves the human two branches to reconcile.
+    """
+    branch = integration_branch(
+        BranchLauncher("resolve/earlier/review"), Path("."), "r2"
+    )
+
+    assert branch == "resolve/earlier/review"
+
+
+def test_a_branch_merely_named_like_one_does_not_count() -> None:
+    branch = integration_branch(BranchLauncher("resolve/r1/wip"), Path("."), "r3")
+
+    assert branch == "resolve/r3/review"

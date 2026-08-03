@@ -38,12 +38,10 @@ from lup.resolver.mailbox import (
     wait_for_answers,
 )
 from lup.resolver.models import (
-    ACCEPT,
-    ACCEPTANCE_CONCERN_ID,
+    INTEGRATION_CONCERN_ID,
     AgentRound,
     AnswerBatch,
     CleanupRecord,
-    acceptance_question,
     Concern,
     ConcernEligibility,
     ConcernInventory,
@@ -484,10 +482,6 @@ class ResolverCore:
         if state.phase == ResolvePhase.COMPLETE:
             self.state = state
             return self.manifest(state)
-        if state.phase == ResolvePhase.ACCEPTANCE:
-            self.state = state
-            async with self.promoting():
-                return self.manifest(await self.settle_acceptance())
         if state.phase == ResolvePhase.FAILED:
             if state.resume_from is None:
                 raise ResolverInvariantError(
@@ -756,9 +750,8 @@ class ResolverCore:
             state = await self.integrate(state, outcomes)
         elif state.final_review is None:
             state = await self.integrate(state, outcomes)
-        if state.phase is ResolvePhase.ACCEPTANCE and state.accepted is None:
-            state = await self.settle_acceptance()
-        return self.manifest(state)
+        self.land_nested(state)
+        return self.manifest(self.release(state))
 
     def restore_leases(self, state: ResolveState) -> None:
         """Validate persisted authority and reset incomplete attempts for retry."""
@@ -1822,7 +1815,7 @@ class ResolverCore:
             )
             if integration_lease is None:
                 integration_lease = self.leases.acquire(
-                    "integration", self.config.integration_branch
+                    "integration", self.integration_lease_branch()
                 )
                 leases = [*state.leases, integration_lease]
             else:
@@ -1929,41 +1922,9 @@ class ResolverCore:
             ActorRef(kind="reviewer", id="integration"),
             self.reviewer_factory(integration.worktree),
         ).turn(turn_request(TurnInput(text=review_prompt), FinalReview))
-        state = state.model_copy(
-            update={
-                "phase": ResolvePhase.ACCEPTANCE,
-                "final_review": reviewed.output,
-            }
-        )
+        state = state.model_copy(update={"final_review": reviewed.output})
         self.persist(state)
         return state
-
-    async def settle_acceptance(self) -> ResolveState:
-        """Offer the review decision through the mailbox and apply any answer.
-
-        Acceptance is a reserved question, so the page, a CLI door, and
-        ``--accept``/``--reject`` are one form rather than three separate
-        paths into cleanup. A run whose decision has not arrived returns
-        unchanged, exactly as it did before there was a door to answer
-        through — the decision is a boundary, not a failure.
-        """
-        question = acceptance_question()
-        self.queue_questions([question], ACCEPTANCE_CONCERN_ID)
-        await self.apply_mailbox()
-        result = await wait_for_answers(
-            self.mailbox,
-            [question.id],
-            wait_seconds=self.answer_wait_seconds,
-            poll_interval_seconds=self.poll_interval_seconds,
-            wake=self.wake,
-        )
-        await self.apply_mailbox()
-        if result.unanswered:
-            return self.require_state()
-        self.record_human_acceptance_exclusive(
-            result.answered[0].answer.value == ACCEPT
-        )
-        return self.require_state()
 
     def abort(self, reason: str) -> ResolveManifest:
         """End a run from any phase, freeing its leases but keeping its evidence.
@@ -1987,7 +1948,7 @@ class ResolverCore:
                     action="retained",
                     reason=f"review branch retained after abort: {reason}",
                 )
-                if lease.concern_id == ACCEPTANCE_CONCERN_ID
+                if lease.concern_id == INTEGRATION_CONCERN_ID
                 else self.abort_lease(lease)
                 for lease in state.leases
             ]
@@ -2020,17 +1981,60 @@ class ResolverCore:
             ),
         )
 
-    def record_human_acceptance(self, accepted: bool) -> ResolveManifest:
-        """Record cleanup/retention after the human decides on the review branch."""
-        with self.repository.exclusive():
-            return self.record_human_acceptance_exclusive(accepted)
+    def nested(self) -> bool:
+        """Whether this run integrates onto a branch already checked out."""
+        return (
+            self.worktrees.current_branch(self.config.workspace)
+            == self.config.integration_branch
+        )
 
-    def record_human_acceptance_exclusive(self, accepted: bool) -> ResolveManifest:
-        """Complete a run while holding its inter-process authority lease."""
-        state = self.repository.load()
-        self.state = state
-        if state.phase != ResolvePhase.ACCEPTANCE:
-            raise ResolverInvariantError("run is not awaiting human acceptance")
+    def integration_lease_branch(self) -> str:
+        """The branch the integration worktree owns.
+
+        A nested run cannot take the review branch directly, because git will
+        not add a second worktree for a branch that is already checked out.
+        It builds on a ref of its own and the standing worktree
+        fast-forwards to it at the end, which moves ref, index and working
+        tree in one step.
+        """
+        if self.nested():
+            return f"{self.config.integration_branch}-wip-{self.config.run_id}"
+        return self.config.integration_branch
+
+    def land_nested(self, state: ResolveState) -> None:
+        """Advance the launching worktree's review branch to what this run built."""
+        if not self.nested() or state.integration is None:
+            return
+        built = state.integration.commit
+        if built is None or self.worktrees.fast_forward(self.config.workspace, built):
+            return
+        self.journal.record(
+            RunFailedEvent(
+                reason=(
+                    f"{self.config.integration_branch} could not fast-forward to "
+                    f"{built[:12]}; it moved while this run was building on it. "
+                    "Merge it by hand."
+                )
+            )
+        )
+
+    def concern_failed(self, state: ResolveState, concern_id: str) -> bool:
+        return any(
+            item.concern_id == concern_id and item.status == ConcernStatus.FAILED
+            for item in state.progress
+        )
+
+    def release(self, state: ResolveState) -> ResolveState:
+        """Free the concern leases and hand the review branch over.
+
+        There was a human gate here, and it decided nothing. Accept and
+        reject both retained the integration lease, both removed every
+        concern lease, and differed only in a sentence recorded against the
+        cleanup — so the run stopped, spent a question, and used the answer
+        to choose wording. Per-concern control is the live stop-and-retarget
+        channel while the run moves, and the acceptance of the result is
+        whatever the human does with the branch afterwards.
+        """
         cleanup: list[CleanupRecord] = []  # lup: ignore[empty-collection]
         progress = state
         for lease in state.leases:
@@ -2040,20 +2044,20 @@ class ResolverCore:
                         path=lease.root,
                         branch=lease.branch,
                         action="retained",
-                        reason=(
-                            "review branch accepted for manual integration"
-                            if accepted
-                            else "review branch retained for revision or inspection"
-                        ),
+                        reason="review branch retained for the human to land",
                     )
                 )
                 continue
             removed = self.worktrees.remove(lease)
-            progress = self.progress_state(
-                progress,
-                [lease.concern_id],
-                ConcernStatus.CLEANED if removed else ConcernStatus.RETAINED,
-            )
+            # A concern that failed keeps saying so. Cleaning its worktree is
+            # housekeeping, and relabelling it CLEANED would erase the one
+            # thing the run is evidence of.
+            if not self.concern_failed(progress, lease.concern_id):
+                progress = self.progress_state(
+                    progress,
+                    [lease.concern_id],
+                    ConcernStatus.CLEANED if removed else ConcernStatus.RETAINED,
+                )
             cleanup.append(
                 CleanupRecord(
                     path=lease.root,
@@ -2069,7 +2073,6 @@ class ResolverCore:
         completed = progress.model_copy(
             update={
                 "phase": ResolvePhase.CLEANUP,
-                "accepted": accepted,
                 "cleanup": cleanup,
                 "leases": [
                     lease.model_copy(update={"active": False}) for lease in state.leases
@@ -2079,7 +2082,7 @@ class ResolverCore:
         self.persist(completed)
         completed = completed.model_copy(update={"phase": ResolvePhase.COMPLETE})
         self.persist(completed)
-        return self.manifest(completed)
+        return completed
 
     def persist(self, state: ResolveState) -> None:
         """Persist while keeping the phase a monotonic high-water mark.
@@ -2190,6 +2193,5 @@ class ResolverCore:
             outcomes=state.outcomes,
             verification=state.verification,
             final_review=state.final_review,
-            accepted=state.accepted,
             cleanup=state.cleanup,
         )

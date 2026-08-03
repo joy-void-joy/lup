@@ -41,7 +41,6 @@ class RunStatus(StrEnum):
 
     RUNNING = "running"
     AWAITING_ANSWERS = "awaiting_answers"
-    AWAITING_DECISION = "awaiting_decision"
     PARKED = "parked"
     COMPLETE = "complete"
     FAILED = "failed"
@@ -111,7 +110,6 @@ class SupervisorState(BaseModel):
     concerns: list[ConcernView]
     pending: list[PendingQuestionView]
     review: ReviewView | None
-    decision: bool | None
     failures: list[str]
     rerun_recipe: str
 
@@ -125,7 +123,6 @@ class RunSummary(BaseModel):
     phase: ResolvePhase | None
     concerns: int
     pending_questions: int
-    accepted: bool | None
     live: bool = False
     unreadable: bool = False
     detail: str = ""
@@ -161,14 +158,6 @@ class ParkSubmission(BaseModel):
     reason: str = Field(
         default="parked from the supervisor page",
         description="Why the run is being parked, recorded for the rerun",
-    )
-
-
-class DecisionSubmission(BaseModel):
-    """The human accept or reject decision on the review branch."""
-
-    accepted: bool = Field(
-        description="Accept the review branch for manual integration"
     )
 
 
@@ -349,8 +338,6 @@ def persisted_status(
             return RunStatus.FAILED
         case ResolvePhase.COMPLETE:
             return RunStatus.COMPLETE
-        case ResolvePhase.ACCEPTANCE if state.accepted is None:
-            return RunStatus.AWAITING_DECISION
         case _:
             if not unanswered_questions(views):
                 return RunStatus.RUNNING
@@ -387,7 +374,6 @@ def supervisor_state(
         concerns=concern_views(state),
         pending=views,
         review=review,
-        decision=state.accepted,
         failures=state.failures,
         rerun_recipe=answer_recipe(adapter, state.run_id, unanswered_questions(views)),
     )

@@ -452,6 +452,29 @@ class WorktreeOrchestrator:
         )
         return [Path(line) for line in unmerged.stdout.splitlines() if line]
 
+    def current_branch(self, root: Path) -> str:
+        """Which branch a worktree has checked out, empty when detached."""
+        named = self.launcher.launch(
+            LaunchRequest(arguments=["git", "branch", "--show-current"], cwd=root)
+        )
+        lines = named.stdout.splitlines()
+        return lines[0] if named.code == 0 and lines else ""
+
+    def fast_forward(self, root: Path, source: str) -> bool:
+        """Advance a checked-out branch from inside the worktree holding it.
+
+        Every plumbing route that moves the ref from outside corrupts the
+        view: ``git branch -f`` refuses outright, while ``git update-ref``
+        and ``git push .`` both report success and leave the standing
+        worktree showing a staged modification nobody made, because the ref
+        moved and the index did not. Merging from inside moves ref, index
+        and working tree together.
+        """
+        merged = self.launcher.launch(
+            LaunchRequest(arguments=["git", "merge", "--ff-only", source], cwd=root)
+        )
+        return merged.code == 0
+
     def merge_base(self, lease: WritableRootLease, left: str, right: str) -> str:
         """Where two commits forked, so a contribution can be read from there."""
         found = self.launcher.launch(

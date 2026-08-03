@@ -197,7 +197,7 @@
         <h2>Runs</h2>
         <table>
           <thead>
-            <tr><th>Run</th><th>Phase</th><th>Concerns</th><th>Pending</th><th>Decision</th></tr>
+            <tr><th>Run</th><th>Phase</th><th>Concerns</th><th>Pending</th></tr>
           </thead>
           <tbody id="run-rows"></tbody>
         </table>
@@ -245,11 +245,7 @@
       <section id="review-section" hidden>
         <h2>Review branch</h2>
         <div id="review-body"></div>
-        <div class="actions" id="review-actions">
-          <button class="primary" type="button" id="accept-button">Accept branch</button>
-          <button class="danger" type="button" id="reject-button">Reject</button>
-        </div>
-        <p class="error" id="review-error" hidden></p>
+        <p class="muted" id="review-hand-off"></p>
       </section>
 
       <section id="failures-section" hidden>
@@ -349,11 +345,10 @@
 
       function renderRuns() {
         const rows = runs.map((run) => {
-          const decision = run.accepted === null ? "—" : run.accepted ? "accepted" : "rejected";
           const badge = run.live ? ' <span class="badge">live</span>' : "";
           const detail = run.unreadable ? `<div class="error">${escapeHtml(run.detail)}</div>` : "";
           const current = run.run_id === state?.run_id ? " strong" : "";
-          return `<tr><td><button type="button" class="pill${current}" data-run="${escapeHtml(run.run_id)}">${escapeHtml(run.run_id)}</button>${badge}${detail}</td><td class="muted">${escapeHtml(run.phase || "—")}</td><td>${run.concerns}</td><td>${run.pending_questions}</td><td class="muted">${decision}</td></tr>`;
+          return `<tr><td><button type="button" class="pill${current}" data-run="${escapeHtml(run.run_id)}">${escapeHtml(run.run_id)}</button>${badge}${detail}</td><td class="muted">${escapeHtml(run.phase || "—")}</td><td>${run.concerns}</td><td>${run.pending_questions}</td></tr>`;
         });
         element("run-rows").innerHTML = rows.join("");
         element("runs-empty").hidden = rows.length > 0;
@@ -462,7 +457,8 @@
           .join("");
         element("review-body").innerHTML =
           `<p><code>${escapeHtml(review.review_branch)}</code></p><p>Reviewer ${escapeHtml(verdict)}: ${escapeHtml(review.final_review.reason)}</p>${residual}<table><tbody>${checks}</tbody></table>`;
-        element("review-actions").hidden = state.decision !== null;
+        element("review-hand-off").textContent =
+          "This branch is yours to land — the resolver takes no decision here.";
       }
 
       function renderFailures() {
@@ -615,18 +611,6 @@
           showError("questions-error", error);
         }
       });
-
-      for (const [id, accepted] of [["accept-button", true], ["reject-button", false]]) {
-        element(id).addEventListener("click", async () => {
-          element("review-error").hidden = true;
-          try {
-            state = await post(`/api/runs/${state.run_id}/decision`, { accepted });
-            render();
-          } catch (error) {
-            showError("review-error", error);
-          }
-        });
-      }
 
       element("actor-chips").addEventListener("click", (click) => {
         const chosen = click.target.closest("[data-actor]");

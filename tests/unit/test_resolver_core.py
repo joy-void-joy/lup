@@ -37,12 +37,9 @@ from lup.resolver.core import (
     approval_question,
 )
 from lup.resolver.models import (
-    ACCEPT,
-    ACCEPTANCE_QUESTION_ID,
     AnswerBatch,
     AcceptanceCriterion,
     Concern,
-    acceptance_question,
     ConcernInventory,
     ConcernOutcome,
     ConcernProgress,
@@ -961,9 +958,10 @@ def test_interrupted_concern_returns_to_persisted_lease_boundary(
     ]
 
 
-def test_human_decision_is_locked_persisted_and_cleans_ephemeral_branches(
+def test_releasing_a_run_cleans_concern_branches_and_keeps_the_review_one(
     tmp_path: Path,
 ) -> None:
+    """Cleanup is unconditional; there is no decision left to spend a park on."""
     run_id = "acceptance"
     concern_lease = WritableRootLease(
         concern_id="a",
@@ -978,7 +976,7 @@ def test_human_decision_is_locked_persisted_and_cleans_ephemeral_branches(
     state = ResolveState(
         config_digest="config-sha",
         run_id=run_id,
-        phase=ResolvePhase.ACCEPTANCE,
+        phase=ResolvePhase.VERIFICATION,
         source=SourceSnapshot(branch="feature", commit="source-sha"),
         spec=resolve_spec(),
         concerns=[concern("a")],
@@ -1020,10 +1018,9 @@ def test_human_decision_is_locked_persisted_and_cleans_ephemeral_branches(
     )
     core.persist(state)
 
-    manifest = core.record_human_acceptance(True)
+    core.release(state)
 
     persisted = core.repository.load()
-    assert manifest.accepted is True
     assert persisted.phase == ResolvePhase.COMPLETE
     assert all(not lease.active for lease in persisted.leases)
     assert persisted.progress[0].status == ConcernStatus.CLEANED
@@ -1145,7 +1142,6 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
 
     manifest = await core.run(inventory)
 
-    assert manifest.accepted is None
     assert manifest.final_review == FinalReview(
         accepted=True, reason="combined branch verified"
     )
@@ -1159,10 +1155,7 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
     assert git("branch", "--show-current") == source_branch
     assert git("rev-parse", "HEAD") == source_commit
 
-    completed = core.record_human_acceptance(True)
-
-    assert completed.accepted is True
-    assert [record.action for record in completed.cleanup] == [
+    assert [record.action for record in manifest.cleanup] == [
         "removed",
         "removed",
         "removed",
@@ -1317,7 +1310,7 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
         accepted=True, reason="combined branch verified"
     )
     assert [outcome.verified for outcome in manifest.outcomes] == [True]
-    assert resumed.repository.load().phase == ResolvePhase.ACCEPTANCE
+    assert resumed.repository.load().phase == ResolvePhase.COMPLETE
 
 
 def failure_leg_workspace(tmp_path: Path, launcher: LocalProcessLauncher) -> Path:
@@ -1715,14 +1708,13 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
 
 
 @pytest.mark.asyncio
-async def test_acceptance_is_answered_through_the_mailbox_like_any_question(
+async def test_a_finished_run_releases_itself_without_a_human_gate(
     tmp_path: Path,
 ) -> None:
-    """``--accept`` is a door, not a separate path into cleanup.
+    """The gate decided nothing: both answers cleaned the same leases.
 
-    The flag, the page, and a console answer all write the same reserved
-    offer, so the run applies whichever arrives without knowing which door
-    it came through.
+    So a run reaches COMPLETE on its own, having freed every concern
+    worktree and kept the review branch for whoever lands it.
     """
     launcher = LocalProcessLauncher()
     workspace = failure_leg_workspace(tmp_path, launcher)
@@ -1771,30 +1763,22 @@ async def test_acceptance_is_answered_through_the_mailbox_like_any_question(
             launcher,
         )
 
-    undecided = build_core()
-    seed_approvals(undecided, [concern("a")])
-    manifest = await undecided.run(
+    core = build_core()
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
         ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
     )
 
-    assert manifest.accepted is None
     assert manifest.final_review is not None
-    assert ACCEPTANCE_QUESTION_ID in {
-        item.question.id for item in undecided.mailbox.questions()
-    }
-
-    decided = build_core()
-    seed_offer(decided, ACCEPTANCE_QUESTION_ID, ACCEPT)
-    completed = await decided.resume()
-
-    assert completed.accepted is True
-    assert [record.action for record in completed.cleanup] == ["removed", "retained"]
+    assert core.repository.load().phase == ResolvePhase.COMPLETE
+    assert [record.action for record in manifest.cleanup] == ["removed", "retained"]
 
 
 @pytest.mark.asyncio
-async def test_an_acceptance_offer_outside_its_choices_never_decides(
+async def test_an_offer_outside_a_closed_gate_never_decides(
     tmp_path: Path,
 ) -> None:
+    """A door is a form, not a trusted caller."""
     launcher = LocalProcessLauncher()
     workspace = failure_leg_workspace(tmp_path, launcher)
     core = ResolverCore(
@@ -1812,15 +1796,26 @@ async def test_an_acceptance_offer_outside_its_choices_never_decides(
         LiteralInvocationRenderer(),
         launcher,
     )
-    core.queue_questions([acceptance_question()], "integration")
-    seed_offer(core, ACCEPTANCE_QUESTION_ID, "maybe")
+    core.queue_questions(
+        [
+            MaterialQuestion(
+                id="a-superseded",
+                concern_id="a",
+                prompt="superseded or a regression?",
+                choices=["superseded", "regression"],
+                closed_choices=True,
+            )
+        ],
+        "a",
+    )
+    seed_offer(core, "a-superseded", "maybe")
 
     problems = core.promote_offers()
 
     assert core.mailbox.answers() == []
     assert problems == [
-        f"{ACCEPTANCE_QUESTION_ID} was answered 'maybe', but that gate "
-        "accepts only: accept, reject"
+        "a-superseded was answered 'maybe', but that gate "
+        "accepts only: superseded, regression"
     ]
 
 
@@ -1947,7 +1942,8 @@ async def test_observer_receives_every_persisted_transition_in_order(
         ResolvePhase.REVIEW,
         ResolvePhase.INTEGRATION,
         ResolvePhase.VERIFICATION,
-        ResolvePhase.ACCEPTANCE,
+        ResolvePhase.CLEANUP,
+        ResolvePhase.COMPLETE,
     ]
     assert [item.status for item in observer.transitions] == [
         ConcernStatus.DISCOVERED,
@@ -1960,6 +1956,7 @@ async def test_observer_receives_every_persisted_transition_in_order(
         ConcernStatus.VERIFIED,
         ConcernStatus.INTEGRATING,
         ConcernStatus.INTEGRATED,
+        ConcernStatus.CLEANED,
     ]
     assert {item.concern_id for item in observer.transitions} == {"a"}
 

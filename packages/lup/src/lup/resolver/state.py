@@ -35,8 +35,7 @@ PHASE_TRANSITIONS: dict[ResolvePhase, ResolvePhase] = {
     ResolvePhase.DEPENDENCY_BASES: ResolvePhase.REVIEW,
     ResolvePhase.REVIEW: ResolvePhase.INTEGRATION,
     ResolvePhase.INTEGRATION: ResolvePhase.VERIFICATION,
-    ResolvePhase.VERIFICATION: ResolvePhase.ACCEPTANCE,
-    ResolvePhase.ACCEPTANCE: ResolvePhase.CLEANUP,
+    ResolvePhase.VERIFICATION: ResolvePhase.CLEANUP,
     ResolvePhase.CLEANUP: ResolvePhase.COMPLETE,
 }
 CONCERN_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {

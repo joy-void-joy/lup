@@ -119,13 +119,6 @@ def resolve_command(
         str | None,
         typer.Option("--run-id", help="Stable run id; defaults to the source commit"),
     ] = None,
-    human_decision: Annotated[
-        bool | None,
-        typer.Option(
-            "--accept/--reject",
-            help="Record human acceptance or rejection of the review branch",
-        ),
-    ] = None,
     answer: Annotated[
         list[str] | None,
         typer.Option(
@@ -180,7 +173,6 @@ def resolve_command(
     resolve.run_resolve(
         adapter,
         run_id,
-        human_decision,
         answer or [],
         abort,
         max(wait, resolve.SUPERVISED_WAIT_SECONDS) if supervise else wait,
