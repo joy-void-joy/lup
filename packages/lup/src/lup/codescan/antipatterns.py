@@ -23,13 +23,15 @@ intact. The detectors themselves stay regexes because that is the primitive
 form the hermetic hook runtime can carry (ruff has no plugin API, and engines
 that do — flake8, pylint, semgrep — could not run inside the hook).
 
-Refiners sharpen individual rules on top of that floor, and every one of them
-is audit-side: the hook classifies fragments of a proposed edit, which carry
-neither a parse tree nor types. `empty_collection_exempt_lines` reads the AST;
-`lup.codescan.grammar` goes further and resolves what a matched receiver is
-declared on, so `dict-get` can distinguish a mapping from an HTTP client. Both
-return `Refutation` rows this module drops — and reports the surviving
-directives for. Regex alone remains where a rule is genuinely text-shaped. The
+Refiners sharpen individual rules on top of that floor, and what a refiner
+needs decides who can run it. `refined_exempt_lines` reads the AST alone, so
+the hook applies it too and both gates judge a line the same way — a broad
+regex the kernel keeps flagging while the audit calls its marker spurious is
+a change one gate demands and the other refuses. `lup.codescan.grammar` goes
+further and resolves what a matched receiver is declared on, so `dict-get` can
+distinguish a mapping from an HTTP client; that needs a type oracle and stays
+audit-side. Both return `Refutation` rows this module drops — and reports the
+surviving directives for. Regex alone remains where a rule is text-shaped. The
 `lup.codescan.registry` index and the generated `docs/rules.md` reference list
 this family beside the boundary, spelling, and architecture rules.
 
@@ -61,7 +63,7 @@ from lup.codescan.common import (
     file_level_ignore,
     ignore_rule_ids,
 )
-from lup.policy.kernel.edit import empty_collection_exempt_lines
+from lup.policy.kernel.edit import refined_exempt_lines
 
 
 class AntiPattern(BaseModel):
@@ -79,6 +81,14 @@ class AntiPattern(BaseModel):
     is matched with comments intact. Where no tokenizer applies (the
     TypeScript-family table, text that fails to tokenize) every rule scans the
     raw line — those rules are genuinely text-shaped.
+
+    ``refinement`` states that this rule's regex is wider than the defect it
+    names, and what a match the AST clears actually is — the evidence a
+    refuted match carries. It is prose rather than the refiner itself because
+    the refiner has to live in the hermetic kernel, where a row is primitive
+    and a callable cannot be projected. Declaring it here is what makes the
+    refinement visible at the rule instead of only at its implementation, and
+    ``test_declared_refinements_match_the_kernel`` holds the two in step.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -87,6 +97,7 @@ class AntiPattern(BaseModel):
     pattern: re.Pattern[str]
     message: str
     context: RuleContext = "code"
+    refinement: str = ""
 
 
 PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
@@ -165,6 +176,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # a genuinely open dict (a registry or cache) it is one comment.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
+        refinement="a decorator naming a route, not payload access",
         message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
         "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) "
         "add `# lup: ignore[dict-get]`",
@@ -213,13 +225,13 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "`# lup: ignore[set-shape]`",
     ),
     AntiPattern(
-        # Broad regex trigger, refined by the AST: empty_collection_exempt_lines
-        # exempts deliberate defaults (__init__ state, call kwargs, annotated
-        # module and class declarations), so what reaches a verdict is the
-        # build-then-append seed. The lookbehind keeps `==`/`!=`/`<=`/`>=`
-        # comparisons out.
+        # The refiner exempts deliberate defaults — __init__ state, call
+        # kwargs, annotated module and class declarations — so what reaches a
+        # verdict is the build-then-append seed. The lookbehind keeps
+        # `==`/`!=`/`<=`/`>=` comparisons out.
         id="empty-collection",
         pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
+        refinement="a deliberate default, not a build-then-append seed",
         message="Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an "
         "append/mutate loop — build the collection with a comprehension instead, or add "
         "`# lup: ignore[empty-collection]` for a fold no comprehension can express",
@@ -503,29 +515,28 @@ reports it spurious — while an id no scanner owns still is.
 """
 
 
-EMPTY_COLLECTION_RULE_ID = "empty-collection"
+def refined_refutations(text: str, patterns: list[AntiPattern]) -> list[Refutation]:
+    """Every AST refiner's exemptions, as refutations.
 
-
-def empty_collection_refutations(
-    text: str, patterns: list[AntiPattern]
-) -> list[Refutation]:
-    """The empty-collection AST refiner's exemptions, as refutations.
-
-    The oldest refiner predates the shared shape; projecting it here means the
-    audit has exactly one notion of "matched, but refuted", whether the proof
-    came from the AST alone or from the typed grammar's type oracle.
+    Projecting them here means the audit has exactly one notion of "matched,
+    but refuted", whether the proof came from the AST alone or from the typed
+    grammar's type oracle. The exemptions are the kernel's own, so a line the
+    hook stops flagging is the same line the audit stops demanding a marker
+    for — which is what keeps one gate from requiring a change the other
+    refuses. Which rules have one is read off the rules themselves.
     """
-    if not any(ap.id == EMPTY_COLLECTION_RULE_ID for ap in patterns):
-        return []
+    exempt = refined_exempt_lines(text)
     lines = text.splitlines()
     return [
         Refutation(
-            rule_id=EMPTY_COLLECTION_RULE_ID,
+            rule_id=rule.id,
             line=line,
             subject=lines[line - 1].strip()[:80],
-            evidence="a deliberate default, not a build-then-append seed",
+            evidence=rule.refinement,
         )
-        for line in sorted(empty_collection_exempt_lines(text))
+        for rule in patterns
+        if rule.refinement and rule.id in exempt
+        for line in sorted(exempt[rule.id])
         if line <= len(lines)
     ]
 
@@ -616,10 +627,9 @@ def audit_text(
 
     A hit a refiner refuted is not a trip at all, so a directive naming that
     rule there reports "spurious" — the audit drives the cleanup of markers
-    refinement made unnecessary. Two refiners feed this: the AST exemptions
-    for deliberate empty-collection defaults (see
-    :func:`empty_collection_exempt_lines`), computed here, and whatever
-    `refutations` the caller resolved — the typed grammar in
+    refinement made unnecessary. Two sources feed this: the kernel's own AST
+    exemptions (see :func:`refined_exempt_lines`), computed here, and
+    whatever `refutations` the caller resolved — the typed grammar in
     `lup.codescan.grammar` passes the sites whose receiver a type oracle
     proved outside the rule's family. With no refutations supplied and no
     oracle behind them, every broad regex verdict stands.
@@ -647,8 +657,7 @@ def audit_text(
     context = PythonContext.parse(text)
     refuted = {
         (refutation.rule_id, refutation.line)
-        for refutation in empty_collection_refutations(text, patterns)
-        + (refutations or [])
+        for refutation in refined_refutations(text, patterns) + (refutations or [])
     }
 
     def inline_directive(line_no: int, line: str) -> re.Match[str] | None:

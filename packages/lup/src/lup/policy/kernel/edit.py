@@ -263,6 +263,43 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
     return exempt
 
 
+def dict_get_exempt_lines(source: str) -> set[int]:
+    """Return `.get(` lines whose AST context makes the call a decorator.
+
+    A decorator is not payload access. ``@app.get("/path")`` names a route on
+    a framework object, and no schema is being read out of a dict. Which
+    lines are decorators is decidable from the tree alone, so this holds for
+    a fragment that carries no types — and that is what lets a suppression
+    here be retired instead of being demanded by the audit and refused by
+    the kernel.
+    """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return set()
+    exempt: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            for decorator in node.decorator_list:
+                last = decorator.end_lineno or decorator.lineno
+                exempt.update(range(decorator.lineno, last + 1))
+    return exempt
+
+
+def refined_exempt_lines(source: str) -> dict[str, set[int]]:
+    """Every rule whose broad regex an AST context refines, and where.
+
+    A rule earns an entry when its pattern is wider than the defect it names
+    and the difference is decidable without types. Both halves of the gate
+    read this map — the kernel to stop flagging, the audit to refute — so
+    the two cannot demand opposite things about one line.
+    """
+    return {
+        "empty-collection": empty_collection_exempt_lines(source),
+        "dict-get": dict_get_exempt_lines(source),
+    }
+
+
 def added_line_numbers(before: str | None, after: str | None) -> dict[int, bool]:
     """Identify added line positions with duplicate-line accounting."""
     remaining = before.splitlines() if before is not None else []
@@ -387,7 +424,7 @@ def antipattern_decision(
         mask_python_string_literals(after) if python_source else original_lines
     )
     code_lines = python_code_lines(after) if python_source else original_lines
-    exempt = empty_collection_exempt_lines(after) if python_source else set()
+    exempt = refined_exempt_lines(after) if python_source else {}
     comment_columns = python_comment_columns(after) if python_source else None
     has_file_ignore, disabled_ids = file_ignore(after)
     for number in added:
@@ -416,7 +453,7 @@ def antipattern_decision(
             stripped = code if tokenized and row["context"] == "code" else masked
             if not stripped:
                 continue
-            if rule_id == "empty-collection" and number in exempt:
+            if rule_id in exempt and number in exempt[rule_id]:
                 continue
             if re.search(row["pattern"], stripped) is None:
                 continue
@@ -497,22 +534,29 @@ def decide_edit(
     adjacent, so an ungranted session sees the unchanged lattice.
 
     The marker gate counts review notes only, because the two marker families
-    are gated by different things. Deleting feedback before its concern is
+    are gated in opposite directions. Deleting feedback before its concern is
     resolved is the act the conventions forbid, so notes gate on a changed
-    count. Suppressions are already gated where they belong: declaring one is
-    an added line carrying an `ignore` directive, which
-    :func:`antipattern_decision` asks about, and retiring a stale one is
-    ordinary tidying. Removing a suppression that still covers a live
-    violation needs no gate either — the same decision sees the violation
-    resurface and denies.
+    count. A suppression is gated where it is declared — an added line
+    carrying an `ignore` directive, which :func:`antipattern_decision` asks
+    about — while retiring one needs no gate at all: the same decision
+    re-reads the uncovered line, allows it where nothing trips, and denies
+    where the violation is still live. What makes that verdict trustworthy is
+    :func:`refined_exempt_lines`, without which a rule broader than the defect
+    it names holds its own suppression in place forever.
+
+    Each gate reaches as far as its own reason. Anti-patterns and the size
+    gate describe how production code should read and stop at production;
+    the marker gate follows the feedback instead and stops only at scratch,
+    where nothing persists to be read.
     """
     granted = allowances or []
     previous = before or ""
     updated = after or ""
+    role = path_role(path, path_roles or [])
     # The conventions describe how production code should read. A test's
     # subject is production's behaviour, and scratch is disposable, so
     # neither is judged against them.
-    if after is not None and path_role(path, path_roles or []) == "production":
+    if after is not None and role == "production":
         antipattern = antipattern_decision(
             before, after, antipattern_rows, python_source, granted
         )
@@ -531,9 +575,13 @@ def decide_edit(
     )
     if protected is not None and not (autonomous and protected["allow_autonomous"]):
         return KernelDecision("ask", protected["reason"])
-    if review_marker_count(previous, python_source) != review_marker_count(
-        updated, python_source
-    ):
+    # Feedback is feedback wherever it is left, so this gate follows the file
+    # rather than the conventions: a note on a test still names work somebody
+    # owes. Scratch is the exception, and only because nothing there persists
+    # to be read — a note in a disposable tree has no reader to protect.
+    if role != "scratch" and review_marker_count(
+        previous, python_source
+    ) != review_marker_count(updated, python_source):
         return KernelDecision("ask", "edit changes inline review markers")
     if before is None:
         if autonomous:
@@ -541,7 +589,10 @@ def decide_edit(
         return KernelDecision("ask", "full-file writes require approval")
     if after is None or after == "":
         return KernelDecision("allow", "pure deletion")
-    if real_added_line_count(before, after, python_source) > maximum_added_lines:
+    if (
+        role == "production"
+        and real_added_line_count(before, after, python_source) > maximum_added_lines
+    ):
         if autonomous:
             return KernelDecision("allow", "reviewed autonomous edit")
         return KernelDecision("defer", "edit exceeds the small-change gate")

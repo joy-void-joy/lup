@@ -15,7 +15,11 @@ from lup.codescan.antipatterns import (
     audit_text,
 )
 from lup.policy.bundle import bundled_antipattern_rows
-from lup.policy.kernel.edit import empty_collection_exempt_lines
+from lup.policy.kernel.edit import (
+    dict_get_exempt_lines,
+    empty_collection_exempt_lines,
+    refined_exempt_lines,
+)
 from lup.policy.kernel.rows import AntiPatternRow
 
 
@@ -295,6 +299,41 @@ def blocks(lines):
             body.append(line)
     return out
 """
+
+
+ROUTE_DECORATOR = """\
+@app.get("/api/runs")
+async def read_runs() -> None:
+    payload.get("key")
+
+
+@app.websocket(
+    "/api/stream",
+)
+def stream() -> None:
+    pass
+"""
+
+
+def test_refiner_exempts_route_decorators() -> None:
+    """`.get(` on a decorator names a route; the call below it is real."""
+    assert dict_get_exempt_lines(ROUTE_DECORATOR) == {1, 6, 7, 8}
+
+
+def test_refiner_survives_a_fragment_it_cannot_parse() -> None:
+    assert dict_get_exempt_lines("@app.get(\n") == set()
+
+
+def test_declared_refinements_match_the_kernel() -> None:
+    """A rule declaring a refinement is one the kernel actually refines.
+
+    The refiner lives in the hermetic kernel and the prose on the rule, so
+    nothing but this holds them together — a refiner added without a
+    declaration is invisible where the rule is read, and a declaration
+    without a refiner promises an exemption no gate applies.
+    """
+    declared = {rule.id for rule in PYTHON_ANTI_PATTERNS if rule.refinement}
+    assert declared == set(refined_exempt_lines(""))
 
 
 def test_refiner_exempts_deliberate_defaults() -> None:
