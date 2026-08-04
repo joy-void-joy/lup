@@ -191,7 +191,13 @@ def main():
             else False
         )
         decision = dispatch(payload, permission_request)
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+    # Every way this can fail means one thing — the call went unjudged — and
+    # one answer is right for all of them. Naming the exceptions instead is
+    # what let a plain unreadable file escape, and a traceback exit is not the
+    # fail-closed exit this boundary takes, so the call proceeded ungoverned.
+    # Nothing is swallowed: the reason carries whatever went wrong, and an
+    # interrupt still passes through as the BaseException it is.
+    except Exception as error:
         sys.stderr.write(f"Malformed hook input requires approval: {error}")
         raise SystemExit(2) from error
     if permission_request and decision.effect == "allow":

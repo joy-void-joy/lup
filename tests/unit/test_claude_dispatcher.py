@@ -101,3 +101,18 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
     assert isinstance(allowed, dict)
     assert denied["permissionDecision"] == "deny"
     assert allowed["permissionDecision"] == "allow"
+
+
+def test_an_unreadable_target_asks_instead_of_letting_the_edit_through() -> None:
+    """Reading the edited file is part of judging it, so a read failure asks.
+
+    `OSError` sat outside the handled set, so an unreadable target raised past
+    it and the script died with a traceback. That exit reaches PreToolUse as a
+    non-blocking error, which lets the very call the dispatcher could not judge
+    proceed — the inverse of the property this boundary exists to hold.
+    """
+    decision = decide(edit_payload("packages/lup/src/lup/absent.py", "a", "b", False))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "ask"

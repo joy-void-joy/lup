@@ -177,7 +177,13 @@ def rendered(decision):
 def main():
     try:
         decision = dispatch(json.load(sys.stdin))
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+    # Every way this can fail means one thing — the call went unjudged — and
+    # one answer is right for all of them. Naming the exceptions instead is
+    # what let a plain unreadable file escape, and the traceback exit reaches
+    # PreToolUse as a non-blocking error, so the call proceeded ungoverned.
+    # Nothing is swallowed: the reason carries whatever went wrong, and an
+    # interrupt still passes through as the BaseException it is.
+    except Exception as error:
         decision = KernelDecision(
             "ask", f"Malformed hook input requires approval: {error}"
         )
