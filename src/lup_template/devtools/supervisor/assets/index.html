@@ -571,17 +571,14 @@
         const review = state.review;
         element("review-section").hidden = !review;
         if (!review) return;
-        const verdict = review.final_review.accepted ? "accepted" : "rejected";
-        const residual = review.final_review.residual.length
-          ? `<p class="muted">Residual: ${escapeHtml(review.final_review.residual.join("; "))}</p>`
-          : "";
         const checks = review.verification
           .map((check) => `<tr><td>${escapeHtml(check.name)}</td><td>${check.passed ? "passed" : "failed"}</td><td class="muted">exit ${check.exit_code}</td></tr>`)
           .join("");
         element("review-body").innerHTML =
-          `<p><code>${escapeHtml(review.review_branch)}</code></p><p>Reviewer ${escapeHtml(verdict)}: ${escapeHtml(review.final_review.reason)}</p>${residual}<table><tbody>${checks}</tbody></table>`;
+          `<p><code>${escapeHtml(review.review_branch)}</code></p><table><tbody>${checks}</tbody></table>`;
         element("review-hand-off").textContent =
-          "This branch is yours to land — the resolver takes no decision here.";
+          "This branch is yours to land. What is recorded here is mechanical — " +
+          "whether the merged concerns are jointly right is read from the trace above.";
       }
 
       function renderFailures() {

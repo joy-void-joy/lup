@@ -47,7 +47,6 @@ from lup.resolver.models import (
     ConcernProgress,
     ConcernStatus,
     DependencyBase,
-    FinalReview,
     IntegrationRecord,
     InventoryNote,
     MaterialQuestion,
@@ -868,7 +867,6 @@ async def test_failed_integration_verification_is_not_marked_successful(
 
     persisted = core.repository.load()
     assert persisted.phase == ResolvePhase.VERIFICATION
-    assert persisted.final_review is None
     assert persisted.integration is not None
     assert not persisted.integration.completed
     assert [record.passed for record in persisted.verification] == [False]
@@ -1077,8 +1075,6 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
         }
 
     def reviewer_response(root: Path, output_name: str) -> JsonObject:
-        if output_name == FinalReview.__name__:
-            return {"accepted": True, "reason": "combined branch verified"}
         if output_name != ReviewReport.__name__:
             raise AssertionError(output_name)
         identifier = root.name
@@ -1142,9 +1138,7 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
 
     manifest = await core.run(inventory)
 
-    assert manifest.final_review == FinalReview(
-        accepted=True, reason="combined branch verified"
-    )
+    assert all(record.passed for record in manifest.verification)
     assert all(outcome.verified for outcome in manifest.outcomes)
     assert {outcome.concern_id for outcome in manifest.outcomes} == {"a", "b", "c"}
     assert worker_calls == {"a": 2, "b": 1, "c": 1}
@@ -1255,8 +1249,6 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
         }
 
     def reviewer_response(root: Path, output_name: str) -> JsonObject:
-        if output_name == FinalReview.__name__:
-            return {"accepted": True, "reason": "combined branch verified"}
         assert output_name == ReviewReport.__name__
         return {
             "concern_id": "a",
@@ -1306,9 +1298,7 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
     resumed = build_core()
     manifest = await resumed.resume()
 
-    assert manifest.final_review == FinalReview(
-        accepted=True, reason="combined branch verified"
-    )
+    assert all(record.passed for record in manifest.verification)
     assert [outcome.verified for outcome in manifest.outcomes] == [True]
     assert resumed.repository.load().phase == ResolvePhase.COMPLETE
 
@@ -1441,8 +1431,6 @@ async def test_revision_exhaustion_soft_fails_and_blocks_dependents(
         }
 
     def reviewer_response(root: Path, output_name: str) -> JsonObject:
-        if output_name == FinalReview.__name__:
-            return {"accepted": True, "reason": "verified without the failed concern"}
         assert output_name == ReviewReport.__name__
         identifier = root.name
         if identifier == "a":
@@ -1648,8 +1636,6 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
         }
 
     def reviewer_response(_root: Path, output_name: str) -> JsonObject:
-        if output_name == FinalReview.__name__:
-            return {"accepted": True, "reason": "combined branch verified"}
         return {
             "concern_id": "a",
             "accepted": True,
@@ -1704,7 +1690,7 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
 
     assert worker_calls["a"] == 2
     assert [outcome.verified for outcome in manifest.outcomes] == [True]
-    assert manifest.final_review is not None
+    assert all(record.passed for record in manifest.verification)
 
 
 @pytest.mark.asyncio
@@ -1731,8 +1717,6 @@ async def test_a_finished_run_releases_itself_without_a_human_gate(
         }
 
     def reviewer_response(_root: Path, output_name: str) -> JsonObject:
-        if output_name == FinalReview.__name__:
-            return {"accepted": True, "reason": "combined branch verified"}
         return {
             "concern_id": "a",
             "accepted": True,
@@ -1769,7 +1753,7 @@ async def test_a_finished_run_releases_itself_without_a_human_gate(
         ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
     )
 
-    assert manifest.final_review is not None
+    assert all(record.passed for record in manifest.verification)
     assert core.repository.load().phase == ResolvePhase.COMPLETE
     assert [record.action for record in manifest.cleanup] == ["removed", "retained"]
 
@@ -1963,8 +1947,6 @@ def planning_reviewer(plan: JsonObject) -> ResolverResponse:
     def respond(root: Path, output_name: str) -> JsonObject:
         if output_name == ConcernInventory.__name__:
             return plan
-        if output_name == FinalReview.__name__:
-            return {"accepted": True, "reason": "combined branch verified"}
         return {
             "concern_id": root.name,
             "accepted": True,
@@ -2058,7 +2040,7 @@ async def test_a_concern_admitted_into_a_parked_run_finishes_beside_the_original
     assert sorted(
         outcome.concern_id for outcome in manifest.outcomes if outcome.verified
     ) == ["a", "b"]
-    assert manifest.final_review is not None
+    assert all(record.passed for record in manifest.verification)
     persisted = resumed.repository.load()
     assert persisted.answers is not None
     assert {answer.question_id for answer in persisted.answers.answers} == {
@@ -2311,8 +2293,6 @@ async def test_observer_receives_every_persisted_transition_in_order(
         }
 
     def reviewer_response(_root: Path, output_name: str) -> JsonObject:
-        if output_name == FinalReview.__name__:
-            return {"accepted": True, "reason": "combined branch verified"}
         return {
             "concern_id": "a",
             "accepted": True,
@@ -2406,8 +2386,6 @@ def noted_concern() -> Concern:
 
 
 def accepting_reviewer(_root: Path, output_name: str) -> JsonObject:
-    if output_name == FinalReview.__name__:
-        return {"accepted": True, "reason": "verified"}
     return {
         "concern_id": "a",
         "accepted": True,

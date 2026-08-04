@@ -529,14 +529,6 @@ class VerificationRecord(BaseModel):
     exit_code: int
 
 
-class FinalReview(BaseModel):
-    model_config = FROZEN
-
-    accepted: bool
-    reason: str
-    residual: list[str] = Field(default_factory=list)
-
-
 class CleanupRecord(BaseModel):
     model_config = FROZEN
 
@@ -708,7 +700,6 @@ class ResolveState(BaseModel):
     outcomes: list[ConcernOutcome] = Field(default_factory=list)
     integration: IntegrationRecord | None = None
     verification: list[VerificationRecord] = Field(default_factory=list)
-    final_review: FinalReview | None = None
     cleanup: list[CleanupRecord] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     resume_from: ResolvePhase | None = None
@@ -739,5 +730,4 @@ class ResolveManifest(BaseModel):
     review_branch: str
     outcomes: list[ConcernOutcome]
     verification: list[VerificationRecord]
-    final_review: FinalReview | None = None
     cleanup: list[CleanupRecord] = Field(default_factory=list)

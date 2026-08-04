@@ -862,9 +862,7 @@ def run_resolve(
                 )
                 report_awaiting(parked, adapter, resolved_run_id, planned)
                 return
-            if manifest.final_review is not None:
-                typer.echo(f"Review branch: {manifest.review_branch}")
-                typer.echo(manifest.final_review.model_dump_json(indent=2))
+            typer.echo(f"Review branch: {manifest.review_branch}")
             typer.echo(manifest.model_dump_json(indent=2))
 
         async with spawned_supervisor(

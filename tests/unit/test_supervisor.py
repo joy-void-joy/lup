@@ -32,7 +32,7 @@ from lup.resolver.models import (
     Concern,
     ConcernProgress,
     ConcernStatus,
-    FinalReview,
+    IntegrationRecord,
     MaterialQuestion,
     QuestionAnswer,
     QuestionBatch,
@@ -82,7 +82,7 @@ def persisted_state(
     phase: ResolvePhase = ResolvePhase.WORKERS,
     questions: QuestionBatch | None = None,
     answers: AnswerBatch | None = None,
-    final_review: FinalReview | None = None,
+    integration: IntegrationRecord | None = None,
 ) -> ResolveState:
     return ResolveState(
         config_digest="config-sha",
@@ -100,7 +100,7 @@ def persisted_state(
         progress=[ConcernProgress(concern_id="alpha")],
         questions=questions,
         answers=answers,
-        final_review=final_review,
+        integration=integration,
     )
 
 
@@ -316,12 +316,23 @@ async def test_a_broadcast_reaches_every_actor(tmp_path: Path) -> None:
 async def test_the_review_branch_is_reported_with_no_decision_to_take(
     tmp_path: Path,
 ) -> None:
-    """The gate retired, so the page reports the verdict rather than asking."""
+    """The gate retired, so the page hands the branch over rather than asking.
+
+    What it reports is mechanical — the branch and what verification did.
+    There is no verdict to render because nothing persists one: whether the
+    merged concerns are jointly right is read off the trace by whoever lands
+    the branch, and that reader is the only actor able to act on the answer.
+    """
     build_run(
         tmp_path,
         persisted_state(
             phase=ResolvePhase.VERIFICATION,
-            final_review=FinalReview(accepted=True, reason="clean"),
+            integration=IntegrationRecord(
+                branch="resolve/run-1/review",
+                worktree=tmp_path / "integration",
+                concerns=["alpha"],
+                completed=True,
+            ),
         ),
     )
 
@@ -329,7 +340,7 @@ async def test_the_review_branch_is_reported_with_no_decision_to_take(
         response = await client.get("/api/runs/run-1")
         gone = await client.post("/api/runs/run-1/decision", json={"accepted": True})
 
-    assert response.json()["review"]["final_review"]["reason"] == "clean"
+    assert response.json()["review"]["review_branch"] == "resolve/run-1/review"
     assert gone.status_code == 404
 
 

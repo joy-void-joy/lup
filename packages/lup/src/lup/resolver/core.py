@@ -55,7 +55,6 @@ from lup.resolver.models import (
     ConcernExecution,
     ConcernOutcome,
     DependencyBase,
-    FinalReview,
     IntegrationRecord,
     MaterialQuestion,
     MergeReport,
@@ -828,7 +827,11 @@ class ResolverCore:
             state = state.model_copy(update={"phase": ResolvePhase.REVIEW})
             self.persist(state)
             state = await self.integrate(state, outcomes)
-        elif state.final_review is None:
+        elif state.integration is None or not state.integration.completed:
+            # A resumed run re-enters integration until the record says it
+            # finished. `completed` is written once verification passes, which
+            # is the last mechanical fact the run produces — the judgement on
+            # top of it belongs to whoever opens the journal afterwards.
             state = await self.integrate(state, outcomes)
         self.land_nested(state)
         return self.manifest(self.release(state))
@@ -2097,20 +2100,6 @@ class ResolverCore:
         if any(not record.passed for record in verification):
             raise ResolverInvariantError("persisted integration verification failed")
 
-        review_prompt = (
-            "Perform an independent final review of the dedicated review branch. "
-            "The user's source branch must remain untouched.\n\n"
-            f"{self.invocation_renderer.render(self.spec.review_skill)}\n\n"
-            f"Integration:\n{integration.model_dump_json(indent=2)}\n\n"
-            f"Verification:\n"
-            + "\n".join(record.model_dump_json() for record in verification)
-        )
-        reviewed = await self.actors.session(
-            ActorRef(kind="reviewer", id="integration"),
-            self.reviewer_factory(integration.worktree),
-        ).turn(turn_request(TurnInput(text=review_prompt), FinalReview))
-        state = state.model_copy(update={"final_review": reviewed.output})
-        self.persist(state)
         return state
 
     async def admit(self, request: AdmissionRequest) -> ConcernAdmission:
@@ -2458,6 +2447,5 @@ class ResolverCore:
             ),
             outcomes=state.outcomes,
             verification=state.verification,
-            final_review=state.final_review,
             cleanup=state.cleanup,
         )

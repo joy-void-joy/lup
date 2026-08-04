@@ -24,7 +24,6 @@ from lup.resolver.mailbox import (
 )
 from lup.resolver.models import (
     ConcernStatus,
-    FinalReview,
     MaterialQuestion,
     QuestionAnswer,
     ResolvePhase,
@@ -82,12 +81,17 @@ class PendingQuestionView(BaseModel):
 
 
 class ReviewView(BaseModel):
-    """The review-branch verdict awaiting a human accept or reject."""
+    """The branch this run built and what mechanically holds about it.
+
+    No verdict. Whether twelve merged concerns are jointly right is a
+    judgement, and the actor that can act on the answer is the agent that
+    lands the branch — so it is produced from the journal by whoever opens
+    the run, not persisted here by a reviewer nothing consumed.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     review_branch: str
-    final_review: FinalReview
     verification: list[VerificationRecord]
 
 
@@ -378,10 +382,9 @@ def supervisor_state(
     review = (
         ReviewView(
             review_branch=review_branch_name(state),
-            final_review=state.final_review,
             verification=state.verification,
         )
-        if state.final_review is not None
+        if state.integration is not None and state.integration.completed
         else None
     )
     return SupervisorState(
