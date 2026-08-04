@@ -1,6 +1,6 @@
 """Lup's deliberately small, provider-neutral runtime front door."""
 
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     SessionHandle,
     TurnHandle,

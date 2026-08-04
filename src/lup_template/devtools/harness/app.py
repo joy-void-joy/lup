@@ -136,6 +136,24 @@ def resolve_command(
             "recorded evidence. Requires the run's process to have exited.",
         ),
     ] = None,
+    admit: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--admit",
+            help="Admit work discovered mid-run into this run, described in "
+            "the human's own words (repeatable). Only the new evidence is "
+            "planned; recorded answers and completed work are kept.",
+        ),
+    ] = None,
+    admit_note: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--admit-note",
+            help="Admit a `# lup:` note already written in the tree, as "
+            "<file>:<line> (repeatable). Its text is read from the file, so "
+            "the admitted concern stays traceable to code.",
+        ),
+    ] = None,
     wait: Annotated[
         float,
         typer.Option(
@@ -193,6 +211,7 @@ def resolve_command(
         resolve.SupervisorSpawn(
             enabled=supervise, port=supervise_port, linger=supervise_linger
         ),
+        resolve.admission_request(admit or [], admit_note or []),
     )
 
 

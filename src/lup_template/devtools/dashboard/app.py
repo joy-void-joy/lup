@@ -131,11 +131,11 @@ def create_dashboard() -> FastAPI:
         .read_text("utf-8")
     )
 
-    @dashboard.get("/", response_class=HTMLResponse)  # lup: ignore[dict-get] — route
+    @dashboard.get("/", response_class=HTMLResponse)
     async def dashboard_home() -> HTMLResponse:
         return HTMLResponse(html)
 
-    @dashboard.get("/api/setup")  # lup: ignore[dict-get] — route decorator
+    @dashboard.get("/api/setup")
     async def setup_status() -> DashboardState:
         return dashboard_state()
 

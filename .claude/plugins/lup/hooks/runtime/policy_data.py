@@ -1,10 +1,18 @@
-"""Generated application-owned policy data.
+# Generated from lup.policy.bundle by `uv run lup-devtools harness generate all` — edit the source, not this file.
+# See docs/generated-artifacts.md.
 
-Rendered from lup.policy.bundle by
-`uv run lup-devtools harness generate all` — do not edit directly.
-"""
+"""Generated application-owned policy data."""
 
-ALLOWED_FETCH_SCOPES = [
+from kernel.rows import (
+    AntiPatternRow,
+    PathRoleRow,
+    PathRuleRow,
+    ShellRuleRow,
+    UrlScopeRow,
+)
+
+
+ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
     {
         "scheme": "https",
         "host": "docs.claude.com",
@@ -127,9 +135,9 @@ ALLOWED_FETCH_SCOPES = [
     },
 ]
 
-DENIED_FETCH_SCOPES = ()
+DENIED_FETCH_SCOPES: list[UrlScopeRow] = []
 
-PATH_RULES = [
+PATH_RULES: list[PathRuleRow] = [
     {
         "kind": "subtree",
         "value": ".claude",
@@ -174,7 +182,7 @@ PATH_RULES = [
     },
 ]
 
-ANTI_PATTERN_ROWS = {
+ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
     ".js": [
         {
             "id": "as-any",
@@ -1201,7 +1209,7 @@ ANTI_PATTERN_ROWS = {
     ],
 }
 
-PATH_ROLES = [
+PATH_ROLES: list[PathRoleRow] = [
     {
         "root": "tests",
         "role": "test",
@@ -1212,7 +1220,7 @@ PATH_ROLES = [
     },
 ]
 
-SHELL_RULES = [
+SHELL_RULES: list[ShellRuleRow] = [
     {
         "command": "ls",
         "subcommand": "",
@@ -4265,7 +4273,7 @@ SHELL_RULES = [
     },
 ]
 
-AUTONOMOUS_AGENT_IDENTITIES = [
+AUTONOMOUS_AGENT_IDENTITIES: list[str] = [
     "resolver-worker",
     "lup:resolver-worker",
 ]

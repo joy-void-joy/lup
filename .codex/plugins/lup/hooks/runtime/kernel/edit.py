@@ -243,7 +243,7 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
                     match statement:
                         case ast.Assign(value=value) | ast.AnnAssign(value=value):
                             mark(value)
-            case ast.ClassDef(body=body):
+            case ast.Module(body=body) | ast.ClassDef(body=body):
                 for statement in body:
                     if isinstance(statement, ast.AnnAssign):
                         mark(statement.value)

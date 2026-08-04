@@ -51,6 +51,13 @@ class ConcernStatus(StrEnum):
     FAILED = "failed"
 
 
+class ConcernOrigin(StrEnum):
+    """How one concern entered the run that owns it."""
+
+    INVENTORY = "inventory"
+    ADMITTED = "admitted"
+
+
 class SourceSnapshot(BaseModel):
     model_config = FROZEN
 
@@ -231,25 +238,42 @@ class Concern(ConcernShape):
     """One generalized concern and its complete dependency/acceptance inputs."""
 
     notes: list[ReviewNote] = Field(default_factory=list)
+    evidence: str = Field(
+        default="",
+        description=(
+            "What a human said that no note in the tree carries. Recorded "
+            "beside `notes` rather than in place of them, so a reviewer can "
+            "tell a concern traceable to code from one traceable only to a "
+            "statement someone made."
+        ),
+    )
+    origin: ConcernOrigin = ConcernOrigin.INVENTORY
     eligible: bool = True
     integration_approved: bool = False
 
+    @model_validator(mode="after")
+    def admission_is_grounded(self) -> "Concern":
+        """An admitted concern names the evidence that raised it mid-run."""
+        if self.origin is ConcernOrigin.ADMITTED and not (self.notes or self.evidence):
+            raise ValueError(f"admitted concern {self.id!r} cites no evidence")
+        return self
+
 
 class PlannedConcern(ConcernShape):
-    """One planned concern referencing review notes by zero-based position.
+    """One planned concern referencing its evidence by zero-based position.
 
-    The planner never echoes note content — positional references make copy
-    fidelity a mechanical property instead of a model obligation. References
-    are shared rather than exclusive: a note raising several issues is
-    referenced by each concern that answers one of them.
+    The planner never echoes evidence content — positional references make
+    copy fidelity a mechanical property instead of a model obligation.
+    References are shared rather than exclusive: a note raising several
+    issues is referenced by each concern that answers one of them.
     """
 
-    note_indexes: list[int] = Field(min_length=1)
+    evidence_indexes: list[int] = Field(min_length=1)
 
     @model_validator(mode="after")
     def references_are_distinct(self) -> "PlannedConcern":
-        if len(self.note_indexes) != len(dict.fromkeys(self.note_indexes)):
-            raise ValueError("a concern may reference each note only once")
+        if len(self.evidence_indexes) != len(dict.fromkeys(self.evidence_indexes)):
+            raise ValueError("a concern may reference each piece of evidence once")
         return self
 
 
@@ -528,12 +552,33 @@ class ResolveInventory(BaseModel):
 
 
 class ResolveRequest(BaseModel):
-    """Unorganized review evidence supplied to the shared inventory phase."""
+    """Unorganized review evidence supplied to the shared inventory phase.
+
+    Evidence is positional across both lists: notes occupy indexes ``0`` to
+    ``len(notes) - 1`` and statements continue from there, so one planning
+    turn references either kind the same way.
+    """
 
     model_config = FROZEN
 
     source: SourceSnapshot
-    notes: list[InventoryNote] = Field(min_length=1)
+    notes: list[InventoryNote] = Field(default_factory=list)
+    statements: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Evidence a human gave in their own words, for work nothing in "
+            "the tree carries a note for."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def evidence_is_present(self) -> "ResolveRequest":
+        if not self.notes and not self.statements:
+            raise ValueError("a resolve request needs at least one piece of evidence")
+        return self
+
+    def evidence_count(self) -> int:
+        return len(self.notes) + len(self.statements)
 
 
 class ConcernInventory(BaseModel):
@@ -554,6 +599,38 @@ class ConcernInventory(BaseModel):
         if len(identifiers) != len(dict.fromkeys(identifiers)):
             raise ValueError("planned concern ids must be unique")
         return self
+
+
+class AdmissionRequest(BaseModel):
+    """Evidence discovered while a run was already moving.
+
+    Only this evidence is planned; the run's existing concerns, recorded
+    answers, and completed work are carried forward untouched, because the
+    moment a run is most informative about what else needs doing is the
+    moment it can least afford to be re-derived.
+    """
+
+    model_config = FROZEN
+
+    notes: list[InventoryNote] = Field(default_factory=list)
+    statements: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def evidence_is_present(self) -> "AdmissionRequest":
+        if not self.notes and not self.statements:
+            raise ValueError("an admission needs at least one piece of evidence")
+        return self
+
+
+class ConcernAdmission(BaseModel):
+    """What one mid-run admission added to a live run."""
+
+    model_config = FROZEN
+
+    run_id: str
+    phase: ResolvePhase
+    concerns: list[Concern]
+    questions: list[MaterialQuestion]
 
 
 class ResolverConfig(BaseModel):

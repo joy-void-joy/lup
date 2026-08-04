@@ -8,14 +8,38 @@ all` is the read-only drift check CI runs. The trees are committed so the
 repository is directly launchable as a native Claude/Codex plugin with no
 build step, and so generated output is reviewed like any other change.
 
-Artifacts whose format allows comments open with a generated-from banner
-naming their canonical source and the regeneration command. Two families
-cannot carry one, and this page is their provenance record instead:
+`docs/rules.md` belongs to no single native tree and is rendered by
+`uv run lup-devtools dev rules`, which its own banner names. The `all`
+selector reaches it too, so `harness generate all` and `harness check all`
+settle every generated artifact in the repository and a contributor needs
+only the one command.
 
-- **JSON artifacts** (manifests, hooks, settings, evidence) have no comment
-  syntax.
-- **Skill, command, and agent Markdown** is verbatim model-facing prompt text
-  after its frontmatter; a banner would be injected into every prompt.
+## The generated-from banner
+
+Artifacts whose format allows comments open with a generated-from banner
+naming their canonical source and the exact command that rebuilds them. There
+is one definition of that banner —
+`packages/lup/src/lup/harness/banner.py` — parameterized by source, command,
+any target-specific notes, and the comment syntax a
+`CommentRouter` resolves from the file's suffix (`<!-- -->` for Markdown, `#`
+for Python, TOML, rules and shell, `//` for JavaScript and TypeScript). Two
+banners therefore differ only where those parameters differ.
+
+Every artifact either carries a banner or declares why it carries none, and
+`validated_tree` fails generation for one that does neither — so a new
+generated file cannot quietly ship without provenance. The two declared
+exemptions are:
+
+- **Prompt text** — skill, command, and agent Markdown is verbatim
+  model-facing text after its frontmatter, so a banner would be injected into
+  every prompt.
+- **Verbatim copies** — the policy kernel modules, the `apply_patch` decoder,
+  and `file_suggest.sh` are byte-identical copies of their sources, and a
+  banner would break the diff that proves the copy faithful.
+
+JSON artifacts (manifests, hooks, settings, evidence) need no declaration at
+all: no route claims them because the format has no comment syntax. This page
+is the provenance record for every file in all three groups.
 
 ## One guidance document, two renderings
 
@@ -63,9 +87,11 @@ renderers and the policy bundle).
 | `.claude/plugins/lup/agents/<agent>.md`, `.codex/agents/<agent>.toml` | `content/agents/<agent>.py` |
 | `.claude/plugins/lup/.claude-plugin/plugin.json`, `.claude/plugins/.claude-plugin/marketplace.json` | `catalog.py` via `lup.adapters.claude.harness` |
 | `.codex/plugins/lup/.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json` | `catalog.py` via `lup.adapters.codex.harness` |
-| `.claude/plugins/lup/hooks/`, `.codex/plugins/lup/hooks/` (`hooks.json`, `scripts/policy.py`, `runtime/policy_data.py`, `runtime/evidence.json`) | `catalog.py` `HookSet` (with `lup.policy.shell_rules` and `lup.codescan.antipatterns`) via the adapter hook renderers and `lup.policy.bundle` |
+| `.claude/plugins/lup/hooks/`, `.codex/plugins/lup/hooks/` (`hooks.json`, `scripts/policy.py`, `runtime/policy_data.py`, `runtime/evidence.json`) | `catalog.py` `HookSet` (with `content/shell_vocabulary.py` and `lup.codescan.antipatterns`) via the adapter hook renderers and `lup.policy.bundle` |
 | `.claude/plugins/lup/hooks/runtime/kernel.py`, `.codex/plugins/lup/hooks/runtime/kernel.py` | verbatim copy of `packages/lup/src/lup/policy/kernel.py` (kept byte-identical so it can be diffed against the canonical module, whose docstring names the copy relationship) |
 | `.codex/config.toml` | `lup.adapters.codex.harness` |
+| `.codex/rules/lup.rules` | `lup.policy.shell_rules` plus the `HookSet` shell-rule extension, via `lup.adapters.codex.harness` |
+| `docs/rules.md` | `lup_template.devtools.dev.rules` from `lup.codescan.registry` |
 | `.claude/.lup-ownership.json`, `.codex/.lup-ownership.json` | written by `lup.harness.ownership` from the generation result |
 
 See `docs/harness.md` for how generation, reconciliation, and launch fit

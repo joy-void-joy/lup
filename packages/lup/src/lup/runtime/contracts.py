@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from lup.runtime.models import (
         LiveTurnEvent,
         SessionHandle,
-        SessionId,
         TurnEvent,
         TurnHandle,
         TurnId,
@@ -22,16 +21,6 @@ if TYPE_CHECKING:
         TurnResult,
         TurnToolBinding,
     )
-
-
-class SessionFactory(ABC):
-    """Open configured conversations."""
-
-    @abstractmethod
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        """Open a new or resumed session."""
 
 
 class Session(ABC):

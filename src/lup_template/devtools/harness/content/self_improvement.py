@@ -8,11 +8,10 @@ review, or meta skill, each of which loads its own instructions.
 import lup.harness.models as models
 
 DOCUMENT = models.PromptDocument(
+    source=__name__,
     parts=[
         models.TextPart(
-            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/self_improvement.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
-
-# Self-Improvement Loop
+            text=r"""# Self-Improvement Loop
 
 How to diagnose agent failures and turn them into durable changes. For daily
 development guidance, see [.claude/CLAUDE.md](../.claude/CLAUDE.md); for the
@@ -89,5 +88,5 @@ When the agent fails, the instinct is to patch the prompt. Resist it. Instead, t
 4. What data would we need to validate this change worked?
 """
         ),
-    ]
+    ],
 )

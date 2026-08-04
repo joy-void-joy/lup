@@ -2,21 +2,25 @@
 
 `lup.adapters.claude.hooks` is the boundary every permission and gate hook
 crosses on the Claude backend. These pin the translation contract: each
-path-bearing tool normalizes to one ``tool_path``, structured tool
-responses arrive as JSON text, a portable deny becomes a native
-PreToolUse permission refusal carrying its reason, Stop decisions use the
-block shape, and per-event matcher registration survives the mapping.
+path-bearing tool normalizes to one ``tool_path``, a call decodes to the
+semantic tool a policy judges, structured tool responses arrive as JSON
+text, every PreToolUse verdict answers on the permission channel while
+other events answer on the decision channel, and per-event matcher
+registration survives the mapping.
 """
 
 from claude_agent_sdk import types as claude_types
+from pydantic import AnyHttpUrl
 
 from lup.adapters.claude.hooks import (
     build_claude_hook_handler,
+    claude_hook_semantic_tool,
     claude_hook_tool_path,
     lup_hook_output_to_claude,
     lup_hooks_to_claude,
 )
 from lup.hooks import LupHookInput, LupHookMatcher, LupHookOutput, LupHooksConfig
+from lup.policy.models import FetchUrl, ShellCommand, ToolIdentity, UnknownTool
 from lup.types import JsonObject
 
 
@@ -35,6 +39,31 @@ def test_glob_prefers_explicit_path_and_falls_back_to_pattern_dir() -> None:
     empty_path: JsonObject = {"path": "", "pattern": "/docs/**/*.md"}
     assert claude_hook_tool_path("Glob", empty_path) == "/docs"
     assert claude_hook_tool_path("Glob", {"pattern": "/docs/**/*.md"}) == "/docs"
+
+
+def test_semantic_decode_reads_the_same_names_the_dispatcher_reads() -> None:
+    fetch = claude_hook_semantic_tool(
+        LupHookInput(
+            event="PreToolUse",
+            tool_name="WebFetch",
+            tool_input={"url": "https://docs.example.com/api"},
+        )
+    )
+    assert fetch == FetchUrl(url=AnyHttpUrl("https://docs.example.com/api"))
+
+    shell = claude_hook_semantic_tool(
+        LupHookInput(
+            event="PreToolUse", tool_name="Bash", tool_input={"command": "git status"}
+        )
+    )
+    assert shell == ShellCommand(command="git status")
+
+    unclassified = claude_hook_semantic_tool(
+        LupHookInput(event="PreToolUse", tool_name="mcp__notes__write", tool_input={})
+    )
+    assert unclassified == UnknownTool(
+        identity=ToolIdentity(original_name="mcp__notes__write")
+    )
 
 
 def pre_tool_use_input(
@@ -144,13 +173,42 @@ def test_output_rendering_covers_every_decision_shape() -> None:
         }
     }
 
-    # A block-styled PreToolUse gate uses the generic decision channel, not
-    # the permission channel — that is how create_tool_gate(style="block")
-    # reaches the agent with a corrective message.
+    ask = lup_hook_output_to_claude(
+        LupHookOutput(decision="ask", reason="approval required"), event="PreToolUse"
+    )
+    assert ask == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": "approval required",
+        }
+    }
+
+    # PreToolUse carries every verdict on the permission channel:
+    # PreToolUseHookSpecificOutput.permissionDecision is
+    # Literal["allow", "deny", "ask", "defer"], and the hook documentation's
+    # decision-control table assigns the top-level `decision` field to
+    # UserPromptSubmit, PostToolUse, Stop, SubagentStop and PreCompact —
+    # PreToolUse is absent from it. So a block-styled gate refuses here as a
+    # denial carrying its corrective message, rather than answering on a
+    # channel this event does not read.
     blocked = lup_hook_output_to_claude(
         LupHookOutput(decision="block", reason="halt"), event="PreToolUse"
     )
-    assert blocked == {"decision": "block", "reason": "halt"}
+    assert blocked == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "halt",
+        }
+    }
+
+    # Stop has no permission channel and no approval flow, so an ask there
+    # fails closed onto the decision channel rather than passing through.
+    stop_ask = lup_hook_output_to_claude(
+        LupHookOutput(decision="ask", reason="approval required"), event="Stop"
+    )
+    assert stop_ask == {"decision": "block", "reason": "approval required"}
 
     nudge = lup_hook_output_to_claude(
         LupHookOutput(system_message="prefer the structured API"), event="PostToolUse"

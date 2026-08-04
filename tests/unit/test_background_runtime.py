@@ -2,21 +2,20 @@
 
 import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 
 import pytest
 from pydantic import BaseModel, ConfigDict
 
 from lup.runtime.background import BackgroundAgent, BackgroundConfig
 from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.runtime.errors import TurnError
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
     TurnIdentifiers,
     TurnId,
-    TurnInput,
     TurnRequest,
     TurnResult,
     turn_request,
@@ -30,18 +29,15 @@ class BackgroundState(BaseModel):
     value: int
 
 
-class RecordingFactory(SessionFactory):
+class RecordingOpener:
     def __init__(self) -> None:
         self.prompts: list[str] = []
         self.sequence = 0
 
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.session_context()
-
     @asynccontextmanager
-    async def session_context(self) -> AsyncGenerator[SessionHandle]:
+    async def session_context(
+        self, _resume: SessionId | None = None
+    ) -> AsyncGenerator[SessionHandle]:
         binder = RecordingBinder()
 
         async def start(text: str) -> AcceptedTurn:
@@ -68,13 +64,14 @@ class RecordingFactory(SessionFactory):
 
 @pytest.mark.asyncio
 async def test_background_agent_coalesces_to_latest_state() -> None:
-    factory = RecordingFactory()
+    opener = RecordingOpener()
+    factory = SessionFactory(opener.session_context)
     completed = asyncio.Event()
     results: list[TurnResult[None]] = []
     errors: list[TurnError] = []
 
     def request(state: BackgroundState) -> TurnRequest[None]:
-        return turn_request(TurnInput(text=f"state={state.value}"))
+        return turn_request(f"state={state.value}")
 
     async def result_handler(result: TurnResult[None]) -> None:
         results.append(result)
@@ -97,6 +94,6 @@ async def test_background_agent_coalesces_to_latest_state() -> None:
     await asyncio.wait_for(completed.wait(), timeout=1)
     await agent.stop()
 
-    assert factory.prompts == ["state=2"]
+    assert opener.prompts == ["state=2"]
     assert len(results) == 1
     assert errors == []

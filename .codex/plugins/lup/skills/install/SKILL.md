@@ -98,7 +98,7 @@ Based on the analysis, classify each lup capability as:
 These work in any repo:
 
 - **Plugin infrastructure**: The plugin directory itself — .claude/plugins/lup/ under Claude Code, .codex/plugins/lup/ under Codex
-- **Permission policy**: configure URL scopes and protected roots in the canonical `HookSet`; change semantic decisions in `lup.policy`, then regenerate
+- **Permission policy**: configure URL scopes, protected roots, and the target's own shell vocabulary in the canonical `HookSet`; change semantic decisions in `lup.policy`, then regenerate
 - **Pre-push quality gates**: Adapt to target's linter/type-checker/test runner
 - **Generic commands**: commit, rebase, close, land, meta, debug, refactor, add-command, modify-command, merge, principle, review, create-investigator
 - **Guidance patterns**: Git workflow, editing style, asking questions, debugging philosophy

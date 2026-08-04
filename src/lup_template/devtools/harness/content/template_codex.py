@@ -17,11 +17,10 @@ from lup_template.devtools.harness.content.template_sections import (
 )
 
 DOCUMENT = models.PromptDocument(
+    source=__name__,
     parts=[
         models.TextPart(
-            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/template_codex.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
-
-# AGENTS.md Template
+            text=r"""# AGENTS.md Template
 
 This file exports portable sections from the upstream AGENTS.md as a scaffold for downstream projects. It contains conventions, workflow patterns, and coding standards that apply to any project using lup.
 
@@ -88,7 +87,11 @@ Codex authentication and settings.
 `lup-devtools setup profile`.
 `--codex-home` or an inherited `CODEX_HOME` selects an explicit home instead.
 
-Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `$lup:*` is identical everywhere. Codex resolves the marketplace from the repository's `.agents/plugins/marketplace.json` and installs the plugin into its own cache, verifying the digest before every launch; `lup-devtools dev plugin name` (run by `"""
+Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `"""
+        ),
+        models.SkillPattern(plugin="lup", placeholder="*"),
+        models.TextPart(
+            text=r"""` is identical everywhere. Codex resolves the marketplace from the repository's `.agents/plugins/marketplace.json` and installs the plugin into its own cache, verifying the digest before every launch; `lup-devtools dev plugin name` (run by `"""
         ),
         models.SkillInvocation(plugin="lup", skill="init"),
         models.TextPart(text=r"""` and `"""),
@@ -159,5 +162,5 @@ When the user provides documentation links, incorporate that knowledge into AGEN
 """
         ),
         *SELF_IMPROVEMENT_THROUGH_END,
-    ]
+    ],
 )

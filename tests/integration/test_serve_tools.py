@@ -27,7 +27,7 @@ from lup.workspace.context import (
     SESSION_ID_ENV,
 )
 from lup.realtime.relay import MetaEvent, RealtimeMailbox, ReplyEvent
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.sandbox.container import Sandbox
 from lup.subagents import create_run_subagent_tool
 from lup.types import SubagentSpec

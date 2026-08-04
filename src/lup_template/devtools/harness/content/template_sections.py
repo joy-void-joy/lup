@@ -766,7 +766,7 @@ Run `uv run lup-devtools --help` for the full command tree.
     ),
 ]
 
-CLAUDE_POLICY_SCOPE = r"""The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary, every URL scope, and each edit in a batch. Ask is
+CLAUDE_POLICY_SCOPE = r"""The policy classifies each shell command against the vocabulary declared in `devtools/harness/content/shell_vocabulary.py`, every URL scope, and each edit in a batch. Ask is
 reserved for judged risk; an unjudged command or unparsed construct denies with
 a hint naming the `# lup: escalate: <why>` marker, and that leading marker
 promotes the classified decision to an approval question carrying the agent's
@@ -788,7 +788,7 @@ pass read-only script screens, `curl` is screened to read methods within the
 declared URL scopes, and edit decisions include protected
 paths, marker changes, size, and the canonical anti-pattern audit."""
 
-CODEX_POLICY_SCOPE = r"""The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary and every URL scope in a batch. Ask is
+CODEX_POLICY_SCOPE = r"""The policy classifies each shell command against the vocabulary declared in `devtools/harness/content/shell_vocabulary.py` and every URL scope in a batch. Ask is
 reserved for judged risk; an unjudged command or unparsed construct denies with
 a hint naming the `# lup: escalate: <why>` marker, and that leading marker
 promotes the classified decision to an approval question carrying the agent's

@@ -6,6 +6,11 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from lup.adapters.claude.native import (
+    ClaudeEventDecoder,
+    ClaudeHookPayload,
+    parse_claude_before_tool,
+)
 from lup.hooks import (
     LupHookEvent,
     LupHookInput,
@@ -13,6 +18,7 @@ from lup.hooks import (
     LupHookOutput,
     LupHooksConfig,
 )
+from lup.policy.models import SemanticTool
 from lup.types import JsonObject, ToolName
 from lup.workspace.paths import extract_glob_dir
 
@@ -34,6 +40,17 @@ def claude_hook_tool_path(tool_name: ToolName, tool_input: JsonObject) -> str:
             return extract_glob_dir(str(pattern))
         case _:
             return ""
+
+
+def claude_hook_semantic_tool(event: LupHookInput) -> SemanticTool:
+    """Decode one in-process hook event into the tool a semantic policy judges.
+
+    The generated dispatchers decode the same names and payload fields from a
+    subprocess hook; this is that decode for a session whose hooks run
+    in-process, so both enforcement paths judge one vocabulary.
+    """
+    payload = ClaudeHookPayload(tool_name=event.tool_name, tool_input=event.tool_input)
+    return ClaudeEventDecoder().decode(parse_claude_before_tool(payload)).tool
 
 
 def build_claude_hook_handler(
@@ -102,7 +119,13 @@ def lup_hook_output_to_claude(
     *,
     event: LupHookEvent = "PreToolUse",
 ) -> claude_types.SyncHookJSONOutput:
-    """Render a portable hook result into the matching Claude hook shape."""
+    """Render a portable hook result into the matching Claude hook shape.
+
+    PreToolUse answers on the permission channel and only there, so a gate's
+    block reaches the agent as a refusal carrying its corrective message.
+    Every other event answers on the top-level decision channel, where a
+    verdict that cannot be represented fails closed as a block.
+    """
     from claude_agent_sdk import types as claude_types
 
     match event, output.decision:
@@ -129,7 +152,7 @@ def lup_hook_output_to_claude(
                     permissionDecisionReason=output.reason,
                 )
             )
-        case "PreToolUse", "deny":
+        case "PreToolUse", "deny" | "block":
             return claude_types.SyncHookJSONOutput(
                 hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
                     hookEventName="PreToolUse",
@@ -137,7 +160,7 @@ def lup_hook_output_to_claude(
                     permissionDecisionReason=output.reason,
                 )
             )
-        case _, "deny" | "block":
+        case _, "ask" | "deny" | "block":
             return claude_types.SyncHookJSONOutput(
                 decision="block", reason=output.reason
             )

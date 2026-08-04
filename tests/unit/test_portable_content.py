@@ -18,7 +18,7 @@ RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
 
 MARK = "<supplied by the caller>"
 
-REMAINING_PROSE_BREACHES: list[str] = []  # lup: ignore[empty-collection]
+REMAINING_PROSE_BREACHES: list[str] = []
 """Declarations whose prose still names a platform.
 
 Empty, and the compilers now refuse a breach outright, so this is a second

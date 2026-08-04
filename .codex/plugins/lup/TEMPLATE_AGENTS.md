@@ -1,4 +1,4 @@
-<!-- Generated from src/lup_template/devtools/harness/content/template_codex.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from lup_template.devtools.harness.content.template_codex by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
 
 # AGENTS.md Template
 
@@ -727,7 +727,7 @@ application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 
-The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary and every URL scope in a batch. Ask is
+The policy classifies each shell command against the vocabulary declared in `devtools/harness/content/shell_vocabulary.py` and every URL scope in a batch. Ask is
 reserved for judged risk; an unjudged command or unparsed construct denies with
 a hint naming the `# lup: escalate: <why>` marker, and that leading marker
 promotes the classified decision to an approval question carrying the agent's

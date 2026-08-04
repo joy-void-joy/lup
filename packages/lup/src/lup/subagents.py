@@ -20,8 +20,8 @@ from collections.abc import Callable
 from pydantic import BaseModel, Field
 
 from lup.mcp import LupMcpTool, ToolError, lup_tool
-from lup.runtime.contracts import SessionFactory
-from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.factory import SessionFactory
+from lup.runtime.models import TurnTextBlock
 from lup.runtime.query import query
 from lup.types import SubagentSpec
 
@@ -82,7 +82,7 @@ def create_run_subagent_tool(
             ) from exc
 
         logger.info("Delegating to subagent %r", spec.name)
-        response = await query(factory, turn_request(TurnInput(text=validated.task)))
+        response = await query(factory, validated.task)
         text = "\n\n".join(
             block.text for block in response.blocks if isinstance(block, TurnTextBlock)
         )

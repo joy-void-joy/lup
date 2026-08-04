@@ -86,7 +86,7 @@ from lup.realtime.models import (
 from lup.realtime.scheduler import Scheduler, SleepResult
 from lup.reflect import ReflectionGate
 from lup.runtime.contracts import Session
-from lup.runtime.models import TurnInput, turn_request
+from lup.runtime.models import turn_request
 from lup.telemetry.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
@@ -660,7 +660,7 @@ async def run_relay_session(
         stop_watching = asyncio.Event()
         watcher = asyncio.create_task(watch_mailbox())
         try:
-            handle = await conversation.start(turn_request(TurnInput(text=message)))
+            handle = await conversation.start(turn_request(message))
             await handle.turn.result()
         finally:
             stop_watching.set()

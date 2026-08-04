@@ -2,8 +2,8 @@
 
 import json
 import shlex
-from importlib import resources
 from pathlib import Path
+from lup.harness.banner import PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
     Atom,
@@ -12,6 +12,7 @@ from lup.harness.contracts import (
     PromptRenderer,
 )
 from lup.harness.generation import argument_text
+from lup.harness.prompts import guidance_banner
 from lup.harness.models import (
     Agent,
     Artifact,
@@ -27,9 +28,15 @@ from lup.harness.models import (
     TreeLocation,
 )
 from lup.policy.bundle import (
+    POLICY_DATA_BANNER,
     policy_kernel_modules,
     render_policy_data,
     runtime_url_scope,
+)
+from lup.policy.dispatcher import (
+    DispatcherDeclaration,
+    compile_dispatcher,
+    dispatcher_banner,
 )
 from lup.policy.kernel.rows import PathRoleRow
 
@@ -101,15 +108,13 @@ class ClaudeSpellings(NativeSpellings):
             "The command accepts optional flags: `--run-id <id>` resumes "
             "a persisted run and `--accept`/`--reject` records the human "
             "decision on its review branch. It waits zero seconds by "
-            "default and parks on material questions — relay them to "
-            "the user verbatim, never answer them yourself, then rerun "
-            "with the repeatable `--answer <question-id>=<value>` flag. "
-            "Relay each question with everything printed alongside it — the "
-            "`# lup:` notes it was raised from, the concern's spec, and its "
-            "acceptance criteria — because a bare prompt reads as a decision "
-            "with no stakes and cannot be judged. Choices are the planner's "
-            "suggestions, not a menu: say so, and pass an answer in the "
-            "user's own words when they give one. "
+            "default and parks on material questions, printing each one "
+            "beside the `# lup:` notes it was raised from, the concern's "
+            "spec, and its acceptance criteria; rerun with the repeatable "
+            "`--answer <question-id>=<value>` flag to answer them. "
+            "`--admit <text>` admits work discovered mid-run in the human's "
+            "own words and `--admit-note <file>:<line>` admits a note you "
+            "wrote in the tree, both repeatable. "
             "Never pass `--wait` or `--supervise`; both hold a run open "
             "for a human instead of parking — `--wait` at the mailbox, "
             "`--supervise` at the page it opens."
@@ -195,6 +200,7 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
                     ),
                     content=content,
                     semantic_id=source.id,
+                    banner=PROMPT_TEXT,
                 )
             ]
         )
@@ -235,6 +241,7 @@ class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
                     ),
                     content=content,
                     semantic_id=source.id,
+                    banner=PROMPT_TEXT,
                 )
             ]
         )
@@ -287,21 +294,32 @@ class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
     def render(self, source: Harness) -> ArtifactTree:
         return ArtifactTree(
             artifacts=[
-                Artifact(
+                Artifact.generated(
                     path=Path(".claude/CLAUDE.md"),
-                    content=self.prompts.render(source.guidance),
+                    body=self.prompts.render(source.guidance),
                     semantic_id="harness.guidance",
+                    banner=guidance_banner(self.prompts, source.guidance),
                 )
             ]
         )
 
 
-CLAUDE_POLICY_DISPATCHER = (
-    resources.files("lup.adapters.claude")
-    .joinpath("assets/policy_dispatcher.py")
-    .read_text("utf-8")
+CLAUDE_DISPATCHER = DispatcherDeclaration(
+    runtime_name="Claude Code",
+    package="lup.adapters.claude",
+    managed_root_env="CLAUDE_CONFIG_DIR",
+    relativizer="workspace_path",
+    routed_tools=["Bash", "WebFetch", "Edit", "Write"],
+    hook_events=["PreToolUse"],
+    failure="conservative_ask",
+    runtime_modules=["policy_data"],
 )
-"""Hermetic hook dispatcher script, shipped verbatim into the plugin tree."""
+"""Everything Claude Code spells differently from every other runtime.
+
+The tools named here are both what the plugin registers the hook for and
+what the compiler proves the dispatcher routes, so a tool cannot be handed
+to the hook without a branch that decides it.
+"""
 
 
 class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
@@ -312,24 +330,23 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         self.worker_identity = worker_identity
 
     def render(self, source: HookSet) -> ArtifactTree:
+        registration = [
+            {
+                "matcher": "|".join(CLAUDE_DISPATCHER.routed_tools),
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": (
+                            'python3 "$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py"'
+                        ),
+                        "timeout": 30,
+                    }
+                ],
+            }
+        ]
         hooks = {
             "description": "Lup semantic permission policy",
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "WebFetch|Bash|Edit|Write",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": (
-                                    'python3 "$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py"'
-                                ),
-                                "timeout": 30,
-                            }
-                        ],
-                    }
-                ]
-            },
+            "hooks": {event: registration for event in CLAUDE_DISPATCHER.hook_events},
         }
         evidence = {"schemaVersion": 1, "policyIds": source.policy_ids}
         return ArtifactTree(
@@ -343,9 +360,10 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     path=Path(
                         f".claude/plugins/{self.plugin_name}/hooks/scripts/policy.py"
                     ),
-                    content=CLAUDE_POLICY_DISPATCHER,
+                    content=compile_dispatcher(CLAUDE_DISPATCHER),
                     semantic_id=source.id,
                     executable=True,
+                    banner=dispatcher_banner(CLAUDE_DISPATCHER),
                 ),
                 *[
                     Artifact(
@@ -355,15 +373,17 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         ),
                         content=module.source,
                         semantic_id=source.id,
+                        banner=VERBATIM_COPY,
                     )
                     for module in policy_kernel_modules()
                 ],
-                Artifact(
+                Artifact.generated(
                     path=Path(
                         f".claude/plugins/{self.plugin_name}/hooks/runtime/"
                         "policy_data.py"
                     ),
-                    content=render_policy_data(
+                    banner=POLICY_DATA_BANNER,
+                    body=render_policy_data(
                         allowed_fetch_scopes=[
                             runtime_url_scope(
                                 str(scope.origin),
@@ -394,7 +414,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             PathRoleRow(root=role.root.as_posix(), role=role.role)
                             for role in source.path_roles
                         ],
-                        shell_rule_extension=list(source.shell_rules),
+                        shell_rules=list(source.shell_rules),
                     ),
                     semantic_id=source.id,
                 ),

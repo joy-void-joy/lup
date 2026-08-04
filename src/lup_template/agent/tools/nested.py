@@ -20,7 +20,7 @@ the auxiliary factory with ``aux_model()``, like the reviewer in ``reflect.py``.
 from pydantic import BaseModel, Field
 
 from lup.mcp import lup_tool
-from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.models import TurnTextBlock
 from lup.runtime.query import query
 from lup_template.agent.config import aux_model
 
@@ -62,13 +62,9 @@ async def critique(params: CritiqueInput) -> CritiqueOutput:
     factory = build_auxiliary_factory(model=aux_model())
     result = await query(
         factory,
-        turn_request(
-            TurnInput(
-                text=(
-                    f"Critique the following draft, focusing on {params.focus}. "
-                    f"Be specific and concise.\n\n{params.draft}"
-                )
-            )
+        (
+            f"Critique the following draft, focusing on {params.focus}. "
+            f"Be specific and concise.\n\n{params.draft}"
         ),
     )
     text = "\n\n".join(

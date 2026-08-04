@@ -8,9 +8,7 @@ from lup.adapters.claude.runtime import (
     create_claude_session_factory,
 )
 from lup.adapters.codex.runtime import CodexSessionConfig, create_codex_session_factory
-from lup.runtime.contracts import SessionFactory
-from lup.runtime.models import TurnInput, turn_request
-from lup.runtime.query import query
+from lup.runtime.factory import SessionFactory
 from lup.runtime.routing import ModelRoute, ModelRouter, PrefixModelMatcher
 
 from examples.common import Summary
@@ -52,9 +50,8 @@ async def main() -> None:
             ),
         ]
     )
-    result = await query(
-        router.resolve(MODEL),
-        turn_request(TurnInput(text="Explain explicit model routing."), Summary),
+    result = await router.resolve(MODEL).query(
+        "Explain explicit model routing.", Summary
     )
     print(result.output.summary)
 

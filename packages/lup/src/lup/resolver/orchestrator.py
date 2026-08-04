@@ -52,6 +52,18 @@ class WritableRootLeases:
         self.leases: dict[str, WritableRootLease] = {}
 
     def acquire(self, concern_id: str, branch: str) -> WritableRootLease:
+        lease = self.plan(concern_id, branch)
+        self.leases[concern_id] = lease
+        return lease
+
+    def plan(self, concern_id: str, branch: str) -> WritableRootLease:
+        """Resolve one non-overlapping writable root without taking it.
+
+        A concern admitted mid-run is checked against the roots this run
+        already handed out before anything about the run is written, so an
+        overlap is refused at the boundary rather than discovered by a
+        worker editing another concern's tree.
+        """
         if concern_id in self.leases and self.leases[concern_id].active:
             raise LeaseViolationError(f"concern {concern_id!r} already has a lease")
         candidate = (self.root / concern_id).resolve()
@@ -70,13 +82,21 @@ class WritableRootLeases:
                     f"writable roots overlap for {concern_id!r} and "
                     f"{existing.concern_id!r}"
                 )
-        lease = WritableRootLease(
+        return WritableRootLease(
             concern_id=concern_id,
             root=candidate,
             branch=branch,
         )
-        self.leases[concern_id] = lease
-        return lease
+
+    def adopt(self, leases: list[WritableRootLease]) -> None:
+        """Take a run's persisted active leases as this process's authority.
+
+        Every later acquisition is then checked against roots this run
+        already handed out, which is what makes a lease acquired long after
+        the first batch — for a concern admitted mid-run — refuse an overlap
+        instead of quietly sharing a writable root.
+        """
+        self.leases = {lease.concern_id: lease for lease in leases if lease.active}
 
     def assert_path(self, concern_id: str, path: Path) -> None:
         try:

@@ -312,6 +312,14 @@ def check_cmd(
             "the lup.codescan.boundaries guard the full check also runs",
         ),
     ] = False,
+    placement: Annotated[
+        bool,
+        typer.Option(
+            "--placement",
+            help="List library data tables no adopter can replace only — the "
+            "lup.codescan.boundaries placement guard the full check also runs",
+        ),
+    ] = False,
     stats: Annotated[
         bool,
         typer.Option(
@@ -342,6 +350,9 @@ def check_cmd(
         return
     if boundaries:
         boundaries_mod.report(as_json)
+        return
+    if placement:
+        boundaries_mod.report_placement(as_json)
         return
     check.run_checks(
         fix, no_test, check.changed_paths(since) if since is not None else None

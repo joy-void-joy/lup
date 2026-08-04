@@ -10,7 +10,7 @@
             "type": "command"
           }
         ],
-        "matcher": "WebFetch|Bash|Edit|Write"
+        "matcher": "Bash|WebFetch|Edit|Write"
       }
     ]
   }

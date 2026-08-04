@@ -92,7 +92,7 @@ async def test_timeout_covers_terminal_completion_and_interrupts() -> None:
         correction=None,
         persistence=None,
     )
-    handle = await session.start(turn_request(TurnInput(text="slow")))
+    handle = await session.start(turn_request("slow"))
 
     with pytest.raises(TurnTimeoutError):
         await handle.turn.result()
@@ -128,7 +128,7 @@ async def test_timeout_interrupts_the_current_recovery_attempt() -> None:
         correction=None,
         persistence=None,
     )
-    handle = await session.start(turn_request(TurnInput(text="retry then wait")))
+    handle = await session.start(turn_request("retry then wait"))
 
     with pytest.raises(TurnTimeoutError):
         await handle.turn.result()
@@ -163,7 +163,7 @@ async def test_recovery_accumulates_failed_attempt_usage() -> None:
         correction=None,
         persistence=None,
     )
-    handle = await session.start(turn_request(TurnInput(text="retry")))
+    handle = await session.start(turn_request("retry"))
     result = await handle.turn.result()
 
     assert sequence == 2
@@ -199,7 +199,7 @@ async def test_correction_rebinds_a_fresh_store_and_aggregates_usage() -> None:
         correction=CorrectionConfig(cycles=1),
         persistence=None,
     )
-    handle = await session.start(turn_request(TurnInput(text="typed"), WrappedOutput))
+    handle = await session.start(turn_request("typed", WrappedOutput))
     result = await handle.turn.result()
 
     assert result.output == WrappedOutput(value=7)
@@ -243,7 +243,7 @@ async def test_recovery_and_correction_share_one_logical_retry_loop() -> None:
         correction=CorrectionConfig(cycles=1),
         persistence=None,
     )
-    handle = await session.start(turn_request(TurnInput(text="typed"), WrappedOutput))
+    handle = await session.start(turn_request("typed", WrappedOutput))
     result = await handle.turn.result()
 
     assert sequence == 4
@@ -267,10 +267,8 @@ async def test_serialized_session_queues_until_prior_result_finishes() -> None:
         return accepted(sequence, complete)
 
     session = SerializedSession(ComposedSession(start, binder))
-    first = await session.start(turn_request(TurnInput(text="first")))
-    second_task = asyncio.create_task(
-        session.start(turn_request(TurnInput(text="second")))
-    )
+    first = await session.start(turn_request("first"))
+    second_task = asyncio.create_task(session.start(turn_request("second")))
     await asyncio.sleep(0)
     assert not second_task.done()
 
@@ -295,9 +293,9 @@ async def test_consumed_serialized_turn_cannot_release_a_new_owner() -> None:
         return accepted(sequence, complete)
 
     session = SerializedSession(ComposedSession(start, binder))
-    first = await session.start(turn_request(TurnInput(text="first")))
+    first = await session.start(turn_request("first"))
     await first.turn.result()
-    second = await session.start(turn_request(TurnInput(text="second")))
+    second = await session.start(turn_request("second"))
 
     with pytest.raises(RuntimeError):
         await first.turn.result()
@@ -330,7 +328,7 @@ async def test_budget_exhaustion_preserves_completed_evidence() -> None:
         correction=None,
         persistence=None,
     )
-    handle = await session.start(turn_request(TurnInput(text="expensive")))
+    handle = await session.start(turn_request("expensive"))
 
     with pytest.raises(BudgetExceededError) as raised:
         await handle.turn.result()
@@ -349,7 +347,7 @@ async def test_cancelled_serialized_acceptance_releases_queue_lock() -> None:
         raise AssertionError("unreachable")
 
     session = SerializedSession(ComposedSession(start, binder))
-    task = asyncio.create_task(session.start(turn_request(TurnInput(text="cancel"))))
+    task = asyncio.create_task(session.start(turn_request("cancel")))
     await entered.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -376,7 +374,7 @@ async def test_successful_result_is_persisted_atomically(tmp_path: Path) -> None
         correction=None,
         persistence=PersistenceConfig(directory=tmp_path),
     )
-    handle = await session.start(turn_request(TurnInput(text="persist")))
+    handle = await session.start(turn_request("persist"))
     await handle.turn.result()
 
     files = list(tmp_path.iterdir())
@@ -426,7 +424,7 @@ async def test_trace_usage_and_display_observe_one_complete_logical_turn() -> No
         usage=UsageConfig(sink=usage),
         display=DisplayConfig(sink=display),
     )
-    handle = await session.start(turn_request(TurnInput(text="observe")))
+    handle = await session.start(turn_request("observe"))
     result = await handle.turn.result()
 
     assert result.usage.input_tokens == 4
@@ -459,7 +457,7 @@ async def test_persistence_failure_surfaces_as_typed_turn_error(
         correction=None,
         persistence=PersistenceConfig(directory=blocker / "turns"),
     )
-    handle = await session.start(turn_request(TurnInput(text="persist")))
+    handle = await session.start(turn_request("persist"))
 
     with pytest.raises(ProviderTurnError):
         await handle.turn.result()
@@ -489,7 +487,7 @@ async def test_retry_start_failure_is_wrapped_as_provider_error() -> None:
         correction=None,
         persistence=None,
     )
-    handle = await session.start(turn_request(TurnInput(text="fragile")))
+    handle = await session.start(turn_request("fragile"))
 
     with pytest.raises(ProviderTurnError) as caught:
         await handle.turn.result()
@@ -573,7 +571,7 @@ async def test_retry_joins_live_events_and_retargets_steer() -> None:
         correction=None,
         persistence=None,
     )
-    handle = await session.start(turn_request(TurnInput(text="hello")))
+    handle = await session.start(turn_request("hello"))
     events = handle.events
     steer = handle.steer
     assert events is not None

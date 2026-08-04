@@ -1,4 +1,4 @@
-<!-- Generated from src/lup_template/devtools/harness/content/permissions.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from lup_template.devtools.harness.content.permissions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
 
 # Permission Policy
 
@@ -18,7 +18,9 @@ canonical source and regenerate.
 ## Shell classification
 
 The policy classifies each shell command against the vocabulary in
-`lup.policy.shell_rules`, every URL scope, and each edit in a batch. The shell
+`devtools/harness/content/shell_vocabulary.py`, every URL scope, and each edit
+in a batch. `lup.policy.shell_rules` owns the shape that table takes and its
+erasure into the rows the kernel reads, never the words. The shell
 lattice reserves ask for judged risk; unjudged work denies, hinting the
 escalation recipe. Under a launcher-verified OS sandbox
 (`LUP_SANDBOX_ACTIVE`), unjudged work defers to that boundary, and a

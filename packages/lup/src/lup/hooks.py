@@ -13,6 +13,7 @@ construction.
 
 Output helpers:
 - allow_hook() — PreToolUse allow decision
+- ask_hook() — PreToolUse approval-required decision
 - deny_hook() — PreToolUse deny decision
 - block_hook() — block decision (Stop or PreToolUse)
 
@@ -82,7 +83,10 @@ decision).
 ``ask`` is what makes a denial recoverable. Without it every refusal is
 terminal for an agent with no interactive human attached — a worker meeting
 a genuine need outside its allowlist has no route at all, which is how a
-merge worker once spent a whole run unable to stage its own resolutions."""
+merge worker once spent a whole run unable to stage its own resolutions.
+
+``None`` is the fifth answer and means the hook declines to decide, so the
+session's ambient permission flow applies untouched."""
 
 
 class LupHookInput(BaseModel):
@@ -517,9 +521,11 @@ def create_tool_gate(
             *unlocked* via OR. The internal flag never resets — for
             per-cycle gates, track the state yourself and pass *unlocked*.
         event: Hook event to gate: ``"PreToolUse"`` (default) or ``"Stop"``.
-        style: Locked response shape. ``"deny"`` uses the PreToolUse
-            permission decision; ``"block"`` uses the cross-event
-            block decision (required for Stop).
+        style: Locked response shape. ``"deny"`` uses the permission
+            decision; ``"block"`` uses the cross-event block decision
+            (required for Stop). A PreToolUse gate refuses on the
+            permission channel either way — that is the only channel the
+            event reads — so the two differ for Stop alone.
         allow_when_unlocked: When True, return an explicit allow decision
             once unlocked instead of passing through to later hooks
             (PreToolUse only).

@@ -13,7 +13,7 @@ from lup.adapters.claude.runtime import (
     ClaudeConversationState,
     ClaudeFork,
     ClaudeSessionConfig,
-    ClaudeSessionFactory,
+    ClaudeSessionOpener,
     ClaudeTurnToolBinder,
     build_claude_options,
     claude_usage,
@@ -57,7 +57,7 @@ class SecondOutput(BaseModel):
 
 def test_fresh_claude_session_uses_cli_valid_uuid() -> None:
     state = ClaudeConversationState(
-        ClaudeSessionFactory(ClaudeSessionConfig(model="claude")), None
+        ClaudeSessionOpener(ClaudeSessionConfig(model="claude")), None
     )
 
     assert str(UUID(state.session_id)) == state.session_id
@@ -124,8 +124,8 @@ def test_claude_isolation_knobs_default_to_native_behavior() -> None:
     assert options.extra_args == {}
 
 
-def test_claude_factory_builds_options_through_an_overridable_seam() -> None:
-    class IsolatedFactory(ClaudeSessionFactory):
+def test_claude_opener_builds_options_through_an_overridable_seam() -> None:
+    class IsolatedOpener(ClaudeSessionOpener):
         def build_options(
             self,
             *,
@@ -139,13 +139,13 @@ def test_claude_factory_builds_options_through_an_overridable_seam() -> None:
             options.max_buffer_size = 4096
             return options
 
-    factory = IsolatedFactory(ClaudeSessionConfig(model="claude"))
-    state = factory.create_state(None)
-    options = state.factory.build_options(
+    opener = IsolatedOpener(ClaudeSessionConfig(model="claude"))
+    state = opener.create_state(None)
+    options = state.opener.build_options(
         binding=None, resume=None, session_id=state.session_id
     )
 
-    assert state.factory is factory
+    assert state.opener is opener
     assert options.max_buffer_size == 4096
 
 
@@ -342,7 +342,7 @@ async def test_claude_partial_events_are_live_and_completed_replay_is_preserved(
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", FixtureClient)
     state = ClaudeConversationState(
-        ClaudeSessionFactory(ClaudeSessionConfig(model="claude")), None
+        ClaudeSessionOpener(ClaudeSessionConfig(model="claude")), None
     )
 
     accepted = await state.start_turn("hello")
@@ -430,7 +430,7 @@ async def test_the_durable_view_is_the_live_one_without_its_deltas(
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", FixtureClient)
     state = ClaudeConversationState(
-        ClaudeSessionFactory(ClaudeSessionConfig(model="claude")), None
+        ClaudeSessionOpener(ClaudeSessionConfig(model="claude")), None
     )
 
     accepted = await state.start_turn("hello")
@@ -460,7 +460,7 @@ async def test_claude_latest_turn_fork_preserves_a_typed_session_handle(
     import claude_agent_sdk as claude
 
     state = ClaudeConversationState(
-        ClaudeSessionFactory(ClaudeSessionConfig(model="claude", cwd=tmp_path)), None
+        ClaudeSessionOpener(ClaudeSessionConfig(model="claude", cwd=tmp_path)), None
     )
 
     def fork_session(
@@ -504,7 +504,7 @@ async def test_claude_binder_rebinds_schema_store_and_gate_across_turns(
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", RecordingClient)
     state = ClaudeConversationState(
-        ClaudeSessionFactory(ClaudeSessionConfig(model="claude")), None
+        ClaudeSessionOpener(ClaudeSessionConfig(model="claude")), None
     )
     binder = ClaudeTurnToolBinder(state)
 

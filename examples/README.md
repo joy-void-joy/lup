@@ -20,12 +20,18 @@ Anthropic-compatible service on `http://localhost:4000`:
 uv run -m examples.compatible_endpoint
 ```
 
-The policy example is credential-free and exercises the same semantic fetch
-decision used by generated hooks:
+The policy pair wires the semantic policies into a session's hooks, so the
+call a policy denies is a call the session refuses — the fetch path and the
+tool-call path of the same declared origin table:
 
 ```bash
 uv run -m examples.semantic_policy
+uv run -m examples.semantic_policy_shell
 ```
+
+Both make a real model call. Their enforcement is checked without one by
+`tests/unit/test_policy_examples.py`, which drives each example's own
+session configuration through the hooks the SDK would invoke.
 
 Each composition keeps provider construction at the application boundary.
 The query, wrappers, background scheduler, and router depend only on narrow

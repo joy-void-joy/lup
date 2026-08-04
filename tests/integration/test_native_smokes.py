@@ -38,8 +38,8 @@ from lup.resolver.models import (
     VerificationCommand,
     WorkerContext,
 )
-from lup.runtime.contracts import SessionFactory
-from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.factory import SessionFactory
+from lup.runtime.models import TurnTextBlock, turn_request
 
 pytestmark = pytest.mark.integration
 
@@ -59,7 +59,7 @@ async def test_fresh_claude_session_completes_one_turn(tmp_path: Path) -> None:
     )
     async with factory.open() as handle:
         accepted = await handle.session.start(
-            turn_request(TurnInput(text="Reply with the single word: ready"))
+            turn_request("Reply with the single word: ready")
         )
         result = await accepted.turn.result()
 
@@ -90,11 +90,9 @@ async def test_codex_thread_start_carries_a_dynamic_tool(tmp_path: Path) -> None
     async with factory.open() as handle:
         accepted = await handle.session.start(
             turn_request(
-                TurnInput(
-                    text=(
-                        "Submit your output now: call the submission tool with "
-                        "message set to 'smoke ok'."
-                    )
+                (
+                    "Submit your output now: call the submission tool with "
+                    "message set to 'smoke ok'."
                 ),
                 SmokeSubmission,
             )

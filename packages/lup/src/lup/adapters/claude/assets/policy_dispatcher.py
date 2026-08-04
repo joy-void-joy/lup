@@ -1,8 +1,15 @@
-#!/usr/bin/env python3
-"""Generated Claude hook dispatcher over the canonical semantic kernel.
+"""Claude Code's half of the compiled hook dispatcher.
 
-Rendered from lup.adapters.claude.assets.policy_dispatcher by
-`uv run lup-devtools harness generate all` — do not edit directly.
+:mod:`lup.policy.dispatcher` compiles this module together with the shared
+host half into the plugin's `hooks/scripts/policy.py`, so this is not itself
+a script. It holds only what Claude Code spells for itself: the environment
+naming the root it installs trusted packages beneath, relativization against
+the launch directory, the four tools it routes, and the conservative ask it
+returns through its own decision channel for input nothing can decide from.
+
+The imports below resolve against the generated runtime the compiled script
+sits beside, which is why this file is type-checked against that tree rather
+than against the workspace.
 """
 
 import json
@@ -10,12 +17,21 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(
-    0, str(Path(__file__).parents[1] / "runtime")
-)  # lup: Why do we have sys.path.insert here?
-from kernel.decision import (
-    KernelDecision,
-)  # lup: I'm not comfortable having invalid python code here. Can't we compile it or something?
+# The hook is launched as a bare script, promised no cwd, PYTHONPATH, or
+# interpreter environment, and `runtime/` is a plain sibling directory holding
+# the kernel package and this plugin's policy data rather than an installed
+# distribution. Naming it as a search path is what lets the imports below
+# resolve, for the interpreter and for a type checker alike.
+sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
+from host import (
+    declared_identity,
+    existing_write_targets,
+    granted_allowances,
+    managed_script_roots,
+    read_document,
+    sandbox_active,
+)
+from kernel.decision import KernelDecision
 from kernel.edit import decide_edit
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_write_targets
@@ -34,28 +50,14 @@ from policy_data import (
 )
 
 
-def sandbox_active():
-    environ = os.environ  # lup: ignore[os-environ]
-    return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
-
-
-def managed_script_roots() -> list[str]:
-    """Return absolute package roots installed and trusted by Claude Code.
-
-    The workspace-local plugin directory is deliberately not a root: it is
-    agent-adjacent and verified only at launch, so an approved write there
-    must not grant silent execution rights for the rest of the session.
-    """
+def managed_root():
+    """The root Claude Code installs and trusts packages beneath."""
     environ = os.environ  # lup: ignore[os-environ]
     if "CLAUDE_CONFIG_DIR" in environ:
-        home = Path(environ["CLAUDE_CONFIG_DIR"])
-    elif "HOME" in environ:
-        home = Path(environ["HOME"]) / ".claude"
-    else:
-        return []
-    if not home.is_absolute():
-        return []
-    return [str(home / "skills"), str(home / "plugins" / "cache")]
+        return Path(environ["CLAUDE_CONFIG_DIR"])
+    if "HOME" in environ:
+        return Path(environ["HOME"]) / ".claude"
+    return None
 
 
 def edit_documents(path, old_text, new_text, replace_all):
@@ -96,7 +98,7 @@ def workspace_path(path_text):
 def edit_decision(path_text, before, after, autonomous):
     path = Path(path_text)
     suffix = path.suffix.lower()
-    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else ()
+    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
     return decide_edit(
         workspace_path(path_text),
         before,
@@ -107,38 +109,9 @@ def edit_decision(path_text, before, after, autonomous):
         path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
-        allowances=granted_allowances(),
+        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV),
         python_source=suffix in (".py", ".pyi"),
     )
-
-
-def existing_write_targets(command):
-    """Report which of a command's write targets already exist on disk.
-
-    The kernel never reads the filesystem, so it cannot tell creating a file
-    from overwriting one. Resolving that here keeps the decision itself a
-    pure function of the command text and this list.
-    """
-    return [
-        target
-        for target in shell_write_targets(command)
-        if (Path.cwd() / target).exists()
-    ]
-
-
-def declared_identity():
-    """The identity this session's launcher declared, if it declared one."""
-    environ = os.environ  # lup: ignore[os-environ]
-    return environ[AGENT_IDENTITY_ENV] if AGENT_IDENTITY_ENV in environ else ""
-
-
-def granted_allowances():
-    """Edit gates a human approved for the concern this session is working."""
-    environ = os.environ  # lup: ignore[os-environ]
-    if CONCERN_ALLOWANCES_ENV not in environ:
-        return []
-    declared = json.loads(environ[CONCERN_ALLOWANCES_ENV] or "[]")
-    return [str(name) for name in declared]
 
 
 def dispatch(payload):
@@ -147,22 +120,23 @@ def dispatch(payload):
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = (
         agent_type in AUTONOMOUS_AGENT_IDENTITIES
-        or declared_identity() in AUTONOMOUS_AGENT_IDENTITIES
+        or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     )
     if name == "Bash":
+        command = tool_input["command"]
         unsandboxed = (
             "dangerouslyDisableSandbox" in tool_input
             and tool_input["dangerouslyDisableSandbox"] is True
         )
         return decide_shell(
-            tool_input["command"],
+            command,
             SHELL_RULES,
             ALLOWED_FETCH_SCOPES,
             DENIED_FETCH_SCOPES,
             sandboxed=sandbox_active() and not unsandboxed,
-            trusted_script_roots=managed_script_roots(),
+            trusted_script_roots=managed_script_roots(managed_root()),
             path_roles=PATH_ROLES,
-            existing_targets=existing_write_targets(tool_input["command"]),
+            existing_targets=existing_write_targets(shell_write_targets(command)),
         )
     if name == "WebFetch":
         return decide_fetch(
@@ -179,10 +153,9 @@ def dispatch(payload):
         )
         return edit_decision(tool_input["file_path"], before, after, autonomous)
     if name == "Write":
-        path = Path(tool_input["file_path"])
         return edit_decision(
             tool_input["file_path"],
-            path.read_text(encoding="utf-8") if path.exists() else None,
+            read_document(tool_input["file_path"]),
             tool_input["content"],
             autonomous,
         )
@@ -209,7 +182,3 @@ def main():
             "ask", f"Malformed hook input requires approval: {error}"
         )
     json.dump(rendered(decision), sys.stdout)
-
-
-if __name__ == "__main__":
-    main()

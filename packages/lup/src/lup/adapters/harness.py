@@ -18,31 +18,14 @@ from lup.adapters.codex.harness import (
 )
 from lup.codescan.portable import prose_breaches
 from lup.harness.contracts import NativeSpellings
-from lup.harness.generation import ArtifactValidationError
 from lup.harness.prompts import SpelledPromptRenderer
 from lup.harness.models import (
     GUIDANCE_CHARACTER_BUDGET,
     Artifact,
     ArtifactTree,
     Harness,
-    TextPart,
 )
-from lup.harness.validation import DeterministicTreeValidator
-
-
-def validated_tree(artifacts: list[Artifact]) -> ArtifactTree:
-    """Sort a complete output tree and reject any deterministic issue."""
-    tree = ArtifactTree(
-        artifacts=sorted(artifacts, key=lambda item: item.path.as_posix())
-    )
-    result = DeterministicTreeValidator().validate(tree)
-    if not result.valid:
-        raise ArtifactValidationError(
-            "; ".join(
-                f"{issue.semantic_id}: {issue.message}" for issue in result.issues
-            )
-        )
-    return tree
+from lup.harness.validation import validated_tree
 
 
 def prompt_renderer(own: NativeSpellings) -> SpelledPromptRenderer:
@@ -104,34 +87,8 @@ def reject_native_prose(source: Harness) -> None:
         )
 
 
-def reject_rendered_invocations(source: Harness, sigil: str) -> None:
-    """Keep native invocation spelling inside typed adapter rendering only."""
-    prefixes = tuple(
-        f"{sigil}{plugin.name}:" for plugin in source.plugins
-    )  # lup: tuple() is an antipattern, please run a full antipattern sweep
-    prompts = [
-        source.guidance,
-        *[
-            declaration.prompt
-            for plugin in source.plugins
-            for declaration in [*plugin.skills, *plugin.agents]
-        ],
-    ]
-    if any(
-        prefix in part.text
-        for prompt in prompts
-        for part in prompt.parts
-        if isinstance(part, TextPart)
-        for prefix in prefixes
-    ):
-        raise ValueError(  # lup: I feel like this is failing the "parse, don't validate" principle
-            "provider invocation syntax must be represented by SkillInvocation"
-        )
-
-
 def compile_claude(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Claude-owned artifacts."""
-    reject_rendered_invocations(source, "/")
     reject_native_prose(source)
     spellings = ClaudeSpellings()
     prompts = prompt_renderer(spellings)
@@ -160,7 +117,6 @@ def compile_claude(source: Harness) -> ArtifactTree:
 
 def compile_codex(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Codex-owned artifacts."""
-    reject_rendered_invocations(source, "$")
     reject_native_prose(source)
     spellings = CodexSpellings()
     prompts = prompt_renderer(spellings)

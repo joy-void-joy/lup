@@ -7,6 +7,19 @@ with another capability through multiple inheritance. Small callbacks remain
 typed callables. `lup.codescan.capabilities` enforces the mechanical shape
 across resolved project imports with the audited `abc-capability` rule.
 
+An entry point is not a capability. `SessionFactory` is a concrete class over
+one typed `SessionOpener` callable: opening a session is a callback, and the
+class holding it is the surface applications construct and pass around, so
+adapters, wrappers, and tests build `SessionFactory(opener)` rather than derive
+from an ABC. Shared behavior then lives where every caller reaches it —
+`SessionFactory.query(prompt, OutputModel)` runs one turn on one session, and
+the free `lup.query` alias is bound to that same function object, so it spells
+the operation identically — overloads, inference, and all — where a composition
+root reads better with the factory as an argument. Both accept a prompt string,
+a `TurnInput`, or a request prepared with `turn_request()`, which stays the one
+place that normalisation lives. `ModelRouter` is the same shape over the
+`ModelMatcher` capability.
+
 Rich behavior is explicit data flow. `SessionHandle` contains a `Session` and
 an optional `ForkSession`; `TurnHandle[T]` contains a `Turn[T]` and optional
 live events, interrupt, and steer capabilities. These frozen Pydantic values
@@ -15,7 +28,8 @@ do not implement behavior or hide a provider. Unsupported behavior is absent.
 The runtime sequence is:
 
 1. an application builds a validated Claude or Codex config;
-2. immutable profile/endpoint transforms run before factory construction;
+2. immutable profile/endpoint transforms run before factory construction,
+   applied directly or through a resolver's `session_factory()`;
 3. `SessionFactory.open()` owns provider resources;
 4. `Session.start()` creates a fresh output store, finishes tool binding, and
    waits for native turn acknowledgement;
@@ -38,6 +52,36 @@ The same boundary applies to generation. Shared inspection and materialization
 consume an injected immutable recipe; adapter selection is confined to the CLI
 composition root. The generic path never compares a target name or provider
 value.
+
+## Library mechanism, application data
+
+The library/application split runs the other way too: `packages/lup` owns
+mechanism, and the application supplies the data it operates on. A library may
+declare a value only when it could not have chosen otherwise — when a second
+implementer with the same intent would have written the same thing, because a
+language, a tool, a grammar, or one of this library's own closed enums dictates
+it. A value that is a judgement is application data, and reaches the library as
+an **overridable default**: shipping a default is not the defect, shipping a
+choice with no parameter to replace it is. `HookSet` is the shape — a pydantic
+surface the template fills with fetch scopes, protected roots, and shell-rule
+extensions.
+
+Half of this is mechanical. The audited `library-default` rule in
+`lup.codescan.boundaries` requires every multi-entry data table declared under
+`packages/lup/src/lup` (outside `lup/adapters`, where provider spellings are
+canonical by definition) to be reachable somewhere in the library as a
+caller-replaceable default — a parameter default, a pydantic field default or
+factory, or the sentinel a mutable default is written as. Reachability is
+computed across the whole library, so a table defaulted by a distant consumer
+still passes.
+
+The other half is not checkable and is not meant to be: whether a value is
+dictated from outside the repository is a fact about curl's flags or Python's
+suffixes, not about the syntax. Canonicity is therefore declared at the site
+with `# lup: ignore[library-default]` and a reason naming what fixes the value.
+`docs/library-boundary.md` carries the criterion in full, the classification of
+every library table against it, the reverse-direction audit, and the target
+layout the relocation work executes against.
 
 Structured output has one mechanism. Each typed turn binds `submit_output` to
 its Pydantic schema and fresh store; native structured-output modes remain off.
@@ -82,9 +126,10 @@ The generated plugins enforce permissions without importing lup, yet decide
 identically to the library:
 
 1. **Canonical sources** — the `HookSet` in `devtools/harness/catalog.py`
-   (protected edit roots, allowed fetch scopes, policy ids, shell-rule
-   extensions), the anti-pattern rule set in `lup.codescan.antipatterns`, and
-   the baseline shell vocabulary in `lup.policy.shell_rules`.
+   (protected edit roots, allowed fetch scopes, policy ids, and the shell
+   vocabulary declared in `content/shell_vocabulary.py`) plus the anti-pattern
+   rule set in `lup.codescan.antipatterns`. The library supplies the shape a
+   vocabulary takes (`lup.policy.shell_rules`), never the words.
 2. **Library layer** — `lup.policy.rules` validates those inputs as pydantic
    surfaces and erases them into primitive rows; `lup.policy.kernel` — the
    hermetic, stdlib-only decision core — interprets those rows to reach every
@@ -93,8 +138,11 @@ identically to the library:
    adapters' `native` modules decode wire payloads into
    `lup.policy.models` events and render decisions back.
 3. **Assembly** — `lup.policy.bundle` reads the kernel source verbatim and
-   renders the erased rows as data files; the adapter hook renderers emit
-   `hooks/hooks.json`, the dispatcher `hooks/scripts/policy.py`, and
+   renders the erased rows as data files; `lup.policy.dispatcher` compiles
+   `hooks/scripts/policy.py` from `lup.policy.assets.host` — the host-side
+   half every runtime answers identically — plus one adapter-owned half and
+   the `DispatcherDeclaration` whose axes it proves that half keeps; the
+   adapter hook renderers emit `hooks/hooks.json` and
    `hooks/runtime/{kernel.py,policy_data.py}` under `.claude/plugins/lup/`
    and `.codex/plugins/lup/`.
 4. **Equivalence** — the shared fixture suite runs the same cases through

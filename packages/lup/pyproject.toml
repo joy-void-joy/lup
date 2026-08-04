@@ -49,6 +49,7 @@ where = ["src"]
 lup = ["py.typed"]
 "lup.adapters.claude" = ["assets/*.py"]
 "lup.adapters.codex" = ["assets/*.py"]
+"lup.policy" = ["assets/*.py"]
 
 [tool.pyright]
 # Independent of the workspace-root config: this lets the standalone library
@@ -56,7 +57,18 @@ lup = ["py.typed"]
 # to packages/lup/src. The root config re-lists this path under its own include
 # for the workspace-wide run; the two configs do not merge or conflict.
 include = ["src"]
-# Adapter asset scripts are verbatim payloads for the generated plugin tree;
-# their imports resolve only in that runtime layout, not in this workspace.
-exclude = ["src/lup/adapters/claude/assets", "src/lup/adapters/codex/assets"]
 pythonVersion = "3.14"
+
+# `kernel`, `policy_data`, and `codex_patch` are top-level modules only inside
+# a generated plugin's `hooks/runtime`, so each dispatcher asset resolves them
+# against the tree the surrounding repository generates — the same layout the
+# workspace-root config names, reached from this directory. `host` is the half
+# the compiler links in rather than ships, so an asset resolves it against the
+# canonical module both scripts are compiled from.
+[[tool.pyright.executionEnvironments]]
+root = "src/lup/adapters/claude/assets"
+extraPaths = ["../../.claude/plugins/lup/hooks/runtime", "src/lup/policy/assets"]
+
+[[tool.pyright.executionEnvironments]]
+root = "src/lup/adapters/codex/assets"
+extraPaths = ["../../.codex/plugins/lup/hooks/runtime", "src/lup/policy/assets"]

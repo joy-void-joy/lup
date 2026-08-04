@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pydantic import BaseModel, ConfigDict
 
 from lup.runtime.config import ModelMatcher
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 
 
 class ExactModelMatcher(ModelMatcher):

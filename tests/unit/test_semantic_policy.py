@@ -60,6 +60,8 @@ from lup.policy.rules import (
     human_owned_path_rule,
 )
 
+from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
+
 
 class DecisionCase(BaseModel):
     """One primitive input and its expected policy effect."""
@@ -821,6 +823,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             human_owned_files=["README.md"],
             autonomous_agent_identities=["resolver-worker"],
             path_roles=FIXTURE_PATH_ROLES,
+            shell_rules=SHELL_RULES,
         ),
         encoding="utf-8",
     )
@@ -1012,6 +1015,7 @@ def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) ->
 
 def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
     policy = ShellPolicy(
+        SHELL_RULES,
         allowed_urls=[UrlScope(origin=AnyHttpUrl("https://docs.example.com"))],
         denied_urls=[UrlScope(origin=AnyHttpUrl("https://internal.example.com"))],
     )
@@ -1029,7 +1033,7 @@ def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
 
 
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
-    policy = ShellPolicy()
+    policy = ShellPolicy(SHELL_RULES)
 
     assert policy.decide(
         ShellCommand(command="git status && uv run pytest")
@@ -1045,7 +1049,7 @@ def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
 
 def test_shell_policy_confines_trusted_native_skill_scripts() -> None:
     root = "/opt/codex/skills"
-    policy = ShellPolicy(trusted_script_roots=[root])
+    policy = ShellPolicy(SHELL_RULES, trusted_script_roots=[root])
 
     def effect(command: str) -> str:
         return policy.decide(ShellCommand(command=command)).effect
@@ -1058,7 +1062,7 @@ def test_shell_policy_confines_trusted_native_skill_scripts() -> None:
     assert effect(f"node {root}/../escape.mjs") == "deny"
     assert effect("node --eval 'process.exit()'") == "deny"
     assert (
-        ShellPolicy(trusted_script_roots=["/"])
+        ShellPolicy(SHELL_RULES, trusted_script_roots=["/"])
         .decide(ShellCommand(command="node /tmp/untrusted-script.mjs"))
         .effect
         == "deny"
@@ -1069,14 +1073,17 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     tmp_path: Path,
 ) -> None:
     bundled = load_bundled_kernel(tmp_path, "shell")
-    policy = ShellPolicy(path_roles=FIXTURE_PATH_ROLES)
-    sandboxed_policy = ShellPolicy(sandbox_active=True, path_roles=FIXTURE_PATH_ROLES)
+    policy = ShellPolicy(SHELL_RULES, path_roles=FIXTURE_PATH_ROLES)
+    sandboxed_policy = ShellPolicy(
+        SHELL_RULES, sandbox_active=True, path_roles=FIXTURE_PATH_ROLES
+    )
 
     for index, case in enumerate(SHELL_POLICY_CASES):
         if case.interactive:
             active = sandboxed_policy if case.sandboxed else policy
         else:
             active = ShellPolicy(
+                SHELL_RULES,
                 sandbox_active=case.sandboxed,
                 interactive=False,
                 path_roles=FIXTURE_PATH_ROLES,
@@ -1116,7 +1123,7 @@ def test_write_targets_name_only_the_paths_a_command_opens_for_writing() -> None
 def test_creating_a_file_passes_where_overwriting_one_still_asks(
     tmp_path: Path,
 ) -> None:
-    policy = ShellPolicy()
+    policy = ShellPolicy(SHELL_RULES)
     existing = tmp_path / "kept.txt"
     existing.write_text("prior work", encoding="utf-8")
     command = "echo x > kept.txt"
@@ -1127,7 +1134,7 @@ def test_creating_a_file_passes_where_overwriting_one_still_asks(
 
 
 def test_sandbox_escape_reenters_the_deny_lattice() -> None:
-    policy = ShellPolicy(sandbox_active=True)
+    policy = ShellPolicy(SHELL_RULES, sandbox_active=True)
     confined = policy.decide(ShellCommand(command="frobnicate --weird"))
     assert confined.effect == "defer"
     escaped = policy.decide(
@@ -1139,10 +1146,12 @@ def test_sandbox_escape_reenters_the_deny_lattice() -> None:
 
 def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     """Codex hooks cannot complete the approval flow, so they never name it."""
-    interactive = ShellPolicy().decide(ShellCommand(command="git push --force"))
+    interactive = ShellPolicy(SHELL_RULES).decide(
+        ShellCommand(command="git push --force")
+    )
     assert interactive.effect == "ask"
 
-    blocked = ShellPolicy(interactive=False).decide(
+    blocked = ShellPolicy(SHELL_RULES, interactive=False).decide(
         ShellCommand(command="git push --force")
     )
     assert blocked.effect == "deny"

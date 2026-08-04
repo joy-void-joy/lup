@@ -37,7 +37,8 @@ from lup.resolver.journal import (
 )
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import FROZEN
-from lup.runtime.contracts import Interrupt, SessionFactory, Steer
+from lup.runtime.contracts import Interrupt, Steer
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     SessionHandle,
     SessionId,

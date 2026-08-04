@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.runtime.errors import TurnError
 from lup.runtime.models import TurnRequest, TurnResult
 

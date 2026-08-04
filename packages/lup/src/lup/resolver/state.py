@@ -25,6 +25,7 @@ from lup.resolver.models import (
 PHASE_ORDER: dict[ResolvePhase, int] = {
     phase: index for index, phase in enumerate(ResolvePhase)
 }
+# lup: ignore[library-default] — the successor of each phase in this library's own closed enum
 PHASE_TRANSITIONS: dict[ResolvePhase, ResolvePhase] = {
     ResolvePhase.INVENTORY: ResolvePhase.QUESTIONS,
     ResolvePhase.QUESTIONS: ResolvePhase.ELIGIBILITY,
@@ -38,6 +39,7 @@ PHASE_TRANSITIONS: dict[ResolvePhase, ResolvePhase] = {
     ResolvePhase.VERIFICATION: ResolvePhase.CLEANUP,
     ResolvePhase.CLEANUP: ResolvePhase.COMPLETE,
 }
+# lup: ignore[library-default] — the legal successors of each status in this library's own closed enum
 CONCERN_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {
     ConcernStatus.DISCOVERED: [
         ConcernStatus.WAITING_FOR_ANSWERS,
@@ -178,12 +180,13 @@ def validate_progress_transition(
 
     A concern admitted mid-run appears here for the first time, so the
     covering check runs against the candidate alone: requiring both sides to
-    cover the same set is what made admission impossible.
+    cover the same set is what made admission impossible. What may never
+    happen is a concern leaving the projection: that would drop recorded work.
     """
     before = progress_index(current.progress)
     after = progress_index(candidate.progress)
     concern_ids = {concern.id for concern in candidate.concerns}
-    if after.keys() != concern_ids:
+    if after.keys() != concern_ids or not before.keys() <= after.keys():
         raise StateTransitionError("resolver progress must cover every concern exactly")
     for identifier, prior in before.items():
         if identifier not in after:
@@ -250,6 +253,11 @@ class ResolverStateRepository:
             ):
                 raise StateTransitionError(
                     "resolver source, specification, and configuration are immutable"
+                )
+            if state.concerns[: len(current.concerns)] != current.concerns:
+                raise StateTransitionError(
+                    "a recorded resolver concern is immutable; a concern "
+                    "discovered later joins the run beside them"
                 )
             validate_concern_admission(current, state)
             validate_progress_transition(current, state)

@@ -1,4 +1,4 @@
-"""Resolve an immutable Claude profile transform before factory construction."""
+"""Resolve a Claude profile into its configured session factory."""
 
 import asyncio
 from pathlib import Path
@@ -8,12 +8,7 @@ from lup.adapters.claude.config import (
     ClaudeProfileResolver,
     ClaudeProfileSelection,
 )
-from lup.adapters.claude.runtime import (
-    ClaudeSessionConfig,
-    create_claude_session_factory,
-)
-from lup.runtime.models import TurnInput, turn_request
-from lup.runtime.query import query
+from lup.adapters.claude.runtime import ClaudeSessionConfig
 
 from examples.common import Summary
 
@@ -31,13 +26,8 @@ async def main() -> None:
         },
         active="work",
     )
-    selected = ClaudeProfileResolver(registry).resolve(None).apply(base)
-    result = await query(
-        create_claude_session_factory(
-            selected
-        ),  # lup: I feel like this too, shouldn't this be a property of ClaudeProfileResolver?
-        turn_request(TurnInput(text="Describe immutable configuration."), Summary),
-    )
+    factory = ClaudeProfileResolver(registry).session_factory(base)
+    result = await factory.query("Describe immutable configuration.", Summary)
     print(result.output.summary)
 
 

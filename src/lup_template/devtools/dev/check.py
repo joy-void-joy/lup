@@ -9,7 +9,10 @@ from lup.codescan.markers import find_feedback
 from lup.harness.models import GUIDANCE_CHARACTER_BUDGET
 
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
-from lup_template.devtools.dev.boundaries import scan_boundaries
+from lup_template.devtools.dev.boundaries import (
+    scan_boundaries,
+    scan_library_placement,
+)
 from lup_template.devtools.dev.branches import unlanded_siblings
 from lup_template.devtools.dev.comments import FoundComment, scan_tracked
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
@@ -155,16 +158,17 @@ def run_checks(fix: bool, no_test: bool, scope: list[str] | None = None) -> None
         typer.echo("claude comments: ok")
         results.append(CheckOutcome(name="claude comments", passed=True))
 
-    findings = scan_antipatterns()
-    blocking = [f for f in findings if f.kind != "untyped"]
+    scan = scan_antipatterns()
+    blocking = [f for f in scan.findings if f.kind != "untyped"]
+    refined = f", {len(scan.refuted)} refuted" if scan.refuted else ""
     if blocking:
-        typer.echo(f"antipatterns: FAIL ({len(blocking)} finding(s))")
+        typer.echo(f"antipatterns: FAIL ({len(blocking)} finding(s){refined})")
         for finding in blocking:
             typer.echo(f"  {finding.file}:{finding.line} [{finding.kind}]")
         results.append(CheckOutcome(name="antipatterns", passed=False))
     else:
-        advisory = len(findings) - len(blocking)
-        tail = f" ({advisory} untyped, advisory)" if advisory else ""
+        advisory = len(scan.findings) - len(blocking)
+        tail = f" ({advisory} untyped, advisory{refined})" if advisory else refined
         typer.echo(f"antipatterns: ok{tail}")
         results.append(CheckOutcome(name="antipatterns", passed=True))
 
@@ -177,6 +181,16 @@ def run_checks(fix: bool, no_test: bool, scope: list[str] | None = None) -> None
     else:
         typer.echo("seam boundaries: ok")
         results.append(CheckOutcome(name="seam boundaries", passed=True))
+
+    tables = scan_library_placement()
+    if tables:
+        typer.echo(f"library placement: FAIL ({len(tables)} baked-in table(s))")
+        for table in tables:
+            typer.echo(f"  {table.file}:{table.line}  {table.module}")
+        results.append(CheckOutcome(name="library placement", passed=False))
+    else:
+        typer.echo("library placement: ok")
+        results.append(CheckOutcome(name="library placement", passed=True))
 
     used = max(
         len(claude_prompt_renderer().render(GUIDANCE)),

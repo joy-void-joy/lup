@@ -386,6 +386,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
     return tokens
 
 
+# lup: ignore[library-default] — POSIX shell grammar operators
 SENTINEL_OPS = ("(", ")", ";;", ";&", ";;&")
 
 

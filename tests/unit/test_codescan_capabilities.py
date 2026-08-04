@@ -6,7 +6,7 @@ reports fewer findings, which reads exactly like a clean repository.
 
 from pathlib import Path
 
-from lup.codescan.capabilities import module_name
+from lup.codescan.common import module_name
 
 
 def test_a_package_under_a_distribution_directory_resolves_to_the_package() -> None:

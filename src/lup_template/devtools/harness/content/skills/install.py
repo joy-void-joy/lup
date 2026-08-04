@@ -154,7 +154,7 @@ These work in any repo:
             models.PluginPath(plugin="lup", location="root", scope="every_tree"),
             models.TextPart(
                 text=r"""
-- **Permission policy**: configure URL scopes and protected roots in the canonical `HookSet`; change semantic decisions in `lup.policy`, then regenerate
+- **Permission policy**: configure URL scopes, protected roots, and the target's own shell vocabulary in the canonical `HookSet`; change semantic decisions in `lup.policy`, then regenerate
 - **Pre-push quality gates**: Adapt to target's linter/type-checker/test runner
 - **Generic commands**: commit, rebase, close, land, meta, debug, refactor, add-command, modify-command, merge, principle, review, create-investigator
 - **Guidance patterns**: Git workflow, editing style, asking questions, debugging philosophy

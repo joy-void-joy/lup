@@ -12,13 +12,19 @@ The `# lup: ignore` escape hatch — inline, or as a standalone file-level
 opt-out — is matched here too, `LineProjections` holds the token-masked line
 views a context-aware rule scans, and `LineCursor` is the shared line walk that
 lets a scanner absorb a note's continuation lines without index bookkeeping.
+
+`PythonSource` is the unit whole-project scanners consume, and `Refutation`
+the shape a refiner returns when it proves a matched line is not what its rule
+is about — the one mechanism by which a broad regex hit is dropped with a
+reason attached.
 """
 
 import re
 from collections.abc import Callable
+from pathlib import Path, PurePosixPath
 from typing import Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from lup.policy.kernel.edit import (
     docstring_lines as python_docstring_lines,
@@ -89,6 +95,74 @@ def file_level_ignore(text: str, max_lines: int = 10) -> FileIgnore | None:
         if match is not None:
             return FileIgnore(line=i + 1, rule_ids=ignore_rule_ids(match))
     return None
+
+
+class PythonSource(BaseModel):
+    """One import-resolvable Python module a project-wide scanner reads.
+
+    The unit every whole-project scan consumes: the architecture audit builds
+    its symbol index from these, and the typed grammar parses them for the
+    sites it judges.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    path: Path
+    module: str
+    text: str
+
+
+def module_name(path: Path) -> str:
+    """Infer a dotted module name from a repository-relative Python path."""
+    parts = list(PurePosixPath(path.as_posix()).parts)
+    # The innermost match is the package root. Taking the first one made
+    # `packages/lup/src/lup/x.py` resolve to `lup.src.lup.x` — the
+    # distribution directory rather than the package — so every cross-module
+    # symbol lookup missed. It degrades to fewer findings rather than wrong
+    # ones, which is why it went unnoticed.
+    roots = [
+        index for index, part in enumerate(parts) if part in {"lup", "lup_template"}
+    ]
+    selected = parts[roots[-1] :] if roots else parts
+    if selected[-1] == "__init__.py":
+        selected = selected[:-1]
+    else:
+        selected[-1] = PurePosixPath(selected[-1]).stem
+    return ".".join(selected)
+
+
+def sources_from_paths(paths: list[Path]) -> list[PythonSource]:
+    """Read source files and assign import-resolvable module names."""
+    return [
+        PythonSource(
+            path=path,
+            module=module_name(path),
+            text=path.read_text(encoding="utf-8"),
+        )
+        for path in paths
+    ]
+
+
+class Refutation(BaseModel):
+    """One rule hit a refiner proved does not apply, and the proof.
+
+    A refiner sharpens a broad line rule after the fact: the regex says the
+    shape is present, the refiner says this instance is not what the rule is
+    about. The AST exemptions for deliberate empty-collection defaults and the
+    typed grammar's receiver resolution both speak this shape, so the audit
+    has one mechanism for "matched, but refuted" — and a `# lup: ignore` left
+    guarding a refuted line becomes a dead directive the audit reports.
+
+    ``subject`` is the source expression the verdict is about and ``evidence``
+    the sentence that justifies it, so a dropped finding is always accountable.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    rule_id: str
+    line: int
+    subject: str
+    evidence: str
 
 
 class PythonContext(BaseModel):

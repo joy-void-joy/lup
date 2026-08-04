@@ -36,7 +36,6 @@ from pydantic import BaseModel, Field
 
 from lup.mcp import LupMcpTool, lup_tool
 from lup.reflect import ReviewGate, ReviewResult, ReviewVerdict
-from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.query import query
 
 logger = logging.getLogger(__name__)
@@ -225,10 +224,7 @@ async def run_reviewer(
         system_prompt=REVIEWER_SYSTEM_PROMPT.format(outputs_dir=outputs_dir or "N/A"),
         tools=REVIEWER_TOOLS,
     )
-    result = await query(
-        factory,
-        turn_request(TurnInput(text=reviewer_prompt), ReviewResult),
-    )
+    result = await query(factory, reviewer_prompt, ReviewResult)
     return result.output
 
 
