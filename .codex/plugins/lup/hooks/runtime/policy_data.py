@@ -449,7 +449,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "set-shape",
             "pattern": "(?<!\\.)\\bset[\\[(]|(?::|->)\\s*set\\b",
-            "message": "A declared `set` is usually better as a dict (keyed lookup) or a purpose-built structure. For a genuinely set-shaped value add `# lup: ignore[set-shape]`",
+            "message": "A declared `set` is usually better as a dict, when the members key something, or as a `list[BaseModel]`, when each member carries more than its own name \u2014 a bare set of strings is often a record that lost its other fields. Reach for membership on a local set comprehension instead of declaring the set as the interface. For a genuinely set-shaped value add `# lup: ignore[set-shape]`",
             "context": "code",
         },
         {
@@ -703,7 +703,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "set-shape",
             "pattern": "(?<!\\.)\\bset[\\[(]|(?::|->)\\s*set\\b",
-            "message": "A declared `set` is usually better as a dict (keyed lookup) or a purpose-built structure. For a genuinely set-shaped value add `# lup: ignore[set-shape]`",
+            "message": "A declared `set` is usually better as a dict, when the members key something, or as a `list[BaseModel]`, when each member carries more than its own name \u2014 a bare set of strings is often a record that lost its other fields. Reach for membership on a local set comprehension instead of declaring the set as the interface. For a genuinely set-shaped value add `# lup: ignore[set-shape]`",
             "context": "code",
         },
         {

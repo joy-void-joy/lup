@@ -656,6 +656,20 @@ EDIT_POLICY_CASES = [
         after="a = 1\nb = 2\nc = 3\nd = 4\ne = 5",
         effect="allow",
     ),
+    # Creating a file is the same reach for the same reason. Adding lines to
+    # a test freely while asking to create one is not a coherent boundary.
+    EditDecisionCase(
+        path="tests/unit/test_new.py",
+        before=None,
+        after="def test_thing() -> None:\n    assert True\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before=None,
+        after="def thing() -> None:\n    pass\n",
+        effect="ask",
+    ),
     EditDecisionCase(
         path="src/module.py",
         before="value = 1",

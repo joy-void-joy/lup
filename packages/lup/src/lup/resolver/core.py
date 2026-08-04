@@ -190,12 +190,31 @@ def format_candidates(owed: list[DropCandidate]) -> str:
     A merger handed four hundred lines reads none of them, and the obligation
     is per path rather than per line — the sample is enough to recognize what
     went missing and find the rest.
+
+    Lost definitions lead, and are named in full rather than sampled. Lines go
+    missing whenever a resolution rewrites them, so that list is long and
+    mostly benign; a definition that existed and now does not is the shape a
+    regression takes, and there are never so many that naming them all costs
+    the reader anything.
     """
     return (
         "\n".join(
-            f"- {candidate.path.as_posix()} (from {candidate.parent[:12]}), "
-            f"{len(candidate.missing)} lines, first: "
-            + " / ".join(candidate.missing[:3])
+            f"- {candidate.path.as_posix()} (from {candidate.parent[:12]})"
+            + (
+                "\n  definitions no longer present: "
+                + ", ".join(
+                    f"{symbol.name} (parent line {symbol.line})"
+                    for symbol in candidate.lost_symbols
+                )
+                if candidate.lost_symbols
+                else ""
+            )
+            + (
+                f"\n  {len(candidate.missing)} lines, first: "
+                + " / ".join(candidate.missing[:3])
+                if candidate.missing
+                else ""
+            )
             for candidate in owed
         )
         or "- (none)"
@@ -1239,8 +1258,73 @@ class ResolverCore:
                     broke=failed,
                 )
             )
+            await self.recheck_standing(lease, base, joined[:-1], parent)
         await self.audit_join(lease, base, joined, current, purpose)
         return current
+
+    async def recheck_standing(
+        self,
+        lease: WritableRootLease,
+        base: str,
+        standing: list[str],
+        parent: str,
+    ) -> None:
+        """Ask whether this join stopped an already-joined concern holding.
+
+        A regression is precisely an earlier parent's criterion that no longer
+        holds. Checking that only after the last join reports it with every
+        parent a candidate and the merger long past the context; asking it
+        here names the join that caused it while the tree is still small
+        enough to read.
+
+        Only concerns this join could have touched are re-examined. A join
+        that changes no file an earlier concern changed cannot have broken its
+        criteria in a way the per-join verification above would not already
+        have caught, and re-reading every concern after every join would cost
+        a reviewer turn per pair.
+        """
+        state = self.state
+        if state is None or not standing:
+            return
+        changed = {
+            path.as_posix()
+            for path in self.worktrees.changed_between(lease, base, parent)
+        }
+        owners = {
+            outcome.commit: outcome.concern_id
+            for outcome in state.outcomes
+            if outcome.commit is not None
+        }
+        for earlier in standing:
+            if earlier not in owners:
+                continue
+            overlap = changed & {
+                path.as_posix()
+                for path in self.worktrees.changed_between(lease, base, earlier)
+            }
+            if not overlap:
+                continue
+            concern = next(
+                (item for item in state.concerns if item.id == owners[earlier]), None
+            )
+            if concern is None:
+                continue
+            await self.recheck_concern(
+                concern,
+                lease.root,
+                situation=(
+                    "A later concern has just been joined into the tree your "
+                    "concern is already in, and the two changed the same "
+                    "files. Re-check your concern's acceptance criteria "
+                    "against this tree. A criterion you passed before may no "
+                    "longer hold; say so plainly if it does not.\n\n"
+                    "Files both touched:\n"
+                    + "\n".join(f"- {path}" for path in sorted(overlap))
+                    + f"\n\nJoined commit: {parent[:12]}\nWorktree: {lease.root}"
+                ),
+                occasion=f"join-{parent[:12]}",
+                lost_because=f"once {parent[:12]} was joined into the same tree",
+            )
 
     def join_order(
         self, lease: WritableRootLease, base: str, parents: list[str]
@@ -1295,52 +1379,71 @@ class ResolverCore:
         for concern in state.concerns:
             if concern.id not in integrated:
                 continue
-            reviewer = self.actors.session(
-                ActorRef(kind="reviewer", id=concern.id),
-                self.reviewer_factory(integration.worktree),
+            await self.recheck_concern(
+                concern,
+                integration.worktree,
+                situation=(
+                    "Every concern in this run is now integrated into one "
+                    "tree. Re-check your concern's acceptance criteria "
+                    "against that tree rather than the worktree you "
+                    "reviewed. A criterion you passed before may no "
+                    "longer hold now that a sibling has landed; say so "
+                    "plainly if it does not.\n\n"
+                    f"Integrated concerns: {', '.join(integration.concerns)}\n"
+                    f"Worktree: {integration.worktree}"
+                ),
+                occasion="integrated",
+                lost_because="once every sibling is integrated",
             )
-            result = await reviewer.turn(
-                turn_request(
-                    TurnInput(
-                        text=(
-                            "Every concern in this run is now integrated into one "
-                            "tree. Re-check your concern's acceptance criteria "
-                            "against that tree rather than the worktree you "
-                            "reviewed. A criterion you passed before may no "
-                            "longer hold now that a sibling has landed; say so "
-                            "plainly if it does not.\n\n"
-                            f"Integrated concerns: {', '.join(integration.concerns)}\n"
-                            f"Worktree: {integration.worktree}"
-                        )
+
+    async def recheck_concern(
+        self,
+        concern: Concern,
+        worktree: Path,
+        *,
+        situation: str,
+        occasion: str,
+        lost_because: str,
+    ) -> None:
+        """Ask one concern's reviewer whether its criteria still hold here.
+
+        A failed criterion opens a question rather than failing the run,
+        because later work can legitimately supersede an earlier criterion
+        and only a human can say whether this did. The question is keyed by
+        occasion so the same concern examined after two different joins asks
+        twice rather than colliding on one id — the second failure is its own
+        fact, and it names a different join.
+        """
+        reviewer = self.actors.session(
+            ActorRef(kind="reviewer", id=concern.id),
+            self.reviewer_factory(worktree),
+        )
+        result = await reviewer.turn(
+            turn_request(TurnInput(text=situation), ReviewReport)
+        )
+        met = {identifier: True for identifier in result.output.criteria_met}
+        lost = [
+            criterion.id for criterion in concern.criteria if criterion.id not in met
+        ]
+        if not lost:
+            return
+        self.queue_questions(
+            [
+                MaterialQuestion(
+                    id=f"{concern.id}-superseded-{occasion}",
+                    concern_id=concern.id,
+                    prompt=(
+                        f"{concern.id} no longer meets {', '.join(lost)} "
+                        f"{lost_because}. The reviewer says: "
+                        f"{result.output.reason}. Was this criterion "
+                        "superseded by later work, or is this a regression?"
                     ),
-                    ReviewReport,
+                    choices=["superseded", "regression"],
+                    closed_choices=True,
                 )
-            )
-            met = {identifier: True for identifier in result.output.criteria_met}
-            lost = [
-                criterion.id
-                for criterion in concern.criteria
-                if criterion.id not in met
-            ]
-            if not lost:
-                continue
-            self.queue_questions(
-                [
-                    MaterialQuestion(
-                        id=f"{concern.id}-superseded",
-                        concern_id=concern.id,
-                        prompt=(
-                            f"{concern.id} no longer meets {', '.join(lost)} once "
-                            f"every sibling is integrated. The reviewer says: "
-                            f"{result.output.reason}. Was this criterion "
-                            "superseded by later work, or is this a regression?"
-                        ),
-                        choices=["superseded", "regression"],
-                        closed_choices=True,
-                    )
-                ],
-                concern.id,
-            )
+            ],
+            concern.id,
+        )
 
     def verify(self, root: Path) -> list[VerificationRecord]:
         """Run the whole verification set against one tree.
@@ -1570,6 +1673,7 @@ class ResolverCore:
                 else ""
             )
             + self.ledger_recital()
+            + self.accumulated_recital()
         )
 
     def ledger_recital(self) -> str:
@@ -1588,6 +1692,44 @@ class ResolverCore:
                 f"- {entry.parent[:12]}: {entry.summary}" for entry in self.ledger
             )
             + "\n\n"
+        )
+
+    def accumulated_recital(self) -> str:
+        """What the tree being joined into is already carrying, and why.
+
+        The incoming parent arrived with its concern, its answers and its
+        merge notes; the side it is being joined into had only one-line
+        summaries. That asymmetry is what produces the characteristic bad
+        join — the incoming change is legible and the standing one is not, so
+        the resolution favours what the merger can read, and an earlier
+        concern is quietly reverted by someone who never saw what it was for.
+        """
+        state = self.state
+        if state is None or not self.ledger:
+            return ""
+        joined = {entry.parent for entry in self.ledger}
+        concerns = {
+            outcome.concern_id: outcome.commit
+            for outcome in state.outcomes
+            if outcome.commit in joined
+        }
+        recited = [
+            f"- {concern.id}: {concern.title}\n"
+            + "".join(
+                f"    criterion: {criterion.description}\n"
+                for criterion in concern.criteria
+            )
+            for concern in state.concerns
+            if concern.id in concerns
+        ]
+        if not recited:
+            return ""
+        return (
+            "Already in the tree you are joining into. These are settled, and "
+            "a resolution that stops one of them holding is a regression "
+            "however reasonable the incoming change looks:\n"
+            + "\n".join(recited)
+            + "\n"
         )
 
     async def admit_concern(self, concern: Concern) -> None:
@@ -1676,7 +1818,11 @@ class ResolverCore:
             "Two things you must account for. Every candidate below is content "
             "one parent contributed that this tree no longer holds — disposition "
             "each as kept, rewritten, superseded or dropped, with a reason. A "
-            "rewrite is a legitimate answer; silence is not. And any file you "
+            "rewrite is a legitimate answer; silence is not. Where a candidate "
+            "names definitions no longer present, read those first: a function "
+            "or class one parent defined and this tree does not is the shape a "
+            "regression takes, and 'rewritten' is only true if you can name "
+            "where the behaviour landed. And any file you "
             "edit that is not in the conflict set must be declared, with a "
             "reason: fixing a caller whose file merged clean is correct and "
             "expected, and is exactly what has to be visible.\n\n"

@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from lup.codescan.symbols import DefinedSymbol
 from lup.harness.models import ResolveSpec
 
 FROZEN = ConfigDict(frozen=True)
@@ -406,6 +407,14 @@ class DropCandidate(BaseModel):
     parent: str
     path: Path
     missing: list[str]
+    lost_symbols: list[DefinedSymbol] = Field(default_factory=list)
+    """Definitions the parent introduced that the joined tree no longer holds.
+
+    A separate finding from the missing lines, and a sharper one. Lines go
+    missing whenever a resolution rewrites them, so the list is long and
+    mostly benign; a function that was defined and now is not is the shape a
+    silent regression actually takes.
+    """
 
 
 type HunkFate = Literal["kept", "rewritten", "superseded", "dropped"]

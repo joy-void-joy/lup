@@ -581,10 +581,14 @@ def decide_edit(
     :func:`refined_exempt_lines`, without which a rule broader than the defect
     it names holds its own suppression in place forever.
 
-    Each gate reaches as far as its own reason. Anti-patterns and the size
-    gate describe how production code should read and stop at production;
+    Each gate reaches as far as its own reason. Anti-patterns, the size gate
+    and the full-write gate are all about how production code reads and how
+    much of it a reviewer can hold at once, so all three stop at production;
     the marker gate follows the feedback instead and stops only at scratch,
-    where nothing persists to be read.
+    where nothing persists to be read. A full write only ever asks about
+    creating a file — an overwrite carries its predecessor as ``before`` —
+    and creating one where the conventions do not reach costs a reviewer
+    nothing, which pure deletion already assumed everywhere.
     """
     granted = allowances or []
     previous = before or ""
@@ -620,7 +624,7 @@ def decide_edit(
         previous, python_source
     ) != review_marker_count(updated, python_source):
         return KernelDecision("ask", "edit changes inline review markers")
-    if before is None:
+    if before is None and role == "production":
         if autonomous:
             return KernelDecision("allow", "reviewed autonomous full write")
         return KernelDecision("ask", "full-file writes require approval")

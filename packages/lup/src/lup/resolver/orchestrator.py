@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from lup.codescan.symbols import DefinedSymbol, defined_symbols, symbols_lost
 from lup.harness.process import LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import WorktreePreparer
 from lup.resolver.notes import clear_concern_notes
@@ -567,13 +568,45 @@ class WorktreeOrchestrator:
         found: list[DropCandidate] = []  # lup: ignore[empty-collection]
         for path in self.changed_between(lease, base, parent):
             contributed = self.added_lines(lease, base, parent, path)
-            if not contributed:
+            lost = self.lost_symbols(lease, base, parent, result, path)
+            if not contributed and not lost:
                 continue
             held = self.file_at(lease, result, path)
             missing = [line for line in contributed if line not in held]
-            if missing:
-                found.append(DropCandidate(parent=parent, path=path, missing=missing))
+            if missing or lost:
+                found.append(
+                    DropCandidate(
+                        parent=parent, path=path, missing=missing, lost_symbols=lost
+                    )
+                )
         return found
+
+    def lost_symbols(
+        self,
+        lease: WritableRootLease,
+        base: str,
+        parent: str,
+        result: str,
+        path: Path,
+    ) -> list[DefinedSymbol]:
+        """Definitions this parent introduced that the joined tree dropped.
+
+        Restricted to what the parent itself added, so a definition removed
+        deliberately on the other side is that side's decision and not this
+        parent's loss. The convention this repository states for merges is
+        exactly this comparison — account for every missing `def` and `class`
+        — and stating it in a guidance document made it a step a merger could
+        skip, where computing it makes the answer an obligation.
+        """
+        if path.suffix.lower() not in {".py", ".pyi"}:
+            return []
+        introduced = symbols_lost(
+            self.file_at(lease, parent, path), self.file_at(lease, base, path)
+        )
+        held = {
+            symbol.name for symbol in defined_symbols(self.file_at(lease, result, path))
+        }
+        return [symbol for symbol in introduced if symbol.name not in held]
 
     def commit_join(self, lease: WritableRootLease, title: str) -> str:
         """Create and read the orchestrator-owned semantic join commit."""
