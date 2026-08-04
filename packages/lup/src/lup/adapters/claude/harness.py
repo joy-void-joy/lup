@@ -308,7 +308,6 @@ CLAUDE_DISPATCHER = DispatcherDeclaration(
     runtime_name="Claude Code",
     package="lup.adapters.claude",
     managed_root_env="CLAUDE_CONFIG_DIR",
-    relativizer="workspace_path",
     routed_tools=["Bash", "WebFetch", "Edit", "Write"],
     hook_events=["PreToolUse"],
     failure="conservative_ask",

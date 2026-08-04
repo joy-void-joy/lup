@@ -11,6 +11,8 @@ from pathlib import Path
 
 import sh
 
+from lup.types import JsonObject
+
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
 
 
@@ -100,6 +102,53 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
     assert isinstance(denied, dict)
     assert isinstance(allowed, dict)
     assert denied["permissionDecision"] == "deny"
+    assert allowed["permissionDecision"] == "allow"
+
+
+def write_payload(path: str, content: str) -> JsonObject:
+    """One Write hook payload, the way a live session sends it."""
+    return {"tool_name": "Write", "tool_input": {"file_path": path, "content": content}}
+
+
+def decide_from(
+    payload: JsonObject, cwd: Path
+) -> dict[str, object]:  # lup: ignore[dict-str-payload]
+    """Run the dispatcher from a working directory that is not the repo."""
+    output = str(
+        sh.Command("python3")(
+            "-I",
+            "-S",
+            str(DISPATCHER.resolve()),
+            _in=json.dumps(payload),
+            _cwd=str(cwd),
+        )
+    )
+    return json.loads(output)
+
+
+def test_absolute_paths_resolve_against_their_worktree_not_the_launch_directory() -> (
+    None
+):
+    """A session always sends absolute paths, and may be launched anywhere.
+
+    Every repo-relative rule matches on the relativized path, so anchoring it
+    on the working directory decides policy by where the runtime happened to
+    start: from a sibling directory nothing matched, which left the role
+    relaxations off and — far worse — let a protected path through.
+    """
+    root = Path(".").resolve()
+    outside = root.parent
+    protected = decide_from(
+        write_payload(str(root / "README.md"), "# replaced\n"), outside
+    )
+    under_test = decide_from(
+        write_payload(str(root / "tests" / "unit" / "probe.py"), "x = {}\n"), outside
+    )
+    asked = protected["hookSpecificOutput"]
+    allowed = under_test["hookSpecificOutput"]
+    assert isinstance(asked, dict)
+    assert isinstance(allowed, dict)
+    assert asked["permissionDecision"] == "ask"
     assert allowed["permissionDecision"] == "allow"
 
 

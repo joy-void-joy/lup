@@ -32,6 +32,7 @@ from host import (
     managed_script_roots,
     read_document,
     sandbox_active,
+    worktree_path,
 )
 from kernel.decision import KernelDecision
 from kernel.edit import decide_edit
@@ -56,24 +57,6 @@ def managed_root():
     """The home Codex installs and trusts packages beneath."""
     environ = os.environ  # lup: ignore[os-environ]
     return Path(environ["CODEX_HOME"]) if "CODEX_HOME" in environ else None
-
-
-def worktree_path(path_text):
-    """Relativize against the worktree holding the path, not the cwd.
-
-    A sibling worktree is writable but is not under the launch directory,
-    so relativizing against the cwd would leave its paths absolute and
-    every repo-relative path rule — human-owned files, protected
-    directories — would quietly fail to match inside it.
-    """
-    path = Path(path_text)
-    if not path.is_absolute():
-        return path_text
-    resolved = path.resolve()
-    for root in resolved.parents:
-        if (root / ".git").exists():
-            return resolved.relative_to(root).as_posix()
-    return path_text
 
 
 def edit_decision(path_text, before, after, path_exists):

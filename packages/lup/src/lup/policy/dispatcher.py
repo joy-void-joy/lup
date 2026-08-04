@@ -61,6 +61,14 @@ ROUTER_SUBJECT = "name"
 ENTRYPOINT = "main"
 """The router, the tool name it branches on, and the process entry point."""
 
+RELATIVIZER = "worktree_path"
+"""How every dispatcher makes an absolute path repo-relative.
+
+Shared rather than declared per runtime: every repo-relative rule matches on
+this answer, so a runtime free to spell its own could anchor on something
+that is not the file's worktree, and each rule would then miss in silence.
+"""
+
 EVENT_KEY = "hook_event_name"
 EVENT_FIELD = "hookEventName"
 """How an arriving payload and a returned envelope each name a hook event."""
@@ -93,7 +101,6 @@ class DispatcherDeclaration(BaseModel):
     runtime_name: str
     package: str
     managed_root_env: str
-    relativizer: str
     routed_tools: list[str]
     hook_events: list[str]
     failure: DispatcherFailure
@@ -316,9 +323,19 @@ def declaration_breaches(
         ],
         *[
             f"declares {name} but defines no such function"
-            for name in (declaration.relativizer, ROUTER, ENTRYPOINT)
+            for name in (ROUTER, ENTRYPOINT)
             if named_function(runtime, name) is None
         ],
+        *breach(
+            RELATIVIZER
+            not in [
+                name
+                for item in half_imports(runtime)
+                if item.module == SHARED_MEMBER
+                for name in item.names
+            ],
+            f"never takes {RELATIVIZER} from {SHARED_MEMBER}",
+        ),
         *breach(
             declaration.managed_root_env not in constants,
             f"never reads {declaration.managed_root_env}",

@@ -56,6 +56,26 @@ def managed_script_roots(root: Path | None) -> list[str]:
     return [str(root / "skills"), str(root / "plugins" / "cache")]
 
 
+def worktree_path(path_text: str) -> str:
+    """Relativize against the worktree holding the path, not the cwd.
+
+    Every repo-relative rule — human-owned files, protected directories, the
+    role a path carries — matches on this answer, so anchoring it anywhere
+    but the file's own worktree decides policy by where the runtime happened
+    to be launched. A sibling worktree is writable and is not under the
+    launch directory; the cwd this script is promised nothing about is not a
+    root at all. Both leave the path absolute, and every rule silently misses.
+    """
+    path = Path(path_text)
+    if not path.is_absolute():
+        return path_text
+    resolved = path.resolve()
+    for root in resolved.parents:
+        if (root / ".git").exists():
+            return resolved.relative_to(root).as_posix()
+    return path_text
+
+
 def existing_write_targets(targets: list[str]) -> list[str]:
     """Report which of a command's write targets already exist on disk.
 
@@ -125,23 +145,12 @@ def edit_documents(path, old_text, new_text, replace_all):
     return current, updated
 
 
-def workspace_path(path_text):
-    path = Path(path_text)
-    if not path.is_absolute():
-        return path_text
-    root = Path.cwd().resolve()
-    resolved = path.resolve()
-    if resolved.is_relative_to(root):
-        return resolved.relative_to(root).as_posix()
-    return path_text
-
-
 def edit_decision(path_text, before, after, autonomous):
     path = Path(path_text)
     suffix = path.suffix.lower()
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
     return decide_edit(
-        workspace_path(path_text),
+        worktree_path(path_text),
         before,
         after,
         path_exists=path.exists(),

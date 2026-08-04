@@ -324,7 +324,6 @@ CODEX_DISPATCHER = DispatcherDeclaration(
     runtime_name="Codex",
     package="lup.adapters.codex",
     managed_root_env="CODEX_HOME",
-    relativizer="worktree_path",
     routed_tools=["Bash", "web_fetch", "apply_patch"],
     hook_events=["PermissionRequest", "PreToolUse"],
     failure="stderr_exit",
