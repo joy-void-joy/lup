@@ -12,6 +12,7 @@ import lup_template.devtools.dev.check as check
 import lup_template.devtools.dev.comments as comments
 import lup_template.devtools.dev.conflicts as conflicts
 import lup_template.devtools.dev.init as init
+import lup_template.devtools.dev.library as library
 import lup_template.devtools.dev.plugin as plugin
 import lup_template.devtools.dev.pr as pr
 import lup_template.devtools.dev.resolve_review as resolve_review
@@ -23,11 +24,13 @@ worktree_app = typer.Typer(no_args_is_help=True)
 pr_app = typer.Typer(no_args_is_help=True)
 conflict_app = typer.Typer(no_args_is_help=True)
 init_app = typer.Typer(no_args_is_help=True)
+library_app = typer.Typer(no_args_is_help=True)
 plugin_app = typer.Typer(no_args_is_help=True)
 app.add_typer(worktree_app, name="worktree", help="Worktree management")
 app.add_typer(pr_app, name="pr", help="PR lifecycle (status, merge, push, checks)")
 app.add_typer(conflict_app, name="conflict", help="Merge/rebase conflict resolution")
 app.add_typer(init_app, name="init", help="Project initialization")
+app.add_typer(library_app, name="library", help="How this project obtains lup")
 app.add_typer(plugin_app, name="plugin", help="Local plugin marketplace wiring")
 
 
@@ -461,6 +464,69 @@ def init_rename_package_cmd(
 ) -> None:
     """Rename the lup Python package to a project-specific name."""
     init.rename_package(new_name, dry_run)
+
+
+# -- library commands --
+
+DryRun = Annotated[
+    bool,
+    typer.Option("--dry-run", "-n", help="Show what would change without writing"),
+]
+KeepVendored = Annotated[
+    bool,
+    typer.Option("--keep-vendored", help=f"Leave {library.VENDORED_ROOT}/ on disk"),
+]
+Force = Annotated[
+    bool,
+    typer.Option("--force", help="Un-vendor even from an unrenamed template"),
+]
+
+
+@library_app.command("status")
+def library_status_cmd() -> None:
+    """Report where the lup library is resolved from."""
+    library.library_status()
+
+
+@library_app.command("use")
+def library_use_cmd(
+    mode: Annotated[
+        library.LibraryMode, typer.Argument(help="published, local, or linked")
+    ],
+    version: Annotated[
+        str | None,
+        typer.Option("--version", help="Lower version bound for the published release"),
+    ] = None,
+    keep_vendored: KeepVendored = False,
+    force: Force = False,
+    dry_run: DryRun = False,
+) -> None:
+    """Resolve lup from the package index, or from the vendored copy."""
+    library.use_library(mode, version, keep_vendored, force, dry_run)
+
+
+@library_app.command("link")
+def library_link_cmd(
+    checkout: Annotated[
+        Path, typer.Argument(help="Path to a lup checkout holding packages/lup")
+    ],
+    keep_vendored: KeepVendored = False,
+    force: Force = False,
+    dry_run: DryRun = False,
+) -> None:
+    """Develop against a lup checkout so library changes land in its repo."""
+    library.link_library(checkout, keep_vendored, force, dry_run)
+
+
+@library_app.command("unlink")
+def library_unlink_cmd(
+    version: Annotated[
+        str | None, typer.Option("--version", help="Lower version bound to restore")
+    ] = None,
+    dry_run: DryRun = False,
+) -> None:
+    """Stop developing against a checkout and go back to the published release."""
+    library.use_library(library.LibraryMode.PUBLISHED, version, True, True, dry_run)
 
 
 # -- plugin commands --
