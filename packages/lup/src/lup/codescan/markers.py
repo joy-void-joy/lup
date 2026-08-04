@@ -58,6 +58,12 @@ DEFER_HEAD_RE = re.compile(r"^defer\s*\[(?P<condition>.+?)\]\s*:\s*", re.IGNOREC
 # prose about "the template" never matches. The comment prefix is optional
 # because a docstring todo carries no `#`; group 1 still captures the
 # introducer when present, as the scan expects.
+# A resolution claim: `# lup: solved: <the note's original text>`. An agent
+# that has addressed a note converts it rather than deleting it, so the claim
+# is an artifact in the tree instead of an absence nobody can review. No
+# bracket, because the head carries no parameter — what it needs to say is
+# said by keeping the note's own words after it.
+SOLVED_HEAD_RE = re.compile(r"^solved\s*:\s*", re.IGNORECASE)
 TEMPLATE_MARKER_RE = re.compile(r"(?:(#|//)\s*)?TEMPLATE\s*:")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
@@ -104,8 +110,9 @@ def scan_mode_for(path: Path) -> str:
 
 
 # The closed vocabulary of review-note flavors: an ordinary actionable note,
-# or deferred work parked behind an explicit wake condition.
-type NoteKind = Literal["note", "defer"]
+# deferred work parked behind an explicit wake condition, or a claim that a
+# note has been addressed and is waiting to be checked.
+type NoteKind = Literal["note", "defer", "solved"]
 
 
 class MarkerComment(BaseModel):
@@ -113,7 +120,9 @@ class MarkerComment(BaseModel):
 
     ``kind`` classifies the note; a ``defer`` note carries its wake
     ``condition`` parsed out of the `defer[...]` head, and ``text`` holds only
-    the message that follows it. An ordinary note has no condition.
+    the message that follows it. An ordinary note has no condition, and a
+    ``solved`` note carries the original note's words unchanged — that is what
+    makes the claim checkable against what was actually asked.
     """
 
     start_line: int
@@ -129,16 +138,18 @@ class MarkerComment(BaseModel):
         match (self.kind, self.condition):
             case ("defer", None) | ("defer", ""):
                 raise ValueError("a defer note requires a wake condition")
-            case ("note", str()):
-                raise ValueError("an ordinary note carries no wake condition")
+            case ("note", str()) | ("solved", str()):
+                raise ValueError("only a defer note carries a wake condition")
             case _:
                 return self
 
     def marker_text(self) -> str:
-        """The note body as written after its marker, defer head included."""
+        """The note body as written after its marker, any head included."""
         match self.kind:
             case "defer":
                 return f"defer[{self.condition}]: {self.text}"
+            case "solved":
+                return f"solved: {self.text}"
             case "note":
                 return self.text
 
@@ -262,15 +273,21 @@ def find_markers(
 
 
 def classify_deferral(note: MarkerComment) -> MarkerComment:
-    """Split a `defer[<wake condition>]:` head off one review note, if present.
+    """Split a `defer[...]:` or `solved:` head off one review note, if present.
 
-    A matching note comes back with kind ``defer``, its wake condition parsed
-    out, and ``text`` reduced to the message after the head. Any other note —
-    including prose that merely starts with the word "defer", a head whose
-    condition is empty, or a head that never closes with `]:` — is returned
-    unchanged as an ordinary ``note``, so a malformed deferral degrades to
-    visible open feedback instead of a silently mangled condition.
+    A matching note comes back with the head's kind, a deferral's wake
+    condition parsed out, and ``text`` reduced to the message after the head.
+    Any other note — including prose that merely starts with the word
+    "defer", a head whose condition is empty, or a head that never closes
+    with `]:` — is returned unchanged as an ordinary ``note``, so a malformed
+    head degrades to visible open feedback instead of a silently mangled
+    condition or a claim nobody made.
     """
+    solved = SOLVED_HEAD_RE.match(note.text)
+    if solved is not None:
+        return note.model_copy(
+            update={"kind": "solved", "text": note.text[solved.end() :]}
+        )
     head = DEFER_HEAD_RE.match(note.text)
     if head is None:
         return note

@@ -58,6 +58,9 @@ from lup_template.devtools.harness.content.skills.refactor_tools import (
 from lup_template.devtools.harness.content.skills.resolve import SKILL as SKILL_RESOLVE
 from lup_template.devtools.harness.content.skills.review import SKILL as SKILL_REVIEW
 from lup_template.devtools.harness.content.skills.update import SKILL as SKILL_UPDATE
+from lup_template.devtools.harness.content.skills.verify_solved import (
+    SKILL as SKILL_VERIFY_SOLVED,
+)
 from lup_template.devtools.harness.content.skills.implementer import (
     SKILL as SKILL_IMPLEMENTER,
 )
@@ -106,6 +109,7 @@ SKILLS = [
     SKILL_RESOLVE,
     SKILL_REVIEW,
     SKILL_UPDATE,
+    SKILL_VERIFY_SOLVED,
     SKILL_IMPLEMENTER,
     SKILL_RESOLVE_REVIEWER,
 ]

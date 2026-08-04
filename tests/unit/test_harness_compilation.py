@@ -227,7 +227,7 @@ def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
     harness = portable_harness()
     plugin = harness.plugins[0]
 
-    assert len(plugin.skills) == 30
+    assert len(plugin.skills) == 31
     assert len(plugin.agents) == 4
     assert {skill.name for skill in plugin.skills} >= {
         "resolve",
@@ -631,7 +631,7 @@ def test_typed_content_package_has_expected_module_inventory() -> None:
     content = Path("src/lup_template/devtools/harness/content")
     sources = list(content.rglob("*.py"))
 
-    assert len(sources) == 49
+    assert len(sources) == 50
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:
@@ -798,9 +798,9 @@ def test_both_native_trees_compile_deterministically() -> None:
     assert codex == compile_codex(harness)
     assert (
         len([item for item in claude.artifacts if "/commands/" in item.path.as_posix()])
-        == 30
+        == 31
     )
-    assert len([item for item in codex.artifacts if item.path.name == "SKILL.md"]) == 30
+    assert len([item for item in codex.artifacts if item.path.name == "SKILL.md"]) == 31
     assert Path(".codex/plugins/lup/.codex-plugin/plugin.json") in {
         item.path for item in codex.artifacts
     }

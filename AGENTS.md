@@ -181,20 +181,20 @@ The codebase should read as a **monolithic source of truth** — understandable 
 
 ### Inline `# lup:` Notes
 
-A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — distinct from the `# lup: ignore` escape hatch under § Type Safety and from the `# lup: defer[...]` parking flavor under § Deferred Work. The edits hook prompts whenever an edit changes a file's `# lup:` marker count, and `lup-devtools` scans for unresolved notes.
+A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address. Four flavors, and only the removal rules differ:
 
-**Never delete a `# lup:` note until its concern is actually resolved.** Making a file parse, tidying up, or editing past it does not count. Resolve a note by fixing the code or structure it points at, or — for a question — by answering it definitively and reflecting that answer in the code, the docs, or an explicit user decision. Only then does the note come out (use `$lup:resolve`).
+| Marker | Removing it |
+|---|---|
+| `# lup: <text>` — open feedback | **denied**; resolve it into a claim instead |
+| `# lup: solved: <text>` — a claim you addressed it | **denied**; only the verify-solved review pass retires one |
+| `# lup: defer[<cond>]: <text>` — parked work (§ Deferred Work) | **denied** while its condition is unmet |
+| `# lup: ignore[<rule>]` — an anti-pattern hatch (§ Type Safety), not feedback | fine once the violation is gone |
 
-A note in a comment-less format (e.g. JSON) is the trap: you can't keep it there, but you still can't silently drop it to satisfy the parser. Resolve its concern first, or relocate it to a file that can hold it (the code it refers to, a tracking doc). If a note raises several concerns, remove it only once every one is resolved; otherwise keep the unresolved parts.
+Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/notes.md` carries the full lifecycle (use `$lup:resolve`).
 
 ### Deferred Work
 
-**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places:
-
-- **A `# lup: defer[<wake condition>]: <text>` note** at the most relevant site — the code or config the work concerns. The bracket names the condition under which the work wakes, mirroring `# lup: ignore[rule-id]`. `dev comments` lists deferred notes in their own section and `dev check` stays red while any exist, so parked work remains visible pressure instead of silent debt. Each resolve pass triages them: a note whose wake condition reads as met is proposed to the user for waking; an unmet one is carried forward untouched, never re-litigated as ordinary feedback and never stripped by an editor whose concern doesn't wake it.
-- **Ask instead of filing** — when whether (or how) to defer is itself the open question, put it to the user.
-
-A briefing under `tmp/` is the one exception, and it is not a backlog. Its whole purpose is to start a *fresh* session from scratch on a situation the current one cannot finish, so it states the situation as it stands now: what is wrong, what is left to do, and what a reader needs to act. Never append to one, never patch it, and never let it accumulate a history of what was tried — rewrite it whole, the way § Code as Documentation asks of the codebase itself. A file that records its own past has become the tracking file this rule forbids.
+**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places: a `# lup: defer[<wake condition>]: <text>` note at the site it concerns, where `dev check` keeps it visible until its condition is met; or a question to the user, when whether to defer is itself the open question. `docs/notes.md` carries both, and the one exception — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
 
 ### DRY: Don't Repeat Yourself
 
@@ -314,6 +314,7 @@ then regenerate.
 - $lup:resolve-reviewer — Review one resolver concern against its acceptance criteria
 - $lup:review — Review a session trace for workflow quality, tool usage, and improvement opportunities
 - $lup:update — Review upstream template commits and apply improvements
+- $lup:verify-solved — Check every claimed-resolved note against what it actually asked
 
 **Agents:**
 

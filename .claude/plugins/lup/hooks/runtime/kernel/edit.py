@@ -20,6 +20,12 @@ MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # The whitespace sits inside the lookahead: leaving it outside lets the regex
 # backtrack to zero width and match `# lup: ignore` after all.
 NOTE_RE = re.compile(r"(#|//)\s*lup\s*:(?!\s*ignore\b)", re.IGNORECASE)
+# An open note is one still owed an answer, so `solved` is excluded alongside
+# `ignore`: a resolution claim is a note that has been acted on and is waiting
+# to be checked, and counting it as open would make converting one read as
+# deleting it.
+OPEN_NOTE_RE = re.compile(r"(#|//)\s*lup\s*:(?!\s*(?:ignore|solved)\b)", re.IGNORECASE)
+SOLVED_NOTE_RE = re.compile(r"(#|//)\s*lup\s*:\s*solved\b", re.IGNORECASE)
 IGNORE_RE = re.compile(
     r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?",
     re.IGNORECASE,
@@ -116,18 +122,43 @@ def python_code_lines(source: str) -> list[str]:
     return ["".join(line) for line in lines]
 
 
+def quoted_example(line: str, position: int) -> bool:
+    """Whether a match at ``position`` sits inside a backtick code span.
+
+    Prose that documents the marker syntax writes it in backticks, which is
+    how a reader tells an example from an instruction. Counting those as
+    notes made documenting the convention indistinguishable from leaving
+    feedback — and made the gate fire on the very text explaining it. Odd
+    single-backtick parity catches a marker mid-span; a run directly before
+    the marker catches double-backtick quoting, whose even-length run defeats
+    the parity check.
+    """
+    prefix = line[:position]
+    return prefix.count("`") % 2 == 1 or prefix.endswith("`")
+
+
+def count_outside_examples(pattern: re.Pattern[str], text: str) -> int:
+    """Count matches in one chunk of prose, skipping backtick-quoted examples."""
+    return sum(
+        1
+        for line in text.splitlines()
+        for match in pattern.finditer(line)
+        if not quoted_example(line, match.start())
+    )
+
+
 def count_in_prose(
     source: str, pattern: re.Pattern[str], python_source: bool = False
 ) -> int:
     """Count pattern matches where prose belongs, not inside ordinary strings."""
     if not python_source:
-        return len(pattern.findall(source))
+        return count_outside_examples(pattern, source)
     tokens = python_tokens(source)
     if tokens is None:
-        return len(pattern.findall(source))
+        return count_outside_examples(pattern, source)
     documentation = docstring_lines(source)
     return sum(
-        len(pattern.findall(token.string))
+        count_outside_examples(pattern, token.string)
         for token in tokens
         if token.type == tokenize.COMMENT
         or (
@@ -143,6 +174,62 @@ def count_in_prose(
 def review_marker_count(source: str, python_source: bool = False) -> int:
     """Count review notes — the feedback whose removal is the gated act."""
     return count_in_prose(source, NOTE_RE, python_source)
+
+
+def open_note_count(source: str, python_source: bool = False) -> int:
+    """Count notes still owed an answer, excluding resolution claims."""
+    return count_in_prose(source, OPEN_NOTE_RE, python_source)
+
+
+def solved_note_count(source: str, python_source: bool = False) -> int:
+    """Count resolution claims waiting to be checked."""
+    return count_in_prose(source, SOLVED_NOTE_RE, python_source)
+
+
+def marker_decision(
+    previous: str, updated: str, python_source: bool, granted: list[str]
+) -> KernelDecision | None:
+    """Judge what this edit did to the file's review notes.
+
+    Deleting feedback is denied rather than asked. An ask is something an
+    agent argues its way through in the same turn that wanted the deletion,
+    and the deletion is exactly the act nobody can review afterwards — the
+    note is gone, so its absence looks identical to a note that never
+    existed. What the agent does instead is convert it: `# lup: solved:` in
+    front of the original words leaves the claim in the tree, against the
+    text it claims to answer, for a later pass to check.
+
+    That later pass is the one holder of ``note-resolution``, and the only
+    thing that can retire a claim or send it back to being open feedback.
+    """
+    opened = open_note_count(updated, python_source) - open_note_count(
+        previous, python_source
+    )
+    claimed = solved_note_count(updated, python_source) - solved_note_count(
+        previous, python_source
+    )
+    if "note-resolution" in granted:
+        return None
+    if opened < 0 and opened + claimed == 0:
+        return None
+    if opened < 0:
+        return KernelDecision(
+            "deny",
+            "this edit removes inline review feedback. Resolving a note means "
+            "replacing `# lup:` with `# lup: solved:` and keeping its text, so "
+            "the claim can be checked against what was asked; deleting it "
+            "leaves nothing to check",
+        )
+    if claimed < 0:
+        return KernelDecision(
+            "deny",
+            "this edit removes a `# lup: solved:` claim. Only the review pass "
+            "retires one — it either confirms the claim and removes the note, "
+            "or restores it to open feedback",
+        )
+    if opened > 0:
+        return KernelDecision("ask", "edit adds inline review feedback")
+    return None
 
 
 def empty_collection_exempt_lines(source: str) -> set[int]:
@@ -570,10 +657,10 @@ def decide_edit(
     edit belongs to. A grant releases exactly the gate it names and nothing
     adjacent, so an ungranted session sees the unchanged lattice.
 
-    The marker gate counts review notes only, because the two marker families
-    are gated in opposite directions. Deleting feedback before its concern is
-    resolved is the act the conventions forbid, so notes gate on a changed
-    count. A suppression is gated where it is declared — an added line
+    The two marker families are gated in opposite directions. Feedback is
+    judged by :func:`marker_decision`: adding it asks, deleting it is denied,
+    and the way through is to convert a note into a claim the review pass can
+    check. A suppression is gated where it is declared — an added line
     carrying an `ignore` directive, which :func:`antipattern_decision` asks
     about — while retiring one needs no gate at all: the same decision
     re-reads the uncovered line, allows it where nothing trips, and denies
@@ -620,10 +707,10 @@ def decide_edit(
     # rather than the conventions: a note on a test still names work somebody
     # owes. Scratch is the exception, and only because nothing there persists
     # to be read — a note in a disposable tree has no reader to protect.
-    if role != "scratch" and review_marker_count(
-        previous, python_source
-    ) != review_marker_count(updated, python_source):
-        return KernelDecision("ask", "edit changes inline review markers")
+    if role != "scratch":
+        marker = marker_decision(previous, updated, python_source, granted)
+        if marker is not None:
+            return marker
     if before is None and role == "production":
         if autonomous:
             return KernelDecision("allow", "reviewed autonomous full write")

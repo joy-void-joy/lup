@@ -1314,27 +1314,92 @@ def test_a_granted_suppression_releases_only_its_own_gate() -> None:
         allowances=["antipattern-suppression"],
         python_source=True,
     )
-    assert decision.effect == "ask"
-    assert decision.reason == "edit changes inline review markers"
+    assert decision.effect == "deny"
+    assert "removes inline review feedback" in decision.reason
 
 
-def test_review_notes_still_gate_in_both_directions() -> None:
-    """A note is feedback: deleting one before it is resolved stays gated."""
+def test_adding_feedback_asks_and_deleting_it_is_refused() -> None:
+    """The two directions are different acts and get different answers.
+
+    An ask is something an agent argues through in the turn that wanted the
+    deletion, and a deleted note is the one thing nobody can review after the
+    fact: its absence is indistinguishable from a note that never existed.
+    """
     policy = EditPolicy(protected=[])
-    removed = EditBatch(
-        changes=[
-            EditChange(path=Path("a.py"), before="x = 1  # lup: fix", after="x = 1")
-        ]
-    )
     added = EditBatch(
         changes=[
             EditChange(path=Path("a.py"), before="x = 1", after="x = 1  # lup: fix")
         ]
     )
-    for batch in (removed, added):
-        decision = policy.decide(batch)
-        assert decision.effect == "ask"
-        assert decision.reason == "edit changes inline review markers"
+    removed = EditBatch(
+        changes=[
+            EditChange(path=Path("a.py"), before="x = 1  # lup: fix", after="x = 1")
+        ]
+    )
+
+    assert policy.decide(added).effect == "ask"
+    assert policy.decide(removed).effect == "deny"
+
+
+def test_converting_a_note_into_a_claim_is_the_way_through() -> None:
+    """Resolving keeps the words and changes the keyword, so it stays checkable."""
+    policy = EditPolicy(protected=[])
+    claimed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1  # lup: fix the cache",
+                after="x = 1  # lup: solved: fix the cache",
+            )
+        ]
+    )
+
+    assert policy.decide(claimed).effect == "allow"
+
+
+def test_only_the_review_pass_retires_a_claim() -> None:
+    """A claim is checked by someone other than whoever made it."""
+    change = EditChange(
+        path=Path("a.py"),
+        before="x = 1  # lup: solved: fix the cache",
+        after="x = 1",
+    )
+    batch = EditBatch(changes=[change])
+
+    assert EditPolicy(protected=[]).decide(batch).effect == "deny"
+    assert (
+        decide_edit(
+            "a.py",
+            change.before,
+            change.after,
+            path_exists=True,
+            path_rules=[],
+            antipattern_rows=antipattern_rows(change),
+            allowances=["note-resolution"],
+            python_source=True,
+        ).effect
+        == "allow"
+    )
+
+
+def test_prose_documenting_the_marker_syntax_is_not_feedback() -> None:
+    """A backtick span is an example, which is how a reader tells them apart.
+
+    Counting quoted markers made documenting the convention indistinguishable
+    from leaving a note, so writing about the gate tripped it.
+    """
+    policy = EditPolicy(protected=[])
+    documented = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before='"""Doc."""\n',
+                after='"""Resolve a note by writing `# lup: solved:` before it."""\n',
+            )
+        ]
+    )
+
+    assert policy.decide(documented).effect == "allow"
 
 
 def test_a_note_in_scratch_is_not_gated() -> None:
@@ -1362,7 +1427,7 @@ def test_a_note_in_a_test_is_still_gated() -> None:
             )
         ]
     )
-    assert policy.decide(batch).effect == "ask"
+    assert policy.decide(batch).effect == "deny"
 
 
 def test_retiring_a_suppression_the_ast_refutes_is_allowed() -> None:

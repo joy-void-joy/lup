@@ -163,8 +163,9 @@ def location_line(comment: FoundComment) -> str:
 def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
     """Print one scan's results as a listing or JSON (same shape either way).
 
-    Deferred notes are listed in their own section, each with its wake
-    condition, so parked work never blends into the open feedback above it.
+    Deferred notes and resolution claims each get their own section, so
+    parked work never blends into open feedback and a claim waiting to be
+    checked is never mistaken for one somebody has checked.
     """
     if as_json:
         output_json([comment.model_dump() for comment in found])
@@ -173,8 +174,9 @@ def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
         typer.echo(empty)
         return
     deferred = [comment for comment in found if comment.kind == "defer"]
+    solved = [comment for comment in found if comment.kind == "solved"]
     for comment in found:
-        if comment.kind == "defer":
+        if comment.kind != "note":
             continue
         typer.echo(location_line(comment))
         typer.echo(f"    {comment.text}")
@@ -183,10 +185,20 @@ def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
         for comment in deferred:
             typer.echo(location_line(comment))
             typer.echo(f"    defer[{comment.condition}] {comment.text}")
+    if solved:
+        typer.echo("\nClaimed resolved — awaiting review of each claim:")
+        for comment in solved:
+            typer.echo(location_line(comment))
+            typer.echo(f"    solved: {comment.text}")
     files = {comment.file for comment in found}
     summary = f"\n{len(found)} comment(s) in {len(files)} file(s)"
-    if deferred:
-        summary += f" ({len(deferred)} deferred)"
+    counted = [
+        f"{len(deferred)} deferred" if deferred else "",
+        f"{len(solved)} claimed" if solved else "",
+    ]
+    stated = [item for item in counted if item]
+    if stated:
+        summary += " (" + ", ".join(stated) + ")"
     typer.echo(summary)
 
 
