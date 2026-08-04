@@ -204,9 +204,7 @@ def create_supervisor(
     async def read_selected(selected: str) -> SupervisorState:
         return read_run(state_root, selected, adapter)
 
-    @supervisor.get(  # lup: ignore[dict-get] — route decorator
-        "/api/runs/{selected}/events"
-    )
+    @supervisor.get("/api/runs/{selected}/events")
     async def read_events(selected: str, request: Request) -> StreamingResponse:
         """Follow one run's record, resuming from whatever the reader last saw."""
         resume = request.headers.get("last-event-id", "")  # lup: ignore[dict-get]
@@ -216,16 +214,12 @@ def create_supervisor(
             headers=SSE_HEADERS,
         )
 
-    @supervisor.get(  # lup: ignore[dict-get] — route decorator
-        "/api/runs/{selected}/actors"
-    )
+    @supervisor.get("/api/runs/{selected}/actors")
     async def read_actors(selected: str) -> ActorIndex:
         """Every actor that has produced an entry, in first-seen order."""
         return ActorIndex(actors=run_journal(state_root, selected).actors())
 
-    @supervisor.get(  # lup: ignore[dict-get] — route decorator
-        "/api/runs/{selected}/journal/{seq}"
-    )
+    @supervisor.get("/api/runs/{selected}/journal/{seq}")
     async def read_entry(selected: str, seq: int) -> JournalEntry:
         """One entry whole, for a reader expanding a truncated block."""
         found = run_journal(state_root, selected).entry(seq)

@@ -645,6 +645,20 @@ EDIT_POLICY_CASES = [
         after="value: Any",
         effect="allow",
     ),
+    # The small-change gate is a reviewability convention, and it reaches
+    # exactly as far as the conventions do: a fixture is written whole.
+    EditDecisionCase(
+        path="tests/unit/test_thing.py",
+        before="value = 1",
+        after="a = 1\nb = 2\nc = 3\nd = 4\ne = 5",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="a = 1\nb = 2\nc = 3\nd = 4\ne = 5",
+        effect="defer",
+    ),
     EditDecisionCase(
         path="src/module.py",
         before="value: str",
@@ -1304,6 +1318,55 @@ def test_review_notes_still_gate_in_both_directions() -> None:
         decision = policy.decide(batch)
         assert decision.effect == "ask"
         assert decision.reason == "edit changes inline review markers"
+
+
+def test_a_note_in_scratch_is_not_gated() -> None:
+    """Nothing under a scratch root persists to be read, so no reader is owed."""
+    policy = EditPolicy(protected=[], path_roles=FIXTURE_PATH_ROLES)
+    batch = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("tmp/probe.py"), before="x = 1  # lup: fix", after="x = 1"
+            )
+        ]
+    )
+    assert policy.decide(batch).effect == "allow"
+
+
+def test_a_note_in_a_test_is_still_gated() -> None:
+    """A test file persists and is read, so feedback left there is owed too."""
+    policy = EditPolicy(protected=[], path_roles=FIXTURE_PATH_ROLES)
+    batch = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("tests/unit/test_thing.py"),
+                before="x = 1  # lup: fix",
+                after="x = 1",
+            )
+        ]
+    )
+    assert policy.decide(batch).effect == "ask"
+
+
+def test_retiring_a_suppression_the_ast_refutes_is_allowed() -> None:
+    """The gate that demanded this marker gone must not be the one refusing it.
+
+    A route decorator trips the `dict-get` regex and nothing else, so before
+    the refiner the audit called the marker spurious while the kernel denied
+    every edit that removed it — a change one gate required and the other
+    forbade, with no operation in between.
+    """
+    policy = EditPolicy(protected=[])
+    batch = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before='@app.get("/x")  # lup: ignore[dict-get]\ndef read() -> None:\n    pass\n',
+                after='@app.get("/x")\ndef read() -> None:\n    pass\n',
+            )
+        ]
+    )
+    assert policy.decide(batch).effect == "allow"
 
 
 def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
