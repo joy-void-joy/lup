@@ -891,19 +891,6 @@ class ResolverCore:
             if not lease.root.exists() and not self.worktrees.branch_exists(lease):
                 self.restore_concern_progress(lease.concern_id)
                 continue
-            # lup: defer[when the resolver review loop is next revised]: a
-            # concern with no outcome yet has not finished a round, which is
-            # exactly the state a worker parks in when it asks a question — so
-            # every park discards that turn's entire work and the concern
-            # re-runs from a clean base. That is coherent as retry semantics,
-            # since the rerun has the answer in hand, but it prices asking at
-            # one wasted turn per question while the guidance tells workers to
-            # ask the moment a decision is not theirs. Nothing reports the cost,
-            # and a rerun re-derives its question under a new id that no
-            # recorded answer matches, so the same decision can be answered
-            # repeatedly — observed four times for one question in a single run.
-            # Decide deliberately whether a park should preserve the attempt or
-            # keep discarding it, and either way surface what it costs.
             self.restore_worktree(lease, expected, False)
             self.restore_concern_progress(lease.concern_id)
 
@@ -935,15 +922,13 @@ class ResolverCore:
                     f"persisted commit changed for {lease.concern_id}"
                 )
             return
-        # A merge left open is not an abandoned attempt: it is the join a turn
-        # was resolving when the run parked to ask about it, and the resolution
-        # lives in the working tree the reset would wipe. Preparing the same
-        # join is idempotent, so leaving this alone is what lets an answered
-        # question resume the work it interrupted rather than recreate the
-        # conflict it was asked about.
-        if self.worktrees.merging(lease) is not None:
-            return
-        self.worktrees.reset(lease, expected)
+        # A park is a pause, not an abandonment. What sits in the working tree
+        # is the turn a question interrupted — the join being resolved, or the
+        # edits a worker made before it found the decision it could not take —
+        # and the actor's session is reattached still holding it. Discarding it
+        # priced every question at a wasted turn, and the rerun re-derived that
+        # question under an id no recorded answer matched, so the same decision
+        # was put to the human as many as four times in one run.
 
     def restore_concern_progress(self, concern_id: str) -> None:
         """Return one interrupted concern to its leased retry boundary."""

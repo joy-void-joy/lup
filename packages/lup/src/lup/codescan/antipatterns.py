@@ -677,12 +677,6 @@ def audit_text(
             if (ap.id, index) not in refuted
         ]
         hit_ids = {ap.id for ap in hits}
-        # The edit hook judges fragments, which carry no types, so it enforces
-        # the raw line rule a type oracle can refute here. A suppression the
-        # hook still requires is therefore not spurious, however confidently
-        # this scan refutes it — calling it so would demand a removal the gate
-        # denies, leaving the tree red with nothing an agent may do about it.
-        kernel_hit_ids = {ap.id for ap in line_hits(projections, index, patterns)}
         directive = inline_directive(index, line)
         inline_ids = ignore_rule_ids(directive) if directive is not None else None
 
@@ -722,7 +716,7 @@ def audit_text(
                         rule_id=covered[0] if covered else "",
                     )
                 )
-            elif not kernel_hit_ids:
+            else:
                 findings.append(
                     AntiPatternFinding(
                         kind="spurious",
@@ -732,7 +726,7 @@ def audit_text(
                     )
                 )
         else:
-            for rid in sorted(inline_ids - kernel_hit_ids - FOREIGN_RULE_IDS):
+            for rid in sorted(inline_ids - hit_ids - FOREIGN_RULE_IDS):
                 findings.append(
                     AntiPatternFinding(
                         kind="spurious",
