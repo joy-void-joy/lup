@@ -45,6 +45,7 @@ consumers and the auditor import directly.
 """
 
 import re
+from collections.abc import Callable
 
 from pydantic import BaseModel
 
@@ -63,7 +64,26 @@ from lup.codescan.common import (
     file_level_ignore,
     ignore_rule_ids,
 )
-from lup.policy.kernel.edit import refined_exempt_lines
+from lup.policy.kernel.edit import (
+    dict_get_exempt_lines,
+    empty_collection_exempt_lines,
+)
+
+
+class Refiner(BaseModel):
+    """An AST context that narrows one rule, and what a cleared match really is.
+
+    ``exempt`` returns the lines the context clears, and ``evidence`` says why
+    in the words a refuted finding carries. The kernel owns these functions
+    because the hook must apply them with no types and no dependencies to
+    hand; the rule holds the same object so the narrowing is visible where
+    the rule is declared.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    exempt: Callable[[str], set[int]]
+    evidence: str
 
 
 class AntiPattern(BaseModel):
@@ -82,13 +102,15 @@ class AntiPattern(BaseModel):
     TypeScript-family table, text that fails to tokenize) every rule scans the
     raw line — those rules are genuinely text-shaped.
 
-    ``refinement`` states that this rule's regex is wider than the defect it
-    names, and what a match the AST clears actually is — the evidence a
-    refuted match carries. It is prose rather than the refiner itself because
-    the refiner has to live in the hermetic kernel, where a row is primitive
-    and a callable cannot be projected. Declaring it here is what makes the
-    refinement visible at the rule instead of only at its implementation, and
-    ``test_declared_refinements_match_the_kernel`` holds the two in step.
+    ``refiner`` is present when the regex is wider than the defect the rule
+    names and an AST context settles the difference. It carries the function
+    itself, so reading the rule tells you what narrows it rather than only
+    that something does. The kernel reaches the same functions through
+    :data:`lup.policy.kernel.edit.REFINERS`, because a row projected into the
+    hermetic runtime is primitive and cannot carry a callable;
+    ``test_declared_refiners_are_the_kernel_refiners`` pins the two to the
+    same objects, since a rule refined on one side only is exactly the split
+    that makes a marker unremovable.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -97,7 +119,7 @@ class AntiPattern(BaseModel):
     pattern: re.Pattern[str]
     message: str
     context: RuleContext = "code"
-    refinement: str = ""
+    refiner: Refiner | None = None
 
 
 PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
@@ -176,7 +198,10 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # a genuinely open dict (a registry or cache) it is one comment.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
-        refinement="a decorator naming a route, not payload access",
+        refiner=Refiner(
+            exempt=dict_get_exempt_lines,
+            evidence="a decorator naming a route, not payload access",
+        ),
         message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
         "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) "
         "add `# lup: ignore[dict-get]`",
@@ -231,7 +256,10 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # `==`/`!=`/`<=`/`>=` comparisons out.
         id="empty-collection",
         pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
-        refinement="a deliberate default, not a build-then-append seed",
+        refiner=Refiner(
+            exempt=empty_collection_exempt_lines,
+            evidence="a deliberate default, not a build-then-append seed",
+        ),
         message="Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an "
         "append/mutate loop — build the collection with a comprehension instead, or add "
         "`# lup: ignore[empty-collection]` for a fold no comprehension can express",
@@ -523,20 +551,20 @@ def refined_refutations(text: str, patterns: list[AntiPattern]) -> list[Refutati
     grammar's type oracle. The exemptions are the kernel's own, so a line the
     hook stops flagging is the same line the audit stops demanding a marker
     for — which is what keeps one gate from requiring a change the other
-    refuses. Which rules have one is read off the rules themselves.
+    refuses. Each rule carries its own refiner, so nothing here maps an id
+    back to a function that lives elsewhere.
     """
-    exempt = refined_exempt_lines(text)
     lines = text.splitlines()
     return [
         Refutation(
             rule_id=rule.id,
             line=line,
             subject=lines[line - 1].strip()[:80],
-            evidence=rule.refinement,
+            evidence=rule.refiner.evidence,
         )
         for rule in patterns
-        if rule.refinement and rule.id in exempt
-        for line in sorted(exempt[rule.id])
+        if rule.refiner is not None
+        for line in sorted(rule.refiner.exempt(text))
         if line <= len(lines)
     ]
 

@@ -7,6 +7,7 @@ import io
 import posixpath
 import re
 import tokenize
+from collections.abc import Callable
 
 from .decision import KernelDecision
 from .roles import path_role
@@ -286,18 +287,33 @@ def dict_get_exempt_lines(source: str) -> set[int]:
     return exempt
 
 
-def refined_exempt_lines(source: str) -> dict[str, set[int]]:
-    """Every rule whose broad regex an AST context refines, and where.
+def refiner_for(rule_id: str) -> Callable[[str], set[int]] | None:
+    """The AST context that narrows one rule, where the rule has one.
 
-    A rule earns an entry when its pattern is wider than the defect it names
-    and the difference is decidable without types. Both halves of the gate
-    read this map — the kernel to stop flagging, the audit to refute — so
-    the two cannot demand opposite things about one line.
+    A rule earns a refiner when its pattern is wider than the defect it names
+    and the difference is decidable without types. The kernel resolves it from
+    the id because a row projected into the hermetic runtime is primitive and
+    cannot carry a callable; the rule declaration in `lup.codescan.antipatterns`
+    holds the same function directly, and a test pins the two together.
     """
-    return {
-        "empty-collection": empty_collection_exempt_lines(source),
-        "dict-get": dict_get_exempt_lines(source),
-    }
+    match rule_id:
+        case "empty-collection":
+            return empty_collection_exempt_lines
+        case "dict-get":
+            return dict_get_exempt_lines
+    return None
+
+
+def refined_exempt_lines(
+    source: str, rows: list[AntiPatternRow]
+) -> dict[str, set[int]]:
+    """Where each refined rule is cleared in this source, computed once."""
+    found: dict[str, set[int]] = {}
+    for row in rows:
+        refiner = refiner_for(row["id"])
+        if refiner is not None:
+            found[row["id"]] = refiner(source)
+    return found
 
 
 def added_line_numbers(before: str | None, after: str | None) -> dict[int, bool]:
@@ -424,7 +440,7 @@ def antipattern_decision(
         mask_python_string_literals(after) if python_source else original_lines
     )
     code_lines = python_code_lines(after) if python_source else original_lines
-    exempt = refined_exempt_lines(after) if python_source else {}
+    exempt = refined_exempt_lines(after, rows) if python_source else {}
     comment_columns = python_comment_columns(after) if python_source else None
     has_file_ignore, disabled_ids = file_ignore(after)
     for number in added:

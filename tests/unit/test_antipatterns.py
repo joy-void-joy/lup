@@ -18,7 +18,7 @@ from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
-    refined_exempt_lines,
+    refiner_for,
 )
 from lup.policy.kernel.rows import AntiPatternRow
 
@@ -324,16 +324,17 @@ def test_refiner_survives_a_fragment_it_cannot_parse() -> None:
     assert dict_get_exempt_lines("@app.get(\n") == set()
 
 
-def test_declared_refinements_match_the_kernel() -> None:
-    """A rule declaring a refinement is one the kernel actually refines.
+def test_declared_refiners_are_the_kernel_refiners() -> None:
+    """A rule's refiner is the same object the hook applies under its id.
 
-    The refiner lives in the hermetic kernel and the prose on the rule, so
-    nothing but this holds them together — a refiner added without a
-    declaration is invisible where the rule is read, and a declaration
-    without a refiner promises an exemption no gate applies.
+    The rule holds the function and the kernel holds an id map, because a row
+    projected into the hermetic runtime cannot carry a callable. Nothing but
+    this keeps them the same: a rule refined on one side only is how a marker
+    becomes one the audit demands gone and the hook refuses to remove.
     """
-    declared = {rule.id for rule in PYTHON_ANTI_PATTERNS if rule.refinement}
-    assert declared == set(refined_exempt_lines(""))
+    for rule in PYTHON_ANTI_PATTERNS:
+        expected = None if rule.refiner is None else rule.refiner.exempt
+        assert refiner_for(rule.id) is expected, rule.id
 
 
 def test_refiner_exempts_deliberate_defaults() -> None:
