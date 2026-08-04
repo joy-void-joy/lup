@@ -91,8 +91,13 @@ from lup.policy.dispatcher import (
     source_half,
 )
 from lup.types import EnvVars
+from lup_template.agent.toolsets import EXAMPLE_GROUP, NOTES_GROUP, tool_group_names
+from lup_template.devtools.agent.serve import (
+    collect_tools_by_server,
+    harness_session_context,
+)
 from lup_template.devtools.dev.rules import rule_reference_artifact
-from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.catalog import HARNESS_SESSION, portable_harness
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness import launch
@@ -2009,3 +2014,52 @@ def test_codex_sandbox_arguments_defer_to_a_caller_envelope() -> None:
     for extra_args in caller_forms:
         assert codex_sandbox_arguments(environment, extra_args) == []
     assert "LUP_SANDBOX_ACTIVE" not in environment
+
+
+def test_declared_tool_servers_are_the_registry_the_backends_assemble() -> None:
+    """A group added to the toolsets registry reaches a native session too."""
+    servers = portable_harness().plugins[0].mcp_servers
+    assert [server.name for server in servers] == tool_group_names(realtime=False)
+
+
+def test_each_runtime_spells_the_project_root_a_tool_server_starts_from() -> None:
+    """Neither tree may leave the root to whatever directory a launch had."""
+    server = portable_harness().plugins[0].mcp_servers[0]
+    assert "${CLAUDE_PROJECT_DIR}" in server.command_line(ClaudeSpellings())
+    assert "." in server.command_line(CodexSpellings())
+
+
+def test_claude_tree_offers_the_tool_servers_as_a_plugin_configuration() -> None:
+    """The scope that follows the plugin, so enabling it is what starts them."""
+    tree = compile_claude(portable_harness())
+    declaration = next(
+        artifact
+        for artifact in tree.artifacts
+        if artifact.path == Path(".claude/plugins/lup/.mcp.json")
+    )
+    servers = json.loads(declaration.content)["mcpServers"]
+    assert sorted(servers) == sorted(tool_group_names(realtime=False))
+    assert servers["notes"]["command"] == "uv"
+    assert "${CLAUDE_PROJECT_DIR}" in servers["notes"]["args"]
+
+
+def test_codex_tree_offers_the_tool_servers_in_its_project_config() -> None:
+    """Codex keeps a project's servers beside the rest of its project config."""
+    tree = compile_codex(portable_harness())
+    config = next(
+        artifact
+        for artifact in tree.artifacts
+        if artifact.path == Path(".codex/config.toml")
+    )
+    parsed = tomllib.loads(config.content)
+    assert parsed["features"]["hooks"] is True
+    assert sorted(parsed["mcp_servers"]) == sorted(tool_group_names(realtime=False))
+    assert parsed["mcp_servers"]["notes"]["command"] == "uv"
+
+
+def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> None:
+    """No adapter relays a context to a natively launched server; it opens one."""
+    assert collect_tools_by_server(None).keys() == {EXAMPLE_GROUP}
+    context = harness_session_context(HARNESS_SESSION)
+    assert context.session_id == HARNESS_SESSION
+    assert NOTES_GROUP in collect_tools_by_server(context)

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "17336b9b597ad737249dab0d2d66d7cae53126b2c551b1157e0a2c2bb3358485",
+  "source_digest": "61765d05314924ce5633d5c72accd87e268a24de3ce93227d96996c43bff5822",
   "target_requirements": [
     "claude-code"
   ],
@@ -31,6 +31,13 @@
       "path": ".claude/plugins/lup/.claude-plugin/plugin.json",
       "category": "generated",
       "sha256": "f5544bac80f586a89bee764acd1eba9ff6335f1678da13c25557585d73ce9045",
+      "semantic_id": "plugin.lup",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/.mcp.json",
+      "category": "generated",
+      "sha256": "a9e22c7ccb4fcca4549aaef149f3147cbeb4bcde8026fff395b78f12981ec05c",
       "semantic_id": "plugin.lup",
       "executable": false
     },

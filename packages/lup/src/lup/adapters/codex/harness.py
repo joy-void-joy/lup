@@ -4,6 +4,8 @@ import json
 import shlex
 from importlib import resources
 from pathlib import Path
+
+import tomlkit
 from lup.harness.banner import (
     PROMPT_TEXT,
     REGENERATE_COMMAND,
@@ -131,6 +133,14 @@ class CodexSpellings(NativeSpellings):
             "https://developers.openai.com/codex/ and "
             "https://learn.chatgpt.com/"
         )
+
+    def project_root(self) -> str:
+        # Codex substitutes nothing into a server command, but it reads this
+        # config only for the project the config sits in, so the launch
+        # directory is that project by construction. Naming it explicitly is
+        # what makes a server started anywhere else fail instead of resolving
+        # up the tree into a neighbouring checkout.
+        return "."
 
     def model_alias(self, tier: ModelTier) -> str | None:
         return None
@@ -287,11 +297,35 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
         )
 
 
+def codex_project_config(source: Harness, spellings: NativeSpellings) -> str:
+    """Render the project config: enabled features, then every tool server.
+
+    Codex keeps a project's servers in the same file as the rest of its
+    project configuration, so this is one document rather than the separate
+    artifact the other runtime reads.
+    """
+    document = tomlkit.document()
+    features = tomlkit.table()
+    features["hooks"] = True
+    document["features"] = features
+    servers = tomlkit.table(is_super_table=True)
+    for plugin in source.plugins:
+        for server in plugin.mcp_servers:
+            entry = tomlkit.table()
+            entry["command"] = server.command
+            entry["args"] = server.command_line(spellings)
+            servers[server.name] = entry
+    if servers:
+        document["mcp_servers"] = servers
+    return tomlkit.dumps(document)
+
+
 class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
     """Render root project guidance at Codex's documented repository location."""
 
-    def __init__(self, prompts: PromptRenderer) -> None:
+    def __init__(self, prompts: PromptRenderer, spellings: NativeSpellings) -> None:
         self.prompts = prompts
+        self.spellings = spellings
 
     def render(self, source: Harness) -> ArtifactTree:
         return ArtifactTree(
@@ -304,7 +338,7 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
                 ),
                 Artifact.generated(
                     path=Path(".codex/config.toml"),
-                    body="[features]\nhooks = true\n",
+                    body=codex_project_config(source, self.spellings),
                     semantic_id="harness.project-config",
                     banner=GeneratedBanner(
                         source=__name__,
@@ -313,6 +347,8 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
                             "Personal sandbox and approval defaults stay in "
                             "~/.codex/config.toml.",
                             "Native shell allows are generated under .codex/rules/.",
+                            "Tool servers start from this project, so start "
+                            "the runtime at its root.",
                         ],
                     ),
                 ),

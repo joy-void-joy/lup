@@ -19,14 +19,56 @@ from lup.harness.models import (
     HookSandbox,
     HookSet,
     HookUrlScope,
+    LiteralWord,
+    McpServer,
     Plugin,
+    ProjectRootWord,
     ResolveSpec,
     SkillInvocation,
 )
 from lup.workspace.paths import project_root, read_project_name
+from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
+
+HARNESS_SESSION = "harness"
+"""The session a natively launched tool server opens for itself.
+
+One name per worktree, shared by every group's process, so the tools of one
+native session write where the next one will find them."""
+
+
+def agent_tool_servers() -> list[McpServer]:
+    """Offer this project's own agent tools to whichever runtime is reading.
+
+    The groups come from the same registry the in-process and subprocess
+    backends assemble from, so a group added there reaches a native session
+    too rather than only the ones this program launches itself. Realtime is
+    the relay mode of a persistent run and belongs to no interactive session,
+    so its group is not among them.
+    """
+    return [
+        McpServer(
+            id=f"mcp.{name}",
+            name=name,
+            description=f"Agent tools in the {name} group, served over stdio",
+            command="uv",
+            arguments=[
+                LiteralWord(text="run"),
+                LiteralWord(text="--directory"),
+                ProjectRootWord(),
+                LiteralWord(text="lup-devtools"),
+                LiteralWord(text="agent"),
+                LiteralWord(text="serve-tools"),
+                LiteralWord(text="--server"),
+                LiteralWord(text=name),
+                LiteralWord(text="--session"),
+                LiteralWord(text=HARNESS_SESSION),
+            ],
+        )
+        for name in tool_group_names(realtime=False)
+    ]
 
 
 def declared_hook_set() -> HookSet:
@@ -63,6 +105,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         ),
         skills=SKILLS,
         agents=AGENTS,
+        mcp_servers=agent_tool_servers(),
         hooks=HookSet(
             id="hooks.lup-policy",
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],

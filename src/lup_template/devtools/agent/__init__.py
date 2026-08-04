@@ -70,17 +70,27 @@ def serve_tools_cmd(
             help="Serve only this group; default: all but example",
         ),
     ] = None,
+    session: Annotated[
+        str | None,
+        typer.Option(
+            "--session",
+            help="Open a session under this name when none is relayed",
+        ),
+    ] = None,
 ) -> None:
     """Start SDK tools as an MCP stdio server (the ``notes`` server).
 
-    Launched as a subprocess by the subprocess-served-tool adapters and
-    by the ``claude`` runner. When session-context env vars are present
-    (see ``lup.workspace.context.SessionContext``), session-bound
+    Launched as a subprocess by the subprocess-served-tool adapters, by the
+    ``claude`` runner, and by the generated native harness trees. When
+    session-context env vars are present (see
+    ``lup.workspace.context.SessionContext``), session-bound
     tools — reflect and
     submit_output — are served alongside the static tools, and tool
     metrics are flushed to the session directory for the parent to read.
+    A native runtime relays no such context, so it names a session instead
+    and this process opens it.
     """
-    serve.serve_tools(list_only, server_group)
+    serve.serve_tools(list_only, server_group, session)
 
 
 @app.command("repl")

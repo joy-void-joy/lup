@@ -469,6 +469,67 @@ class Agent(BaseModel):
     color: AgentColor | None = None
 
 
+class McpWord(BaseModel):
+    """One word of the command line that starts an MCP server.
+
+    A server the harness offers has to be reachable from wherever the runtime
+    spawns it, and each runtime hands a spawned process a different way of
+    naming the repository it belongs to. Declaring the words as parts rather
+    than as a string keeps that difference in the adapters, the way a prompt
+    keeps every other native spelling there.
+    """
+
+    model_config = FROZEN
+
+    @abstractmethod
+    def spell_in(self, runtime: "NativeSpellings") -> str:
+        """Spell this word in one runtime's own vocabulary."""
+
+
+class LiteralWord(McpWord):
+    """One word every runtime spells identically."""
+
+    type: Literal["literal"] = "literal"
+    text: str = Field(min_length=1)
+
+    def spell_in(self, runtime: "NativeSpellings") -> str:
+        return self.text
+
+
+class ProjectRootWord(McpWord):
+    """The repository root, as the runtime spawning the server can name it."""
+
+    type: Literal["project_root"] = "project_root"
+
+    def spell_in(self, runtime: "NativeSpellings") -> str:
+        return runtime.project_root()
+
+
+type McpCommandWord = Annotated[LiteralWord | ProjectRootWord, Discriminator("type")]
+
+
+class McpServer(BaseModel):
+    """One tool server a native tree offers the agent that reads it.
+
+    The application owns which tools exist and how they are grouped; this
+    declares only how a runtime starts one group and what to call it, so the
+    same registry reaches an in-process session and a native harness session
+    without either learning the other's assembly.
+    """
+
+    model_config = FROZEN
+
+    id: str
+    name: NativeName
+    description: PortableText = Field(min_length=1, max_length=1024)
+    command: str = Field(min_length=1)
+    arguments: list[McpCommandWord] = Field(default_factory=list)
+
+    def command_line(self, runtime: "NativeSpellings") -> list[str]:
+        """Spell every argument for the runtime that will spawn this server."""
+        return [argument.spell_in(runtime) for argument in self.arguments]
+
+
 class HookUrlScope(BaseModel):
     """Portable generated-hook URL scope configured by the application."""
 
@@ -603,16 +664,20 @@ class Plugin(BaseModel):
     description: PortableText = Field(min_length=1, max_length=1024)
     skills: list[Skill]
     agents: list[Agent]
+    mcp_servers: list[McpServer] = Field(default_factory=list)
     hooks: HookSet | None = None
 
     @model_validator(mode="after")
     def unique_effective_names(self) -> "Plugin":
         skill_names = [skill.name for skill in self.skills]
         agent_names = [agent.name for agent in self.agents]
+        server_names = [server.name for server in self.mcp_servers]
         if len(skill_names) != len(dict.fromkeys(skill_names)):
             raise ValueError(f"plugin {self.id!r} has duplicate skill names")
         if len(agent_names) != len(dict.fromkeys(agent_names)):
             raise ValueError(f"plugin {self.id!r} has duplicate agent names")
+        if len(server_names) != len(dict.fromkeys(server_names)):
+            raise ValueError(f"plugin {self.id!r} has duplicate MCP server names")
         return self
 
 
@@ -637,6 +702,7 @@ class Harness(BaseModel):
                 plugin.id,
                 *[skill.id for skill in plugin.skills],
                 *[agent.id for agent in plugin.agents],
+                *[server.id for server in plugin.mcp_servers],
             ]
         ]
         if len(ids) != len(dict.fromkeys(ids)):

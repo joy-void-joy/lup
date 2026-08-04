@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+    "notes": {
+      "args": [
+        "run",
+        "--directory",
+        "${CLAUDE_PROJECT_DIR}",
+        "lup-devtools",
+        "agent",
+        "serve-tools",
+        "--server",
+        "notes",
+        "--session",
+        "harness"
+      ],
+      "command": "uv"
+    },
+    "sandbox": {
+      "args": [
+        "run",
+        "--directory",
+        "${CLAUDE_PROJECT_DIR}",
+        "lup-devtools",
+        "agent",
+        "serve-tools",
+        "--server",
+        "sandbox",
+        "--session",
+        "harness"
+      ],
+      "command": "uv"
+    }
+  }
+}

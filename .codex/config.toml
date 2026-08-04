@@ -2,6 +2,15 @@
 # See docs/generated-artifacts.md.
 # Personal sandbox and approval defaults stay in ~/.codex/config.toml.
 # Native shell allows are generated under .codex/rules/.
+# Tool servers start from this project, so start the runtime at its root.
 
 [features]
 hooks = true
+
+[mcp_servers.notes]
+command = "uv"
+args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--server", "notes", "--session", "harness"]
+
+[mcp_servers.sandbox]
+command = "uv"
+args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--server", "sandbox", "--session", "harness"]

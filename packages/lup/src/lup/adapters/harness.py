@@ -4,6 +4,7 @@ from lup.adapters.claude.harness import (
     ClaudeAgentRenderer,
     ClaudeGuidanceRenderer,
     ClaudeHookRenderer,
+    ClaudeMcpRenderer,
     ClaudePluginManifestRenderer,
     ClaudeSkillRenderer,
     ClaudeSpellings,
@@ -93,6 +94,7 @@ def compile_claude(source: Harness) -> ArtifactTree:
     spellings = ClaudeSpellings()
     prompts = prompt_renderer(spellings)
     manifest_renderer = ClaudePluginManifestRenderer()
+    mcp_renderer = ClaudeMcpRenderer(spellings)
     guidance_renderer = ClaudeGuidanceRenderer(prompts)
     artifacts: list[Artifact] = []  # lup: ignore[empty-collection]
     for plugin in source.plugins:
@@ -103,6 +105,7 @@ def compile_claude(source: Harness) -> ArtifactTree:
         for declaration in plugin.agents:
             artifacts.extend(agent_renderer.render(declaration).artifacts)
         artifacts.extend(manifest_renderer.render(plugin).artifacts)
+        artifacts.extend(mcp_renderer.render(plugin).artifacts)
         if plugin.hooks is not None:
             artifacts.extend(
                 ClaudeHookRenderer(plugin.name, source.resolver.worker_identity)
@@ -121,7 +124,7 @@ def compile_codex(source: Harness) -> ArtifactTree:
     spellings = CodexSpellings()
     prompts = prompt_renderer(spellings)
     manifest_renderer = CodexPluginManifestRenderer()
-    guidance_renderer = CodexGuidanceRenderer(prompts)
+    guidance_renderer = CodexGuidanceRenderer(prompts, spellings)
     artifacts: list[Artifact] = []  # lup: ignore[empty-collection]
     for plugin in source.plugins:
         skill_renderer = CodexSkillRenderer(prompts, plugin.name)
