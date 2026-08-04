@@ -103,8 +103,35 @@
       .result pre { color: var(--muted); }
       .result.bad pre { color: var(--danger); }
       .entry pre { margin: 4px 0 0; padding: 6px 8px; background: var(--panel-raised); border-radius: 6px; overflow-x: auto; font-size: 12px; max-height: 16em; }
+      .pre-body {
+        margin: 4px 0 0;
+        padding: 6px 8px;
+        background: var(--panel-raised);
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: pre-wrap;
+      }
       .chip.done { color: var(--ok); border-color: #2c5a46; }
       .chip.current { color: var(--text); background: var(--panel-raised); border-color: var(--accent); }
+      .chip-row { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+      .chip-row > .muted { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; min-width: 4.5em; }
+      .boundary { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 11px; }
+      .boundary::after { content: ""; flex: 1; border-top: 1px dashed var(--border); }
+      .entry.unknown { border-left-color: var(--danger); }
+      .expand {
+        margin-top: 4px;
+        padding: 1px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: none;
+        color: var(--muted);
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .expand:hover { color: var(--text); border-color: var(--accent); }
+      .target { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
 
       table { width: 100%; border-collapse: collapse; font-size: 14px; }
       th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -225,13 +252,15 @@
 
       <section id="trace-section">
         <h2>Trace</h2>
-        <div class="chips" id="actor-chips"></div>
+        <div class="chip-row"><span class="muted">Scope</span><div class="chips" id="scope-chips"></div></div>
+        <div class="chip-row"><span class="muted">Actor</span><div class="chips" id="actor-chips"></div></div>
         <div id="trace-body"></div>
         <p class="muted" id="trace-empty">Nothing recorded yet.</p>
         <div class="actions">
-          <input id="message-text" type="text" placeholder="Say something to this actor — it decides nothing and never parks the run" />
+          <input id="message-text" type="text" placeholder="Say something — it decides nothing and never parks the run" />
           <button class="primary" type="button" id="message-button">Send</button>
         </div>
+        <p class="target" id="message-target"></p>
         <p class="error" id="message-error" hidden></p>
       </section>
 
@@ -268,7 +297,11 @@
       let source = null;
       let runs = [];
       let entries = [];
-      let actorFilter = null;
+      // What the trace is showing. A concern is not one actor: its worker, the
+      // reviewer that read it and the merger that joined it share an id and
+      // run in different rounds, so opening a concern has to mean all of them
+      // or it silently shows whichever happened to come first.
+      let scope = { kind: "merged" };
 
       const element = (id) => document.getElementById(id);
 
@@ -373,32 +406,73 @@
         return `${actor.kind}:${actor.id}#${actor.round}`;
       }
 
-      function blockMarkup(block) {
+      // A body is shown whole once someone asks for it. Until then it is cut
+      // at a length that still says what the block was, because a single file
+      // read is longer than every other entry in the run put together and
+      // renders the trace unreadable exactly where it gets interesting.
+      const BODY_LIMIT = 1200;
+      const expanded = new Set();
+
+      function bodyMarkup(text, key, className) {
+        const body = String(text ?? "");
+        if (body.length <= BODY_LIMIT || expanded.has(key)) {
+          return `<div class="${className}">${escapeHtml(body)}</div>`;
+        }
+        const cut = body.slice(0, BODY_LIMIT);
+        const rest = body.length - BODY_LIMIT;
+        return (
+          `<div class="${className}">${escapeHtml(cut)}…</div>` +
+          `<button type="button" class="expand" data-expand="${escapeHtml(key)}">show ${rest} more characters</button>`
+        );
+      }
+
+      function blockMarkup(block, key) {
         switch (block.type) {
           case "text":
-            return `<div class="say">${escapeHtml(block.text)}</div>`;
+            return bodyMarkup(block.text, key, "say");
           case "thinking":
-            return `<div class="think">${escapeHtml(block.redacted ? "[redacted reasoning]" : block.thinking)}</div>`;
+            return block.redacted
+              ? `<div class="think">[redacted reasoning]</div>`
+              : bodyMarkup(block.thinking, key, "think");
           case "tool_call":
-            return `<div class="call"><strong>${escapeHtml(block.name)}</strong><pre>${escapeHtml(JSON.stringify(block.arguments, null, 2))}</pre></div>`;
+            return `<div class="call"><strong>${escapeHtml(block.name)}</strong>${bodyMarkup(JSON.stringify(block.arguments, null, 2), key, "pre-body")}</div>`;
           case "tool_result":
-            return `<div class="result ${block.is_error ? "bad" : ""}"><pre>${escapeHtml(block.content)}</pre></div>`;
+            return `<div class="result ${block.is_error ? "bad" : ""}">${bodyMarkup(block.content, key, "pre-body")}</div>`;
           default:
-            return "";
+            return `<div class="say muted">[${escapeHtml(block.type)}]</div>`;
         }
       }
 
       // A run event and a block are rendered by the same component on purpose.
       // The merged view is this list unfiltered, so a phase move has to sit in
       // the same column as the turn that caused it or the ordering buys nothing.
+      //
+      // Every member of both unions gets an arm, including the two that render
+      // nothing. `block_started` and `block_completed` are the streaming
+      // granularity of content `message_completed` already carries whole, so
+      // drawing them would show every block twice; saying that here is what
+      // separates a deliberate silence from an event that fell through. An
+      // event this page has never heard of is drawn rather than dropped —
+      // a trace that quietly omits what it cannot name is not a record.
       function entryMarkup(entry) {
         const event = entry.event;
         const stamp = new Date(entry.at).toLocaleTimeString();
         const who = actorLabel(entry.actor);
         const head = `<div class="entry-head"><span class="muted">${escapeHtml(stamp)}</span> <span class="pill">${escapeHtml(who)}</span></div>`;
+        const boundary = (text) =>
+          `<div class="boundary"><span>${escapeHtml(stamp)}</span><span>${escapeHtml(who)}</span><span>${escapeHtml(text)}</span></div>`;
         switch (event.type) {
           case "message_completed":
-            return `<div class="entry">${head}${event.message.blocks.map(blockMarkup).join("")}</div>`;
+            return `<div class="entry">${head}${event.message.blocks
+              .map((block, index) => blockMarkup(block, `${entry.seq}:${index}`))
+              .join("")}</div>`;
+          case "turn_started":
+            return boundary("turn started");
+          case "turn_completed":
+            return boundary("turn completed");
+          case "block_started":
+          case "block_completed":
+            return "";
           case "phase_changed":
             return `<div class="entry note">${head}<div>phase → <strong>${escapeHtml(event.phase)}</strong></div></div>`;
           case "concern_progressed":
@@ -409,34 +483,77 @@
             return `<div class="entry note">${head}<div>answered ${escapeHtml(event.answer.question_id)} = ${escapeHtml(event.answer.value)} <span class="muted">(${escapeHtml(event.door)})</span></div></div>`;
           case "message_posted":
             return `<div class="entry note"><div class="entry-head"><span class="muted">${escapeHtml(stamp)}</span> <span class="pill strong">${escapeHtml(event.door)} → ${escapeHtml(who)}</span></div><div class="say">${escapeHtml(event.text)}</div></div>`;
+          case "join_completed":
+            return `<div class="entry note">${head}<div>joined <code>${escapeHtml(event.parent.slice(0, 12))}</code>${event.conflicted ? " (conflicted)" : ""}${event.broke.length ? ` — broke: ${escapeHtml(event.broke.join(", "))}` : ""}</div></div>`;
+          case "join_audit":
+            return `<div class="entry note">${head}<div>audited ${event.parents.length} parent(s), ${event.outstanding} outstanding</div></div>`;
           case "run_failed":
             return `<div class="entry note">${head}<div class="error">${escapeHtml(event.reason)}</div></div>`;
           default:
-            return "";
+            return `<div class="entry note unknown">${head}${bodyMarkup(JSON.stringify(event, null, 2), `${entry.seq}:raw`, "pre-body")}</div>`;
         }
       }
 
-      function renderActors() {
+      function inScope(entry) {
+        switch (scope.kind) {
+          case "concern":
+            return entry.actor.id === scope.id;
+          case "actor":
+            return actorLabel(entry.actor) === scope.label;
+          default:
+            return true;
+        }
+      }
+
+      // Which actors the actor row offers: every one under the open concern,
+      // or every one in the run when nothing is narrowed. Selecting an actor
+      // keeps the concern it belongs to, so the two rows read as one path in.
+      function scopedActors() {
+        const concern = scope.kind === "merged" ? null : scope.id;
         const seen = [];
         for (const entry of entries) {
           const label = actorLabel(entry.actor);
+          if (concern !== null && entry.actor.id !== concern) continue;
           if (!seen.includes(label)) seen.push(label);
         }
-        const chip = (label, active) =>
-          `<button type="button" class="chip${active ? " current" : ""}" data-actor="${escapeHtml(label)}">${escapeHtml(label)}</button>`;
+        return seen;
+      }
+
+      const chipMarkup = (label, text, active, key) =>
+        `<button type="button" class="chip${active ? " current" : ""}" data-${key}="${escapeHtml(label)}">${escapeHtml(text)}</button>`;
+
+      function renderScopes() {
+        const ids = [];
+        for (const entry of entries) {
+          if (!ids.includes(entry.actor.id)) ids.push(entry.actor.id);
+        }
+        element("scope-chips").innerHTML = [
+          chipMarkup("", "merged", scope.kind === "merged", "scope"),
+          ...ids.map((id) => chipMarkup(id, id, scope.id === id, "scope")),
+        ].join("");
+      }
+
+      function renderActors() {
+        const labels = scopedActors();
+        const all =
+          scope.kind === "merged"
+            ? []
+            : [chipMarkup("", "whole concern", scope.kind === "concern", "actor")];
         element("actor-chips").innerHTML = [
-          chip("merged", actorFilter === null),
-          ...seen.map((label) => chip(label, actorFilter === label)),
+          ...all,
+          ...labels.map((label) =>
+            chipMarkup(label, label, scope.label === label, "actor")
+          ),
         ].join("");
       }
 
       function renderTrace() {
-        const shown = entries.filter(
-          (entry) => actorFilter === null || actorLabel(entry.actor) === actorFilter
-        );
+        const shown = entries.filter(inScope);
         element("trace-body").innerHTML = shown.map(entryMarkup).join("");
         element("trace-empty").hidden = shown.length > 0;
+        renderScopes();
         renderActors();
+        renderTarget();
       }
 
       function renderPhases() {
@@ -488,6 +605,7 @@
         renderRuns();
         renderPhases();
         renderConcerns();
+        renderTrace();
         renderQuestions();
         renderReview();
         renderFailures();
@@ -518,7 +636,8 @@
         if (!response.ok) return;
         state = await response.json();
         entries = [];
-        actorFilter = null;
+        expanded.clear();
+        scope = { kind: "merged" };
         if (source) source.close();
         connect();
         render();
@@ -532,8 +651,14 @@
       // an offer and cannot have recorded it.
       const REPROJECTS = ["question_asked", "answer_settled", "run_failed"];
 
+      // A long run outlives what a page can hold, so the oldest entries are
+      // dropped rather than accumulated until the tab dies. The record on
+      // disk is complete either way — this bounds the reader, not the run.
+      const RETAINED_ENTRIES = 4000;
+
       function apply(entry) {
         entries.push(entry);
+        if (entries.length > RETAINED_ENTRIES) entries.shift();
         renderTrace();
         if (!state) return;
         const event = entry.event;
@@ -617,31 +742,57 @@
         }
       });
 
+      element("scope-chips").addEventListener("click", (click) => {
+        const chosen = click.target.closest("[data-scope]");
+        if (!chosen) return;
+        const id = chosen.dataset.scope;
+        scope = id ? { kind: "concern", id } : { kind: "merged" };
+        renderTrace();
+      });
+
       element("actor-chips").addEventListener("click", (click) => {
         const chosen = click.target.closest("[data-actor]");
         if (!chosen) return;
         const label = chosen.dataset.actor;
-        actorFilter = label === "merged" ? null : label;
+        scope = label
+          ? { kind: "actor", id: label.split(":")[1].split("#")[0], label }
+          : { kind: "concern", id: scope.id };
         renderTrace();
       });
 
-      // A concern row opens into its worker's trace. The chips stay the way
-      // back to the merged view, so the two are one component and not two.
+      // A concern row opens the whole concern — worker, reviewer and merger,
+      // every round — because what a reader wants from a concern is what
+      // happened to it, not what one of its three actors did. The chips
+      // narrow from there and stay the way back out.
       element("concern-rows").addEventListener("click", (click) => {
         const chosen = click.target.closest("[data-concern]");
         if (!chosen) return;
-        const worker = entries
-          .map((entry) => entry.actor)
-          .filter((actor) => actor.id === chosen.dataset.concern)
-          .pop();
-        if (!worker) return;
-        actorFilter = actorLabel(worker);
+        scope = { kind: "concern", id: chosen.dataset.concern };
         renderTrace();
         element("trace-section").scrollIntoView({ behavior: "smooth" });
       });
 
-      // Addressed to whichever actor the trace is filtered to, and to every
-      // actor when it is not. The filter is the conversation you are in.
+      element("trace-body").addEventListener("click", (click) => {
+        const chosen = click.target.closest("[data-expand]");
+        if (!chosen) return;
+        expanded.add(chosen.dataset.expand);
+        renderTrace();
+      });
+
+      // A message reaches one actor or all of them; the mailbox addresses an
+      // exact label or broadcasts, and has nothing in between. A concern scope
+      // therefore says so rather than silently picking one of its actors.
+      function messageTarget() {
+        return scope.kind === "actor" ? scope.label : "";
+      }
+
+      function renderTarget() {
+        const target = messageTarget();
+        element("message-target").textContent = target
+          ? `Goes to ${target}.`
+          : "Goes to every actor in this run. Pick an actor above to address one.";
+      }
+
       element("message-button").addEventListener("click", async () => {
         const field = element("message-text");
         if (!field.value.trim()) return;
@@ -649,7 +800,7 @@
         try {
           await post(`/api/runs/${state.run_id}/messages`, {
             text: field.value,
-            to_actor: actorFilter ?? "",
+            to_actor: messageTarget(),
           });
           field.value = "";
         } catch (error) {

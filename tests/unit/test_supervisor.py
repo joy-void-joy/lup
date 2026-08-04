@@ -10,6 +10,7 @@ import re  # lup: ignore[import-re] — extracting identifiers from packaged JS
 from html.parser import HTMLParser
 from importlib import resources
 from pathlib import Path
+from typing import get_args
 
 import pytest
 import typer
@@ -17,7 +18,8 @@ from httpx import ASGITransport, AsyncClient
 
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.channels.models import utc_now
-from lup.resolver.journal import Journal, PhaseChangedEvent
+from lup.resolver.journal import Journal, PhaseChangedEvent, RunEvent
+from lup.runtime.models import TurnEvent
 from lup.resolver.mailbox import (
     AnswerDoor,
     PendingQuestion,
@@ -582,6 +584,35 @@ def test_every_element_the_script_reaches_for_exists_in_the_markup() -> None:
 
     assert referenced
     assert [name for name in referenced if name not in parser.ids] == []
+
+
+def test_the_page_draws_every_event_the_journal_can_record() -> None:
+    """A trace that omits what it cannot name is not a record.
+
+    The page switches on `event.type`, so an event union it has never heard
+    of renders as nothing at all: the routes keep passing, the entry is in
+    the journal, and the reader is simply never shown it. Reading the arms
+    back out of the page is what makes adding an event to either union fail
+    here rather than in a trace somebody is trying to read.
+    """
+    page = (
+        resources.files("lup_template.devtools.supervisor")
+        .joinpath("assets/index.html")
+        .read_text("utf-8")
+    )
+    drawn = set(
+        re.findall(  # lup: ignore[re-call] — switch arms in packaged JS
+            r"""case ["'](\w+)["']:""", page
+        )
+    )
+    recordable = {
+        member.model_fields["type"].default
+        for union in (RunEvent, TurnEvent)
+        for member in get_args(union.__value__)
+    }
+
+    assert recordable
+    assert sorted(recordable - drawn) == []
 
 
 def test_the_page_posts_only_routes_the_app_serves() -> None:
