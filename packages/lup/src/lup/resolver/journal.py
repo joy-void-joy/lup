@@ -109,6 +109,7 @@ class MessagePostedEvent(BaseModel):
     text: str
     door: str
     in_reply_to: str | None = None
+    redirect: bool = False
 
 
 class JoinCompletedEvent(BaseModel):

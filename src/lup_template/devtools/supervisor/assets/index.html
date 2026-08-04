@@ -259,6 +259,7 @@
         <div class="actions">
           <input id="message-text" type="text" placeholder="Say something — it decides nothing and never parks the run" />
           <button class="primary" type="button" id="message-button">Send</button>
+          <button type="button" id="redirect-button" title="Refuse this actor's next tool call and hand it this text as the reason">Redirect</button>
         </div>
         <p class="target" id="message-target"></p>
         <p class="error" id="message-error" hidden></p>
@@ -482,7 +483,7 @@
           case "answer_settled":
             return `<div class="entry note">${head}<div>answered ${escapeHtml(event.answer.question_id)} = ${escapeHtml(event.answer.value)} <span class="muted">(${escapeHtml(event.door)})</span></div></div>`;
           case "message_posted":
-            return `<div class="entry note"><div class="entry-head"><span class="muted">${escapeHtml(stamp)}</span> <span class="pill strong">${escapeHtml(event.door)} → ${escapeHtml(who)}</span></div><div class="say">${escapeHtml(event.text)}</div></div>`;
+            return `<div class="entry note"><div class="entry-head"><span class="muted">${escapeHtml(stamp)}</span> <span class="pill strong">${escapeHtml(event.door)} ${event.redirect ? "redirected" : "→"} ${escapeHtml(who)}</span></div><div class="say">${escapeHtml(event.text)}</div></div>`;
           case "join_completed":
             return `<div class="entry note">${head}<div>joined <code>${escapeHtml(event.parent.slice(0, 12))}</code>${event.conflicted ? " (conflicted)" : ""}${event.broke.length ? ` — broke: ${escapeHtml(event.broke.join(", "))}` : ""}</div></div>`;
           case "join_audit":
@@ -793,7 +794,7 @@
           : "Goes to every actor in this run. Pick an actor above to address one.";
       }
 
-      element("message-button").addEventListener("click", async () => {
+      async function say(redirect) {
         const field = element("message-text");
         if (!field.value.trim()) return;
         element("message-error").hidden = true;
@@ -801,12 +802,16 @@
           await post(`/api/runs/${state.run_id}/messages`, {
             text: field.value,
             to_actor: messageTarget(),
+            redirect,
           });
           field.value = "";
         } catch (error) {
           showError("message-error", error);
         }
-      });
+      }
+
+      element("message-button").addEventListener("click", () => say(false));
+      element("redirect-button").addEventListener("click", () => say(true));
 
       function connect() {
         source = new EventSource(`/api/runs/${state.run_id}/events`);

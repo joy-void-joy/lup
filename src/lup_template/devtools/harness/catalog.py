@@ -29,6 +29,20 @@ from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 
+def declared_hook_set() -> HookSet:
+    """The hook set this project declares, for a session composed in process.
+
+    Generated plugins read it off the harness they are compiled from. A
+    session this program builds itself has to reach the same declaration, or
+    it enforces something the generated tree does not.
+    """
+    return next(
+        plugin.hooks
+        for plugin in portable_harness().plugins
+        if plugin.hooks is not None
+    )
+
+
 def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harness:
     """Build the canonical declaration graph consumed by every adapter.
 

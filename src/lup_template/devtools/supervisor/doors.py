@@ -15,11 +15,13 @@ from pathlib import Path
 import typer
 
 from lup.channels.models import utc_now
+from lup.resolver.journal import Journal
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
     ParkRequest,
     QuestionMailbox,
+    new_message,
 )
 from lup.workspace.paths import project_root
 from lup_template.devtools.harness.resolve import parse_answer_flags
@@ -132,6 +134,57 @@ def answer_questions(
             )
         )
         typer.echo(f"offered {identifier}={value}")
+
+
+@app.command("actors")
+def list_actors(
+    run_id: str = typer.Option(..., "--run-id", help="Run whose record to read"),
+) -> None:
+    """List every actor this run has recorded, which is every one addressable."""
+    actors = Journal(resolve_state_root() / run_id).actors()
+    if not actors:
+        typer.echo("No actor has recorded anything yet.")
+        return
+    for actor in actors:
+        typer.echo(actor.label())
+
+
+@app.command("say")
+def say_to_actor(
+    text: str = typer.Argument(..., help="What to tell the actor"),
+    run_id: str = typer.Option(..., "--run-id", help="Run whose mailbox to write"),
+    to: str = typer.Option(
+        "", "--to", help="Actor label from `actors`, or empty to reach every actor"
+    ),
+    in_reply_to: str = typer.Option(
+        "", "--in-reply-to", help="Question or message id this answers, if any"
+    ),
+) -> None:
+    """Tell an actor something. It reads this and keeps going."""
+    open_mailbox(run_id).send(
+        new_message(run_id, to, text, AnswerDoor.AGENT, in_reply_to)
+    )
+    typer.echo(f"sent to {to or 'every actor'}")
+
+
+@app.command("redirect")
+def redirect_actor(
+    text: str = typer.Argument(..., help="What the actor should do instead"),
+    run_id: str = typer.Option(..., "--run-id", help="Run whose mailbox to write"),
+    to: str = typer.Option(
+        "", "--to", help="Actor label from `actors`, or empty to reach every actor"
+    ),
+) -> None:
+    """Stop an actor and put it on something else.
+
+    Where `say` rides alongside the actor's next tool call, this refuses that
+    call and hands back this text as the reason — so an actor going the wrong
+    way cannot take one more step down it before reading why it was stopped.
+    """
+    open_mailbox(run_id).send(
+        new_message(run_id, to, text, AnswerDoor.AGENT, redirect=True)
+    )
+    typer.echo(f"redirected {to or 'every actor'}")
 
 
 @app.command("park")

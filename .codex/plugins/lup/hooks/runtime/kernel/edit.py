@@ -413,6 +413,23 @@ def file_ignore(source: str) -> tuple[bool, tuple[str, ...] | None]:
     return False, ()
 
 
+def suppression_site(number: int, line: str) -> str:
+    """One suppression, located and quoted so it can be read before approving."""
+    return f"line {number}: {line.strip()[:160]}"
+
+
+def suppression_reason(sites: list[str]) -> str:
+    """Name every suppression this edit declares, not merely that it declares one.
+
+    A permission prompt carries the reason and nothing else, so a verdict
+    that said only what kind of thing happened left the reviewer to find the
+    line themselves — in a diff they were being asked to approve precisely
+    because it needed reading. Every site is listed rather than the first,
+    since approving is one decision over the whole batch.
+    """
+    return "edit introduces an antipattern suppression\n" + "\n".join(sites)
+
+
 def antipattern_decision(
     before: str | None,
     after: str,
@@ -443,6 +460,7 @@ def antipattern_decision(
     exempt = refined_exempt_lines(after, rows) if python_source else {}
     comment_columns = python_comment_columns(after) if python_source else None
     has_file_ignore, disabled_ids = file_ignore(after)
+    declared: list[str] = []
     for number in added:
         original = original_lines[number - 1]
         directive = IGNORE_RE.search(original)
@@ -454,9 +472,9 @@ def antipattern_decision(
                 and comment_columns[number] == directive.start()
             )
         ):
-            return KernelDecision(
-                suppression, "edit introduces an antipattern suppression"
-            )
+            declared.append(suppression_site(number, original))
+    if declared:
+        return KernelDecision(suppression, suppression_reason(declared))
     tokenized = comment_columns is not None
     for number in added:
         masked = scanned_lines[number - 1].strip()
@@ -475,15 +493,18 @@ def antipattern_decision(
                 continue
             if has_file_ignore and (disabled_ids is None or rule_id in disabled_ids):
                 continue
-            directive = IGNORE_RE.search(original_lines[number - 1])
+            original = original_lines[number - 1]
+            directive = IGNORE_RE.search(original)
             if directive is not None:
                 covered = ignore_rule_ids(directive)
                 if covered is None or rule_id in covered:
                     return KernelDecision(
-                        suppression, "edit introduces an antipattern suppression"
+                        suppression,
+                        suppression_reason([suppression_site(number, original)]),
                     )
             return KernelDecision(
-                "deny", f"{message} (rule {rule_id} — see docs/rules.md)"
+                "deny",
+                f"line {number}: {message} (rule {rule_id} — see docs/rules.md)",
             )
     return None
 

@@ -30,6 +30,7 @@ from lup.adapters.codex.native import (
     CodexUnknownOperation,
     CodexDecisionRenderer,
 )
+from lup.harness.enforcement import declared_path_rules
 from lup.policy.chain import UnknownToolPolicy
 from lup.policy.bundle import (
     bundled_antipattern_rows,
@@ -58,8 +59,10 @@ from lup.policy.rules import (
     ShellPolicy,
     UrlScope,
     human_owned_path_rule,
+    path_rule_row,
 )
 
+from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 
@@ -1259,7 +1262,7 @@ def test_declaring_a_suppression_still_asks() -> None:
     )
     decision = policy.decide(declared)
     assert decision.effect == "ask"
-    assert decision.reason == "edit introduces an antipattern suppression"
+    assert decision.reason.startswith("edit introduces an antipattern suppression")
 
 
 def test_prose_mentioning_a_suppression_is_not_declaring_one() -> None:
@@ -1367,6 +1370,62 @@ def test_retiring_a_suppression_the_ast_refutes_is_allowed() -> None:
         ]
     )
     assert policy.decide(batch).effect == "allow"
+
+
+def test_a_suppression_ask_names_every_line_it_is_asking_about() -> None:
+    """A prompt carries the reason and nothing else, so it has to locate the line."""
+    policy = EditPolicy(protected=[])
+    batch = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\n",
+                after=(
+                    "x = 1\n"
+                    "first: Any = 1  # lup: ignore[any-type]\n"
+                    "second: Any = 2  # lup: ignore[any-type]\n"
+                ),
+            )
+        ]
+    )
+    decision = policy.decide(batch)
+
+    assert decision.effect == "ask"
+    assert "line 2: first: Any = 1  # lup: ignore[any-type]" in decision.reason
+    assert "line 3: second: Any = 2  # lup: ignore[any-type]" in decision.reason
+
+
+def test_a_denial_names_the_line_that_tripped_it() -> None:
+    policy = EditPolicy(protected=[])
+    batch = EditBatch(
+        changes=[
+            EditChange(path=Path("a.py"), before="x = 1\n", after="x = 1\ny: Any = 2\n")
+        ]
+    )
+    decision = policy.decide(batch)
+
+    assert decision.effect == "deny"
+    assert decision.reason.startswith("line 2: ")
+
+
+def test_a_composed_session_enforces_the_rules_the_generated_tree_does() -> None:
+    """One declaration, two enforcement paths, and nothing between them.
+
+    A generated dispatcher compiles the hook set into rows; a session this
+    program composes builds policy objects from the same hook set. Neither
+    can see the other, so a rule added to one and not the other would make a
+    run's permissions depend on who launched it — which is exactly how a
+    resolver worker ran under a directory ACL while every plugin generated
+    from the same declaration judged the acts semantically.
+    """
+    hooks = next(plugin.hooks for plugin in portable_harness().plugins if plugin.hooks)
+    composed = [path_rule_row(rule) for rule in declared_path_rules(hooks)]
+    generated = runtime_path_rules(
+        [root.as_posix() for root in hooks.protected_edit_roots],
+        [path.as_posix() for path in hooks.human_owned_files],
+    )
+
+    assert composed == generated
 
 
 def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:

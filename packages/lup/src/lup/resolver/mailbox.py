@@ -95,6 +95,14 @@ class ActorMessage(BaseModel):
     A message is not a question, and the type is where that is enforced: a
     stream has no unsettled state for a run to wait on, so no amount of
     messaging can park anything.
+
+    ``redirect`` separates telling an actor something from stopping it. An
+    ordinary message rides in front of the actor's next tool call and it
+    keeps going; a redirect refuses that call and hands back the text as the
+    reason, so the actor cannot carry on with what it was doing without
+    first reading why it was stopped. Both are the same record on the same
+    stream, because an intervention belongs in order beside what it
+    interrupted.
     """
 
     model_config = FROZEN
@@ -105,6 +113,7 @@ class ActorMessage(BaseModel):
     door: AnswerDoor
     sent_at: datetime
     in_reply_to: str = ""
+    redirect: bool = False
 
 
 class MailboxWait(BaseModel):
@@ -292,7 +301,12 @@ async def wait_for_answers(
 
 
 def new_message(
-    run_id: str, to_actor: str, text: str, door: AnswerDoor, in_reply_to: str = ""
+    run_id: str,
+    to_actor: str,
+    text: str,
+    door: AnswerDoor,
+    in_reply_to: str = "",
+    redirect: bool = False,
 ) -> ActorMessage:
     """Build a message stamped now, so callers do not each reach for a clock."""
     return ActorMessage(
@@ -302,4 +316,5 @@ def new_message(
         door=door,
         sent_at=utc_now(),
         in_reply_to=in_reply_to,
+        redirect=redirect,
     )

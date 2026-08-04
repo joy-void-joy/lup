@@ -25,8 +25,11 @@ import lup_template.devtools.harness.resolve as resolve
 from lup_template.devtools.supervisor.app import serve_supervisor
 from lup_template.devtools.supervisor.doors import (
     answer_questions,
+    list_actors,
     list_questions,
     park_run,
+    redirect_actor,
+    say_to_actor,
 )
 
 app = typer.Typer(no_args_is_help=True, help="Generate and launch a native harness")
@@ -105,6 +108,9 @@ resolve_app = typer.Typer(
 resolve_app.command("supervise")(serve_supervisor)
 resolve_app.command("questions")(list_questions)
 resolve_app.command("answer")(answer_questions)
+resolve_app.command("actors")(list_actors)
+resolve_app.command("say")(say_to_actor)
+resolve_app.command("redirect")(redirect_actor)
 resolve_app.command("park")(park_run)
 app.add_typer(resolve_app, name="resolve")
 

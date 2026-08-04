@@ -177,6 +177,15 @@ def create_inbox_hooks(mailbox: QuestionMailbox, actor: str) -> LupHooksConfig:
     to. Waiting for the next turn would mean a directive sits unread for as
     long as the current one runs, which on a resolver turn is most of the
     run.
+
+    Telling and stopping are different acts and get different verdicts. A
+    message rides alongside the call and the actor keeps going. A redirect
+    denies the call and hands back the text as the reason, so an actor going
+    the wrong way cannot take one more step down it — which is the whole
+    difference between being informed and being redirected. Nothing here
+    spends an interrupt: a turn that ends mid-report is a turn whose typed
+    submission never arrives, and the actor is answering a refused tool call
+    either way.
     """
     offset = [mailbox.stream_offset()]
 
@@ -185,12 +194,21 @@ def create_inbox_hooks(mailbox: QuestionMailbox, actor: str) -> LupHooksConfig:
         offset[0] = mailbox.stream_offset()
         if not arrived:
             return LupHookOutput(decision="allow")
-        return LupHookOutput(
-            decision="allow",
-            additional_context="\n".join(
-                f"[message from {message.door}] {message.text}" for message in arrived
-            ),
+        # Everything that arrived is carried either way. The offset has already
+        # moved past all of it, so a message batched alongside a redirect has
+        # this one delivery and no other.
+        delivered = "\n".join(
+            f"[{'redirected' if message.redirect else 'message'} by {message.door}] "
+            f"{message.text}"
+            for message in arrived
         )
+        if any(message.redirect for message in arrived):
+            return LupHookOutput(
+                decision="deny",
+                reason=delivered
+                + "\n\nStop what this call was part of and act on the above.",
+            )
+        return LupHookOutput(decision="allow", additional_context=delivered)
 
     return LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=deliver, tag="inbox")])
 
@@ -206,6 +224,13 @@ class RequestAllowanceInput(BaseModel):
 
 class SendMessageInput(BaseModel):
     text: str = Field(description="What to tell the humans watching this run")
+    to_actor: str = Field(
+        default="",
+        description=(
+            "Actor label to address, like 'worker:some-concern#1'. Leave empty "
+            "to reach everyone watching."
+        ),
+    )
     in_reply_to: str = Field(
         default="",
         description="The id of a message or question this answers, if any",
@@ -348,18 +373,19 @@ def create_question_tools(
         return await await_answers(AwaitAnswersInput(question_ids=posted.question_ids))
 
     @lup_tool(
-        "Tell the humans watching this run something, without waiting for a "
-        "reply. Use this to volunteer what you have found, flag a consequence "
-        "for whoever merges your work, or answer something you were asked. "
-        "This never blocks and never parks the run — if you need a decision "
-        "before you can continue, that is a question, not a message.",
+        "Tell the humans watching this run — or one other actor in it — "
+        "something, without waiting for a reply. Use this to volunteer what "
+        "you have found, flag a consequence for whoever merges your work, or "
+        "answer something you were asked, naming the actor that asked. This "
+        "never blocks and never parks the run — if you need a decision before "
+        "you can continue, that is a question, not a message.",
         name="send_message",
     )
     async def send_message(params: SendMessageInput) -> SendMessageOutput:
         mailbox.send(
             ActorMessage(
                 run_id=run_id,
-                to_actor="",
+                to_actor=params.to_actor,
                 text=params.text,
                 door=AnswerDoor.AGENT,
                 sent_at=utc_now(),

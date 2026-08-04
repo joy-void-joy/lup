@@ -172,6 +172,13 @@ class MessageSubmission(BaseModel):
     in_reply_to: str = Field(
         default="", description="Question or message id this answers, if any"
     )
+    redirect: bool = Field(
+        default=False,
+        description=(
+            "Refuse the actor's next tool call and hand it this text as the "
+            "reason, instead of letting it read alongside what it was doing"
+        ),
+    )
 
 
 def answer_recipe(adapter: str, run_id: str, questions: list[MaterialQuestion]) -> str:

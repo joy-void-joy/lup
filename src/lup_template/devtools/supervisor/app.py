@@ -247,7 +247,9 @@ def create_supervisor(
         """Say something to one actor, or to all of them, without deciding.
 
         A message settles nothing, so this can never park a run — which is
-        the whole reason messages are a stream and decisions are slots.
+        the whole reason messages are a stream and decisions are slots. A
+        redirect settles nothing either: it refuses one tool call and states
+        why, which retargets the actor without ending the turn it is in.
         """
         run_mailbox(state_root, selected).send(
             ActorMessage(
@@ -257,6 +259,7 @@ def create_supervisor(
                 door=AnswerDoor.PAGE,
                 sent_at=utc_now(),
                 in_reply_to=submission.in_reply_to,
+                redirect=submission.redirect,
             )
         )
         return read_run(state_root, selected, adapter)

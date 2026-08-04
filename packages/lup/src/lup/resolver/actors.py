@@ -37,12 +37,10 @@ from lup.resolver.journal import (
 )
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import FROZEN
-from lup.runtime.contracts import Interrupt, Steer
 from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
-    TurnInput,
     TurnRequest,
     TurnResult,
 )
@@ -103,8 +101,6 @@ class ActorSession:
         self.record = record or ActorRecord(actor=actor)
         self.stack = AsyncExitStack()
         self.handle: SessionHandle | None = None
-        self.interrupt: Interrupt | None = None
-        self.steering: Steer | None = None
         self.pending: list[str] = []
 
     async def opened(self) -> SessionHandle:
@@ -128,8 +124,6 @@ class ActorSession:
         self.collect_inbox()
         handle = await self.opened()
         started = await handle.session.start(self.with_pending(request))
-        self.interrupt = started.interrupt
-        self.steering = started.steer
         drain = (
             asyncio.create_task(
                 record_turn(self.journal, self.actor, started.events.events())
@@ -140,8 +134,6 @@ class ActorSession:
         try:
             result = await started.turn.result()
         finally:
-            self.interrupt = None
-            self.steering = None
             if drain is not None:
                 # The adapter closes its queue in a `finally`, so the drain
                 # terminates on the failure path too and awaiting it here
@@ -173,6 +165,7 @@ class ActorSession:
                     text=message.text,
                     door=message.door,
                     in_reply_to=message.in_reply_to,
+                    redirect=message.redirect,
                 ),
             )
 
@@ -203,38 +196,6 @@ class ActorSession:
                 f"{self.actor.label()} resumed expecting a different submission "
                 "schema than the one it was bound to"
             )
-
-    async def steer(self, text: str) -> bool:
-        """Volunteer something to an actor that should keep going.
-
-        Best-effort by contract: it hands the message to the running turn and
-        the runtime delivers it at the next opportunity. Deliberately not
-        emulated with an interrupt — spending one to deliver a message ends a
-        turn that had no reason to end, and reads as a different act in the
-        trace. Between turns there is nothing to append to, so the message
-        waits and arrives at the head of the next one.
-        """
-        if self.steering is None:
-            self.pending.append(text)
-            return True
-        await self.steering.steer(TurnInput(text=text))
-        return True
-
-    async def redirect(self, text: str) -> bool:
-        """Stop what this actor is doing and put it on something else.
-
-        Interrupt-then-new-turn, which is uniform on every runtime. This is
-        the verb for retargeting rather than for informing: it gives an
-        observable boundary, and every resolver turn ends in a typed
-        submission, so steering a decision into a turn that has already
-        formed its report is racy exactly when the input was meant to change
-        the outcome.
-        """
-        self.pending.append(text)
-        if self.interrupt is None:
-            return False
-        await self.interrupt.interrupt()
-        return True
 
     async def close(self) -> None:
         await self.stack.aclose()

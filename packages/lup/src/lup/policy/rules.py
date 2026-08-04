@@ -9,7 +9,6 @@ stay decision-identical; the shared fixture suite asserts exactly that.
 """
 
 from pathlib import Path
-from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
@@ -26,6 +25,7 @@ from lup.policy.kernel.lex import parse_shell_words, shell_write_targets
 from lup.policy.kernel.rows import (
     AntiPatternRow,
     PathRoleRow,
+    PathRuleKind,
     PathRuleRow,
     UrlScopeRow,
 )
@@ -171,11 +171,17 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
 
 
 class PathRule(BaseModel):
-    """One semantic protected-path match supplied by a composition root."""
+    """One semantic protected-path match supplied by a composition root.
+
+    ``kind`` spans the whole primitive vocabulary rather than a subset of it.
+    A rule a generated dispatcher can enforce and a composed session cannot
+    express is a rule whose reach depends on who launched the run, which is
+    the one thing single-sourcing the policy exists to prevent.
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    kind: Literal["exact", "subtree", "name_prefix", "new_subtree"]
+    kind: PathRuleKind
     value: str
     reason: str
     allow_autonomous: bool = False

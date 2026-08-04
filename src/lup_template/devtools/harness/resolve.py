@@ -573,13 +573,20 @@ def run_resolve(
             create_codex_session_factory,
         )
         from lup_template.agent.config import engine_for_model, settings
+        from lup.adapters.claude.hooks import claude_hook_semantic_tool
+        from lup.harness.enforcement import semantic_policy_for
         from lup.hooks import (
+            LupHooksConfig,
             create_git_inspection_hook,
             create_permission_hooks,
             merge_hooks,
         )
+        from lup.policy.enforcement import create_policy_hooks
 
-        from lup_template.devtools.harness.catalog import portable_harness
+        from lup_template.devtools.harness.catalog import (
+            declared_hook_set,
+            portable_harness,
+        )
 
         session_environment = non_interactive_environment(
             os.environ  # lup: ignore[os-environ] — sessions inherit the console
@@ -667,7 +674,10 @@ def run_resolve(
                         ],
                         hooks=merge_hooks(
                             merge_hooks(
-                                create_permission_hooks([cwd], []),
+                                merge_hooks(
+                                    create_permission_hooks([cwd], []),
+                                    worker_policy_hooks(),
+                                ),
                                 create_git_inspection_hook(),
                             ),
                             create_inbox_hooks(
@@ -701,6 +711,28 @@ def run_resolve(
                     },
                     writable_roots=[cwd],
                 )
+            )
+
+        def worker_policy_hooks() -> LupHooksConfig:
+            """Judge a worker's calls by the policy every plugin enforces.
+
+            The directory ACL beside this bounds where a worker may write and
+            says nothing about what it may read, fetch, or run — so reads,
+            egress and every non-filesystem act passed unjudged, with the OS
+            sandbox as the only floor. What blocked this before was that a
+            denial had nowhere to go; the `ask` verdict reaches the mailbox
+            now, so a worker meeting a genuine need outside the vocabulary
+            asks for it instead of failing.
+
+            The worker is autonomous because its edits are reviewed by an
+            actor of this run, which is the same fact the generated tree
+            derives its autonomous list from.
+            """
+            return create_policy_hooks(
+                semantic_policy_for(
+                    declared_hook_set(), autonomous=True, interactive=False
+                ),
+                claude_hook_semantic_tool,
             )
 
         def reviewer_factory(cwd: Path) -> SessionFactory:
