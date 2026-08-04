@@ -1,5 +1,6 @@
 """Deterministic resolver DAG, lease, state, and commit-authority tests."""
 
+import asyncio
 from collections import Counter
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -48,6 +49,7 @@ from lup.resolver.models import (
     ConcernStatus,
     DependencyBase,
     IntegrationRecord,
+    JoinProgress,
     InventoryNote,
     MaterialQuestion,
     MergeReport,
@@ -350,6 +352,21 @@ class RecordingLauncher(ProcessLauncher):
         elif request.arguments[1:3] == ["branch", "--show-current"]:
             stdout = "resolve/a\n"
         return ExitStatus(code=0, stdout=stdout)
+
+
+class HeadLauncher(ProcessLauncher):
+    """A worktree that exists, sits on one branch, and reports one HEAD."""
+
+    def __init__(self, head: str, branch: str) -> None:
+        self.head = head
+        self.branch = branch
+
+    def launch(self, request: LaunchRequest) -> ExitStatus:
+        if request.arguments[1:3] == ["rev-parse", "HEAD"]:
+            return ExitStatus(code=0, stdout=f"{self.head}\n")
+        if request.arguments[1:3] == ["branch", "--show-current"]:
+            return ExitStatus(code=0, stdout=f"{self.branch}\n")
+        return ExitStatus(code=0)
 
 
 class FailingVerificationLauncher(ProcessLauncher):
@@ -954,6 +971,121 @@ def test_interrupted_concern_returns_to_persisted_lease_boundary(
             reason="retry lease restored",
         )
     ]
+
+
+def integration_state(
+    run_id: str, tmp_path: Path, progress: JoinProgress
+) -> ResolveState:
+    """A run parked with an integration lease and nothing else in flight."""
+    lease = WritableRootLease(
+        concern_id="integration",
+        root=tmp_path / "worktrees" / "integration",
+        branch=f"resolve/{run_id}/review",
+    )
+    return ResolveState(
+        config_digest="config-sha",
+        run_id=run_id,
+        phase=ResolvePhase.INTEGRATION,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("a")],
+        progress=[ConcernProgress(concern_id="a", status=ConcernStatus.INTEGRATING)],
+        leases=[lease],
+        join_progress=progress,
+    )
+
+
+def test_a_resume_partway_through_integration_keeps_the_joins_it_built(
+    tmp_path: Path,
+) -> None:
+    """The joins already committed are progress, not a failed attempt.
+
+    Before join progress had a field, an integration that parked mid-sequence
+    had no `IntegrationRecord` — that is written only once every join lands —
+    so the expected commit fell back to the run's source and the restore
+    discarded every join already built. Six were thrown away in one observed
+    run, and the same semantic question came back under a fresh id because
+    the whole integration restarted beneath it.
+    """
+    run_id = "partway"
+    state = integration_state(
+        run_id, tmp_path, JoinProgress(joined=["p1", "p2"], commit="j2")
+    )
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=tmp_path,
+            worktree_root=tmp_path / "worktrees",
+            run_id=run_id,
+            integration_branch=f"resolve/{run_id}/review",
+            verification_commands=[
+                VerificationCommand(name="tests", arguments=["pytest"])
+            ],
+        ),
+        resolve_spec(),
+        lambda _cwd: unused_session_factory(),
+        lambda _cwd: unused_session_factory(),
+        UnusedInvocationRenderer(),
+        HeadLauncher("j2", f"resolve/{run_id}/review"),
+    )
+    core.persist(state)
+
+    core.restore_leases(state)
+
+    assert core.repository.load().join_progress == JoinProgress(
+        joined=["p1", "p2"], commit="j2"
+    )
+
+
+def test_a_base_moves_onto_the_commit_that_cleared_its_notes(
+    tmp_path: Path,
+) -> None:
+    """The resolver must not raise an invariant it violated itself.
+
+    The orchestrator strips a concern's notes as a commit of its own, so a
+    concern that never verified has HEAD at that clearance while its recorded
+    base sits behind it. Restoring then raised `persisted commit changed`,
+    with no CLI operation able to repair it, and the worktree had to be reset
+    by hand.
+    """
+    run_id = "cleared"
+    base = DependencyBase(
+        concern_id="a", parent_concerns=[], parent_commits=[], commit="base-sha"
+    )
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=tmp_path,
+            worktree_root=tmp_path / "worktrees",
+            run_id=run_id,
+            integration_branch=f"resolve/{run_id}/review",
+            verification_commands=[
+                VerificationCommand(name="tests", arguments=["pytest"])
+            ],
+        ),
+        resolve_spec(),
+        lambda _cwd: unused_session_factory(),
+        lambda _cwd: unused_session_factory(),
+        UnusedInvocationRenderer(),
+        MissingBranchLauncher(),
+    )
+    core.persist(
+        ResolveState(
+            config_digest="config-sha",
+            run_id=run_id,
+            phase=ResolvePhase.WORKERS,
+            source=SourceSnapshot(branch="feature", commit="source-sha"),
+            spec=resolve_spec(),
+            concerns=[concern("a")],
+            progress=[ConcernProgress(concern_id="a")],
+            bases=[base],
+        )
+    )
+
+    moved = asyncio.run(core.record_note_clearance(base, "clearance-sha"))
+
+    assert moved.commit == "clearance-sha"
+    assert core.repository.load().bases == [moved]
 
 
 def test_releasing_a_run_cleans_concern_branches_and_keeps_the_review_one(

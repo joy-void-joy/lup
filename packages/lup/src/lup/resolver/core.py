@@ -56,6 +56,7 @@ from lup.resolver.models import (
     ConcernOutcome,
     DependencyBase,
     IntegrationRecord,
+    JoinProgress,
     MaterialQuestion,
     MergeReport,
     QuestionAnswer,
@@ -849,48 +850,24 @@ class ResolverCore:
         }
         for lease in self.leases.leases.values():
             if lease.concern_id == "integration":
-                # lup: defer[when the resolver review loop is next revised]: an
-                # integration that has not finished has no `IntegrationRecord`
-                # — it is written only once `join_commits` returns — so this
-                # falls to the source commit and `restore_worktree` hard-resets
-                # the worktree, discarding every join already completed. A run
-                # that parks partway through integration therefore redoes all
-                # of them on each resume, re-running a merge turn per parent and
-                # re-deriving the same conflicts. Observed: six joins built and
-                # thrown away, and the same semantic question re-asked under a
-                # fresh id because the whole integration restarted beneath it,
-                # so the human answered it twice. Record join progress as it is
-                # made, and resume from the last completed join rather than from
-                # the source commit. The reset below now preserves committed
-                # joins, but the deeper shape is still wrong: `IntegrationRecord`
-                # carries one `commit` that means "all joins done, verification
-                # pending", so there is nowhere to record "joined 6 of 12".
-                # Persisting that record mid-join would make `integrate` skip
-                # the join block entirely and verify a half-merged tree — worse
-                # than replaying. Give join progress its own field so a resume
-                # can start at the next unjoined parent instead of re-running a
-                # merge turn for every parent already in HEAD.
+                # Three states, and each names the commit it expects rather
+                # than accepting whatever HEAD happens to hold. A finished
+                # integration expects its record; a partway one expects the
+                # last join it recorded, so the joins already built survive
+                # and only the interrupted merge and its index are discarded;
+                # one that never started expects the source commit.
                 if (
                     state.integration is not None
                     and state.integration.commit is not None
                 ):
                     recorded = True
                     expected = state.integration.commit
+                elif state.join_progress is not None:
+                    recorded = True
+                    expected = state.join_progress.commit
                 else:
-                    # Joins already committed are progress, not a failed
-                    # attempt. `reset` exists to discard an uncommitted attempt,
-                    # and resetting to the worktree's own HEAD does exactly
-                    # that: a half-finished merge and its index go, every
-                    # completed join stays. Naming the source commit here
-                    # discarded all of them on every resume, so a run that
-                    # parked mid-integration replayed every join and re-derived
-                    # the same questions under fresh ids.
                     recorded = False
-                    expected = (
-                        self.worktrees.head(lease)
-                        if lease.root.exists()
-                        else state.source.commit
-                    )
+                    expected = state.source.commit
                 self.restore_worktree(lease, expected, recorded)
                 continue
             outcome = (
@@ -926,18 +903,6 @@ class ResolverCore:
             else:
                 self.worktrees.create(lease, expected)
         self.worktrees.branch(lease)
-        # lup: defer[when the resolver review loop is next revised]: this
-        # invariant bricks a run whose concern failed. The caller passes
-        # `outcome.commit or expected`, and a concern that never verified has
-        # no commit, so `expected` falls back to the run's source commit — but
-        # the orchestrator has already moved that worktree's HEAD with its own
-        # `resolve: clear review notes` commit. Every later resume then raises,
-        # naming an invariant the resolver itself violated, and no CLI
-        # operation repairs it. Observed on docs-set-restructure: HEAD sat at
-        # the note-clearing commit while expected was the source commit, so the
-        # whole run could not resume until the worktree was reset by hand. A
-        # failed concern's restore should expect whatever HEAD its own recorded
-        # commits left, or record that commit when it clears notes.
         if terminal:
             if self.worktrees.head(lease) != expected:
                 raise ResolverInvariantError(
@@ -1034,6 +999,7 @@ class ResolverCore:
                 self.worktrees.create(lease, base.commit)
 
         cleared = self.worktrees.clear_notes(lease, concern, base.commit)
+        base = await self.record_note_clearance(base, cleared.commit)
         answers = self.answers_for(concern.id)
         assignment = WorkAssignment(
             run_id=self.config.run_id,
@@ -1262,8 +1228,27 @@ class ResolverCore:
                 )
             )
             await self.recheck_standing(lease, base, joined[:-1], parent)
+            self.record_join_progress(joined, current)
         await self.audit_join(lease, base, joined, current, purpose)
         return current
+
+    def record_join_progress(self, joined: list[str], commit: str) -> None:
+        """Say where the join sequence got to, as each parent lands.
+
+        Written after the parent is committed, so what it names is a tree
+        that exists. A resume restores to this commit instead of the run's
+        source, which is what stops it discarding joins it already built.
+        """
+        state = self.state
+        if state is None:
+            return
+        self.persist(
+            state.model_copy(
+                update={
+                    "join_progress": JoinProgress(joined=list(joined), commit=commit)
+                }
+            )
+        )
 
     async def recheck_standing(
         self,
@@ -2042,9 +2027,15 @@ class ResolverCore:
                 commit=integration_commit,
                 completed=False,
             )
-            state = state.model_copy(
+            # Re-read rather than updating the copy this scope has held since
+            # before the joins: `join_commits` persisted progress under it,
+            # and building from the stale local would drop what it recorded.
+            # The record supersedes that progress, so it is cleared with the
+            # same write that establishes it.
+            state = self.require_state().model_copy(
                 update={
                     "integration": integration,
+                    "join_progress": None,
                 }
             )
             self.persist(state)
@@ -2411,6 +2402,40 @@ class ResolverCore:
         async with self.state_lock:
             state = self.require_state()
             self.persist(self.progress_state(state, [concern_id], status, reason))
+
+    async def record_note_clearance(
+        self, base: DependencyBase, commit: str
+    ) -> DependencyBase:
+        """Move this concern's recorded base onto the commit that cleared its notes.
+
+        The orchestrator strips a concern's notes as a commit of its own, so
+        the tree its worker starts from is that commit and not the one the
+        base was built at. Leaving the record behind bricked every resume of a
+        concern that failed: with no verified commit to restore, the expected
+        commit fell back to the base while HEAD sat at the clearance, and the
+        invariant the resolver itself had violated raised with no CLI
+        operation able to repair it.
+
+        Recorded rather than tolerated. An invariant that accepts whatever
+        HEAD says is not one, and the fact it needs was always available at
+        the moment the commit was made.
+        """
+        if commit == base.commit:
+            return base
+        moved = base.model_copy(update={"commit": commit})
+        async with self.state_lock:
+            state = self.require_state()
+            self.persist(
+                state.model_copy(
+                    update={
+                        "bases": [
+                            moved if item.concern_id == base.concern_id else item
+                            for item in state.bases
+                        ]
+                    }
+                )
+            )
+        return moved
 
     async def record_dependency_base(self, base: DependencyBase) -> None:
         """Persist one immutable dependency base before worker execution."""

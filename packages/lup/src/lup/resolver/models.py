@@ -520,6 +520,26 @@ class IntegrationRecord(BaseModel):
     completed: bool = False
 
 
+class JoinProgress(BaseModel):
+    """How far integration has got, recorded as each parent lands.
+
+    :class:`IntegrationRecord` is written once every join is done, so until
+    then there was nowhere to say "six of twelve" — and writing a partial one
+    would make ``integrate`` skip the join block and verify a half-merged
+    tree. A resume therefore fell back to the run's source commit and hard
+    reset the worktree, discarding every join already built and re-deriving
+    the same questions under fresh ids, which a human then answered twice.
+
+    Recording it separately keeps the two facts apart: this says where the
+    join sequence got to, the record says the sequence finished.
+    """
+
+    model_config = FROZEN
+
+    joined: list[str]
+    commit: str
+
+
 class VerificationRecord(BaseModel):
     model_config = FROZEN
 
@@ -699,6 +719,7 @@ class ResolveState(BaseModel):
     bases: list[DependencyBase] = Field(default_factory=list)
     outcomes: list[ConcernOutcome] = Field(default_factory=list)
     integration: IntegrationRecord | None = None
+    join_progress: JoinProgress | None = None
     verification: list[VerificationRecord] = Field(default_factory=list)
     cleanup: list[CleanupRecord] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
