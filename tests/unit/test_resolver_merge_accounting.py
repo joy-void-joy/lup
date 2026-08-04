@@ -10,6 +10,7 @@ choice visible.
 from pathlib import Path
 
 import pytest
+import sh
 
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
@@ -237,36 +238,78 @@ def test_superseding_leaves_the_predecessor_in_the_record() -> None:
     validate_concern_admission(started, corrected)
 
 
-class TrackedLauncher(ProcessLauncher):
-    """Answer `git ls-files --error-unmatch` for one known-tracked path."""
+@pytest.fixture
+def approval_repo(tmp_path: Path) -> Path:
+    """A real repository: recoverability is Git's answer, not a fake's.
 
-    def __init__(self, tracked: str) -> None:
-        self.tracked = tracked
-
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        matched = self.tracked in request.arguments
-        return ExitStatus(code=0 if matched else 1)
-
-
-def test_an_agent_may_approve_removing_a_committed_file() -> None:
-    """The object store is the recovery, so the deletion is not permanent."""
-    assert agent_may_approve("rm src/old.py", Path("."), TrackedLauncher("src/old.py"))
-
-
-def test_only_a_human_may_approve_removing_an_untracked_file() -> None:
-    """Nothing holds a copy, so nobody can undo it afterwards."""
-    assert not agent_may_approve(
-        "rm scratch.txt", Path("."), TrackedLauncher("src/old.py")
+    The launcher this used to take could only say whether a path was tracked,
+    which is the weaker question that let a modified file read as recoverable.
+    Asking Git itself is what makes the uncommitted-work case expressible.
+    """
+    work = tmp_path / "repo"
+    (work / "src").mkdir(parents=True)
+    hooks = tmp_path / "no-hooks"
+    hooks.mkdir()
+    git = sh.Command("git").bake(
+        "-C",
+        str(work),
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        f"core.hooksPath={hooks}",
+        _tty_out=False,
     )
+    git("init", "-b", "main")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    (work / "src" / "old.py").write_text("value = 1\n", encoding="utf-8")
+    (work / "src" / "edited.py").write_text("value = 2\n", encoding="utf-8")
+    git("add", "src/old.py", "src/edited.py")
+    git("commit", "-m", "chore: base")
+    (work / "src" / "edited.py").write_text("value = 3\n", encoding="utf-8")
+    (work / "scratch.txt").write_text("untracked\n", encoding="utf-8")
+    return work
 
 
-def test_only_a_human_may_approve_discarding_uncommitted_work() -> None:
-    assert not agent_may_approve("git reset --hard HEAD", Path("."), None)
-    assert not agent_may_approve("git checkout -- .", Path("."), None)
+def test_an_agent_may_approve_removing_a_committed_file(approval_repo: Path) -> None:
+    """The object store is the recovery, so the deletion is not permanent."""
+    assert agent_may_approve("rm src/old.py", approval_repo)
 
 
-def test_only_a_human_may_approve_anything_that_leaves_this_machine() -> None:
-    assert not agent_may_approve("git push --force origin main", Path("."), None)
+def test_only_a_human_may_approve_removing_an_untracked_file(
+    approval_repo: Path,
+) -> None:
+    """Nothing holds a copy, so nobody can undo it afterwards."""
+    assert not agent_may_approve("rm scratch.txt", approval_repo)
+
+
+def test_only_a_human_may_approve_removing_uncommitted_edits(
+    approval_repo: Path,
+) -> None:
+    """Tracked is not recoverable: the object store holds the older text.
+
+    Approving this discarded the working-copy change, which is precisely the
+    work nothing could restore afterwards.
+    """
+    assert not agent_may_approve("rm src/edited.py", approval_repo)
+
+
+def test_only_a_human_may_approve_removing_a_directory(approval_repo: Path) -> None:
+    """Nothing in the command bounds what the directory holds."""
+    assert not agent_may_approve("rm -rf src", approval_repo)
+
+
+def test_only_a_human_may_approve_discarding_uncommitted_work(
+    approval_repo: Path,
+) -> None:
+    assert not agent_may_approve("git reset --hard HEAD", approval_repo)
+    assert not agent_may_approve("git checkout -- .", approval_repo)
+
+
+def test_only_a_human_may_approve_anything_that_leaves_this_machine(
+    approval_repo: Path,
+) -> None:
+    assert not agent_may_approve("git push --force origin main", approval_repo)
 
 
 class BranchLauncher(ProcessLauncher):

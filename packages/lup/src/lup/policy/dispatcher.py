@@ -38,6 +38,22 @@ SHARED_PACKAGE = "lup.policy"
 SHARED_MEMBER = "host"
 """The half every runtime answers identically, compiled into both scripts."""
 
+DECISIONS_MEMBER = "decisions"
+"""The half every runtime answers identically, needing the kernel to answer it.
+
+Separate from ``host`` because the two stand on different ground: the host half
+resolves facts from the machine and may reach nothing but the pinned standard
+library, while this one calls the kernel and is type-checked against the
+generated runtime. Both are shared, so neither is a place a runtime can
+diverge — which is the whole reason the kernel call sites live here.
+"""
+
+SPLICED_MEMBERS = (  # lup: ignore[library-default] — the two members this compiler itself defines; a caller cannot splice a half the compiler does not read
+    SHARED_MEMBER,
+    DECISIONS_MEMBER,
+)
+"""The halves the compiler splices in, whose imports resolve to nothing after."""
+
 RUNTIME_MEMBER = "policy_dispatcher"
 """The half one adapter owns: its own words, and nothing another repeats."""
 
@@ -47,6 +63,7 @@ DISPATCHER_STDLIB = (
     "os",
     "sys",
     "pathlib",
+    "subprocess",
 )  # lup: ignore[library-default] — the stdlib a compiled dispatcher actually imports; widening it is the hazard the pin exists to prevent
 """The standard library a compiled dispatcher may reach.
 
@@ -54,6 +71,12 @@ Pinned rather than open: the script starts through a native CLI with
 ``python3``, outside Lup's import graph and any active virtual environment,
 so a convenient project helper — or the ``lup`` package itself — would make
 permissions disappear precisely where packaging differs.
+
+``subprocess`` earns its place because asking Git whether a path is
+recoverable is a question only a process can answer, and every alternative
+spelling of it — ``sh``, a devtools helper — is exactly the unresolvable
+import this pin exists to reject. Being genuine standard library, it cannot
+produce that failure. Each further entry deserves the same argument.
 """
 
 ROUTER = "dispatch"
@@ -251,59 +274,82 @@ def breach(condition: bool, message: str) -> list[str]:
 
 
 def import_breaches(
-    declaration: DispatcherDeclaration, shared: SourceHalf, runtime: SourceHalf
+    declaration: DispatcherDeclaration,
+    shared: SourceHalf,
+    decisions: SourceHalf,
+    runtime: SourceHalf,
 ) -> list[str]:
-    """Imports a compiled script could not resolve, or would arrive without.
+    """Imports a compiled script could not resolve on a bare interpreter.
 
-    The shared half's own import block is not emitted — the runtime half's is,
-    because that is the one a type checker read this dispatcher against — so
-    every module and name the shared half stands on has to be in it.
+    Every half carries its own imports into the emitted prologue, so what is
+    checked is resolvability rather than whether one half remembered to import
+    what another stands on. A link between halves resolves to nothing once
+    they are one file, which is why those are excluded rather than judged.
     """
-    imports = half_imports(runtime)
-    carried = [item.module for item in imports]
     return [
-        *[
-            f"imports {item.module}, which a bare script cannot resolve"
-            for item in imports
-            if not resolvable(item.module, declaration)
-        ],
-        *[
-            f"drops {item.module}, which the shared half needs"
-            for item in half_imports(shared)
-            if item.module not in carried
-        ],
-        *[
-            f"drops {name} from {item.module}, which the shared half needs"
-            for item in half_imports(shared)
-            for name in item.names
-            if not any(
-                other.module == item.module and name in other.names for other in imports
-            )
-        ],
+        f"{half.module} imports {item.module}, which a bare script cannot resolve"
+        for half in (shared, decisions, runtime)
+        for item in half_imports(half)
+        if item.module not in SPLICED_MEMBERS
+        and not resolvable(item.module, declaration)
     ]
 
 
-def sharing_breaches(shared: SourceHalf, runtime: SourceHalf) -> list[str]:
-    """Places where the two halves overlap instead of composing."""
-    offered = [node.name for node in half_functions(shared)]
+def host_purity_breaches(shared: SourceHalf) -> list[str]:
+    """Reaches the host half makes beyond the standard library it is pinned to.
+
+    The host half is what resolves facts from the machine, and it may stand on
+    nothing but the pinned standard library — not the kernel, not the ``lup``
+    package. Type checking used to settle that incidentally, by reading the
+    file somewhere the kernel did not resolve; it now reads against a
+    generated runtime so the kernel-aware half beside it can be checked at
+    all. A guarantee that has quietly become a configuration detail is not a
+    guarantee, so it is proven here instead.
+    """
+    return [
+        f"{SHARED_MEMBER} imports {item.module}, which is outside its pinned stdlib"
+        for item in half_imports(shared)
+        if item.module not in DISPATCHER_STDLIB
+    ]
+
+
+def sharing_breaches(
+    shared: SourceHalf, decisions: SourceHalf, runtime: SourceHalf
+) -> list[str]:
+    """Places where the halves overlap instead of composing.
+
+    A runtime half redefining something a shared half answers is the drift
+    this split exists to prevent, so it is a breach wherever it appears —
+    including the decisions half, which stands on the host half exactly as an
+    adapter does.
+    """
+    offers = {SHARED_MEMBER: [node.name for node in half_functions(shared)]}
+    offers[DECISIONS_MEMBER] = [node.name for node in half_functions(decisions)]
+    shared_names = offers[SHARED_MEMBER] + offers[DECISIONS_MEMBER]
     return [
         *[
-            f"redefines {node.name}, which the shared half already answers"
-            for node in half_functions(runtime)
-            if node.name in offered
+            f"{half.module} redefines {node.name}, which a shared half answers"
+            for half in (decisions, runtime)
+            for node in half_functions(half)
+            if node.name
+            in (offers[SHARED_MEMBER] if half is decisions else shared_names)
         ],
         *[
-            f"takes {name} from {SHARED_MEMBER}, which does not offer it"
-            for item in half_imports(runtime)
-            if item.module == SHARED_MEMBER
+            f"{half.module} takes {name} from {item.module}, which does not offer it"
+            for half in (decisions, runtime)
+            for item in half_imports(half)
+            if item.module in SPLICED_MEMBERS
             for name in item.names
-            if name not in offered
+            if name not in offers[item.module]
         ],
     ]
 
 
 def declaration_breaches(
-    declaration: DispatcherDeclaration, shared: SourceHalf, runtime: SourceHalf
+    declaration: DispatcherDeclaration,
+    shared: SourceHalf,
+    decisions: SourceHalf,
+    runtime: SourceHalf,
 ) -> list[str]:
     """Axes the declaration promised that the runtime half does not keep."""
     constants = string_constants(runtime.tree)
@@ -330,11 +376,11 @@ def declaration_breaches(
             RELATIVIZER
             not in [
                 name
-                for item in half_imports(runtime)
+                for item in half_imports(decisions)
                 if item.module == SHARED_MEMBER
                 for name in item.names
             ],
-            f"never takes {RELATIVIZER} from {SHARED_MEMBER}",
+            f"{DECISIONS_MEMBER} never takes {RELATIVIZER} from {SHARED_MEMBER}",
         ),
         *breach(
             declaration.managed_root_env not in constants,
@@ -378,19 +424,44 @@ def compiled_docstring(declaration: DispatcherDeclaration) -> str:
     )
 
 
-def runtime_prologue(half: SourceHalf) -> str:
-    """The runtime half's imports, less the shared import the compiler links.
+def spliced_prologue(half: SourceHalf, emitted: str) -> list[str]:
+    """A spliced half's own imports, less its links and what is already there.
 
-    The shared half arrives as source rather than as a module beside the
+    Emitted as whole source lines rather than as the parsed statement, so a
+    trailing marker stays attached to the import it answers for: the rules the
+    generated tree is scanned against read the line, and a marker the compiler
+    dropped is a violation nobody declared. A half that needs something the
+    runtime half never imports —
+    the standard library module the host half asks Git with, the kernel names
+    the decisions half calls — carries it in rather than obliging every
+    adapter to import what it does not use.
+    """
+    lines = half.text.splitlines()
+    return [
+        segment
+        for node in half.tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        if not (isinstance(node, ast.ImportFrom) and node.module in SPLICED_MEMBERS)
+        for segment in [
+            "\n".join(lines[node.lineno - 1 : (node.end_lineno or node.lineno)])
+        ]
+        if segment and segment not in emitted
+    ]
+
+
+def runtime_prologue(half: SourceHalf) -> str:
+    """The runtime half's imports, less the shared imports the compiler links.
+
+    A spliced half arrives as source rather than as a module beside the
     script, so the import that let a type checker read this half against it
-    has nothing left to resolve once both are one file.
+    has nothing left to resolve once they are one file.
     """
     docstring = half.tree.body[0]
     opening = half_functions(half)[0].lineno
     linked = [
         number
         for node in half.tree.body
-        if isinstance(node, ast.ImportFrom) and node.module == SHARED_MEMBER
+        if isinstance(node, ast.ImportFrom) and node.module in SPLICED_MEMBERS
         for number in range(node.lineno, (node.end_lineno or node.lineno) + 1)
     ]
     kept = [
@@ -409,18 +480,27 @@ def compile_dispatcher(declaration: DispatcherDeclaration) -> str:
     is a session running without a permission boundary, so generation stops.
     """
     shared = source_half(SHARED_PACKAGE, SHARED_MEMBER)
+    decisions = source_half(SHARED_PACKAGE, DECISIONS_MEMBER)
     runtime = source_half(declaration.package, RUNTIME_MEMBER)
     breaches = [
-        *import_breaches(declaration, shared, runtime),
-        *sharing_breaches(shared, runtime),
-        *declaration_breaches(declaration, shared, runtime),
+        *import_breaches(declaration, shared, decisions, runtime),
+        *host_purity_breaches(shared),
+        *sharing_breaches(shared, decisions, runtime),
+        *declaration_breaches(declaration, shared, decisions, runtime),
     ]
     if breaches:
         raise ValueError(f"{runtime.module} " + "; ".join(breaches))
     header = "\n".join([SHEBANG, compiled_docstring(declaration)])
+    prologue = runtime_prologue(runtime)
+    carried = [
+        segment
+        for half in (shared, decisions)
+        for segment in spliced_prologue(half, prologue)
+    ]
     blocks = [
-        f"{header}\n\n{runtime_prologue(runtime)}",
+        "\n".join([f"{header}\n\n{prologue}", *carried]),
         *[function_source(shared, node) for node in half_functions(shared)],
+        *[function_source(decisions, node) for node in half_functions(decisions)],
         *[function_source(runtime, node) for node in half_functions(runtime)],
         INVOCATION,
     ]

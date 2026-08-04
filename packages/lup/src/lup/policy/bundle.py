@@ -271,6 +271,7 @@ def render_policy_data(
     autonomous_agent_identities: list[str],
     path_roles: list[PathRoleRow],
     shell_rules: list[ShellCommandRule],
+    recoverable_target_limit: int,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
     body = "\n\n".join(
@@ -293,6 +294,7 @@ def render_policy_data(
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
             "CONCERN_ALLOWANCES_ENV = " + json.dumps(CONCERN_ALLOWANCES_ENV),
             "MAXIMUM_ADDED_LINES = 3",
+            "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
         ]
     )
     return (

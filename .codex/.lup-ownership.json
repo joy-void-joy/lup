@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "5f1cdd0099d780ae7a298e1a457df9333d540f0344394d53a4b0ba5f55afe29a",
+  "source_digest": "17336b9b597ad737249dab0d2d66d7cae53126b2c551b1157e0a2c2bb3358485",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -121,7 +121,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/lex.py",
       "category": "generated",
-      "sha256": "c86976050f38a067391666c4ad2e3f3ec58b98c7d6a4e39c4ade38b42a00198f",
+      "sha256": "f28613725c65efb060420e1a686eeb92fab62684699738fb023cb3486e17805e",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -142,28 +142,28 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "cfb20d209a4feb5c04411e4acd2388c0c3eb43c1d7e21a0cd3b8799406b55c8f",
+      "sha256": "aff3ef4c7603f97ebefd8cb50591c4a89c22f0e182dc4d72da2cd82a52ec7adf",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/words.py",
       "category": "generated",
-      "sha256": "0a014e019e70b9c670519e370d30f9cca0fe743edf0131087bcabf268e23a567",
+      "sha256": "5a4a887bb6c76c220f0e56e7bea41614e802795a7c36f6b27ea951bd27546f41",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "17bffcb2123757057128f6c9ad876821fd4eb66d951d45f09efb2802e92bb58a",
+      "sha256": "b0ad57d5477cdd861d856b5aff5492c6231c3c367f382d097fcc71838ba2f85d",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "1d7317f98479f8ed07c6a8b5be90facef4c0d863268058ea4b94c6aad5f51580",
+      "sha256": "e2f02727d65a19f5fa635d6269a95453e6617eac644136efc7b94b06b49f82ad",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

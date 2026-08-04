@@ -21,7 +21,15 @@ from lup.policy.kernel.edit import (
     path_rule_matches as kernel_path_rule_matches,
 )
 from lup.policy.kernel.fetch import decide_fetch
-from lup.policy.kernel.lex import parse_shell_words, shell_write_targets
+from lup.policy.assets.host import (
+    directory_write_targets,
+    recoverable_write_targets,
+)
+from lup.policy.kernel.lex import (
+    parse_shell_words,
+    shell_path_verb_targets,
+    shell_write_targets,
+)
 from lup.policy.kernel.rows import (
     AntiPatternRow,
     PathRoleRow,
@@ -129,8 +137,10 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
+        recoverable_target_limit: int = 5,
     ) -> None:
         self.path_roles = path_roles or []
+        self.recoverable_target_limit = recoverable_target_limit
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
@@ -140,6 +150,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
 
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
+        acted_on = shell_path_verb_targets(event.command)
         return pydantic_decision(
             decide_shell(
                 event.command,
@@ -155,6 +166,9 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     for target in shell_write_targets(event.command)
                     if (root / target).exists()
                 ],
+                recoverable_targets=recoverable_write_targets(acted_on, root),
+                directory_targets=directory_write_targets(acted_on, root),
+                recoverable_target_limit=self.recoverable_target_limit,
             )
         )
 

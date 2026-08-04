@@ -80,6 +80,7 @@ from lup.harness.reconciliation import (
 from lup.policy.bundle import policy_kernel_modules
 from lup.policy.dispatcher import (
     SHARED_MEMBER,
+    SPLICED_MEMBERS,
     SHARED_PACKAGE,
     DispatcherDeclaration,
     SourceHalf,
@@ -1383,13 +1384,18 @@ def test_both_dispatchers_are_compiled_from_one_shared_host_half() -> None:
     which is how the halves drifted apart before they were compiled.
     """
     shared = [
-        node.name for node in half_functions(source_half(SHARED_PACKAGE, SHARED_MEMBER))
+        node.name
+        for member in SPLICED_MEMBERS
+        for node in half_functions(source_half(SHARED_PACKAGE, member))
     ]
     claude = compiled_functions(compile_dispatcher(CLAUDE_DISPATCHER))
     codex = compiled_functions(compile_dispatcher(CODEX_DISPATCHER))
 
     assert "sandbox_active" in shared and "existing_write_targets" in shared
     assert "granted_allowances" in shared and "declared_identity" in shared
+    # Every kernel call site is shared, which is what stops one runtime from
+    # passing a fact the other has quietly stopped passing.
+    assert "bash_decision" in shared and "edit_decision" in shared
     identical = [
         name
         for name in claude

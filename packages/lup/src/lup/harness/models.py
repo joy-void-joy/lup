@@ -564,6 +564,16 @@ class HookSet(BaseModel):
             "denied; declare a downstream toolchain here, not in the kernel"
         ),
     )
+    recoverable_target_limit: int = Field(
+        default=5,
+        ge=0,
+        description=(
+            "How many committed, unmodified files one command may destroy "
+            "without asking. Git restores each of them, but restoring is a "
+            "repair somebody has to know to perform, so past this count a "
+            "delete reads as a sweep and is worth a question"
+        ),
+    )
     sandbox: HookSandbox | None = None
 
 

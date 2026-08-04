@@ -14,7 +14,13 @@ from .decision import (
 )
 from .roles import path_role
 from .rows import PathRoleRow
-from .words import is_session_scratch_target, refuses_generated_plugin_target
+from .words import (
+    SCRATCH_VERB_FLAGS,
+    effective_command,
+    is_session_scratch_target,
+    path_verb_operands,
+    refuses_generated_plugin_target,
+)
 
 
 class ShellToken:
@@ -623,3 +629,30 @@ def parse_shell_words(
     if not segments:
         return unjudged("shell command has no executable segment")
     return segments
+
+
+def shell_path_verb_targets(command: str) -> list[str]:
+    """Name every operand a path-writing verb in this command acts on.
+
+    A caller that can reach the filesystem resolves facts about these — which
+    are directories, which Git could restore — and hands them back, so the
+    kernel decides from primitive data without ever reading a disk. Naming
+    only these operands keeps that resolution proportional to the command: a
+    session running ``ls`` pays for none of it.
+
+    Over-naming is safe and under-naming is merely conservative, because the
+    answers are consulted as a table of facts rather than trusted as a target
+    list — the kernel decides for itself which words a verb writes. A command
+    that does not lex yields nothing and keeps its unjudged verdict.
+    """
+    segments = parse_shell_words(command, 0)
+    if isinstance(segments, KernelDecision):
+        return []
+    targets: list[str] = []
+    for segment in segments:
+        words, _dangerous = effective_command(segment)
+        if not words or posixpath.basename(words[0]) not in SCRATCH_VERB_FLAGS:
+            continue
+        operands, _inert = path_verb_operands(words)
+        targets.extend(operands)
+    return targets

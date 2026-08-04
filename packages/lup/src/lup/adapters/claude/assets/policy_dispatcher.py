@@ -23,32 +23,10 @@ from pathlib import Path
 # distribution. Naming it as a search path is what lets the imports below
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from host import (
-    declared_identity,
-    existing_write_targets,
-    granted_allowances,
-    managed_script_roots,
-    read_document,
-    sandbox_active,
-    worktree_path,
-)
+from decisions import bash_decision, edit_decision, fetch_decision
+from host import declared_identity, read_document, sandbox_active
 from kernel.decision import KernelDecision
-from kernel.edit import decide_edit
-from kernel.fetch import decide_fetch
-from kernel.lex import shell_write_targets
-from kernel.shell import decide_shell
-from policy_data import (
-    AGENT_IDENTITY_ENV,
-    ALLOWED_FETCH_SCOPES,
-    ANTI_PATTERN_ROWS,
-    AUTONOMOUS_AGENT_IDENTITIES,
-    CONCERN_ALLOWANCES_ENV,
-    DENIED_FETCH_SCOPES,
-    MAXIMUM_ADDED_LINES,
-    PATH_ROLES,
-    PATH_RULES,
-    SHELL_RULES,
-)
+from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 
 
 def managed_root():
@@ -85,25 +63,6 @@ def edit_documents(path, old_text, new_text, replace_all):
     return current, updated
 
 
-def edit_decision(path_text, before, after, autonomous):
-    path = Path(path_text)
-    suffix = path.suffix.lower()
-    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
-    return decide_edit(
-        worktree_path(path_text),
-        before,
-        after,
-        path_exists=path.exists(),
-        path_rules=PATH_RULES,
-        antipattern_rows=rows,
-        path_roles=PATH_ROLES,
-        maximum_added_lines=MAXIMUM_ADDED_LINES,
-        autonomous=autonomous,
-        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV),
-        python_source=suffix in (".py", ".pyi"),
-    )
-
-
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -113,40 +72,34 @@ def dispatch(payload):
         or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     )
     if name == "Bash":
-        command = tool_input["command"]
         unsandboxed = (
             "dangerouslyDisableSandbox" in tool_input
             and tool_input["dangerouslyDisableSandbox"] is True
         )
-        return decide_shell(
-            command,
-            SHELL_RULES,
-            ALLOWED_FETCH_SCOPES,
-            DENIED_FETCH_SCOPES,
-            sandboxed=sandbox_active() and not unsandboxed,
-            trusted_script_roots=managed_script_roots(managed_root()),
-            path_roles=PATH_ROLES,
-            existing_targets=existing_write_targets(shell_write_targets(command)),
+        return bash_decision(
+            tool_input["command"],
+            managed_root(),
+            sandbox_active() and not unsandboxed,
+            True,
         )
     if name == "WebFetch":
-        return decide_fetch(
-            tool_input["url"],
-            ALLOWED_FETCH_SCOPES,
-            DENIED_FETCH_SCOPES,
-        )
+        return fetch_decision(tool_input["url"])
     if name == "Edit":
+        path = tool_input["file_path"]
         before, after = edit_documents(
-            tool_input["file_path"],
+            path,
             tool_input["old_string"],
             tool_input["new_string"],
             "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
-        return edit_decision(tool_input["file_path"], before, after, autonomous)
+        return edit_decision(path, before, after, Path(path).exists(), autonomous)
     if name == "Write":
+        path = tool_input["file_path"]
         return edit_decision(
-            tool_input["file_path"],
-            read_document(tool_input["file_path"]),
+            path,
+            read_document(path),
             tool_input["content"],
+            Path(path).exists(),
             autonomous,
         )
     return KernelDecision("ask", "tool is not classified")

@@ -515,6 +515,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                             for role in source.path_roles
                         ],
                         shell_rules=list(source.shell_rules),
+                        recoverable_target_limit=source.recoverable_target_limit,
                     ),
                     semantic_id=source.id,
                 ),

@@ -17,6 +17,7 @@ from .rows import PathRoleRow, ShellRuleRow, UrlScopeRow
 from .words import (
     INTERPRETERS,
     UV_RUN_ALLOWED_TARGETS,
+    asks_before_removing_a_directory,
     command_words,
     dangerous_env_name,
     effective_command,
@@ -59,6 +60,8 @@ class ShellContext(TypedDict):
     trusted_script_roots: list[str]
     path_roles: list[PathRoleRow]
     recoverable_targets: list[str]
+    directory_targets: list[str]
+    recoverable_target_limit: int
 
 
 def shell_context(
@@ -68,6 +71,8 @@ def shell_context(
     trusted_script_roots: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
     recoverable_targets: list[str] | None = None,
+    directory_targets: list[str] | None = None,
+    recoverable_target_limit: int = 5,
 ) -> ShellContext:
     """Bundle one classification's declarations, normalizing absent lists."""
     return ShellContext(
@@ -77,6 +82,8 @@ def shell_context(
         trusted_script_roots=trusted_script_roots or [],
         path_roles=path_roles or [],
         recoverable_targets=recoverable_targets or [],
+        directory_targets=directory_targets or [],
+        recoverable_target_limit=recoverable_target_limit,
     )
 
 
@@ -171,10 +178,18 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
     if refused is not None:
         return refused
     recoverable = confined_to_recoverable_roots(
-        words, context["path_roles"], context["recoverable_targets"]
+        words,
+        context["path_roles"],
+        context["recoverable_targets"],
+        context["recoverable_target_limit"],
     )
     if recoverable is not None:
         return recoverable
+    directory = asks_before_removing_a_directory(
+        words, context["path_roles"], context["directory_targets"]
+    )
+    if directory is not None:
+        return directory
     if executable == "xargs":
         payload = xargs_payload(words)
         if not payload:
@@ -672,6 +687,8 @@ def classify_shell(
     path_roles: list[PathRoleRow] | None = None,
     existing_targets: list[str] | None = None,
     recoverable_targets: list[str] | None = None,
+    directory_targets: list[str] | None = None,
+    recoverable_target_limit: int = 5,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(command, 0, existing_targets, path_roles)
@@ -684,6 +701,8 @@ def classify_shell(
         trusted_script_roots,
         path_roles,
         recoverable_targets,
+        directory_targets,
+        recoverable_target_limit,
     )
     decisions = decide_segment_list(segments, context)
     denied = next((item for item in decisions if item.effect == "deny"), None)
@@ -709,6 +728,8 @@ def decide_shell(
     interactive: bool = True,
     existing_targets: list[str] | None = None,
     recoverable_targets: list[str] | None = None,
+    directory_targets: list[str] | None = None,
+    recoverable_target_limit: int = 5,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -754,6 +775,8 @@ def decide_shell(
             path_roles,
             existing_targets,
             recoverable_targets,
+            directory_targets,
+            recoverable_target_limit,
         )
         if inner.effect == "allow":
             return inner
@@ -768,5 +791,7 @@ def decide_shell(
             path_roles,
             existing_targets,
             recoverable_targets,
+            directory_targets,
+            recoverable_target_limit,
         )
     )

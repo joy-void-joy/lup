@@ -99,6 +99,9 @@ FIXTURE_PATH_ROLES = [
     PathRoleRow(root="tmp", role="scratch"),
 ]
 
+FIXTURE_RECOVERABLE_LIMIT = 5
+"""How many restorable files one command may destroy before it asks."""
+
 SHELL_POLICY_CASES = [
     DecisionCase(input="env MODE=test python script.py", effect="deny"),
     DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
@@ -882,6 +885,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             autonomous_agent_identities=["resolver-worker"],
             path_roles=FIXTURE_PATH_ROLES,
             shell_rules=SHELL_RULES,
+            recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
         ),
         encoding="utf-8",
     )

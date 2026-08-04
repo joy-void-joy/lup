@@ -271,10 +271,45 @@ def refuses_generated_plugin_write(words: list[str]) -> KernelDecision | None:
     return None
 
 
+def asks_before_removing_a_directory(
+    words: list[str],
+    path_roles: list[PathRoleRow],
+    directory_targets: list[str] | None = None,
+) -> KernelDecision | None:
+    """Ask before a verb destroys a directory, naming the way through.
+
+    Git restores a file it tracks, so a delete confined to files is bounded by
+    the files named. A directory is not: its size is whatever it happens to
+    hold, nothing in the command says what that is, and untracked work inside
+    it is restored by nothing. The ask says which route is open rather than
+    leaving a refusal the agent can only guess at. A scratch root keeps its
+    own grant, because there the tree is disposable by declaration.
+    """
+    executable = posixpath.basename(words[0])
+    if executable not in ("rm", "mv"):
+        return None
+    operands, _inert = path_verb_operands(words)
+    named = [
+        word
+        for word in operands
+        if word in (directory_targets or [])
+        and path_role(word, path_roles) != "scratch"
+        and not is_session_scratch_target(word)
+    ]
+    if not named:
+        return None
+    return KernelDecision(
+        "ask",
+        "removing a directory is never granted, because nothing in the command"
+        " bounds what it holds — name the files instead, or approve this",
+    )
+
+
 def confined_to_recoverable_roots(
     words: list[str],
     path_roles: list[PathRoleRow],
     recoverable_targets: list[str] | None = None,
+    recoverable_target_limit: int = 5,
 ) -> KernelDecision | None:
     """Recognize a path-taking judged-ask verb whose every target is disposable.
 
@@ -287,6 +322,13 @@ def confined_to_recoverable_roots(
     root is as disposable as the root it lands in. A long flag, an opaque
     word, or a single written target outside those roots falls through to the
     verb's ask, so a mixed command still asks.
+
+    The two grants are bounded differently because what backs them differs. A
+    scratch root is disposable by declaration, so emptying one is one act
+    whatever it holds. Restoring committed work is instead a repair somebody
+    has to know to perform, so that grant is capped: past the limit a delete
+    is a sweep, and a sweep is worth a question even when every file in it
+    could be brought back.
     """
     executable = posixpath.basename(words[0])
     if executable not in SCRATCH_VERB_FLAGS:
@@ -295,14 +337,21 @@ def confined_to_recoverable_roots(
     if not inert or not operands:
         return None
     targets = written_operands(executable, operands)
-    if all(
-        path_role(word, path_roles) == "scratch"
-        or is_session_scratch_target(word)
-        or word in (recoverable_targets or [])
+    disposable = [
+        word
         for word in targets
-    ):
-        return KernelDecision("allow", "confined to recoverable roots")
-    return None
+        if path_role(word, path_roles) == "scratch" or is_session_scratch_target(word)
+    ]
+    restorable = [
+        word
+        for word in targets
+        if word not in disposable and word in (recoverable_targets or [])
+    ]
+    if len(disposable) + len(restorable) != len(targets):
+        return None
+    if len(restorable) > recoverable_target_limit:
+        return None
+    return KernelDecision("allow", "confined to recoverable roots")
 
 
 def dangerous_env_name(name: str) -> bool:

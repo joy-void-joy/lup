@@ -23,12 +23,8 @@ from lup.hooks import (
     LupHookOutput,
     LupHooksConfig,
 )
-from lup.harness.process import (
-    LaunchRequest,
-    LocalProcessLauncher,
-    ProcessLauncher,
-)
 from lup.mcp import LupMcpTool, ToolError, lup_tool
+from lup.policy.assets.host import recoverable_write_targets
 from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     ANSWER_POLL_SECONDS,
@@ -139,17 +135,20 @@ IRREVERSIBLE_VERBS = dict.fromkeys(
 )
 
 
-def agent_may_approve(
-    command: str, root: Path, launcher: ProcessLauncher | None = None
-) -> bool:
+def agent_may_approve(command: str, root: Path) -> bool:
     """Whether an orchestrating agent may answer this ask, or only a human.
 
-    Recoverability decides, not the verb. Removing a tracked, committed file
-    is recoverable from the object store, so an agent may approve it;
-    removing an untracked one is not, and neither is a hard reset over
-    uncommitted work, a force-push, or anything that leaves this machine.
-    ``git ls-files`` settles the tracked question at hook time, which makes
-    this structural rather than a list somebody has to maintain.
+    Recoverability decides, not the verb. Removing a file the object store
+    already holds is recoverable, so an agent may approve it; removing an
+    untracked one is not, and neither is a hard reset over uncommitted work, a
+    force-push, or anything that leaves this machine.
+
+    What counts as recoverable is the permission kernel's own answer, taken
+    from the host half rather than asked again here. Two definitions of the
+    word is how one of them ends up weaker: this asked only whether Git
+    tracked the path, so a tracked file carrying uncommitted edits read as
+    recoverable and approving its removal discarded work nothing could
+    restore. Directories are excluded there for the same reason, and now here.
     """
     words = command.split()
     if not words:
@@ -159,14 +158,7 @@ def agent_may_approve(
     if words[0] != "rm":
         return True
     targets = [word for word in words[1:] if not word.startswith("-")]
-    if not targets:
-        return False
-    tracked = (launcher or LocalProcessLauncher()).launch(
-        LaunchRequest(
-            arguments=["git", "ls-files", "--error-unmatch", *targets], cwd=root
-        )
-    )
-    return tracked.code == 0
+    return bool(targets) and recoverable_write_targets(targets, root) == targets
 
 
 def create_inbox_hooks(mailbox: QuestionMailbox, actor: str) -> LupHooksConfig:

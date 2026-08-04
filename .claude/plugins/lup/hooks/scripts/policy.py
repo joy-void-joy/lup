@@ -20,20 +20,21 @@ from pathlib import Path
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from kernel.decision import KernelDecision
+from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
+import subprocess  # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 from kernel.edit import decide_edit
 from kernel.fetch import decide_fetch
-from kernel.lex import shell_write_targets
+from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
 from policy_data import (
-    AGENT_IDENTITY_ENV,
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
-    AUTONOMOUS_AGENT_IDENTITIES,
     CONCERN_ALLOWANCES_ENV,
     DENIED_FETCH_SCOPES,
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
     PATH_RULES,
+    RECOVERABLE_TARGET_LIMIT,
     SHELL_RULES,
 )
 
@@ -86,6 +87,62 @@ def existing_write_targets(targets: list[str]) -> list[str]:
     return [target for target in targets if (Path.cwd() / target).exists()]
 
 
+def git_answers(arguments: list[str], root: Path) -> list[str] | None:
+    """One read-only Git query's lines, or None when Git cannot answer.
+
+    Git missing, the path outside a repository, a malformed pathspec, and a
+    non-zero exit all collapse to None, so a caller reading this as evidence
+    that something is safe to destroy treats an unanswerable question as a no.
+    """
+    try:
+        finished = subprocess.run(
+            ["git", *arguments],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    return finished.stdout.splitlines() if finished.returncode == 0 else None
+
+
+def recoverable_write_targets(
+    targets: list[str], root: Path | None = None
+) -> list[str]:
+    """Report which targets Git could restore byte for byte after a delete.
+
+    Recoverable means tracked, carrying no uncommitted change, and a regular
+    file: the object store then holds exactly what is on disk, so destroying
+    it costs a checkout rather than any information.
+
+    A directory is never reported, however clean everything beneath it is.
+    One grant would otherwise cover a tree of unbounded size and depth, and
+    the point of resolving this per path is that each grant stays the size of
+    the thing named.
+    """
+    where = Path.cwd() if root is None else root
+    return [
+        target
+        for target in targets
+        if (where / target).is_file()
+        and git_answers(["ls-files", "--error-unmatch", "--", target], where)
+        is not None
+        and git_answers(["status", "--porcelain", "--", target], where) == []
+    ]
+
+
+def directory_write_targets(targets: list[str], root: Path | None = None) -> list[str]:
+    """Report which of a command's targets are directories on disk.
+
+    A refusal that can name this says which way out is open — remove the
+    files it holds — rather than leaving the agent to guess why a delete it
+    expected to pass did not.
+    """
+    where = Path.cwd() if root is None else root
+    return [target for target in targets if (where / target).is_dir()]
+
+
 def read_document(path_text: str) -> str | None:
     """Read a path's current text, or None when nothing is there yet."""
     path = Path(path_text)
@@ -109,6 +166,68 @@ def granted_allowances(allowances_env: str) -> list[str]:
         return []
     declared = json.loads(environ[allowances_env] or "[]")
     return [str(name) for name in declared]
+
+
+def bash_decision(
+    command: str, managed_root: Path | None, sandboxed: bool, interactive: bool
+) -> KernelDecision:
+    """Judge one shell command against the declared vocabulary.
+
+    The kernel reads no filesystem, so every fact about the paths this command
+    would touch is resolved here and passed as data: which redirection targets
+    already exist, which operands Git could restore, and which are directories.
+    """
+    acted_on = shell_path_verb_targets(command)
+    return decide_shell(
+        command,
+        SHELL_RULES,
+        ALLOWED_FETCH_SCOPES,
+        DENIED_FETCH_SCOPES,
+        sandboxed=sandboxed,
+        trusted_script_roots=managed_script_roots(managed_root),
+        path_roles=PATH_ROLES,
+        existing_targets=existing_write_targets(shell_write_targets(command)),
+        recoverable_targets=recoverable_write_targets(acted_on),
+        directory_targets=directory_write_targets(acted_on),
+        recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
+        interactive=interactive,
+    )
+
+
+def fetch_decision(url: str) -> KernelDecision:
+    """Judge one outbound fetch against the declared scopes."""
+    return decide_fetch(url, ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES)
+
+
+def edit_decision(
+    path_text: str,
+    before: str | None,
+    after: str | None,
+    path_exists: bool,
+    autonomous: bool,
+) -> KernelDecision:
+    """Judge one file's before and after against the declared edit policy.
+
+    The path is relativized against the worktree holding it rather than the
+    directory the runtime started in, because every repo-relative rule matches
+    on that answer and a session may be launched anywhere.
+    """
+    suffix = Path(path_text).suffix.lower()
+    return decide_edit(
+        worktree_path(path_text),
+        before,
+        after,
+        path_exists=path_exists,
+        path_rules=PATH_RULES,
+        antipattern_rows=ANTI_PATTERN_ROWS[suffix]
+        if suffix in ANTI_PATTERN_ROWS
+        else [],
+        path_roles=PATH_ROLES,
+        maximum_added_lines=MAXIMUM_ADDED_LINES,
+        autonomous=autonomous,
+        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV),
+        python_source=suffix in (".py", ".pyi"),
+    )
 
 
 def managed_root():
@@ -145,25 +264,6 @@ def edit_documents(path, old_text, new_text, replace_all):
     return current, updated
 
 
-def edit_decision(path_text, before, after, autonomous):
-    path = Path(path_text)
-    suffix = path.suffix.lower()
-    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
-    return decide_edit(
-        worktree_path(path_text),
-        before,
-        after,
-        path_exists=path.exists(),
-        path_rules=PATH_RULES,
-        antipattern_rows=rows,
-        path_roles=PATH_ROLES,
-        maximum_added_lines=MAXIMUM_ADDED_LINES,
-        autonomous=autonomous,
-        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV),
-        python_source=suffix in (".py", ".pyi"),
-    )
-
-
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -173,40 +273,34 @@ def dispatch(payload):
         or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     )
     if name == "Bash":
-        command = tool_input["command"]
         unsandboxed = (
             "dangerouslyDisableSandbox" in tool_input
             and tool_input["dangerouslyDisableSandbox"] is True
         )
-        return decide_shell(
-            command,
-            SHELL_RULES,
-            ALLOWED_FETCH_SCOPES,
-            DENIED_FETCH_SCOPES,
-            sandboxed=sandbox_active() and not unsandboxed,
-            trusted_script_roots=managed_script_roots(managed_root()),
-            path_roles=PATH_ROLES,
-            existing_targets=existing_write_targets(shell_write_targets(command)),
+        return bash_decision(
+            tool_input["command"],
+            managed_root(),
+            sandbox_active() and not unsandboxed,
+            True,
         )
     if name == "WebFetch":
-        return decide_fetch(
-            tool_input["url"],
-            ALLOWED_FETCH_SCOPES,
-            DENIED_FETCH_SCOPES,
-        )
+        return fetch_decision(tool_input["url"])
     if name == "Edit":
+        path = tool_input["file_path"]
         before, after = edit_documents(
-            tool_input["file_path"],
+            path,
             tool_input["old_string"],
             tool_input["new_string"],
             "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
-        return edit_decision(tool_input["file_path"], before, after, autonomous)
+        return edit_decision(path, before, after, Path(path).exists(), autonomous)
     if name == "Write":
+        path = tool_input["file_path"]
         return edit_decision(
-            tool_input["file_path"],
-            read_document(tool_input["file_path"]),
+            path,
+            read_document(path),
             tool_input["content"],
+            Path(path).exists(),
             autonomous,
         )
     return KernelDecision("ask", "tool is not classified")

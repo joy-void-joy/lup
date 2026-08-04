@@ -9,6 +9,7 @@ the harness invokes it.
 import json
 from pathlib import Path
 
+import pytest
 import sh
 
 from lup.types import JsonObject
@@ -150,6 +151,110 @@ def test_absolute_paths_resolve_against_their_worktree_not_the_launch_directory(
     assert isinstance(allowed, dict)
     assert asked["permissionDecision"] == "ask"
     assert allowed["permissionDecision"] == "allow"
+
+
+def bash_payload(command: str) -> JsonObject:
+    """One Bash hook payload, the way a live session sends it."""
+    return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+
+def effect_from(command: str, cwd: Path) -> tuple[str, str]:
+    """The effect and reason the emitted dispatcher returns for one command."""
+    specific = decide_from(bash_payload(command), cwd)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"]), str(
+        specific["permissionDecisionReason"]
+    )
+
+
+@pytest.fixture
+def delete_repo(tmp_path: Path) -> Path:
+    """A repository holding one committed file of each kind that matters."""
+    work = tmp_path / "repo"
+    (work / "src").mkdir(parents=True)
+    hooks = tmp_path / "no-hooks"
+    hooks.mkdir()
+    git = sh.Command("git").bake(
+        "-C",
+        str(work),
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        f"core.hooksPath={hooks}",
+        _tty_out=False,
+    )
+    git("init", "-b", "main")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    for index in range(8):
+        (work / "src" / f"file{index}.py").write_text("value = 1\n", encoding="utf-8")
+    git("add", "src")
+    git("commit", "-m", "chore: base")
+    (work / "untracked.py").write_text("value = 2\n", encoding="utf-8")
+    return work
+
+
+def test_removing_a_committed_unmodified_file_is_granted(delete_repo: Path) -> None:
+    """Git holds exactly what is on disk, so the delete costs a checkout.
+
+    The kernel reads no filesystem and runs no Git, so this only passes when
+    the emitted script resolved recoverability itself and handed it over.
+    """
+    effect, _reason = effect_from("rm src/file0.py", delete_repo)
+
+    assert effect == "allow"
+
+
+def test_removing_an_untracked_file_still_asks(delete_repo: Path) -> None:
+    """Nothing holds a copy, so nothing could restore it afterwards."""
+    effect, _reason = effect_from("rm untracked.py", delete_repo)
+
+    assert effect == "ask"
+
+
+def test_removing_a_directory_asks_and_names_the_way_through(
+    delete_repo: Path,
+) -> None:
+    """Nothing in the command bounds what a directory holds, however clean.
+
+    The refusal has to say what is open instead, or the agent reads a delete
+    it expected to pass as an unexplained wall.
+    """
+    effect, reason = effect_from("rm -rf src", delete_repo)
+
+    assert effect == "ask"
+    assert "name the files instead" in reason
+
+
+def test_a_sweep_of_restorable_files_asks_even_though_each_is_restorable(
+    delete_repo: Path,
+) -> None:
+    """Restoring is a repair somebody has to know to perform.
+
+    Every file here is committed and clean, so the per-file grant would take
+    all of them; past the declared limit the delete reads as a sweep instead.
+    """
+    named = " ".join(f"src/file{index}.py" for index in range(8))
+
+    effect, _reason = effect_from(f"rm {named}", delete_repo)
+
+    assert effect == "ask"
+
+
+def test_writing_a_generated_plugin_tree_is_refused_by_absolute_path(
+    delete_repo: Path,
+) -> None:
+    """A session sends whatever spelling it likes, and may run anywhere.
+
+    Recognizing only the repo-relative spelling would fail open on exactly
+    the form that reaches past the worktree the runtime started in.
+    """
+    outside = delete_repo / ".claude" / "plugins" / "lup" / "hooks" / "policy.py"
+
+    effect, reason = effect_from(f"rm {outside}", delete_repo)
+
+    assert effect == "deny"
+    assert "harness generate all" in reason
 
 
 def test_an_unreadable_target_asks_instead_of_letting_the_edit_through() -> None:
