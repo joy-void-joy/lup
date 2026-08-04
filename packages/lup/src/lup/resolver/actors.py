@@ -152,13 +152,26 @@ class ActorSession:
         hook's job instead: the actor calls any tool and the message is in
         its context, which is what makes it impossible to forget — the actor
         was never involved in receiving it.
+
+        A redirect says so even here. Where a hook surface exists it refuses
+        the call outright, and this path is what a runtime without one gets
+        instead — later, and unable to stop anything, but an actor told it
+        was redirected can still abandon what it was doing. Delivering it in
+        the same words as an ordinary message hid the difference from the one
+        party that needed it, while the journal recorded the distinction
+        faithfully for everyone who did not.
         """
         if self.inbox is None:
             return
         arrived = self.inbox.messages_for(self.actor.label(), self.inbox_offset)
         self.inbox_offset = self.inbox.stream_offset()
         for message in arrived:
-            self.pending.append(f"[{message.door}] {message.text}")
+            self.pending.append(
+                f"[redirected by {message.door}] {message.text}\n"
+                "Stop what you were doing and act on this."
+                if message.redirect
+                else f"[{message.door}] {message.text}"
+            )
             self.journal.append(
                 self.actor,
                 MessagePostedEvent(
