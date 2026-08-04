@@ -171,9 +171,6 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
     # Housekeeping confined to the disposable roots is as safe as writing
     # them; any long flag, opaque word, or outside target keeps the verb's ask.
-    # A generated plugin tree joins them: regeneration restores it byte for
-    # byte, while its parent keeps settings, trust state, and authored skills
-    # that nothing can restore, so the grant stops at the plugins root.
     DecisionCase(input="rm tmp/oneoff.py", effect="allow"),
     DecisionCase(input="rm -rf tmp/scratch", effect="allow"),
     DecisionCase(input="rm -f $TMPDIR/out.txt", effect="allow"),
@@ -182,12 +179,35 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rm tmp/../src/x.py", effect="ask"),
     DecisionCase(input="rm --no-preserve-root -rf tmp", effect="ask"),
     DecisionCase(input="rm -rf /", effect="ask"),
-    DecisionCase(input="rm .codex/plugins/lup/hooks/scripts/policy.py", effect="allow"),
-    DecisionCase(input="rm -rf .claude/plugins", effect="allow"),
-    DecisionCase(input="rm .claude/plugins/lup/x tmp/y", effect="allow"),
     DecisionCase(input="rm .claude/settings.local.json", effect="ask"),
     DecisionCase(input="rm -rf .claude/skills", effect="ask"),
     DecisionCase(input="rm .claude/plugins/../settings.json", effect="ask"),
+    # A generated plugin tree is a build product the running runtime already
+    # loaded, so writing one by hand changes nothing it will honor and the
+    # next generation reverts it. Every writing form refuses it and names the
+    # typed source instead; a long flag the allow would not recognize must not
+    # buy a way past the refusal, and reading such a path stays ordinary.
+    DecisionCase(input="rm .codex/plugins/lup/hooks/scripts/policy.py", effect="deny"),
+    DecisionCase(input="rm -rf .claude/plugins", effect="deny"),
+    DecisionCase(input="rm .claude/plugins/lup/x tmp/y", effect="deny"),
+    DecisionCase(input="rm --recursive .claude/plugins/lup", effect="deny"),
+    DecisionCase(
+        input="mv tmp/policy.py .claude/plugins/lup/hooks/policy.py", effect="deny"
+    ),
+    DecisionCase(input="cp tmp/a .codex/plugins/lup/b", effect="deny"),
+    DecisionCase(input="mkdir -p .claude/plugins/lup/hooks", effect="deny"),
+    DecisionCase(input="touch .codex/plugins/lup/marker", effect="deny"),
+    DecisionCase(
+        input="echo x > .claude/plugins/lup/hooks/scripts/policy.py", effect="deny"
+    ),
+    DecisionCase(input="echo x >> .codex/plugins/lup/data.py", effect="deny"),
+    DecisionCase(
+        input="cp .claude/plugins/lup/hooks/scripts/policy.py tmp/copy.py",
+        effect="allow",
+    ),
+    DecisionCase(
+        input="cat .claude/plugins/lup/hooks/scripts/policy.py", effect="allow"
+    ),
     # Every path-taking judged-ask verb reads the same role, so a scratch root
     # is housekept without friction while production keeps the verb's ask.
     DecisionCase(input="cp tmp/a.json tmp/b.json", effect="allow"),
@@ -196,11 +216,18 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="touch tmp/marker", effect="allow"),
     DecisionCase(input="rmdir tmp/run", effect="allow"),
     DecisionCase(input="mv tmp/draft.md src/final.md", effect="ask"),
-    DecisionCase(input="cp src/a.py tmp/a.py", effect="ask"),
     DecisionCase(input="mkdir src/newpkg", effect="ask"),
     DecisionCase(input="touch src/newfile.py", effect="ask"),
     DecisionCase(input="cp --archive tmp/a tmp/b", effect="ask"),
-    DecisionCase(input="rm /home/u/.claude/plugins/lup/x", effect="ask"),
+    # Copying reads its sources and writes only its destination, so landing
+    # production in a scratch root destroys nothing; moving out of one does,
+    # because the source is removed, and that keeps the verb's ask.
+    DecisionCase(input="cp src/a.py tmp/a.py", effect="allow"),
+    DecisionCase(input="cp /etc/hosts tmp/hosts", effect="allow"),
+    DecisionCase(input="cp tmp/a src/b.py", effect="ask"),
+    DecisionCase(input="mv src/a.py tmp/a.py", effect="ask"),
+    DecisionCase(input="rm /home/u/.claude/plugins/lup/x", effect="deny"),
+    DecisionCase(input="echo x > /srv/tree/dev/.codex/plugins/lup/y", effect="deny"),
     DecisionCase(input="rm .codex/config.local.toml", effect="ask"),
     # Quote-aware substitution: inert inside single quotes; a live $(...)
     # classifies recursively — the inner command joins the batch, and the

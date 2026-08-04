@@ -176,54 +176,129 @@ def is_session_scratch_target(word: str) -> bool:
     return "$" not in word and posixpath.normpath(word).startswith("/tmp/claude-")
 
 
+GENERATED_PLUGIN_REFUSAL = (
+    "a native plugin tree is compiled from typed source, and the running"
+    " runtime already loaded it — edit the policy source, run"
+    " `lup-devtools harness generate all`, then ask the user to restart"
+    " claude or codex so the change takes effect"
+)
+
+
 def is_generated_plugin_target(word: str) -> bool:
     """Recognize a path confined to a native plugin tree the harness renders.
 
-    Every file there is compiled from typed source, so removing one costs a
-    regeneration rather than any information. The roots stop at ``plugins``
-    because their parents also hold settings, trust state, and hand-written
-    skills and commands that no generator can restore.
+    Every file there is compiled from typed source, so writing one by hand
+    edits a build product: the change is reverted by the next generation and
+    never reaches the runtime that already loaded it. The roots stop at
+    ``plugins`` because their parents also hold settings, trust state, and
+    hand-written skills and commands that no generator can restore.
+
+    The roots are matched as path segments wherever they occur, so an absolute
+    spelling and a sibling worktree's tree are recognized too. A relaxation
+    may safely decline to resolve those, because declining leaves the ask in
+    place; a refusal that only knew the repo-relative spelling would instead
+    fail open on the one form that reaches past this worktree.
     """
-    normalized = posixpath.normpath(word)
-    if normalized.startswith("/"):
-        return False
+    segments = posixpath.normpath(word).split("/")
     return any(
-        normalized == root or normalized.startswith(root + "/")
-        for root in GENERATED_PLUGIN_ROOTS
+        segments[index : index + len(parts)] == parts
+        for parts in [root.split("/") for root in GENERATED_PLUGIN_ROOTS]
+        for index in range(len(segments))
     )
 
 
+def path_verb_operands(words: list[str]) -> tuple[list[str], bool]:
+    """A path verb's operands, and whether every flag among them was inert.
+
+    An inert flag does not change what the verb does to its operands, so the
+    operand list means what it reads. An unrecognized one can move the
+    destination, add one, or change which paths are touched at all — which is
+    why the two directions diverge on it: a caller granting something must
+    decline outright, and a caller refusing something must widen to every
+    operand rather than trust their positions.
+    """
+    allowed = SCRATCH_VERB_FLAGS[posixpath.basename(words[0])]
+    operands: list[str] = []
+    inert = True
+    for word in words[1:]:
+        if word == "--":
+            continue
+        if word.startswith("-") and len(word) > 1:
+            if word.startswith("--") or not all(
+                letter in allowed for letter in word[1:]
+            ):
+                inert = False
+            continue
+        operands.append(word)
+    return operands, inert
+
+
+def written_operands(executable: str, operands: list[str]) -> list[str]:
+    """The operands a path verb modifies, as opposed to the ones it reads.
+
+    Copying reads every source and writes only the destination, so a path
+    named as a source is an ordinary read however protected it is. Every other
+    verb here removes or creates each path it is given.
+    """
+    if executable == "cp" and len(operands) > 1:
+        return operands[-1:]
+    return operands
+
+
+def refuses_generated_plugin_target(word: str) -> KernelDecision | None:
+    """Refuse one path that would write inside a generated plugin tree.
+
+    Every writing form routes its targets here — a path verb's operands, a
+    redirection's target — so the refusal and the reason it carries are
+    written once and cannot drift between the paths that reach them.
+    """
+    if not is_generated_plugin_target(word):
+        return None
+    return KernelDecision("deny", GENERATED_PLUGIN_REFUSAL)
+
+
+def refuses_generated_plugin_write(words: list[str]) -> KernelDecision | None:
+    """Refuse a path verb that would write inside a generated plugin tree."""
+    executable = posixpath.basename(words[0])
+    if executable not in SCRATCH_VERB_FLAGS:
+        return None
+    operands, inert = path_verb_operands(words)
+    targets = written_operands(executable, operands) if inert else operands
+    for word in targets:
+        refused = refuses_generated_plugin_target(word)
+        if refused is not None:
+            return refused
+    return None
+
+
 def confined_to_recoverable_roots(
-    words: list[str], path_roles: list[PathRoleRow]
+    words: list[str],
+    path_roles: list[PathRoleRow],
+    recoverable_targets: list[str] | None = None,
 ) -> KernelDecision | None:
     """Recognize a path-taking judged-ask verb whose every target is disposable.
 
     A scratch role names a tree of disposable files, so destroying one is as
-    safe as writing it and creating one there settles nothing; a generated
-    plugin tree costs a regeneration rather than any information. A long flag,
-    an opaque word, or a single target outside those roots falls through to
-    the verb's ask, so a mixed command still asks.
+    safe as writing it and creating one there settles nothing. A path the host
+    reports as recoverable is committed with no uncommitted change, so
+    destroying it costs a checkout rather than any information — the host
+    establishes that, because the kernel never reads the filesystem. Only the
+    operands the verb writes are judged, so copying any source into a scratch
+    root is as disposable as the root it lands in. A long flag, an opaque
+    word, or a single written target outside those roots falls through to the
+    verb's ask, so a mixed command still asks.
     """
     executable = posixpath.basename(words[0])
     if executable not in SCRATCH_VERB_FLAGS:
         return None
-    allowed = SCRATCH_VERB_FLAGS[executable]
-    targets: list[str] = []
-    for word in words[1:]:
-        if word == "--":
-            continue
-        if word.startswith("-"):
-            short = not word.startswith("--") and len(word) > 1
-            if short and all(letter in allowed for letter in word[1:]):
-                continue
-            return None
-        targets.append(word)
-    if not targets:
+    operands, inert = path_verb_operands(words)
+    if not inert or not operands:
         return None
+    targets = written_operands(executable, operands)
     if all(
         path_role(word, path_roles) == "scratch"
         or is_session_scratch_target(word)
-        or is_generated_plugin_target(word)
+        or word in (recoverable_targets or [])
         for word in targets
     ):
         return KernelDecision("allow", "confined to recoverable roots")

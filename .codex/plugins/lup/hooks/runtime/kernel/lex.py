@@ -14,7 +14,7 @@ from .decision import (
 )
 from .roles import path_role
 from .rows import PathRoleRow
-from .words import is_session_scratch_target
+from .words import is_session_scratch_target, refuses_generated_plugin_target
 
 
 class ShellToken:
@@ -467,6 +467,10 @@ def resolve_redirection(
     caller has established the target does not exist. ``existing_targets`` of
     ``None`` means no caller established anything, and every target is
     treated as already there.
+
+    A generated plugin tree is refused ahead of every relaxation, including
+    the create case: authoring a file there by hand is editing a build
+    product, whether or not one is already sitting at that path.
     """
     operator = tokens[index].text
     if "<<" in operator and "<<<" not in operator:
@@ -486,6 +490,9 @@ def resolve_redirection(
         return None, target + 1
     if posixpath.normpath(tokens[target].text) == "/dev/null":
         return None, target + 1
+    refused = refuses_generated_plugin_target(tokens[target].text)
+    if refused is not None:
+        return refused, target + 1
     if path_role(tokens[target].text, path_roles or []) == "scratch":
         return None, target + 1
     if is_session_scratch_target(tokens[target].text):

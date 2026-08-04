@@ -29,7 +29,7 @@ from lup.policy.kernel.rows import (
     PathRuleRow,
     UrlScopeRow,
 )
-from lup.policy.kernel.shell import decide_shell, decide_shell_segment
+from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
 from lup.policy.kernel.words import command_words as kernel_command_words
 from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
 from lup.policy.models import (
@@ -162,10 +162,13 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         return pydantic_decision(
             decide_shell_segment(
                 segment.words,
-                self.rules,
-                self.allowed_scopes,
-                self.denied_scopes,
-                self.trusted_script_roots,
+                shell_context(
+                    self.rules,
+                    self.allowed_scopes,
+                    self.denied_scopes,
+                    self.trusted_script_roots,
+                    self.path_roles,
+                ),
             )
         )
 
