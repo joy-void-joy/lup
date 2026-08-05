@@ -138,13 +138,13 @@ def auto_import_namespace(
     """Build a namespace by importing modules referenced in the expression."""
     namespace = dict(SAFE_BUILTINS)
 
-    root_names: list[str] = []  # lup: ignore[empty-collection] — walk fold
-    attr_nodes: list[ast.Attribute] = []  # lup: ignore[empty-collection] — walk fold
-    for node in ast.walk(tree.body):
-        if isinstance(node, ast.Name) and node.id not in namespace:
-            root_names.append(node.id)
-        elif isinstance(node, ast.Attribute):
-            attr_nodes.append(node)
+    walked = list(ast.walk(tree.body))
+    root_names = [
+        node.id
+        for node in walked
+        if isinstance(node, ast.Name) and node.id not in namespace
+    ]
+    attr_nodes = [node for node in walked if isinstance(node, ast.Attribute)]
 
     for name in dict.fromkeys(root_names):
         if name in DANGEROUS_MODULES:

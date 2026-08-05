@@ -2,6 +2,7 @@
 
 import ast
 import typing
+from collections.abc import Iterator
 from pathlib import Path
 
 from lup_template.devtools.py.common import categorize_import
@@ -24,27 +25,24 @@ def collect_imports_from_source(source: str) -> list[ImportEntry]:
     except SyntaxError:
         return []
 
-    entries: list[ImportEntry] = []  # lup: ignore[empty-collection] — walk fold
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                entries.append(
-                    ImportEntry(
+    def entries_of(node: ast.AST) -> Iterator[ImportEntry]:
+        """Every import entry one node declares."""
+        match node:
+            case ast.Import(names=names):
+                for alias in names:
+                    yield ImportEntry(
                         module=alias.name,
                         names=[],
                         category=categorize_import(alias.name),
                     )
+            case ast.ImportFrom(module=module, names=names) if module:
+                yield ImportEntry(
+                    module=module,
+                    names=[alias.name for alias in names],
+                    category=categorize_import(module),
                 )
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            names = [alias.name for alias in node.names]
-            entries.append(
-                ImportEntry(
-                    module=node.module,
-                    names=names,
-                    category=categorize_import(node.module),
-                )
-            )
-    return entries
+
+    return [entry for node in ast.walk(tree) for entry in entries_of(node)]
 
 
 def format_import_entry(entry: ImportEntry) -> str:
