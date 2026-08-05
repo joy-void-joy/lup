@@ -25,8 +25,10 @@ import lup.codescan.capabilities as capabilities
 import lup.codescan.dispatch as dispatch
 import lup.codescan.grammar as grammar
 import lup.codescan.portable as portable
+from lup.codescan.common import RuleStrength
 
 type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"]
+
 
 RULE_REFERENCE = "docs/rules.md"
 """Repository-relative path of the generated reference deny messages cite."""
@@ -51,6 +53,10 @@ class RegisteredRule(BaseModel):
     message: str
     defined_in: str
     refinement: str = ""
+    strength: RuleStrength = "soft"
+    """Soft by default: a rule earns ``strong`` by having a replacement that is
+    right every time, and until someone can say what that replacement is, the
+    honest answer is that an exception might exist."""
 
 
 # lup: ignore[library-default] — one card per rule the library's own scanners define

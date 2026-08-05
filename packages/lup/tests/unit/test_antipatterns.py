@@ -669,6 +669,50 @@ def test_audit_dict_get_silenced_by_typed_ignore() -> None:
     assert audit_text(source, PYTHON_ANTI_PATTERNS) == []
 
 
+def test_a_strong_rule_refuses_every_suppression() -> None:
+    """A reasoned exception is a soft rule's mechanism, not a strong one's.
+
+    Soft rules name a shape that is usually wrong and occasionally the only
+    thing that works, so a directive there is graded rather than obeyed. A
+    strong rule's replacement is right every time, which leaves a directive
+    nothing to express but a decision to keep the defect.
+    """
+    strong = AntiPattern(
+        id="probe-strong",
+        pattern=re.compile(r"\bforbidden\b"),
+        message="use the replacement",
+        strength="strong",
+    )
+
+    for source in (
+        "value = forbidden()\n",
+        "value = forbidden()  # lup: ignore[probe-strong]\n",
+        "value = forbidden()  # lup: ignore\n",
+        "# lup: ignore[probe-strong]\nvalue = forbidden()\n",
+    ):
+        findings = audit_text(source, [strong])
+        missing = [
+            f for f in findings if f.rule_id == "probe-strong" and f.kind == "missing"
+        ]
+
+        assert len(missing) == 1, source
+        assert "write the replacement" in missing[0].message
+        # A directive written anyway is additionally reported as spurious,
+        # which is what it is: the hit beside it was never silenced.
+        assert all(f.kind in {"missing", "spurious"} for f in findings), source
+
+
+def test_a_soft_rule_still_honours_its_suppression() -> None:
+    soft = AntiPattern(
+        id="probe-soft",
+        pattern=re.compile(r"\bforbidden\b"),
+        message="prefer something else",
+    )
+
+    assert audit_text("value = forbidden()  # lup: ignore[probe-soft]\n", [soft]) == []
+    assert [f.kind for f in audit_text("value = forbidden()\n", [soft])] == ["missing"]
+
+
 def test_audit_file_level_typed_ignore_disables_only_that_rule() -> None:
     # `# lup: ignore[dict-get]` at the top silences dict-get file-wide, but
     # every other rule stays live.

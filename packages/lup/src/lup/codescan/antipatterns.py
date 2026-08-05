@@ -62,6 +62,7 @@ from lup.codescan.common import (
     PythonContext,
     Refutation,
     RuleContext,
+    RuleStrength,
     file_level_ignore,
     ignore_rule_ids,
 )
@@ -121,6 +122,15 @@ class AntiPattern(BaseModel):
     message: str
     context: RuleContext = "code"
     refiner: Refiner | None = None
+    strength: RuleStrength = "soft"
+    """Whether a `# lup: ignore` may silence this rule at all.
+
+    Soft by default, because most of these name a shape that is usually wrong
+    and occasionally the only thing that works, and the audit exists to grade
+    those exceptions. A rule is ``strong`` only when its replacement is right
+    every time — then a suppression is not a reasoned exception but the defect
+    with a comment on it, and this refuses to be silenced.
+    """
 
 
 PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
@@ -746,6 +756,21 @@ def audit_text(
 
         silenced_by_bare = False
         for ap in hits:
+            if ap.strength == "strong":
+                # No directive reaches this one. A soft rule's suppression is a
+                # reasoned exception the audit then grades; a strong rule has a
+                # replacement that is right every time, so the same comment
+                # would only record a decision to keep the defect.
+                findings.append(
+                    AntiPatternFinding(
+                        kind="missing",
+                        line=index,
+                        text=preview,
+                        message=f"{ap.message} (no suppression: write the replacement)",
+                        rule_id=ap.id,
+                    )
+                )
+                continue
             if ap.id in file_disabled:
                 # Live only when the file-level directive is the sole silencer;
                 # an inline-covered hit does not keep the file-wide id alive.

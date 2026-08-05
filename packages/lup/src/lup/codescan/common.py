@@ -34,6 +34,21 @@ from lup.policy.kernel.edit import (
     python_tokens,
 )
 
+type RuleStrength = Literal["soft", "strong"]
+"""Whether a rule admits a reasoned exception, or admits none.
+
+Most rules are ``soft``: they name a shape that is usually wrong and sometimes
+is the only thing that works — ``Any`` at an untyped boundary, a vendor's own
+constant, a narrowing the type system needs. A suppression there is the
+mechanism working, and the audit grades each one missing, bare, or dead.
+
+A ``strong`` rule names a shape whose replacement is right every time. There is
+no input for which an `isinstance` chain beats the `match` it compiles to, and
+no call site where a bare tuple beats the `TypedDict` naming its fields — so a
+suppression there is not a reasoned exception, it is the defect with a comment
+on it. Those are refused, and the message says to write the replacement.
+"""
+
 type RuleContext = Literal["code", "comment"]
 """The syntactic surface a scan rule inspects: masked code, or comment text."""
 
