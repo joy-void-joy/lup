@@ -16,11 +16,11 @@ offending line or as a file-level directive, with a reason.
 """
 
 import ast
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from pathlib import Path
-from typing import Self
+from typing import Self, get_args
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lup.codescan.common import (
     IGNORE_RE,
@@ -28,6 +28,8 @@ from lup.codescan.common import (
     file_level_ignore,
     ignore_rule_ids,
 )
+from lup.harness.contracts import NativeSpellings
+from lup.harness.models import PluginLocation, TreeLocation
 from lup.policy.kernel.decision import KERNEL_IMPORT_ALLOWLIST
 
 RULE_ID = "seam-boundary"
@@ -58,20 +60,75 @@ NATIVE_SPELLINGS = {
 }
 
 
-def path_is_sanctioned(rel_path: Path) -> bool:
-    """Whether a path may import native implementations as a composition root."""
-    posix = rel_path.as_posix()
-    return (
-        "lup/adapters/" in posix
-        or posix.startswith((".claude/", ".codex/", ".agents/"))
-        or posix == "AGENTS.md"
-        or posix.startswith("tests/")
-        or posix.startswith("examples/")
-        or posix == "src/lup_template/agent/core.py"
-        or posix.startswith("src/lup_template/devtools/harness/")
-        or posix == "src/lup_template/devtools/setup.py"
-        or posix == "src/lup_template/devtools/usage/app.py"
+def generated_tree_paths(
+    runtimes: Sequence[NativeSpellings], plugins: Sequence[str]
+) -> list[str]:
+    """Every path a runtime writes its own tree at, asked rather than listed.
+
+    A generated tree is the rendering of exactly the implementations this rule
+    guards, so what sanctions it is that a runtime spells it — and a runtime
+    that learns a location sanctions it the same day, with no second copy here
+    to keep in step.
+    """
+    return sorted(
+        {
+            *(
+                runtime.tree(location)
+                for runtime in runtimes
+                for location in get_args(TreeLocation.__value__)
+            ),
+            *(
+                runtime.plugin(plugin, location, None)
+                for runtime in runtimes
+                for plugin in plugins
+                for location in get_args(PluginLocation.__value__)
+            ),
+        }
     )
+
+
+class ApplicationRoots(BaseModel):
+    """Where one application composes concrete implementations of the seams.
+
+    The library guards its own package and can name nothing beyond it: an
+    adopter renames the application package before writing a line, so a path
+    written down here would go on naming a package that no longer exists and
+    silently sanction nothing.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    composition: list[str] = Field(default_factory=list)
+    """Repository-relative files, or directory prefixes ending in ``/``."""
+
+    portable_prose: list[str] = Field(default_factory=list)
+    """Those composition roots whose prose must still name no provider — a
+    declaration every tree renders is written in one of them."""
+
+    def sanctions(self, rel_path: Path) -> bool:
+        """Whether this application composes natively at that path."""
+        posix = rel_path.as_posix()
+        return any(
+            posix.startswith(root) if root.endswith("/") else posix == root
+            for root in self.composition
+        )
+
+    def sanctions_spelling(self, rel_path: Path) -> bool:
+        """Whether that path may also own a provider's own wire words."""
+        return self.sanctions(rel_path) and not rel_path.as_posix().startswith(
+            tuple(self.portable_prose)
+        )
+
+
+NO_APPLICATION = ApplicationRoots()
+"""What an adopter sanctions before it says so: nothing beyond the library."""
+
+
+def path_is_sanctioned(
+    rel_path: Path, application: ApplicationRoots = NO_APPLICATION
+) -> bool:
+    """Whether a path may import native implementations as a composition root."""
+    return "lup/adapters/" in rel_path.as_posix() or application.sanctions(rel_path)
 
 
 def library_placement_path_is_audited(rel_path: Path) -> bool:
@@ -84,11 +141,12 @@ def library_placement_path_is_audited(rel_path: Path) -> bool:
     return posix.startswith(LIBRARY_ROOT) and "lup/adapters/" not in posix
 
 
-def native_spelling_path_is_sanctioned(rel_path: Path) -> bool:
+def native_spelling_path_is_sanctioned(
+    rel_path: Path, application: ApplicationRoots = NO_APPLICATION
+) -> bool:
     """Whether a path may own provider wire spellings without a suppression."""
-    content_root = "src/lup_template/devtools/harness/content/"
-    return path_is_sanctioned(rel_path) and not rel_path.as_posix().startswith(
-        content_root
+    return "lup/adapters/" in rel_path.as_posix() or application.sanctions_spelling(
+        rel_path
     )
 
 
@@ -506,12 +564,14 @@ def audit_boundaries(text: str) -> list[BoundaryAuditFinding]:
     ]
 
 
-def audit_path_boundaries(rel_path: Path, text: str) -> list[BoundaryAuditFinding]:
+def audit_path_boundaries(
+    rel_path: Path, text: str, application: ApplicationRoots = NO_APPLICATION
+) -> list[BoundaryAuditFinding]:
     """Audit only the boundary rules that apply at one repository path."""
     findings: list[BoundaryAuditFinding] = []
-    if not path_is_sanctioned(rel_path):
+    if not path_is_sanctioned(rel_path, application):
         findings.extend(audit_rule(text, RULE_ID, import_violations(text)))
-    if not native_spelling_path_is_sanctioned(rel_path):
+    if not native_spelling_path_is_sanctioned(rel_path, application):
         findings.extend(
             audit_rule(
                 text,

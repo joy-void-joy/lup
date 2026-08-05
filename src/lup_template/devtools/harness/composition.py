@@ -22,9 +22,11 @@ from lup.adapters.codex.harness_runtime import (
     CodexCliEvidence,
     codex_capability_probes,
 )
-from lup.harness.contracts import SkillInvocationRenderer
+from lup.codescan.boundaries import ApplicationRoots, generated_tree_paths
+from lup.harness.contracts import NativeSpellings, SkillInvocationRenderer
 from lup.harness.models import CapabilityEvidence
 from lup.workspace.paths import project_root
+from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.generate import (
     GenerationRecipe,
     claude_generation_recipe,
@@ -73,6 +75,36 @@ def codex_composition(root: Path) -> NativeHarnessComposition:
         recipe=codex_generation_recipe(root),
         readiness=readiness,
         invocation_renderer=CodexSpellings(),
+    )
+
+
+NATIVE_RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
+"""Every runtime this project generates a tree for."""
+
+
+def application_roots() -> ApplicationRoots:
+    """Where this project composes concrete native implementations.
+
+    The generated trees are asked of the runtimes rather than written down, so
+    a location a runtime learns sanctions its own tree. The rest are this
+    project's own homes, derived from where this package actually sits, so
+    renaming it during initialization moves them instead of leaving the rule
+    pointing at a package that is gone.
+    """
+    package = Path(__file__).resolve().parents[2].relative_to(project_root()).as_posix()
+    harness = f"{package}/devtools/harness/"
+    plugins = [plugin.name for plugin in portable_harness().plugins]
+    return ApplicationRoots(
+        composition=[
+            *generated_tree_paths(NATIVE_RUNTIMES, plugins),
+            "tests/",
+            "examples/",
+            f"{package}/agent/core.py",
+            harness,
+            f"{package}/devtools/setup.py",
+            f"{package}/devtools/usage/app.py",
+        ],
+        portable_prose=[f"{harness}content/"],
     )
 
 

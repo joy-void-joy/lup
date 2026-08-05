@@ -25,6 +25,7 @@ from lup.codescan.boundaries import (
     find_library_default_breaches,
     library_placement_path_is_audited,
 )
+from lup_template.devtools.harness.composition import application_roots
 from lup_template.devtools.utils import git, output_json
 
 
@@ -91,6 +92,7 @@ def scan_library_placement() -> list[FoundBreach]:
 def scan_boundaries() -> list[FoundBreach]:
     """Every native import, spelling, and kernel-import breach in the tree."""
     found: list[FoundBreach] = []  # lup: ignore[empty-collection]
+    roots = application_roots()
     for source in tracked_python_sources():
         found.extend(
             FoundBreach(
@@ -99,7 +101,7 @@ def scan_boundaries() -> list[FoundBreach]:
                 module=finding.module,
                 text=finding.text,
             )
-            for finding in audit_path_boundaries(source.path, source.text)
+            for finding in audit_path_boundaries(source.path, source.text, roots)
             if finding.kind == "missing"
         )
         if source.rel.startswith("packages/lup/src/lup/policy/kernel/"):
