@@ -46,7 +46,7 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 | `eval-exec` | anti-pattern | Python | <code>(?&lt;![.\w])(?:eval&#124;exec)\s*\(</code> | Never use eval()/exec() — parse the data (ast.literal_eval for literals) or dispatch explicitly | typed directive | `lup.codescan.antipatterns` |
 | `except-baseexception` | anti-pattern | Python | <code>\bexcept\s+BaseException\b</code> | except BaseException catches KeyboardInterrupt — use Exception or narrower | typed directive | `lup.codescan.antipatterns` |
 | `frozenset-shape` | anti-pattern | Python | <code>\bfrozenset\b</code> | A declared `frozenset[...]` shape or constant is usually overkill — use a dict or a purpose-built structure. For a genuinely immutable default argument add `# lup: ignore[frozenset-shape]` | typed directive | `lup.codescan.antipatterns` |
-| `generic-base` | anti-pattern | Python | <code>\bGeneric\[</code> | Use Python 3.12+ class[T] syntax instead of Generic[T] | typed directive | `lup.codescan.antipatterns` |
+| `generic-base` | anti-pattern | Python | <code>\bGeneric\[</code> | Use Python 3.12+ class[T] syntax instead of Generic[T] | **refused** | `lup.codescan.antipatterns` |
 | `global-statement` | anti-pattern | Python | <code>^global\s+\w</code> | No `global` statements — mutate a module-level holder object or pass state explicitly | typed directive | `lup.codescan.antipatterns` |
 | `import-re` | anti-pattern | Python | <code>\bimport\s+re\b&#124;\bfrom\s+re\s+import\b</code> | `import re` / `from re import` is a code smell — parse structured data with its own API instead: JSON -&gt; json.loads, paths -&gt; pathlib.Path, URLs -&gt; urllib.parse, XML/HTML -&gt; xml.etree.ElementTree / lxml, dates -&gt; datetime | typed directive | `lup.codescan.antipatterns` |
 | `namedtuple` | anti-pattern | Python | <code>\bNamedTuple\b&#124;\bnamedtuple\b</code> | Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple | typed directive | `lup.codescan.antipatterns` |
@@ -70,9 +70,9 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 | `suppress-import` | anti-pattern | Python | <code>\bfrom\s+contextlib\s+import\b.*\bsuppress\b</code> | contextlib.suppress silently swallows exceptions — log, handle, or re-raise | typed directive | `lup.codescan.antipatterns` |
 | `tuple-shape` | anti-pattern | Python | <code>\btuple\[</code> | A declared `tuple[...]` shape hides what each position means — name the fields with a TypedDict or BaseModel, a `type Alias = ...` for a reused shape, or `list` for a variable-length sequence | typed directive | `lup.codescan.antipatterns` |
 | `type-ignore` | anti-pattern | Python | <code>#\s*type:\s*ignore</code> | Never use # type: ignore — fix the type error properly | typed directive | `lup.codescan.antipatterns` |
-| `typing-generics` | anti-pattern | Python | <code>\b(?:List&#124;Dict&#124;Tuple&#124;Set)\[</code> | Use lowercase builtin generics — list, dict, tuple, set — instead of the capitalized typing aliases | typed directive | `lup.codescan.antipatterns` |
-| `typing-union` | anti-pattern | Python | <code>\b(?:Optional&#124;Union)\[</code> | Use PEP 604 unions — X &#124; None instead of Optional, X &#124; Y instead of Union | typed directive | `lup.codescan.antipatterns` |
-| `utcnow` | anti-pattern | Python | <code>\butcnow\s*\(</code> | datetime.utcnow() is naive and deprecated — use datetime.now(timezone.utc) | typed directive | `lup.codescan.antipatterns` |
+| `typing-generics` | anti-pattern | Python | <code>\b(?:List&#124;Dict&#124;Tuple&#124;Set)\[</code> | Use lowercase builtin generics — list, dict, tuple, set — instead of the capitalized typing aliases | **refused** | `lup.codescan.antipatterns` |
+| `typing-union` | anti-pattern | Python | <code>\b(?:Optional&#124;Union)\[</code> | Use PEP 604 unions — X &#124; None instead of Optional, X &#124; Y instead of Union | **refused** | `lup.codescan.antipatterns` |
+| `utcnow` | anti-pattern | Python | <code>\butcnow\s*\(</code> | datetime.utcnow() is naive and deprecated — use datetime.now(timezone.utc) | **refused** | `lup.codescan.antipatterns` |
 | `any-annotation` | anti-pattern | TypeScript | <code>:\s*any\b</code> | Never use `any` type annotation — use specific types, generics, or `unknown` | typed directive | `lup.codescan.antipatterns` |
 | `any-assertion` | anti-pattern | TypeScript | <code>&lt;any&gt;</code> | Never use `&lt;any&gt;` type assertion — use proper types | typed directive | `lup.codescan.antipatterns` |
 | `as-any` | anti-pattern | TypeScript | <code>\bas\s+any\b</code> | Never use `as any` — use proper types or type guards | typed directive | `lup.codescan.antipatterns` |
@@ -86,7 +86,7 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 | `ts-ignore` | anti-pattern | TypeScript | <code>@ts-ignore</code> | Never use @ts-ignore — fix the type error properly | typed directive | `lup.codescan.antipatterns` |
 | `ts-nocheck` | anti-pattern | TypeScript | <code>@ts-nocheck</code> | Never use @ts-nocheck — fix the type errors in the file | typed directive | `lup.codescan.antipatterns` |
 | `tslint-disable` | anti-pattern | TypeScript | <code>//\s*tslint:disable</code> | Never use tslint:disable — migrate to eslint and fix the issue | typed directive | `lup.codescan.antipatterns` |
-| `var-declaration` | anti-pattern | TypeScript | <code>\bvar\s+[A-Za-z_$]</code> | Use `const` or `let` instead of `var` — var is function-scoped and hoisted | typed directive | `lup.codescan.antipatterns` |
+| `var-declaration` | anti-pattern | TypeScript | <code>\bvar\s+[A-Za-z_$]</code> | Use `const` or `let` instead of `var` — var is function-scoped and hoisted | **refused** | `lup.codescan.antipatterns` |
 
 ## Audit-side refinements
 

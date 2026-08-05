@@ -181,6 +181,7 @@ def anti_pattern_rules(
             message=rule.message,
             defined_in=antipatterns.__name__,
             refinement=refined[rule.id] if rule.id in refined else "",
+            strength=rule.strength,
         )
         for scope, scoped in (
             ("Python", declared.python),

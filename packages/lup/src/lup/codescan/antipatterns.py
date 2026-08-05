@@ -159,16 +159,19 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="generic-base",
+        strength="strong",
         pattern=re.compile(r"\bGeneric\["),
         message="Use Python 3.12+ class[T] syntax instead of Generic[T]",
     ),
     AntiPattern(
         id="typing-union",
+        strength="strong",
         pattern=re.compile(r"\b(?:Optional|Union)\["),
         message="Use PEP 604 unions — X | None instead of Optional, X | Y instead of Union",
     ),
     AntiPattern(
         id="typing-generics",
+        strength="strong",
         pattern=re.compile(r"\b(?:List|Dict|Tuple|Set)\["),
         message="Use lowercase builtin generics — list, dict, tuple, set — "
         "instead of the capitalized typing aliases",
@@ -426,6 +429,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="utcnow",
+        strength="strong",
         pattern=re.compile(r"\butcnow\s*\("),
         message="datetime.utcnow() is naive and deprecated — use datetime.now(timezone.utc)",
     ),
@@ -520,6 +524,7 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="var-declaration",
+        strength="strong",
         pattern=re.compile(r"\bvar\s+[A-Za-z_$]"),
         message="Use `const` or `let` instead of `var` — var is function-scoped and hoisted",
     ),
