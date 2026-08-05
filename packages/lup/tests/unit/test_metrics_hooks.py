@@ -102,8 +102,9 @@ async def test_capture_hook_collects_only_matching_tool_data() -> None:
     def extract(data: LupHookInput) -> list[str]:
         return [data.tool_result]
 
-    config, captured = create_capture_hook("WebSearch", extract)
-    hook = config.post_tool_use[0].hook
+    capture = create_capture_hook("WebSearch", extract)
+    captured = capture["captured"]
+    hook = capture["hooks"].post_tool_use[0].hook
 
     await hook(post_input("WebSearch", "r1"))
     await hook(post_input("Other", "ignored"))
