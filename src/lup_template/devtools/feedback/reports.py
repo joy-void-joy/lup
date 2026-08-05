@@ -171,7 +171,7 @@ def costs(version: str | None, all_versions: bool, as_json: bool) -> None:
         "output",
         "cached",
     )
-    table_rows: list[tuple[str, ...]] = []  # lup: ignore[tuple-shape, empty-collection]
+    table_rows: list[tuple[str, ...]] = []  # lup: ignore[empty-collection]
     for name in sorted(rows):
         row = rows[name]
         cost_display = f"${row['cost_usd']:.2f}" if row["cost_usd"] else "—"
