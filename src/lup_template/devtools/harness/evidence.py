@@ -15,7 +15,7 @@ from importlib.metadata import version as installed_package_version
 
 from pydantic import BaseModel, ConfigDict
 
-EVIDENCE_REFRESHED = "2026-07-16"
+EVIDENCE_REFRESHED = "2026-08-05"
 
 
 class EvidenceEntry(BaseModel):
@@ -28,9 +28,9 @@ class EvidenceEntry(BaseModel):
 
 
 EVIDENCE_LEDGER = [
-    EvidenceEntry(capability="claude-cli", version="2.1.211"),
+    EvidenceEntry(capability="claude-cli", version="2.1.222"),
     EvidenceEntry(capability="claude-agent-sdk", version="0.2.89"),
-    EvidenceEntry(capability="codex-cli", version="0.144.4"),
+    EvidenceEntry(capability="codex-cli", version="0.145.0"),
 ]
 
 
