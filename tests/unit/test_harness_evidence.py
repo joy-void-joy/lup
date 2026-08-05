@@ -5,6 +5,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 import yaml
 
+from lup_template.devtools.dev.workflow import (
+    CHECK_COMMAND,
+    WORKFLOW_PATH,
+    write_workflow,
+)
 from lup_template.devtools.harness.evidence import (
     EVIDENCE_LEDGER,
     EvidenceEntry,
@@ -112,20 +117,19 @@ def test_native_workflow_probes_even_when_strict_evidence_fails() -> None:
     assert any(step.run == "uv run pytest -m integration -v" for step in native.steps)
 
 
-def test_pull_request_workflow_runs_quality_and_harness_gates() -> None:
-    document = yaml.safe_load(
-        Path(".github/workflows/harness-drift.yml").read_text(encoding="utf-8")
-    )
+def test_pull_request_workflow_runs_the_same_gate_a_checkout_runs() -> None:
+    """One command, so what CI enforces cannot drift from what `dev check` is.
+
+    Every row this used to spell out is a row of that command, harness drift
+    included; naming them again here is what let the two lists disagree.
+    """
+    document = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     workflow = NativeWorkflow.model_validate(document)
     commands = [step.run for step in workflow.jobs["check"].steps if step.run]
 
-    assert commands == [
-        "uv sync --all-extras",
-        "uv run ruff format --check .",
-        "uv run ruff check .",
-        "uv run pyright",
-        "uv run pytest",
-        "uv run lup-devtools dev check --antipatterns",
-        "uv run lup-devtools dev check --boundaries",
-        "uv run lup-devtools harness check all",
-    ]
+    assert commands == ["uv sync --all-extras", CHECK_COMMAND]
+
+
+def test_the_workflow_on_disk_is_the_one_the_declaration_renders() -> None:
+    """Generated rather than scaffolded, so `dev check` reports it when it drifts."""
+    write_workflow(check=True)

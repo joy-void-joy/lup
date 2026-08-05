@@ -116,7 +116,9 @@ ARTIFACT_COMMENT_ROUTER = CommentRouter(
         ),
         CommentRoute(
             name="hash",
-            matcher=SuffixPathMatcher([".py", ".toml", ".rules", ".sh"]),
+            matcher=SuffixPathMatcher(
+                [".py", ".toml", ".rules", ".sh", ".yml", ".yaml"]
+            ),
             syntax=LinePrefixComment("#"),
         ),
         CommentRoute(

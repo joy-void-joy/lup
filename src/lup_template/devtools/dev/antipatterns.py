@@ -43,6 +43,7 @@ from lup.policy.kernel.roles import path_role
 from lup.policy.kernel.rows import PathRoleRow
 from lup_template.devtools.dev.pyright_oracle import default_oracle
 from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.composition import application_roots
 from lup_template.devtools.utils import git, output_json
 
 
@@ -139,10 +140,11 @@ def scan_antipatterns() -> AntiPatternScan:
         )
         for finding in audit_capabilities(sources)
     )
+    roots = application_roots()
     boundary_findings = [
         (source.path, finding)
         for source in sources
-        for finding in audit_path_boundaries(source.path, source.text)
+        for finding in audit_path_boundaries(source.path, source.text, roots)
     ]
     foreign_untyped = {
         (path.as_posix(), finding.line)

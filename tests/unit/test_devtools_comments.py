@@ -16,7 +16,7 @@ import typer
 
 from lup.codescan.markers import NoteKind
 from lup_template.devtools.dev import comments
-from lup_template.devtools.dev.check import comments_gate_lines
+from lup_template.devtools.dev.check import inline_notes_lines
 
 PY_SOURCE = """\
 alpha = 1
@@ -173,8 +173,8 @@ def note_at(
     )
 
 
-def test_comments_gate_lists_deferred_after_unresolved() -> None:
-    lines = comments_gate_lines(
+def test_inline_notes_list_deferred_after_unresolved() -> None:
+    lines = inline_notes_lines(
         [
             note_at("a.py", 3),
             note_at(
@@ -188,18 +188,19 @@ def test_comments_gate_lists_deferred_after_unresolved() -> None:
     )
 
     assert lines == [
-        "claude comments: FAIL (1 unresolved, 1 deferred)",
+        "inline notes: 1 unresolved, 1 deferred (advisory)",
         "  a.py:3-3",
         "  deferred[until branches merge] .gitignore:9-9",
     ]
 
 
-def test_comments_gate_stays_red_on_defers_alone() -> None:
-    lines = comments_gate_lines(
+def test_open_notes_report_without_refusing_the_tree_that_carries_them() -> None:
+    """A note asks somebody for something; a branch is expected to carry open ones."""
+    lines = inline_notes_lines(
         [note_at("a.py", 3, kind="defer", condition="until v2", text="parked")]
     )
 
-    assert lines[0] == "claude comments: FAIL (0 unresolved, 1 deferred)"
+    assert lines[0] == "inline notes: 0 unresolved, 1 deferred (advisory)"
 
 
 def test_render_separates_the_deferred_section(

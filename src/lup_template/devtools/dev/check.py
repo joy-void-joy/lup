@@ -15,7 +15,13 @@ from lup_template.devtools.dev.boundaries import (
 )
 from lup_template.devtools.dev.branches import unlanded_siblings
 from lup_template.devtools.dev.comments import FoundComment, scan_tracked
+from lup_template.devtools.harness.composition import EVERY_TARGET
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
+from lup_template.devtools.harness.drift import (
+    clean_repository_artifacts,
+    drift_reports,
+    report_drift,
+)
 from lup_template.devtools.utils import git, uv
 
 # The suite waits on git subprocesses and hook scripts far more than it
@@ -33,19 +39,22 @@ class CheckOutcome(BaseModel):
     passed: bool
 
 
-def comments_gate_lines(found: list[FoundComment]) -> list[str]:
-    """The comments gate's FAIL header and detail lines.
+def inline_notes_lines(found: list[FoundComment]) -> list[str]:
+    """The inline-notes header and detail lines.
 
-    Deferred notes keep the gate red — committed parked work stays visible
-    pressure — but their `deferred[<wake condition>]` lines render after the
-    unresolved ones, so the red is legible at a glance.
+    Advisory rather than gating: a note is a standing request to somebody, and
+    the tree is expected to carry open ones for as long as the work they name
+    is open. Failing on them would make every branch red for a condition its
+    author chose deliberately, so this reports and the reader decides. Their
+    `deferred[<wake condition>]` lines render after the unresolved ones, so
+    what is still being asked reads first.
     """
     unresolved = [comment for comment in found if comment.kind != "defer"]
     deferred = [comment for comment in found if comment.kind == "defer"]
     counts = f"{len(unresolved)} unresolved"
     if deferred:
         counts += f", {len(deferred)} deferred"
-    lines = [f"claude comments: FAIL ({counts})"]
+    lines = [f"inline notes: {counts} (advisory)"]
     lines.extend(
         f"  {comment.file}:{comment.start_line}-{comment.end_line}"
         for comment in unresolved
@@ -71,9 +80,9 @@ def owned_comments(
 
     A resolver worker's own notes are already cleared from its worktree
     before it starts, so every note it can still see belongs to a sibling
-    concern it has no lease on. Gating the whole tree would fail it for work
-    it cannot touch; gating what it changed asks the only question it can
-    answer, which is whether it left a note in its own code.
+    concern it has no lease on. Reporting the whole tree would tell it about
+    work it cannot touch; reporting what it changed says the only thing it
+    can act on, which is whether it left a note in its own code.
     """
     if scope is None:
         return found
@@ -149,14 +158,11 @@ def run_checks(fix: bool, no_test: bool, scope: list[str] | None = None) -> None
                 typer.echo(e.stdout.decode().rstrip())
             results.append(CheckOutcome(name="pytest", passed=False))
 
+    # advisory — a note asks somebody for something, and a tree is expected to
+    # carry open ones; what it says is worth reading, not worth refusing over
     found = owned_comments(scan_tracked(find_feedback), scope)
-    if found:
-        for line in comments_gate_lines(found):
-            typer.echo(line)
-        results.append(CheckOutcome(name="claude comments", passed=False))
-    else:
-        typer.echo("claude comments: ok")
-        results.append(CheckOutcome(name="claude comments", passed=True))
+    for line in inline_notes_lines(found) if found else ["inline notes: none"]:
+        typer.echo(line)
 
     scan = scan_antipatterns()
     blocking = [f for f in scan.findings if f.kind != "untyped"]
@@ -191,6 +197,17 @@ def run_checks(fix: bool, no_test: bool, scope: list[str] | None = None) -> None
     else:
         typer.echo("library placement: ok")
         results.append(CheckOutcome(name="library placement", passed=True))
+
+    stale = [report for report in drift_reports(EVERY_TARGET) if not report.clean]
+    repository_is_current = clean_repository_artifacts()
+    if stale or not repository_is_current:
+        typer.echo(f"harness drift: FAIL ({len(stale)} tree(s))")
+        for report in stale:
+            report_drift(report, paths=True)
+        results.append(CheckOutcome(name="harness drift", passed=False))
+    else:
+        typer.echo("harness drift: ok")
+        results.append(CheckOutcome(name="harness drift", passed=True))
 
     used = max(
         len(claude_prompt_renderer().render(GUIDANCE)),

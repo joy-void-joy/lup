@@ -5,8 +5,8 @@ from pathlib import Path
 
 from lup.codescan.registry import RegisteredRule, all_rules
 from lup.harness.banner import GeneratedBanner
+from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
-from lup.harness.validation import validated_tree
 from lup.workspace.paths import project_root
 
 
@@ -100,19 +100,11 @@ def rule_reference_artifact() -> Artifact:
     )
 
 
-def write_rule_reference(path: Path | None = None, *, check: bool = False) -> Path:
+def write_rule_reference(root: Path | None = None, *, check: bool = False) -> Path:
     """Write or verify the generated rule reference."""
-    destination = path or project_root() / RULE_REFERENCE_PATH
-    expected = validated_tree([rule_reference_artifact()]).artifacts[0].content
-    if check:
-        if (
-            not destination.is_file()
-            or destination.read_text(encoding="utf-8") != expected
-        ):
-            raise RuntimeError(
-                f"{destination} is stale; run `{RULE_REFERENCE_COMMAND}`"
-            )
-        return destination
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(expected, encoding="utf-8", newline="\n")
-    return destination
+    return write_generated_file(
+        rule_reference_artifact(),
+        root or project_root(),
+        RULE_REFERENCE_COMMAND,
+        check=check,
+    )
