@@ -12,12 +12,11 @@ from pydantic import BaseModel
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.harness.process import (
-    ExitStatus,
     LaunchRequest,
     LocalProcessLauncher,
-    ProcessLauncher,
 )
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
+from tests.unit.doubles import FailingLauncher, ScriptedLauncher, out
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -336,52 +335,35 @@ def test_undecodable_persisted_state_raises_a_typed_recovery_error(
         repository.load()
 
 
-class RecordingLauncher(ProcessLauncher):
-    def __init__(self) -> None:
-        self.requests: list[LaunchRequest] = []
-        self.rev_parse_calls = 0
-
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        self.requests.append(request)
-        stdout = ""
-        if request.arguments[1:3] == ["rev-parse", "HEAD"]:
-            self.rev_parse_calls += 1
-            stdout = "base-sha\n" if self.rev_parse_calls == 1 else "created-sha\n"
-        elif request.arguments[1:3] == ["diff", "--name-only"]:
-            stdout = "src/module.py\n"
-        elif request.arguments[1:3] == ["branch", "--show-current"]:
-            stdout = "resolve/a\n"
-        return ExitStatus(code=0, stdout=stdout)
+def recording_launcher() -> ScriptedLauncher:
+    """A worktree reporting one HEAD before its branch exists and one after."""
+    return ScriptedLauncher(
+        {
+            "rev-parse HEAD": [out("base-sha\n"), out("created-sha\n")],
+            "diff --name-only": out("src/module.py\n"),
+            "branch --show-current": out("resolve/a\n"),
+        }
+    )
 
 
-class HeadLauncher(ProcessLauncher):
+def head_launcher(head: str, branch: str) -> ScriptedLauncher:
     """A worktree that exists, sits on one branch, and reports one HEAD."""
-
-    def __init__(self, head: str, branch: str) -> None:
-        self.head = head
-        self.branch = branch
-
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        if request.arguments[1:3] == ["rev-parse", "HEAD"]:
-            return ExitStatus(code=0, stdout=f"{self.head}\n")
-        if request.arguments[1:3] == ["branch", "--show-current"]:
-            return ExitStatus(code=0, stdout=f"{self.branch}\n")
-        return ExitStatus(code=0)
+    return ScriptedLauncher(
+        {
+            "rev-parse HEAD": out(f"{head}\n"),
+            "branch --show-current": out(f"{branch}\n"),
+        }
+    )
 
 
-class FailingVerificationLauncher(ProcessLauncher):
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        return ExitStatus(code=1, stderr=f"failed: {request.arguments}")
+def successful_launcher() -> ScriptedLauncher:
+    """Every probe succeeds."""
+    return ScriptedLauncher()
 
 
-class SuccessfulLauncher(ProcessLauncher):
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        return ExitStatus(code=0)
-
-
-class MissingBranchLauncher(ProcessLauncher):
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        return ExitStatus(code=1)
+def missing_branch_launcher() -> ScriptedLauncher:
+    """Every probe fails, the way git answers about a branch that is not there."""
+    return ScriptedLauncher(default=out(code=1))
 
 
 def unused_session_factory() -> SessionFactory:
@@ -494,7 +476,7 @@ def planning_core(tmp_path: Path, response: ResolverResponse) -> ResolverCore:
         lambda context: resolver_test_factory(context.root, response),
         lambda root: resolver_test_factory(root, response),
         LiteralInvocationRenderer(),
-        RecordingLauncher(),
+        recording_launcher(),
     )
 
 
@@ -597,7 +579,7 @@ async def test_one_note_raising_two_issues_reaches_both_concerns(
         lambda context: resolver_test_factory(context.root, reviewer_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
-        RecordingLauncher(),
+        recording_launcher(),
     )
 
     inventory = await core.plan_inventory(request)
@@ -657,7 +639,7 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
         lambda context: resolver_test_factory(context.root, reviewer_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
-        RecordingLauncher(),
+        recording_launcher(),
     )
 
     inventory = await core.plan_inventory(request)
@@ -673,60 +655,36 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
     ]
 
 
-class JoinLauncher(ProcessLauncher):
+def join_launcher(marker_check_code: int) -> ScriptedLauncher:
     """Answer the join probes, reporting one unmerged path with chosen markers."""
-
-    def __init__(self, marker_check_code: int) -> None:
-        self.marker_check_code = marker_check_code
-
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        match request.arguments[1:3]:
-            case ["diff", "--check"]:
-                return ExitStatus(code=self.marker_check_code, stdout="leftover marker")
-            case ["diff", "--name-only"]:
-                return ExitStatus(code=0, stdout="src/module.py\n")
-            case ["status", "--porcelain"]:
-                return ExitStatus(code=0, stdout="UU src/module.py\n")
-            case ["rev-parse", "HEAD"]:
-                return ExitStatus(code=0, stdout="joined-sha\n")
-            case _:
-                return ExitStatus(code=0)
+    return ScriptedLauncher(
+        {
+            "diff --check": out("leftover marker", code=marker_check_code),
+            "diff --name-only": out("src/module.py\n"),
+            "status --porcelain": out("UU src/module.py\n"),
+            "rev-parse HEAD": out("joined-sha\n"),
+        }
+    )
 
 
-class AncestryLauncher(ProcessLauncher):
+def ancestry_launcher(is_ancestor: bool) -> ScriptedLauncher:
     """Answer merge-base ancestry with a fixed verdict, recording every call."""
-
-    def __init__(self, is_ancestor: bool) -> None:
-        self.is_ancestor = is_ancestor
-        self.arguments: list[list[str]] = []
-
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        self.arguments.append(request.arguments)
-        if request.arguments[1:3] == ["merge-base", "--is-ancestor"]:
-            return ExitStatus(code=0 if self.is_ancestor else 1)
-        return ExitStatus(code=0)
+    return ScriptedLauncher(
+        {"merge-base --is-ancestor": out(code=0 if is_ancestor else 1)}
+    )
 
 
-class MergingLauncher(ProcessLauncher):
+def merging_launcher(merge_head: str) -> ScriptedLauncher:
     """Report an open merge against a chosen parent, recording every call."""
-
-    def __init__(self, merge_head: str) -> None:
-        self.merge_head = merge_head
-        self.arguments: list[list[str]] = []
-
-    def launch(self, request: LaunchRequest) -> ExitStatus:
-        self.arguments.append(request.arguments)
-        if request.arguments[1:3] == ["rev-parse", "-q"]:
-            if not self.merge_head:
-                return ExitStatus(code=1)
-            return ExitStatus(code=0, stdout=f"{self.merge_head}\n")
-        return ExitStatus(code=0)
+    return ScriptedLauncher(
+        {"rev-parse -q": out(f"{merge_head}\n") if merge_head else out(code=1)}
+    )
 
 
 def test_preparing_the_same_join_twice_leaves_the_open_merge_alone(
     tmp_path: Path,
 ) -> None:
-    launcher = MergingLauncher("parent-sha")
+    launcher = merging_launcher("parent-sha")
     orchestrator = WorktreeOrchestrator(launcher, tmp_path)
     lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
 
@@ -738,7 +696,7 @@ def test_preparing_the_same_join_twice_leaves_the_open_merge_alone(
 
 
 def test_preparing_a_different_join_still_opens_the_merge(tmp_path: Path) -> None:
-    launcher = MergingLauncher("")
+    launcher = merging_launcher("")
     orchestrator = WorktreeOrchestrator(launcher, tmp_path)
     lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
 
@@ -756,20 +714,20 @@ def test_preparing_a_different_join_still_opens_the_merge(tmp_path: Path) -> Non
 def test_already_joined_reports_containment_from_merge_base(tmp_path: Path) -> None:
     lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
 
-    contained = AncestryLauncher(is_ancestor=True)
+    contained = ancestry_launcher(is_ancestor=True)
     assert WorktreeOrchestrator(contained, tmp_path).already_joined(lease, "sha")
     assert contained.arguments == [
         ["git", "merge-base", "--is-ancestor", "sha", "HEAD"]
     ]
 
-    absent = AncestryLauncher(is_ancestor=False)
+    absent = ancestry_launcher(is_ancestor=False)
     assert not WorktreeOrchestrator(absent, tmp_path).already_joined(lease, "sha")
 
 
 def test_join_accepts_a_resolved_path_the_merger_left_unstaged(
     tmp_path: Path,
 ) -> None:
-    orchestrator = WorktreeOrchestrator(JoinLauncher(marker_check_code=0), tmp_path)
+    orchestrator = WorktreeOrchestrator(join_launcher(marker_check_code=0), tmp_path)
     lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
 
     assert orchestrator.commit_join(lease, "resolve: integrate") == "joined-sha"
@@ -778,7 +736,7 @@ def test_join_accepts_a_resolved_path_the_merger_left_unstaged(
 def test_join_still_refuses_a_path_whose_content_carries_markers(
     tmp_path: Path,
 ) -> None:
-    orchestrator = WorktreeOrchestrator(JoinLauncher(marker_check_code=2), tmp_path)
+    orchestrator = WorktreeOrchestrator(join_launcher(marker_check_code=2), tmp_path)
     lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
 
     with pytest.raises(RuntimeError, match="invalid changes"):
@@ -788,7 +746,7 @@ def test_join_still_refuses_a_path_whose_content_carries_markers(
 def test_only_orchestrator_creates_commits_and_reads_their_identity(
     tmp_path: Path,
 ) -> None:
-    launcher = RecordingLauncher()
+    launcher = recording_launcher()
     orchestrator = WorktreeOrchestrator(launcher, tmp_path)
     leases = WritableRootLeases(tmp_path / "agents")
     lease = leases.acquire("a", "resolve/a")
@@ -875,7 +833,7 @@ async def test_failed_integration_verification_is_not_marked_successful(
         lambda _cwd: unused_session_factory(),
         lambda _cwd: unused_session_factory(),
         UnusedInvocationRenderer(),
-        FailingVerificationLauncher(),
+        FailingLauncher(),
     )
     core.persist(state)
 
@@ -957,7 +915,7 @@ def test_interrupted_concern_returns_to_persisted_lease_boundary(
         lambda _cwd: unused_session_factory(),
         lambda _cwd: unused_session_factory(),
         UnusedInvocationRenderer(),
-        MissingBranchLauncher(),
+        missing_branch_launcher(),
     )
     core.persist(state)
 
@@ -1026,7 +984,7 @@ def test_a_resume_partway_through_integration_keeps_the_joins_it_built(
         lambda _cwd: unused_session_factory(),
         lambda _cwd: unused_session_factory(),
         UnusedInvocationRenderer(),
-        HeadLauncher("j2", f"resolve/{run_id}/review"),
+        head_launcher("j2", f"resolve/{run_id}/review"),
     )
     core.persist(state)
 
@@ -1067,7 +1025,7 @@ def test_a_base_moves_onto_the_commit_that_cleared_its_notes(
         lambda _cwd: unused_session_factory(),
         lambda _cwd: unused_session_factory(),
         UnusedInvocationRenderer(),
-        MissingBranchLauncher(),
+        missing_branch_launcher(),
     )
     core.persist(
         ResolveState(
@@ -1144,7 +1102,7 @@ def test_releasing_a_run_cleans_concern_branches_and_keeps_the_review_one(
         lambda _cwd: unused_session_factory(),
         lambda _cwd: unused_session_factory(),
         UnusedInvocationRenderer(),
-        SuccessfulLauncher(),
+        successful_launcher(),
     )
     core.persist(state)
 
@@ -1333,7 +1291,7 @@ def test_persist_clamps_phase_to_the_recorded_high_water_mark(tmp_path: Path) ->
         lambda _cwd: unused_session_factory(),
         lambda _cwd: unused_session_factory(),
         UnusedInvocationRenderer(),
-        RecordingLauncher(),
+        recording_launcher(),
     )
     core.persist(state)
 
