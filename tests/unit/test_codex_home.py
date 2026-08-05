@@ -81,7 +81,13 @@ def test_prepare_seeds_auth_and_sanitized_personal_settings(tmp_path: Path) -> N
     hooks = config.item("hooks")
     assert isinstance(hooks, Table)
     assert "PreToolUse" in hooks
-    assert "state" not in hooks
+    # Trust is seeded, unlike installed state. The runtime will not run a
+    # plugin's hooks until they are reviewed, so a scoped home that dropped
+    # this installs the policy plugin and then runs ungoverned — present,
+    # never consulted, and silent about it.
+    state = hooks.item("state")
+    assert isinstance(state, Table)
+    assert "lup@account:hooks/hooks.json:pre_tool_use:0:0" in state
     profile = tomlkit.parse((scoped / "review.config.toml").read_text(encoding="utf-8"))
     assert profile["model_reasoning_effort"] == "high"
     assert "plugins" not in profile

@@ -443,7 +443,7 @@
     {
       "path": "docs/native-capabilities.md",
       "category": "generated",
-      "sha256": "cfa0af93a3cdfd46943e3f23c60a044dacef3477a20964c392e2b649973ef9e5",
+      "sha256": "c2947bcfb187cfff2ed2f043fde85756a2a9efac6b567bbb58e1601b52061589",
       "semantic_id": "docs.native-capabilities",
       "executable": false
     },
