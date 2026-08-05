@@ -58,6 +58,25 @@ and session behavior — which is too slow and credential-bound for the
 per-push gate. Release-evidence rules for this lane are in
 [contributing.md](contributing.md).
 
+## What a project built on lup runs in CI
+
+One command:
+
+```yaml
+- run: uv run lup-devtools dev check
+```
+
+That is deliberately the whole of it. `dev check` is the same bar a checkout
+runs locally — format, lint, types, tests, review notes, anti-patterns, seam
+boundaries, library placement, generated-tree drift, and the guidance budget —
+so a green local run and a green pipeline cannot mean different things.
+
+Nothing is generated into an adopter's `.github/`. A workflow file is the
+project's own, and a framework that wrote one would be claiming a schedule,
+a runner, and a trigger policy that are not its to choose. This repository
+generates its own `quality.yml` because it is *this* project's workflow; an
+adopter writes the three lines above wherever its pipeline lives.
+
 ## Why the pre-commit hook is path-scoped
 
 ADR-012 in [dev-tooling-decisions.md](dev-tooling-decisions.md) records the

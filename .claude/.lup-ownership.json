@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "e4132d5fa5949a9496b448099d03ae7b1e14b5351bbea7eb78d3c3868a00b0cb",
+  "source_digest": "74c1c6a0b021f4070b9ab32fba0a7fec95d56f50f4996a4a230e90abc2b01911",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "5600bd8db6a8a8b27fbde2a6a69a6b1eee35cef775ee54b6f9d4ddc4a069e17c",
+      "sha256": "653df836e5a3925289841cabda1229f971dadbea7b6a8e987bbe7ef92fd169c7",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -478,7 +478,7 @@
     {
       "path": "docs/quality-pipeline.md",
       "category": "generated",
-      "sha256": "4fc6ea9db0d3223dd32b06b7ad70b9afde74fa32c15f6f1a837a88b422a7aad7",
+      "sha256": "ba698c9144c919d366f45382cbde1d55fd6cbae5bbef85f67cd7af358cd699e0",
       "semantic_id": "docs.quality-pipeline",
       "executable": false
     },

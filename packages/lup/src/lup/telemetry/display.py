@@ -1,3 +1,6 @@
+# lup: defer[when this display is next reworked]: assembly is largely
+# unexercised. Lowest stakes of the ranked coverage gaps — a wrong line here
+# misinforms a watching human rather than changing what a run does.
 """Color-coded console display of agent content blocks.
 
 Real-time output for interactive sessions: tool use and tool result blocks

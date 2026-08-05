@@ -2,7 +2,29 @@
 
 ## 0.2.0 — 2026-07-23
 
-Breaking capability-composition and semantic-policy release.
+Breaking capability-composition and semantic-policy release. A clean break:
+remove legacy imports rather than wrapping them, because no runtime
+compatibility facade exists.
+
+| Removed surface | Replacement |
+|---|---|
+| `Engine.client()` / `Client.session()` | adapter `create_*_session_factory(config)`, then `SessionFactory.open()` |
+| `Client.query()` / broad `query(**options)` | `SessionFactory.query(prompt, OutputModel)`, or the free `query(factory, prompt, OutputModel)` alias |
+| `Client.stream()` / `ReplayStream` | optional `TurnHandle.events`; completed `TurnResult.blocks` |
+| old `Session.send(text)` | `handle = await Session.start(turn_request(text))`, then `await handle.turn.result()` |
+| `Session.interrupt()` | optional `TurnHandle.interrupt.interrupt()` |
+| `LupResponse.output(Model)` | strict `TurnResult[Model].output` |
+| `output_schema` / `output_format` | `TurnRequest(output_type=Model)` and turn-bound `submit_output` |
+| `Engine.profiles()` / `Profile.select()` | adapter `ProfileResolver.session_factory(base, name)`, or `resolve(name)` plus immutable `ConfigTransform.apply()` |
+| `Engine.background()` / `BackgroundDriver` | `runtime.background.BackgroundAgent(factory, state_to_request, …)` |
+| `Engine.builtin_tools()` / provider tables | adapter `NativeEventDecoder` plus semantic events |
+| `claude-compat` / `openai-compat` engines | `ClaudeCompatibilityTransform` / `CodexCompatibilityTransform` |
+| `LupAgentOptions` | component-owned `ClaudeSessionConfig`, `CodexSessionConfig`, wrapper configs, `TurnRequest` |
+| `ConsumeTracker`, `INTENT_KNOBS`, `refuse_unconsumed()` | Pydantic validation on the component owning each setting |
+| global `ENGINES` / mutable `MODEL_ROUTES` | immutable `ModelRoute` values and explicit recipes |
+| `adapters.tools.names` | semantic policy models; native names stay private to decoders and renderers |
+| `lup-devtools claude` | `lup-devtools harness claude` |
+| `lup-devtools claude usage` | `lup-devtools usage` |
 
 - Replaced engine/client/options service locators with narrow `SessionFactory`,
   `Session`, `Turn`, event, interrupt, steer, fork, binding, render, launch, and
