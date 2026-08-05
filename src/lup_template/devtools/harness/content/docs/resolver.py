@@ -1,6 +1,12 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.resolver by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+"""Resolver lifecycle, mailbox, and recovery."""
 
-# Resolver lifecycle and recovery
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    source=__name__,
+    parts=[
+        models.TextPart(
+            text=r"""# Resolver lifecycle and recovery
 
 `ResolverCore` is the single provider-neutral resolver. Concrete entries inject
 worker and reviewer factories, a native skill invocation renderer, a process
@@ -105,3 +111,7 @@ Integration runs configured verification commands, requests an independent
 final typed review, records cleanup or retained-worktree instructions, and
 stops at human acceptance. It never merges into the user's branch. Failure
 records partial evidence and retains actionable cleanup state.
+"""
+        )
+    ],
+)

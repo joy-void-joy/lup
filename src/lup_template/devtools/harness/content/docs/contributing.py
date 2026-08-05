@@ -1,6 +1,12 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.contributing by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+"""How to contribute to this repository, whichever component you land in."""
 
-# Contributing
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    source=__name__,
+    parts=[
+        models.TextPart(
+            text=r"""# Contributing
 
 This page is for a contributor arriving cold. It covers getting a working
 checkout, deciding where a change belongs, and what has to be green before it
@@ -70,7 +76,15 @@ Two branches: `dev` is the integration branch feature work merges into, and
 `main` is stable and receives only reviewed pull requests from `dev`. Never
 commit code directly to `dev`.
 
-/lup:rebase cleans up history and opens the pull request; /lup:close merges an approved one and cleans up. /lup:merge guides conflict
+"""
+        ),
+        models.SkillInvocation(plugin="lup", skill="rebase"),
+        models.TextPart(text=r""" cleans up history and opens the pull request; """),
+        models.SkillInvocation(plugin="lup", skill="close"),
+        models.TextPart(text=r""" merges an approved one and cleans up. """),
+        models.SkillInvocation(plugin="lup", skill="merge"),
+        models.TextPart(
+            text=r""" guides conflict
 resolution — and during a merge the bias is toward inclusion: audit the result
 against both parents and confirm every removed function, parameter, or command
 was removed deliberately rather than lost to a conflict side.
@@ -150,7 +164,11 @@ and both halves are reviewed together. What to look for:
 
 Unresolved `# lup:` review notes stay visible in a full local `dev check`.
 They are feedback to act on, not lint to clear: a note comes out when the code
-or structure it points at has actually changed. /lup:resolve runs that pass;
+or structure it points at has actually changed. """
+        ),
+        models.SkillInvocation(plugin="lup", skill="resolve"),
+        models.TextPart(
+            text=r""" runs that pass;
 [resolver.md](resolver.md) describes what it does.
 
 ## Native evidence and the release gate
@@ -173,3 +191,7 @@ consecutive scheduled nightly runs in which:
 
 Review the probe output together with the evidence ledger rather than updating
 the ledger mechanically.
+"""
+        ),
+    ],
+)

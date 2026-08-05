@@ -29,7 +29,12 @@ from lup.adapters.harness import (
     compile_claude,
     compile_codex,
 )
-from lup.harness.banner import ARTIFACT_COMMENT_ROUTER, GeneratedBanner
+from lup.codescan.registry import RULE_REFERENCE
+from lup.harness.banner import (
+    ARTIFACT_COMMENT_ROUTER,
+    REGENERATE_COMMAND,
+    GeneratedBanner,
+)
 from lup.harness.generation import ArtifactValidationError
 from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
 from lup.harness.validation import validated_tree
@@ -58,6 +63,7 @@ from lup.harness.models import (
     Skill,
     SkillInvocation,
     SkillPattern,
+    SpellingExample,
     TextPart,
     document_byte_size,
     document_text_size,
@@ -99,6 +105,7 @@ from lup_template.devtools.agent.serve import (
 )
 from lup_template.devtools.dev.rules import rule_reference_artifact
 from lup_template.devtools.harness.catalog import HARNESS_SESSION, portable_harness
+from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness import launch
@@ -258,8 +265,31 @@ def test_claude_tree_renders_every_typed_support_document() -> None:
     assert Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md") in paths
     assert Path(".claude/plugins/lup/scripts/file_suggest.sh") in paths
     assert Path(".claude/settings.json") in paths
-    assert Path("docs/self-improvement.md") in paths
-    assert Path("docs/permissions.md") in paths
+    assert {document.path for document in DOCUMENTS} <= paths
+
+
+def test_every_published_document_is_generated_and_banners_itself() -> None:
+    """A document under docs/ that generation does not own could be hand-edited.
+
+    The roster is the only source of documents, so an entry missing from the
+    tree, a stray file beside them, or a page whose banner does not name its
+    own module all mean a reader cannot trust the banner to be true.
+    """
+    artifacts = {
+        artifact.path: artifact
+        for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
+    }
+    published = {document.path for document in DOCUMENTS}
+    unmanaged = sorted(
+        path for path in Path("docs").glob("*.md") if path not in published
+    )
+
+    assert unmanaged == [Path(RULE_REFERENCE)]
+    for document in DOCUMENTS:
+        banner = GeneratedBanner(
+            source=document.document.declared_source(), command=REGENERATE_COMMAND
+        )
+        assert banner.opens(document.path, artifacts[document.path].content)
 
 
 def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
@@ -422,6 +452,9 @@ class PartExpectation(BaseModel):
 
 PART_CONTRACT: dict[str, PartExpectation] = {
     "TextPart": PartExpectation(part=TextPart(text="plain prose"), diverges=False),
+    "SpellingExample": PartExpectation(
+        part=SpellingExample(text="`/lup:merge` beside `$lup:merge`"), diverges=False
+    ),
     "SkillInvocation": PartExpectation(
         part=SkillInvocation(plugin="lup", skill="merge"), diverges=True
     ),
@@ -491,7 +524,8 @@ class PartQuestion(BaseModel):
 
 PART_QUESTIONS: dict[str, PartQuestion] = {
     "text_payload": PartQuestion(
-        ask=lambda part: part.text_payload is not None, answered_by=["TextPart"]
+        ask=lambda part: part.text_payload is not None,
+        answered_by=["TextPart", "SpellingExample"],
     ),
     "invocation": PartQuestion(
         ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]
@@ -651,11 +685,29 @@ def test_skill_argument_declarations_require_a_matching_reference(
         )
 
 
-def test_typed_content_package_has_expected_module_inventory() -> None:
-    content = Path("src/lup_template/devtools/harness/content")
-    sources = list(content.rglob("*.py"))
+def test_every_typed_content_module_is_reachable_from_a_catalog() -> None:
+    """An orphaned content module renders into no tree and drifts unnoticed.
 
-    assert len(sources) == 51
+    Importing the generation recipes pulls in every declaration a catalog
+    aggregates, so a module still on disk but absent from ``sys.modules`` is
+    one no artifact is rendered from — a retired skill left behind, or a
+    document nobody listed.
+    """
+    content = Path("src/lup_template/devtools/harness/content")
+    loaded = {
+        Path(source).resolve()
+        for source in (
+            getattr(module, "__file__", None) for module in list(sys.modules.values())
+        )
+        if source is not None
+    }
+    orphans = [
+        path.as_posix()
+        for path in sorted(content.rglob("*.py"))
+        if path.name != "__init__.py" and path.resolve() not in loaded
+    ]
+
+    assert not orphans
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:
@@ -732,12 +784,16 @@ NAMES_RATHER_THAN_PROSE = [
     "Plugin.id",
     "Plugin.version",
     "Skill.id",
+    "SpellingExample.text",
 ]
-"""Declared strings that identify or version a declaration instead of teaching it.
+"""Declared strings deliberately exempt from the portable-prose constraint.
 
-None of these reaches a reader as words, so none is portable prose. Every other
-free-text field a prompt or its discovery metadata carries is, and a new field
-has to join one list or the other rather than quietly accepting anything."""
+Most identify or version a declaration rather than teaching anything, so they
+never reach a reader as words. ``SpellingExample.text`` is the one that does
+and is exempt anyway: its whole subject is what each runtime spells, which is
+the one thing portable prose cannot say. Every other free-text field a prompt
+or its discovery metadata carries is portable, and a new field has to join one
+list or the other rather than quietly accepting anything."""
 
 
 def test_every_free_text_declaration_field_is_portable_prose() -> None:

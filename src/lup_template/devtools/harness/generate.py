@@ -41,16 +41,7 @@ from lup.harness.reconciliation import (
 from lup.harness.contracts import CurrentTreeReader, PromptRenderer, Reconciler
 from lup.harness.validation import validated_tree
 from lup_template.devtools.harness.catalog import portable_harness
-from lup_template.devtools.harness.content.orchestration import (
-    DOCUMENT as ORCHESTRATION,
-)
-from lup_template.devtools.harness.content.patterns import DOCUMENT as PATTERNS
-from lup_template.devtools.harness.content.permissions import (
-    DOCUMENT as PERMISSIONS,
-)
-from lup_template.devtools.harness.content.self_improvement import (
-    DOCUMENT as SELF_IMPROVEMENT,
-)
+from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
 from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
@@ -131,6 +122,25 @@ def rendered_document(
     )
 
 
+def published_documents(prompts: PromptRenderer) -> list[Artifact]:
+    """Render every document the roster declares.
+
+    The roster is the whole of what ``docs/`` contains: a document not
+    declared there is not published, and a file found there that this did not
+    produce is deleted as unowned. Both trees render the same set, so the two
+    cannot disagree about what the repository documents.
+    """
+    return [
+        rendered_document(
+            path=document.path,
+            document=document.document,
+            prompts=prompts,
+            semantic_id=document.semantic_id,
+        )
+        for document in DOCUMENTS
+    ]
+
+
 def managed_paths(desired: ArtifactTree, prior: OwnershipManifest | None) -> list[Path]:
     """Combine desired and formerly owned paths for deletion detection."""
     paths = [artifact.path for artifact in desired.artifacts]
@@ -160,30 +170,7 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
     prompts = claude_prompt_renderer()
     content_root = Path(__file__).parent / "content"
     support_artifacts = [
-        rendered_document(
-            path=Path("docs/orchestration.md"),
-            document=ORCHESTRATION,
-            prompts=prompts,
-            semantic_id="harness.orchestration",
-        ),
-        rendered_document(
-            path=Path("docs/patterns.md"),
-            document=PATTERNS,
-            prompts=prompts,
-            semantic_id="harness.patterns",
-        ),
-        rendered_document(
-            path=Path("docs/self-improvement.md"),
-            document=SELF_IMPROVEMENT,
-            prompts=prompts,
-            semantic_id="harness.self-improvement",
-        ),
-        rendered_document(
-            path=Path("docs/permissions.md"),
-            document=PERMISSIONS,
-            prompts=prompts,
-            semantic_id="harness.permissions",
-        ),
+        *published_documents(prompts),
         rendered_document(
             path=Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md"),
             document=TEMPLATE_CLAUDE,

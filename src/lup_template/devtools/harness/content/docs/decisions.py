@@ -1,6 +1,12 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.decisions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+"""Architectural decisions behind the development tooling."""
 
-# Development-tooling decisions
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    source=__name__,
+    parts=[
+        models.TextPart(
+            text=r"""# Development-tooling decisions
 
 These records capture the architectural constraints behind Lup's development
 tooling. Each decision is stated against the current system; repository
@@ -202,3 +208,7 @@ matches the whole `lup` package rather than an enumerated import closure so
 a new generation dependency cannot silently escape it.
 
 [README.md](README.md) indexes every guide these decisions govern.
+"""
+        )
+    ],
+)

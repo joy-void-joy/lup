@@ -144,6 +144,28 @@ class TextPart(SemanticPart):
         return self.text
 
 
+class SpellingExample(SemanticPart):
+    """Prose whose subject is a runtime's own spelling, quoted verbatim.
+
+    Ordinary prose refuses a rendered invocation because a reader on the other
+    runtime cannot use one. A document *comparing* the runtimes has to quote
+    both, so the exemption is declared here rather than left as a rule that
+    quietly does not fire. It is deliberately narrow: the same words reach
+    every tree, so this can only ever exhibit a spelling — never issue one,
+    which is what :class:`SkillInvocation` is for.
+    """
+
+    type: Literal["spelling_example"] = "spelling_example"
+    text: str
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return self.text
+
+    @property
+    def text_payload(self) -> str:
+        return self.text
+
+
 class InvocationArgument(BaseModel):
     model_config = FROZEN
 
@@ -345,6 +367,7 @@ class ArgumentsRef(SemanticPart):
 
 type PromptPart = Annotated[
     TextPart
+    | SpellingExample
     | SkillInvocation
     | NativePath
     | PluginPath

@@ -1,6 +1,14 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.native_capabilities by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+# lup: ignore[native-spelling]
+# The ledger names the native trees each probed contract writes to.
+"""The evidence ledger of accepted native contracts."""
 
-# Native capability evidence
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    source=__name__,
+    parts=[
+        models.TextPart(
+            text=r"""# Native capability evidence
 
 This ledger records the native contracts accepted for Lup 0.2. Runtime
 versions are evidence boundaries, not branches in shared orchestration. A
@@ -64,3 +72,7 @@ part of probing.
 - Live authenticated provider smoke tests remain locally opt-in through the
   integration marker, run on the credentials-gated nightly lane, and are not
   inferred from unit fixtures.
+"""
+        )
+    ],
+)

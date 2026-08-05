@@ -9,7 +9,7 @@ portable contracts. *Outward*: a library module may not decide for its
 adopters — a declared data table has to be reachable as an overridable
 default, so an adopter replaces the vocabulary rather than editing the library
 (``library-default``, the mechanical half of the placement criterion in
-``docs/library-boundary.md``).
+``docs/library.md``).
 
 A deliberate exception uses the typed ``# lup: ignore[<rule-id>]`` on the
 offending line or as a file-level directive, with a reason.

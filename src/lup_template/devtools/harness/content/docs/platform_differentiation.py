@@ -1,6 +1,14 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.platform_differentiation by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+# lup: ignore[native-spelling]
+# This map's subject matter is the native spellings themselves.
+"""Every intended Claude/Codex difference and the parity audit."""
 
-# Platform differentiation and parity
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    source=__name__,
+    parts=[
+        models.TextPart(
+            text=r"""# Platform differentiation and parity
 
 One portable declaration, two native renderings. `portable_harness()` in
 `src/lup_template/devtools/harness/catalog.py` is deliberately singular: the
@@ -33,7 +41,21 @@ each platform's native format — never byte parity.
 
 | Concern | Claude | Codex | Why it differs (all deliberate) |
 | --- | --- | --- | --- |
-| Skill invocation spelling | `/lup:<skill>` (`ClaudeSpellings.render`) | `$lup:<skill>` (`CodexSpellings.render`) | Native sigils. Canonical content stores `SkillInvocation` parts; only the vocabularies spell them. `SkillPattern` carries the placeholder or wildcard form a prompt uses when it teaches the shape of an invocation instead of issuing one. |
+"""
+        ),
+        models.SpellingExample(
+            text=(
+                "| Skill invocation spelling | `/lup:<skill>` "
+                "(`ClaudeSpellings.render`) | `$lup:<skill>` "
+                "(`CodexSpellings.render`) | Native sigils. Canonical content "
+                "stores `SkillInvocation` parts; only the vocabularies spell "
+                "them. `SkillPattern` carries the placeholder or wildcard form "
+                "a prompt uses when it teaches the shape of an invocation "
+                "instead of issuing one. |"
+            )
+        ),
+        models.TextPart(
+            text=r"""
 | Prompt compilation | `ClaudeSpellings`: `$ARGUMENTS` for `ArgumentsRef`, the structured-question tool for `AskUser`, a delegation call for `Delegate` | `CodexSpellings`: prose arguments reference, a direct instruction to ask, a custom-agent delegation | One neutral `SpelledPromptRenderer` walks the parts; each runtime supplies a `NativeSpellings` for every native word. A new part adds an abstract method neither runtime can be constructed without answering. |
 | Harness locations in prose | `.claude/CLAUDE.md`, `.claude/settings.json`, `.claude/plugins/lup/commands/`, … | `AGENTS.md`, `.codex/config.toml`, `.codex/plugins/lup/skills/`, … | `NativePath` and `PluginPath` name a location semantically. `scope="this_tree"` resolves to the reader's own tree; `scope="every_tree"` renders every runtime's spelling in one identical string, which is how prose teaches both at once. |
 | Model choice | `model: opus \| sonnet \| haiku \| inherit` in agent frontmatter | row omitted | Agent declarations carry a portable `ModelTier`. Recorded evidence for Codex custom agents covers TOML parsing only, so no alias is proven to spell a tier in; omitting the row inherits the session model. |
@@ -45,7 +67,18 @@ each platform's native format — never byte parity.
 | Hook dispatch | Matcher `WebFetch\|Bash\|Edit\|Write`; dispatcher returns structured allow/ask/deny JSON, or no decision to defer a size-only edit to the client's permission mode; edit preimages are inspected (protected paths, marker counts, size, anti-patterns) | Matcher `Bash\|apply_patch\|web_fetch`; dispatcher approximates `ask` as fail-closed exit code 2 and treats a deferred edit as exit 0; `apply_patch` input is opaque and always asks | Claude hooks support structured decisions and edit introspection; Codex hooks do not, so the same semantic kernel (`lup.policy`, identical generated `runtime/kernel.py`) is wrapped in a fail-closed shell. |
 | Autonomous edit identities | `policy_data.py` grants the resolver's `worker_identity`, bare and plugin-qualified, from the hook payload or the session environment | Same identity, from the session environment only | Both lists are derived from `ResolveSpec.worker_identity`, so neither runtime can ship an empty one by omission. Codex hook payloads carry no agent identity, which is why the environment is the channel that reaches every session on both runtimes. |
 | OS sandbox boundary | The `HookSandbox` declaration compiles into the `settings.json` `sandbox` block (bwrap network allowlist, human-owned write denials, credential read denials); the launcher verifies `bwrap`/`socat` before exporting `LUP_SANDBOX_ACTIVE` | The launcher establishes an explicit `--sandbox workspace-write` envelope on the interactive command line and exports the flag only for an envelope it set itself; a caller-supplied sandbox flag keeps the deny lattice active | Codex sandbox config has no per-path write denials or domain allowlist, so its envelope is the declaration's strict subset (network off); the resolver paths carry their own explicit envelopes on both platforms. |
-| Resolver entry | `/lup:resolve` instructs `uv run lup-devtools harness resolve --adapter claude` | `$lup:resolve` instructs the same command with `--adapter codex` | Both entries only launch the shared persisted Python resolver, and differ solely in the adapter they name — `ResolverEntry` is deliberately undifferentiated because workflow scripts execute in an isolated VM with no shell, leaving the Claude entry nothing to wrap. The entry contract is the CLI's: optional `--run-id <id>` (resume), `--accept`/`--reject` (record the human decision), and repeatable `--answer`. Both rendered entries document it (pinned by `test_generated_resolver_entries_only_launch_the_shared_python_core`, which also asserts no `Workflow(` wrapper appears). |
+"""
+        ),
+        models.SpellingExample(
+            text=(
+                "| Resolver entry | `/lup:resolve` instructs `uv run "
+                "lup-devtools harness resolve --adapter claude` | "
+                "`$lup:resolve` instructs the same command with "
+                "`--adapter codex` |"
+            )
+        ),
+        models.TextPart(
+            text=r""" Both entries only launch the shared persisted Python resolver, and differ solely in the adapter they name — `ResolverEntry` is deliberately undifferentiated because workflow scripts execute in an isolated VM with no shell, leaving the Claude entry nothing to wrap. The entry contract is the CLI's: optional `--run-id <id>` (resume), `--accept`/`--reject` (record the human decision), and repeatable `--answer`. Both rendered entries document it (pinned by `test_generated_resolver_entries_only_launch_the_shared_python_core`, which also asserts no `Workflow(` wrapper appears). |
 | Downstream template guidance | `.claude/plugins/lup/TEMPLATE_CLAUDE.md` from `content/template_claude.py` | `.codex/plugins/lup/TEMPLATE_AGENTS.md` from `content/template_codex.py` | Both flavors compose the portable sections in `content/template_sections.py`; only platform slices (guidance-file names, meta-agent naming, edit-hook vs opaque-patch guidance, LSP vs CLI diagnostics, settings, communication idiom) differ. |
 | Launch and trust | Launches the verified local plugin directory with `--plugin-dir`; `CLAUDE_CONFIG_DIR` selects the profile | Seeds a persistent per-worktree home from personal authentication and settings, installs and verifies the plugin there; explicit `--codex-home`/`CODEX_HOME` overrides bypass isolation | Native trust models: Claude trusts the workspace plugin, while Codex requires an installed cache and keeps plugin identity in home-level config. |
 | Runtime preflight | `claude` CLI version, plugin support, `plugin validate` | `codex` CLI version and cache digest evidence | Each side probes only its own native capabilities (`harness_runtime.py` in each adapter). |
@@ -88,3 +121,7 @@ to declare names them as the closed type spells them. And the SDK symbols in
 the guidance's Type Safety section stay literal too — they are importable names
 from the library this template builds on, needed verbatim by a reader on either
 runtime.
+"""
+        ),
+    ],
+)

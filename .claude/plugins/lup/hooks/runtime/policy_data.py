@@ -1,5 +1,5 @@
 # Generated from lup.policy.bundle by `uv run lup-devtools harness generate all` — edit the source, not this file.
-# See docs/generated-artifacts.md.
+# See docs/harness.md.
 
 """Generated application-owned policy data."""
 

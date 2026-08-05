@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.dev.rules by `uv run lup-devtools dev rules` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from lup_template.devtools.dev.rules by `uv run lup-devtools dev rules` — edit the source, not this file. See docs/harness.md. -->
 
 # Lup rule reference
 
