@@ -41,12 +41,20 @@ def test_ts_table_matches_generated_bundle() -> None:
 
 STRONG_RULE_IDS = {
     "generic-base",
+    "tuple-shape",
     "typing-generics",
     "typing-union",
     "utcnow",
     "var-declaration",
 }
 """The rules whose replacement the language itself provides.
+
+Most are successor spellings, where the replacement is the same type written
+the modern way. ``tuple-shape`` is the one that changes the type rather than
+its spelling: a `TypedDict` names what each position meant. It is strong only
+because its pattern was narrowed to fixed arity first — `tuple[X, ...]` is an
+immutable sequence with no field names to give, and a rule that demanded them
+would be demanding something that does not exist.
 
 Pinned so that promoting a rule stays a decision someone made rather than one
 that arrived with a sweep, and so demoting one cannot pass unremarked.
@@ -75,6 +83,7 @@ def test_the_hook_refuses_a_directive_the_audit_would_refuse(rule_id: str) -> No
     """
     suffix, matching = {
         "generic-base": (".py", "class Box(Generic[T]): ..."),
+        "tuple-shape": (".py", "pair: tuple[int, str] = (1, 2)"),
         "typing-generics": (".py", "values: List[int] = []"),
         "typing-union": (".py", "value: Optional[str] = None"),
         "utcnow": (".py", "stamp = datetime.utcnow()"),
@@ -640,15 +649,46 @@ def test_audit_accepts_jsonvalue_dicts() -> None:
 
 
 def test_audit_flags_tuple_variable_and_attribute_annotations() -> None:
-    # The rule catches every declared tuple shape, not just return types.
+    # The rule catches every declared fixed-arity shape, not just return types.
     for line in (
         "pair: tuple[int, str] = (1, 'a')\n",
-        "    self.pair: tuple[int, str] = pair\n",
+        "class Holder:\n    pair: tuple[int, str] = (1, 'a')\n",
         "def f() -> tuple[int, str]: ...\n",
     ):
         findings = audit_text(line, PYTHON_ANTI_PATTERNS)
         assert [f.kind for f in findings] == ["missing"], line
         assert findings[0].rule_id == "tuple-shape"
+
+
+def test_audit_leaves_variadic_tuples_alone() -> None:
+    """`tuple[X, ...]` is an immutable sequence, not a shape wanting field names.
+
+    Nesting is why the tree decides this and not a wider regex: the trailing
+    ellipsis in `tuple[dict[str, int], ...]` sits behind a bracket no character
+    class can step over.
+    """
+    for line in (
+        "names: tuple[str, ...] = ()\n",
+        "def f() -> tuple[int, ...]: ...\n",
+        "rows: tuple[dict[str, JsonValue], ...] = ()\n",
+    ):
+        assert audit_text(line, PYTHON_ANTI_PATTERNS) == [], line
+
+
+def test_a_line_mixing_both_tuple_shapes_keeps_its_finding() -> None:
+    """A variadic neighbour does not clear a fixed-arity shape on the same line."""
+    mixed = "def f(rows: tuple[str, ...]) -> tuple[int, str]: ...\n"
+    findings = audit_text(mixed, PYTHON_ANTI_PATTERNS)
+    assert [f.rule_id for f in findings] == ["tuple-shape"]
+
+
+def test_source_that_does_not_parse_reports_no_tuple_shape() -> None:
+    """A strong rule cannot deny on a verdict it has no tree to justify.
+
+    There is no directive that would rescue the site, so "cannot tell" has to
+    fail toward silence; the audit sees it again once the file parses.
+    """
+    assert audit_text("def f(  # unclosed\n", PYTHON_ANTI_PATTERNS) == []
 
 
 def test_audit_flags_declared_frozenset() -> None:

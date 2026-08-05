@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lup.codescan.common import IGNORE_RE, file_level_ignore, ignore_rule_ids
+from lup.codescan.common import file_level_ignore, ignore_rule_ids
+from lup.policy.kernel.edit import IGNORE_RE
 from lup.codescan.markers import (
     TEMPLATE_MARKER_RE,
     MarkerComment,

@@ -57,7 +57,6 @@ from lup.codescan.boundaries import (
 from lup.codescan.capabilities import RULE_ID as ABC_CAPABILITY_RULE_ID
 from lup.codescan.dispatch import RULE_ID as OWN_MODEL_DISPATCH_RULE_ID
 from lup.codescan.common import (
-    IGNORE_RE,
     LineProjections,
     PythonContext,
     Refutation,
@@ -67,8 +66,10 @@ from lup.codescan.common import (
     ignore_rule_ids,
 )
 from lup.policy.kernel.edit import (
+    IGNORE_RE,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
+    tuple_shape_exempt_lines,
 )
 
 
@@ -234,10 +235,17 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="tuple-shape",
+        strength="strong",
         pattern=re.compile(r"\btuple\["),
-        message="A declared `tuple[...]` shape hides what each position means — name the "
-        "fields with a TypedDict or BaseModel, a `type Alias = ...` for a reused shape, or "
-        "`list` for a variable-length sequence",
+        refiner=Refiner(
+            exempt=tuple_shape_exempt_lines,
+            evidence="an immutable sequence, not a positional shape",
+        ),
+        message="A fixed-arity `tuple[...]` hides what each position means — name the "
+        "fields with a BaseModel. Fall back to a TypedDict only where a model cannot go: "
+        "the hermetic kernel, which has no pydantic, or a field that must stay the caller's "
+        "own object, which validation would copy. `tuple[X, ...]` is a sequence and never "
+        "trips this",
     ),
     AntiPattern(
         # Mirrors tuple-shape for frozenset: every declared frozenset annotation

@@ -23,11 +23,11 @@ from typing import Self, get_args
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lup.codescan.common import (
-    IGNORE_RE,
     PythonContext,
     file_level_ignore,
     ignore_rule_ids,
 )
+from lup.policy.kernel.edit import IGNORE_RE
 from lup.harness.contracts import NativeSpellings
 from lup.harness.models import PluginLocation, TreeLocation
 from lup.policy.kernel.decision import KERNEL_IMPORT_ALLOWLIST

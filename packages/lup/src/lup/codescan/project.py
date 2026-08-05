@@ -23,13 +23,13 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from lup.codescan.common import (
-    IGNORE_RE,
     PythonContext,
     PythonSource,
     RuleStrength,
     file_level_ignore,
     ignore_rule_ids,
 )
+from lup.policy.kernel.edit import IGNORE_RE
 
 type FindingKind = Literal["missing", "untyped", "spurious"]
 """How a violation and the suppressions around it ended up related."""

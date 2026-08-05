@@ -1,4 +1,4 @@
-# lup: ignore[import-re, re-call, set-shape, empty-collection, tuple-shape, dict-get, string-split] — the scanner that enforces these rules is written in the vocabulary they govern
+# lup: ignore[import-re, set-shape, empty-collection, dict-get, string-split] — the scanner that enforces these rules is written in the vocabulary they govern
 """Shared scanning core for the review-marker and anti-pattern scanners.
 
 Both `lup.codescan.markers` and `lup.codescan.antipatterns` walk a file line by
@@ -27,6 +27,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict
 
 from lup.policy.kernel.edit import (
+    FILE_IGNORE_RE,
     docstring_lines as python_docstring_lines,
     mask_python_string_literals,
     python_code_lines,
@@ -52,22 +53,10 @@ on it. Those are refused, and the message says to write the replacement.
 type RuleContext = Literal["code", "comment"]
 """The syntactic surface a scan rule inspects: masked code, or comment text."""
 
-# An `ignore` directive is bare (`# lup: ignore`, silences every rule) or typed
-# pyright-style (`# lup: ignore[rule-id, other-rule]`, silences only the named
-# rules). The optional `ids` group captures the comma-separated list when typed.
-IGNORE_RE = re.compile(
-    r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?", re.IGNORECASE
-)
-# The file-level form is the same directive standing alone on its own line, so
-# the leading anchor is what separates it from a trailing inline one. It may
-# carry a reason after the ids, introduced by a dash or a colon the way the
-# inline form and `defer[<condition>]:` already do — a suppression that cannot
-# say why it exists is the shape these rules were written to discourage.
-FILE_IGNORE_RE = re.compile(
-    r"^\s*(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?"
-    r"\s*(?:[-—–:]\s*(?P<reason>\S.*?))?\s*$",
-    re.IGNORECASE,
-)
+# Both directive spellings come from the kernel rather than being restated
+# here. The hook and this audit have to agree on what a directive *is* before
+# they can agree on what it silences, and two regexes drifted apart is exactly
+# how a file ends up exempt to one gate and denied by the other.
 
 
 def ignore_rule_ids(match: re.Match[str]) -> set[str] | None:
@@ -257,6 +246,20 @@ class LineProjections(BaseModel):
         return lines[line_no - 1].strip()
 
 
+class NumberedLine(BaseModel):
+    """One line of a scanned file, and its 1-based number."""
+
+    number: int
+    text: str
+
+
+class MappedLine[T](BaseModel):
+    """What a mapper made of one line, and the 1-based number it came from."""
+
+    number: int
+    value: T
+
+
 class LineCursor:
     """Forward cursor over a file's lines with a take-a-run helper.
 
@@ -274,28 +277,28 @@ class LineCursor:
     def __iter__(self) -> Self:
         return self
 
-    def __next__(self) -> tuple[int, str]:
+    def __next__(self) -> NumberedLine:
         if self.pos >= len(self.lines):
             raise StopIteration
         line = self.lines[self.pos]
         self.pos += 1
-        return self.pos, line
+        return NumberedLine(number=self.pos, text=line)
 
     def take_mapping[T](
         self, mapper: Callable[[int, str], T | None]
-    ) -> list[tuple[int, T]]:
+    ) -> list[MappedLine[T]]:
         """Consume and map following lines until `mapper` returns ``None``.
 
         The rejecting line is left unconsumed for the next `__next__`. A mapper
         may return a falsy-but-not-``None`` value (an empty continuation line),
         which is kept; only ``None`` ends the run.
         """
-        taken: list[tuple[int, T]] = []
+        taken: list[MappedLine[T]] = []
         while self.pos < len(self.lines):
             line_no = self.pos + 1
             mapped = mapper(line_no, self.lines[self.pos])
             if mapped is None:
                 break
             self.pos += 1
-            taken.append((line_no, mapped))
+            taken.append(MappedLine(number=line_no, value=mapped))
         return taken

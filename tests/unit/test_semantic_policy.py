@@ -1333,6 +1333,71 @@ def test_declaring_a_suppression_still_asks() -> None:
     assert decision.reason.startswith("edit introduces an antipattern suppression")
 
 
+def test_dropping_one_rule_from_a_suppression_needs_no_approval() -> None:
+    """Shrinking a directive is what the audit asks for when it calls one spurious.
+
+    Reading the added line alone cannot tell this from a suppression appearing
+    out of nowhere, so the gate used to ask — and the audit was already
+    demanding the very edit it asked to approve.
+    """
+    policy = EditPolicy(protected=[])
+    narrowed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore[any-type, dict-get]\nvalue = 1\n",
+                after="# lup: ignore[any-type]\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(narrowed).effect == "allow"
+
+
+def test_a_bare_suppression_narrowed_to_named_rules_needs_no_approval() -> None:
+    """The bare directive covers every rule, so naming a few can only shrink it."""
+    policy = EditPolicy(protected=[])
+    typed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore\nvalue = 1\n",
+                after="# lup: ignore[any-type]\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(typed).effect == "allow"
+
+
+def test_widening_a_suppression_still_asks() -> None:
+    """Adding a rule to a directive silences something it did not before."""
+    policy = EditPolicy(protected=[])
+    widened = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore[any-type]\nvalue = 1\n",
+                after="# lup: ignore[any-type, dict-get]\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(widened).effect == "ask"
+
+
+def test_a_named_suppression_going_bare_still_asks() -> None:
+    """Dropping the names widens the directive to every rule."""
+    policy = EditPolicy(protected=[])
+    widened = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore[any-type]\nvalue = 1\n",
+                after="# lup: ignore\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(widened).effect == "ask"
+
+
 def test_prose_mentioning_a_suppression_is_not_declaring_one() -> None:
     """Documenting the escape hatch is neither a note nor a directive."""
     policy = EditPolicy(protected=[])
