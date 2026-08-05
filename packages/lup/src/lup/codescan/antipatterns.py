@@ -275,8 +275,10 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             evidence="a deliberate default, not a build-then-append seed",
         ),
         message="Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an "
-        "append/mutate loop — build the collection with a comprehension instead, or add "
-        "`# lup: ignore[empty-collection]` for a fold no comprehension can express",
+        "append/mutate loop — build the collection with a comprehension, or, when the "
+        "loop carries control flow a comprehension cannot, `yield` the items from a "
+        "nested function and let its caller collect them. Add "
+        "`# lup: ignore[empty-collection]` only for a fold neither expresses",
     ),
     AntiPattern(
         id="cast",

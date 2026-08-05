@@ -3,11 +3,19 @@
 import html
 from pathlib import Path
 
+from lup.codescan.common import RuleStrength
 from lup.codescan.registry import RegisteredRule, all_rules
 from lup.harness.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
 from lup.workspace.paths import project_root
+
+
+SUPPRESSION_CELL: dict[RuleStrength, str] = {
+    "soft": "typed directive",
+    "strong": "**refused**",
+}
+"""What each strength offers a reader who has just been denied by a rule."""
 
 
 def markdown_cell(value: str) -> str:
@@ -29,13 +37,15 @@ def render_rule_reference() -> str:
 
     def table(rows: list[RegisteredRule]) -> str:
         lines = [
-            "| Rule id | Family | Scope | Matching example | Diagnostic | Defined in |",
-            "|---|---|---|---|---|---|",
+            "| Rule id | Family | Scope | Matching example | Diagnostic | "
+            "Suppression | Defined in |",
+            "|---|---|---|---|---|---|---|",
             *[
                 "| "
                 f"`{row.id}` | {row.family} | {markdown_cell(row.scope)} | "
                 f"<code>{markdown_cell(row.example)}</code> | "
-                f"{markdown_cell(row.message)} | `{row.defined_in}` |"
+                f"{markdown_cell(row.message)} | {SUPPRESSION_CELL[row.strength]} | "
+                f"`{row.defined_in}` |"
                 for row in rows
             ],
         ]
@@ -63,6 +73,14 @@ def render_rule_reference() -> str:
         "`# lup: ignore` remains parseable but is reported as untyped; a stale typed "
         "directive is blocking. `# noqa`, `# type: ignore`, and `# pyright: ignore` "
         "are separate forbidden shapes.\n\n"
+        "The **Suppression** column says whether a directive reaches a rule at all. "
+        "Most are soft: they name a shape that is usually wrong and occasionally the "
+        "only thing that works, so a typed directive is a reasoned exception and the "
+        "audit grades it. A rule marked **refused** is strong — its replacement is "
+        "right every time, which leaves a directive nothing to express but a decision "
+        "to keep the defect. Those rules ignore every directive, report the violation "
+        "anyway, and report the directive itself as spurious; the only way past one is "
+        "to write the replacement its diagnostic names.\n\n"
         "```python\n"
         "cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold\n"
         "```\n\n"

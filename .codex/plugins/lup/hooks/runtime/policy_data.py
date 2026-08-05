@@ -455,7 +455,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "empty-collection",
             "pattern": "(?<![=!<>])=\\s*(?:\\{\\}|\\[\\]|set\\(\\))",
-            "message": "Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an append/mutate loop \u2014 build the collection with a comprehension instead, or add `# lup: ignore[empty-collection]` for a fold no comprehension can express",
+            "message": "Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an append/mutate loop \u2014 build the collection with a comprehension, or, when the loop carries control flow a comprehension cannot, `yield` the items from a nested function and let its caller collect them. Add `# lup: ignore[empty-collection]` only for a fold neither expresses",
             "context": "code",
         },
         {
@@ -709,7 +709,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "empty-collection",
             "pattern": "(?<![=!<>])=\\s*(?:\\{\\}|\\[\\]|set\\(\\))",
-            "message": "Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an append/mutate loop \u2014 build the collection with a comprehension instead, or add `# lup: ignore[empty-collection]` for a fold no comprehension can express",
+            "message": "Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an append/mutate loop \u2014 build the collection with a comprehension, or, when the loop carries control flow a comprehension cannot, `yield` the items from a nested function and let its caller collect them. Add `# lup: ignore[empty-collection]` only for a fold neither expresses",
             "context": "code",
         },
         {
