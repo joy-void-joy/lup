@@ -66,6 +66,12 @@ class AntiPatternRow(TypedDict):
     pattern: str
     message: str
     context: str
+    strength: str
+    """"strong" when no directive may silence this rule, "soft" when one may.
+
+    The audit refuses a directive on a strong rule; the hook has to refuse the
+    same one, or an edit the hook admits is an edit `dev check` then rejects.
+    """
 
 
 class ShellRuleRow(TypedDict):

@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
-from lup.codescan.antipatterns import patterns_for_suffix
+from lup.codescan.antipatterns import AntiPattern, patterns_for_suffix
 from lup.policy.contracts import DecisionPolicy
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import (
@@ -234,20 +234,28 @@ def path_rule_matches(path: Path, rule: PathRule) -> bool:
     return kernel_path_rule_matches(path.as_posix(), path.exists(), path_rule_row(rule))
 
 
+def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
+    """Erase one declared rule into the primitive row the kernel matches on.
+
+    The single projection from the declaration to the runtime shape. Both the
+    live policy and the bundled hermetic runtime go through it, so a field the
+    declaration gains cannot reach one gate and not the other.
+    """
+    return AntiPatternRow(
+        id=rule.id,
+        pattern=rule.pattern.pattern,
+        message=rule.message,
+        context=rule.context,
+        strength=rule.strength,
+    )
+
+
 def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
     """Compile rules selected by one edit path into primitive kernel rows."""
     patterns = patterns_for_suffix(change.path.suffix.lower())
     if patterns is None:
         return []
-    return [
-        AntiPatternRow(
-            id=rule.id,
-            pattern=rule.pattern.pattern,
-            message=rule.message,
-            context=rule.context,
-        )
-        for rule in patterns
-    ]
+    return [antipattern_row(rule) for rule in patterns]
 
 
 class EditPolicy(DecisionPolicy[EditBatch]):

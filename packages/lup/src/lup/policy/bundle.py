@@ -28,7 +28,7 @@ from lup.policy.kernel.rows import (
     UrlScopeRow,
 )
 from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
-from lup.policy.rules import human_owned_path_rule, path_rule_row
+from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
 
 
 class KernelModule(BaseModel):
@@ -58,24 +58,8 @@ def bundled_antipattern_rows(
 ) -> dict[str, list[AntiPatternRow]]:
     """Compile primitive runtime rows directly from canonical rule objects."""
     declared = rules or AntiPatternSet()
-    python_rows = [
-        AntiPatternRow(
-            id=rule.id,
-            pattern=rule.pattern.pattern,
-            message=rule.message,
-            context=rule.context,
-        )
-        for rule in declared.python
-    ]
-    typescript_rows = [
-        AntiPatternRow(
-            id=rule.id,
-            pattern=rule.pattern.pattern,
-            message=rule.message,
-            context=rule.context,
-        )
-        for rule in declared.typescript
-    ]
+    python_rows = [antipattern_row(rule) for rule in declared.python]
+    typescript_rows = [antipattern_row(rule) for rule in declared.typescript]
     return {
         ".py": python_rows,
         ".pyi": python_rows,
@@ -198,15 +182,14 @@ def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
     for suffix, patterns in sorted(rows.items()):
         lines.append(f"    {json.dumps(suffix)}: [")
         for row in patterns:
-            block = (
-                "        {\n"
-                f'            "id": {json.dumps(row["id"])},\n'
-                f'            "pattern": {json.dumps(row["pattern"])},\n'
-                f'            "message": {json.dumps(row["message"])},\n'
-                f'            "context": {json.dumps(row["context"])},\n'
-                "        },"
+            # Rendered from the row's own keys rather than a list of them: a
+            # field added to AntiPatternRow reaches the hermetic runtime by
+            # construction, instead of being dropped until someone notices.
+            fields = "\n".join(
+                f"            {json.dumps(key)}: {json.dumps(value)},"
+                for key, value in row.items()
             )
-            lines.append(block)
+            lines.append(f"        {{\n{fields}\n        }},")
         lines.append("    ],")
     lines.append("}")
     return "\n".join(lines)

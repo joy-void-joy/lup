@@ -7,7 +7,7 @@ import io
 import posixpath
 import re
 import tokenize
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 from .decision import KernelDecision
 from .roles import path_role
@@ -517,6 +517,49 @@ def suppression_reason(sites: list[str]) -> str:
     return "edit introduces an antipattern suppression\n" + "\n".join(sites)
 
 
+def anti_pattern_hits(
+    added: dict[int, bool],
+    rows: list[AntiPatternRow],
+    code_lines: list[str],
+    scanned_lines: list[str],
+    exempt: dict[str, set[int]],
+    tokenized: bool,
+) -> Iterator[tuple[int, AntiPatternRow]]:
+    """Every added line and the rule it matches, before suppressions apply.
+
+    Separating matching from deciding is what lets the strong rules be
+    consulted ahead of the suppression gate without the match logic existing
+    twice — two copies being how a gate starts disagreeing with itself.
+    """
+    for number in added:
+        masked = scanned_lines[number - 1].strip()
+        if not tokenized and masked.startswith("#") and "type:" not in masked:
+            continue
+        code = code_lines[number - 1].strip()
+        for row in rows:
+            stripped = code if tokenized and row["context"] == "code" else masked
+            if not stripped:
+                continue
+            if row["id"] in exempt and number in exempt[row["id"]]:
+                continue
+            if re.search(row["pattern"], stripped) is not None:
+                yield number, row
+
+
+def anti_pattern_denial(number: int, row: AntiPatternRow) -> KernelDecision:
+    """Deny one matched line, saying whether a directive could have helped."""
+    refusal = (
+        " (no suppression: write the replacement)"
+        if row["strength"] == "strong"
+        else ""
+    )
+    return KernelDecision(
+        "deny",
+        f"line {number}: {row['message']}{refusal} "
+        f"(rule {row['id']} — see docs/rules.md)",
+    )
+
+
 def antipattern_decision(
     before: str | None,
     after: str,
@@ -560,39 +603,36 @@ def antipattern_decision(
             )
         ):
             declared.append(suppression_site(number, original))
+    tokenized = comment_columns is not None
+    hits = list(
+        anti_pattern_hits(added, rows, code_lines, scanned_lines, exempt, tokenized)
+    )
+
+    # A strong rule outranks every suppression below it, including the declared
+    # gate: its replacement is right every time, so a directive beside it
+    # expresses nothing a human should be asked to approve — and approving one
+    # would admit an edit `dev check` then refuses.
+    for number, row in hits:
+        if row["strength"] == "strong":
+            return anti_pattern_denial(number, row)
+
     if declared:
         return KernelDecision(suppression, suppression_reason(declared))
-    tokenized = comment_columns is not None
-    for number in added:
-        masked = scanned_lines[number - 1].strip()
-        if not tokenized and masked.startswith("#") and "type:" not in masked:
+
+    for number, row in hits:
+        rule_id = row["id"]
+        if has_file_ignore and (disabled_ids is None or rule_id in disabled_ids):
             continue
-        code = code_lines[number - 1].strip()
-        for row in rows:
-            rule_id = row["id"]
-            message = row["message"]
-            stripped = code if tokenized and row["context"] == "code" else masked
-            if not stripped:
-                continue
-            if rule_id in exempt and number in exempt[rule_id]:
-                continue
-            if re.search(row["pattern"], stripped) is None:
-                continue
-            if has_file_ignore and (disabled_ids is None or rule_id in disabled_ids):
-                continue
-            original = original_lines[number - 1]
-            directive = IGNORE_RE.search(original)
-            if directive is not None:
-                covered = ignore_rule_ids(directive)
-                if covered is None or rule_id in covered:
-                    return KernelDecision(
-                        suppression,
-                        suppression_reason([suppression_site(number, original)]),
-                    )
-            return KernelDecision(
-                "deny",
-                f"line {number}: {message} (rule {rule_id} — see docs/rules.md)",
-            )
+        original = original_lines[number - 1]
+        directive = IGNORE_RE.search(original)
+        if directive is not None:
+            covered = ignore_rule_ids(directive)
+            if covered is None or rule_id in covered:
+                return KernelDecision(
+                    suppression,
+                    suppression_reason([suppression_site(number, original)]),
+                )
+        return anti_pattern_denial(number, row)
     return None
 
 

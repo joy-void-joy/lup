@@ -8,6 +8,8 @@ projection and audit missing, untyped, and spurious suppressions.
 
 import re
 
+import pytest
+
 from lup.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
     TS_ANTI_PATTERNS,
@@ -16,23 +18,17 @@ from lup.codescan.antipatterns import (
 )
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
+    antipattern_decision,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
     refiner_for,
 )
 from lup.policy.kernel.rows import AntiPatternRow
+from lup.policy.rules import antipattern_row
 
 
 def lib_rows(patterns: list[AntiPattern]) -> list[AntiPatternRow]:
-    return [
-        AntiPatternRow(
-            id=ap.id,
-            pattern=ap.pattern.pattern,
-            message=ap.message,
-            context=ap.context,
-        )
-        for ap in patterns
-    ]
+    return [antipattern_row(ap) for ap in patterns]
 
 
 def test_python_table_matches_generated_bundle() -> None:
@@ -41,6 +37,74 @@ def test_python_table_matches_generated_bundle() -> None:
 
 def test_ts_table_matches_generated_bundle() -> None:
     assert lib_rows(TS_ANTI_PATTERNS) == bundled_antipattern_rows()[".ts"]
+
+
+STRONG_RULE_IDS = {
+    "generic-base",
+    "typing-generics",
+    "typing-union",
+    "utcnow",
+    "var-declaration",
+}
+"""The rules whose replacement the language itself provides.
+
+Pinned so that promoting a rule stays a decision someone made rather than one
+that arrived with a sweep, and so demoting one cannot pass unremarked.
+"""
+
+
+def test_the_strong_classification_is_the_declared_one() -> None:
+    declared = {
+        rule.id
+        for table in (PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS)
+        for rule in table
+        if rule.strength == "strong"
+    }
+
+    assert declared == STRONG_RULE_IDS
+
+
+@pytest.mark.parametrize("rule_id", sorted(STRONG_RULE_IDS))
+def test_the_hook_refuses_a_directive_the_audit_would_refuse(rule_id: str) -> None:
+    """Both gates decide alike, or an admitted edit fails `dev check`.
+
+    The kernel matches erased rows, so a strength the declaration carries and
+    the projection drops would leave the hook honouring a directive the audit
+    reports spurious — an edit permitted at the point of writing and rejected
+    at the point of checking.
+    """
+    suffix, matching = {
+        "generic-base": (".py", "class Box(Generic[T]): ..."),
+        "typing-generics": (".py", "values: List[int] = []"),
+        "typing-union": (".py", "value: Optional[str] = None"),
+        "utcnow": (".py", "stamp = datetime.utcnow()"),
+        "var-declaration": (".ts", "var count = 1;"),
+    }[rule_id]
+    rows = [row for row in bundled_antipattern_rows()[suffix] if row["id"] == rule_id]
+    assert rows, rule_id
+    assert rows[0]["strength"] == "strong"
+
+    decision = antipattern_decision(
+        None,
+        f"{matching}  // lup: ignore[{rule_id}]\n"
+        if suffix == ".ts"
+        else f"{matching}  # lup: ignore[{rule_id}]\n",
+        rows,
+        python_source=suffix == ".py",
+    )
+
+    assert decision is not None
+    assert decision.effect == "deny"
+    assert "write the replacement" in decision.reason
+
+
+def test_a_soft_rule_is_still_honoured_by_the_hook() -> None:
+    rows = [row for row in bundled_antipattern_rows()[".py"] if row["id"] == "any-type"]
+    decision = antipattern_decision(
+        None, "value: Any = 1  # lup: ignore[any-type]\n", rows, python_source=True
+    )
+
+    assert decision is None or decision.effect != "deny"
 
 
 def test_rule_ids_are_unique_kebab_case() -> None:
