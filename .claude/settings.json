@@ -28,7 +28,9 @@
       "Skill(lup:hooks)",
       "Read(./.claude/settings.json.local*)",
       "Read(./sync.json.local)",
-      "Read(./downstream.json.local)"
+      "Read(./downstream.json.local)",
+      "mcp__plugin_lup_notes",
+      "mcp__plugin_lup_sandbox"
     ],
     "deny": [
       "Read(./**/.env*.local)",

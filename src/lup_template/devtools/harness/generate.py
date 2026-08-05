@@ -193,7 +193,7 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
         Artifact(
             path=Path(".claude/settings.json"),
             content=json.dumps(
-                project_settings(source.plugins[0].hooks), indent=2, sort_keys=True
+                project_settings(source.plugins[0]), indent=2, sort_keys=True
             ),
             semantic_id="harness.project-settings",
         ),

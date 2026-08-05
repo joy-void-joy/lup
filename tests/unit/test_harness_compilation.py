@@ -1948,9 +1948,10 @@ def test_proposal_rewrite_is_idempotent_but_tampering_refuses(tmp_path: Path) ->
 
 
 def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
-    hooks = portable_harness().plugins[0].hooks
+    plugin = portable_harness().plugins[0]
+    hooks = plugin.hooks
     assert hooks is not None
-    settings = project_settings(hooks)
+    settings = project_settings(plugin)
     sandbox = settings["sandbox"]
     assert isinstance(sandbox, dict)
     filesystem = sandbox["filesystem"]
@@ -1962,6 +1963,22 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     assert "code.claude.com" in domains
     assert "github.com" in domains
     assert "sandbox" not in project_settings(None)
+
+
+def test_a_declared_tool_server_is_granted_rather_than_asked_about() -> None:
+    """A server the harness wires in is this project's own code.
+
+    The grant names each server by the scoped name a runtime addresses a
+    plugin's server by; the bare key it is declared under matches nothing.
+    """
+    plugin = portable_harness().plugins[0]
+    permissions = project_settings(plugin)["permissions"]
+    assert isinstance(permissions, dict)
+    allowed = permissions["allow"]
+    assert isinstance(allowed, list)
+    for server in plugin.mcp_servers:
+        assert f"mcp__plugin_{plugin.name}_{server.name}" in allowed
+    assert "WebSearch" in allowed
 
 
 def test_codex_sandbox_arguments_establish_the_envelope() -> None:
