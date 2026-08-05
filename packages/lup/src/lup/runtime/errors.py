@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.runtime.models import TurnBlock, TurnIdentifiers
+from lup.runtime.models import AnyTurnBlock, TurnIdentifiers
 from lup.types import Usage
 
 
@@ -22,7 +22,7 @@ class TurnFailure(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     message: str
-    blocks: list[TurnBlock] = Field(default_factory=list)
+    blocks: list[AnyTurnBlock] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)
     duration: timedelta = timedelta()
     identifiers: TurnIdentifiers | None = None

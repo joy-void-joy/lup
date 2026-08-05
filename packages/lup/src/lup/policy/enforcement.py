@@ -25,15 +25,13 @@ from lup.hooks import (
     deny_hook,
 )
 from lup.policy.chain import UnknownToolPolicy
-from lup.policy.contracts import DecisionPolicy
+from lup.policy.contracts import DeclaredPolicies, DecisionPolicy
 from lup.policy.models import (
     Decision,
     EditBatch,
     FetchUrl,
-    SearchWeb,
     SemanticTool,
     ShellCommand,
-    UnknownTool,
 )
 
 
@@ -56,12 +54,13 @@ def policy_hook_output(decision: Decision) -> LupHookOutput:
 
 
 class SemanticToolPolicy(DecisionPolicy[SemanticTool]):
-    """Route each semantic tool to the policy that judges its family.
+    """Hold the declared policies and let each tool find its own.
 
-    An undeclared family asks rather than allows: a composition that wires
-    fetch scopes and forgets shell must stop at a human, not wave the
-    command through. Search and unclassified tools have no rule surface at
-    all, so they always ask.
+    The tool answers rather than this class deciding, so a new kind of tool
+    is a class beside the others rather than an arm here that a reader has
+    to remember to add. What that costs a composition is stated where the
+    tools implement it: an undeclared family asks rather than allows, and
+    search and unclassified tools have no rule surface at all.
     """
 
     def __init__(
@@ -71,38 +70,12 @@ class SemanticToolPolicy(DecisionPolicy[SemanticTool]):
         shell: DecisionPolicy[ShellCommand] | None = None,
         edit: DecisionPolicy[EditBatch] | None = None,
     ) -> None:
-        self.fetch = fetch
-        self.shell = shell
-        self.edit = edit
-        self.unknown = UnknownToolPolicy()
+        self.policies = DeclaredPolicies(
+            unknown=UnknownToolPolicy(), fetch=fetch, shell=shell, edit=edit
+        )
 
     def decide(self, event: SemanticTool) -> Decision:
-        def undeclared(family: str) -> Decision:
-            return Decision(
-                effect="ask",
-                reason=f"no {family} policy is declared, so this call needs approval",
-            )
-
-        match event:
-            case FetchUrl():
-                if self.fetch is None:
-                    return undeclared("fetch")
-                return self.fetch.decide(event)
-            case ShellCommand():
-                if self.shell is None:
-                    return undeclared("shell")
-                return self.shell.decide(event)
-            case EditBatch():
-                if self.edit is None:
-                    return undeclared("edit")
-                return self.edit.decide(event)
-            case SearchWeb(query=query):
-                return Decision(
-                    effect="ask",
-                    reason=f"web search {query!r} is not covered by policy",
-                )
-            case UnknownTool():
-                return self.unknown.decide(event)
+        return event.decide_under(self.policies)
 
 
 type SemanticDecoder = Callable[[LupHookInput], SemanticTool]

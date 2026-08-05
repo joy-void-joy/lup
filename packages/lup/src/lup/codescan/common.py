@@ -20,7 +20,7 @@ reason attached.
 """
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Set as AbstractSet
 from pathlib import Path, PurePosixPath
 from typing import Literal, Self
 
@@ -97,6 +97,17 @@ def file_level_ignore(text: str, max_lines: int = 10) -> FileIgnore | None:
     return None
 
 
+# lup: ignore[library-default] — this library's own import root, fixed by the
+# name it is distributed under rather than by any adopter's taste.
+LIBRARY_PACKAGE_ROOT = "lup"
+
+PACKAGE_ROOTS = frozenset({LIBRARY_PACKAGE_ROOT})  # lup: ignore[frozenset-shape]
+"""Import roots a scan resolves module names against, by default this library's
+own. An application adds the package it publishes, whose name it alone knows —
+initialization renames it, so a value written down here would go on naming a
+package that no longer exists and silently resolve nothing."""
+
+
 class PythonSource(BaseModel):
     """One import-resolvable Python module a project-wide scanner reads.
 
@@ -112,18 +123,23 @@ class PythonSource(BaseModel):
     text: str
 
 
-def module_name(path: Path) -> str:
-    """Infer a dotted module name from a repository-relative Python path."""
+def module_name(path: Path, roots: AbstractSet[str] = PACKAGE_ROOTS) -> str:
+    """Infer a dotted module name from a repository-relative Python path.
+
+    A distribution laid out as ``packages/<name>/src/<name>/…`` repeats its
+    name in the directory above ``src``, so the import root is the one ``src``
+    introduces rather than the first segment that happens to match. Taking the
+    first match instead resolves ``packages/lup/src/lup/harness/models.py`` to
+    ``lup.src.lup.harness.models``, which no import ever names — every
+    cross-module lookup against it silently misses.
+    """
     parts = list(PurePosixPath(path.as_posix()).parts)
-    # The innermost match is the package root. Taking the first one made
-    # `packages/lup/src/lup/x.py` resolve to `lup.src.lup.x` — the
-    # distribution directory rather than the package — so every cross-module
-    # symbol lookup missed. It degrades to fewer findings rather than wrong
-    # ones, which is why it went unnoticed.
-    roots = [
-        index for index, part in enumerate(parts) if part in {"lup", "lup_template"}
+    matched = [
+        index
+        for index, part in enumerate(parts)
+        if part in roots and (index == 0 or parts[index - 1] == "src")
     ]
-    selected = parts[roots[-1] :] if roots else parts
+    selected = parts[matched[-1] if matched else 0 :]
     if selected[-1] == "__init__.py":
         selected = selected[:-1]
     else:
@@ -131,12 +147,14 @@ def module_name(path: Path) -> str:
     return ".".join(selected)
 
 
-def sources_from_paths(paths: list[Path]) -> list[PythonSource]:
+def sources_from_paths(
+    paths: list[Path], roots: AbstractSet[str] = PACKAGE_ROOTS
+) -> list[PythonSource]:
     """Read source files and assign import-resolvable module names."""
     return [
         PythonSource(
             path=path,
-            module=module_name(path),
+            module=module_name(path, roots),
             text=path.read_text(encoding="utf-8"),
         )
         for path in paths

@@ -1,5 +1,8 @@
-# lup: ignore[bare-object]
+# lup: ignore[bare-object, own-model-dispatch]
 # Test fixtures and assertions construct these shapes deliberately.
+# The no-loss checks assert which relay-event kind survived a raising handler,
+# a non-destructive peek, and a reset — the variant is what is being observed
+# from outside the union, not a walk over it that RelayEvent could answer.
 """Behavior tests for core-library correctness fixes.
 
 Each test pins an invariant that a specific bug used to violate:

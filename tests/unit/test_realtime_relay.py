@@ -1,5 +1,9 @@
-# lup: ignore[any-type, dict-get, tuple-shape]
+# lup: ignore[any-type, dict-get, tuple-shape, own-model-dispatch]
 # Test fixtures and assertions construct these shapes deliberately.
+# The relay-event checks assert which kind the mailbox parsed back off
+# actions.jsonl, and that a redelivered batch holds the same one — the variant
+# is what is being observed from outside the union, not a walk over it that
+# RelayEvent could answer.
 """Realtime relay wiring: mailbox protocol, served tools, and the wake loop.
 
 The relay is how persistent mode works on backends whose tools run in a
@@ -31,7 +35,6 @@ from lup.realtime.relay import (
     RemindEvent,
     ReplyEvent,
     ScheduleActionEvent,
-    apply_relay_event,
     create_realtime_relay_tools,
     run_relay_session,
 )
@@ -303,7 +306,7 @@ class TestRelayTools:
         ]
 
 
-class TestApplyRelayEvent:
+class TestRelayEventApply:
     async def test_reply_delivers_and_cancels_scheduled_action(self) -> None:
         delivered: list[str] = []
 
@@ -311,13 +314,12 @@ class TestApplyRelayEvent:
             delivered.append(content)
 
         scheduler = Scheduler(on_action=on_action)
-        await apply_relay_event(
-            ScheduleActionEvent(content="nudge", delay_seconds=300),
-            scheduler=scheduler,
+        await ScheduleActionEvent(content="nudge", delay_seconds=300).apply(
+            scheduler=scheduler
         )
         assert scheduler.get_state().get("scheduled_action") is not None
 
-        await apply_relay_event(ReplyEvent(message="hello"), scheduler=scheduler)
+        await ReplyEvent(message="hello").apply(scheduler=scheduler)
         assert delivered == ["hello"]
         assert scheduler.get_state().get("scheduled_action") is None
         assert "nudge" in scheduler.ideas
@@ -327,11 +329,11 @@ class TestApplyRelayEvent:
             pass
 
         scheduler = Scheduler(on_action=on_action)
-        await apply_relay_event(
-            RemindEvent(label="check back", delay_seconds=120), scheduler=scheduler
+        await RemindEvent(label="check back", delay_seconds=120).apply(
+            scheduler=scheduler
         )
-        await apply_relay_event(
-            DebounceEvent(initial_seconds=30, quiet_seconds=5), scheduler=scheduler
+        await DebounceEvent(initial_seconds=30, quiet_seconds=5).apply(
+            scheduler=scheduler
         )
 
         state = scheduler.get_state()
@@ -348,7 +350,7 @@ class TestApplyRelayEvent:
         scheduler.wake("user_message")
         assert scheduler.wake_pending is True
 
-        await apply_relay_event(ContextReadEvent(), scheduler=scheduler)
+        await ContextReadEvent().apply(scheduler=scheduler)
         assert scheduler.wake_pending is False
 
     async def test_meta_logged_to_trace(self, tmp_path: Path) -> None:
@@ -356,8 +358,7 @@ class TestApplyRelayEvent:
             pass
 
         trace = TraceLogger(trace_path=tmp_path / "trace.md", title="t")
-        await apply_relay_event(
-            MetaEvent(thought="pacing was rushed"),
+        await MetaEvent(thought="pacing was rushed").apply(
             scheduler=Scheduler(on_action=on_action),
             trace_logger=trace,
         )

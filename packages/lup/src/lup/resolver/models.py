@@ -1,5 +1,7 @@
 """Immutable, schema-versioned semantic resolver records."""
 
+from abc import abstractmethod
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal
@@ -558,11 +560,32 @@ class CleanupRecord(BaseModel):
     reason: str
 
 
-class ResolveInventory(BaseModel):
+type InventoryPlanner = Callable[["ResolveRequest"], Awaitable["ResolveInventory"]]
+"""How a source carrying raw evidence has it organized into concerns."""
+
+
+class ResolverSource(BaseModel):
+    """What a resolver run starts from, able to yield the inventory it runs.
+
+    A run begins either from concerns already organized or from the review
+    evidence that has yet to be organized into them. Asking the source for its
+    inventory keeps the entry point free of both spellings, so a further kind
+    of starting point is one class rather than an edit to the entry point.
+    """
+
     model_config = FROZEN
 
+    @abstractmethod
+    async def inventory(self, planner: InventoryPlanner) -> "ResolveInventory":
+        """The concerns this run executes, planned first if they are not yet."""
+
+
+class ResolveInventory(ResolverSource):
     source: SourceSnapshot
     concerns: list[Concern]
+
+    async def inventory(self, planner: InventoryPlanner) -> "ResolveInventory":
+        return self
 
     @model_validator(mode="after")
     def unique_concerns(self) -> "ResolveInventory":
@@ -572,15 +595,13 @@ class ResolveInventory(BaseModel):
         return self
 
 
-class ResolveRequest(BaseModel):
+class ResolveRequest(ResolverSource):
     """Unorganized review evidence supplied to the shared inventory phase.
 
     Evidence is positional across both lists: notes occupy indexes ``0`` to
     ``len(notes) - 1`` and statements continue from there, so one planning
     turn references either kind the same way.
     """
-
-    model_config = FROZEN
 
     source: SourceSnapshot
     notes: list[InventoryNote] = Field(default_factory=list)
@@ -600,6 +621,9 @@ class ResolveRequest(BaseModel):
 
     def evidence_count(self) -> int:
         return len(self.notes) + len(self.statements)
+
+    async def inventory(self, planner: InventoryPlanner) -> ResolveInventory:
+        return await planner(self)
 
 
 class ConcernInventory(BaseModel):

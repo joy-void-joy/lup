@@ -376,8 +376,24 @@ class PromptDocument(BaseModel):
         return self.source
 
 
-GUIDANCE_CHARACTER_BUDGET = 32_768
-"""Ceiling on the guidance document every session loads before its first turn.
+GUIDANCE_BYTE_BUDGET = 32_768
+"""Default ceiling, in UTF-8 bytes, on the always-loaded guidance document.
+
+Codex stops adding project documentation once the combined size reaches
+``project_doc_max_bytes``, whose own default is 32 KiB — so exceeding this is
+not an error a reader ever sees, it is *silent truncation*. The unit is bytes
+for the same reason: that is what the vendor limits, and UTF-8 punctuation
+makes a document's byte count exceed its character count, so a character-based
+check runs looser than the real cap and passes documents that would be cut.
+
+Claude has no equivalent setting — its guidance file is loaded in full
+whatever its length. Lup applies one number to both trees anyway, so the two
+runtimes read the same document rather than one reading a longer one.
+
+This is a default rather than a constant: the number mirrors a real vendor
+default, but which ceiling a given project wants is its own call. Pass
+``budget`` to the checks below to state a different one. See § A Constant
+Should Probably Be An Overridable Default in ``docs/patterns.md``.
 
 What a session pays for is the rendered document, so that is what the adapters
 check as they compile it. A typed part costs whatever its adapter spells it as,
@@ -386,19 +402,24 @@ skill or a denial message surfaces at the right moment belongs in a generated
 document under ``docs/`` instead, reached by a file-path pointer."""
 
 
+def document_byte_size(text: str) -> int:
+    """What a rendered document costs the runtime that loads it, in UTF-8 bytes."""
+    return len(text.encode("utf-8"))
+
+
 def document_prose(document: PromptDocument) -> list[str]:
     """Every literal prose payload a document carries, in reading order."""
     return [text for part in document.parts if (text := part.text_payload) is not None]
 
 
 def document_text_size(document: PromptDocument) -> int:
-    """Lower bound on what a document costs a session, in literal characters.
+    """Lower bound on what a document costs a session, in UTF-8 bytes.
 
     Every part renders to something, so the rendered document is never smaller.
     This is the share a neutral module can measure without reaching for an
     adapter to spell the rest.
     """
-    return sum(len(text) for text in document_prose(document))
+    return sum(document_byte_size(text) for text in document_prose(document))
 
 
 class Argument(BaseModel):
@@ -817,11 +838,11 @@ class Harness(BaseModel):
             raise ValueError(f"delegations name unknown agents: {unknown_agents}")
 
         used = document_text_size(self.guidance)
-        if used > GUIDANCE_CHARACTER_BUDGET:
+        if used > GUIDANCE_BYTE_BUDGET:
             raise ValueError(
-                f"always-loaded guidance is {used} characters, over the "
-                f"{GUIDANCE_CHARACTER_BUDGET} budget by "
-                f"{used - GUIDANCE_CHARACTER_BUDGET}. Move a section to a "
+                f"always-loaded guidance is {used} bytes, over the "
+                f"{GUIDANCE_BYTE_BUDGET} budget by "
+                f"{used - GUIDANCE_BYTE_BUDGET}. Move a section to a "
                 "generated document under docs/ and leave a file-path pointer, "
                 "the way Self-Improvement Loop and Permission Hooks were split."
             )

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from lup.adapters.harness import claude_prompt_renderer, codex_prompt_renderer
 from lup.codescan.markers import find_feedback
-from lup.harness.models import GUIDANCE_CHARACTER_BUDGET
+from lup.harness.models import GUIDANCE_BYTE_BUDGET, document_byte_size
 
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
 from lup_template.devtools.dev.boundaries import (
@@ -210,14 +210,13 @@ def run_checks(fix: bool, no_test: bool, scope: list[str] | None = None) -> None
         results.append(CheckOutcome(name="harness drift", passed=True))
 
     used = max(
-        len(claude_prompt_renderer().render(GUIDANCE)),
-        len(codex_prompt_renderer().render(GUIDANCE)),
+        document_byte_size(claude_prompt_renderer().render(GUIDANCE)),
+        document_byte_size(codex_prompt_renderer().render(GUIDANCE)),
     )
-    free = GUIDANCE_CHARACTER_BUDGET - used
+    free = GUIDANCE_BYTE_BUDGET - used
     state = "ok" if free >= 0 else f"FAIL (over by {-free})"
     typer.echo(
-        f"guidance budget: {state} — {used}/{GUIDANCE_CHARACTER_BUDGET}"
-        f" characters, {free} free"
+        f"guidance budget: {state} — {used}/{GUIDANCE_BYTE_BUDGET} bytes, {free} free"
     )
     results.append(CheckOutcome(name="guidance budget", passed=free >= 0))
 

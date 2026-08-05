@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "ee6827c7089f2443385d82a35786fe753a6627e6ea65bd41b65593c920fdfbd1",
+  "source_digest": "335fc5e89ae7027357bfbb990c4b80b1b480c06276f61a52e38dd0e79bb12bd0",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -44,7 +44,7 @@
     {
       "path": ".codex/config.toml",
       "category": "generated",
-      "sha256": "772fe08476cad4b4bf7728d2c88e4c9c0562e77b84844248c286bfbcc3cc8e93",
+      "sha256": "466b6217a997c526445b212b682779ced37823e7f8bc10a871b8378cdf24d09a",
       "semantic_id": "harness.project-config",
       "executable": false
     },
@@ -394,7 +394,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "650de1ae8117e9a9f3c306bce4ab3654b1c92f0a40d3b1a000f1061441f5405e",
+      "sha256": "8f6d5248b99806cf801c606e3838552a102626036824cb716f4c5255b11d4dbe",
       "semantic_id": "harness.guidance",
       "executable": false
     }

@@ -1,3 +1,7 @@
+# lup: ignore[own-model-dispatch]
+# What the display sink received and what the live stream framed are the
+# claims here: the block and event types are the assertions, and the unmatched
+# case fails the test on anything else rather than dispatching past it.
 """Whole-turn timeout, recovery, correction, persistence, and queue tests."""
 
 import asyncio

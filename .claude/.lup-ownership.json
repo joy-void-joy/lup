@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "ee6827c7089f2443385d82a35786fe753a6627e6ea65bd41b65593c920fdfbd1",
+  "source_digest": "335fc5e89ae7027357bfbb990c4b80b1b480c06276f61a52e38dd0e79bb12bd0",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,15 +9,8 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "4624651e2640141b0d9d705eafa33935e695b2c34ba2e8f98405d727e588315b",
+      "sha256": "bd9ed8f83b224f089fb9028da2c04464c2a3591c3a16237aa5b6ed78a9499fa1",
       "semantic_id": "harness.guidance",
-      "executable": false
-    },
-    {
-      "path": ".claude/PATTERNS.md",
-      "category": "generated",
-      "sha256": "8e4e9f176557845259ba18f03cdc17fa34038c2922f60a79b463f5715b532485",
-      "semantic_id": "harness.patterns",
       "executable": false
     },
     {
@@ -44,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "a81fc3eee1e6e2247807e616b9473f29fe4ad1f237412c03c464f4d9968f221b",
+      "sha256": "0e4f7ae6093cd8baa2252a0ba8ebcc7c8f3d7ed7fa6962e85c68ee7e5dd0791b",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -406,6 +399,20 @@
       "executable": false
     },
     {
+      "path": "docs/orchestration.md",
+      "category": "generated",
+      "sha256": "f078ee586358f85eb543c7e9da1f9300ec497ef129651d18e0db46480125bc24",
+      "semantic_id": "harness.orchestration",
+      "executable": false
+    },
+    {
+      "path": "docs/patterns.md",
+      "category": "generated",
+      "sha256": "01a1fce12dcc60dabc8cff01f9a9b2466835e8b6e589de55f1ac22b63635468d",
+      "semantic_id": "harness.patterns",
+      "executable": false
+    },
+    {
       "path": "docs/permissions.md",
       "category": "generated",
       "sha256": "18b546ce4f6108c648795493720172ac4085eb0e58947778c8d1f3db78ad1e70",
@@ -415,7 +422,7 @@
     {
       "path": "docs/self-improvement.md",
       "category": "generated",
-      "sha256": "9a1d5e6808c963e5de87cec6e1396ee6d3c9704bcc00d94c00eb343574485101",
+      "sha256": "42af33914c911ec5f77de93b6c984c147a053d95d73fd7a56ce5baa27d98187c",
       "semantic_id": "harness.self-improvement",
       "executable": false
     }

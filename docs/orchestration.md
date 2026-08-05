@@ -1,10 +1,10 @@
-<!-- Generated from lup_template.devtools.harness.content.patterns by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from lup_template.devtools.harness.content.orchestration by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
 
-# Design Patterns
+# Agent Orchestration Patterns
 
-Architectural patterns used in this project. For daily development guidance, see [CLAUDE.md](CLAUDE.md).
+How work is delegated across agents in this project — what runs where, and who sees it. The recurring *code* shapes live in [docs/patterns.md](patterns.md); daily development guidance is in the agent guidance document your runtime loads.
 
-**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 5 (`claude-opus-5`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see CLAUDE.md § Model Selection).
+**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 5 (`claude-opus-5`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see § Model Selection in the agent guidance).
 
 **Vocabulary:** two kinds of delegated agents look alike and must not be conflated:
 
@@ -184,4 +184,4 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 
 **Example:** `src/lup_template/agent/tools/example.py` is the template for all three forms — `fetch_example` routes known hosts to a specialized handler (`fetch_wiki_article`, domain dispatch) and distills fetched pages through a nested `query()` call (`extract_answer`, extraction); `search_example` recovers missing snippet fields from a fallback source (`fill_missing_snippets`, null-filling).
 
-**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API wrappers. Extraction uses `query(factory, prompt)` (see [Nested Agent Pattern](#nested-agent-pattern)).
+**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API wrappers. Extraction uses `query(factory, request)` (see [Nested Agent Pattern](#nested-agent-pattern)).

@@ -21,7 +21,6 @@ from pydantic import BaseModel, Field
 
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.runtime.factory import SessionFactory
-from lup.runtime.models import TurnTextBlock
 from lup.runtime.query import query
 from lup.types import SubagentSpec
 
@@ -84,7 +83,9 @@ def create_run_subagent_tool(
         logger.info("Delegating to subagent %r", spec.name)
         response = await query(factory, validated.task)
         text = "\n\n".join(
-            block.text for block in response.blocks if isinstance(block, TurnTextBlock)
+            text
+            for block in response.blocks
+            if (text := block.text_payload) is not None
         )
         return RunSubagentOutput(subagent=spec.name, result=text)
 

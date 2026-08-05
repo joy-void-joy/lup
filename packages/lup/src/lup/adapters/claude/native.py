@@ -1,3 +1,11 @@
+# lup: ignore[own-model-dispatch]
+# The Claude*Operation models mirror Claude Code's PreToolUse tool_input shapes
+# — Edit, Write, Bash, WebFetch, WebSearch — so the arms of
+# ClaudeEventDecoder.decode narrow a vendor payload rather than dispatch on a
+# union of ours. Answering `decode` from each mirror would pull the neutral
+# lup.policy vocabulary back across the boundary this adapter exists to hold,
+# and would make the vendor's tool roster, not ours, decide when a variant is
+# added.
 """Claude-private native event parsing and decision rendering."""
 
 from pathlib import Path

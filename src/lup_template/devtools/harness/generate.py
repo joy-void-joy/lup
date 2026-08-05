@@ -41,6 +41,9 @@ from lup.harness.reconciliation import (
 from lup.harness.contracts import CurrentTreeReader, PromptRenderer, Reconciler
 from lup.harness.validation import validated_tree
 from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.orchestration import (
+    DOCUMENT as ORCHESTRATION,
+)
 from lup_template.devtools.harness.content.patterns import DOCUMENT as PATTERNS
 from lup_template.devtools.harness.content.permissions import (
     DOCUMENT as PERMISSIONS,
@@ -158,7 +161,13 @@ def claude_generation_recipe(root: Path) -> GenerationRecipe:
     content_root = Path(__file__).parent / "content"
     support_artifacts = [
         rendered_document(
-            path=Path(".claude/PATTERNS.md"),
+            path=Path("docs/orchestration.md"),
+            document=ORCHESTRATION,
+            prompts=prompts,
+            semantic_id="harness.orchestration",
+        ),
+        rendered_document(
+            path=Path("docs/patterns.md"),
             document=PATTERNS,
             prompts=prompts,
             semantic_id="harness.patterns",

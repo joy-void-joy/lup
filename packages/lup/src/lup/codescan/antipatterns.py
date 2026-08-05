@@ -55,6 +55,7 @@ from lup.codescan.boundaries import (
     RULE_ID as SEAM_BOUNDARY_RULE_ID,
 )
 from lup.codescan.capabilities import RULE_ID as ABC_CAPABILITY_RULE_ID
+from lup.codescan.dispatch import RULE_ID as OWN_MODEL_DISPATCH_RULE_ID
 from lup.codescan.common import (
     IGNORE_RE,
     LineProjections,
@@ -535,6 +536,7 @@ FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
         ABC_CAPABILITY_RULE_ID,
         LIBRARY_DEFAULT_RULE_ID,
         NATIVE_SPELLING_RULE_ID,
+        OWN_MODEL_DISPATCH_RULE_ID,
         SEAM_BOUNDARY_RULE_ID,
     }
 )

@@ -4,6 +4,8 @@
 # Native shell allows are generated under .codex/rules/.
 # Tool servers start from this project, so start the runtime at its root.
 
+project_doc_max_bytes = 32768
+
 [features]
 hooks = true
 

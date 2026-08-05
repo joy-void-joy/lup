@@ -22,6 +22,7 @@ from lup.harness.contracts import (
 from lup.harness.generation import argument_text
 from lup.harness.prompts import guidance_banner
 from lup.harness.models import (
+    GUIDANCE_BYTE_BUDGET,
     Agent,
     Artifact,
     ArtifactTree,
@@ -296,17 +297,25 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
         )
 
 
-def codex_project_config(source: Harness, spellings: NativeSpellings) -> str:
+def codex_project_config(
+    source: Harness, spellings: NativeSpellings, budget: int = GUIDANCE_BYTE_BUDGET
+) -> str:
     """Render the project config: enabled features, then every tool server.
 
     Codex keeps a project's servers in the same file as the rest of its
     project configuration, so this is one document rather than the separate
     artifact the other runtime reads.
+
+    The guidance ceiling generation already enforces is restated here as
+    ``project_doc_max_bytes``: the runtime truncates project guidance at its
+    own default, so a document that passed generation would still reach the
+    model short if the two disagreed.
     """
     document = tomlkit.document()
     features = tomlkit.table()
     features["hooks"] = True
     document["features"] = features
+    document["project_doc_max_bytes"] = budget
     servers = tomlkit.table(is_super_table=True)
     for plugin in source.plugins:
         for server in plugin.mcp_servers:
@@ -322,9 +331,15 @@ def codex_project_config(source: Harness, spellings: NativeSpellings) -> str:
 class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
     """Render root project guidance at Codex's documented repository location."""
 
-    def __init__(self, prompts: PromptRenderer, spellings: NativeSpellings) -> None:
+    def __init__(
+        self,
+        prompts: PromptRenderer,
+        spellings: NativeSpellings,
+        budget: int = GUIDANCE_BYTE_BUDGET,
+    ) -> None:
         self.prompts = prompts
         self.spellings = spellings
+        self.budget = budget
 
     def render(self, source: Harness) -> ArtifactTree:
         return ArtifactTree(
@@ -337,7 +352,7 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
                 ),
                 Artifact.generated(
                     path=Path(".codex/config.toml"),
-                    body=codex_project_config(source, self.spellings),
+                    body=codex_project_config(source, self.spellings, self.budget),
                     semantic_id="harness.project-config",
                     banner=GeneratedBanner(
                         source=__name__,

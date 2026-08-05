@@ -1,12 +1,6 @@
-"""Canonical code-structure design approaches."""
+<!-- Generated from lup_template.devtools.harness.content.patterns by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
 
-import lup.harness.models as models
-
-DOCUMENT = models.PromptDocument(
-    source=__name__,
-    parts=[
-        models.TextPart(
-            text=r"""# Design Patterns
+# Design Patterns
 
 The recurring *code* shapes in this repository: what each one is for, where to
 read a worked instance, and the reasoning that makes it the default. How work
@@ -111,7 +105,3 @@ declared at the wrong level. `GUIDANCE_BYTE_BUDGET`
 mirrors a real vendor default, so the number is not arbitrary — but *which*
 number a given project wants is still its own call, so it is a parameter with
 that default rather than a constant.
-"""
-        ),
-    ],
-)

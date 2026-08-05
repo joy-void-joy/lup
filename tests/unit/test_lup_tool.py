@@ -1,5 +1,8 @@
-# lup: ignore[cast, dict-get]
+# lup: ignore[cast, dict-get, own-model-dispatch]
 # Test fixtures and assertions construct these shapes deliberately.
+# That the direct-call path hands back the declared output model rather than
+# the serialized MCP response is the assertion itself, observed from outside
+# the decorator, not a branch taken on the way to one.
 """Behavior tests for the lup_tool decorator and LupMcpTool.
 
 Covers the three response paths of the SDK-facing handler (success,

@@ -23,6 +23,7 @@ guard it turns up as spurious on the next line of the report.
 """
 
 from collections import Counter, defaultdict
+from collections.abc import Set as AbstractSet
 from pathlib import Path
 
 import typer
@@ -34,9 +35,15 @@ from lup.codescan.antipatterns import (
     audit_text,
     patterns_for_suffix,
 )
-from lup.codescan.capabilities import audit_capabilities
 from lup.codescan.boundaries import audit_path_boundaries
-from lup.codescan.common import PythonSource, Refutation, module_name
+from lup.codescan.capabilities import audit_capabilities
+from lup.codescan.common import (
+    PACKAGE_ROOTS,
+    PythonSource,
+    Refutation,
+    module_name,
+)
+from lup.codescan.dispatch import audit_own_model_dispatch
 from lup.codescan.grammar import refute
 from lup.codescan.registry import RULE_REFERENCE
 from lup.policy.kernel.roles import path_role
@@ -45,6 +52,16 @@ from lup_template.devtools.dev.pyright_oracle import default_oracle
 from lup_template.devtools.harness.catalog import portable_harness
 from lup_template.devtools.harness.composition import application_roots
 from lup_template.devtools.utils import git, output_json
+
+
+def scanned_roots() -> AbstractSet[str]:
+    """The import roots this repository's scans resolve module names against.
+
+    The library knows its own; this package's name is derived from where the
+    package actually sits, so renaming it during initialization moves the root
+    with it rather than leaving scans resolving against a package that is gone.
+    """
+    return PACKAGE_ROOTS | {Path(__file__).resolve().parents[2].name}
 
 
 def declared_path_roles() -> list[PathRoleRow]:
@@ -117,7 +134,11 @@ def scan_antipatterns() -> AntiPatternScan:
             continue
         scanned.append(ScannedFile(rel=rel, path=path, patterns=patterns, text=text))
         if path.suffix.lower() in {".py", ".pyi"}:
-            sources.append(PythonSource(path=path, module=module_name(path), text=text))
+            sources.append(
+                PythonSource(
+                    path=path, module=module_name(path, scanned_roots()), text=text
+                )
+            )
 
     refuted = refute(sources, default_oracle())
     results = [
@@ -138,7 +159,10 @@ def scan_antipatterns() -> AntiPatternScan:
             message=finding.message,
             rule_id=finding.rule_id,
         )
-        for finding in audit_capabilities(sources)
+        for finding in [
+            *audit_capabilities(sources),
+            *audit_own_model_dispatch(sources),
+        ]
     )
     roots = application_roots()
     boundary_findings = [

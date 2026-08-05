@@ -6,13 +6,17 @@ tool); the policies in :mod:`lup.policy.rules` and :mod:`lup.policy.chain`
 consume them and return a :class:`Decision`.
 """
 
+from abc import abstractmethod
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, StringConstraints
 
 from lup.policy.kernel.decision import DecisionEffect
 from lup.types import JsonObject, JsonValue
+
+if TYPE_CHECKING:
+    from lup.policy.contracts import DeclaredPolicies
 
 type PolicyId = Literal["fetch", "shell", "edit", "unknown-tool"]
 """One semantic decision family a generated hook set enforces.
@@ -45,47 +49,86 @@ class EditChange(BaseModel):
     after: str | None = None
 
 
-class EditBatch(BaseModel):
-    """The complete set of file changes in one native edit operation."""
+def undeclared(family: str) -> "Decision":
+    """The verdict for a family this composition never declared a policy for."""
+    return Decision(
+        effect="ask",
+        reason=f"no {family} policy is declared, so this call needs approval",
+    )
+
+
+class SemanticToolBase(BaseModel):
+    """One native call as policy understands it, judging itself.
+
+    Each kind knows which declared family judges it, so routing is the tool
+    answering rather than a walk naming the kinds. Pydantic's metaclass is an
+    ``ABCMeta``, so a kind that does not answer :meth:`decide_under` cannot be
+    built at all — a new tool cannot slip past the router by omission.
+    """
 
     model_config = ConfigDict(frozen=True)
+
+    @abstractmethod
+    def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
+        """The verdict this call's own family policy reaches."""
+
+
+class EditBatch(SemanticToolBase):
+    """The complete set of file changes in one native edit operation."""
 
     changes: list[EditChange] = Field(min_length=1)
 
+    def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
+        if policies.edit is None:
+            return undeclared("edit")
+        return policies.edit.decide(self)
 
-class ShellCommand(BaseModel):
+
+class ShellCommand(SemanticToolBase):
     """A semantic command execution request."""
-
-    model_config = ConfigDict(frozen=True)
 
     command: str
     cwd: Path | None = None
     unsandboxed: bool = False
 
+    def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
+        if policies.shell is None:
+            return undeclared("shell")
+        return policies.shell.decide(self)
 
-class FetchUrl(BaseModel):
+
+class FetchUrl(SemanticToolBase):
     """Retrieval of one known URL."""
-
-    model_config = ConfigDict(frozen=True)
 
     url: AnyHttpUrl
 
+    def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
+        if policies.fetch is None:
+            return undeclared("fetch")
+        return policies.fetch.decide(self)
 
-class SearchWeb(BaseModel):
+
+class SearchWeb(SemanticToolBase):
     """A web search query, distinct from fetching a known URL."""
-
-    model_config = ConfigDict(frozen=True)
 
     query: str
 
+    def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
+        """Search has no rule surface at all, so it always asks."""
+        return Decision(
+            effect="ask",
+            reason=f"web search {self.query!r} is not covered by policy",
+        )
 
-class UnknownTool(BaseModel):
+
+class UnknownTool(SemanticToolBase):
     """An unclassified native tool invocation retained for audit."""
-
-    model_config = ConfigDict(frozen=True)
 
     identity: ToolIdentity
     input: JsonObject = Field(default_factory=dict)
+
+    def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
+        return policies.unknown.decide(self)
 
 
 type SemanticTool = EditBatch | ShellCommand | FetchUrl | SearchWeb | UnknownTool

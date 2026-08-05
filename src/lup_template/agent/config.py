@@ -175,7 +175,7 @@ class Settings(BaseSettings):
             "defer past a context threshold, None inherits the harness "
             "default. Defaults to false because the template serves a small "
             "curated surface where a deferred (invisible) tool risks the "
-            "agent concluding the capability is missing — see PATTERNS.md "
+            "agent concluding the capability is missing — see docs/orchestration.md "
             "§ Deferred Tool Schemas. Claude sessions only."
         ),
     )

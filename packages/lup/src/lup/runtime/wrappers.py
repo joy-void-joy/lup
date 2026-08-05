@@ -30,10 +30,9 @@ from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
-    TurnBlock,
+    AnyTurnBlock,
     TurnHandle,
     TurnIdentifiers,
-    BlockDeltaEvent,
     LiveTurnEvent,
     TurnEvent,
     TurnInput,
@@ -116,7 +115,7 @@ class DisplayRecord(BaseModel):
 
     identifiers: TurnIdentifiers
     messages: list[TurnMessage]
-    blocks: list[TurnBlock]
+    blocks: list[AnyTurnBlock]
 
 
 type TraceSink = Callable[[TraceRecord], Awaitable[None]]
@@ -215,8 +214,8 @@ class SwitchingEventStream(EventStream):
 
     async def durable(self) -> AsyncIterator[TurnEvent]:
         async for event in self.iterate(deltas=False):
-            if not isinstance(event, BlockDeltaEvent):
-                yield event
+            if (durable := event.durable) is not None:
+                yield durable
 
     def events(self) -> AsyncIterator[TurnEvent]:
         return self.durable()

@@ -21,7 +21,8 @@ from lup.codescan.portable import prose_breaches
 from lup.harness.contracts import NativeSpellings
 from lup.harness.prompts import SpelledPromptRenderer
 from lup.harness.models import (
-    GUIDANCE_CHARACTER_BUDGET,
+    GUIDANCE_BYTE_BUDGET,
+    document_byte_size,
     Artifact,
     ArtifactTree,
     Harness,
@@ -49,24 +50,25 @@ def codex_prompt_renderer() -> SpelledPromptRenderer:
     return prompt_renderer(CodexSpellings())
 
 
-def reject_oversized_guidance(tree: ArtifactTree) -> None:
+def reject_oversized_guidance(
+    tree: ArtifactTree, budget: int = GUIDANCE_BYTE_BUDGET
+) -> None:
     """Hold the always-loaded document to its budget as a session sees it.
 
     The declaration-time lower bound in ``Harness`` cannot know what the parts
     render to, and the gap grows with every part that replaces literal prose.
+    Bytes, not characters: that is the unit the runtime's own ceiling counts
+    in, and the two differ wherever the document uses non-ASCII punctuation.
     """
     for artifact in tree.artifacts:
-        used = len(artifact.content)
-        if artifact.semantic_id != "harness.guidance" or used <= (
-            GUIDANCE_CHARACTER_BUDGET
-        ):
+        used = document_byte_size(artifact.content)
+        if artifact.semantic_id != "harness.guidance" or used <= budget:
             continue
         raise ValueError(
-            f"rendered guidance {artifact.path.as_posix()} is {used} characters, "
-            f"over the {GUIDANCE_CHARACTER_BUDGET} budget by "
-            f"{used - GUIDANCE_CHARACTER_BUDGET}. Move a section to a generated "
-            "document under docs/ and leave a file-path pointer, the way "
-            "Self-Improvement Loop and Permission Hooks were split."
+            f"rendered guidance {artifact.path.as_posix()} is {used} bytes, "
+            f"over the {budget} budget by {used - budget}. Move a section to a "
+            "generated document under docs/ and leave a file-path pointer, the "
+            "way Self-Improvement Loop and Permission Hooks were split."
         )
 
 
