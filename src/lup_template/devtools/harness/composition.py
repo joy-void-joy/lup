@@ -98,6 +98,7 @@ def application_roots() -> ApplicationRoots:
         composition=[
             *generated_tree_paths(NATIVE_RUNTIMES, plugins),
             "tests/",
+            "packages/lup/tests/",
             "examples/",
             f"{package}/agent/core.py",
             harness,

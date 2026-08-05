@@ -1,5 +1,7 @@
 """Unified pre-flight checks: ruff, pyright, pytest."""
 
+from pathlib import Path
+
 import sh
 import typer
 from pydantic import BaseModel
@@ -146,17 +148,24 @@ def run_checks(fix: bool, no_test: bool, scope: list[str] | None = None) -> None
             typer.echo(e.stdout.decode().rstrip())
         results.append(CheckOutcome(name="pyright", passed=False))
 
-    # pytest
+    # pytest, twice. The library ships to an index without the application
+    # beside it, so its suite is run from its own directory where `src` is all
+    # it can see — a library test reaching for a template fixture passes at
+    # the root and fails there, which is the only place that difference shows.
     if not no_test:
-        try:
-            uv("run", "pytest", "-n", str(TEST_WORKERS))
-            typer.echo("pytest: ok")
-            results.append(CheckOutcome(name="pytest", passed=True))
-        except sh.ErrorReturnCode as e:
-            typer.echo("pytest: FAIL")
-            if e.stdout:
-                typer.echo(e.stdout.decode().rstrip())
-            results.append(CheckOutcome(name="pytest", passed=False))
+        for name, directory in (
+            ("pytest", Path.cwd()),
+            ("pytest (lup)", Path("packages/lup")),
+        ):
+            try:
+                uv("run", "pytest", "-n", str(TEST_WORKERS), _cwd=directory)
+                typer.echo(f"{name}: ok")
+                results.append(CheckOutcome(name=name, passed=True))
+            except sh.ErrorReturnCode as e:
+                typer.echo(f"{name}: FAIL")
+                if e.stdout:
+                    typer.echo(e.stdout.decode().rstrip())
+                results.append(CheckOutcome(name=name, passed=False))
 
     # advisory — a note asks somebody for something, and a tree is expected to
     # carry open ones; what it says is worth reading, not worth refusing over

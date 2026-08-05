@@ -137,6 +137,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             ],
             path_roles=[
                 HookPathRole(root=Path("tests"), role="test"),
+                HookPathRole(root=Path("packages/lup/tests"), role="test"),
                 HookPathRole(root=Path("tmp"), role="scratch"),
             ],
             human_owned_files=[Path("README.md")],

@@ -45,7 +45,9 @@ def test_a_replace_all_edit_is_judged_rather_than_refused() -> None:
     produced — leaving the whole class of multi-site edit ungoverned.
     """
     decision = decide(
-        edit_payload("tests/unit/test_path_roles.py", "PathRoleRow", "RoleRow", True)
+        edit_payload(
+            "packages/lup/tests/unit/test_path_roles.py", "PathRoleRow", "RoleRow", True
+        )
     )
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
@@ -55,7 +57,9 @@ def test_a_replace_all_edit_is_judged_rather_than_refused() -> None:
 
 def test_a_preimage_that_is_absent_is_still_a_malformed_edit() -> None:
     decision = decide(
-        edit_payload("tests/unit/test_path_roles.py", "no-such-text", "x", True)
+        edit_payload(
+            "packages/lup/tests/unit/test_path_roles.py", "no-such-text", "x", True
+        )
     )
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
@@ -66,7 +70,12 @@ def test_a_preimage_that_is_absent_is_still_a_malformed_edit() -> None:
 def test_an_ambiguous_single_edit_still_requires_an_unambiguous_preimage() -> None:
     """Without `replace_all` the exactly-once requirement is the tool's own."""
     decision = decide(
-        edit_payload("tests/unit/test_path_roles.py", "PathRoleRow", "RoleRow", False)
+        edit_payload(
+            "packages/lup/tests/unit/test_path_roles.py",
+            "PathRoleRow",
+            "RoleRow",
+            False,
+        )
     )
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
@@ -92,7 +101,7 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
     )
     under_test = decide(
         edit_payload(
-            "tests/unit/test_path_roles.py",
+            "packages/lup/tests/unit/test_path_roles.py",
             shared,
             "from typing import Any",
             False,

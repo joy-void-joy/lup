@@ -52,6 +52,17 @@ lup = ["py.typed"]
 "lup.adapters.codex" = ["assets/*.py"]
 "lup.policy" = ["assets/*.py"]
 
+# Independent of the workspace-root selection, and deliberately so: run from
+# this directory the suite sees `src` alone, so a library test that reached
+# for the application would fail here while still passing at the root. That
+# is the whole reason the two suites are separate rather than one selection.
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-m 'not integration'"
+markers = ["integration: tests requiring external services (Docker, APIs)"]
+
 [tool.pyright]
 # Independent of the workspace-root config: this lets the standalone library
 # type-check on its own (pyright run from this directory), where `src` resolves

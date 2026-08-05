@@ -227,7 +227,10 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="touch tmp/marker", effect="allow"),
     DecisionCase(input="rmdir tmp/run", effect="allow"),
     DecisionCase(input="mv tmp/draft.md src/final.md", effect="ask"),
-    DecisionCase(input="mkdir src/newpkg", effect="ask"),
+    # An empty directory anywhere, unlike the file beside it: `mkdir` cannot
+    # overwrite and leaves nothing to run, so what lands inside is judged on
+    # its own path rather than the directory being refused up front.
+    DecisionCase(input="mkdir src/newpkg", effect="allow"),
     DecisionCase(input="touch src/newfile.py", effect="ask"),
     DecisionCase(input="cp --archive tmp/a tmp/b", effect="ask"),
     # Copying reads its sources and writes only its destination, so landing

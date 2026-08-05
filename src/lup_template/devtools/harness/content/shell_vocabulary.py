@@ -95,7 +95,6 @@ JUDGED_ASK_COMMANDS = (
     ("rmdir", "deleting directories requires approval"),
     ("mv", "moving files requires approval"),
     ("cp", "copying over files requires approval"),
-    ("mkdir", "creating directories requires approval"),
     ("touch", "creating files requires approval — prefer the Write tool"),
     ("chmod", "changing permissions requires approval"),
     ("chown", "changing ownership requires approval"),
@@ -484,6 +483,15 @@ SHELL_RULES: list[ShellCommandRule] = [
         ShellCommandRule(name=name, default_effect="deny", reason=reason)
         for name, reason in REDIRECTED_DENY_COMMANDS
     ],
+    ShellCommandRule(
+        # Not read-only, and not judged either. The verbs beside it in the ask
+        # list are destructive or content-bearing: they overwrite something, or
+        # they author a file that later holds code. An empty directory does
+        # neither — it cannot overwrite (`-p` is a no-op on one that exists),
+        # and it holds nothing to run. Everything that lands inside it still
+        # passes the write and edit gates on its own path.
+        name="mkdir",
+    ),
     ShellCommandRule(
         # -l/-L print fingerprints and public keys — the read-only diagnostic
         # for push-auth failures; every other form mutates the agent.

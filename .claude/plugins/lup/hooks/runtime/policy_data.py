@@ -1215,6 +1215,10 @@ PATH_ROLES: list[PathRoleRow] = [
         "role": "test",
     },
     {
+        "root": "packages/lup/tests",
+        "role": "test",
+    },
+    {
         "root": "tmp",
         "role": "scratch",
     },
@@ -1948,17 +1952,6 @@ SHELL_RULES: list[ShellRuleRow] = [
         "reason": "copying over files requires approval",
     },
     {
-        "command": "mkdir",
-        "subcommand": "",
-        "operation": "",
-        "effect": "ask",
-        "ask_flags": [],
-        "allow_flags": [],
-        "read_verbs": [],
-        "value_flags": [],
-        "reason": "creating directories requires approval",
-    },
-    {
         "command": "touch",
         "subcommand": "",
         "operation": "",
@@ -2320,6 +2313,17 @@ SHELL_RULES: list[ShellRuleRow] = [
         "read_verbs": [],
         "value_flags": [],
         "reason": "use uv add / uv remove instead of pip",
+    },
+    {
+        "command": "mkdir",
+        "subcommand": "",
+        "operation": "",
+        "effect": "allow",
+        "ask_flags": [],
+        "allow_flags": [],
+        "read_verbs": [],
+        "value_flags": [],
+        "reason": "",
     },
     {
         "command": "ssh-add",
