@@ -1,4 +1,4 @@
-# lup: ignore[empty-collection, import-re, re-call, string-split, tuple-shape]
+# lup: ignore[empty-collection, import-re, re-call, string-split]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Shell segment, structure, and whole-command classification."""
 
@@ -139,7 +139,9 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
         return unjudged("shell segment has no command")
     if segment[0] == "[[":
         return KernelDecision("allow", "test expression is read-only")
-    words, dangerous = effective_command(segment)
+    effective = effective_command(segment)
+    words = effective["words"]
+    dangerous = effective["dangerous"]
     if dangerous:
         return KernelDecision(
             "ask", "a security-sensitive environment assignment requires approval"
@@ -325,26 +327,35 @@ def argument_safe_words(words: list[str], context: ShellContext) -> bool:
     )
 
 
-type ShellBinding = tuple[str, str | None]
-"""One frozen variable binding: name to literal value, or None when opaque."""
+class ShellBinding(TypedDict):
+    """One frozen variable binding: a name, and its literal value or None.
+
+    ``value`` is ``None`` where the word could not be read as a literal, which
+    is what makes the binding opaque to every later substitution.
+    """
+
+    name: str
+    value: str | None
 
 
 def bind_name(
     bindings: tuple[ShellBinding, ...], name: str, value: str | None
 ) -> tuple[ShellBinding, ...]:
     """Rebind one name immutably, shadowing any earlier binding of it."""
-    kept = tuple(pair for pair in bindings if pair[0] != name)
-    return (*kept, (name, value))
+    kept = tuple(pair for pair in bindings if pair["name"] != name)
+    return (*kept, ShellBinding(name=name, value=value))
 
 
-def pure_assignment_names(segment: list[str]) -> list[tuple[str, str | None]] | None:
-    """The (name, literal value) pairs of an assignment-only segment."""
-    pairs: list[tuple[str, str | None]] = []
+def pure_assignment_names(segment: list[str]) -> list[ShellBinding] | None:
+    """The bindings of an assignment-only segment."""
+    pairs: list[ShellBinding] = []
     for word in segment:
         name, separator, value = word.partition("=")
         if not separator or not name.isidentifier():
             return None
-        pairs.append((name, value if literal_loop_word(value) else None))
+        pairs.append(
+            ShellBinding(name=name, value=value if literal_loop_word(value) else None)
+        )
     return pairs
 
 
@@ -384,7 +395,9 @@ def resolve_segment_bindings(
     must name an argument-safe command.
     """
     resolved = segment
-    for name, value in bindings:
+    for binding in bindings:
+        name = binding["name"]
+        value = binding["value"]
         if not any(references_variable(word, name) for word in resolved):
             continue
         if value is not None:
@@ -453,13 +466,20 @@ def decide_for_body(
     return instantiations(["x"])
 
 
+class Group(TypedDict):
+    """What one compound construct decided, and the segment to resume at."""
+
+    decisions: list[KernelDecision]
+    resume: int
+
+
 def decide_loop(
     segments: list[list[str]],
     start: int,
     context: ShellContext,
     depth: int,
     bindings: tuple[ShellBinding, ...] = (),
-) -> tuple[list[KernelDecision], int] | KernelDecision:
+) -> Group | KernelDecision:
     """Classify one loop construct, returning its decisions and the next index.
 
     A while/until condition and body classify as one sequential list, so a
@@ -484,9 +504,11 @@ def decide_loop(
         case ["for", name, "in", *loop_words] if name.isidentifier():
             if condition:
                 return unjudged("loop construct does not parse")
-            return (
-                decide_for_body(name, loop_words, body, context, depth, bindings),
-                end + 1,
+            return Group(
+                decisions=decide_for_body(
+                    name, loop_words, body, context, depth, bindings
+                ),
+                resume=end + 1,
             )
         case ["for", *_rest]:
             return unjudged("loop form is not classified")
@@ -497,7 +519,7 @@ def decide_loop(
             decisions = decide_segment_list(
                 [*conditions, *body], context, depth + 1, bindings
             )
-            return decisions, end + 1
+            return Group(decisions=decisions, resume=end + 1)
     return unjudged("loop construct does not parse")
 
 
@@ -534,7 +556,7 @@ def decide_conditional(
     context: ShellContext,
     depth: int,
     bindings: tuple[ShellBinding, ...] = (),
-) -> tuple[list[KernelDecision], int] | KernelDecision:
+) -> Group | KernelDecision:
     """Classify one ``if`` construct: conditions and branches recursively."""
     if depth >= 2:
         return unjudged("conditionals nest too deeply")
@@ -548,7 +570,10 @@ def decide_conditional(
             interior.append(stripped)
     if not interior:
         return unjudged("conditional is empty")
-    return decide_segment_list(interior, context, depth + 1, bindings), end + 1
+    return Group(
+        decisions=decide_segment_list(interior, context, depth + 1, bindings),
+        resume=end + 1,
+    )
 
 
 def decide_case(
@@ -557,7 +582,7 @@ def decide_case(
     context: ShellContext,
     depth: int,
     bindings: tuple[ShellBinding, ...] = (),
-) -> tuple[list[KernelDecision], int] | KernelDecision:
+) -> Group | KernelDecision:
     """Classify one ``case`` construct: patterns are match data, bodies recurse."""
     if depth >= 2:
         return unjudged("case constructs nest too deeply")
@@ -592,8 +617,11 @@ def decide_case(
     if end is None:
         return unjudged("case construct does not parse")
     if not body:
-        return [], end + 1
-    return decide_segment_list(body, context, depth + 1, bindings), end + 1
+        return Group(decisions=[], resume=end + 1)
+    return Group(
+        decisions=decide_segment_list(body, context, depth + 1, bindings),
+        resume=end + 1,
+    )
 
 
 def decide_segment_list(
@@ -649,12 +677,12 @@ def decide_segment_list(
                     outcome = decide_case(segments, index, context, depth, bindings)
             if isinstance(outcome, KernelDecision):
                 return [*decisions, outcome]
-            grouped, index = outcome
-            decisions.extend(grouped)
+            index = outcome["resume"]
+            decisions.extend(outcome["decisions"])
             continue
         assignments = pure_assignment_names(segment)
         if assignments is not None:
-            if any(dangerous_env_name(name) for name, _value in assignments):
+            if any(dangerous_env_name(pair["name"]) for pair in assignments):
                 decisions.append(
                     KernelDecision(
                         "ask",
@@ -663,11 +691,11 @@ def decide_segment_list(
                 )
                 index += 1
                 continue
-            for name, value in assignments:
-                bindings = bind_name(bindings, name, value)
+            for pair in assignments:
+                bindings = bind_name(bindings, pair["name"], pair["value"])
             index += 1
             continue
-        words, _dangerous = effective_command(segment)
+        words = effective_command(segment)["words"]
         if words and posixpath.basename(words[0]) == "read":
             extended = read_bindings(words, bindings)
             if isinstance(extended, KernelDecision):

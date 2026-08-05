@@ -1,9 +1,9 @@
-# lup: ignore[empty-collection, tuple-shape]
+# lup: ignore[empty-collection]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Shell lexing: tokens, redirections, heredocs, and segment grouping."""
 
 import posixpath
-from typing import Literal
+from typing import Literal, TypedDict
 
 from .decision import (
     BACKTICK_REASON,
@@ -21,6 +21,43 @@ from .words import (
     path_verb_operands,
     refuses_generated_plugin_target,
 )
+
+
+class Scan(TypedDict):
+    """A balanced scan's inner text, and the position just past its close.
+
+    ``text`` is ``None`` when the construct never closed. Every caller turns
+    that into an unjudged verdict rather than guessing at the remainder, so
+    the position still says how far the scan got.
+    """
+
+    text: str | None
+    end: int
+
+
+class Lexeme(TypedDict):
+    """One lexed operator or expansion, and the position just past it."""
+
+    text: str
+    end: int
+
+
+class Heredoc(TypedDict):
+    """A delimiter awaiting its body, and whether quoting made the body literal."""
+
+    delimiter: str
+    quoted: bool
+
+
+class Redirection(TypedDict):
+    """What classifying one redirection decided, and where to resume.
+
+    ``decision`` of ``None`` means the redirection is safe and consumed;
+    ``resume`` is the token index the caller continues from either way.
+    """
+
+    decision: KernelDecision | None
+    resume: int
 
 
 class ShellToken:
@@ -47,7 +84,7 @@ class ShellToken:
         self.text = text
 
 
-def read_process_substitution(command: str, position: int) -> tuple[str | None, int]:
+def read_process_substitution(command: str, position: int) -> Scan:
     """Scan a balanced ``<(...)`` body, honoring quotes, returning its inner text."""
     start = position
     depth = 1
@@ -57,7 +94,7 @@ def read_process_substitution(command: str, position: int) -> tuple[str | None, 
         if character == "'":
             closing = command.find("'", position + 1)
             if closing == -1:
-                return None, position
+                return Scan(text=None, end=position)
             position = closing + 1
             continue
         if character == '"':
@@ -65,7 +102,7 @@ def read_process_substitution(command: str, position: int) -> tuple[str | None, 
             while position < length and command[position] != '"':
                 position += 2 if command[position] == "\\" else 1
             if position >= length:
-                return None, position
+                return Scan(text=None, end=position)
             position += 1
             continue
         if character == "\\":
@@ -76,12 +113,12 @@ def read_process_substitution(command: str, position: int) -> tuple[str | None, 
         elif character == ")":
             depth -= 1
             if depth == 0:
-                return command[start:position], position + 1
+                return Scan(text=command[start:position], end=position + 1)
         position += 1
-    return None, position
+    return Scan(text=None, end=position)
 
 
-def read_command_substitution(command: str, position: int) -> tuple[str | None, int]:
+def read_command_substitution(command: str, position: int) -> Scan:
     """Scan a balanced ``$(...)`` expansion, returning its inner text.
 
     ``position`` sits on the ``$``; the returned end position follows the
@@ -91,7 +128,7 @@ def read_command_substitution(command: str, position: int) -> tuple[str | None, 
     return read_process_substitution(command, position + 2)
 
 
-def read_redirection(command: str, position: int) -> tuple[str, int]:
+def read_redirection(command: str, position: int) -> Lexeme:
     """Read a maximal redirection operator, returning its text and end position."""
     start = position
     length = len(command)
@@ -111,33 +148,33 @@ def read_redirection(command: str, position: int) -> tuple[str, int]:
             command[position].isdigit() or command[position] == "-"
         ):
             position += 1
-    return command[start:position], position
+    return Lexeme(text=command[start:position], end=position)
 
 
-def read_control(command: str, position: int) -> tuple[str, int]:
+def read_control(command: str, position: int) -> Lexeme:
     """Read a maximal control operator, returning its text and end position."""
     character = command[position]
     length = len(command)
     if character == "&":
         if position + 1 < length and command[position + 1] == "&":
-            return "&&", position + 2
-        return "&", position + 1
+            return Lexeme(text="&&", end=position + 2)
+        return Lexeme(text="&", end=position + 1)
     if character == "|":
         if position + 1 < length and command[position + 1] == "|":
-            return "||", position + 2
+            return Lexeme(text="||", end=position + 2)
         if position + 1 < length and command[position + 1] == "&":
-            return "|&", position + 2
-        return "|", position + 1
+            return Lexeme(text="|&", end=position + 2)
+        return Lexeme(text="|", end=position + 1)
     if character == ";":
         if command[position : position + 3] == ";;&":
-            return ";;&", position + 3
+            return Lexeme(text=";;&", end=position + 3)
         if command[position : position + 2] in (";;", ";&"):
-            return command[position : position + 2], position + 2
-        return ";", position + 1
-    return character, position + 1
+            return Lexeme(text=command[position : position + 2], end=position + 2)
+        return Lexeme(text=";", end=position + 1)
+    return Lexeme(text=character, end=position + 1)
 
 
-def read_arithmetic(command: str, position: int) -> tuple[str | None, int]:
+def read_arithmetic(command: str, position: int) -> Scan:
     """Scan a balanced ``$((...))`` expansion whose interior is pure data.
 
     ``position`` sits on the ``$``. Arithmetic cannot run commands, so the
@@ -150,22 +187,24 @@ def read_arithmetic(command: str, position: int) -> tuple[str | None, int]:
     while cursor < length:
         character = command[cursor]
         if character == "`" or command[cursor : cursor + 2] == "$(":
-            return None, cursor
+            return Scan(text=None, end=cursor)
         if character == "(":
             depth += 1
         elif character == ")":
             depth -= 1
             if depth == 0:
-                return command[position : cursor + 1], cursor + 1
+                return Scan(text=command[position : cursor + 1], end=cursor + 1)
         cursor += 1
-    return None, cursor
+    return Scan(text=None, end=cursor)
 
 
-def arithmetic_token(command: str, position: int) -> tuple[str, int] | KernelDecision:
+def arithmetic_token(command: str, position: int) -> Lexeme | KernelDecision:
     """Read one ``$((...))`` expansion or explain why it cannot join a word."""
-    expansion, end = read_arithmetic(command, position)
+    scan = read_arithmetic(command, position)
+    expansion = scan["text"]
+    end = scan["end"]
     if expansion is not None:
-        return expansion, end
+        return Lexeme(text=expansion, end=end)
     if command[end : end + 2] == "$(" or command[end : end + 1] == "`":
         return KernelDecision("deny", SUBSTITUTION_REASON)
     return unjudged("arithmetic expansion does not parse")
@@ -181,7 +220,7 @@ def without_leading_tabs(line: str) -> str:
 
 
 def read_heredoc_bodies(
-    command: str, position: int, pending: list[tuple[str, bool]]
+    command: str, position: int, pending: list[Heredoc]
 ) -> int | KernelDecision:
     """Consume heredoc bodies after a newline, gating unquoted expansion.
 
@@ -189,7 +228,9 @@ def read_heredoc_bodies(
     shell substitute inside the body, so any substitution syntax there is
     refused with the quoting recipe.
     """
-    for delimiter, is_quoted in pending:
+    for heredoc in pending:
+        delimiter = heredoc["delimiter"]
+        is_quoted = heredoc["quoted"]
         lines: list[str] = []
         terminated = False
         while position <= len(command):
@@ -229,7 +270,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
     started = False
     quoted = False
     heredoc_expected = False
-    pending_heredocs: list[tuple[str, bool]] = []
+    pending_heredocs: list[Heredoc] = []
     length = len(command)
     position = 0
 
@@ -238,7 +279,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
         if started:
             tokens.append(ShellToken("word", "".join(word), quoted))
             if heredoc_expected:
-                pending_heredocs.append(("".join(word), quoted))
+                pending_heredocs.append(Heredoc(delimiter="".join(word), quoted=quoted))
                 heredoc_expected = False
             word.clear()
             started = False
@@ -268,8 +309,8 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                     outcome = arithmetic_token(command, position)
                     if isinstance(outcome, KernelDecision):
                         return outcome
-                    expansion, position = outcome
-                    word.append(expansion)
+                    position = outcome["end"]
+                    word.append(outcome["text"])
                     continue
                 if inner == "`":
                     return KernelDecision("deny", BACKTICK_REASON)
@@ -278,12 +319,13 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                     and position + 1 < length
                     and command[position + 1] == "("
                 ):
-                    body, end = read_command_substitution(command, position)
+                    substitution = read_command_substitution(command, position)
+                    body = substitution["text"]
                     if body is None:
                         return unjudged("command substitution does not parse")
                     tokens.append(ShellToken("cmdsub", body))
                     word.append(SUBSTITUTION_SENTINEL)
-                    position = end
+                    position = substitution["end"]
                     continue
                 word.append(inner)
                 position += 1
@@ -307,20 +349,21 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             outcome = arithmetic_token(command, position)
             if isinstance(outcome, KernelDecision):
                 return outcome
-            expansion, position = outcome
-            word.append(expansion)
+            position = outcome["end"]
+            word.append(outcome["text"])
             started = True
             continue
         if character == "`":
             return KernelDecision("deny", BACKTICK_REASON)
         if character == "$" and position + 1 < length and command[position + 1] == "(":
-            body, end = read_command_substitution(command, position)
+            substitution = read_command_substitution(command, position)
+            body = substitution["text"]
             if body is None:
                 return unjudged("command substitution does not parse")
             tokens.append(ShellToken("cmdsub", body))
             word.append(SUBSTITUTION_SENTINEL)
             started = True
-            position = end
+            position = substitution["end"]
             continue
         if character == ">" and position + 1 < length and command[position + 1] == "(":
             return KernelDecision(
@@ -329,11 +372,12 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
         if character == "<" and position + 1 < length and command[position + 1] == "(":
             if started:
                 return unjudged("process substitution inside a word is not classified")
-            inner, end = read_process_substitution(command, position + 2)
+            substitution = read_process_substitution(command, position + 2)
+            inner = substitution["text"]
             if inner is None:
                 return unjudged("process substitution does not parse")
             tokens.append(ShellToken("procsub", inner))
-            position = end
+            position = substitution["end"]
             continue
         if character == "#" and not started:
             newline = command.find("\n", position)
@@ -352,14 +396,18 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                 quoted = False
             else:
                 flush()
-            operator, position = read_redirection(command, position)
+            redirection = read_redirection(command, position)
+            operator = redirection["text"]
+            position = redirection["end"]
             tokens.append(ShellToken("op", fd + operator))
             if "<<" in operator and "<<<" not in operator:
                 heredoc_expected = True
             continue
         if character in ";&|\n":
             flush()
-            operator, position = read_control(command, position)
+            control = read_control(command, position)
+            operator = control["text"]
+            position = control["end"]
             tokens.append(ShellToken("op", operator))
             if operator == "\n" and pending_heredocs:
                 consumed = read_heredoc_bodies(command, position, pending_heredocs)
@@ -464,7 +512,7 @@ def resolve_redirection(
     heredoc_fed: bool = False,
     existing_targets: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
-) -> tuple[KernelDecision | None, int]:
+) -> Redirection:
     """Classify one redirection, consuming its target and stripping safe forms.
 
     A write that would overwrite an existing file is the destructive case: a
@@ -482,45 +530,47 @@ def resolve_redirection(
     if "<<" in operator and "<<<" not in operator:
         target = index + 1
         if target >= len(tokens) or tokens[target].kind != "word":
-            return unjudged("heredoc has no delimiter"), index + 1
-        return None, target + 1
+            return Redirection(
+                decision=unjudged("heredoc has no delimiter"), resume=index + 1
+            )
+        return Redirection(decision=None, resume=target + 1)
     if "&" in operator and (operator[-1].isdigit() or operator[-1] == "-"):
-        return None, index + 1
+        return Redirection(decision=None, resume=index + 1)
     target = index + 1
     if target >= len(tokens) or tokens[target].kind != "word":
-        return (
-            KernelDecision("ask", "file redirection is never auto-allowed"),
-            index + 1,
+        return Redirection(
+            decision=KernelDecision("ask", "file redirection is never auto-allowed"),
+            resume=index + 1,
         )
     if "<" in operator:
-        return None, target + 1
+        return Redirection(decision=None, resume=target + 1)
     if posixpath.normpath(tokens[target].text) == "/dev/null":
-        return None, target + 1
+        return Redirection(decision=None, resume=target + 1)
     refused = refuses_generated_plugin_target(tokens[target].text)
     if refused is not None:
-        return refused, target + 1
+        return Redirection(decision=refused, resume=target + 1)
     if path_role(tokens[target].text, path_roles or []) == "scratch":
-        return None, target + 1
+        return Redirection(decision=None, resume=target + 1)
     if is_session_scratch_target(tokens[target].text):
-        return None, target + 1
+        return Redirection(decision=None, resume=target + 1)
     if (
         existing_targets is not None
         and literal_target(tokens[target].text)
         and tokens[target].text not in existing_targets
     ):
-        return None, target + 1
+        return Redirection(decision=None, resume=target + 1)
     if heredoc_fed:
-        return (
-            KernelDecision(
+        return Redirection(
+            decision=KernelDecision(
                 "deny",
                 "authoring a file through a heredoc bypasses the edit policy"
                 " — write a tmp/*.py script or use the Edit tool",
             ),
-            target + 1,
+            resume=target + 1,
         )
-    return (
-        KernelDecision("ask", "file redirection is never auto-allowed"),
-        target + 1,
+    return Redirection(
+        decision=KernelDecision("ask", "file redirection is never auto-allowed"),
+        resume=target + 1,
     )
 
 
@@ -619,9 +669,11 @@ def parse_shell_words(
                 current = []
             index += 1
             continue
-        verdict, index = resolve_redirection(
+        redirection = resolve_redirection(
             tokens, index, heredoc_fed, existing_targets, path_roles
         )
+        index = redirection["resume"]
+        verdict = redirection["decision"]
         if verdict is not None:
             return verdict
     if current:
@@ -650,9 +702,9 @@ def shell_path_verb_targets(command: str) -> list[str]:
         return []
     targets: list[str] = []
     for segment in segments:
-        words, _dangerous = effective_command(segment)
+        words = effective_command(segment)["words"]
         if not words or posixpath.basename(words[0]) not in SCRATCH_VERB_FLAGS:
             continue
-        operands, _inert = path_verb_operands(words)
+        operands = path_verb_operands(words)["operands"]
         targets.extend(operands)
     return targets

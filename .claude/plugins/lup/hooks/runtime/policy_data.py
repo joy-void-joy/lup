@@ -478,9 +478,9 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "tuple-shape",
             "pattern": "\\btuple\\[",
-            "message": "A declared `tuple[...]` shape hides what each position means \u2014 name the fields with a TypedDict or BaseModel, a `type Alias = ...` for a reused shape, or `list` for a variable-length sequence",
+            "message": "A fixed-arity `tuple[...]` hides what each position means \u2014 name the fields with a BaseModel. Fall back to a TypedDict only where a model cannot go: the hermetic kernel, which has no pydantic, or a field that must stay the caller's own object, which validation would copy. `tuple[X, ...]` is a sequence and never trips this",
             "context": "code",
-            "strength": "soft",
+            "strength": "strong",
         },
         {
             "id": "frozenset-shape",
@@ -774,9 +774,9 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "tuple-shape",
             "pattern": "\\btuple\\[",
-            "message": "A declared `tuple[...]` shape hides what each position means \u2014 name the fields with a TypedDict or BaseModel, a `type Alias = ...` for a reused shape, or `list` for a variable-length sequence",
+            "message": "A fixed-arity `tuple[...]` hides what each position means \u2014 name the fields with a BaseModel. Fall back to a TypedDict only where a model cannot go: the hermetic kernel, which has no pydantic, or a field that must stay the caller's own object, which validation would copy. `tuple[X, ...]` is a sequence and never trips this",
             "context": "code",
-            "strength": "soft",
+            "strength": "strong",
         },
         {
             "id": "frozenset-shape",

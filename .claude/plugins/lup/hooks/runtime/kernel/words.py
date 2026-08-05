@@ -1,12 +1,28 @@
-# lup: ignore[empty-collection, set-shape, string-split, tuple-shape]
+# lup: ignore[empty-collection, set-shape, string-split]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Word-level shell helpers: expansion safety, flags, and payloads."""
 
 import posixpath
+from typing import TypedDict
 
 from .decision import KernelDecision, SUBSTITUTION_SENTINEL
 from .roles import path_role
 from .rows import PathRoleRow
+
+
+class EffectiveCommand(TypedDict):
+    """The words the shell finally executes, and whether a binding was dangerous."""
+
+    words: list[str]
+    dangerous: bool
+
+
+class VerbOperands(TypedDict):
+    """A path verb's operands, and whether every flag among them was inert."""
+
+    operands: list[str]
+    inert: bool
+
 
 PASS_THROUGH_WORDS = (  # lup: ignore[library-default] — real wrappers that exec the argument after them
     "env",
@@ -75,7 +91,7 @@ def nice_payload(segment: list[str], position: int) -> int:
     return position
 
 
-def effective_command(segment: list[str]) -> tuple[list[str], bool]:
+def effective_command(segment: list[str]) -> EffectiveCommand:
     """Skip assignments and transparent wrappers, noting dangerous assignments.
 
     Wrappers that take values (``timeout 5``, ``nice -n 10``) consume them, so
@@ -93,7 +109,7 @@ def effective_command(segment: list[str]) -> tuple[list[str], bool]:
             continue
         executable = posixpath.basename(word)
         if executable == "env" and position + 1 == len(segment):
-            return segment[position:], dangerous
+            return EffectiveCommand(words=segment[position:], dangerous=dangerous)
         if executable in PASS_THROUGH_WORDS:
             position += 1
             continue
@@ -103,13 +119,13 @@ def effective_command(segment: list[str]) -> tuple[list[str], bool]:
         if executable == "nice":
             position = nice_payload(segment, position + 1)
             continue
-        return segment[position:], dangerous
-    return [], dangerous
+        return EffectiveCommand(words=segment[position:], dangerous=dangerous)
+    return EffectiveCommand(words=[], dangerous=dangerous)
 
 
 def command_words(words: list[str]) -> list[str]:
     """Skip assignments and transparent wrappers to the effective command."""
-    return effective_command(words)[0]
+    return effective_command(words)["words"]
 
 
 def uv_run_words(words: list[str]) -> list[str]:
@@ -201,7 +217,7 @@ def is_generated_plugin_target(word: str) -> bool:
     )
 
 
-def path_verb_operands(words: list[str]) -> tuple[list[str], bool]:
+def path_verb_operands(words: list[str]) -> VerbOperands:
     """A path verb's operands, and whether every flag among them was inert.
 
     An inert flag does not change what the verb does to its operands, so the
@@ -224,7 +240,7 @@ def path_verb_operands(words: list[str]) -> tuple[list[str], bool]:
                 inert = False
             continue
         operands.append(word)
-    return operands, inert
+    return VerbOperands(operands=operands, inert=inert)
 
 
 def written_operands(executable: str, operands: list[str]) -> list[str]:
@@ -256,7 +272,9 @@ def refuses_generated_plugin_write(words: list[str]) -> KernelDecision | None:
     executable = posixpath.basename(words[0])
     if executable not in SCRATCH_VERB_FLAGS:
         return None
-    operands, inert = path_verb_operands(words)
+    verb = path_verb_operands(words)
+    operands = verb["operands"]
+    inert = verb["inert"]
     targets = written_operands(executable, operands) if inert else operands
     for word in targets:
         refused = refuses_generated_plugin_target(word)
@@ -282,7 +300,7 @@ def asks_before_removing_a_directory(
     executable = posixpath.basename(words[0])
     if executable not in ("rm", "mv"):
         return None
-    operands, _inert = path_verb_operands(words)
+    operands = path_verb_operands(words)["operands"]
     named = [
         word
         for word in operands
@@ -327,7 +345,9 @@ def confined_to_recoverable_roots(
     executable = posixpath.basename(words[0])
     if executable not in SCRATCH_VERB_FLAGS:
         return None
-    operands, inert = path_verb_operands(words)
+    verb = path_verb_operands(words)
+    operands = verb["operands"]
+    inert = verb["inert"]
     if not inert or not operands:
         return None
     targets = written_operands(executable, operands)

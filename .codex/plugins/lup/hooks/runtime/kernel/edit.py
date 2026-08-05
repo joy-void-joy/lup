@@ -1,4 +1,4 @@
-# lup: ignore[empty-collection, import-re, re-call, set-shape, string-split, tuple-shape]
+# lup: ignore[empty-collection, import-re, re-call, set-shape, string-split]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Edit gates: anti-patterns, protected paths, markers, and size."""
 
@@ -8,6 +8,7 @@ import posixpath
 import re
 import tokenize
 from collections.abc import Callable, Iterator
+from typing import TypedDict
 
 from .decision import KernelDecision
 from .roles import path_role
@@ -30,8 +31,17 @@ IGNORE_RE = re.compile(
     r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?",
     re.IGNORECASE,
 )
+# The file-level form is the same directive standing alone on its own line, so
+# the leading anchor is what separates it from a trailing inline one. It may
+# carry a reason after the ids, introduced by a dash or a colon the way the
+# inline form and `defer[<condition>]:` already do — a suppression that cannot
+# say why it exists is the shape these rules were written to discourage. The
+# audit reads the same object: a kernel that stopped at `]` would deny every
+# added line in a file whose directive explains itself, while `dev check`
+# called that file exempt.
 FILE_IGNORE_RE = re.compile(
-    r"^\s*(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?\s*$",
+    r"^\s*(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?"
+    r"\s*(?:[-—–:]\s*(?P<reason>\S.*?))?\s*$",
     re.IGNORECASE,
 )
 
@@ -374,6 +384,48 @@ def dict_get_exempt_lines(source: str) -> set[int]:
     return exempt
 
 
+def tuple_shape_exempt_lines(source: str) -> set[int]:
+    """Return `tuple[` lines the tree shows to be variadic rather than positional.
+
+    ``tuple[X, ...]`` is not a shape whose positions want names — it is an
+    immutable sequence, and the rule's replacement says nothing about it:
+    ``extra_exceptions: tuple[type[Exception], ...]`` must be a tuple because
+    that is what ``except`` takes, and a list default would be a mutable-default
+    bug. Fixed arity is the defect the rule names, so a line is cleared only
+    when every ``tuple[`` on it is variadic — a line carrying both keeps its
+    finding rather than being cleared by its neighbour.
+
+    Nesting is why this needs the tree and not a wider regex: in
+    ``tuple[dict[str, int], ...]`` the trailing ellipsis sits behind a bracket
+    no character class can step over.
+
+    Source that does not parse clears every line. The rule is strong, so a
+    verdict it cannot justify would be a denial with no escape, and "cannot
+    tell" must fail toward silence — the audit sees the site again as soon as
+    the file parses.
+    """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return set(range(1, len(source.splitlines()) + 2))
+
+    def is_ellipsis(node: ast.expr) -> bool:
+        return isinstance(node, ast.Constant) and node.value is Ellipsis
+
+    variadic: set[int] = set()
+    fixed: set[int] = set()
+    for node in ast.walk(tree):
+        match node:
+            case ast.Subscript(
+                value=ast.Name(id="tuple"), slice=ast.Tuple(elts=elts)
+            ) if elts:
+                target = variadic if is_ellipsis(elts[-1]) else fixed
+                target.add(node.lineno)
+            case ast.Subscript(value=ast.Name(id="tuple")):
+                fixed.add(node.lineno)
+    return variadic - fixed
+
+
 def refiner_for(rule_id: str) -> Callable[[str], set[int]] | None:
     """The AST context that narrows one rule, where the rule has one.
 
@@ -388,6 +440,8 @@ def refiner_for(rule_id: str) -> Callable[[str], set[int]] | None:
             return empty_collection_exempt_lines
         case "dict-get":
             return dict_get_exempt_lines
+        case "tuple-shape":
+            return tuple_shape_exempt_lines
     return None
 
 
@@ -425,6 +479,50 @@ def added_lines(before: str | None, after: str | None) -> list[str]:
         else:
             added.append(line)
     return added
+
+
+def removed_lines(before: str | None, after: str | None) -> list[str]:
+    """Return lines the edit took away, with duplicate-line accounting."""
+    remaining = (after or "").splitlines()
+    removed: list[str] = []
+    for line in (before or "").splitlines():
+        if line in remaining:
+            remaining.remove(line)
+        else:
+            removed.append(line)
+    return removed
+
+
+def narrows_a_suppression(line: str, gone: list[str]) -> bool:
+    """Whether this added directive only shrinks one the edit replaced.
+
+    A suppression gate that reads the added line alone cannot tell
+    `# lup: ignore[a, b]` becoming `# lup: ignore[a]` from a suppression
+    appearing out of nowhere, and asks about both. The first is the edit the
+    audit *demands* when it reports a directive spurious, so asking to approve
+    it makes one gate request what the other grants — the same split
+    `refined_exempt_lines` exists to avoid.
+
+    A narrowing is a removed line whose code is character-identical and whose
+    ids are a superset, ``None`` being the bare directive that covers every
+    rule. Anything else — a new site, a widened list, a typed list going bare
+    — is left to the gate.
+    """
+    match = IGNORE_RE.search(line)
+    if match is None:
+        return False
+    kept = ignore_rule_ids(match)
+    code = line[: match.start()]
+    for previous in gone:
+        earlier = IGNORE_RE.search(previous)
+        if earlier is None or previous[: earlier.start()] != code:
+            continue
+        covered = ignore_rule_ids(earlier)
+        if covered is None:
+            return True
+        if kept is not None and set(kept) <= set(covered):
+            return True
+    return False
 
 
 def is_record_class(node: ast.ClassDef) -> bool:
@@ -491,13 +589,25 @@ def ignore_rule_ids(match: re.Match[str]) -> tuple[str, ...] | None:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
-def file_ignore(source: str) -> tuple[bool, tuple[str, ...] | None]:
+class FileIgnore(TypedDict):
+    """Whether a file-level suppression exists, and the ids it names.
+
+    ``ids`` is ``None`` for the bare directive, which disables every rule, and
+    distinguishing that from the empty tuple of the no-directive case is why
+    ``present`` is carried rather than inferred.
+    """
+
+    present: bool
+    ids: tuple[str, ...] | None
+
+
+def file_ignore(source: str) -> FileIgnore:
     """Return whether a file-level suppression exists and the ids it names."""
     for line in source.splitlines()[:10]:
         match = FILE_IGNORE_RE.match(line)
         if match is not None:
-            return True, ignore_rule_ids(match)
-    return False, ()
+            return FileIgnore(present=True, ids=ignore_rule_ids(match))
+    return FileIgnore(present=False, ids=())
 
 
 def suppression_site(number: int, line: str) -> str:
@@ -517,6 +627,13 @@ def suppression_reason(sites: list[str]) -> str:
     return "edit introduces an antipattern suppression\n" + "\n".join(sites)
 
 
+class AntiPatternHit(TypedDict):
+    """One added line and the rule it matched, before any suppression applies."""
+
+    line: int
+    row: AntiPatternRow
+
+
 def anti_pattern_hits(
     added: dict[int, bool],
     rows: list[AntiPatternRow],
@@ -524,7 +641,7 @@ def anti_pattern_hits(
     scanned_lines: list[str],
     exempt: dict[str, set[int]],
     tokenized: bool,
-) -> Iterator[tuple[int, AntiPatternRow]]:
+) -> Iterator[AntiPatternHit]:
     """Every added line and the rule it matches, before suppressions apply.
 
     Separating matching from deciding is what lets the strong rules be
@@ -543,7 +660,7 @@ def anti_pattern_hits(
             if row["id"] in exempt and number in exempt[row["id"]]:
                 continue
             if re.search(row["pattern"], stripped) is not None:
-                yield number, row
+                yield AntiPatternHit(line=number, row=row)
 
 
 def anti_pattern_denial(number: int, row: AntiPatternRow) -> KernelDecision:
@@ -589,17 +706,24 @@ def antipattern_decision(
     code_lines = python_code_lines(after) if python_source else original_lines
     exempt = refined_exempt_lines(after, rows) if python_source else {}
     comment_columns = python_comment_columns(after) if python_source else None
-    has_file_ignore, disabled_ids = file_ignore(after)
+    file_level = file_ignore(after)
+    has_file_ignore = file_level["present"]
+    disabled_ids = file_level["ids"]
+    gone = removed_lines(before, after)
     declared: list[str] = []
     for number in added:
         original = original_lines[number - 1]
         directive = IGNORE_RE.search(original)
-        if directive is not None and (
-            not python_source
-            or comment_columns is None
-            or (
-                number in comment_columns
-                and comment_columns[number] == directive.start()
+        if (
+            directive is not None
+            and not narrows_a_suppression(original, gone)
+            and (
+                not python_source
+                or comment_columns is None
+                or (
+                    number in comment_columns
+                    and comment_columns[number] == directive.start()
+                )
             )
         ):
             declared.append(suppression_site(number, original))
@@ -612,15 +736,16 @@ def antipattern_decision(
     # gate: its replacement is right every time, so a directive beside it
     # expresses nothing a human should be asked to approve — and approving one
     # would admit an edit `dev check` then refuses.
-    for number, row in hits:
-        if row["strength"] == "strong":
-            return anti_pattern_denial(number, row)
+    for hit in hits:
+        if hit["row"]["strength"] == "strong":
+            return anti_pattern_denial(hit["line"], hit["row"])
 
     if declared:
         return KernelDecision(suppression, suppression_reason(declared))
 
-    for number, row in hits:
-        rule_id = row["id"]
+    for hit in hits:
+        number = hit["line"]
+        rule_id = hit["row"]["id"]
         if has_file_ignore and (disabled_ids is None or rule_id in disabled_ids):
             continue
         original = original_lines[number - 1]
@@ -632,7 +757,7 @@ def antipattern_decision(
                     suppression,
                     suppression_reason([suppression_site(number, original)]),
                 )
-        return anti_pattern_denial(number, row)
+        return anti_pattern_denial(number, hit["row"])
     return None
 
 
