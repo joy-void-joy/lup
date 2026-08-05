@@ -353,6 +353,20 @@ Use `/lup:hooks` to change the canonical policy inputs, regenerate both native
 plugins, and run the shared fixture suite. `settings.json`
 holds only native settings outside this semantic policy boundary.
 
+### Code Intelligence
+
+The `codeintel` tool group answers questions about code by *resolving* it, through a language server. **Prefer these over grep for anything about a name** — a name has a definition, a scope, and a set of references, and only a resolver knows them.
+
+- **find_definition** — where a symbol is declared, through the import or alias that names it
+- **find_references** — every use across the workspace, excluding look-alikes in other scopes
+- **hover** — the type the checker actually resolved, before you assume one
+- **list_symbols** — every symbol a file declares, instead of grepping for `def ` or `class `
+- **rename_symbol** — plans a workspace-wide rename and reports the files it would touch, without writing. **Always prefer it over `Edit` with `replace_all`**, which cannot tell one scope from another; apply the reported edits yourself.
+
+Grep is still right for what is genuinely characters: a string literal, a comment, a non-Python file.
+
+---
+
 ## Configuration
 
 ### Environment Variables

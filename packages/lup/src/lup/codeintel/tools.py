@@ -1,0 +1,266 @@
+"""Code intelligence as tools, so every runtime asks the same questions.
+
+An agent that greps for `def foo` finds characters; a language server finds
+the definition, through the imports and aliases that make a name mean what it
+means. Serving that as MCP tools rather than relying on whatever each harness
+happens to ship is what makes one instruction — *use these instead of grep* —
+true on every runtime, instead of true on the one whose vendor provides them.
+
+The server executable and workspace root are supplied, so this names no
+particular checker. A failure is reported to the agent as a tool error rather
+than swallowed: an agent told "no references" by a server that never started
+would conclude the symbol is unused.
+"""
+
+import asyncio
+from collections.abc import Awaitable
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+from pydantic import BaseModel, Field, ValidationError
+
+from lup.codeintel.client import lsp_session
+from lup.codeintel.replies import (
+    DOCUMENT_SYMBOLS,
+    HOVER,
+    LOCATIONS,
+    WORKSPACE_EDIT,
+)
+from lup.mcp import LupMcpTool, ToolError, lup_tool
+from lup.types import JsonValue
+
+REQUEST_TIMEOUT_SECONDS = 120.0
+"""Budget for one question. A server that stops answering fails the tool."""
+
+
+class SymbolSite(BaseModel):
+    """One resolved source location, in the one-based terms an editor shows."""
+
+    path: str
+    line: int
+
+
+class SiteList(BaseModel):
+    """Where a symbol is defined, or every place it is used."""
+
+    sites: list[SymbolSite]
+
+
+class Documentation(BaseModel):
+    """What the checker knows about the symbol at one position."""
+
+    text: str
+
+
+class FileSymbol(BaseModel):
+    """One symbol a document declares."""
+
+    name: str
+    kind: int
+    line: int
+
+
+class SymbolList(BaseModel):
+    """Every symbol one document declares."""
+
+    symbols: list[FileSymbol]
+
+
+class RenamedFile(BaseModel):
+    """One file a rename would touch, and how many edits it would make."""
+
+    path: str
+    edits: int
+
+
+class RenamePlan(BaseModel):
+    """Every edit a rename implies, before anything is written.
+
+    Reported rather than applied: a rename spanning files is exactly the
+    change worth seeing first, and the edit tools already carry the approval
+    path that writing from here would route around.
+    """
+
+    new_name: str
+    files: list[RenamedFile]
+
+
+class PositionInput(BaseModel):
+    """A symbol named by where it sits."""
+
+    path: str = Field(description="Repository-relative path to the file.")
+    line: int = Field(description="One-based line number the symbol is on.")
+    column: int = Field(
+        default=0, description="Zero-based byte column of the symbol on that line."
+    )
+
+
+class RenameInput(PositionInput):
+    """A symbol to rename, and what to call it."""
+
+    new_name: str = Field(description="The identifier to rename the symbol to.")
+
+
+class DocumentInput(BaseModel):
+    """A whole file to enumerate."""
+
+    path: str = Field(description="Repository-relative path to the file.")
+
+
+def path_of(uri: str) -> str:
+    """The filesystem path a `file:` URI names."""
+    return Path(unquote(urlparse(uri).path)).as_posix()
+
+
+def sites_of(result: JsonValue) -> list[SymbolSite]:
+    """Decode a location-shaped reply into one-based source sites."""
+    try:
+        decoded = LOCATIONS.validate_python(result)
+    except ValidationError:
+        return []
+    if decoded is None:
+        return []
+    found = decoded if isinstance(decoded, list) else [decoded]
+    return [
+        SymbolSite(path=path_of(location.uri), line=location.range.start.line + 1)
+        for location in found
+    ]
+
+
+def create_codeintel_tools(server: Path, root: Path) -> list[LupMcpTool]:
+    """Build the code-intelligence tools driving *server* over *root*.
+
+    Args:
+        server: The language-server executable, run with ``--stdio``.
+        root: Workspace root the server resolves imports against.
+
+    Returns:
+        Tools answering definition, reference, hover, symbol, and rename
+        questions. Each opens its own session, so no state survives a call
+        and a server that dies costs one question rather than the group.
+    """
+
+    async def guarded[T](work: Awaitable[T], question: str) -> T:
+        try:
+            return await asyncio.wait_for(work, timeout=REQUEST_TIMEOUT_SECONDS)
+        except (OSError, EOFError, TimeoutError, ValueError) as error:
+            raise ToolError(
+                f"{server.name} could not answer {question}: {error}"
+            ) from error
+
+    def located(path: str) -> Path:
+        resolved = (root / path).resolve()
+        if not resolved.is_file():
+            raise ToolError(f"no such file: {path}")
+        return resolved
+
+    async def at_position(method: str, params: PositionInput) -> JsonValue:
+        resolved = located(params.path)
+
+        async def run() -> JsonValue:
+            async with lsp_session(server, root, name=server.name) as session:
+                return await session.request(
+                    method,
+                    await session.position_in(resolved, params.line, params.column),
+                )
+
+        return await guarded(run(), method)
+
+    @lup_tool(
+        "Find where a symbol is defined. Use instead of grepping for `def name` "
+        "or `class name`: this resolves imports and aliases, so it finds the "
+        "real declaration rather than a line that looks like one."
+    )
+    async def find_definition(params: PositionInput) -> SiteList:
+        return SiteList(
+            sites=sites_of(await at_position("textDocument/definition", params))
+        )
+
+    @lup_tool(
+        "Find every use of a symbol across the workspace. Use instead of "
+        "grepping for a name: this excludes look-alikes in other scopes and "
+        "includes uses reached through an alias or a re-export."
+    )
+    async def find_references(params: PositionInput) -> SiteList:
+        resolved = located(params.path)
+
+        async def run() -> JsonValue:
+            async with lsp_session(server, root, name=server.name) as session:
+                request = await session.position_in(
+                    resolved, params.line, params.column
+                )
+                request["context"] = {"includeDeclaration": False}
+                return await session.request("textDocument/references", request)
+
+        return SiteList(sites=sites_of(await guarded(run(), "references")))
+
+    @lup_tool(
+        "Read a symbol's inferred type and documentation. Use before assuming "
+        "what a value is: the checker knows the type that was resolved."
+    )
+    async def hover(params: PositionInput) -> Documentation:
+        result = await at_position("textDocument/hover", params)
+        try:
+            decoded = HOVER.validate_python(result)
+        except ValidationError:
+            return Documentation(text="")
+        return Documentation(text="" if decoded is None else decoded.text())
+
+    @lup_tool(
+        "List every symbol a file declares, with its line. Use instead of "
+        "grepping for `def ` or `class ` to learn a file's shape."
+    )
+    async def list_symbols(params: DocumentInput) -> SymbolList:
+        resolved = located(params.path)
+
+        async def run() -> JsonValue:
+            async with lsp_session(server, root, name=server.name) as session:
+                await session.open(resolved)
+                return await session.request(
+                    "textDocument/documentSymbol",
+                    {"textDocument": {"uri": resolved.as_uri()}},
+                )
+
+        result = await guarded(run(), "symbols")
+        try:
+            decoded = DOCUMENT_SYMBOLS.validate_python(result)
+        except ValidationError:
+            return SymbolList(symbols=[])
+        return SymbolList(
+            symbols=[
+                FileSymbol(name=found.name, kind=found.kind, line=found.line)
+                for symbol in decoded or []
+                for found in symbol.declared()
+            ]
+        )
+
+    @lup_tool(
+        "Plan a workspace-wide rename of the symbol at a position. Reports the "
+        "files and edit counts without writing anything. Always prefer this "
+        "over a find-and-replace, which cannot tell one scope from another."
+    )
+    async def rename_symbol(params: RenameInput) -> RenamePlan:
+        resolved = located(params.path)
+
+        async def run() -> JsonValue:
+            async with lsp_session(server, root, name=server.name) as session:
+                request = await session.position_in(
+                    resolved, params.line, params.column
+                )
+                request["newName"] = params.new_name
+                return await session.request("textDocument/rename", request)
+
+        result = await guarded(run(), "a rename")
+        try:
+            decoded = WORKSPACE_EDIT.validate_python(result)
+        except ValidationError:
+            decoded = None
+        return RenamePlan(
+            new_name=params.new_name,
+            files=[
+                RenamedFile(path=path_of(touched.uri), edits=touched.edits)
+                for touched in (decoded.touched() if decoded else [])
+            ],
+        )
+
+    return [find_definition, find_references, hover, list_symbols, rename_symbol]

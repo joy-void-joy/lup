@@ -16,3 +16,7 @@ args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--se
 [mcp_servers.sandbox]
 command = "uv"
 args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--server", "sandbox", "--session", "harness"]
+
+[mcp_servers.codeintel]
+command = "uv"
+args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--server", "codeintel", "--session", "harness"]

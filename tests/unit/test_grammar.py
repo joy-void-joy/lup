@@ -23,10 +23,10 @@ from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import antipattern_decision
 from lup.policy.kernel.rows import AntiPatternRow
 
+from lup.codeintel.client import utf16_column
 from lup_template.devtools.dev.pyright_oracle import (
     PyrightOracle,
     locations_of,
-    utf16_column,
 )
 
 MAPPING_STUB = """

@@ -1,5 +1,20 @@
 {
   "mcpServers": {
+    "codeintel": {
+      "args": [
+        "run",
+        "--directory",
+        "${CLAUDE_PROJECT_DIR}",
+        "lup-devtools",
+        "agent",
+        "serve-tools",
+        "--server",
+        "codeintel",
+        "--session",
+        "harness"
+      ],
+      "command": "uv"
+    },
     "notes": {
       "args": [
         "run",

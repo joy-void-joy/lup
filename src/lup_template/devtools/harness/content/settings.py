@@ -12,7 +12,6 @@ SETTINGS: JsonObject = {
         "claude-md-management@claude-plugins-official": True,
         "github@claude-plugins-official": True,
         "lup@lup-template": True,
-        "pyright-lsp@claude-plugins-official": True,
     },
     "env": {"ENABLE_TOOL_SEARCH": "false"},
     "extraKnownMarketplaces": {
