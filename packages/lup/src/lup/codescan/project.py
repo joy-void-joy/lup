@@ -26,6 +26,7 @@ from lup.codescan.common import (
     IGNORE_RE,
     PythonContext,
     PythonSource,
+    RuleStrength,
     file_level_ignore,
     ignore_rule_ids,
 )
@@ -268,7 +269,10 @@ def directives_for(source: PythonSource) -> list[Directive]:
 
 
 def audit_suppressions(
-    sources: list[PythonSource], violations: list[RuleViolation], rule_id: str
+    sources: list[PythonSource],
+    violations: list[RuleViolation],
+    rule_id: str,
+    strength: RuleStrength = "soft",
 ) -> list[RuleFinding]:
     """Pair a rule's violations with the suppressions written against it.
 
@@ -276,6 +280,11 @@ def audit_suppressions(
     that covers one is reported "untyped" once, so the migration to typed
     directives stays visible; a directive naming `rule_id` that guards nothing
     is reported "spurious", so a rule cannot rot behind dead markers.
+
+    A ``strong`` rule admits no directive at all: every violation is reported
+    missing, and a directive written anyway covers nothing and so falls to the
+    same spurious sweep. This mirrors what :func:`lup.codescan.antipatterns.
+    audit_text` does for the line rules, so both surfaces refuse alike.
     """
     directives = [
         directive for source in sources for directive in directives_for(source)
@@ -283,11 +292,13 @@ def audit_suppressions(
     used: set[int] = set()
     untyped_reported: set[int] = set()
     findings: list[RuleFinding] = []
+    refusal = " (no suppression: write the replacement)" if strength == "strong" else ""
     for violation in violations:
         covering = [
             (index, directive)
             for index, directive in enumerate(directives)
-            if directive.path == violation.path
+            if strength == "soft"
+            and directive.path == violation.path
             and (
                 directive.file_level
                 or directive.line in {violation.line, *violation.suppression_lines}
@@ -300,7 +311,7 @@ def audit_suppressions(
                     kind="missing",
                     path=violation.path,
                     line=violation.line,
-                    message=violation.message,
+                    message=f"{violation.message}{refusal}",
                     rule_id=rule_id,
                 )
             )

@@ -24,6 +24,7 @@ import lup.codescan.boundaries as boundaries
 import lup.codescan.capabilities as capabilities
 import lup.codescan.dispatch as dispatch
 import lup.codescan.grammar as grammar
+import lup.codescan.narrowing as narrowing
 import lup.codescan.portable as portable
 from lup.codescan.common import RuleStrength
 
@@ -87,6 +88,21 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
             "pydantic.BaseModel."
         ),
         defined_in=dispatch.__name__,
+    ),
+    RegisteredRule(
+        id=narrowing.RULE_ID,
+        family="architecture",
+        scope="Python architecture",
+        example="if isinstance(n, ast.Name): ...\nelif isinstance(n, ast.Attribute): ...",
+        message=(
+            "Narrowing one subject again, in a later arm of the same if/elif chain, "
+            "is a dispatch in the older spelling: each arm becomes a case pattern, an "
+            "and conjunct becomes its guard, and the fallthrough becomes case _. A "
+            "single narrowing is sanctioned and stays silent, as does isinstance in "
+            "expression position, where match has no spelling at all."
+        ),
+        defined_in=narrowing.__name__,
+        strength="strong",
     ),
     RegisteredRule(
         id=boundaries.RULE_ID,

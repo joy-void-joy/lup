@@ -45,6 +45,7 @@ from lup.codescan.common import (
 )
 from lup.codescan.dispatch import audit_own_model_dispatch
 from lup.codescan.grammar import refute
+from lup.codescan.narrowing import audit_isinstance_chains
 from lup.codescan.registry import RULE_REFERENCE
 from lup.policy.kernel.roles import path_role
 from lup.policy.kernel.rows import PathRoleRow
@@ -162,6 +163,7 @@ def scan_antipatterns() -> AntiPatternScan:
         for finding in [
             *audit_capabilities(sources),
             *audit_own_model_dispatch(sources),
+            *audit_isinstance_chains(sources),
         ]
     )
     roots = application_roots()
