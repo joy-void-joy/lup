@@ -38,6 +38,8 @@ if TYPE_CHECKING:
     from lup.telemetry.trace import TraceLogger
 
 TOOL_COLORS = [
+    # The rotation a console gets when its caller expresses no preference:
+    # every terminal-safe hue, ordered so adjacent tool pairings contrast.
     "cyan",
     "green",
     "yellow",
@@ -78,8 +80,8 @@ class ColorAssigner:
     watchers) so their pairings can't cross.
     """
 
-    def __init__(self) -> None:
-        self.cycle = itertools.cycle(TOOL_COLORS)
+    def __init__(self, palette: list[str] | None = None) -> None:
+        self.cycle = itertools.cycle(palette or TOOL_COLORS)
         # Open tool-use-id -> color map, filled as blocks arrive.
         self.by_id: dict[str, str] = {}  # lup: ignore[dict-str-payload]
 

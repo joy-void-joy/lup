@@ -35,6 +35,7 @@ from policy_data import (
     PATH_ROLES,
     PATH_RULES,
     RECOVERABLE_TARGET_LIMIT,
+    RUNNER_TARGETS,
     SHELL_RULES,
 )
 
@@ -190,6 +191,7 @@ def bash_decision(
         recoverable_targets=recoverable_write_targets(acted_on),
         directory_targets=directory_write_targets(acted_on),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
+        runner_targets=RUNNER_TARGETS,
         interactive=interactive,
     )
 

@@ -50,7 +50,6 @@ from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.kernel.words import (
     INTERPRETERS,
     PASS_THROUGH_WORDS,
-    UV_RUN_ALLOWED_TARGETS,
 )
 from lup.policy.shell_rules import ShellCommandRule
 
@@ -397,7 +396,9 @@ CODEX_DYNAMIC_COMMANDS = (
 """Executables whose semantic decision cannot be represented by one prefix."""
 
 
-def codex_allow_prefixes(rules: list[ShellCommandRule]) -> list[list[str]]:
+def codex_allow_prefixes(
+    rules: list[ShellCommandRule], runner_targets: list[str]
+) -> list[list[str]]:
     """Compile semantic allows that stay allowed for every suffix.
 
     Codex prefix rules bypass the sandbox, so flag-guarded rows cannot be
@@ -427,7 +428,7 @@ def codex_allow_prefixes(rules: list[ShellCommandRule]) -> list[list[str]]:
                 continue
             if subcommand.effect == "allow" and not subcommand.ask_flags:
                 add([command.name, subcommand.name])
-    for target in UV_RUN_ALLOWED_TARGETS:
+    for target in runner_targets:
         add(["uv", "run", target])
     return sorted(prefixes)
 
@@ -437,7 +438,9 @@ def render_codex_rules(source: HookSet) -> str:
     rows = [
         f"prefix_rule(pattern = {json.dumps(prefix)}, decision = "
         '"allow", justification = "Allowed by Lup semantic shell policy")'
-        for prefix in codex_allow_prefixes(source.shell_rules)
+        for prefix in codex_allow_prefixes(
+            source.shell_rules, list(source.runner_targets)
+        )
     ]
     return "\n".join([*rows, ""])
 
@@ -552,6 +555,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         ],
                         shell_rules=list(source.shell_rules),
                         recoverable_target_limit=source.recoverable_target_limit,
+                        runner_targets=list(source.runner_targets),
                     ),
                     semantic_id=source.id,
                 ),

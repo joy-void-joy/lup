@@ -141,6 +141,9 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             ],
             human_owned_files=[Path("README.md")],
             shell_rules=SHELL_RULES,
+            # This project's toolchain: what `uv run <target>` may reach here
+            # without a question, which is nothing any other project inherits.
+            runner_targets=["pyright", "pytest", "ruff", "lup-devtools"],
             sandbox=HookSandbox(
                 extra_domains=["api.anthropic.com"],
                 credential_paths=["~/.ssh", "~/.aws/credentials"],

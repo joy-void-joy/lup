@@ -127,8 +127,11 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
 """Project-shape rules enforced by the AST scanners, one card per rule id."""
 
 
-def anti_pattern_rules() -> list[RegisteredRule]:
+def anti_pattern_rules(
+    rules: antipatterns.AntiPatternSet | None = None,
+) -> list[RegisteredRule]:
     """Project every anti-pattern rule into its registry card."""
+    declared = rules or antipatterns.AntiPatternSet()
     refined = {rule.id: rule.refinement for rule in grammar.GRAMMAR_RULES}
     return [
         RegisteredRule(
@@ -140,14 +143,16 @@ def anti_pattern_rules() -> list[RegisteredRule]:
             defined_in=antipatterns.__name__,
             refinement=refined[rule.id] if rule.id in refined else "",
         )
-        for scope, rules in (
-            ("Python", antipatterns.PYTHON_ANTI_PATTERNS),
-            ("TypeScript", antipatterns.TS_ANTI_PATTERNS),
+        for scope, scoped in (
+            ("Python", declared.python),
+            ("TypeScript", declared.typescript),
         )
-        for rule in rules
+        for rule in scoped
     ]
 
 
-def all_rules() -> list[RegisteredRule]:
+def all_rules(
+    rules: antipatterns.AntiPatternSet | None = None,
+) -> list[RegisteredRule]:
     """Every registered rule across all families, structural rules first."""
-    return [*STRUCTURAL_RULES, *anti_pattern_rules()]
+    return [*STRUCTURAL_RULES, *anti_pattern_rules(rules)]

@@ -625,6 +625,15 @@ class HookSet(BaseModel):
             "denied; declare a downstream toolchain here, not in the kernel"
         ),
     )
+    runner_targets: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Which bare targets `uv run <target>` may reach without a question. "
+            "A project's own toolchain, so the library holds no opinion: an "
+            "empty list judges every runner invocation by the ordinary shell "
+            "vocabulary instead"
+        ),
+    )
     recoverable_target_limit: int = Field(
         default=5,
         ge=0,

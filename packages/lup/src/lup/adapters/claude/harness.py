@@ -454,6 +454,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         ],
                         shell_rules=list(source.shell_rules),
                         recoverable_target_limit=source.recoverable_target_limit,
+                        runner_targets=list(source.runner_targets),
                     ),
                     semantic_id=source.id,
                 ),

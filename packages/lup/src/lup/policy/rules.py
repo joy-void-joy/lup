@@ -138,9 +138,11 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
         recoverable_target_limit: int = 5,
+        runner_targets: list[str] | None = None,
     ) -> None:
         self.path_roles = path_roles or []
         self.recoverable_target_limit = recoverable_target_limit
+        self.runner_targets = runner_targets or []
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
@@ -169,6 +171,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 recoverable_targets=recoverable_write_targets(acted_on, root),
                 directory_targets=directory_write_targets(acted_on, root),
                 recoverable_target_limit=self.recoverable_target_limit,
+                runner_targets=self.runner_targets,
             )
         )
 

@@ -47,7 +47,7 @@ consumers and the auditor import directly.
 import re
 from collections.abc import Callable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from lup.codescan.boundaries import (
     LIBRARY_DEFAULT_RULE_ID,
@@ -572,18 +572,40 @@ def refined_refutations(text: str, patterns: list[AntiPattern]) -> list[Refutati
     ]
 
 
-def patterns_for_suffix(suffix: str) -> list[AntiPattern] | None:
-    """The anti-pattern table that applies to a file suffix, or None to skip it.
+class AntiPatternSet(BaseModel):
+    """Which anti-patterns a project checks, by the language they read.
 
-    Mirrors the hook's split: Python files are checked against the Python
-    table, TS/JS-family files against the TS table, and any other suffix is
-    not scanned (the hook only gates those two families).
+    The rules a project holds itself to are its own conventions written down,
+    so the tables this library ships are what a caller starts from rather than
+    what it is stuck with — one set reaches the edit hook, the whole-file
+    audit, and the generated rule reference together, so a project that
+    replaces it replaces all three at once.
     """
-    if suffix in PY_SUFFIXES:
-        return PYTHON_ANTI_PATTERNS
-    if suffix in TS_SUFFIXES:
-        return TS_ANTI_PATTERNS
-    return None
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
+    python: list[AntiPattern] = Field(default_factory=lambda: PYTHON_ANTI_PATTERNS)
+    typescript: list[AntiPattern] = Field(default_factory=lambda: TS_ANTI_PATTERNS)
+
+    def for_suffix(self, suffix: str) -> list[AntiPattern] | None:
+        """The table that applies to a file suffix, or None to skip it.
+
+        Mirrors the hook's split: Python files are checked against the Python
+        table, TS/JS-family files against the TS table, and any other suffix
+        is not scanned (the hook only gates those two families).
+        """
+        if suffix in PY_SUFFIXES:
+            return self.python
+        if suffix in TS_SUFFIXES:
+            return self.typescript
+        return None
+
+
+def patterns_for_suffix(
+    suffix: str, rules: AntiPatternSet | None = None
+) -> list[AntiPattern] | None:
+    """The anti-pattern table one file suffix is checked against."""
+    return (rules or AntiPatternSet()).for_suffix(suffix)
 
 
 def line_hits(

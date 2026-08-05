@@ -56,12 +56,6 @@ INTERPRETERS = (  # lup: ignore[library-default] — real interpreter executable
     "ksh",
     "fish",
 )
-UV_RUN_ALLOWED_TARGETS = (
-    "pyright",
-    "pytest",
-    "ruff",
-    "lup-devtools",
-)
 
 
 def timeout_payload(segment: list[str], position: int) -> int:
@@ -139,7 +133,7 @@ def uv_run_words(words: list[str]) -> list[str]:
 # Every judged-ask verb that acts on paths, paired with the short flags whose
 # presence does not change what the verb does to them. A long flag or an
 # unrecognized cluster falls through to the verb's own ask.
-SCRATCH_VERB_FLAGS = {
+SCRATCH_VERB_FLAGS = {  # lup: ignore[library-default] — each verb's own POSIX flags, fixed by what the utility does rather than by who is asking
     "rm": "rfv",
     "rmdir": "pv",
     "mv": "fnv",

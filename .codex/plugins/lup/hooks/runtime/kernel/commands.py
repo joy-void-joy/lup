@@ -9,7 +9,6 @@ from .decision import KernelDecision, unjudged
 from .rows import ShellRuleRow, UrlScopeRow
 from .words import (
     INTERPRETERS,
-    UV_RUN_ALLOWED_TARGETS,
     flag_matches,
     opaque_argument,
     uv_run_words,
@@ -370,6 +369,7 @@ def decide_awk_words(words: list[str]) -> KernelDecision:
     return KernelDecision("allow", "read-only awk program")
 
 
+# lup: ignore[library-default] — curl's own flags that change reporting and not the request; the value follows curl's manual, not a project's taste
 CURL_SAFE_FLAGS = (
     "-s",
     "--silent",
@@ -465,7 +465,7 @@ def decide_curl_words(
     return KernelDecision("allow", "read-only curl within declared scopes")
 
 
-def decide_uv(words: list[str]) -> KernelDecision:
+def decide_uv(words: list[str], runner_targets: list[str]) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms."""
     subcommand = words[1]
     if subcommand in ("add", "sync"):
@@ -491,7 +491,7 @@ def decide_uv(words: list[str]) -> KernelDecision:
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
             )
-        if bare_target and run_command in UV_RUN_ALLOWED_TARGETS:
+        if bare_target and run_command in runner_targets:
             return KernelDecision("allow")
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")

@@ -4285,3 +4285,10 @@ CONCERN_ALLOWANCES_ENV = "LUP_CONCERN_ALLOWANCES"
 MAXIMUM_ADDED_LINES = 3
 
 RECOVERABLE_TARGET_LIMIT = 5
+
+RUNNER_TARGETS: list[str] = [
+    "pyright",
+    "pytest",
+    "ruff",
+    "lup-devtools",
+]

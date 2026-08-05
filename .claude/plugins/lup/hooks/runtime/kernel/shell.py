@@ -16,7 +16,6 @@ from .decision import (
 from .rows import PathRoleRow, ShellRuleRow, UrlScopeRow
 from .words import (
     INTERPRETERS,
-    UV_RUN_ALLOWED_TARGETS,
     asks_before_removing_a_directory,
     command_words,
     dangerous_env_name,
@@ -62,6 +61,7 @@ class ShellContext(TypedDict):
     recoverable_targets: list[str]
     directory_targets: list[str]
     recoverable_target_limit: int
+    runner_targets: list[str]
 
 
 def shell_context(
@@ -73,6 +73,7 @@ def shell_context(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
+    runner_targets: list[str] | None = None,
 ) -> ShellContext:
     """Bundle one classification's declarations, normalizing absent lists."""
     return ShellContext(
@@ -84,6 +85,7 @@ def shell_context(
         recoverable_targets=recoverable_targets or [],
         directory_targets=directory_targets or [],
         recoverable_target_limit=recoverable_target_limit,
+        runner_targets=runner_targets or [],
     )
 
 
@@ -148,7 +150,7 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
         return unjudged("a command substitution in command position is not classified")
     if any(
         SUBSTITUTION_SENTINEL in word for word in words[1:]
-    ) and not argument_safe_words(words, context["rows"]):
+    ) and not argument_safe_words(words, context):
         return unjudged(
             "a command substitution result could become a guarded flag — run"
             " it in its own call and splice the literal output"
@@ -210,7 +212,7 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
             return KernelDecision("deny", "inline code is not allowed")
         return unjudged("uvx command is not classified")
     if executable == "uv" and len(words) > 1:
-        return decide_uv(words)
+        return decide_uv(words, context["runner_targets"])
     return decide_command_rows(words, context["rows"])
 
 
@@ -280,7 +282,7 @@ def literal_loop_word(word: str) -> bool:
     )
 
 
-def uv_post_target_words_safe(words: list[str]) -> bool:
+def uv_post_target_words_safe(words: list[str], runner_targets: list[str]) -> bool:
     """True when every unknown word sits strictly after a blessed uv run target.
 
     uv stops parsing its own options at the first positional word, so a word
@@ -296,11 +298,11 @@ def uv_post_target_words_safe(words: list[str]) -> bool:
             return False
         if word.startswith("-"):
             continue
-        return "/" not in word and word in UV_RUN_ALLOWED_TARGETS
+        return "/" not in word and word in runner_targets
     return False
 
 
-def argument_safe_words(words: list[str], rows: list[ShellRuleRow]) -> bool:
+def argument_safe_words(words: list[str], context: ShellContext) -> bool:
     """True when the command's row allows regardless of argument content.
 
     A loop variable bound to a non-literal word list can expand to any word,
@@ -311,10 +313,10 @@ def argument_safe_words(words: list[str], rows: list[ShellRuleRow]) -> bool:
     """
     executable = posixpath.basename(words[0])
     if executable == "uv":
-        return uv_post_target_words_safe(words)
+        return uv_post_target_words_safe(words, context["runner_targets"])
     if executable in INTERPRETERS or executable in ("sed", "git", "uvx", "xargs"):
         return False
-    matches = [row for row in rows if row["command"] == executable]
+    matches = [row for row in context["rows"] if row["command"] == executable]
     return (
         len(matches) == 1
         and not matches[0]["subcommand"]
@@ -371,7 +373,7 @@ def read_bindings(
 def resolve_segment_bindings(
     segment: list[str],
     bindings: tuple[ShellBinding, ...],
-    rows: list[ShellRuleRow],
+    context: ShellContext,
     gate_opaque: bool,
 ) -> list[str] | KernelDecision:
     """Substitute literal bindings and gate opaque ones by argument safety.
@@ -391,7 +393,7 @@ def resolve_segment_bindings(
         if not gate_opaque:
             continue
         words = command_words(resolved)
-        if not words or not argument_safe_words(words, rows):
+        if not words or not argument_safe_words(words, context):
             return unjudged("an opaquely bound variable could become a guarded flag")
     return resolved
 
@@ -441,7 +443,7 @@ def decide_for_body(
     for segment in body:
         if any(references_variable(word, name) for word in segment):
             words = command_words(segment)
-            if not words or not argument_safe_words(words, context["rows"]):
+            if not words or not argument_safe_words(words, context):
                 return [
                     unjudged(
                         "loop words are not literal, so a variable argument"
@@ -629,7 +631,7 @@ def decide_segment_list(
             continue
         structural = segment[0] in ("for", "while", "until", "if", "case")
         resolved = resolve_segment_bindings(
-            segment, bindings, context["rows"], gate_opaque=not structural
+            segment, bindings, context, gate_opaque=not structural
         )
         if isinstance(resolved, KernelDecision):
             return [*decisions, resolved]
@@ -689,6 +691,7 @@ def classify_shell(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
+    runner_targets: list[str] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(command, 0, existing_targets, path_roles)
@@ -703,6 +706,7 @@ def classify_shell(
         recoverable_targets,
         directory_targets,
         recoverable_target_limit,
+        runner_targets,
     )
     decisions = decide_segment_list(segments, context)
     denied = next((item for item in decisions if item.effect == "deny"), None)
@@ -730,6 +734,7 @@ def decide_shell(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
+    runner_targets: list[str] | None = None,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -777,6 +782,7 @@ def decide_shell(
             recoverable_targets,
             directory_targets,
             recoverable_target_limit,
+            runner_targets,
         )
         if inner.effect == "allow":
             return inner
@@ -793,5 +799,6 @@ def decide_shell(
             recoverable_targets,
             directory_targets,
             recoverable_target_limit,
+            runner_targets,
         )
     )

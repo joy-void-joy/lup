@@ -100,6 +100,9 @@ FIXTURE_PATH_ROLES = [
 ]
 
 FIXTURE_RECOVERABLE_LIMIT = 5
+FIXTURE_RUNNER_TARGETS = ["pyright", "pytest", "ruff", "lup-devtools"]
+"""What this project declares `uv run <target>` may reach, which is what the
+shell fixtures below are written against."""
 """How many restorable files one command may destroy before it asks."""
 
 SHELL_POLICY_CASES = [
@@ -886,6 +889,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             path_roles=FIXTURE_PATH_ROLES,
             shell_rules=SHELL_RULES,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
+            runner_targets=FIXTURE_RUNNER_TARGETS,
         ),
         encoding="utf-8",
     )
@@ -911,7 +915,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from kernel.shell import decide_shell\n"
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
-        "    MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES, SHELL_RULES,\n"
+        "    MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES, RUNNER_TARGETS,\n"
+        "    SHELL_RULES,\n"
         ")\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
@@ -922,6 +927,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        interactive=case['interactive'],\n"
         "        path_roles=PATH_ROLES,\n"
         "        existing_targets=case['existing'],\n"
+        "        runner_targets=RUNNER_TARGETS,\n"
         "    )\n"
         "    assert result.effect == case['effect'], case\n"
         "for case in fixtures['fetch']:\n"
@@ -1095,7 +1101,7 @@ def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
 
 
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
-    policy = ShellPolicy(SHELL_RULES)
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
 
     assert policy.decide(
         ShellCommand(command="git status && uv run pytest")
@@ -1135,9 +1141,16 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     tmp_path: Path,
 ) -> None:
     bundled = load_bundled_kernel(tmp_path, "shell")
-    policy = ShellPolicy(SHELL_RULES, path_roles=FIXTURE_PATH_ROLES)
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_roles=FIXTURE_PATH_ROLES,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
     sandboxed_policy = ShellPolicy(
-        SHELL_RULES, sandbox_active=True, path_roles=FIXTURE_PATH_ROLES
+        SHELL_RULES,
+        sandbox_active=True,
+        path_roles=FIXTURE_PATH_ROLES,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
     )
 
     for index, case in enumerate(SHELL_POLICY_CASES):
@@ -1149,6 +1162,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
                 sandbox_active=case.sandboxed,
                 interactive=False,
                 path_roles=FIXTURE_PATH_ROLES,
+                runner_targets=FIXTURE_RUNNER_TARGETS,
             )
         # Each case judges a tree of its own, so a file one case declares
         # present never leaks into the next case's create-versus-overwrite.
@@ -1167,6 +1181,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             interactive=case.interactive,
             path_roles=FIXTURE_PATH_ROLES,
             existing_targets=case.existing,
+            runner_targets=FIXTURE_RUNNER_TARGETS,
         ).effect
         assert bundled_effect == case.effect, case.input
 

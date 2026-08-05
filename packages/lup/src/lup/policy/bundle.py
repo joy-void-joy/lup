@@ -16,7 +16,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
+from lup.codescan.antipatterns import AntiPatternSet
 from lup.harness.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.identity import AGENT_IDENTITY_ENV, CONCERN_ALLOWANCES_ENV
 import lup.policy.kernel as kernel
@@ -53,8 +53,11 @@ def policy_kernel_modules() -> list[KernelModule]:
     ]
 
 
-def bundled_antipattern_rows() -> dict[str, list[AntiPatternRow]]:
+def bundled_antipattern_rows(
+    rules: AntiPatternSet | None = None,
+) -> dict[str, list[AntiPatternRow]]:
     """Compile primitive runtime rows directly from canonical rule objects."""
+    declared = rules or AntiPatternSet()
     python_rows = [
         AntiPatternRow(
             id=rule.id,
@@ -62,7 +65,7 @@ def bundled_antipattern_rows() -> dict[str, list[AntiPatternRow]]:
             message=rule.message,
             context=rule.context,
         )
-        for rule in PYTHON_ANTI_PATTERNS
+        for rule in declared.python
     ]
     typescript_rows = [
         AntiPatternRow(
@@ -71,7 +74,7 @@ def bundled_antipattern_rows() -> dict[str, list[AntiPatternRow]]:
             message=rule.message,
             context=rule.context,
         )
-        for rule in TS_ANTI_PATTERNS
+        for rule in declared.typescript
     ]
     return {
         ".py": python_rows,
@@ -272,6 +275,7 @@ def render_policy_data(
     path_roles: list[PathRoleRow],
     shell_rules: list[ShellCommandRule],
     recoverable_target_limit: int,
+    runner_targets: list[str],
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
     body = "\n\n".join(
@@ -295,6 +299,7 @@ def render_policy_data(
             "CONCERN_ALLOWANCES_ENV = " + json.dumps(CONCERN_ALLOWANCES_ENV),
             "MAXIMUM_ADDED_LINES = 3",
             "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
+            "RUNNER_TARGETS: list[str] = " + string_rows_literal(runner_targets),
         ]
     )
     return (

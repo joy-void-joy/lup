@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "61765d05314924ce5633d5c72accd87e268a24de3ce93227d96996c43bff5822",
+  "source_digest": "ee6827c7089f2443385d82a35786fe753a6627e6ea65bd41b65593c920fdfbd1",
   "target_requirements": [
     "claude-code"
   ],
@@ -317,7 +317,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "4749d9f52358ebd1fb647a4e192df1f510233bffc05fedb3410771e55984cc38",
+      "sha256": "9f43cbab78f964255d9c09be7203a7e225be1383628c32bf656f959bdf4ea4f4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -366,28 +366,28 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "aff3ef4c7603f97ebefd8cb50591c4a89c22f0e182dc4d72da2cd82a52ec7adf",
+      "sha256": "f587fa910b058875b9b8c1c4cbd26b2846f8ff0b0b263dfc9d06eac9e0582c67",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/words.py",
       "category": "generated",
-      "sha256": "5a4a887bb6c76c220f0e56e7bea41614e802795a7c36f6b27ea951bd27546f41",
+      "sha256": "8d2f49167d0b5e35447df2531e7a0cc24a95dd7f2117c8adf09f8a8461c605d5",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "b27de5dacfe07029d8eb53a4dc1895f07abba58f1cde3005a86612620d4f04ac",
+      "sha256": "4c196d884420bc3304b2c2d0f287c28e5411fe46ea3fad7e5f504af0e07836ef",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "47b4aceaf46a60e16eebfe05b44efea2f4fe6ab73dbd0aa5e27c0a3516e9991a",
+      "sha256": "025ca41d938e63270120088ca2d8edf5595247ca3bb00a40cb4950e876bb0ee1",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
