@@ -6,8 +6,9 @@
 Pure path layout — where things go on disk. No data discovery or disk
 iteration; see :mod:`lup.workspace.history` for cross-version queries.
 
-Paths auto-detect the project root (walking up to ``pyproject.toml``)
-on first access, but can be overridden via :func:`configure`::
+Paths auto-detect the project root (the nearest enclosing ``pyproject.toml``
+declaring ``[tool.lup]``, from the working directory) on first access, but
+can be overridden via :func:`configure`::
 
     from lup.workspace.paths import configure
     configure(root=Path("/my/project"), notes_dir=Path("/my/data/notes"))
@@ -58,10 +59,9 @@ import tomllib
 from pydantic import BaseModel
 
 
-def find_project_root() -> Path:
-    """Find project root by walking up to the pyproject.toml with [tool.lup]."""
-    current = Path(__file__).resolve().parent
-    for parent in [current, *current.parents]:
+def declared_project_root(start: Path) -> Path | None:
+    """The nearest enclosing directory whose pyproject declares ``[tool.lup]``."""
+    for parent in [start, *start.parents]:
         pyproject = parent / "pyproject.toml"
         if pyproject.exists():
             with pyproject.open("rb") as f:
@@ -69,9 +69,23 @@ def find_project_root() -> Path:
             match data:
                 case {"tool": {"lup": _}}:
                     return parent
-    raise RuntimeError(
-        "Could not find project root (no pyproject.toml with [tool.lup] found)"
-    )
+    return None
+
+
+def find_project_root() -> Path:
+    """Find the project root enclosing this installation of the library.
+
+    Only meaningful for a source checkout, where the library lives inside the
+    project it serves. Installed as a dependency it answers about the
+    environment rather than the project, so :func:`resolve_state` asks the
+    working directory first and reaches this only as a fallback.
+    """
+    root = declared_project_root(Path(__file__).resolve().parent)
+    if root is None:
+        raise RuntimeError(
+            "Could not find project root (no pyproject.toml with [tool.lup] found)"
+        )
+    return root
 
 
 @functools.cache
@@ -154,10 +168,18 @@ state = PathState()
 
 
 def resolve_state() -> PathConfig:
-    """Return the cached path state, auto-detecting the project root on first use."""
+    """Return the cached path state, auto-detecting the project root on first use.
+
+    The working directory decides, because that is what names the project a
+    command is being run against. Where the library happens to be installed
+    answers a different question — a shared virtualenv, a container image, or
+    ``UV_PROJECT_ENVIRONMENT`` all put it outside the project entirely — and
+    agrees with the working directory only in a source checkout, which is the
+    case where it stays a usable fallback.
+    """
     config = state.config
     if config is None:
-        root = find_project_root()
+        root = declared_project_root(Path.cwd()) or find_project_root()
         config = PathConfig(
             root=root,
             version=read_agent_version(root),

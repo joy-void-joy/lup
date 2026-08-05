@@ -109,6 +109,35 @@ def test_path_is_under_blocks_traversal(tmp_path: Path) -> None:
     assert not path_is_under(escape, [allowed])
 
 
+def test_autodetection_answers_about_the_project_the_command_runs_against(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Installed as a dependency the library sits outside every project it serves.
+
+    Where it is installed is then a fact about the environment, so the fallback
+    that reads it must never win over the working directory.
+    """
+    project = tmp_path / "adopter"
+    (project / "src").mkdir(parents=True)
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "adopter"\n\n[tool.lup]\nagent_version = "3.1.4"\n'
+    )
+    elsewhere = tmp_path / "shared-venv"
+    elsewhere.mkdir()
+
+    def installed_outside_any_project() -> Path:
+        raise AssertionError(
+            "the working directory answered; the fallback must not run"
+        )
+
+    monkeypatch.setattr(paths.state, "config", None)
+    monkeypatch.setattr(paths, "find_project_root", installed_outside_any_project)
+    monkeypatch.chdir(project / "src")
+
+    assert paths.project_root() == project
+    assert paths.agent_version() == "3.1.4"
+
+
 def test_extract_glob_dir() -> None:
     assert extract_glob_dir("/tmp/foo/**/*.py") == "/tmp/foo"
     assert extract_glob_dir("**/*.py") == ""
