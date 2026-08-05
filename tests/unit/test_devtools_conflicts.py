@@ -13,37 +13,22 @@ import pytest
 import sh
 
 from lup_template.devtools.dev import conflicts
+from tests.unit.repos import commit_file, initialized_repo
 
 
 @pytest.fixture
 def rebase_conflict_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
-    repo.mkdir()
-    hooks = tmp_path / "no-hooks"
-    hooks.mkdir()
-    git = sh.Command("git").bake(
-        "-C",
-        str(repo),
-        "-c",
-        "commit.gpgsign=false",
-        "-c",
-        f"core.hooksPath={hooks}",
-        _tty_out=False,
-    )
+    git = initialized_repo(repo, tmp_path / "no-hooks")
 
-    def commit_file(content: str, message: str) -> None:
-        (repo / "file.txt").write_text(content, encoding="utf-8")
-        git("add", "file.txt")
-        git("commit", "-m", message)
+    def commit_conflicting(content: str, message: str) -> None:
+        commit_file(git, repo, "file.txt", content, message)
 
-    git("init", "-b", "main")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
-    commit_file("base\n", "chore: base")
+    commit_conflicting("base\n", "chore: base")
     git("checkout", "-b", "feature")
-    commit_file("feature\n", "feat: feature change")
+    commit_conflicting("feature\n", "feat: feature change")
     git("checkout", "main")
-    commit_file("main\n", "fix: main change")
+    commit_conflicting("main\n", "fix: main change")
     git("checkout", "feature")
     try:
         git("rebase", "main")

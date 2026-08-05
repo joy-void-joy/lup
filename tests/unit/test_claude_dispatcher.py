@@ -13,6 +13,7 @@ import pytest
 import sh
 
 from lup.types import JsonObject
+from tests.unit.repos import initialized_repo
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
 
@@ -181,20 +182,7 @@ def delete_repo(tmp_path: Path) -> Path:
     """A repository holding one committed file of each kind that matters."""
     work = tmp_path / "repo"
     (work / "src").mkdir(parents=True)
-    hooks = tmp_path / "no-hooks"
-    hooks.mkdir()
-    git = sh.Command("git").bake(
-        "-C",
-        str(work),
-        "-c",
-        "commit.gpgsign=false",
-        "-c",
-        f"core.hooksPath={hooks}",
-        _tty_out=False,
-    )
-    git("init", "-b", "main")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
+    git = initialized_repo(work, tmp_path / "no-hooks")
     for index in range(8):
         (work / "src" / f"file{index}.py").write_text("value = 1\n", encoding="utf-8")
     git("add", "src")

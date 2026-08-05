@@ -17,6 +17,7 @@ import typer
 from lup.codescan.markers import NoteKind
 from lup_template.devtools.dev import comments
 from lup_template.devtools.dev.check import inline_notes_lines
+from tests.unit.repos import commit_file, initialized_repo
 
 PY_SOURCE = """\
 alpha = 1
@@ -31,24 +32,8 @@ delta = 4  # lup: rename delta
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     work = tmp_path / "repo"
-    work.mkdir()
-    hooks = tmp_path / "no-hooks"
-    hooks.mkdir()
-    git = sh.Command("git").bake(
-        "-C",
-        str(work),
-        "-c",
-        "commit.gpgsign=false",
-        "-c",
-        f"core.hooksPath={hooks}",
-        _tty_out=False,
-    )
-    git("init", "-b", "main")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
-    (work / "code.py").write_text(PY_SOURCE, encoding="utf-8")
-    git("add", "code.py")
-    git("commit", "-m", "chore: base")
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    commit_file(git, work, "code.py", PY_SOURCE, "chore: base")
     monkeypatch.chdir(work)
     return work
 

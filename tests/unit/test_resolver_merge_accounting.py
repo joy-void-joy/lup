@@ -10,7 +10,6 @@ choice visible.
 from pathlib import Path
 
 import pytest
-import sh
 
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
@@ -31,6 +30,7 @@ from lup.resolver.orchestrator import report_mismatch
 from lup.resolver.state import StateTransitionError, validate_concern_admission
 from lup.resolver.tools import agent_may_approve
 from lup_template.devtools.harness.resolve import integration_branch
+from tests.unit.repos import initialized_repo
 
 PARENT = "a1b2c3d4e5f6"
 
@@ -248,20 +248,7 @@ def approval_repo(tmp_path: Path) -> Path:
     """
     work = tmp_path / "repo"
     (work / "src").mkdir(parents=True)
-    hooks = tmp_path / "no-hooks"
-    hooks.mkdir()
-    git = sh.Command("git").bake(
-        "-C",
-        str(work),
-        "-c",
-        "commit.gpgsign=false",
-        "-c",
-        f"core.hooksPath={hooks}",
-        _tty_out=False,
-    )
-    git("init", "-b", "main")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
+    git = initialized_repo(work, tmp_path / "no-hooks")
     (work / "src" / "old.py").write_text("value = 1\n", encoding="utf-8")
     (work / "src" / "edited.py").write_text("value = 2\n", encoding="utf-8")
     git("add", "src/old.py", "src/edited.py")
