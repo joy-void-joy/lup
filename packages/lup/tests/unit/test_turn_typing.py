@@ -8,8 +8,6 @@ call infers. Each pin sits on a call that also executes, so the pinned shapes
 cannot drift away from working code.
 """
 
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import assert_type
 
@@ -19,7 +17,6 @@ from pydantic import BaseModel, ConfigDict
 from lup.runtime.contracts import Session, Turn
 from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
-    SessionHandle,
     SessionId,
     TurnHandle,
     TurnId,
@@ -31,6 +28,7 @@ from lup.runtime.models import (
 )
 from lup.runtime.query import query
 from lup.types import Usage
+from tests.unit.doubles import session_factory
 
 IDENTIFIERS = TurnIdentifiers(
     session=SessionId(value="session"), turn=TurnId(value="turn")
@@ -53,6 +51,9 @@ class StubTurn[T: BaseModel | None](Turn[T]):
 
     async def result(self) -> TurnResult[T]:
         output_type = self.request.output_type
+        # Constructed here rather than through the shared `turn_result`: the
+        # instance this builds is a `T` only by the request's own construction,
+        # which is a fact `model_validate` accepts and no signature can state.
         return TurnResult[T].model_validate(
             {
                 "output": None if output_type is None else output_type(),
@@ -79,14 +80,7 @@ class StubSession(Session):
 
     def factory(self) -> SessionFactory:
         """A factory whose every opened session is this one."""
-
-        @asynccontextmanager
-        async def open_stub(
-            _resume: SessionId | None = None,
-        ) -> AsyncGenerator[SessionHandle]:
-            yield SessionHandle(session=self)
-
-        return SessionFactory(open_stub)
+        return session_factory(self)
 
 
 def test_turn_request_without_a_model_infers_no_output() -> None:

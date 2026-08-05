@@ -12,7 +12,23 @@ probe it does not declare succeeds silently, which is what the hand-rolled
 doubles all did with their trailing `return ExitStatus(code=0)`.
 """
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from datetime import timedelta
+
+from pydantic import BaseModel
+
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
+from lup.runtime.contracts import Session, Turn
+from lup.runtime.factory import SessionFactory
+from lup.runtime.models import (
+    SessionHandle,
+    SessionId,
+    TurnId,
+    TurnIdentifiers,
+    TurnResult,
+)
+from lup.types import Usage
 
 PROBE_WORDS = 2
 """How many words after the executable name identify a git probe."""
@@ -67,6 +83,54 @@ class ScriptedLauncher(ProcessLauncher):
         if not isinstance(answers, list):
             return answers
         return answers[min(asked, len(answers) - 1)]
+
+
+def identifiers(session: str = "session", turn: str = "turn") -> TurnIdentifiers:
+    """The pair of ids a completed turn reports itself under."""
+    return TurnIdentifiers(session=SessionId(value=session), turn=TurnId(value=turn))
+
+
+def turn_result[T: BaseModel | None](
+    output: T, marks: TurnIdentifiers | None = None
+) -> TurnResult[T]:
+    """A finished turn's result, with the fields no test inspects filled in.
+
+    `TurnResult` carries six fields and a stub cares about one of them. Spelling
+    the other five at each double put the transcript, usage, and duration in
+    front of the output, which is the part under test.
+    """
+    return TurnResult[T].model_validate(
+        {
+            "output": output,
+            "messages": [],
+            "blocks": [],
+            "usage": Usage(),
+            "duration": timedelta(),
+            "identifiers": marks if marks is not None else identifiers(),
+        }
+    )
+
+
+class StaticTurn[T: BaseModel | None](Turn[T]):
+    """A turn that has already finished, holding the result it will report."""
+
+    def __init__(self, result: TurnResult[T]) -> None:
+        self.value = result
+
+    async def result(self) -> TurnResult[T]:
+        return self.value
+
+
+def session_factory(session: Session) -> SessionFactory:
+    """A factory whose every opened session is the one given."""
+
+    @asynccontextmanager
+    async def open_session(
+        _resume: SessionId | None = None,
+    ) -> AsyncGenerator[SessionHandle]:
+        yield SessionHandle(session=session)
+
+    return SessionFactory(open_session)
 
 
 class FailingLauncher(ProcessLauncher):

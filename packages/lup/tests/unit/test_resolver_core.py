@@ -2,9 +2,9 @@
 
 import asyncio
 from collections import Counter
-from collections.abc import AsyncGenerator, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
+from datetime import UTC, datetime
 from pathlib import Path
 import pytest
 from pydantic import BaseModel
@@ -16,7 +16,15 @@ from lup.harness.process import (
     LocalProcessLauncher,
 )
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
-from tests.unit.doubles import FailingLauncher, ScriptedLauncher, out
+from tests.unit.doubles import (
+    FailingLauncher,
+    ScriptedLauncher,
+    StaticTurn,
+    identifiers,
+    out,
+    session_factory,
+    turn_result,
+)
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -76,19 +84,16 @@ from lup.resolver.state import (
     StateCorruptionError,
     StateTransitionError,
 )
-from lup.runtime.contracts import Session, Turn
+from lup.runtime.contracts import Session
 from lup.runtime.factory import SessionFactory
 from lup.runtime.composition import is_output_model
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
     TurnHandle,
-    TurnIdentifiers,
-    TurnId,
     TurnRequest,
-    TurnResult,
 )
-from lup.types import JsonObject, Usage
+from lup.types import JsonObject
 
 
 def concern(
@@ -380,14 +385,6 @@ class UnusedInvocationRenderer(SkillInvocationRenderer):
         raise AssertionError(f"invocation should not be rendered: {invocation}")
 
 
-class StaticResultTurn[T: BaseModel | None](Turn[T]):
-    def __init__(self, result: TurnResult[T]) -> None:
-        self.value = result
-
-    async def result(self) -> TurnResult[T]:
-        return self.value
-
-
 type ResolverResponse = Callable[[Path, str], JsonObject]
 
 
@@ -407,30 +404,15 @@ class ResolverTestSession(Session):
         output = output_type.model_validate(
             self.response(self.root, output_type.__name__)
         )
-        result = TurnResult[T].model_validate(
-            {
-                "output": output,
-                "messages": [],
-                "blocks": [],
-                "usage": Usage(),
-                "duration": timedelta(),
-                "identifiers": TurnIdentifiers(
-                    session=SessionId(value=f"resolver-{self.root.name}"),
-                    turn=TurnId(value=f"turn-{self.sequence}"),
-                ),
-            }
+        result = turn_result(
+            output,
+            identifiers(f"resolver-{self.root.name}", f"turn-{self.sequence}"),
         )
-        return TurnHandle[T](turn=StaticResultTurn(result))
+        return TurnHandle[T](turn=StaticTurn(result))
 
 
 def resolver_test_factory(root: Path, response: ResolverResponse) -> SessionFactory:
-    @asynccontextmanager
-    async def open_session(
-        _resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        yield SessionHandle(session=ResolverTestSession(root, response))
-
-    return SessionFactory(open_session)
+    return session_factory(ResolverTestSession(root, response))
 
 
 class LiteralInvocationRenderer(SkillInvocationRenderer):
