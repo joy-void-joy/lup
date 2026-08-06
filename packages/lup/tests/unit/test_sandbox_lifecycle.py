@@ -457,16 +457,49 @@ class TestRunCodeCrashRecovery:
         result = sandbox.run_code("print('x')")
 
         assert result.exit_code == 1
-        assert "restarted" in result.stderr
+        assert "Variables from previous cells have been lost" in result.stderr
         assert sandbox.repl is not None
         client.close_peers()
 
-    def test_failed_restart_surfaces_not_initialized(self) -> None:
+    def test_failed_reexec_rebuilds_the_container_and_names_the_deeper_loss(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A re-exec cannot succeed when the container itself is gone.
+
+        Recovery has to escalate to a rebuild inside this same call —
+        deferring it to the next one hands the caller a wiped namespace
+        reported as an ordinary success.
+        """
+        sandbox = self.crashed_sandbox(FakeDockerClient())
+        sandbox.shared_dir = tmp_path / "shared"
+        rebuilt = FakeDockerClient()
+        rebuilt.prepare_repl_socket(repl_reply())
+        monkeypatch.setattr(docker, "from_env", lambda: as_client(rebuilt))
+
+        result = sandbox.run_code("print('x')")
+
+        assert result.exit_code == 1
+        assert "Variables and installed packages have been lost" in result.stderr
+        assert sandbox.repl is not None
+        assert sandbox.container_name in rebuilt.containers.existing
+        rebuilt.close_peers()
+
+    def test_failed_rebuild_raises_chained_to_the_original_crash(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         sandbox = self.crashed_sandbox(FakeDockerClient())
 
-        with pytest.raises(SandboxNotInitializedError, match="restart failed"):
+        def refuse_client() -> docker.DockerClient:
+            raise DockerException("daemon gone")
+
+        monkeypatch.setattr(docker, "from_env", refuse_client)
+
+        with pytest.raises(
+            SandboxNotInitializedError, match="could not be rebuilt"
+        ) as raised:
             sandbox.run_code("print('x')")
 
+        assert isinstance(raised.value.__cause__, ReplCrashedError)
         assert sandbox.repl is None
 
 

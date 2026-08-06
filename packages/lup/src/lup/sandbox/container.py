@@ -407,6 +407,19 @@ class Sandbox:
         self.repl.start()
         logger.info("REPL restarted (state cleared)")
 
+    def rebuild_container(self) -> None:
+        """Replace a container that is gone, keeping the workspace volume.
+
+        Deliberately not :meth:`stop` first: ``stop`` runs
+        ``destroy_container``, which removes the session volume too.
+        ``start_container`` drops the old container by name and mounts the
+        same named volume, so files under ``/workspace`` outlive a rebuild
+        even though the Python namespace and installed packages do not.
+        """
+        self.repl = None
+        self.active_container = None
+        self.start()
+
     def __enter__(self) -> Self:
         """Enter context manager, starting the sandbox."""
         started = False
@@ -435,8 +448,9 @@ class Sandbox:
         """Execute Python code in the sandbox's persistent REPL.
 
         Variables, imports, and data persist between calls within the same
-        session. If the REPL crashes, it is restarted automatically (but
-        state from previous cells is lost).
+        session. A crashed REPL is recovered before this returns — by
+        re-exec, or by rebuilding the container — and the returned result
+        says which state that cost (see :meth:`recover_from_crash`).
 
         Args:
             code: Python code to execute.
@@ -455,25 +469,49 @@ class Sandbox:
 
         try:
             return self.repl.execute(code, timeout_seconds)
-        except ReplCrashedError:
-            logger.warning("REPL crashed, restarting")
-            self.repl.stop()
+        except ReplCrashedError as crash:
+            logger.warning("REPL crashed, recovering")
+            return self.recover_from_crash(self.repl, crash)
+
+    def recover_from_crash(
+        self, repl: ReplSession, crash: ReplCrashedError
+    ) -> ExecuteCodeResult:
+        """Bring the sandbox back up, reporting what the crash cost.
+
+        Escalates in two steps: re-exec the REPL inside the existing
+        container, and rebuild the container only if that fails. A broken
+        exec socket usually means the container itself is gone, and
+        re-execing into a container that no longer exists can never
+        succeed.
+
+        Recovery finishes inside the call that observed the crash, so its
+        caller is always told what was lost. Leaving the sandbox
+        uninitialized instead would push the rebuild onto the next call,
+        which has no idea a crash happened and would report a wiped
+        namespace as an ordinary success.
+        """
+        repl.stop()
+        try:
+            repl.start()
+            lost = "Variables from previous cells have been lost."
+        except (RuntimeError, DockerException, APIError, SocketError):
+            logger.warning("REPL re-exec failed, rebuilding the container")
             try:
-                self.repl.start()
-            except (RuntimeError, DockerException, APIError, SocketError):
-                logger.exception("REPL restart failed")
+                self.rebuild_container()
+            except (APIError, DockerException, OSError, RuntimeError) as e:
+                logger.exception("Sandbox rebuild failed")
                 self.repl = None
-                raise SandboxNotInitializedError("REPL restart failed")
-            return ExecuteCodeResult(
-                exit_code=1,
-                stdout="",
-                stderr=(
-                    "REPL process crashed and was restarted. "
-                    "Variables from previous cells have been lost. "
-                    "Please re-run any setup code."
-                ),
-                duration_ms=0,
-            )
+                raise SandboxNotInitializedError(
+                    f"REPL crashed and the sandbox could not be rebuilt: {e}"
+                ) from crash
+            lost = "Variables and installed packages have been lost."
+        return ExecuteCodeResult(
+            exit_code=1,
+            stderr=(
+                f"REPL process crashed and was restarted. {lost} "
+                "Please re-run any setup code."
+            ),
+        )
 
     def run_install(self, packages: list[str]) -> InstallPackageResult:
         """Install Python packages using uv.
@@ -485,7 +523,14 @@ class Sandbox:
             Result containing exit code, output, and package list.
         """
         cmd = ["uv", "pip", "install", "--system", *packages]
-        result: ExecResult = self.container.exec_run(cmd, demux=False)
+        try:
+            result: ExecResult = self.container.exec_run(cmd, demux=False)
+        except NotFound:
+            # Same dead-container case run_code recovers from, reached
+            # through the install path instead of the REPL socket.
+            logger.warning("Container gone during install, rebuilding")
+            self.rebuild_container()
+            result = self.container.exec_run(cmd, demux=False)
 
         output_text = decode_output(result.output)
 
