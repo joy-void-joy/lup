@@ -43,6 +43,7 @@ from lup.resolver.core import (
     ResolverInvariantError,
     approval_decisions,
     approval_question,
+    resolver_config_digest,
 )
 from lup.resolver.models import (
     AdmissionRequest,
@@ -828,6 +829,61 @@ async def test_failed_integration_verification_is_not_marked_successful(
     assert not persisted.integration.completed
     assert [record.passed for record in persisted.verification] == [False]
     assert [outcome.integrated for outcome in persisted.outcomes] == [False]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_resume_names_what_moved_and_how_to_recover(
+    tmp_path: Path,
+) -> None:
+    """The run holding the most answers is the one that hits this.
+
+    Parking exposes a defect and fixing it moves the gate under the parked
+    run, so the message has to say which input moved and that aborting is
+    the way out — neither was recoverable from "does not match".
+    """
+    run_id = "digest-drift"
+
+    def build_core(command: str) -> ResolverCore:
+        return ResolverCore(
+            ResolverConfig(
+                state_root=tmp_path / "state",
+                workspace=tmp_path,
+                worktree_root=tmp_path / "worktrees",
+                run_id=run_id,
+                integration_branch="resolve/review",
+                verification_commands=[
+                    VerificationCommand(name="gate", arguments=[command])
+                ],
+            ),
+            resolve_spec(),
+            lambda _cwd: unused_session_factory(),
+            lambda _cwd: unused_session_factory(),
+            UnusedInvocationRenderer(),
+            FailingLauncher(),
+        )
+
+    parked = build_core("check-at-park")
+    parked.persist(
+        ResolveState(
+            config_digest=resolver_config_digest(parked.config),
+            run_id=run_id,
+            phase=ResolvePhase.INVENTORY,
+            source=SourceSnapshot(branch="feature", commit="source-sha"),
+            spec=resolve_spec(),
+            concerns=[concern("a")],
+            progress=[ConcernProgress(concern_id="a")],
+        )
+    )
+
+    with pytest.raises(ResolverInvariantError) as refused:
+        await build_core("check-after-the-fix").resume()
+
+    message = str(refused.value)
+    assert "configuration" in message
+    assert "--abort" in message
+    # The inputs that did not move are not blamed for the one that did.
+    assert "run id" not in message
+    assert "specification" not in message
 
 
 def test_illegal_per_concern_transition_is_rejected(tmp_path: Path) -> None:

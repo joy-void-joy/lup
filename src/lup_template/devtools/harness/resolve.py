@@ -30,6 +30,7 @@ from lup.resolver.contracts import (
     WorktreePreparer,
 )
 from lup.resolver.core import ResolverCore
+from lup.resolver.state import ResolverStateRepository
 from lup.resolver.models import (
     AdmissionRequest,
     Concern,
@@ -567,8 +568,18 @@ def run_resolve(
         "resolve-" + resolver_git(launcher, root, ["rev-parse", "--short=12", "HEAD"])
     )
     # Every concern worktree is created from here, so it is what a worker's
-    # own diff is measured against when scoping the note gate.
-    base_commit = resolver_git(launcher, root, ["rev-parse", "HEAD"])
+    # own diff is measured against when scoping the note gate. A run that
+    # already exists takes its own recorded base rather than today's HEAD:
+    # this value reaches the config digest, so re-deriving it made every
+    # commit refuse to resume the run that was parked before it — including
+    # the commit fixing the defect that parked it.
+    state_root = root / ".lup" / "resolve"
+    persisted = ResolverStateRepository(state_root, resolved_run_id)
+    base_commit = (
+        persisted.load().source.commit
+        if persisted.exists()
+        else resolver_git(launcher, root, ["rev-parse", "HEAD"])
+    )
 
     async def execute() -> None:
         from lup.adapters.claude.runtime import (
@@ -654,8 +665,6 @@ def run_resolve(
                 f"Configured model {settings.model!r} does not route to adapter "
                 f"{adapter!r}; sessions use the adapter's native default model."
             )
-
-        state_root = root / ".lup" / "resolve"
 
         def toolchain_writable_paths() -> list[Path]:
             """Absolute paths a sandboxed worker's toolchain must be able to write.

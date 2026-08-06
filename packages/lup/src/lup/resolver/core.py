@@ -533,13 +533,29 @@ class ResolverCore:
             )
         state = self.repository.load()
         self.state = state
-        if (
-            state.run_id != self.config.run_id
-            or state.spec != self.spec
-            or state.config_digest != resolver_config_digest(self.config)
-        ):
+        moved = [
+            name
+            for name, persisted, current in (
+                ("run id", state.run_id, self.config.run_id),
+                ("specification", state.spec, self.spec),
+                (
+                    "configuration",
+                    state.config_digest,
+                    resolver_config_digest(self.config),
+                ),
+            )
+            if persisted != current
+        ]
+        if moved:
+            # Naming neither what moved nor the way out left one recovery to
+            # guess at, and the run holding the most answers is the one that
+            # hits this: parking exposes a defect, and fixing the defect is
+            # what moves the configuration under the parked run.
             raise ResolverInvariantError(
-                "persisted resolver identity or specification does not match"
+                f"resolver run {state.run_id!r} was persisted under a different "
+                + " and ".join(moved)
+                + "; resume it from the same tree and gate, or abort it with "
+                "--abort <reason> to start a run that matches"
             )
         if state.phase == ResolvePhase.ABORTED:
             raise ResolverInvariantError(
