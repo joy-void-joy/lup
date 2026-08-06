@@ -390,8 +390,8 @@ class TestReplTransport:
 
         result = repl.execute("print(2 + 2)", timeout_seconds=10)
 
-        assert result["exit_code"] == 0
-        assert result["stdout"] == "4\n"
+        assert result.exit_code == 0
+        assert result.stdout == "4\n"
         repl.stop()
         client.close_peers()
 
@@ -456,8 +456,8 @@ class TestRunCodeCrashRecovery:
 
         result = sandbox.run_code("print('x')")
 
-        assert result["exit_code"] == 1
-        assert "restarted" in result["stderr"]
+        assert result.exit_code == 1
+        assert "restarted" in result.stderr
         assert sandbox.repl is not None
         client.close_peers()
 

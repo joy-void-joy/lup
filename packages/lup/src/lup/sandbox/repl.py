@@ -12,7 +12,7 @@ import time
 from importlib import resources
 from typing import Protocol
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 try:
     import docker
@@ -87,15 +87,6 @@ REPL_SERVER_SCRIPT = (
 """Source of :mod:`lup.sandbox.repl_server`, copied into the container."""
 
 
-class ReplResponse(BaseModel):
-    """One JSON-line response from the in-container REPL server."""
-
-    exit_code: int = 1
-    stdout: str = ""
-    stderr: str = ""
-    duration_ms: int = 0
-
-
 class ReplSession:
     """Persistent Python REPL inside a Docker container.
 
@@ -132,8 +123,8 @@ class ReplSession:
         self.exec_id = exec_id
         self.sock = self.client.api.exec_start(self.exec_id, socket=True)
         result = self.execute("pass", timeout_seconds=10)
-        if result["exit_code"] != 0:
-            raise RuntimeError(f"REPL startup failed: {result['stderr']}")
+        if result.exit_code != 0:
+            raise RuntimeError(f"REPL startup failed: {result.stderr}")
         logger.info("Persistent REPL started")
 
     def stop(self) -> None:
@@ -172,12 +163,7 @@ class ReplSession:
                 f"Code execution timed out after {timeout_seconds} seconds"
             )
 
-        return ExecuteCodeResult(
-            exit_code=response.exit_code,
-            stdout=response.stdout,
-            stderr=response.stderr,
-            duration_ms=response.duration_ms,
-        )
+        return response
 
     def send(self, data: bytes) -> None:
         """Write raw bytes to the exec socket stdin."""
@@ -188,7 +174,7 @@ class ReplSession:
         except (BrokenPipeError, OSError) as e:
             raise ReplCrashedError(f"REPL write failed: {e}") from e
 
-    def recv_response(self, deadline: float | None) -> ReplResponse:
+    def recv_response(self, deadline: float | None) -> ExecuteCodeResult:
         """Read Docker multiplex frames until a complete JSON line arrives.
 
         ``deadline=None`` blocks indefinitely (no-timeout requests).
@@ -218,7 +204,7 @@ class ReplSession:
                         )
                         text = line.decode("utf-8", errors="replace")
                         try:
-                            return ReplResponse.model_validate_json(text)
+                            return ExecuteCodeResult.model_validate_json(text)
                         except ValidationError as e:
                             raise ReplCrashedError(
                                 f"REPL returned non-JSON: {text[:200]}"

@@ -14,9 +14,9 @@ Examples:
 
         >>> with Sandbox(session_id="demo", shared_dir="/tmp/shared") as sb:
         ...     result = sb.run_code("import math; print(math.pi)")
-        ...     result["stdout"]
+        ...     result.stdout
         '3.141592653589793\\n'
-        ...     result["exit_code"]
+        ...     result.exit_code
         0
 
     State persists across calls within the same session::
@@ -24,7 +24,7 @@ Examples:
         >>> with Sandbox(session_id="demo", shared_dir="/tmp/shared") as sb:
         ...     sb.run_code("x = 42")
         ...     result = sb.run_code("print(x * 2)")
-        ...     result["stdout"]
+        ...     result.stdout
         '84\\n'
 
     Install packages and create MCP tools for an agent::
@@ -66,10 +66,8 @@ from lup.sandbox.models import (
     DEFAULT_PRE_INSTALL,
     CodeExecutionTimeoutError,
     ExecuteCodeInput,
-    ExecuteCodeOutput,
     ExecuteCodeResult,
     InstallPackageInput,
-    InstallPackageOutput,
     InstallPackageResult,
     Mount,
     NetworkMode,
@@ -524,11 +522,10 @@ class Sandbox:
             "State persists: define variables in one call, use them in the next.",
             name="execute_code",
         )
-        async def execute_code(inp: ExecuteCodeInput) -> ExecuteCodeOutput:
+        async def execute_code(inp: ExecuteCodeInput) -> ExecuteCodeResult:
             try:
                 self.ensure_started()
-                result = self.run_code(inp.code)
-                return ExecuteCodeOutput(**result)
+                return self.run_code(inp.code)
             except SandboxNotInitializedError as e:
                 logger.error("Sandbox not initialized: %s", e)
                 raise ToolError(f"Sandbox error: {e}") from e
@@ -544,11 +541,10 @@ class Sandbox:
             "in the container across executions.",
             name="install_package",
         )
-        async def install_package(inp: InstallPackageInput) -> InstallPackageOutput:
+        async def install_package(inp: InstallPackageInput) -> InstallPackageResult:
             try:
                 self.ensure_started()
-                result = self.run_install(inp.packages)
-                return InstallPackageOutput(**result)
+                return self.run_install(inp.packages)
             except SandboxNotInitializedError as e:
                 logger.error("Sandbox not initialized: %s", e)
                 raise ToolError(f"Sandbox error: {e}") from e
