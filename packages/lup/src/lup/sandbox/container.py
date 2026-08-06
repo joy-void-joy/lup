@@ -19,6 +19,12 @@ Examples:
         ...     result.exit_code
         0
 
+    A cell ending in an expression echoes it, the way a notebook cell does::
+
+        >>> with Sandbox(session_id="demo", shared_dir="/tmp/shared") as sb:
+        ...     sb.run_code("import math; math.pi").result
+        '3.141592653589793'
+
     State persists across calls within the same session::
 
         >>> with Sandbox(session_id="demo", shared_dir="/tmp/shared") as sb:
@@ -511,6 +517,8 @@ class Sandbox:
         @lup_tool(
             "Execute Python code in an isolated Docker container with persistent state. "
             "Variables, imports, and data persist between calls — no need to re-define them. "
+            "A cell ending in an expression returns that value's repr as 'result' and "
+            "binds it to '_', so you only need print() for intermediate output. "
             f"{network_text}Timeout: {timeout_seconds}s.\n\n"
             f"Filesystem (use absolute paths; the cwd is /workspace):\n{filesystem_text}\n\n"
             "Examples:\n"

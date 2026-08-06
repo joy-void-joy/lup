@@ -66,6 +66,13 @@ class ExecuteCodeResult(BaseModel):
     exit_code: int = 1
     stdout: str = ""
     stderr: str = ""
+    result: str | None = Field(
+        default=None,
+        description=(
+            "repr() of the cell's last expression, or null when the cell "
+            "ends in a statement or the expression evaluated to None"
+        ),
+    )
     duration_ms: int = 0
 
 

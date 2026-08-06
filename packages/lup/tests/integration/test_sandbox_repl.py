@@ -45,6 +45,21 @@ class TestReplPersistence:
             assert r2.exit_code == 0
             assert '{"a": 1}' in r2.stdout
 
+    def test_trailing_expression_echoes_across_the_wire(self, sandbox: Sandbox) -> None:
+        """The echo survives the real container, not just the in-process server."""
+        with sandbox:
+            r1 = sandbox.run_code("x = 41\nx + 1")
+            assert r1.result == "42"
+            assert r1.stdout == ""
+
+            r2 = sandbox.run_code("print('side effect')")
+            assert r2.result is None
+            assert r2.stdout == "side effect\n"
+
+            # r2's expression was None, so it never displaced `_`.
+            r3 = sandbox.run_code("_")
+            assert r3.result == "42"
+
     def test_multiline_computation(self, sandbox: Sandbox) -> None:
         """Multi-step computation with numpy."""
         with sandbox:
