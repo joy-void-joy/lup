@@ -108,6 +108,56 @@ async def test_codex_thread_start_carries_a_dynamic_tool(tmp_path: Path) -> None
     assert result.identifiers.session.value
 
 
+class RecallSubmission(BaseModel):
+    """Typed output whose schema is identical on both probe turns."""
+
+    recalled: str = Field(min_length=1)
+
+
+async def test_a_claude_session_carries_context_across_same_schema_turns(
+    tmp_path: Path,
+) -> None:
+    """The second turn is the one that broke, so a smoke test has to take one.
+
+    Every earlier smoke drove a single turn and passed while no worker could
+    finish, because what fails is the turn boundary: the provider persists no
+    headless transcript to resume, so a session that reconnects between turns
+    starts each one cold. Nothing here resumes anything — the same live
+    connection has to carry the first turn's word into the second.
+    """
+    factory = create_claude_session_factory(
+        ClaudeSessionConfig(
+            model=CLAUDE_SMOKE_MODEL,
+            system_prompt="Call the submission tool. Never ask a question.",
+            cwd=tmp_path,
+        )
+    )
+    async with factory.open() as handle:
+        first = await handle.session.start(
+            turn_request(
+                "Remember the word BATHYSPHERE. Submit it as recalled.",
+                RecallSubmission,
+            )
+        )
+        opening = await first.turn.result()
+        second = await handle.session.start(
+            turn_request(
+                "Submit the word I asked you to remember, as recalled. "
+                "Do not guess a new one.",
+                RecallSubmission,
+            )
+        )
+        result = await second.turn.result()
+
+    assert "bathysphere" in opening.output.recalled.lower()
+    # Carried by the conversation, not restated in the prompt above.
+    assert "bathysphere" in result.output.recalled.lower()
+    # The provider reports a fresh id per turn precisely because it persists
+    # nothing to attach them to, so continuity is the recalled word rather
+    # than a stable identifier.
+    assert result.identifiers.session.value
+
+
 async def answer_every_question(core: ResolverCore, stop: asyncio.Event) -> None:
     """Stand in for a human at the mailbox, answering each recommendation.
 
