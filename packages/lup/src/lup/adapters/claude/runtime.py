@@ -140,10 +140,15 @@ class ClaudeConversationState:
             return self.client
         import claude_agent_sdk as claude
 
+        # The runtime assigns the id and this state reads it off the first
+        # result, mirroring `CodexTurnChannel.ensure_thread`. Dictating one
+        # instead let the two adapters disagree about who owns a session's
+        # identity, and only one of them can be right about a conversation the
+        # provider is the one persisting.
         options = self.opener.build_options(
             binding=self.binding,
             resume=self.resume,
-            session_id=None if self.resume is not None else self.session_id,
+            session_id=None,
         )
         client = claude.ClaudeSDKClient(options=options)
         await client.connect()
