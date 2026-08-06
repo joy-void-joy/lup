@@ -47,6 +47,22 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
     },
     {
         "scheme": "https",
+        "host": "platform.claude.com",
+        "port": None,
+        "path_prefix": "/",
+        "reason": "",
+        "include_subdomains": False,
+    },
+    {
+        "scheme": "http",
+        "host": "platform.claude.com",
+        "port": None,
+        "path_prefix": "/",
+        "reason": "",
+        "include_subdomains": False,
+    },
+    {
+        "scheme": "https",
         "host": "ai.pydantic.dev",
         "port": None,
         "path_prefix": "/",

@@ -114,6 +114,11 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 HookUrlScope(origin=AnyHttpUrl("http://docs.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("https://code.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("http://code.claude.com")),
+                # docs.claude.com now redirects the Agent SDK and API paths
+                # here, so the route the guidance prescribes leaves the
+                # declared scopes one hop in.
+                HookUrlScope(origin=AnyHttpUrl("https://platform.claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("http://platform.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("https://ai.pydantic.dev")),
                 HookUrlScope(origin=AnyHttpUrl("http://ai.pydantic.dev")),
                 HookUrlScope(origin=AnyHttpUrl("https://learn.chatgpt.com")),

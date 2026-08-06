@@ -65,6 +65,7 @@
       "allowedDomains": [
         "docs.claude.com",
         "code.claude.com",
+        "platform.claude.com",
         "ai.pydantic.dev",
         "learn.chatgpt.com",
         "developers.openai.com",

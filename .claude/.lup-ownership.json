@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "b85cee02e6ad0781fc454653ef8617fee88b7dbc914eda7c303e5fca5f9d7765",
+  "source_digest": "9c5dcc5da1e1857dd1c35a36908b6aa5146796f89c3811cb1be3141ae1a294e2",
   "target_requirements": [
     "claude-code"
   ],
@@ -373,7 +373,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "1272d9e8e240547f834fed370f9bcceec891284ead71a5796bf8b3a643701572",
+      "sha256": "cab596b63e882a5eeaa0769bac99838e3b8c124dedba95d88717a275fb8f0e19",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -394,7 +394,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "2b184b4d78b80ec33bb4d03287166b3629c2df3c0f10900b90332a703e7727a5",
+      "sha256": "9d084f024d454ae9da04cd3227718bb0727a8b449a93dc793152ba4dde1796ea",
       "semantic_id": "harness.project-settings",
       "executable": false
     },
