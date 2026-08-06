@@ -14,7 +14,7 @@ Key patterns:
    agent never sees tools it cannot use (see search_example below)
 
 These tools are also the canonical template for the Data Augmentation
-pattern (PATTERNS.md § Data Augmentation): enrich external data inside
+pattern (docs/orchestration.md § Data Augmentation): enrich external data inside
 the tool so the agent receives structured, domain-aware results — never
 raw HTML or half-empty records. Each of the three forms has a concrete
 demonstration here:
@@ -27,7 +27,7 @@ demonstration here:
   inside the tool
 - Extraction — ``fetch_example`` distills a fetched page down to a
   focused answer through a nested ``query()`` call (``extract_answer``)
-  when the caller passes ``extract`` (see PATTERNS.md § Nested Agent)
+  when the caller passes ``extract`` (see docs/orchestration.md § Nested Agent)
 
 Tool descriptions are the agent's only documentation for each tool.
 A terse description forces the agent to guess when/why to use a tool,
@@ -45,7 +45,6 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 
 from lup.mcp import ToolError, lup_tool
-from lup.runtime.models import TurnTextBlock
 from lup.runtime.query import query
 from lup_template.agent.config import aux_model
 
@@ -111,7 +110,7 @@ class FetchOutput(BaseModel):
 
 # --- Data augmentation helpers ---
 # Enrichment runs inside the tool, before results reach the agent
-# (PATTERNS.md § Data Augmentation Pattern)
+# (docs/orchestration.md § Data Augmentation Pattern)
 
 
 async def fill_missing_snippets(results: list[SearchResult]) -> list[SearchResult]:
@@ -202,7 +201,7 @@ async def fetch_generic(url: str) -> FetchOutput:
 async def extract_answer(content: str, question: str) -> str:
     """Distill fetched content down to what answers *question*.
 
-    Extraction form: a nested agent call (PATTERNS.md § Nested Agent
+    Extraction form: a nested agent call (docs/orchestration.md § Nested Agent
     Pattern) turns a large text block into a focused answer inside the
     tool, so the raw page never has to occupy the main agent's context.
     The model comes from ``aux_model()`` so the nested call follows the
@@ -220,7 +219,7 @@ async def extract_answer(content: str, question: str) -> str:
     )
     result = await query(factory, f"Question: {question}\n\nDocument:\n{content}")
     text = "\n\n".join(
-        block.text for block in result.blocks if isinstance(block, TurnTextBlock)
+        text for block in result.blocks if (text := block.text_payload) is not None
     )
     return text or "(no answer extracted)"
 

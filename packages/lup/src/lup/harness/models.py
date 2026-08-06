@@ -144,6 +144,28 @@ class TextPart(SemanticPart):
         return self.text
 
 
+class SpellingExample(SemanticPart):
+    """Prose whose subject is a runtime's own spelling, quoted verbatim.
+
+    Ordinary prose refuses a rendered invocation because a reader on the other
+    runtime cannot use one. A document *comparing* the runtimes has to quote
+    both, so the exemption is declared here rather than left as a rule that
+    quietly does not fire. It is deliberately narrow: the same words reach
+    every tree, so this can only ever exhibit a spelling — never issue one,
+    which is what :class:`SkillInvocation` is for.
+    """
+
+    type: Literal["spelling_example"] = "spelling_example"
+    text: str
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return self.text
+
+    @property
+    def text_payload(self) -> str:
+        return self.text
+
+
 class InvocationArgument(BaseModel):
     model_config = FROZEN
 
@@ -345,6 +367,7 @@ class ArgumentsRef(SemanticPart):
 
 type PromptPart = Annotated[
     TextPart
+    | SpellingExample
     | SkillInvocation
     | NativePath
     | PluginPath
@@ -376,8 +399,24 @@ class PromptDocument(BaseModel):
         return self.source
 
 
-GUIDANCE_CHARACTER_BUDGET = 32_768
-"""Ceiling on the guidance document every session loads before its first turn.
+GUIDANCE_BYTE_BUDGET = 32_768
+"""Default ceiling, in UTF-8 bytes, on the always-loaded guidance document.
+
+Codex stops adding project documentation once the combined size reaches
+``project_doc_max_bytes``, whose own default is 32 KiB — so exceeding this is
+not an error a reader ever sees, it is *silent truncation*. The unit is bytes
+for the same reason: that is what the vendor limits, and UTF-8 punctuation
+makes a document's byte count exceed its character count, so a character-based
+check runs looser than the real cap and passes documents that would be cut.
+
+Claude has no equivalent setting — its guidance file is loaded in full
+whatever its length. Lup applies one number to both trees anyway, so the two
+runtimes read the same document rather than one reading a longer one.
+
+This is a default rather than a constant: the number mirrors a real vendor
+default, but which ceiling a given project wants is its own call. Pass
+``budget`` to the checks below to state a different one. See § A Constant
+Should Probably Be An Overridable Default in ``docs/patterns.md``.
 
 What a session pays for is the rendered document, so that is what the adapters
 check as they compile it. A typed part costs whatever its adapter spells it as,
@@ -386,19 +425,24 @@ skill or a denial message surfaces at the right moment belongs in a generated
 document under ``docs/`` instead, reached by a file-path pointer."""
 
 
+def document_byte_size(text: str) -> int:
+    """What a rendered document costs the runtime that loads it, in UTF-8 bytes."""
+    return len(text.encode("utf-8"))
+
+
 def document_prose(document: PromptDocument) -> list[str]:
     """Every literal prose payload a document carries, in reading order."""
     return [text for part in document.parts if (text := part.text_payload) is not None]
 
 
 def document_text_size(document: PromptDocument) -> int:
-    """Lower bound on what a document costs a session, in literal characters.
+    """Lower bound on what a document costs a session, in UTF-8 bytes.
 
     Every part renders to something, so the rendered document is never smaller.
     This is the share a neutral module can measure without reaching for an
     adapter to spell the rest.
     """
-    return sum(len(text) for text in document_prose(document))
+    return sum(document_byte_size(text) for text in document_prose(document))
 
 
 class Argument(BaseModel):
@@ -467,6 +511,67 @@ class Agent(BaseModel):
     tools: list[ToolName] = Field(default_factory=list)
     model: ModelTier | None = None
     color: AgentColor | None = None
+
+
+class McpWord(BaseModel):
+    """One word of the command line that starts an MCP server.
+
+    A server the harness offers has to be reachable from wherever the runtime
+    spawns it, and each runtime hands a spawned process a different way of
+    naming the repository it belongs to. Declaring the words as parts rather
+    than as a string keeps that difference in the adapters, the way a prompt
+    keeps every other native spelling there.
+    """
+
+    model_config = FROZEN
+
+    @abstractmethod
+    def spell_in(self, runtime: "NativeSpellings") -> str:
+        """Spell this word in one runtime's own vocabulary."""
+
+
+class LiteralWord(McpWord):
+    """One word every runtime spells identically."""
+
+    type: Literal["literal"] = "literal"
+    text: str = Field(min_length=1)
+
+    def spell_in(self, runtime: "NativeSpellings") -> str:
+        return self.text
+
+
+class ProjectRootWord(McpWord):
+    """The repository root, as the runtime spawning the server can name it."""
+
+    type: Literal["project_root"] = "project_root"
+
+    def spell_in(self, runtime: "NativeSpellings") -> str:
+        return runtime.project_root()
+
+
+type McpCommandWord = Annotated[LiteralWord | ProjectRootWord, Discriminator("type")]
+
+
+class McpServer(BaseModel):
+    """One tool server a native tree offers the agent that reads it.
+
+    The application owns which tools exist and how they are grouped; this
+    declares only how a runtime starts one group and what to call it, so the
+    same registry reaches an in-process session and a native harness session
+    without either learning the other's assembly.
+    """
+
+    model_config = FROZEN
+
+    id: str
+    name: NativeName
+    description: PortableText = Field(min_length=1, max_length=1024)
+    command: str = Field(min_length=1)
+    arguments: list[McpCommandWord] = Field(default_factory=list)
+
+    def command_line(self, runtime: "NativeSpellings") -> list[str]:
+        """Spell every argument for the runtime that will spawn this server."""
+        return [argument.spell_in(runtime) for argument in self.arguments]
 
 
 class HookUrlScope(BaseModel):
@@ -564,6 +669,25 @@ class HookSet(BaseModel):
             "denied; declare a downstream toolchain here, not in the kernel"
         ),
     )
+    runner_targets: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Which bare targets `uv run <target>` may reach without a question. "
+            "A project's own toolchain, so the library holds no opinion: an "
+            "empty list judges every runner invocation by the ordinary shell "
+            "vocabulary instead"
+        ),
+    )
+    recoverable_target_limit: int = Field(
+        default=5,
+        ge=0,
+        description=(
+            "How many committed, unmodified files one command may destroy "
+            "without asking. Git restores each of them, but restoring is a "
+            "repair somebody has to know to perform, so past this count a "
+            "delete reads as a sweep and is worth a question"
+        ),
+    )
     sandbox: HookSandbox | None = None
 
 
@@ -593,16 +717,20 @@ class Plugin(BaseModel):
     description: PortableText = Field(min_length=1, max_length=1024)
     skills: list[Skill]
     agents: list[Agent]
+    mcp_servers: list[McpServer] = Field(default_factory=list)
     hooks: HookSet | None = None
 
     @model_validator(mode="after")
     def unique_effective_names(self) -> "Plugin":
         skill_names = [skill.name for skill in self.skills]
         agent_names = [agent.name for agent in self.agents]
+        server_names = [server.name for server in self.mcp_servers]
         if len(skill_names) != len(dict.fromkeys(skill_names)):
             raise ValueError(f"plugin {self.id!r} has duplicate skill names")
         if len(agent_names) != len(dict.fromkeys(agent_names)):
             raise ValueError(f"plugin {self.id!r} has duplicate agent names")
+        if len(server_names) != len(dict.fromkeys(server_names)):
+            raise ValueError(f"plugin {self.id!r} has duplicate MCP server names")
         return self
 
 
@@ -627,6 +755,7 @@ class Harness(BaseModel):
                 plugin.id,
                 *[skill.id for skill in plugin.skills],
                 *[agent.id for agent in plugin.agents],
+                *[server.id for server in plugin.mcp_servers],
             ]
         ]
         if len(ids) != len(dict.fromkeys(ids)):
@@ -732,11 +861,11 @@ class Harness(BaseModel):
             raise ValueError(f"delegations name unknown agents: {unknown_agents}")
 
         used = document_text_size(self.guidance)
-        if used > GUIDANCE_CHARACTER_BUDGET:
+        if used > GUIDANCE_BYTE_BUDGET:
             raise ValueError(
-                f"always-loaded guidance is {used} characters, over the "
-                f"{GUIDANCE_CHARACTER_BUDGET} budget by "
-                f"{used - GUIDANCE_CHARACTER_BUDGET}. Move a section to a "
+                f"always-loaded guidance is {used} bytes, over the "
+                f"{GUIDANCE_BYTE_BUDGET} budget by "
+                f"{used - GUIDANCE_BYTE_BUDGET}. Move a section to a "
                 "generated document under docs/ and leave a file-path pointer, "
                 "the way Self-Improvement Loop and Permission Hooks were split."
             )

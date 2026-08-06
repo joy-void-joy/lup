@@ -1,15 +1,15 @@
-# lup: ignore[empty-collection, import-re, re-call, string-split, tuple-shape]
+# lup: ignore[empty-collection, import-re, re-call, string-split]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Per-command shell classification for the judged executables."""
 
 import posixpath
 import re
+from typing import TypedDict
 
 from .decision import KernelDecision, unjudged
 from .rows import ShellRuleRow, UrlScopeRow
 from .words import (
     INTERPRETERS,
-    UV_RUN_ALLOWED_TARGETS,
     flag_matches,
     opaque_argument,
     uv_run_words,
@@ -73,9 +73,20 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     return KernelDecision(row["effect"], row["reason"])
 
 
+class Subcommand(TypedDict):
+    """The subcommand word a command line names, and the arguments after it.
+
+    ``word`` is empty when the line carried only global flags, which leaves
+    the default row to answer for it.
+    """
+
+    word: str
+    remainder: list[str]
+
+
 def split_subcommand(
     executable: str, arguments: list[str], default: ShellRuleRow | None
-) -> tuple[str, list[str]] | KernelDecision:
+) -> Subcommand | KernelDecision:
     """Find the subcommand word, honoring global value-taking and guarded flags."""
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
@@ -83,13 +94,13 @@ def split_subcommand(
     while position < len(arguments):
         word = arguments[position]
         if not word.startswith("-"):
-            return word, arguments[position + 1 :]
+            return Subcommand(word=word, remainder=arguments[position + 1 :])
         if flag_matches(word, ask_flags):
             return KernelDecision(
                 "ask", f"{executable} global flag {word} requires approval"
             )
         position += 2 if word in value_flags else 1
-    return "", []
+    return Subcommand(word="", remainder=[])
 
 
 def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDecision:
@@ -107,7 +118,8 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
     split = split_subcommand(executable, arguments, default)
     if isinstance(split, KernelDecision):
         return split
-    subword, remainder = split
+    subword = split["word"]
+    remainder = split["remainder"]
     subrows = [row for row in matches if subword and row["subcommand"] == subword]
     if not subrows:
         if default is None:
@@ -370,6 +382,7 @@ def decide_awk_words(words: list[str]) -> KernelDecision:
     return KernelDecision("allow", "read-only awk program")
 
 
+# lup: ignore[library-default] — curl's own flags that change reporting and not the request; the value follows curl's manual, not a project's taste
 CURL_SAFE_FLAGS = (
     "-s",
     "--silent",
@@ -465,7 +478,7 @@ def decide_curl_words(
     return KernelDecision("allow", "read-only curl within declared scopes")
 
 
-def decide_uv(words: list[str]) -> KernelDecision:
+def decide_uv(words: list[str], runner_targets: list[str]) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms."""
     subcommand = words[1]
     if subcommand in ("add", "sync"):
@@ -491,7 +504,7 @@ def decide_uv(words: list[str]) -> KernelDecision:
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
             )
-        if bare_target and run_command in UV_RUN_ALLOWED_TARGETS:
+        if bare_target and run_command in runner_targets:
             return KernelDecision("allow")
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")

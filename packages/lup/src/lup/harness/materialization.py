@@ -12,7 +12,9 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from lup.harness.contracts import Materializer
+from lup.harness.models import Artifact
 from lup.harness.reconciliation import ReconciliationProposal
+from lup.harness.validation import validated_tree
 
 
 class MaterializationResult(BaseModel):
@@ -53,6 +55,30 @@ def prune_empty_parents(root: Path, path: Path) -> None:
         if any(parent.iterdir()):
             return
         parent.rmdir()
+
+
+def write_generated_file(
+    artifact: Artifact, root: Path, command: str, *, check: bool
+) -> Path:
+    """Write or verify one artifact belonging to no runtime's tree.
+
+    Most generated files are reconciled against the ownership manifest of the
+    tree they belong to. A repository-wide one belongs to none of them, so the
+    whole of its proof is that what is on disk is what the declaration renders,
+    and the recovery is the command that renders it.
+    """
+    destination = safe_target(root, artifact.path)
+    expected = validated_tree([artifact]).artifacts[0].content
+    if check:
+        if (
+            not destination.is_file()
+            or destination.read_text(encoding="utf-8") != expected
+        ):
+            raise RuntimeError(f"{destination} is stale; run `{command}`")
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(expected, encoding="utf-8", newline="\n")
+    return destination
 
 
 class AtomicMaterializer(Materializer):

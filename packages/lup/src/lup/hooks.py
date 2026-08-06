@@ -53,15 +53,15 @@ Examples:
 
     Capture data from a sub-agent's tool calls::
 
-        >>> hooks, captured = create_capture_hook("WebSearch", extract_urls)
+        >>> capture = create_capture_hook("WebSearch", extract_urls)
         >>> # After running the agent, `captured` contains extracted items
-        >>> len(captured)
+        >>> len(capture["captured"])
         5
 """
 
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -437,11 +437,22 @@ def create_nudge_hook(
     )
 
 
+class CaptureHook[T](TypedDict):
+    """A capture hook and the list it appends to as responses arrive.
+
+    A ``TypedDict`` rather than a model because ``captured`` is live: pydantic
+    would revalidate it into a copy, and the caller would then watch a list
+    nothing writes to.
+    """
+
+    hooks: LupHooksConfig
+    captured: list[T]
+
+
 def create_capture_hook[T](
     tool_name: ToolName,
     extract: Callable[[LupHookInput], list[T]],
-    # A model would revalidate-copy the live captured list — pair stays a tuple.
-) -> tuple[LupHooksConfig, list[T]]:  # lup: ignore[tuple-shape] — destructured pair
+) -> CaptureHook[T]:
     """Create a PostToolUse hook that captures data from tool responses.
 
     Extracts data from a sub-agent's tool responses into a shared list.
@@ -451,7 +462,7 @@ def create_capture_hook[T](
         extract: Function that examines the hook input and returns items to capture.
 
     Returns:
-        (hooks_config, captured): The hook config and the shared accumulator list.
+        A `CaptureHook` carrying the hook config and the shared accumulator list.
     """
     captured: list[T] = []
 
@@ -465,11 +476,11 @@ def create_capture_hook[T](
         captured.extend(items)
         return LupHookOutput()
 
-    return (
-        LupHooksConfig(
+    return CaptureHook(
+        hooks=LupHooksConfig(
             post_tool_use=[LupHookMatcher(hook=capture_hook, tag="capture")]
         ),
-        captured,
+        captured=captured,
     )
 
 

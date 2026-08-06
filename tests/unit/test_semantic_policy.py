@@ -1,3 +1,8 @@
+# lup: ignore[own-model-dispatch]
+# Which semantic tool a native payload decodes to is exactly what these parity
+# tests claim: `UnknownTool` is the fail-closed outcome for a novel or
+# malformed operation, `ShellCommand` the recognized one. The decoded type is
+# the assertion, observed from outside both decoders.
 """Cross-native semantic decoding and conservative policy parity tests."""
 
 import ast
@@ -99,6 +104,12 @@ FIXTURE_PATH_ROLES = [
     PathRoleRow(root="tmp", role="scratch"),
 ]
 
+FIXTURE_RECOVERABLE_LIMIT = 5
+FIXTURE_RUNNER_TARGETS = ["pyright", "pytest", "ruff", "lup-devtools"]
+"""What this project declares `uv run <target>` may reach, which is what the
+shell fixtures below are written against."""
+"""How many restorable files one command may destroy before it asks."""
+
 SHELL_POLICY_CASES = [
     DecisionCase(input="env MODE=test python script.py", effect="deny"),
     DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
@@ -171,9 +182,6 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
     # Housekeeping confined to the disposable roots is as safe as writing
     # them; any long flag, opaque word, or outside target keeps the verb's ask.
-    # A generated plugin tree joins them: regeneration restores it byte for
-    # byte, while its parent keeps settings, trust state, and authored skills
-    # that nothing can restore, so the grant stops at the plugins root.
     DecisionCase(input="rm tmp/oneoff.py", effect="allow"),
     DecisionCase(input="rm -rf tmp/scratch", effect="allow"),
     DecisionCase(input="rm -f $TMPDIR/out.txt", effect="allow"),
@@ -182,12 +190,35 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rm tmp/../src/x.py", effect="ask"),
     DecisionCase(input="rm --no-preserve-root -rf tmp", effect="ask"),
     DecisionCase(input="rm -rf /", effect="ask"),
-    DecisionCase(input="rm .codex/plugins/lup/hooks/scripts/policy.py", effect="allow"),
-    DecisionCase(input="rm -rf .claude/plugins", effect="allow"),
-    DecisionCase(input="rm .claude/plugins/lup/x tmp/y", effect="allow"),
     DecisionCase(input="rm .claude/settings.local.json", effect="ask"),
     DecisionCase(input="rm -rf .claude/skills", effect="ask"),
     DecisionCase(input="rm .claude/plugins/../settings.json", effect="ask"),
+    # A generated plugin tree is a build product the running runtime already
+    # loaded, so writing one by hand changes nothing it will honor and the
+    # next generation reverts it. Every writing form refuses it and names the
+    # typed source instead; a long flag the allow would not recognize must not
+    # buy a way past the refusal, and reading such a path stays ordinary.
+    DecisionCase(input="rm .codex/plugins/lup/hooks/scripts/policy.py", effect="deny"),
+    DecisionCase(input="rm -rf .claude/plugins", effect="deny"),
+    DecisionCase(input="rm .claude/plugins/lup/x tmp/y", effect="deny"),
+    DecisionCase(input="rm --recursive .claude/plugins/lup", effect="deny"),
+    DecisionCase(
+        input="mv tmp/policy.py .claude/plugins/lup/hooks/policy.py", effect="deny"
+    ),
+    DecisionCase(input="cp tmp/a .codex/plugins/lup/b", effect="deny"),
+    DecisionCase(input="mkdir -p .claude/plugins/lup/hooks", effect="deny"),
+    DecisionCase(input="touch .codex/plugins/lup/marker", effect="deny"),
+    DecisionCase(
+        input="echo x > .claude/plugins/lup/hooks/scripts/policy.py", effect="deny"
+    ),
+    DecisionCase(input="echo x >> .codex/plugins/lup/data.py", effect="deny"),
+    DecisionCase(
+        input="cp .claude/plugins/lup/hooks/scripts/policy.py tmp/copy.py",
+        effect="allow",
+    ),
+    DecisionCase(
+        input="cat .claude/plugins/lup/hooks/scripts/policy.py", effect="allow"
+    ),
     # Every path-taking judged-ask verb reads the same role, so a scratch root
     # is housekept without friction while production keeps the verb's ask.
     DecisionCase(input="cp tmp/a.json tmp/b.json", effect="allow"),
@@ -196,11 +227,21 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="touch tmp/marker", effect="allow"),
     DecisionCase(input="rmdir tmp/run", effect="allow"),
     DecisionCase(input="mv tmp/draft.md src/final.md", effect="ask"),
-    DecisionCase(input="cp src/a.py tmp/a.py", effect="ask"),
-    DecisionCase(input="mkdir src/newpkg", effect="ask"),
+    # An empty directory anywhere, unlike the file beside it: `mkdir` cannot
+    # overwrite and leaves nothing to run, so what lands inside is judged on
+    # its own path rather than the directory being refused up front.
+    DecisionCase(input="mkdir src/newpkg", effect="allow"),
     DecisionCase(input="touch src/newfile.py", effect="ask"),
     DecisionCase(input="cp --archive tmp/a tmp/b", effect="ask"),
-    DecisionCase(input="rm /home/u/.claude/plugins/lup/x", effect="ask"),
+    # Copying reads its sources and writes only its destination, so landing
+    # production in a scratch root destroys nothing; moving out of one does,
+    # because the source is removed, and that keeps the verb's ask.
+    DecisionCase(input="cp src/a.py tmp/a.py", effect="allow"),
+    DecisionCase(input="cp /etc/hosts tmp/hosts", effect="allow"),
+    DecisionCase(input="cp tmp/a src/b.py", effect="ask"),
+    DecisionCase(input="mv src/a.py tmp/a.py", effect="ask"),
+    DecisionCase(input="rm /home/u/.claude/plugins/lup/x", effect="deny"),
+    DecisionCase(input="echo x > /srv/tree/dev/.codex/plugins/lup/y", effect="deny"),
     DecisionCase(input="rm .codex/config.local.toml", effect="ask"),
     # Quote-aware substitution: inert inside single quotes; a live $(...)
     # classifies recursively — the inner command joins the batch, and the
@@ -855,6 +896,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             autonomous_agent_identities=["resolver-worker"],
             path_roles=FIXTURE_PATH_ROLES,
             shell_rules=SHELL_RULES,
+            recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
+            runner_targets=FIXTURE_RUNNER_TARGETS,
         ),
         encoding="utf-8",
     )
@@ -880,7 +923,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from kernel.shell import decide_shell\n"
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
-        "    MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES, SHELL_RULES,\n"
+        "    MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES, RUNNER_TARGETS,\n"
+        "    SHELL_RULES,\n"
         ")\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
@@ -891,6 +935,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        interactive=case['interactive'],\n"
         "        path_roles=PATH_ROLES,\n"
         "        existing_targets=case['existing'],\n"
+        "        runner_targets=RUNNER_TARGETS,\n"
         "    )\n"
         "    assert result.effect == case['effect'], case\n"
         "for case in fixtures['fetch']:\n"
@@ -1064,7 +1109,7 @@ def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
 
 
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
-    policy = ShellPolicy(SHELL_RULES)
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
 
     assert policy.decide(
         ShellCommand(command="git status && uv run pytest")
@@ -1104,9 +1149,16 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     tmp_path: Path,
 ) -> None:
     bundled = load_bundled_kernel(tmp_path, "shell")
-    policy = ShellPolicy(SHELL_RULES, path_roles=FIXTURE_PATH_ROLES)
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_roles=FIXTURE_PATH_ROLES,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
     sandboxed_policy = ShellPolicy(
-        SHELL_RULES, sandbox_active=True, path_roles=FIXTURE_PATH_ROLES
+        SHELL_RULES,
+        sandbox_active=True,
+        path_roles=FIXTURE_PATH_ROLES,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
     )
 
     for index, case in enumerate(SHELL_POLICY_CASES):
@@ -1118,6 +1170,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
                 sandbox_active=case.sandboxed,
                 interactive=False,
                 path_roles=FIXTURE_PATH_ROLES,
+                runner_targets=FIXTURE_RUNNER_TARGETS,
             )
         # Each case judges a tree of its own, so a file one case declares
         # present never leaks into the next case's create-versus-overwrite.
@@ -1136,6 +1189,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             interactive=case.interactive,
             path_roles=FIXTURE_PATH_ROLES,
             existing_targets=case.existing,
+            runner_targets=FIXTURE_RUNNER_TARGETS,
         ).effect
         assert bundled_effect == case.effect, case.input
 
@@ -1277,6 +1331,71 @@ def test_declaring_a_suppression_still_asks() -> None:
     decision = policy.decide(declared)
     assert decision.effect == "ask"
     assert decision.reason.startswith("edit introduces an antipattern suppression")
+
+
+def test_dropping_one_rule_from_a_suppression_needs_no_approval() -> None:
+    """Shrinking a directive is what the audit asks for when it calls one spurious.
+
+    Reading the added line alone cannot tell this from a suppression appearing
+    out of nowhere, so the gate used to ask — and the audit was already
+    demanding the very edit it asked to approve.
+    """
+    policy = EditPolicy(protected=[])
+    narrowed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore[any-type, dict-get]\nvalue = 1\n",
+                after="# lup: ignore[any-type]\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(narrowed).effect == "allow"
+
+
+def test_a_bare_suppression_narrowed_to_named_rules_needs_no_approval() -> None:
+    """The bare directive covers every rule, so naming a few can only shrink it."""
+    policy = EditPolicy(protected=[])
+    typed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore\nvalue = 1\n",
+                after="# lup: ignore[any-type]\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(typed).effect == "allow"
+
+
+def test_widening_a_suppression_still_asks() -> None:
+    """Adding a rule to a directive silences something it did not before."""
+    policy = EditPolicy(protected=[])
+    widened = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore[any-type]\nvalue = 1\n",
+                after="# lup: ignore[any-type, dict-get]\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(widened).effect == "ask"
+
+
+def test_a_named_suppression_going_bare_still_asks() -> None:
+    """Dropping the names widens the directive to every rule."""
+    policy = EditPolicy(protected=[])
+    widened = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore[any-type]\nvalue = 1\n",
+                after="# lup: ignore\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(widened).effect == "ask"
 
 
 def test_prose_mentioning_a_suppression_is_not_declaring_one() -> None:

@@ -12,8 +12,7 @@ One fold, used by every adapter, is what keeps that from happening again.
 from collections.abc import Sequence
 
 from lup.runtime.models import (
-    MessageCompletedEvent,
-    TurnBlock,
+    AnyTurnBlock,
     TurnEvent,
     TurnMessage,
 )
@@ -26,10 +25,10 @@ def fold_transcript(events: Sequence[TurnEvent]) -> list[TurnMessage]:
     no partial fragment to decide about.
     """
     return [
-        event.message for event in events if isinstance(event, MessageCompletedEvent)
+        message for event in events if (message := event.completed_message) is not None
     ]
 
 
-def fold_blocks(events: Sequence[TurnEvent]) -> list[TurnBlock]:
+def fold_blocks(events: Sequence[TurnEvent]) -> list[AnyTurnBlock]:
     """Every block a turn produced, in the order the messages carried them."""
     return [block for message in fold_transcript(events) for block in message.blocks]

@@ -1,3 +1,5 @@
+<!-- Generated from lup_template.devtools.harness.content.docs.supervisor by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+
 # Resolver supervisor
 
 A resolver run drives nested agents through `query()`, so the harness never

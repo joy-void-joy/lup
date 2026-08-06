@@ -32,7 +32,7 @@ def with_retry[T](
     max_attempts: int = 3,
     min_wait: float = 2,
     max_wait: float = 10,
-    extra_exceptions: tuple[type[Exception], ...] = (),  # lup: ignore[tuple-shape]
+    extra_exceptions: tuple[type[Exception], ...] = (),
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Decorator for retrying async functions with exponential backoff.
 

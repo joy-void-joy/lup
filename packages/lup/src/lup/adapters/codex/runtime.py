@@ -1,3 +1,6 @@
+# lup: defer[when this module's notification decoding is next extended]: the
+# pinned cases are the failure paths; item-delta and approval-parameter shapes
+# are decoded without a test naming them.
 """Codex app-server SessionFactory with live optional turn capabilities."""
 
 import asyncio
@@ -32,7 +35,7 @@ from lup.runtime.models import (
     SessionId,
     SubmissionDecision,
     SubmissionGateResolver,
-    TurnBlock,
+    AnyTurnBlock,
     TurnCompletedEvent,
     TurnEvent,
     TurnStartedEvent,
@@ -172,7 +175,7 @@ class CodexTurnChannel:
             asyncio.get_running_loop().create_future()
         )
         self.durable: list[TurnEvent] = []
-        self.blocks: list[TurnBlock] = []
+        self.blocks: list[AnyTurnBlock] = []
         self.usage = Usage()
         self.started = perf_counter()
 
@@ -329,8 +332,8 @@ class CodexLiveEventStream(EventStream):
 
     async def durable(self) -> AsyncIterator[TurnEvent]:
         async for event in self.iterate():
-            if not isinstance(event, BlockDeltaEvent):
-                yield event
+            if (durable := event.durable) is not None:
+                yield durable
 
     def events(self) -> AsyncIterator[TurnEvent]:
         return self.durable()
@@ -664,7 +667,7 @@ def message_role(payload: JsonObject) -> Literal["user", "assistant", "tool", "s
             return "assistant"
 
 
-def decode_completed_item(payload: JsonObject) -> list[TurnBlock]:
+def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
     """Decode one typed completed app-server item into canonical blocks."""
     from lup.runtime.models import (
         TurnTextBlock,
@@ -687,7 +690,7 @@ def decode_completed_item(payload: JsonObject) -> list[TurnBlock]:
             "aggregatedOutput": output,
             "status": status,
         }:
-            blocks: list[TurnBlock] = [
+            blocks: list[AnyTurnBlock] = [
                 TurnToolCallBlock(
                     id=identifier,
                     name="ShellCommand",

@@ -21,11 +21,16 @@ from lup.codescan.boundaries import (
     find_boundary_breaches,
     find_library_default_breaches,
     find_native_spelling_breaches,
+    generated_tree_paths,
     library_placement_path_is_audited,
     native_spelling_path_is_sanctioned,
     path_is_sanctioned,
 )
 
+from lup_template.devtools.harness.composition import (
+    NATIVE_RUNTIMES,
+    application_roots,
+)
 from lup_template.devtools.dev.boundaries import (
     library_sources,
     overridable_names,
@@ -121,10 +126,26 @@ def test_native_spelling_suppression_is_audited() -> None:
 
 
 def test_sanctioned_paths() -> None:
+    roots = application_roots()
     assert path_is_sanctioned(Path("packages/lup/src/lup/adapters/claude/runtime.py"))
-    assert path_is_sanctioned(Path("tests/unit/test_adapter_transforms.py"))
-    assert path_is_sanctioned(Path("src/lup_template/agent/core.py"))
-    assert not path_is_sanctioned(Path("packages/lup/src/lup/subagents.py"))
+    assert path_is_sanctioned(Path("tests/unit/test_adapter_transforms.py"), roots)
+    assert path_is_sanctioned(Path("src/lup_template/agent/core.py"), roots)
+    assert not path_is_sanctioned(Path("packages/lup/src/lup/subagents.py"), roots)
+
+
+def test_an_application_that_says_nothing_sanctions_nothing_of_its_own() -> None:
+    """The library guards its own package and can name no adopter's."""
+    assert not path_is_sanctioned(Path("src/lup_template/agent/core.py"))
+    assert path_is_sanctioned(Path("packages/lup/src/lup/adapters/codex/harness.py"))
+
+
+def test_a_generated_tree_is_sanctioned_by_the_runtime_that_spells_it() -> None:
+    """Asked of the runtimes, so a location they learn sanctions its own tree."""
+    roots = application_roots()
+    for spelled in generated_tree_paths(NATIVE_RUNTIMES, ["lup"]):
+        assert path_is_sanctioned(
+            Path(spelled) / "any.py", roots
+        ) or path_is_sanctioned(Path(spelled), roots)
 
 
 def test_portable_content_is_scanned_for_native_spellings() -> None:
@@ -133,10 +154,11 @@ def test_portable_content_is_scanned_for_native_spellings() -> None:
         "from lup.adapters.claude.runtime import ClaudeSessionFactory\n"
         'method = "turn/start"\n'
     )
+    roots = application_roots()
 
-    assert path_is_sanctioned(path)
-    assert not native_spelling_path_is_sanctioned(path)
-    findings = audit_path_boundaries(path, text)
+    assert path_is_sanctioned(path, roots)
+    assert not native_spelling_path_is_sanctioned(path, roots)
+    findings = audit_path_boundaries(path, text, roots)
     assert [(item.rule_id, item.line) for item in findings] == [("native-spelling", 2)]
 
 

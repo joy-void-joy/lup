@@ -1,5 +1,5 @@
 # Generated from lup.policy.shell_rules by `uv run lup-devtools harness generate all` — edit the source, not this file.
-# See docs/generated-artifacts.md.
+# See docs/harness.md.
 
 prefix_rule(pattern = ["["], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["basename"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
@@ -120,6 +120,7 @@ prefix_rule(pattern = ["join"], decision = "allow", justification = "Allowed by 
 prefix_rule(pattern = ["jq"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["ls"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["md5sum"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
+prefix_rule(pattern = ["mkdir"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["nl"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["nproc"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["od"], decision = "allow", justification = "Allowed by Lup semantic shell policy")

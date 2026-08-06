@@ -1,5 +1,5 @@
 # Generated from the portable agent declaration agent.trace-explorer by `uv run lup-devtools harness generate all` — edit the source, not this file.
-# See docs/generated-artifacts.md.
+# See docs/harness.md.
 
 name = "trace-explorer"
 description = "Investigate trace evidence without changing production files"

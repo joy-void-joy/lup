@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Discriminator, Field
 REGENERATE_COMMAND = "uv run lup-devtools harness generate all"
 """The devtools command that rebuilds every native harness tree."""
 
-PROVENANCE_RECORD = "docs/generated-artifacts.md"
+PROVENANCE_RECORD = "docs/harness.md"
 """Where a repository records what each generated tree is compiled from."""
 
 
@@ -116,7 +116,9 @@ ARTIFACT_COMMENT_ROUTER = CommentRouter(
         ),
         CommentRoute(
             name="hash",
-            matcher=SuffixPathMatcher([".py", ".toml", ".rules", ".sh"]),
+            matcher=SuffixPathMatcher(
+                [".py", ".toml", ".rules", ".sh", ".yml", ".yaml"]
+            ),
             syntax=LinePrefixComment("#"),
         ),
         CommentRoute(

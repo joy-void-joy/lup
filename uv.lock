@@ -429,6 +429,7 @@ dependencies = [
     { name = "rich" },
     { name = "sh" },
     { name = "tenacity" },
+    { name = "tomlkit" },
 ]
 
 [package.optional-dependencies]
@@ -450,6 +451,7 @@ requires-dist = [
     { name = "rich", specifier = ">=14.3.1" },
     { name = "sh", specifier = ">=2.2.2" },
     { name = "tenacity", specifier = ">=9.0.0" },
+    { name = "tomlkit", specifier = ">=0.15.0" },
 ]
 provides-extras = ["claude", "codex", "docker"]
 

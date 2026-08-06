@@ -120,7 +120,9 @@ def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
     events: list[TraceEvent] = []  # lup: ignore[empty-collection] — block fold
     pending_tool: str | None = None
     # Legacy markdown carries no per-event timestamps; "" marks them unknown.
-    for label, body in iter_markdown_blocks(content):
+    for block in iter_markdown_blocks(content):
+        label = block.label
+        body = block.body
         if label.startswith("Tool:"):
             pending_tool = label.removeprefix("Tool:").strip() or "unknown"
         elif label == "Result":
@@ -146,13 +148,17 @@ def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
     return events
 
 
-type Block = tuple[str, str]  # lup: ignore[tuple-shape] — a (label, body) trace block
+class Block(BaseModel):
+    """One labelled section of a trace markdown document."""
+
+    label: str
+    body: str
 
 
 def iter_markdown_blocks(
     content: str,
 ) -> list[Block]:
-    """Split a trace markdown document into ``(label, body)`` blocks.
+    """Split a trace markdown document into labelled blocks.
 
     A block starts at a ``## <emoji> <label>`` header and runs to the next
     header. The body has any surrounding ``` ``` fences stripped, so a Result
@@ -164,7 +170,9 @@ def iter_markdown_blocks(
 
     def flush() -> None:
         if label is not None:
-            blocks.append((label, strip_code_fence("\n".join(body_lines))))
+            blocks.append(
+                Block(label=label, body=strip_code_fence("\n".join(body_lines)))
+            )
 
     for line in content.split("\n"):
         if line.startswith("## "):

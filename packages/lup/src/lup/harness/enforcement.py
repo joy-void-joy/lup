@@ -113,6 +113,8 @@ def semantic_policy_for(
             trusted_script_roots=trusted_script_roots,
             interactive=interactive,
             path_roles=roles,
+            recoverable_target_limit=hooks.recoverable_target_limit,
+            runner_targets=list(hooks.runner_targets),
         ),
         edit=EditPolicy(
             declared_path_rules(hooks),

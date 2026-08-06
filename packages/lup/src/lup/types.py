@@ -7,10 +7,11 @@ never imports from SDK packages directly. The hook vocabulary lives in
 :mod:`lup.hooks`, not here.
 """
 
+import json
 from collections.abc import Callable, Sequence
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Discriminator, Field, StringConstraints
 
 
 # ---------------------------------------------------------------------------
@@ -103,22 +104,125 @@ type ToolGrant = ToolName | ScopedToolGrant
 # ---------------------------------------------------------------------------
 
 
-class LupTextBlock(BaseModel):
+def normalize_content(content: str | Sequence[object] | None) -> str:
+    """Flatten tool-result content — MCP block list or scalar — to a string."""
+    if content is None:
+        return "(empty)"
+    if isinstance(content, list):
+        texts: list[str] = []  # lup: ignore[empty-collection] — block fold
+        for item in content:
+            match item:
+                case {"type": "text", "text": text}:
+                    texts.append(str(text))
+        return "\n".join(texts)
+    return str(content)
+
+
+class LupContentBlock(BaseModel):
+    """One block of a message, answering every question about itself.
+
+    Whatever a transcript, a console, or a trace needs to know about a block is
+    declared here and answered — or declined — by the block, so a new kind of
+    block is one class rather than an edit to every walk that would have to
+    notice it. The declining answers are what make omission safe: a caller
+    asking ``spoken_text`` reaches every kind that voices prose, including
+    kinds written long after the caller was.
+    """
+
+    @property
+    def display_emoji(self) -> str:
+        """The glyph a console leads this block with."""
+        return "❓"
+
+    @property
+    def display_label(self) -> str:
+        """The short name a console and a trace heading give this block."""
+        return "Unknown"
+
+    @property
+    def display_body(self) -> str:
+        """This block's content as one readable string."""
+        return str(self)
+
+    @property
+    def markdown_fence(self) -> str | None:
+        """The code-fence language a markdown trace wraps the body in, if any."""
+        return None
+
+    @property
+    def spoken_text(self) -> str | None:
+        """Prose the assistant voiced, if this block voices any."""
+        return None
+
+    @property
+    def opens_pairing(self) -> str | None:
+        """The id this block opens, which a later block closes."""
+        return None
+
+    @property
+    def closes_pairing(self) -> str | None:
+        """The id this block closes, opened by an earlier block."""
+        return None
+
+    @property
+    def tool_call_name(self) -> str | None:
+        """The tool this block invokes, if it invokes one."""
+        return None
+
+    @property
+    def result_payload(self) -> str | Sequence[object] | None:
+        """Raw tool output this block carries, for a caller that reformats it."""
+        return None
+
+    def log_summary(self, body: str) -> str:
+        """One stream-log line for this block, given its rendered `body`."""
+        return f"{self.display_label.upper()}: {body}"
+
+
+class LupTextBlock(LupContentBlock):
     """Text content from the assistant."""
 
     type: Literal["text"] = "text"
     text: str
 
+    @property
+    def display_emoji(self) -> str:
+        return "💬"
 
-class LupThinkingBlock(BaseModel):
+    @property
+    def display_label(self) -> str:
+        return "Response"
+
+    @property
+    def display_body(self) -> str:
+        return self.text
+
+    @property
+    def spoken_text(self) -> str | None:
+        return self.text
+
+
+class LupThinkingBlock(LupContentBlock):
     """Extended thinking / reasoning content."""
 
     type: Literal["thinking"] = "thinking"
     thinking: str = ""
     redacted: bool = False
 
+    @property
+    def display_emoji(self) -> str:
+        return "💭"
 
-class LupToolUseBlock(BaseModel):
+    @property
+    def display_label(self) -> str:
+        return "Thinking"
+
+    @property
+    def display_body(self) -> str:
+        return "[redacted]" if self.redacted else self.thinking
+
+
+class LupToolUseBlock(LupContentBlock):
     """A tool invocation by the agent."""
 
     type: Literal["tool_use"] = "tool_use"
@@ -126,18 +230,80 @@ class LupToolUseBlock(BaseModel):
     name: str
     input: JsonObject | None = None
 
+    @property
+    def display_emoji(self) -> str:
+        return "🔧"
 
-class LupToolResultBlock(BaseModel):
+    @property
+    def display_label(self) -> str:
+        return f"Tool: {self.name}"
+
+    @property
+    def display_body(self) -> str:
+        return json.dumps(self.input, indent=2) if self.input else ""
+
+    @property
+    def markdown_fence(self) -> str | None:
+        return "json"
+
+    @property
+    def opens_pairing(self) -> str | None:
+        return self.id
+
+    @property
+    def tool_call_name(self) -> str | None:
+        return self.name
+
+    def log_summary(self, body: str) -> str:
+        arguments = json.dumps(self.input) if self.input else ""
+        return f"TOOL_USE [{self.id}] {self.name}: {arguments}"
+
+
+class LupToolResultBlock(LupContentBlock):
     """Result returned from a tool invocation."""
 
     type: Literal["tool_result"] = "tool_result"
     tool_use_id: str
     content: str | Sequence[object] | None = None
 
+    @property
+    def display_emoji(self) -> str:
+        return "📋"
 
-type LupContentBlock = (
-    LupTextBlock | LupThinkingBlock | LupToolUseBlock | LupToolResultBlock
-)
+    @property
+    def display_label(self) -> str:
+        return "Result"
+
+    @property
+    def display_body(self) -> str:
+        return normalize_content(self.content)
+
+    @property
+    def markdown_fence(self) -> str | None:
+        return ""
+
+    @property
+    def closes_pairing(self) -> str | None:
+        return self.tool_use_id
+
+    @property
+    def result_payload(self) -> str | Sequence[object] | None:
+        return self.content
+
+    def log_summary(self, body: str) -> str:
+        return f"TOOL_RESULT [{self.tool_use_id}]: {body}"
+
+
+type MessageContentBlock = Annotated[
+    LupTextBlock | LupThinkingBlock | LupToolUseBlock | LupToolResultBlock,
+    Discriminator("type"),
+]
+"""One block as a message *field* validates it: the closed set, discriminated.
+
+Annotations that only read a block name :class:`LupContentBlock`, the base. A
+pydantic field must name this alias instead — validating against the base
+alone would rebuild every block as a base instance and drop its payload.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -168,21 +334,44 @@ class SubagentSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class LupAssistantMessage(BaseModel):
+class LupMessage(BaseModel):
+    """One transcript message, answering every question about itself.
+
+    A walk that wants the blocks of a message asks :attr:`content_blocks`
+    rather than naming the kinds of message that carry them, so a kind added
+    later is reached by every existing walk and a kind that carries none — a
+    status line — declines once, here.
+    """
+
+    @property
+    def content_blocks(self) -> list[LupContentBlock]:
+        """The blocks this message carries, empty when it carries none."""
+        return []
+
+
+class LupAssistantMessage(LupMessage):
     """Message from the assistant containing content blocks."""
 
     role: Literal["assistant"] = "assistant"
-    content: list[LupContentBlock]
+    content: list[MessageContentBlock]
+
+    @property
+    def content_blocks(self) -> list[LupContentBlock]:
+        return list(self.content)
 
 
-class LupUserMessage(BaseModel):
+class LupUserMessage(LupMessage):
     """Message from the user or tool results."""
 
     role: Literal["user"] = "user"
-    content: list[LupContentBlock] | str
+    content: list[MessageContentBlock] | str
+
+    @property
+    def content_blocks(self) -> list[LupContentBlock]:
+        return [] if isinstance(self.content, str) else list(self.content)
 
 
-class LupSystemMessage(BaseModel):
+class LupSystemMessage(LupMessage):
     """System-level message (status updates, etc.)."""
 
     role: Literal["system"] = "system"
@@ -223,5 +412,3 @@ type UsageCost = Callable[[Usage], float]
 Adapters that report token counts but no cost take one of these to enforce a
 budget; build it with :func:`lup.runtime.usage.per_mtok_usage_cost`.
 """
-
-type LupMessage = LupAssistantMessage | LupUserMessage | LupSystemMessage

@@ -1,3 +1,13 @@
+# lup: defer[when this decoder next gains an operation shape]: the long tail of
+# operation shapes is decoded without a test naming each one.
+# lup: ignore[own-model-dispatch]
+# The Codex*Operation models mirror Codex app-server and hook payloads — the
+# apply_patch file-change list, Bash, web_fetch, web_search — so the arms of
+# CodexEventDecoder.decode narrow a vendor payload rather than dispatch on a
+# union of ours. Answering `decode` from each mirror would pull the neutral
+# lup.policy vocabulary back across the boundary this adapter exists to hold,
+# and would make the vendor's tool roster, not ours, decide when a variant is
+# added.
 """Codex-private native event parsing and capability-aware decisions."""
 
 from pathlib import Path

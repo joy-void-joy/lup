@@ -1,78 +1,175 @@
-# lup: Two problems:
-# - The docs is focusing a lot on the harness, but lup-devtools harness is only a small part of lup (the library is a big one, and the template as well)
-# - This isn't very indicative of how one could go about contributing to this codebase
+<!-- Generated from lup_template.devtools.harness.content.docs.contributing by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
-# Contributing generated harness changes
+# Contributing
 
-Work in a feature worktree and change canonical Python first. The generated
-Claude, Codex, and shared marketplace artifacts are committed because users
-launch them directly and hooks must run without importing the checkout.
+This page is for a contributor arriving cold. It covers getting a working
+checkout, deciding where a change belongs, and what has to be green before it
+lands. The component guides — [library.md](library.md),
+[template.md](template.md), [harness.md](harness.md) — cover *how* to make a
+change once you know where it goes.
 
-## Local loop
+## Getting set up
 
-1. Edit typed content under `devtools/harness/content`, policy declarations,
-   or an adapter renderer.
-2. Run `uv run lup-devtools harness generate all`.
-3. Review canonical and generated diffs together. Prompt changes should be
-   understandable from their content module; policy-data changes should trace
-   to `HookSet` or canonical rule objects.
-4. Run `uv run lup-devtools harness check all`. This is read-only and fails on
-   desired-tree, ownership, executable-mode, or stale-file drift.
-5. Run `uv run lup-devtools dev check` before committing.
+```bash
+uv sync                                    # both workspace packages
+uv run lup-devtools setup                  # interactive: keys, integrations
+uv run lup-devtools dev check              # the local pre-flight bar
+```
 
-The pre-commit hook regenerates and stops when generation changes tracked
-files; it triggers only for commits touching generation inputs or the owned
-native trees, so other commits run no generation. This makes omitted generated
-output visible without silently adding it to the commit. Pull-request CI runs
-formatting, lint, type, unit, anti-pattern, native-boundary, and
-generated-drift checks; `docs/quality-pipeline.md` maps what each layer
-uniquely catches. The two user-deferred review notes
-remain visible in the complete local `dev check`; they are not silently removed
-or treated as unrelated CI failures.
+`uv` is the package manager: use `uv add <package>`, never edit
+`pyproject.toml` by hand. Secrets go in `.env.local`, which is gitignored;
+`.env` holds template defaults. `uv run lup-devtools --help` is the full
+command tree.
 
-## Reviewing generated artifacts
+To launch the repository as a native agent plugin:
 
-- Treat `.lup-ownership.json` as generated proof, not hand-authored metadata.
-- Verify both native trees when a portable declaration changes.
-- Verify only the owning adapter tree for an adapter-private renderer change.
-- Confirm `hooks/runtime/kernel.py` is the canonical kernel copy and
-  `policy_data.py` contains configuration only.
-- Do not commit credentials, plugin trust, installed cache contents, active
-  sessions, or local profile configuration.
-- Do not resolve a conflict by deleting an unknown file. Classify ownership or
-  leave the conflict explicit.
+```bash
+uv run lup-devtools harness claude          # generate, then launch
+uv run lup-devtools harness codex
+```
 
-## Native evidence
+## Where does my change go?
 
-Deterministic fixtures run on every change. The scheduled native workflow runs
-the full integration marker, including the installed Claude and Codex binaries
-for the session-id, pager, dynamic-tool-schema, and blocked-edit boundaries.
-`harness doctor` compares installed versions with the typed evidence ledger. A
-newer component warns locally and fails the nightly strict check, but the live
-job still runs so the drift cannot suppress the evidence needed to review it.
+| If you are changing… | It belongs in | And you should read |
+| --- | --- | --- |
+| Anything another project built on lup would want | `packages/lup/` | [library.md](library.md) |
+| Anything only this application needs | `src/lup_template/` | [template.md](template.md) |
+| A skill, agent, guidance, permission policy, or a page under `docs/` | `src/lup_template/devtools/harness/content/` | [harness.md](harness.md) |
+| Repeated shell incantations | a new `lup-devtools` command | [template.md](template.md) |
+| A one-off script | `tmp/` | — |
 
-## Release gate
+The placement question between the first two rows is the one that matters, and
+it has a single test: *would another project built on lup want this?* If yes,
+it goes in the library even if only this application uses it today. The
+library never imports the application, so a utility placed wrongly in
+`src/lup_template/` is unreachable from `packages/lup/` and will have to move
+later.
 
-Beyond the ordinary pull-request checks, cutting a release requires observing
-two consecutive scheduled `native-nightly` runs in which:
+Never create a tracking file. A `TODO.md`, backlog, or roadmap parks a
+decision where no workflow surfaces it again. Deferred work lives as a
+`# lup: defer[<wake condition>]: <text>` note at the site it concerns — where
+`dev comments` lists it and `dev check` stays red until it is resolved — or as
+a question to the user.
 
-- the credentials-gated `native` job completed successfully — a skipped job is
-  not a green run, and a completed failure stays visible and release-blocking;
+## Git workflow
+
+Development happens in **worktrees**, not branches switched in place, so
+several changes can be in flight at once:
+
+```bash
+uv run lup-devtools dev worktree create feat-name
+```
+
+The worktree is created as a sibling under `tree/`. Never nest one inside
+another checkout. Commit early, commit often, and keep commits atomic — if the
+message needs an "and", it is two commits. The format is
+`type(scope): description`, with `meta` for harness content and the trees it
+generates.
+
+Two branches: `dev` is the integration branch feature work merges into, and
+`main` is stable and receives only reviewed pull requests from `dev`. Never
+commit code directly to `dev`.
+
+/lup:rebase cleans up history and opens the pull request; /lup:close merges an approved one and cleans up. /lup:merge guides conflict
+resolution — and during a merge the bias is toward inclusion: audit the result
+against both parents and confirm every removed function, parameter, or command
+was removed deliberately rather than lost to a conflict side.
+
+## What has to be green
+
+```bash
+uv run ruff format . && uv run ruff check . && uv run pyright && uv run pytest
+uv run lup-devtools dev check              # markers, anti-patterns, boundaries
+uv run lup-devtools harness check all      # generated-tree drift
+uv run lup-devtools dev rules --check      # the generated rule reference
+```
+
+[quality-pipeline.md](quality-pipeline.md) explains which of the three
+automated layers catches what, and why commit-time regeneration is
+path-scoped. The short version: the per-push CI workflow is the gate that
+binds, the pre-commit hook only stops harness-relevant commits from landing
+without their regenerated output, and the nightly lane owns everything that
+needs a real native CLI.
+
+Two conventions catch most first-time review comments:
+
+- **Every function specifies input and output types**, and `Any`,
+  `dict[str, Any]`, and `dict[str, object]` are not among them. Use a
+  `TypedDict`, a Pydantic model, or `JsonValue`/`JsonObject` from `lup.types`
+  for data whose schema lives elsewhere. `# type: ignore` is forbidden; the
+  audited `# lup: ignore[rule-id]` escape hatch exists for genuine boundaries.
+- **Errors are never silently swallowed.** No `except: pass`, no
+  `contextlib.suppress`. Log with `logger.exception()`, handle it, or re-raise.
+
+[rules.md](rules.md) indexes every executable rule with its matching shape and
+the module that enforces it. A denial names its rule id, so you rarely need to
+read it first.
+
+## Tests
+
+One standard decides whether a test earns its place: **would it catch a
+realistic regression?** A test that asserts a fixture back at itself, or that
+pins language behavior rather than library behavior, is deleted rather than
+maintained.
+
+Two lanes. `tests/unit/` is deterministic, runs on every push, and pins
+adopter-visible behavior: security decisions, byte determinism, wire formats,
+state persistence. `tests/integration/` carries the `integration` marker, is
+deselected by default, and runs against real installed native CLIs and Docker
+on the nightly lane — that is where anything requiring a live boundary
+belongs, and nothing in the unit lane may infer it.
+
+The strongest fixtures in the repository are the shared policy cases in
+`test_semantic_policy.py`: every case runs against both the canonical policy
+objects and the assembled hermetic runtime under `python3 -I -S`, so the
+dependency-free generated kernel cannot drift from the library. When you touch
+`lup.policy`, that suite is the one to run first.
+
+Behavior that must not regress silently is pinned rather than described:
+`test_harness_compilation.py` holds byte-deterministic regeneration and the
+live tree drift-clean, `test_rule_reference.py` fails when
+[rules.md](rules.md) goes stale, and `test_capability_matrix_docs.py` does the
+same for the capability matrix.
+
+## Reviewing a change
+
+A change to canonical harness source arrives with its regenerated artifacts,
+and both halves are reviewed together. What to look for:
+
+- A prompt change should be understandable from its content module alone.
+- A policy-data change should trace to the `HookSet` or a canonical rule
+  object — and `hooks/runtime/kernel.py` should be byte-identical to the
+  canonical kernel, with configuration confined to `policy_data.py`.
+- Both native trees change when a portable declaration does; only the owning
+  tree changes for an adapter-private renderer change.
+- `.lup-ownership.json` is generated proof, not hand-authored metadata.
+- A conflict is never resolved by deleting an unknown file. Classify its
+  ownership or leave the conflict explicit.
+- No credentials, plugin trust, installed cache contents, active sessions, or
+  local profile configuration are ever committed.
+
+Unresolved `# lup:` review notes stay visible in a full local `dev check`.
+They are feedback to act on, not lint to clear: a note comes out when the code
+or structure it points at has actually changed. /lup:resolve runs that pass;
+[resolver.md](resolver.md) describes what it does.
+
+## Native evidence and the release gate
+
+Deterministic fixtures run on every change. A scheduled workflow additionally
+runs the full integration marker against installed Claude and Codex binaries,
+covering the session-id, pager, dynamic-tool-schema, and blocked-edit
+boundaries that only a real CLI can prove. `harness doctor` compares installed
+versions against the typed evidence ledger; a newer component warns locally
+and fails the nightly strict check, while the live job still runs so drift
+cannot suppress the evidence needed to review it.
+
+Beyond the ordinary pull-request checks, cutting a release requires two
+consecutive scheduled nightly runs in which:
+
+- the credentials-gated native job **completed successfully** — a skipped job
+  is not a green run, and a completed failure stays release-blocking;
 - the strict evidence job reported no drift between the installed native
-  versions and `docs/native-capabilities.md`.
+  versions and [native-capabilities.md](native-capabilities.md).
 
 Review the probe output together with the evidence ledger rather than updating
 the ledger mechanically.
-
-## Rule documentation
-
-`docs/rules.md` is generated from executable rule objects:
-
-```bash
-uv run lup-devtools dev rules
-uv run lup-devtools dev rules --check
-```
-
-Change the rule object and tests first, regenerate the reference, and review
-the diagnostic and matching shape together. Never hand-edit the generated
-reference.

@@ -1,12 +1,28 @@
-# lup: ignore[empty-collection, set-shape, string-split, tuple-shape]
+# lup: ignore[empty-collection, set-shape, string-split]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Word-level shell helpers: expansion safety, flags, and payloads."""
 
 import posixpath
+from typing import TypedDict
 
 from .decision import KernelDecision, SUBSTITUTION_SENTINEL
 from .roles import path_role
 from .rows import PathRoleRow
+
+
+class EffectiveCommand(TypedDict):
+    """The words the shell finally executes, and whether a binding was dangerous."""
+
+    words: list[str]
+    dangerous: bool
+
+
+class VerbOperands(TypedDict):
+    """A path verb's operands, and whether every flag among them was inert."""
+
+    operands: list[str]
+    inert: bool
+
 
 PASS_THROUGH_WORDS = (  # lup: ignore[library-default] — real wrappers that exec the argument after them
     "env",
@@ -56,12 +72,6 @@ INTERPRETERS = (  # lup: ignore[library-default] — real interpreter executable
     "ksh",
     "fish",
 )
-UV_RUN_ALLOWED_TARGETS = (
-    "pyright",
-    "pytest",
-    "ruff",
-    "lup-devtools",
-)
 
 
 def timeout_payload(segment: list[str], position: int) -> int:
@@ -81,7 +91,7 @@ def nice_payload(segment: list[str], position: int) -> int:
     return position
 
 
-def effective_command(segment: list[str]) -> tuple[list[str], bool]:
+def effective_command(segment: list[str]) -> EffectiveCommand:
     """Skip assignments and transparent wrappers, noting dangerous assignments.
 
     Wrappers that take values (``timeout 5``, ``nice -n 10``) consume them, so
@@ -99,7 +109,7 @@ def effective_command(segment: list[str]) -> tuple[list[str], bool]:
             continue
         executable = posixpath.basename(word)
         if executable == "env" and position + 1 == len(segment):
-            return segment[position:], dangerous
+            return EffectiveCommand(words=segment[position:], dangerous=dangerous)
         if executable in PASS_THROUGH_WORDS:
             position += 1
             continue
@@ -109,13 +119,13 @@ def effective_command(segment: list[str]) -> tuple[list[str], bool]:
         if executable == "nice":
             position = nice_payload(segment, position + 1)
             continue
-        return segment[position:], dangerous
-    return [], dangerous
+        return EffectiveCommand(words=segment[position:], dangerous=dangerous)
+    return EffectiveCommand(words=[], dangerous=dangerous)
 
 
 def command_words(words: list[str]) -> list[str]:
     """Skip assignments and transparent wrappers to the effective command."""
-    return effective_command(words)[0]
+    return effective_command(words)["words"]
 
 
 def uv_run_words(words: list[str]) -> list[str]:
@@ -139,7 +149,7 @@ def uv_run_words(words: list[str]) -> list[str]:
 # Every judged-ask verb that acts on paths, paired with the short flags whose
 # presence does not change what the verb does to them. A long flag or an
 # unrecognized cluster falls through to the verb's own ask.
-SCRATCH_VERB_FLAGS = {
+SCRATCH_VERB_FLAGS = {  # lup: ignore[library-default] — each verb's own POSIX flags, fixed by what the utility does rather than by who is asking
     "rm": "rfv",
     "rmdir": "pv",
     "mv": "fnv",
@@ -161,73 +171,181 @@ def is_trusted_script(word: str, roots: list[str]) -> bool:
     )
 
 
-def is_session_scratch_target(word: str) -> bool:
-    """Recognize a path confined to the session scratchpad.
-
-    ``$TMPDIR`` is the harness-provided scratch root and ``/tmp/claude-*`` its
-    host-side spelling, so writes there are scratch by definition. A suffix
-    that expands further or climbs out of the root stays unrecognized.
-    """
-    for prefix in ("$TMPDIR/", "${TMPDIR}/"):
-        if word.startswith(prefix):
-            suffix = word[len(prefix) :]
-            normalized = posixpath.normpath(suffix)
-            return "$" not in suffix and not normalized.startswith(("..", "/"))
-    return "$" not in word and posixpath.normpath(word).startswith("/tmp/claude-")
+GENERATED_PLUGIN_REFUSAL = (
+    "a native plugin tree is compiled from typed source, and the running"
+    " runtime already loaded it — edit the policy source, run"
+    " `lup-devtools harness generate all`, then ask the user to restart"
+    " claude or codex so the change takes effect"
+)
 
 
 def is_generated_plugin_target(word: str) -> bool:
     """Recognize a path confined to a native plugin tree the harness renders.
 
-    Every file there is compiled from typed source, so removing one costs a
-    regeneration rather than any information. The roots stop at ``plugins``
-    because their parents also hold settings, trust state, and hand-written
-    skills and commands that no generator can restore.
+    Every file there is compiled from typed source, so writing one by hand
+    edits a build product: the change is reverted by the next generation and
+    never reaches the runtime that already loaded it. The roots stop at
+    ``plugins`` because their parents also hold settings, trust state, and
+    hand-written skills and commands that no generator can restore.
+
+    The roots are matched as path segments wherever they occur, so an absolute
+    spelling and a sibling worktree's tree are recognized too. A relaxation
+    may safely decline to resolve those, because declining leaves the ask in
+    place; a refusal that only knew the repo-relative spelling would instead
+    fail open on the one form that reaches past this worktree.
     """
-    normalized = posixpath.normpath(word)
-    if normalized.startswith("/"):
-        return False
+    segments = posixpath.normpath(word).split("/")
     return any(
-        normalized == root or normalized.startswith(root + "/")
-        for root in GENERATED_PLUGIN_ROOTS
+        segments[index : index + len(parts)] == parts
+        for parts in [root.split("/") for root in GENERATED_PLUGIN_ROOTS]
+        for index in range(len(segments))
+    )
+
+
+def path_verb_operands(words: list[str]) -> VerbOperands:
+    """A path verb's operands, and whether every flag among them was inert.
+
+    An inert flag does not change what the verb does to its operands, so the
+    operand list means what it reads. An unrecognized one can move the
+    destination, add one, or change which paths are touched at all — which is
+    why the two directions diverge on it: a caller granting something must
+    decline outright, and a caller refusing something must widen to every
+    operand rather than trust their positions.
+    """
+    allowed = SCRATCH_VERB_FLAGS[posixpath.basename(words[0])]
+    operands: list[str] = []
+    inert = True
+    for word in words[1:]:
+        if word == "--":
+            continue
+        if word.startswith("-") and len(word) > 1:
+            if word.startswith("--") or not all(
+                letter in allowed for letter in word[1:]
+            ):
+                inert = False
+            continue
+        operands.append(word)
+    return VerbOperands(operands=operands, inert=inert)
+
+
+def written_operands(executable: str, operands: list[str]) -> list[str]:
+    """The operands a path verb modifies, as opposed to the ones it reads.
+
+    Copying reads every source and writes only the destination, so a path
+    named as a source is an ordinary read however protected it is. Every other
+    verb here removes or creates each path it is given.
+    """
+    if executable == "cp" and len(operands) > 1:
+        return operands[-1:]
+    return operands
+
+
+def refuses_generated_plugin_target(word: str) -> KernelDecision | None:
+    """Refuse one path that would write inside a generated plugin tree.
+
+    Every writing form routes its targets here — a path verb's operands, a
+    redirection's target — so the refusal and the reason it carries are
+    written once and cannot drift between the paths that reach them.
+    """
+    if not is_generated_plugin_target(word):
+        return None
+    return KernelDecision("deny", GENERATED_PLUGIN_REFUSAL)
+
+
+def refuses_generated_plugin_write(words: list[str]) -> KernelDecision | None:
+    """Refuse a path verb that would write inside a generated plugin tree."""
+    executable = posixpath.basename(words[0])
+    if executable not in SCRATCH_VERB_FLAGS:
+        return None
+    verb = path_verb_operands(words)
+    operands = verb["operands"]
+    inert = verb["inert"]
+    targets = written_operands(executable, operands) if inert else operands
+    for word in targets:
+        refused = refuses_generated_plugin_target(word)
+        if refused is not None:
+            return refused
+    return None
+
+
+def asks_before_removing_a_directory(
+    words: list[str],
+    path_roles: list[PathRoleRow],
+    directory_targets: list[str] | None = None,
+) -> KernelDecision | None:
+    """Ask before a verb destroys a directory, naming the way through.
+
+    Git restores a file it tracks, so a delete confined to files is bounded by
+    the files named. A directory is not: its size is whatever it happens to
+    hold, nothing in the command says what that is, and untracked work inside
+    it is restored by nothing. The ask says which route is open rather than
+    leaving a refusal the agent can only guess at. A scratch root keeps its
+    own grant, because there the tree is disposable by declaration.
+    """
+    executable = posixpath.basename(words[0])
+    if executable not in ("rm", "mv"):
+        return None
+    operands = path_verb_operands(words)["operands"]
+    named = [
+        word
+        for word in operands
+        if word in (directory_targets or [])
+        and path_role(word, path_roles) != "scratch"
+    ]
+    if not named:
+        return None
+    return KernelDecision(
+        "ask",
+        "removing a directory is never granted, because nothing in the command"
+        " bounds what it holds — name the files instead, or approve this",
     )
 
 
 def confined_to_recoverable_roots(
-    words: list[str], path_roles: list[PathRoleRow]
+    words: list[str],
+    path_roles: list[PathRoleRow],
+    recoverable_targets: list[str] | None = None,
+    recoverable_target_limit: int = 5,
 ) -> KernelDecision | None:
     """Recognize a path-taking judged-ask verb whose every target is disposable.
 
     A scratch role names a tree of disposable files, so destroying one is as
-    safe as writing it and creating one there settles nothing; a generated
-    plugin tree costs a regeneration rather than any information. A long flag,
-    an opaque word, or a single target outside those roots falls through to
-    the verb's ask, so a mixed command still asks.
+    safe as writing it and creating one there settles nothing. A path the host
+    reports as recoverable is committed with no uncommitted change, so
+    destroying it costs a checkout rather than any information — the host
+    establishes that, because the kernel never reads the filesystem. Only the
+    operands the verb writes are judged, so copying any source into a scratch
+    root is as disposable as the root it lands in. A long flag, an opaque
+    word, or a single written target outside those roots falls through to the
+    verb's ask, so a mixed command still asks.
+
+    The two grants are bounded differently because what backs them differs. A
+    scratch root is disposable by declaration, so emptying one is one act
+    whatever it holds. Restoring committed work is instead a repair somebody
+    has to know to perform, so that grant is capped: past the limit a delete
+    is a sweep, and a sweep is worth a question even when every file in it
+    could be brought back.
     """
     executable = posixpath.basename(words[0])
     if executable not in SCRATCH_VERB_FLAGS:
         return None
-    allowed = SCRATCH_VERB_FLAGS[executable]
-    targets: list[str] = []
-    for word in words[1:]:
-        if word == "--":
-            continue
-        if word.startswith("-"):
-            short = not word.startswith("--") and len(word) > 1
-            if short and all(letter in allowed for letter in word[1:]):
-                continue
-            return None
-        targets.append(word)
-    if not targets:
+    verb = path_verb_operands(words)
+    operands = verb["operands"]
+    inert = verb["inert"]
+    if not inert or not operands:
         return None
-    if all(
-        path_role(word, path_roles) == "scratch"
-        or is_session_scratch_target(word)
-        or is_generated_plugin_target(word)
+    targets = written_operands(executable, operands)
+    disposable = [word for word in targets if path_role(word, path_roles) == "scratch"]
+    restorable = [
+        word
         for word in targets
-    ):
-        return KernelDecision("allow", "confined to recoverable roots")
-    return None
+        if word not in disposable and word in (recoverable_targets or [])
+    ]
+    if len(disposable) + len(restorable) != len(targets):
+        return None
+    if len(restorable) > recoverable_target_limit:
+        return None
+    return KernelDecision("allow", "confined to recoverable roots")
 
 
 def dangerous_env_name(name: str) -> bool:

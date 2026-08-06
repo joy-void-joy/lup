@@ -25,57 +25,16 @@ from pathlib import Path
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from codex_patch import patched_files
-from host import (
-    declared_identity,
-    existing_write_targets,
-    granted_allowances,
-    managed_script_roots,
-    read_document,
-    sandbox_active,
-    worktree_path,
-)
+from decisions import bash_decision, edit_decision, fetch_decision
+from host import declared_identity, read_document, sandbox_active
 from kernel.decision import KernelDecision
-from kernel.edit import decide_edit
-from kernel.fetch import decide_fetch
-from kernel.lex import shell_write_targets
-from kernel.shell import decide_shell
-from policy_data import (
-    AGENT_IDENTITY_ENV,
-    ALLOWED_FETCH_SCOPES,
-    ANTI_PATTERN_ROWS,
-    AUTONOMOUS_AGENT_IDENTITIES,
-    CONCERN_ALLOWANCES_ENV,
-    DENIED_FETCH_SCOPES,
-    MAXIMUM_ADDED_LINES,
-    PATH_ROLES,
-    PATH_RULES,
-    SHELL_RULES,
-)
+from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 
 
 def managed_root():
     """The home Codex installs and trusts packages beneath."""
     environ = os.environ  # lup: ignore[os-environ]
     return Path(environ["CODEX_HOME"]) if "CODEX_HOME" in environ else None
-
-
-def edit_decision(path_text, before, after, path_exists):
-    path = Path(path_text)
-    suffix = path.suffix.lower()
-    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
-    return decide_edit(
-        worktree_path(path_text),
-        before,
-        after,
-        path_exists=path_exists,
-        path_rules=PATH_RULES,
-        antipattern_rows=rows,
-        path_roles=PATH_ROLES,
-        maximum_added_lines=MAXIMUM_ADDED_LINES,
-        autonomous=declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES,
-        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV),
-        python_source=suffix in (".py", ".pyi"),
-    )
 
 
 def joined(decisions):
@@ -91,26 +50,18 @@ def dispatch(payload, permission_request=False):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
     if name == "Bash":
-        command = tool_input["command"]
-        return decide_shell(
-            command,
-            SHELL_RULES,
-            ALLOWED_FETCH_SCOPES,
-            DENIED_FETCH_SCOPES,
-            sandboxed=False if permission_request else sandbox_active(),
-            trusted_script_roots=managed_script_roots(managed_root()),
-            path_roles=PATH_ROLES,
-            existing_targets=existing_write_targets(shell_write_targets(command)),
-            interactive=permission_request,
+        return bash_decision(
+            tool_input["command"],
+            managed_root(),
+            False if permission_request else sandbox_active(),
+            permission_request,
         )
     if name == "web_fetch":
-        return decide_fetch(
-            tool_input["url"],
-            ALLOWED_FETCH_SCOPES,
-            DENIED_FETCH_SCOPES,
-        )
+        return fetch_decision(tool_input["url"])
     if name == "apply_patch":
-        changes = patched_files(tool_input["command"], read_document)
+        autonomous = (
+            declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
+        )
         return joined(
             [
                 edit_decision(
@@ -118,8 +69,9 @@ def dispatch(payload, permission_request=False):
                     change.before,
                     change.after,
                     change.path_exists,
+                    autonomous,
                 )
-                for change in changes
+                for change in patched_files(tool_input["command"], read_document)
             ]
         )
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")

@@ -129,6 +129,13 @@ class ClaudeSpellings(NativeSpellings):
             "https://docs.claude.com/ and https://code.claude.com/"
         )
 
+    def project_root(self) -> str:
+        # Claude Code substitutes this into a plugin-provided MCP command
+        # without needing a default, so a server reaches the repository it
+        # serves from whichever scope the plugin was installed in — the local
+        # directory a launch verifies in place, or the marketplace cache.
+        return "${CLAUDE_PROJECT_DIR}"
+
     def model_alias(self, tier: ModelTier) -> str | None:
         return CLAUDE_MODEL_ALIASES[tier]
 
@@ -285,6 +292,38 @@ class ClaudePluginManifestRenderer(ArtifactRenderer[Plugin]):
         )
 
 
+class ClaudeMcpRenderer(ArtifactRenderer[Plugin]):
+    """Render a plugin's tool servers where Claude Code reads a plugin's own.
+
+    A plugin-provided configuration is the scope that follows the plugin: it
+    starts with the plugin rather than asking the project to enable it, and it
+    is the one scope whose commands substitute the project root.
+    """
+
+    def __init__(self, spellings: NativeSpellings) -> None:
+        self.spellings = spellings
+
+    def render(self, source: Plugin) -> ArtifactTree:
+        servers = {
+            server.name: {
+                "command": server.command,
+                "args": server.command_line(self.spellings),
+            }
+            for server in source.mcp_servers
+        }
+        return ArtifactTree(
+            artifacts=[
+                Artifact(
+                    path=Path(f".claude/plugins/{source.name}/.mcp.json"),
+                    content=json.dumps(
+                        {"mcpServers": servers}, indent=2, sort_keys=True
+                    ),
+                    semantic_id=source.id,
+                )
+            ]
+        )
+
+
 class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
     """Render project guidance at Claude's adapter-owned repository location."""
 
@@ -414,6 +453,8 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             for role in source.path_roles
                         ],
                         shell_rules=list(source.shell_rules),
+                        recoverable_target_limit=source.recoverable_target_limit,
+                        runner_targets=list(source.runner_targets),
                     ),
                     semantic_id=source.id,
                 ),

@@ -1,3 +1,5 @@
+<!-- Generated from lup_template.devtools.harness.content.docs.resolver by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+
 # Resolver lifecycle and recovery
 
 `ResolverCore` is the single provider-neutral resolver. Concrete entries inject
@@ -53,7 +55,7 @@ The doors are `--answer <question-id>=<value>`, the supervisor page,
 `lup-devtools harness resolve answer`, and a worker's own question tools.
 `--accept`/`--reject` is not a separate path: acceptance is the reserved
 `integration-acceptance` question, so every door records it the same way. See
-`docs/supervisor.md`.
+[supervisor.md](supervisor.md).
 
 **`state.json` lags the mailbox.** The run folds `questions/` and `answers/`
 into `state.questions`/`state.answers` as it promotes, so those copies are
@@ -67,8 +69,8 @@ explicit run and verify recorded branches, commits, worktrees, and leases.
 
 For a new run, the composition root scans tracked files for actionable review
 notes and passes their source context to a read-only structured planning turn.
-Every piece of evidence must be claimed by at least one generalized concern. If
-a note-bearing file differs from `HEAD`, an unattached Git commit captures those
+The planner must assign every note exactly once to a generalized concern. If a
+note-bearing file differs from `HEAD`, an unattached Git commit captures those
 files through a temporary index. The user's branch, `HEAD`, index, and working
 tree are unchanged.
 
@@ -82,43 +84,6 @@ nodes use an orchestrator-prepared semantic join.
 The initial question batch includes an approve/defer decision for each planned
 concern. A directly approved concern is still ineligible when any dependency is
 deferred. These answers, rather than planner guesses, control the work DAG.
-
-## A concern discovered mid-run joins the run that found it
-
-`--admit <text>` and `--admit-note <file>:<line>` widen a persisted run's
-concern set. Only the supplied evidence is planned — through the same read-only
-planning turn intake uses — and the run keeps its id, every recorded answer, and
-every completed outcome. That is the whole point: a run is most informative
-about what else needs doing exactly when restarting would cost the most, since
-re-deriving the inventory renames concerns and orphans every answer keyed to
-them.
-
-Evidence is a note written to the file it concerns, a statement in the human's
-own words, or both. A concern records which through `origin` and `evidence`, so
-one grounded only in a statement is distinguishable in review.
-
-Admission takes the run's exclusive lease, so like `--abort` it needs the run's
-process to have exited — which is what a parked run is. It is refused once the
-run reaches `integration`: past there the review branch is assembled and a
-joining concern would have to reopen it. A `failed` run is judged by the phase
-it will resume at.
-
-Every stage of `advance` asks what the current concern set still needs rather
-than whether that stage has run before, so an admitted concern is queued its
-material and approval questions, given eligibility, and leased on the next
-resume — the same gates in the same order as one from intake, with no shortcut
-around the human. Its lease is checked against the roots the run already handed
-out and refused on overlap, and the widened graph is revalidated for unique ids,
-present dependencies, and acyclicity before anything is persisted.
-
-An admitted concern may depend on one that already completed: the dependency
-base is that concern's recorded commit, which is what lets work discovered
-*because* an earlier concern landed depend on it. A dependency that produced no
-verified commit blocks the dependent exactly as it does at intake.
-
-Persistence widens rather than mutates. Each recorded concern is immutable and
-the projection may only be appended to, so an admission that tried to rewrite or
-drop recorded work is refused by the repository rather than by convention.
 
 Workers may edit only their leased root and never create branches or commits.
 A worker raises a material question through its own tools and keeps working,

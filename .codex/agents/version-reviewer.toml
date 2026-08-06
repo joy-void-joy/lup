@@ -1,5 +1,5 @@
 # Generated from the portable agent declaration agent.version-reviewer by `uv run lup-devtools harness generate all` — edit the source, not this file.
-# See docs/generated-artifacts.md.
+# See docs/harness.md.
 
 name = "version-reviewer"
 description = "Independently review a proposed version change"

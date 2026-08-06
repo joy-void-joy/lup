@@ -1,10 +1,10 @@
-<!-- Generated from lup_template.devtools.harness.content.self_improvement by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from lup_template.devtools.harness.content.docs.self_improvement by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Self-Improvement Loop
 
 How to diagnose agent failures and turn them into durable changes. For daily
 development guidance, see [.claude/CLAUDE.md](../.claude/CLAUDE.md); for the
-architectural pattern catalog, see [PATTERNS.md](../.claude/PATTERNS.md).
+architectural pattern catalog, see [docs/orchestration.md](orchestration.md).
 
 The two principles that govern every improvement below — **The Bitter Lesson**
 (give the agent more tools and capabilities, not more rules) and **Tool Design

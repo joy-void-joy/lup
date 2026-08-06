@@ -583,10 +583,42 @@ def run_resolve(
         )
         from lup.policy.enforcement import create_policy_hooks
 
+        from lup.adapters.codex.harness_runtime import (
+            CodexPluginInstaller,
+            PluginCacheConfig,
+        )
+
         from lup_template.devtools.harness.catalog import (
             declared_hook_set,
             portable_harness,
         )
+        from lup_template.devtools.harness.codex_home import select_codex_home
+
+        def codex_policy_environment(target: str, environment: EnvVars) -> EnvVars:
+            """Point a Codex session at a home carrying this project's policy.
+
+            The other adapter takes the semantic kernel as session hooks. This
+            one has no such seam — its app-server handles dynamic tools and MCP
+            elicitations and holds approvals at ``never`` — so what judges a
+            Codex session is the generated dispatcher its plugin registers, and
+            a plugin is installed per configuration home. Preparing the home
+            the way an interactive launch does is what puts a session opened
+            here under the policy an operator already runs under, instead of
+            leaving the OS sandbox as its only floor.
+
+            One home per run rather than per concern: the plugin is the same
+            for every worker, and seeding a personal account copy once per
+            concern would differ from the operator's in nothing but cost.
+            """
+            if target != "codex":
+                return {}
+            home = select_codex_home(None, environment, root)
+            plugin = portable_harness().plugins[0]
+            cache = CodexPluginInstaller(
+                PluginCacheConfig(codex_home=home.path, marketplace=plugin.marketplace)
+            ).ensure(root / ".codex" / "plugins" / plugin.name, root)
+            typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
+            return {"CODEX_HOME": str(home.path)}
 
         session_environment = non_interactive_environment(
             os.environ  # lup: ignore[os-environ] — sessions inherit the console
@@ -603,6 +635,8 @@ def run_resolve(
             **agent_identity_environment(""),
             **concern_allowances_environment([]),
         }
+        for environment in (worker_environment, reviewer_environment):
+            environment.update(codex_policy_environment(adapter, session_environment))
         session_model = (
             settings.model if engine_for_model(settings.model) == adapter else None
         )

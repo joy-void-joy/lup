@@ -2,7 +2,7 @@
 
 from urllib.parse import urlsplit
 
-from lup.harness.models import HookSet, HookUrlScope
+from lup.harness.models import HookSet, HookUrlScope, Plugin
 from lup.types import JsonObject, JsonValue
 
 SETTINGS: JsonObject = {
@@ -12,7 +12,6 @@ SETTINGS: JsonObject = {
         "claude-md-management@claude-plugins-official": True,
         "github@claude-plugins-official": True,
         "lup@lup-template": True,
-        "pyright-lsp@claude-plugins-official": True,
     },
     "env": {"ENABLE_TOOL_SEARCH": "false"},
     "extraKnownMarketplaces": {
@@ -22,22 +21,36 @@ SETTINGS: JsonObject = {
         "command": ".claude/plugins/lup/scripts/file_suggest.sh",
         "type": "command",
     },
-    "permissions": {
-        "allow": [
-            "WebSearch",
-            "Skill(lup:hooks)",
-            "Read(./.claude/settings.json.local*)",
-            "Read(./sync.json.local)",
-            "Read(./downstream.json.local)",
-        ],
-        "deny": [
-            "Read(./**/.env*.local)",
-            "Read(./**/.env.local)",
-            "Read(./**/secrets*.local)",
-            "Read(./**/*.secret.local)",
-        ],
-    },
 }
+
+ALLOWED: list[JsonValue] = [
+    "WebSearch",
+    "Skill(lup:hooks)",
+    "Read(./.claude/settings.json.local*)",
+    "Read(./sync.json.local)",
+    "Read(./downstream.json.local)",
+]
+
+DENIED: list[JsonValue] = [
+    "Read(./**/.env*.local)",
+    "Read(./**/.env.local)",
+    "Read(./**/secrets*.local)",
+    "Read(./**/*.secret.local)",
+]
+
+
+def served_tool_grants(plugin: Plugin) -> list[JsonValue]:
+    """Grant every tool the plugin's own servers serve.
+
+    A declared server is this project's own code, wired in deliberately, so
+    asking per call would make the declaration a suggestion. A new group in
+    the toolsets registry is granted by being declared, with nothing here to
+    extend.
+
+    The scoped name is what a runtime addresses a plugin's server by; the bare
+    key it is declared under matches nothing.
+    """
+    return [f"mcp__plugin_{plugin.name}_{server.name}" for server in plugin.mcp_servers]
 
 
 def allowed_network_domains(hooks: HookSet) -> list[str]:
@@ -63,8 +76,8 @@ def allowed_network_domains(hooks: HookSet) -> list[str]:
     return list(dict.fromkeys(merged))
 
 
-def project_settings(hooks: HookSet | None) -> JsonObject:
-    """Render the settings artifact, deriving the sandbox block from hooks.
+def project_settings(plugin: Plugin | None) -> JsonObject:
+    """Render the settings artifact, deriving both blocks from the declaration.
 
     The sandbox stays permissive where the semantic policy already judges
     (allowUnsandboxedCommands defaults on, so escapes re-enter the deny
@@ -72,8 +85,14 @@ def project_settings(hooks: HookSet | None) -> JsonObject:
     human-owned files become OS-level write denials and the declared
     credential paths become sandbox read denials.
     """
+    settings: JsonObject = dict(SETTINGS)
+    settings["permissions"] = {
+        "allow": [*ALLOWED, *(served_tool_grants(plugin) if plugin else [])],
+        "deny": DENIED,
+    }
+    hooks = plugin.hooks if plugin is not None else None
     if hooks is None or hooks.sandbox is None:
-        return dict(SETTINGS)
+        return settings
     domains: list[JsonValue] = list(allowed_network_domains(hooks))
     sandbox_block: JsonObject = {
         "enabled": True,
@@ -89,6 +108,5 @@ def project_settings(hooks: HookSet | None) -> JsonObject:
             ]
         },
     }
-    settings: JsonObject = dict(SETTINGS)
     settings["sandbox"] = sandbox_block
     return settings

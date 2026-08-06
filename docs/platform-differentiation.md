@@ -1,3 +1,5 @@
+<!-- Generated from lup_template.devtools.harness.content.docs.platform_differentiation by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+
 # Platform differentiation and parity
 
 One portable declaration, two native renderings. `portable_harness()` in
@@ -12,20 +14,12 @@ recipes (`claude_generation_recipe` / `codex_generation_recipe` in
 `src/lup_template/devtools/harness/generate.py`). A per-platform declaration
 layer was considered and rejected: it would let semantic content fork silently,
 whereas the adapter seam forces every difference to be a rendering decision
-over the same declarations. Two invariants enforce that, so a difference cannot
-hide in prose. Native invocation syntax is refused where the words are written:
-every free-text declaration field is a `PortableText`
-(`packages/lup/src/lup/harness/models.py`), and a sigil from `INVOCATION_SIGILS`
-followed by a qualified name fails construction, naming the field and the
-spelling. Adapter vocabulary is refused at compile time instead, by
-`reject_native_prose` in `compile_claude` / `compile_codex`.
+over the same declarations. `compile_claude` / `compile_codex` enforce that:
+`reject_rendered_invocations` refuses native invocation sigils in canonical
+text, and `reject_native_prose` refuses any word an adapter would have spelled
+— so a difference cannot hide in prose.
 
-The split is what each check needs to know. An invocation is a shape — a sigil
-and a qualified name — that a single string can be held to on its own, so the
-declaration layer refuses one without knowing which plugins exist or which
-runtime will read it, and each runtime proves its own sigil is one of the set.
-Adapter vocabulary is the opposite: it is whatever the runtimes spell, so the
-check has to see them. It writes down no vocabulary of its own but asks each
+That second check writes down no vocabulary of its own. It asks each
 `NativeSpellings` what it spells and forbids exactly that
 (`packages/lup/src/lup/codescan/portable.py`, rule `portable-content`), which
 is why adding a location to `TreeLocation` or `PluginLocation` forbids it in
@@ -71,7 +65,8 @@ Every family in `.claude/` vs `.codex/`/`.agents/`, with an explicit decision.
 | Ownership proof | `.claude/.lup-ownership.json` | `.codex/.lup-ownership.json` | Parity — same mechanism per tree. |
 | Template guidance | `TEMPLATE_CLAUDE.md` | `TEMPLATE_AGENTS.md` | Parity — shared portable sections, platform slices per flavor. |
 | Resolver entry | skill instructs the CLI directly | skill instructs the CLI directly | Parity — neither tree generates a launcher artifact; the shared `harness resolve --adapter <runtime>` CLI is the entry on both sides. |
-| `PATTERNS.md` | `.claude/PATTERNS.md` | none | Intentional single copy — the pattern guide (`content/patterns.py`) renders identically under both prompt renderers (one text part, no invocation parts, no native spellings), so a `.codex/` copy would be a byte duplicate. It is repository documentation both agents read from the committed tree, so guidance refers to it bare as `PATTERNS.md`, the way the application modules already do. Its residual oddity is the path: its two sibling support documents (`docs/self-improvement.md`, `docs/permissions.md`) sit at neutral locations while this one lives inside a runtime's tree. Moving it to `docs/` would settle that; rendering a second copy becomes worthwhile only if the document ever gains invocation parts. |
+| `PATTERNS.md` | `.claude/PATTERNS.md` | none | Intentional single copy — the pattern guide (`content/patterns.py`) renders identically under both prompt renderers (one text part, no invocation parts, no native spellings), so a `.codex/` copy would be a byte duplicate. It is repository documentation both agents read from the committed tree, so guidance refers to it bare as `PATTERNS.md`, the way the application modules already do. Its residual oddity is the path: every other generated document sits at the neutral `docs/` location while this one lives inside a runtime's tree. Moving it there would settle that; rendering a second copy becomes worthwhile only if the document ever gains invocation parts. |
+| `docs/` | rendered by the Claude recipe | none | Intentional single copy — repository documentation at a neutral location, which neither runtime reads from its own tree. Each page renders identically under both prompt renderers, so a second copy would be a byte duplicate and would additionally give two ownership manifests the same paths to manage. The set is declared once in `content/docs/catalog.py`. |
 | `settings.json` | `.claude/settings.json` | none | Intentional — Claude-native project settings (plugin enablement, marketplace, permissions, file suggestion). The Codex counterparts are the generated `.codex/config.toml` plus uncommitted personal `config.local.toml`. |
 | `scripts/file_suggest.sh` | `.claude/plugins/lup/scripts/file_suggest.sh` | none | Intentional — wired to Claude's native `fileSuggestion` setting; Codex has no equivalent feature. |
 | Codex-only files | none | `.codex/config.toml`, `.agents/plugins/marketplace.json` | Intentional — native Codex requirements with no Claude analogue (Claude's marketplace lives inside `.claude/plugins/`). |

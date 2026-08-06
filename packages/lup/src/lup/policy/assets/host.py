@@ -18,6 +18,7 @@ variable to read — never as a branch on which runtime is asking.
 
 import json
 import os
+import subprocess  # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 from pathlib import Path
 
 
@@ -67,6 +68,62 @@ def existing_write_targets(targets: list[str]) -> list[str]:
     pure function of the command text and this list.
     """
     return [target for target in targets if (Path.cwd() / target).exists()]
+
+
+def git_answers(arguments: list[str], root: Path) -> list[str] | None:
+    """One read-only Git query's lines, or None when Git cannot answer.
+
+    Git missing, the path outside a repository, a malformed pathspec, and a
+    non-zero exit all collapse to None, so a caller reading this as evidence
+    that something is safe to destroy treats an unanswerable question as a no.
+    """
+    try:
+        finished = subprocess.run(
+            ["git", *arguments],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    return finished.stdout.splitlines() if finished.returncode == 0 else None
+
+
+def recoverable_write_targets(
+    targets: list[str], root: Path | None = None
+) -> list[str]:
+    """Report which targets Git could restore byte for byte after a delete.
+
+    Recoverable means tracked, carrying no uncommitted change, and a regular
+    file: the object store then holds exactly what is on disk, so destroying
+    it costs a checkout rather than any information.
+
+    A directory is never reported, however clean everything beneath it is.
+    One grant would otherwise cover a tree of unbounded size and depth, and
+    the point of resolving this per path is that each grant stays the size of
+    the thing named.
+    """
+    where = Path.cwd() if root is None else root
+    return [
+        target
+        for target in targets
+        if (where / target).is_file()
+        and git_answers(["ls-files", "--error-unmatch", "--", target], where)
+        is not None
+        and git_answers(["status", "--porcelain", "--", target], where) == []
+    ]
+
+
+def directory_write_targets(targets: list[str], root: Path | None = None) -> list[str]:
+    """Report which of a command's targets are directories on disk.
+
+    A refusal that can name this says which way out is open — remove the
+    files it holds — rather than leaving the agent to guess why a delete it
+    expected to pass did not.
+    """
+    where = Path.cwd() if root is None else root
+    return [target for target in targets if (where / target).is_dir()]
 
 
 def read_document(path_text: str) -> str | None:

@@ -11,6 +11,7 @@ LLM is involved.
 """
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -32,12 +33,16 @@ from lup.sandbox.container import Sandbox
 from lup.subagents import create_run_subagent_tool
 from lup.types import SubagentSpec
 
+from lup.workspace.paths import project_root
+
 from lup_template.agent.subagents import get_subagent_specs
 from lup_template.agent.toolsets import (
     EXAMPLE_GROUP,
+    NOTES_GROUP,
     build_session_toolset,
     tool_group_names,
 )
+from lup_template.devtools.harness.catalog import HARNESS_SESSION
 
 pytestmark = pytest.mark.integration
 SUBPROCESS_TIMEOUT_SECONDS = 20
@@ -150,6 +155,47 @@ def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
         for tool in tools
     }
     assert served_names(env) == default_expected
+
+
+async def test_native_tree_server_command_serves_the_agent_tools(
+    tmp_path: Path,
+) -> None:
+    """The command line the generated trees declare must reach real tools.
+
+    A native runtime relays no session context, so the declaration names a
+    session instead and the server opens it. Everything but that name and the
+    notes location is taken from the artifact a runtime would read, and the
+    project root stands in for the substitution the runtime performs.
+    """
+    root = project_root()
+    declaration = json.loads((root / ".claude/plugins/lup/.mcp.json").read_text())
+    entry = declaration["mcpServers"][NOTES_GROUP]
+    args = [
+        word.replace("${CLAUDE_PROJECT_DIR}", str(root)).replace(
+            HARNESS_SESSION, "harness-round-trip"
+        )
+        for word in entry["args"]
+    ]
+
+    params = StdioServerParameters(
+        command=entry["command"],
+        args=args,
+        env={
+            **os.environ,
+            "AGENT_NOTES_PATH": str(tmp_path / "notes"),
+            "AGENT_SANDBOX_ENABLED": "false",
+        },
+    )
+
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await asyncio.wait_for(
+                session.initialize(), timeout=SUBPROCESS_TIMEOUT_SECONDS
+            )
+            listed = await asyncio.wait_for(
+                session.list_tools(), timeout=SUBPROCESS_TIMEOUT_SECONDS
+            )
+            assert {tool.name for tool in listed.tools} == {"review", "run_subagent"}
 
 
 async def test_serve_tools_realtime_session_group(tmp_path: Path) -> None:

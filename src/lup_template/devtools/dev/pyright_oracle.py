@@ -1,5 +1,3 @@
-# lup: ignore[empty-collection]
-# A protocol session accumulates answers in the order it asks for them.
 """Pyright's language server, implementing the codescan definition oracle.
 
 `lup.codescan.grammar` judges a site by where its subject is declared, and
@@ -20,48 +18,24 @@ rather than reporting a refutation it cannot support.
 """
 
 import asyncio
-import json
 import shutil
 import sys
-from email.parser import BytesParser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import typer
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import ValidationError
 
+from lup.codeintel.client import lsp_session
+from lup.codeintel.replies import LOCATIONS
 from lup.codescan.oracle import DefinitionOracle, DefinitionSite, SourcePosition
-from lup.types import JsonObject, JsonValue
+from lup.types import JsonValue
 from lup.workspace.paths import project_root
 
 SERVER_NAME = "pyright-langserver"
 
 RESOLVE_TIMEOUT_SECONDS = 600.0
 """Budget for a whole sweep. Exhausting it degrades to the broad rule."""
-
-
-class LspPosition(BaseModel):
-    """A zero-based LSP line and UTF-16 character offset."""
-
-    line: int
-    character: int
-
-
-class LspRange(BaseModel):
-    """The span an LSP location covers."""
-
-    start: LspPosition
-
-
-class LspLocation(BaseModel):
-    """One LSP `Location`: the document and span a symbol is declared at."""
-
-    uri: str
-    range: LspRange
-
-
-LOCATIONS = TypeAdapter(list[LspLocation] | LspLocation | None)
-"""Every shape `textDocument/definition` is specified to answer with."""
 
 
 def langserver_path() -> Path | None:
@@ -71,12 +45,6 @@ def langserver_path() -> Path | None:
         return beside
     located = shutil.which(SERVER_NAME)
     return Path(located) if located is not None else None
-
-
-def utf16_column(line: str, column: int) -> int:
-    """Convert an `ast` UTF-8 byte offset into the UTF-16 offset LSP wants."""
-    prefix = line.encode("utf-8")[:column].decode("utf-8", errors="ignore")
-    return len(prefix.encode("utf-16-le")) // 2
 
 
 def locations_of(result: JsonValue) -> list[DefinitionSite]:
@@ -101,106 +69,18 @@ async def resolve(
     server: Path, root: Path, positions: list[SourcePosition]
 ) -> list[list[DefinitionSite]]:
     """Run one language-server session and answer every queried position."""
-    process = await asyncio.create_subprocess_exec(
-        str(server),
-        "--stdio",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    stdin, stdout = process.stdin, process.stdout
-    if stdin is None or stdout is None:
-        process.kill()
-        raise OSError(f"{SERVER_NAME} started without usable pipes")
-
-    asked = 0
-
-    async def send(method: str, params: JsonObject, request_id: int | None) -> None:
-        body: JsonObject = {"jsonrpc": "2.0", "method": method, "params": params}
-        if request_id is not None:
-            body["id"] = request_id
-        payload = json.dumps(body).encode("utf-8")
-        stdin.write(f"Content-Length: {len(payload)}\r\n\r\n".encode() + payload)
-        await stdin.drain()
-
-    async def receive() -> JsonObject:
-        header = bytearray()
-        while not header.endswith(b"\r\n\r\n"):
-            chunk = await stdout.readline()
-            if not chunk:
-                raise OSError(f"{SERVER_NAME} closed its output stream")
-            header.extend(chunk)
-        declared = BytesParser().parsebytes(bytes(header))["Content-Length"]
-        if declared is None:
-            raise OSError(f"{SERVER_NAME} sent a frame with no Content-Length")
-        message: JsonObject = json.loads(await stdout.readexactly(int(declared)))
-        return message
-
-    async def request(method: str, params: JsonObject) -> JsonValue:
-        nonlocal asked
-        asked += 1
-        await send(method, params, asked)
-        while True:
-            message = await receive()
-            if "id" in message and message["id"] == asked:
-                return message["result"] if "result" in message else None
-
-    async def session() -> list[list[DefinitionSite]]:
-        folder: JsonObject = {"uri": root.as_uri(), "name": root.name}
-        await request(
-            "initialize",
-            {
-                "processId": None,
-                "rootUri": root.as_uri(),
-                "capabilities": {},
-                "workspaceFolders": [folder],
-            },
-        )
-        await send("initialized", {}, None)
-
-        lines: dict[str, list[str]] = {}
-        for path in dict.fromkeys(position.path for position in positions):
-            text = path.read_text(encoding="utf-8")
-            lines[path.as_posix()] = text.splitlines()
-            await send(
-                "textDocument/didOpen",
-                {
-                    "textDocument": {
-                        "uri": path.absolute().as_uri(),
-                        "languageId": "python",
-                        "version": 1,
-                        "text": text,
-                    }
-                },
-                None,
+    async with lsp_session(server, root, name=SERVER_NAME) as session:
+        return [
+            locations_of(
+                await session.request(
+                    "textDocument/definition",
+                    await session.position_in(
+                        position.path, position.line, position.column
+                    ),
+                )
             )
-
-        answers: list[list[DefinitionSite]] = []
-        for position in positions:
-            source = lines[position.path.as_posix()]
-            row = source[position.line - 1] if position.line <= len(source) else ""
-            result = await request(
-                "textDocument/definition",
-                {
-                    "textDocument": {"uri": position.path.absolute().as_uri()},
-                    "position": {
-                        "line": position.line - 1,
-                        "character": utf16_column(row, position.column),
-                    },
-                },
-            )
-            answers.append(locations_of(result))
-
-        await request("shutdown", {})
-        await send("exit", {}, None)
-        return answers
-
-    try:
-        return await session()
-    finally:
-        if process.returncode is None:
-            process.kill()
-        await process.wait()
+            for position in positions
+        ]
 
 
 class PyrightOracle(DefinitionOracle):

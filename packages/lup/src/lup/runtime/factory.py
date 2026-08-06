@@ -63,10 +63,19 @@ class SessionFactory:
         `None`, and a prompt plus a model resolves to that model.
         """
         async with self.open() as handle:
-            if isinstance(request, TurnRequest):
-                turn = await handle.session.start(request)
-            elif output_type is None:
-                turn = await handle.session.start(turn_request(request))
-            else:
-                turn = await handle.session.start(turn_request(request, output_type))
+            # Matched on the material rather than on the prepared request: `str`
+            # is one of these alternatives and cannot answer for itself, so no
+            # base class can carry this for the whole union. Each arm starts its
+            # own turn because `TurnRequest` is invariant — a union of them binds
+            # no single output type at `start`.
+            match request:
+                case str() | TurnInput():  # lup: ignore[own-model-dispatch]
+                    if output_type is None:
+                        turn = await handle.session.start(turn_request(request))
+                    else:
+                        turn = await handle.session.start(
+                            turn_request(request, output_type)
+                        )
+                case _:
+                    turn = await handle.session.start(request)
             return await turn.turn.result()

@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.guidance by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. Deliberately rendered as .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex. -->
+<!-- Generated from lup_template.devtools.harness.content.guidance by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. Deliberately rendered as .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex. -->
 
 # Lup repository guidance
 
@@ -21,7 +21,7 @@ Two kinds of delegated agents look alike and must not be conflated:
 - A **native subagent** ("subagent" for short) is dispatched by the harness: its delegation tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics.
 - A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool.
 
-Guidance that says "subagent" unqualified means the native kind. `PATTERNS.md` carries the full pattern catalog — subagent, nested, background, deferred tool schemas — and when to reach for each.
+Guidance that says "subagent" unqualified means the native kind. `docs/orchestration.md` carries the full delegation catalog — subagent, nested, background, deferred tool schemas — and when to reach for each. `docs/patterns.md` carries the recurring *code* shapes: declaration-plus-renderer, closed-by-construction, and the typed-matcher router.
 
 ## Development Workflow
 
@@ -130,7 +130,9 @@ Default to the **strongest** tier for the main agent, every subagent, reviewer, 
 - **`# lup: ignore` escape hatch** — When `Any` or another anti-pattern is genuinely needed (untyped library boundaries, MCP), add an inline ignore to request user approval. Prefer the typed, pyright-style `# lup: ignore[rule-id]` (comma-separate a list — `# lup: ignore[dict-get, tuple-shape]`) so a site silences exactly the rule it needs and still trips the others; the bare `# lup: ignore` stays valid but the auditor flags it as untyped to nudge migration. A standalone `# lup: ignore` in the first 10 lines disables anti-pattern checks for the whole file, while `# lup: ignore[rule-id]` there disables only that rule file-wide (like `# pyright: ignore` for files). Each rule's id is shown in its deny message; the generated `docs/rules.md` indexes every rule family with the `lup.codescan` module that defines it.
 - **Use Pydantic BaseModel instead of dataclasses**
 - **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
-- **Never dispatch on the type of our own models** — no `isinstance` over a union we declare, no `case ClassName()` arms, no `assert_never` net. The union's base declares the operation and each subtype answers or declines it, so a new variant is one class rather than an edit to every walk, and a filter cannot go stale by omission. Narrowing untyped data at a boundary — a vendor payload, a `JsonValue` — is the different case where `isinstance` is right
+- **Never dispatch on the type of our own models** — no `isinstance` over a union we declare, no `case ClassName()` arms, no `assert_never` net. The union's base declares the operation and each subtype answers or declines it, so a new variant is one class instead of an edit to every walk that would have to notice it, and a filter cannot go stale by omission. Narrowing untyped data at a boundary — a vendor payload, a `JsonValue` — is the different case where `isinstance` is right, because those alternatives are not ours to give a method to. The `own-model-dispatch` rule enforces exactly this line: it fires only on classes we define that inherit `BaseModel`
+- **Compiling is stronger than emitting** — build an artifact from a typed declaration and it cannot diverge; transport checked source and a checker can only warn once it already has. When tempted to add a check that two things still match, ask whether one can be derived from the other instead (`docs/patterns.md`)
+- **A constant should probably be an overridable default** — a canonical value (a native tool's real name, a vendor's field) is fine hardcoded; a non-canonical one (an allowlist, a ceiling, a retry count) is our judgement, so give it a default a caller can override rather than a constant they must fork to change (`docs/patterns.md`)
 - **Use `for`/comprehensions over `while`** — reach for structured iteration whenever the iteration space is expressible (a range, a sequence, an iterator, `enumerate`/`zip`); reserve `while` for genuinely unbounded, condition-driven loops
 
 ### Tool Input Schemas
@@ -190,11 +192,11 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the 
 | `# lup: defer[<cond>]: <text>` — parked work (§ Deferred Work) | **denied** while its condition is unmet |
 | `# lup: ignore[<rule>]` — an anti-pattern hatch (§ Type Safety), not feedback | fine once the violation is gone |
 
-Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/notes.md` carries the full lifecycle (use `/lup:resolve`).
+Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/contributing.md` carries the full lifecycle (use `/lup:resolve`).
 
 ### Deferred Work
 
-**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places: a `# lup: defer[<wake condition>]: <text>` note at the site it concerns, where `dev check` keeps it visible until its condition is met; or a question to the user, when whether to defer is itself the open question. `docs/notes.md` carries both, and the one exception — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
+**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places: a `# lup: defer[<wake condition>]: <text>` note at the site it concerns, where `dev check` keeps it visible until its condition is met; or a question to the user, when whether to defer is itself the open question. `docs/contributing.md` carries both, and the one exception — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
 
 ### DRY: Don't Repeat Yourself
 
@@ -208,7 +210,7 @@ Resolve open feedback by fixing what it points at, or, for a question, by answer
 
 The placement test applies to values, not only to code. `packages/lup` may declare a value only when it could not have chosen otherwise — a language's file suffixes, a provider's wire spelling, a closed enum the library itself defines. Ask: *could a second implementer with the same intent have written a different value?* If yes it is a judgement, and the library takes the caller's instead of making it for every adopter.
 
-**Having defaults is fine; assuming a non-canonical choice with no parameter to replace it is the defect.** `HookSet` is the shape. The audited `library-default` rule checks the mechanical half; canonicity it cannot, so declare that at the site with `# lup: ignore[library-default]` and a reason. `docs/library-boundary.md` carries the criterion, every library table's classification, and the target layout.
+**Having defaults is fine; assuming a non-canonical choice with no parameter to replace it is the defect.** `HookSet` is the shape. The audited `library-default` rule checks the mechanical half; canonicity it cannot, so declare that at the site with `# lup: ignore[library-default]` and a reason. `docs/library.md` carries the criterion, every library table's classification, and the target layout.
 
 ### Imports: No Barrel Files
 
@@ -258,7 +260,7 @@ All development tooling lives in `src/lup_template/devtools/` and is exposed as 
 
 If you find yourself running the same command repeatedly, **add a command** to `src/lup_template/devtools/`.
 
-`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. For one-off work, in order: run it in the sandbox where the work allows; add a `lup-devtools` command, which is reviewable because `devtools/` lands in the diff; or, as a last resort, `python3 <<<EOF` behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
+`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. For one-off work, in order: `lup-devtools py eval '<expression>'` for anything that fits one expression, which auto-imports and needs no file; run it in the sandbox where the work allows; add a `lup-devtools` command, which is reviewable because `devtools/` lands in the diff; or, as a last resort, `python3 <<<EOF` behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
@@ -351,32 +353,17 @@ Use `/lup:hooks` to change the canonical policy inputs, regenerate both native
 plugins, and run the shared fixture suite. `settings.json`
 holds only native settings outside this semantic policy boundary.
 
-### Pyright LSP
+### Code Intelligence
 
-The `pyright-lsp` plugin provides code intelligence. **Use these actively** — faster and more accurate than grep for code understanding.
+The `codeintel` tool group answers questions about code by *resolving* it, through a language server. **Prefer these over grep for anything about a name** — a name has a definition, a scope, and a set of references, and only a resolver knows them.
 
-**Navigation:**
+- **find_definition** — where a symbol is declared, through the import or alias that names it
+- **find_references** — every use across the workspace, excluding look-alikes in other scopes
+- **hover** — the type the checker actually resolved, before you assume one
+- **list_symbols** — every symbol a file declares, instead of grepping for `def ` or `class `
+- **rename_symbol** — plans a workspace-wide rename and reports the files it would touch, without writing. **Always prefer it over `Edit` with `replace_all`**, which cannot tell one scope from another; apply the reported edits yourself.
 
-- **go-to-definition** — Jump to where a symbol is defined (instead of grepping for `def foo`)
-- **find-references** — Find all usages (instead of grepping for a symbol name)
-- **hover-documentation** — Type info and docs at a position
-- **list-symbols** — All symbols in a file (instead of grepping for `def ` or `class `)
-- **find-implementations** — Implementations of an interface/abstract method
-- **trace-call-hierarchy** — Understand call chains
-
-**Refactoring:**
-
-- **rename-symbol** — Rename across workspace. **Always prefer over `Edit` with `replace_all`** — understands scope.
-
-| Task                             | LSP                | grep/Edit        |
-| -------------------------------- | ------------------ | ---------------- |
-| Find where a function is defined | `go-to-definition` |                  |
-| Find all callers of a function   | `find-references`  |                  |
-| Rename a variable/function/class | `rename-symbol`    |                  |
-| Search for a string literal      |                    | `Grep`           |
-| Search across non-Python files   |                    | `Grep`           |
-| Change logic within a function   |                    | `Edit`           |
-| Add new code                     |                    | `Edit` / `Write` |
+Grep is still right for what is genuinely characters: a string literal, a comment, a non-Python file.
 
 ---
 

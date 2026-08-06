@@ -12,6 +12,7 @@ from pathlib import Path
 import typer
 
 from lup_template.devtools.dev.rules import write_rule_reference
+from lup_template.devtools.dev.workflow import write_workflow
 from lup_template.devtools.harness.composition import (
     EVERY_TARGET,
     NativeHarnessComposition,
@@ -66,14 +67,23 @@ def generate_with_report(composition: NativeHarnessComposition) -> None:
     report_generation(recipe.label, materialized.changed, materialized.removed)
 
 
-def clean_rule_reference() -> bool:
-    """Whether the repository-wide rule reference is already up to date."""
-    try:
-        write_rule_reference(check=True)
-    except RuntimeError as error:
-        typer.echo(str(error), err=True)
-        return False
-    return True
+REPOSITORY_WIDE = [write_rule_reference, write_workflow]
+"""Every generated file belonging to no one runtime's tree.
+
+Each writes itself when asked and verifies itself when checked, so a caller
+settles or audits all of them without knowing what any one of them renders."""
+
+
+def clean_repository_artifacts() -> bool:
+    """Whether every generated file outside the native trees is up to date."""
+    stale = []
+    for write in REPOSITORY_WIDE:
+        try:
+            write(check=True)
+        except RuntimeError as error:
+            typer.echo(str(error), err=True)
+            stale.append(write)
+    return not stale
 
 
 def generate_targets(target: str) -> None:
@@ -81,17 +91,29 @@ def generate_targets(target: str) -> None:
     for composition in harness_compositions(target):
         generate_with_report(composition)
     if target == EVERY_TARGET:
-        typer.echo(f"rule reference ready: {write_rule_reference()}")
+        for write in REPOSITORY_WIDE:
+            typer.echo(f"repository artifact ready: {write()}")
+
+
+def drift_reports(target: str) -> list[DriftReport]:
+    """Ownership-aware drift for every composition the selector names.
+
+    A library upgrade changes what the desired tree compiles to, so this is
+    what tells an adopter their generated trees are behind — which is why
+    ``dev check`` asks it too, rather than leaving it to a workflow file no
+    initialization installs.
+    """
+    return [
+        inspect_generation(composition.recipe)
+        for composition in harness_compositions(target)
+    ]
 
 
 def check_targets(target: str) -> None:
     """Report drift for every selected composition; exit nonzero when dirty."""
-    reports = [
-        inspect_generation(composition.recipe)
-        for composition in harness_compositions(target)
-    ]
+    reports = drift_reports(target)
     for report in reports:
         report_drift(report)
-    stale_reference = target == EVERY_TARGET and not clean_rule_reference()
-    if stale_reference or any(not report.clean for report in reports):
+    stale = target == EVERY_TARGET and not clean_repository_artifacts()
+    if stale or any(not report.clean for report in reports):
         raise typer.Exit(1)

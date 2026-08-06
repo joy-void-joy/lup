@@ -1,11 +1,10 @@
-<!-- Generated from lup_template.devtools.harness.content.permissions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from lup_template.devtools.harness.content.docs.permissions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Permission Policy
 
 How the generated hooks decide allow, ask, defer, or deny. For the daily
 summary and the escalation syntax, see
-[.claude/CLAUDE.md](../.claude/CLAUDE.md) § Permission Hooks; for the
-decision flow, see [architecture.md](architecture.md) § Permission policy flow.
+[.claude/CLAUDE.md](../.claude/CLAUDE.md) § Permission Hooks.
 
 ## Sources of truth
 
@@ -69,3 +68,30 @@ merge a session's environment over the launching process's, so silence would
 inherit whatever the operator had exported. A hook script is spawned by the
 runtime with the runtime's environment, so an agent exporting the variable
 inside a shell tool call never reaches the dispatcher that judges it.
+
+## How one decision reaches two runtimes
+
+The generated plugins enforce permissions without importing lup, yet decide
+identically to the library.
+
+1. **Canonical sources** — the `HookSet` in `devtools/harness/catalog.py`
+   (protected edit roots, allowed fetch scopes, policy ids, shell-rule
+   extensions), the anti-pattern rule set in `lup.codescan.antipatterns`, and
+   the baseline shell vocabulary in `lup.policy.shell_rules`.
+2. **Library layer** — `lup.policy.rules` validates those inputs as Pydantic
+   surfaces and erases them into primitive rows; `lup.policy.kernel` — the
+   hermetic, stdlib-only decision core — interprets those rows to reach every
+   shell, fetch, and edit verdict; `lup.policy.chain` composes policies
+   deny-before-ask; the adapters' `native` modules decode wire payloads into
+   `lup.policy.models` events and render decisions back.
+3. **Assembly** — `lup.policy.bundle` reads the kernel source verbatim and
+   renders the erased rows as data files; the adapter hook renderers emit
+   `hooks/hooks.json`, the dispatcher `hooks/scripts/policy.py`, and
+   `hooks/runtime/{kernel.py,policy_data.py}` into each plugin tree.
+4. **Equivalence** — the shared fixture suite runs the same cases through the
+   library policies and the assembled runtime and requires identical verdicts.
+
+Every rule id a denial cites is indexed in [rules.md](rules.md).
+[harness.md](harness.md) covers changing the declarations above, and
+[platform-differentiation.md](platform-differentiation.md) records where the
+two dispatchers deliberately differ.

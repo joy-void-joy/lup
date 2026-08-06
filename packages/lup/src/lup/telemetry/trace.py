@@ -33,16 +33,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.telemetry.blocks import extract_block_info, normalize_content, truncate_str
-from lup.types import (
-    LupAssistantMessage,
-    LupContentBlock,
-    LupMessage,
-    LupTextBlock,
-    LupToolResultBlock,
-    LupToolUseBlock,
-    LupUserMessage,
-)
+from lup.telemetry.blocks import extract_block_info, truncate_str
+from lup.types import LupContentBlock, LupMessage, normalize_content
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +43,10 @@ def format_block_markdown(block: LupContentBlock) -> str:
     """Format a content block as markdown for trace logs."""
     info = extract_block_info(block)
     header = f"## {info.emoji} {info.label}"
-    match block:
-        case LupToolUseBlock():
-            return f"{header}\n\n```json\n{info.content}\n```\n"
-        case LupToolResultBlock():
-            return f"{header}\n\n```\n{info.content}\n```\n"
-        case _:
-            return f"{header}\n\n{info.content}\n"
+    fence = block.markdown_fence
+    if fence is None:
+        return f"{header}\n\n{info.content}\n"
+    return f"{header}\n\n```{fence}\n{info.content}\n```\n"
 
 
 # Capability-request phrasing. Applied to one already-isolated string at the
@@ -232,44 +221,37 @@ class TraceLogger(BaseModel):
         Assistant text that voices a capability request emits one too.
         """
         now = datetime.now().isoformat()
-        match block:
-            case LupToolUseBlock():
-                self.tool_names[block.id] = block.name
-            case LupToolResultBlock():
-                name = self.tool_names.pop(block.tool_use_id, "unknown")
-                ok = tool_result_ok(block.content)
-                brief = truncate_str(normalize_content(block.content), 300)
-                self.emit_event(
-                    TraceEvent(
-                        kind="tool_call", timestamp=now, tool=name, ok=ok, brief=brief
-                    )
+        opened, invoked = block.opens_pairing, block.tool_call_name
+        if opened is not None and invoked is not None:
+            self.tool_names[opened] = invoked
+        if (closed := block.closes_pairing) is not None:
+            name = self.tool_names.pop(closed, "unknown")
+            payload = block.result_payload
+            ok = tool_result_ok(payload)
+            brief = truncate_str(normalize_content(payload), 300)
+            self.emit_event(
+                TraceEvent(
+                    kind="tool_call", timestamp=now, tool=name, ok=ok, brief=brief
                 )
-                if not ok:
-                    self.emit_event(
-                        TraceEvent(kind="error", timestamp=now, tool=name, brief=brief)
-                    )
-            case LupTextBlock():
-                request = capability_request_from_text(block.text)
-                if request is not None:
-                    self.emit_event(
-                        TraceEvent(
-                            kind="capability_request", timestamp=now, brief=request
-                        )
-                    )
-            case _:
-                pass
+            )
+            if not ok:
+                self.emit_event(
+                    TraceEvent(kind="error", timestamp=now, tool=name, brief=brief)
+                )
+        if (spoken := block.spoken_text) is not None:
+            request = capability_request_from_text(spoken)
+            if request is not None:
+                self.emit_event(
+                    TraceEvent(kind="capability_request", timestamp=now, brief=request)
+                )
 
     def log_message(self, message: LupMessage) -> None:
         """Log all content blocks in a message.
 
-        Handles LupAssistantMessage and LupUserMessage. Other message
-        types are silently ignored.
+        A message that carries no content blocks contributes nothing.
         """
-        match message:
-            case LupAssistantMessage() | LupUserMessage():
-                blocks = message.content if isinstance(message.content, list) else []
-                for block in blocks:
-                    self.log_block(block)
+        for block in message.content_blocks:
+            self.log_block(block)
 
     def log_text(self, text: str, heading: str | None = None) -> None:
         """Add raw text to the trace, emitting a capability event if voiced.

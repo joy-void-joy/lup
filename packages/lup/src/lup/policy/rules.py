@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
-from lup.codescan.antipatterns import patterns_for_suffix
+from lup.codescan.antipatterns import AntiPattern, patterns_for_suffix
 from lup.policy.contracts import DecisionPolicy
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import (
@@ -21,7 +21,15 @@ from lup.policy.kernel.edit import (
     path_rule_matches as kernel_path_rule_matches,
 )
 from lup.policy.kernel.fetch import decide_fetch
-from lup.policy.kernel.lex import parse_shell_words, shell_write_targets
+from lup.policy.assets.host import (
+    directory_write_targets,
+    recoverable_write_targets,
+)
+from lup.policy.kernel.lex import (
+    parse_shell_words,
+    shell_path_verb_targets,
+    shell_write_targets,
+)
 from lup.policy.kernel.rows import (
     AntiPatternRow,
     PathRoleRow,
@@ -29,7 +37,7 @@ from lup.policy.kernel.rows import (
     PathRuleRow,
     UrlScopeRow,
 )
-from lup.policy.kernel.shell import decide_shell, decide_shell_segment
+from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
 from lup.policy.kernel.words import command_words as kernel_command_words
 from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
 from lup.policy.models import (
@@ -129,8 +137,12 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
+        recoverable_target_limit: int = 5,
+        runner_targets: list[str] | None = None,
     ) -> None:
         self.path_roles = path_roles or []
+        self.recoverable_target_limit = recoverable_target_limit
+        self.runner_targets = runner_targets or []
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
@@ -140,6 +152,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
 
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
+        acted_on = shell_path_verb_targets(event.command)
         return pydantic_decision(
             decide_shell(
                 event.command,
@@ -155,6 +168,10 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     for target in shell_write_targets(event.command)
                     if (root / target).exists()
                 ],
+                recoverable_targets=recoverable_write_targets(acted_on, root),
+                directory_targets=directory_write_targets(acted_on, root),
+                recoverable_target_limit=self.recoverable_target_limit,
+                runner_targets=self.runner_targets,
             )
         )
 
@@ -162,10 +179,13 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         return pydantic_decision(
             decide_shell_segment(
                 segment.words,
-                self.rules,
-                self.allowed_scopes,
-                self.denied_scopes,
-                self.trusted_script_roots,
+                shell_context(
+                    self.rules,
+                    self.allowed_scopes,
+                    self.denied_scopes,
+                    self.trusted_script_roots,
+                    self.path_roles,
+                ),
             )
         )
 
@@ -214,20 +234,28 @@ def path_rule_matches(path: Path, rule: PathRule) -> bool:
     return kernel_path_rule_matches(path.as_posix(), path.exists(), path_rule_row(rule))
 
 
+def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
+    """Erase one declared rule into the primitive row the kernel matches on.
+
+    The single projection from the declaration to the runtime shape. Both the
+    live policy and the bundled hermetic runtime go through it, so a field the
+    declaration gains cannot reach one gate and not the other.
+    """
+    return AntiPatternRow(
+        id=rule.id,
+        pattern=rule.pattern.pattern,
+        message=rule.message,
+        context=rule.context,
+        strength=rule.strength,
+    )
+
+
 def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
     """Compile rules selected by one edit path into primitive kernel rows."""
     patterns = patterns_for_suffix(change.path.suffix.lower())
     if patterns is None:
         return []
-    return [
-        AntiPatternRow(
-            id=rule.id,
-            pattern=rule.pattern.pattern,
-            message=rule.message,
-            context=rule.context,
-        )
-        for rule in patterns
-    ]
+    return [antipattern_row(rule) for rule in patterns]
 
 
 class EditPolicy(DecisionPolicy[EditBatch]):

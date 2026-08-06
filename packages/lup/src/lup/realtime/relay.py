@@ -59,6 +59,7 @@ Examples:
 
 import asyncio
 import logging
+from abc import abstractmethod
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Annotated, Literal
@@ -117,53 +118,130 @@ text via ``run_relay_session(missing_sleep_message=...)``."""
 # =====================================================================
 
 
-class ReplyEvent(BaseModel):
+class RelayEvent(BaseModel):
+    """One thing the agent did, answering every question the parent asks of it.
+
+    Applying an event to the parent's Scheduler mirrors what the in-process
+    tools do directly, with one deliberate exception: meta-gate transitions
+    stay tool-side (the reply tool resets the gate in its own process) so the
+    gate always follows the agent's tool-call order — a parent-side reset could
+    race a meta the agent recorded just after replying.
+
+    The declining answers below are what make omission safe: a domain hook
+    asking ``events_read`` reaches every kind that reports one, including kinds
+    written long after the hook was.
+
+    Pydantic's metaclass is an ``ABCMeta``, so ``apply`` binds like any abstract
+    method: a kind that does not answer it cannot be constructed.
+    """
+
+    @abstractmethod
+    async def apply(
+        self, *, scheduler: Scheduler, trace_logger: TraceLogger | None = None
+    ) -> None:
+        """Carry out this event against the parent's Scheduler."""
+
+    @property
+    def delivered_message(self) -> str | None:
+        """The message this event hands to the environment, if it carries one."""
+        return None
+
+    @property
+    def events_read(self) -> int | None:
+        """How many recent events the agent's read covered, if it read any."""
+        return None
+
+
+class ReplyEvent(RelayEvent):
     """A message the agent wants delivered to the environment."""
 
     type: Literal["reply"] = "reply"
     message: str
     delay_seconds: int = 0
 
+    async def apply(
+        self, *, scheduler: Scheduler, trace_logger: TraceLogger | None = None
+    ) -> None:
+        if self.delay_seconds == 0:
+            await scheduler.send_action(self.message)
+        else:
+            scheduler.add_delayed_action(self.message, self.delay_seconds)
+        scheduler.cancel_scheduled_action()
 
-class ScheduleActionEvent(BaseModel):
+    @property
+    def delivered_message(self) -> str:
+        return self.message
+
+
+class ScheduleActionEvent(RelayEvent):
     """A quiet-period action request (see Scheduler.start_scheduled_action)."""
 
     type: Literal["schedule_action"] = "schedule_action"
     content: str
     delay_seconds: int
 
+    async def apply(
+        self, *, scheduler: Scheduler, trace_logger: TraceLogger | None = None
+    ) -> None:
+        scheduler.start_scheduled_action(self.content, self.delay_seconds)
 
-class DebounceEvent(BaseModel):
+
+class DebounceEvent(RelayEvent):
     """A debounce window request (see Scheduler.start_debounce)."""
 
     type: Literal["debounce"] = "debounce"
     initial_seconds: int
     quiet_seconds: int
 
+    async def apply(
+        self, *, scheduler: Scheduler, trace_logger: TraceLogger | None = None
+    ) -> None:
+        scheduler.start_debounce(self.initial_seconds, self.quiet_seconds)
 
-class RemindEvent(BaseModel):
+
+class RemindEvent(RelayEvent):
     """A self-prompt reminder request (see Scheduler.add_reminder)."""
 
     type: Literal["remind"] = "remind"
     label: str
     delay_seconds: int
 
+    async def apply(
+        self, *, scheduler: Scheduler, trace_logger: TraceLogger | None = None
+    ) -> None:
+        scheduler.add_reminder(self.label, self.delay_seconds)
 
-class MetaEvent(BaseModel):
+
+class MetaEvent(RelayEvent):
     """A process self-assessment, relayed for trace logging."""
 
     type: Literal["meta"] = "meta"
     thought: str
 
+    async def apply(
+        self, *, scheduler: Scheduler, trace_logger: TraceLogger | None = None
+    ) -> None:
+        if trace_logger:
+            trace_logger.log_text(self.thought, heading="Meta")
 
-class ContextReadEvent(BaseModel):
+
+class ContextReadEvent(RelayEvent):
     """The agent read the state snapshot; the parent may mark events read."""
 
     type: Literal["context_read"] = "context_read"
     last_events: int = 5
 
+    async def apply(
+        self, *, scheduler: Scheduler, trace_logger: TraceLogger | None = None
+    ) -> None:
+        scheduler.consume_wake()
 
-type RelayEvent = Annotated[
+    @property
+    def events_read(self) -> int:
+        return self.last_events
+
+
+type AnyRelayEvent = Annotated[
     ReplyEvent
     | ScheduleActionEvent
     | DebounceEvent
@@ -172,14 +250,20 @@ type RelayEvent = Annotated[
     | ContextReadEvent,
     Field(discriminator="type"),
 ]
+"""Every event kind spelled out, for the places pydantic validates one.
 
-RELAY_EVENT_ADAPTER: TypeAdapter[RelayEvent] = TypeAdapter(RelayEvent)
+A field annotated with the :class:`RelayEvent` base would validate against the
+base's own schema and drop each kind's fields; the discriminated alias
+reconstructs the kind that was written. Behaviour and plain annotations ask the
+base instead, so neither has to list the kinds."""
+
+RELAY_EVENT_ADAPTER: TypeAdapter[AnyRelayEvent] = TypeAdapter(AnyRelayEvent)
 
 
 class EventOffset(BaseModel):
     """One parsed event with the file offset that consumes it (crash-safe apply)."""
 
-    event: RelayEvent
+    event: AnyRelayEvent
     commit_offset: int
 
 
@@ -237,13 +321,13 @@ class RealtimeMailbox:
         self.meta_flag_path = root / META_FLAG_FILENAME
         self.max_actions_bytes = max_actions_bytes
         self.read_offset = 0
-        self.actions: Stream[RelayEvent] = Stream(
+        self.actions: Stream[AnyRelayEvent] = Stream(
             self.actions_path, RELAY_EVENT_ADAPTER, max_actions_bytes
         )
 
     # -- tool side (subprocess) -----------------------------------------
 
-    def append_event(self, event: RelayEvent) -> None:
+    def append_event(self, event: AnyRelayEvent) -> None:
         """Append one event line for the parent to apply.
 
         Raises :class:`RelayOverflowError` once the actions file reaches
@@ -522,40 +606,6 @@ def create_realtime_relay_tools(
 # =====================================================================
 
 
-async def apply_relay_event(
-    event: RelayEvent,
-    *,
-    scheduler: Scheduler,
-    trace_logger: TraceLogger | None = None,
-) -> None:
-    """Apply one agent event to the parent's Scheduler.
-
-    Mirrors what the in-process tools do directly, with one
-    deliberate exception: meta-gate transitions stay tool-side (the
-    reply tool resets the gate in its own process) so the gate always
-    follows the agent's tool-call order — a parent-side reset could race
-    a meta the agent recorded just after replying.
-    """
-    match event:
-        case ReplyEvent():
-            if event.delay_seconds == 0:
-                await scheduler.send_action(event.message)
-            else:
-                scheduler.add_delayed_action(event.message, event.delay_seconds)
-            scheduler.cancel_scheduled_action()
-        case ScheduleActionEvent():
-            scheduler.start_scheduled_action(event.content, event.delay_seconds)
-        case DebounceEvent():
-            scheduler.start_debounce(event.initial_seconds, event.quiet_seconds)
-        case RemindEvent():
-            scheduler.add_reminder(event.label, event.delay_seconds)
-        case MetaEvent():
-            if trace_logger:
-                trace_logger.log_text(event.thought, heading="Meta")
-        case ContextReadEvent():
-            scheduler.consume_wake()
-
-
 def default_wake_message(result: SleepResult) -> str:
     """Minimal wake message; supply build_wake_message for domain context."""
     parts = [f"[wake] reason: {result.reason}"]
@@ -603,7 +653,8 @@ async def run_relay_session(
         build_state: Builds the state snapshot published before each
             turn (unread counts, domain context).
         on_event: Optional domain hook invoked after each applied event
-            (e.g. mark inbox messages read on ContextReadEvent).
+            (e.g. mark inbox messages read for an event reporting
+            ``events_read``).
         should_continue: Pure predicate ending the session when False.
             Checked at each cycle start and again before sleeping (a
             finished session must not wait out a final sleep). None runs
@@ -637,9 +688,7 @@ async def run_relay_session(
         # offset on the first un-applied event, so the next poll redelivers
         # it. No agent event (the user-facing replies) is ever dropped.
         for pair in mailbox.peek_new_events():
-            await apply_relay_event(
-                pair.event, scheduler=scheduler, trace_logger=trace_logger
-            )
+            await pair.event.apply(scheduler=scheduler, trace_logger=trace_logger)
             if on_event is not None:
                 await on_event(pair.event)
             mailbox.read_offset = pair.commit_offset

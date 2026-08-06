@@ -47,7 +47,7 @@ consumers and the auditor import directly.
 import re
 from collections.abc import Callable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from lup.codescan.boundaries import (
     LIBRARY_DEFAULT_RULE_ID,
@@ -55,18 +55,21 @@ from lup.codescan.boundaries import (
     RULE_ID as SEAM_BOUNDARY_RULE_ID,
 )
 from lup.codescan.capabilities import RULE_ID as ABC_CAPABILITY_RULE_ID
+from lup.codescan.dispatch import RULE_ID as OWN_MODEL_DISPATCH_RULE_ID
 from lup.codescan.common import (
-    IGNORE_RE,
     LineProjections,
     PythonContext,
     Refutation,
     RuleContext,
+    RuleStrength,
     file_level_ignore,
     ignore_rule_ids,
 )
 from lup.policy.kernel.edit import (
+    IGNORE_RE,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
+    tuple_shape_exempt_lines,
 )
 
 
@@ -120,6 +123,15 @@ class AntiPattern(BaseModel):
     message: str
     context: RuleContext = "code"
     refiner: Refiner | None = None
+    strength: RuleStrength = "soft"
+    """Whether a `# lup: ignore` may silence this rule at all.
+
+    Soft by default, because most of these name a shape that is usually wrong
+    and occasionally the only thing that works, and the audit exists to grade
+    those exceptions. A rule is ``strong`` only when its replacement is right
+    every time — then a suppression is not a reasoned exception but the defect
+    with a comment on it, and this refuses to be silenced.
+    """
 
 
 PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
@@ -148,16 +160,19 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="generic-base",
+        strength="strong",
         pattern=re.compile(r"\bGeneric\["),
         message="Use Python 3.12+ class[T] syntax instead of Generic[T]",
     ),
     AntiPattern(
         id="typing-union",
+        strength="strong",
         pattern=re.compile(r"\b(?:Optional|Union)\["),
         message="Use PEP 604 unions — X | None instead of Optional, X | Y instead of Union",
     ),
     AntiPattern(
         id="typing-generics",
+        strength="strong",
         pattern=re.compile(r"\b(?:List|Dict|Tuple|Set)\["),
         message="Use lowercase builtin generics — list, dict, tuple, set — "
         "instead of the capitalized typing aliases",
@@ -220,10 +235,17 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="tuple-shape",
+        strength="strong",
         pattern=re.compile(r"\btuple\["),
-        message="A declared `tuple[...]` shape hides what each position means — name the "
-        "fields with a TypedDict or BaseModel, a `type Alias = ...` for a reused shape, or "
-        "`list` for a variable-length sequence",
+        refiner=Refiner(
+            exempt=tuple_shape_exempt_lines,
+            evidence="an immutable sequence, not a positional shape",
+        ),
+        message="A fixed-arity `tuple[...]` hides what each position means — name the "
+        "fields with a BaseModel. Fall back to a TypedDict only where a model cannot go: "
+        "the hermetic kernel, which has no pydantic, or a field that must stay the caller's "
+        "own object, which validation would copy. `tuple[X, ...]` is a sequence and never "
+        "trips this",
     ),
     AntiPattern(
         # Mirrors tuple-shape for frozenset: every declared frozenset annotation
@@ -264,8 +286,10 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             evidence="a deliberate default, not a build-then-append seed",
         ),
         message="Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an "
-        "append/mutate loop — build the collection with a comprehension instead, or add "
-        "`# lup: ignore[empty-collection]` for a fold no comprehension can express",
+        "append/mutate loop — build the collection with a comprehension, or, when the "
+        "loop carries control flow a comprehension cannot, `yield` the items from a "
+        "nested function and let its caller collect them. Add "
+        "`# lup: ignore[empty-collection]` only for a fold neither expresses",
     ),
     AntiPattern(
         id="cast",
@@ -413,6 +437,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="utcnow",
+        strength="strong",
         pattern=re.compile(r"\butcnow\s*\("),
         message="datetime.utcnow() is naive and deprecated — use datetime.now(timezone.utc)",
     ),
@@ -507,6 +532,7 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="var-declaration",
+        strength="strong",
         pattern=re.compile(r"\bvar\s+[A-Za-z_$]"),
         message="Use `const` or `let` instead of `var` — var is function-scoped and hoisted",
     ),
@@ -535,6 +561,7 @@ FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
         ABC_CAPABILITY_RULE_ID,
         LIBRARY_DEFAULT_RULE_ID,
         NATIVE_SPELLING_RULE_ID,
+        OWN_MODEL_DISPATCH_RULE_ID,
         SEAM_BOUNDARY_RULE_ID,
     }
 )
@@ -572,18 +599,40 @@ def refined_refutations(text: str, patterns: list[AntiPattern]) -> list[Refutati
     ]
 
 
-def patterns_for_suffix(suffix: str) -> list[AntiPattern] | None:
-    """The anti-pattern table that applies to a file suffix, or None to skip it.
+class AntiPatternSet(BaseModel):
+    """Which anti-patterns a project checks, by the language they read.
 
-    Mirrors the hook's split: Python files are checked against the Python
-    table, TS/JS-family files against the TS table, and any other suffix is
-    not scanned (the hook only gates those two families).
+    The rules a project holds itself to are its own conventions written down,
+    so the tables this library ships are what a caller starts from rather than
+    what it is stuck with — one set reaches the edit hook, the whole-file
+    audit, and the generated rule reference together, so a project that
+    replaces it replaces all three at once.
     """
-    if suffix in PY_SUFFIXES:
-        return PYTHON_ANTI_PATTERNS
-    if suffix in TS_SUFFIXES:
-        return TS_ANTI_PATTERNS
-    return None
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
+    python: list[AntiPattern] = Field(default_factory=lambda: PYTHON_ANTI_PATTERNS)
+    typescript: list[AntiPattern] = Field(default_factory=lambda: TS_ANTI_PATTERNS)
+
+    def for_suffix(self, suffix: str) -> list[AntiPattern] | None:
+        """The table that applies to a file suffix, or None to skip it.
+
+        Mirrors the hook's split: Python files are checked against the Python
+        table, TS/JS-family files against the TS table, and any other suffix
+        is not scanned (the hook only gates those two families).
+        """
+        if suffix in PY_SUFFIXES:
+            return self.python
+        if suffix in TS_SUFFIXES:
+            return self.typescript
+        return None
+
+
+def patterns_for_suffix(
+    suffix: str, rules: AntiPatternSet | None = None
+) -> list[AntiPattern] | None:
+    """The anti-pattern table one file suffix is checked against."""
+    return (rules or AntiPatternSet()).for_suffix(suffix)
 
 
 def line_hits(
@@ -722,6 +771,21 @@ def audit_text(
 
         silenced_by_bare = False
         for ap in hits:
+            if ap.strength == "strong":
+                # No directive reaches this one. A soft rule's suppression is a
+                # reasoned exception the audit then grades; a strong rule has a
+                # replacement that is right every time, so the same comment
+                # would only record a decision to keep the defect.
+                findings.append(
+                    AntiPatternFinding(
+                        kind="missing",
+                        line=index,
+                        text=preview,
+                        message=f"{ap.message} (no suppression: write the replacement)",
+                        rule_id=ap.id,
+                    )
+                )
+                continue
             if ap.id in file_disabled:
                 # Live only when the file-level directive is the sole silencer;
                 # an inline-covered hit does not keep the file-wide id alive.

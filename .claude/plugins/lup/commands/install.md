@@ -17,6 +17,26 @@ Install the lup plugin, hooks, and useful scaffolding into an existing repositor
 - **target-repo**: Path to the target repository (default: `..`). Resolve relative paths from the current working directory.
 - **--interactive**: If present, put each porting decision to the user as a choice. If absent, be conservative — modify as few files as possible.
 
+### The source repository is read-only
+
+You are running *inside* the source. Every write this command makes belongs to
+the target, and nothing it does may change the checkout it runs from — not a
+file, not a git ref, and not a piece of local state.
+
+The failure is quiet rather than loud, which is why it is stated here: a
+`lup-devtools` command run without a working directory acts on the current one,
+so it lands in the source and looks like it worked. Two habits prevent it:
+
+- Give every command the target explicitly — `git -C <target> …`, and
+  `uv run --project <target> lup-devtools …` for anything that writes state.
+- Write files by absolute path under the target, never by a path relative to
+  where you are standing.
+
+Before reporting success, run `git -C <source> status --short` and confirm it
+is clean. If the source changed, say so in the report rather than reverting
+silently — something wrote where it should not have, and which command did it
+is the useful part.
+
 If `$ARGUMENTS` is empty, use defaults: target=`..`, non-interactive.
 
 ## Phase 1: Analyze Source Repo (Lup Template)
@@ -74,7 +94,27 @@ Build a mental inventory of **portable capabilities** organized by category:
 
 ## Phase 2: Analyze Target Repo
 
-Read the target repo to understand its structure:
+### First: does the target already have lup?
+
+Installing is one of two jobs this command does. The other is bringing a
+target that already has lup up to date, and the two look nothing alike — so
+decide which before reading anything else. Run
+`uv run --project <target> lup-devtools dev library status`; where that command
+does not exist, look for a `lup` dependency in the target's `pyproject.toml`
+and for a vendored `packages/lup/`.
+
+| What the target has | Do this instead of installing |
+| --- | --- |
+| Nothing | Continue with the phases below — this is a first install. |
+| A published or linked `lup` dependency | Nothing to port. Update the release it resolves (`dev library use published`), regenerate its harness, and report. The library arrives as a package; only the target's own declarations are its business. |
+| A vendored `packages/lup/` copy | Do **not** overwrite it. Port the upstream commits through /lup:update, which reviews them one at a time against a tree that has diverged on purpose. Then offer `dev library use published` to end the fork, saying plainly that it is one-way and worth reviewing. |
+| An old install with no sync baseline | Baseline it first (step 9 below, against the target), so the next review lists commits rather than the entire history. |
+
+A target that already has lup is the common case after the first year, and
+overwriting its tree is the one outcome worth ruling out: its declarations
+have diverged on purpose, and they are what generation reads.
+
+### Then: read its structure
 
 1. **Top-level layout**: `ls` the root, look for `src/`, `lib/`, `tests/`, any harness tree, `package.json`, `pyproject.toml`, `Cargo.toml`, etc.
 2. **Language and ecosystem**: Python/Node/Rust/Go/etc? Package manager? Build tools?
@@ -242,7 +282,7 @@ Steps 1-4, 6 and 7 repeat per selected tree; step 5 is tree-independent.
 6. Project configuration — .claude/settings.json under Claude Code, .codex/config.toml under Codex — create or merge
 7. Guidance file — .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex — section-level merge from that tree's template flavor (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
 8. **Hand off to generation**: everything written in steps 1-4, 6 and 7 becomes a generated artifact once the target's harness runs. From here on, the target edits its declarations under `src/<project>/devtools/harness/content/` and regenerates with `uv run lup-devtools harness generate all`; the installed files are outputs, and a hand edit to one is reverted the next time generation runs. Say so explicitly in the Phase 7 report.
-9. **Initialize upstream sync**: Run `uv run lup-devtools sync mark-synced lup` to baseline the sync state so `/lup:update` only shows commits after installation
+9. **Initialize upstream sync**: Run `uv run --project <target> lup-devtools sync mark-synced lup` — the project flag is what makes it baseline the *target's* sync state instead of this repository's — so `/lup:update` only shows commits after installation
 
 ## Phase 7: Verify & Report
 

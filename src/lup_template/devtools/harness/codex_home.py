@@ -6,7 +6,6 @@ from pathlib import Path
 
 import tomlkit
 from pydantic import BaseModel, ConfigDict
-from tomlkit.items import Table
 
 from lup.types import EnvVars
 
@@ -26,15 +25,24 @@ class CodexHomeSelection(BaseModel):
 
 
 def sanitized_codex_config(content: str) -> str:
-    """Keep personal settings while excluding installed plugin state."""
+    """Keep personal settings, including hook trust, without installed state.
+
+    ``marketplaces`` and ``plugins`` record what one home has installed, and a
+    scoped home installs its own against a verified digest — carrying them
+    over would claim an install that never happened here.
+
+    Hook trust is the opposite and is kept. The runtime refuses to run a
+    plugin's hooks until they are reviewed, so a scoped home seeded without
+    that decision installs the policy plugin and then runs ungoverned: the
+    dispatcher is present, never consulted, and nothing says so. Seeding the
+    operator's own trust is what makes a session here run under the policy
+    they already granted — and only that, since a decision they never made is
+    not in the file being copied.
+    """
     document = tomlkit.parse(content)
     for key in CODEX_CONFIG_STATE_KEYS:
         if key in document:
             document.remove(key)
-    if "hooks" in document:
-        hooks = document.item("hooks")
-        if isinstance(hooks, Table) and "state" in hooks:
-            hooks.remove("state")
     return tomlkit.dumps(document)
 
 

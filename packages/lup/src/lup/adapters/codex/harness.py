@@ -4,6 +4,8 @@ import json
 import shlex
 from importlib import resources
 from pathlib import Path
+
+import tomlkit
 from lup.harness.banner import (
     PROMPT_TEXT,
     REGENERATE_COMMAND,
@@ -20,6 +22,7 @@ from lup.harness.contracts import (
 from lup.harness.generation import argument_text
 from lup.harness.prompts import guidance_banner
 from lup.harness.models import (
+    GUIDANCE_BYTE_BUDGET,
     Agent,
     Artifact,
     ArtifactTree,
@@ -48,7 +51,6 @@ from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.kernel.words import (
     INTERPRETERS,
     PASS_THROUGH_WORDS,
-    UV_RUN_ALLOWED_TARGETS,
 )
 from lup.policy.shell_rules import ShellCommandRule
 
@@ -131,6 +133,14 @@ class CodexSpellings(NativeSpellings):
             "https://developers.openai.com/codex/ and "
             "https://learn.chatgpt.com/"
         )
+
+    def project_root(self) -> str:
+        # Codex substitutes nothing into a server command, but it reads this
+        # config only for the project the config sits in, so the launch
+        # directory is that project by construction. Naming it explicitly is
+        # what makes a server started anywhere else fail instead of resolving
+        # up the tree into a neighbouring checkout.
+        return "."
 
     def model_alias(self, tier: ModelTier) -> str | None:
         return None
@@ -287,11 +297,49 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
         )
 
 
+def codex_project_config(
+    source: Harness, spellings: NativeSpellings, budget: int = GUIDANCE_BYTE_BUDGET
+) -> str:
+    """Render the project config: enabled features, then every tool server.
+
+    Codex keeps a project's servers in the same file as the rest of its
+    project configuration, so this is one document rather than the separate
+    artifact the other runtime reads.
+
+    The guidance ceiling generation already enforces is restated here as
+    ``project_doc_max_bytes``: the runtime truncates project guidance at its
+    own default, so a document that passed generation would still reach the
+    model short if the two disagreed.
+    """
+    document = tomlkit.document()
+    features = tomlkit.table()
+    features["hooks"] = True
+    document["features"] = features
+    document["project_doc_max_bytes"] = budget
+    servers = tomlkit.table(is_super_table=True)
+    for plugin in source.plugins:
+        for server in plugin.mcp_servers:
+            entry = tomlkit.table()
+            entry["command"] = server.command
+            entry["args"] = server.command_line(spellings)
+            servers[server.name] = entry
+    if servers:
+        document["mcp_servers"] = servers
+    return tomlkit.dumps(document)
+
+
 class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
     """Render root project guidance at Codex's documented repository location."""
 
-    def __init__(self, prompts: PromptRenderer) -> None:
+    def __init__(
+        self,
+        prompts: PromptRenderer,
+        spellings: NativeSpellings,
+        budget: int = GUIDANCE_BYTE_BUDGET,
+    ) -> None:
         self.prompts = prompts
+        self.spellings = spellings
+        self.budget = budget
 
     def render(self, source: Harness) -> ArtifactTree:
         return ArtifactTree(
@@ -304,7 +352,7 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
                 ),
                 Artifact.generated(
                     path=Path(".codex/config.toml"),
-                    body="[features]\nhooks = true\n",
+                    body=codex_project_config(source, self.spellings, self.budget),
                     semantic_id="harness.project-config",
                     banner=GeneratedBanner(
                         source=__name__,
@@ -313,6 +361,8 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
                             "Personal sandbox and approval defaults stay in "
                             "~/.codex/config.toml.",
                             "Native shell allows are generated under .codex/rules/.",
+                            "Tool servers start from this project, so start "
+                            "the runtime at its root.",
                         ],
                     ),
                 ),
@@ -361,7 +411,9 @@ CODEX_DYNAMIC_COMMANDS = (
 """Executables whose semantic decision cannot be represented by one prefix."""
 
 
-def codex_allow_prefixes(rules: list[ShellCommandRule]) -> list[list[str]]:
+def codex_allow_prefixes(
+    rules: list[ShellCommandRule], runner_targets: list[str]
+) -> list[list[str]]:
     """Compile semantic allows that stay allowed for every suffix.
 
     Codex prefix rules bypass the sandbox, so flag-guarded rows cannot be
@@ -391,7 +443,7 @@ def codex_allow_prefixes(rules: list[ShellCommandRule]) -> list[list[str]]:
                 continue
             if subcommand.effect == "allow" and not subcommand.ask_flags:
                 add([command.name, subcommand.name])
-    for target in UV_RUN_ALLOWED_TARGETS:
+    for target in runner_targets:
         add(["uv", "run", target])
     return sorted(prefixes)
 
@@ -401,7 +453,9 @@ def render_codex_rules(source: HookSet) -> str:
     rows = [
         f"prefix_rule(pattern = {json.dumps(prefix)}, decision = "
         '"allow", justification = "Allowed by Lup semantic shell policy")'
-        for prefix in codex_allow_prefixes(source.shell_rules)
+        for prefix in codex_allow_prefixes(
+            source.shell_rules, list(source.runner_targets)
+        )
     ]
     return "\n".join([*rows, ""])
 
@@ -515,6 +569,8 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                             for role in source.path_roles
                         ],
                         shell_rules=list(source.shell_rules),
+                        recoverable_target_limit=source.recoverable_target_limit,
+                        runner_targets=list(source.runner_targets),
                     ),
                     semantic_id=source.id,
                 ),

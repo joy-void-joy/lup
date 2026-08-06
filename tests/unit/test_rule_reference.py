@@ -15,6 +15,36 @@ def test_checked_in_rule_reference_matches_canonical_objects() -> None:
         assert f"`{rule.id}`" in artifact.content
 
 
+def test_every_card_carries_the_strength_its_rule_declares() -> None:
+    """The reference is where a denied contributor learns if a marker helps.
+
+    A card built by listing fields drops the one nobody remembered to list,
+    and this projection has already done that twice — so the declared strength
+    and the rendered strength are compared rather than assumed equal.
+    """
+    declared = {
+        rule.id: rule.strength for rule in [*PYTHON_ANTI_PATTERNS, *TS_ANTI_PATTERNS]
+    }
+    cards = {rule.id: rule.strength for rule in all_rules()}
+
+    for rule_id, strength in declared.items():
+        assert cards[rule_id] == strength, rule_id
+
+
+def test_a_refused_rule_is_rendered_as_refused() -> None:
+    artifact = rule_reference_artifact()
+    strong = [rule.id for rule in all_rules() if rule.strength == "strong"]
+
+    assert strong, "the strength mechanism has no customer to render"
+    for rule_id in strong:
+        row = next(
+            line
+            for line in artifact.content.splitlines()
+            if line.startswith(f"| `{rule_id}` |")
+        )
+        assert "**refused**" in row, rule_id
+
+
 def test_registry_covers_every_family_with_unique_ids_and_homes() -> None:
     rules = all_rules()
 

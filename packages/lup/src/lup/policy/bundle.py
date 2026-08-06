@@ -16,7 +16,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
+from lup.codescan.antipatterns import AntiPatternSet
 from lup.harness.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.identity import AGENT_IDENTITY_ENV, CONCERN_ALLOWANCES_ENV
 import lup.policy.kernel as kernel
@@ -28,7 +28,7 @@ from lup.policy.kernel.rows import (
     UrlScopeRow,
 )
 from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
-from lup.policy.rules import human_owned_path_rule, path_rule_row
+from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
 
 
 class KernelModule(BaseModel):
@@ -53,26 +53,13 @@ def policy_kernel_modules() -> list[KernelModule]:
     ]
 
 
-def bundled_antipattern_rows() -> dict[str, list[AntiPatternRow]]:
+def bundled_antipattern_rows(
+    rules: AntiPatternSet | None = None,
+) -> dict[str, list[AntiPatternRow]]:
     """Compile primitive runtime rows directly from canonical rule objects."""
-    python_rows = [
-        AntiPatternRow(
-            id=rule.id,
-            pattern=rule.pattern.pattern,
-            message=rule.message,
-            context=rule.context,
-        )
-        for rule in PYTHON_ANTI_PATTERNS
-    ]
-    typescript_rows = [
-        AntiPatternRow(
-            id=rule.id,
-            pattern=rule.pattern.pattern,
-            message=rule.message,
-            context=rule.context,
-        )
-        for rule in TS_ANTI_PATTERNS
-    ]
+    declared = rules or AntiPatternSet()
+    python_rows = [antipattern_row(rule) for rule in declared.python]
+    typescript_rows = [antipattern_row(rule) for rule in declared.typescript]
     return {
         ".py": python_rows,
         ".pyi": python_rows,
@@ -195,15 +182,14 @@ def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
     for suffix, patterns in sorted(rows.items()):
         lines.append(f"    {json.dumps(suffix)}: [")
         for row in patterns:
-            block = (
-                "        {\n"
-                f'            "id": {json.dumps(row["id"])},\n'
-                f'            "pattern": {json.dumps(row["pattern"])},\n'
-                f'            "message": {json.dumps(row["message"])},\n'
-                f'            "context": {json.dumps(row["context"])},\n'
-                "        },"
+            # Rendered from the row's own keys rather than a list of them: a
+            # field added to AntiPatternRow reaches the hermetic runtime by
+            # construction, instead of being dropped until someone notices.
+            fields = "\n".join(
+                f"            {json.dumps(key)}: {json.dumps(value)},"
+                for key, value in row.items()
             )
-            lines.append(block)
+            lines.append(f"        {{\n{fields}\n        }},")
         lines.append("    ],")
     lines.append("}")
     return "\n".join(lines)
@@ -271,6 +257,8 @@ def render_policy_data(
     autonomous_agent_identities: list[str],
     path_roles: list[PathRoleRow],
     shell_rules: list[ShellCommandRule],
+    recoverable_target_limit: int,
+    runner_targets: list[str],
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
     body = "\n\n".join(
@@ -293,6 +281,8 @@ def render_policy_data(
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
             "CONCERN_ALLOWANCES_ENV = " + json.dumps(CONCERN_ALLOWANCES_ENV),
             "MAXIMUM_ADDED_LINES = 3",
+            "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
+            "RUNNER_TARGETS: list[str] = " + string_rows_literal(runner_targets),
         ]
     )
     return (

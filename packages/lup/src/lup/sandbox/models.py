@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 NetworkMode = Literal["bridge", "none"]
 MountMode = Literal["rw", "ro"]
 
-DEFAULT_PRE_INSTALL: tuple[str, ...] = (  # lup: ignore[tuple-shape] — immutable default
+DEFAULT_PRE_INSTALL: tuple[str, ...] = (
     "requests",
     "pandas",
     "numpy",

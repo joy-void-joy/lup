@@ -41,7 +41,8 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, model_validator
 
-from lup.codescan.common import IGNORE_RE, LineCursor, PythonContext
+from lup.codescan.common import LineCursor, PythonContext
+from lup.policy.kernel.edit import IGNORE_RE
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # A deferral note parks work until a stated wake condition is met:
@@ -230,7 +231,9 @@ class MarkerScan:
 
     def notes(self) -> list[MarkerComment]:
         found: list[MarkerComment] = []
-        for line_no, line in self.cursor:
+        for numbered in self.cursor:
+            line_no = numbered.number
+            line = numbered.text
             if self.is_markdown and FENCE_RE.match(line):
                 self.in_fence = not self.in_fence
                 continue
@@ -243,11 +246,11 @@ class MarkerScan:
             end_line = line_no
 
             if not self.is_markdown and line[: match.start()].strip() == "":
-                for cont_no, content in self.cursor.take_mapping(
+                for continuation in self.cursor.take_mapping(
                     self.continuation(match.group(1))
                 ):
-                    parts.append(content)
-                    end_line = cont_no
+                    parts.append(continuation.value)
+                    end_line = continuation.number
 
             found.append(
                 MarkerComment(

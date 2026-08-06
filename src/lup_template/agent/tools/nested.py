@@ -13,14 +13,13 @@ it post-processes ("augments") the nested agent's raw output into the response.
 This is a TEMPLATE. Replace the example with the quick, context-separable work
 your domain needs (generation, parsing, scoring, a second opinion), and add
 ``NESTED_TOOLS`` to a server group in ``toolsets.py`` to serve it. See
-PATTERNS.md § Nested Agent Pattern. The application composition root builds
+docs/orchestration.md § Nested Agent Pattern. The application composition root builds
 the auxiliary factory with ``aux_model()``, like the reviewer in ``reflect.py``.
 """
 
 from pydantic import BaseModel, Field
 
 from lup.mcp import lup_tool
-from lup.runtime.models import TurnTextBlock
 from lup.runtime.query import query
 from lup_template.agent.config import aux_model
 
@@ -68,7 +67,7 @@ async def critique(params: CritiqueInput) -> CritiqueOutput:
         ),
     )
     text = "\n\n".join(
-        block.text for block in result.blocks if isinstance(block, TurnTextBlock)
+        text for block in result.blocks if (text := block.text_payload) is not None
     )
     limit = 2000
     # Augment: the tool, not the nested agent, bounds and shapes the output.
