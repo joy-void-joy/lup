@@ -140,14 +140,10 @@ class ClaudeConversationState:
             return self.client
         import claude_agent_sdk as claude
 
-        # A session id is read off the first result, never dictated to the CLI:
-        # `--session-id` names a conversation to use, and a fresh id names one
-        # that does not exist yet, so forcing it fails the turn that would have
-        # created it. `resume` carries a real id once a turn has returned one.
         options = self.opener.build_options(
             binding=self.binding,
             resume=self.resume,
-            session_id=None,
+            session_id=None if self.resume is not None else self.session_id,
         )
         client = claude.ClaudeSDKClient(options=options)
         await client.connect()
