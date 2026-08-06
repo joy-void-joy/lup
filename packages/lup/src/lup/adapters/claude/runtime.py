@@ -29,7 +29,9 @@ from lup.runtime.contracts import (
 from lup.runtime.errors import (
     DeltaStreamingDisabled,
     ProviderTurnError,
+    TurnError,
     TurnFailure,
+    TurnInterruptedError,
 )
 from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
@@ -123,6 +125,11 @@ class ClaudeSessionConfig(BaseModel):
 type SubmissionBindingSource = Callable[[], TurnToolBinding[BaseModel] | None]
 
 
+def turn_error(interrupt: "ClaudeInterrupt") -> type[TurnError]:
+    """Classify a failed turn the way Codex's terminal status does."""
+    return TurnInterruptedError if interrupt.requested else ProviderTurnError
+
+
 class ClaudeConversationState:
     """Adapter-private reconnect/resume state for one Lup session."""
 
@@ -210,6 +217,7 @@ class ClaudeConversationState:
         )
         events: asyncio.Queue[LiveTurnEvent | None] = asyncio.Queue()
         events.put_nowait(TurnStartedEvent(identifiers=identifiers))
+        interrupt = ClaudeInterrupt(self)
 
         async def complete() -> CompletedTurn:
             from claude_agent_sdk import types as claude_types
@@ -279,7 +287,7 @@ class ClaudeConversationState:
                                         )
                                     )
             except Exception as error:
-                raise ProviderTurnError(
+                raise turn_error(interrupt)(
                     TurnFailure(
                         message=str(error),
                         blocks=fold_blocks(durable),
@@ -304,7 +312,7 @@ class ClaudeConversationState:
             usage = claude_usage(result.usage, total_cost_usd=result.total_cost_usd)
             duration = timedelta(milliseconds=result.duration_ms or 0)
             if result.is_error:
-                raise ProviderTurnError(
+                raise turn_error(interrupt)(
                     TurnFailure(
                         message=str(result.result or "Claude turn failed"),
                         blocks=blocks,
@@ -342,7 +350,7 @@ class ClaudeConversationState:
             identifiers=identifiers,
             complete=await_completion,
             events=ClaudeLiveEventStream(events, self.config.delta_streaming),
-            interrupt=ClaudeInterrupt(self),
+            interrupt=interrupt,
         )
 
 
@@ -429,12 +437,20 @@ class ClaudeTurnToolBinder(TurnToolBinder):
 
 
 class ClaudeInterrupt(Interrupt):
-    """Interrupt the currently connected Claude turn."""
+    """Interrupt the currently connected Claude turn, and remember asking.
+
+    The SDK ends an interrupted turn the way it ends a failed one, so what
+    separates them is only that someone asked. Recording the request is what
+    lets the turn raise as interrupted rather than as a provider failure the
+    recovery wrapper would dutifully retry.
+    """
 
     def __init__(self, state: ClaudeConversationState) -> None:
         self.state = state
+        self.requested = False
 
     async def interrupt(self) -> None:
+        self.requested = True
         if self.state.client is not None:
             await self.state.client.interrupt()
 

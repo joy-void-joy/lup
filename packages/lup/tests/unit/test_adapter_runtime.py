@@ -32,6 +32,7 @@ from lup.adapters.codex.runtime import (
     decode_usage,
 )
 from lup.hooks import create_permission_hooks
+from lup.runtime.errors import ProviderTurnError, TurnInterruptedError
 from lup.types import JsonObject, JsonValue, SubagentSpec
 from lup.runtime.models import (
     SubmissionDecision,
@@ -363,6 +364,63 @@ async def test_claude_partial_events_are_live_and_completed_replay_is_preserved(
     assert completed.messages == [
         TurnMessage(role="assistant", blocks=[TurnTextBlock(text="hello")])
     ]
+
+
+@pytest.mark.asyncio
+async def test_an_interrupted_claude_turn_is_not_a_retryable_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex reads interruption off its terminal status; Claude has none.
+
+    Both ways of ending a turn look identical here, so the request is what
+    tells them apart. Raising the provider's failure instead sent a turn the
+    caller deliberately stopped back through the recovery wrapper to be run
+    again.
+    """
+    import claude_agent_sdk as claude
+    from claude_agent_sdk import types as claude_types
+
+    class InterruptibleClient:
+        def __init__(self, options: claude.ClaudeAgentOptions) -> None:
+            self.options = options
+
+        async def connect(self) -> None:
+            return None
+
+        async def disconnect(self) -> None:
+            return None
+
+        async def interrupt(self) -> None:
+            return None
+
+        async def query(self, prompt: str, session_id: str = "default") -> None:
+            return None
+
+        async def receive_response(self) -> AsyncIterator[claude_types.ResultMessage]:
+            yield claude_types.ResultMessage(
+                subtype="error_during_execution",
+                duration_ms=1,
+                duration_api_ms=1,
+                is_error=True,
+                num_turns=1,
+                session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
+                result="Turn ended early",
+            )
+
+    monkeypatch.setattr(claude, "ClaudeSDKClient", InterruptibleClient)
+    state = ClaudeConversationState(
+        ClaudeSessionOpener(ClaudeSessionConfig(model="claude")), None
+    )
+
+    unasked = await state.start_turn("hello")
+    with pytest.raises(ProviderTurnError):
+        await unasked.complete()
+
+    asked = await state.start_turn("hello")
+    assert asked.interrupt is not None
+    await asked.interrupt.interrupt()
+    with pytest.raises(TurnInterruptedError):
+        await asked.complete()
 
 
 @pytest.mark.asyncio
