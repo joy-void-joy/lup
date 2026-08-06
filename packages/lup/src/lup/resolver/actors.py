@@ -37,10 +37,12 @@ from lup.resolver.journal import (
 )
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import FROZEN
+from lup.runtime.errors import ProviderTurnError
 from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
+    TurnHandle,
     TurnRequest,
     TurnResult,
 )
@@ -111,6 +113,34 @@ class ActorSession:
             )
         return self.handle
 
+    async def started[T: BaseModel | None](
+        self, handle: SessionHandle, request: TurnRequest[T]
+    ) -> TurnHandle[T]:
+        """Begin a turn, forgetting a conversation the provider no longer has.
+
+        A recorded session is a claim that the provider still holds that
+        conversation, and neither runtime guarantees it: a transcript can be
+        pruned, and a runtime that does not persist one never wrote it. Ending
+        a run over lost context rather than over the work is the worse
+        failure, so the actor reopens without the resume and takes its turn on
+        a fresh conversation — the loss recorded rather than passed off as
+        continuity.
+        """
+        delivered = self.with_pending(request)
+        try:
+            return await handle.session.start(delivered)
+        except ProviderTurnError:
+            if self.record.session is None:
+                raise
+            logger.exception(
+                "%s could not resume session %s; continuing on a fresh one",
+                self.actor.label(),
+                self.record.session.value,
+            )
+            self.record = self.record.model_copy(update={"session": None})
+            await self.close()
+            return await (await self.opened()).session.start(delivered)
+
     async def turn[T: BaseModel | None](self, request: TurnRequest[T]) -> TurnResult[T]:
         """Take one turn on this actor's session, recording it as it happens.
 
@@ -123,7 +153,7 @@ class ActorSession:
         self.check_schema(request)
         self.collect_inbox()
         handle = await self.opened()
-        started = await handle.session.start(self.with_pending(request))
+        started = await self.started(handle, request)
         drain = (
             asyncio.create_task(
                 record_turn(self.journal, self.actor, started.events.events())
