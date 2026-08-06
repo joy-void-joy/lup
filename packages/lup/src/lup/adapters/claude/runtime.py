@@ -1,9 +1,10 @@
 """Claude SessionFactory composition with per-turn MCP tool rebinding."""
 
 import asyncio
+import hashlib
 import json
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
@@ -50,7 +51,7 @@ from lup.runtime.models import (
     TurnToolBinding,
 )
 from lup.runtime.transcript import fold_blocks, fold_transcript
-from lup.runtime.output import submit_output
+from lup.runtime.output import submission_schema, submit_output
 from lup.types import (
     EnvVars,
     JsonObject,
@@ -119,6 +120,9 @@ class ClaudeSessionConfig(BaseModel):
     )
 
 
+type SubmissionBindingSource = Callable[[], TurnToolBinding[BaseModel] | None]
+
+
 class ClaudeConversationState:
     """Adapter-private reconnect/resume state for one Lup session."""
 
@@ -129,6 +133,11 @@ class ClaudeConversationState:
         self.session_id = self.resume or str(uuid4())
         self.client: claude.ClaudeSDKClient | None = None
         self.binding: TurnToolBinding[BaseModel] | None = None
+        self.schema_digest: str | None = None
+
+    def current_binding(self) -> TurnToolBinding[BaseModel] | None:
+        """Resolve the binding a live connection's submission tool should serve."""
+        return self.binding
 
     async def disconnect(self) -> None:
         if self.client is None:
@@ -147,7 +156,7 @@ class ClaudeConversationState:
         # identity, and only one of them can be right about a conversation the
         # provider is the one persisting.
         options = self.opener.build_options(
-            binding=self.binding,
+            binding=self.current_binding,
             resume=self.resume,
             session_id=None,
         )
@@ -173,7 +182,7 @@ class ClaudeConversationState:
             try:
                 self.client = await self.connected(
                     self.opener.build_options(
-                        binding=self.binding, resume=None, session_id=None
+                        binding=self.current_binding, resume=None, session_id=None
                     )
                 )
             except Exception as fresh_error:
@@ -377,7 +386,14 @@ class ClaudeLiveEventStream(EventStream):
 
 
 class ClaudeTurnToolBinder(TurnToolBinder):
-    """Reconnect on every binding so schema and handler state are both current."""
+    """Refresh handler state in place and reconnect only to change the schema.
+
+    A connection advertises its submission schema once, so a turn that asks for
+    a different one has to reconnect. A turn that asks for the same one does
+    not, and reconnecting anyway would spend the conversation to install a tool
+    identical to the one already there — which is what every worker turn does,
+    against a provider that no longer persists a transcript to resume.
+    """
 
     def __init__(self, state: ClaudeConversationState) -> None:
         self.state = state
@@ -385,7 +401,14 @@ class ClaudeTurnToolBinder(TurnToolBinder):
     async def bind[T: BaseModel](self, binding: TurnToolBinding[T] | None) -> None:
         if binding is None and self.state.binding is None:
             return
-        await self.state.disconnect()
+        digest = (
+            hashlib.sha256(submission_schema(binding).encode("utf-8")).hexdigest()
+            if binding is not None
+            else None
+        )
+        if digest != self.state.schema_digest:
+            await self.state.disconnect()
+        self.state.schema_digest = digest
         if binding is None:
             self.state.binding = None
             return
@@ -461,7 +484,7 @@ class ClaudeSessionOpener:
     def build_options(
         self,
         *,
-        binding: TurnToolBinding[BaseModel] | None,
+        binding: SubmissionBindingSource,
         resume: str | None,
         session_id: str | None,
     ) -> "claude.ClaudeAgentOptions":
@@ -503,13 +526,23 @@ SUBMISSION_TOOL = "mcp__lup-output__submit_output"
 
 
 def build_submission_server(
-    binding: TurnToolBinding[BaseModel],
+    current: SubmissionBindingSource,
 ) -> LupMcpServerConfig:
-    """Build an exact-schema MCP server whose handler closes over this turn."""
+    """Build an exact-schema MCP server reading the binding the turn installed.
+
+    The schema is fixed for a connection's lifetime because changing it
+    reconnects, but a same-schema turn refreshes store and gate in place. So
+    the handler resolves the binding when it runs rather than closing over the
+    one that happened to be installed when the connection opened, which would
+    write every later turn's output into the first turn's store.
+    """
     server = Server("lup-output", version="1")
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
+        binding = current()
+        if binding is None:
+            return []
         return [
             Tool(
                 name="submit_output",
@@ -522,6 +555,17 @@ def build_submission_server(
     async def call_tool(name: str, arguments: JsonObject) -> CallToolResult:
         if name != "submit_output":
             raise ValueError(f"unknown output tool {name!r}")
+        binding = current()
+        if binding is None:
+            return CallToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text="No matching turn output binding is active.",
+                    )
+                ],
+                isError=True,
+            )
         response = await submit_output(binding, arguments)
         return CallToolResult(
             content=[TextContent(type="text", text=response.message)],
@@ -538,7 +582,7 @@ def build_submission_server(
 def build_claude_options(
     config: ClaudeSessionConfig,
     *,
-    binding: TurnToolBinding[BaseModel] | None,
+    binding: SubmissionBindingSource,
     resume: str | None,
     session_id: str | None,
 ) -> "claude.ClaudeAgentOptions":
@@ -549,7 +593,7 @@ def build_claude_options(
 
     servers = dict(config.tool_servers)
     allowed = list(config.allowed_tools)
-    if binding is not None:
+    if binding() is not None:
         servers["lup-output"] = build_submission_server(binding)
         allowed.append(SUBMISSION_TOOL)
 

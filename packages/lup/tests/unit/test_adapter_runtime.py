@@ -15,7 +15,9 @@ from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
     ClaudeSessionOpener,
     ClaudeTurnToolBinder,
+    SubmissionBindingSource,
     build_claude_options,
+    build_submission_server,
     claude_usage,
     convert_claude_block,
 )
@@ -73,7 +75,7 @@ def test_claude_session_defaults_and_hooks_reach_native_options(
             system_prompt="Project rules",
             hooks=hooks,
         ),
-        binding=None,
+        binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
     )
@@ -98,7 +100,7 @@ def test_claude_isolation_knobs_reach_native_options() -> None:
             setting_sources=[],
             extra_args={"strict-mcp-config": None, "no-session-persistence": None},
         ),
-        binding=None,
+        binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
     )
@@ -114,7 +116,7 @@ def test_claude_isolation_knobs_reach_native_options() -> None:
 def test_claude_isolation_knobs_default_to_native_behavior() -> None:
     options = build_claude_options(
         ClaudeSessionConfig(model="claude"),
-        binding=None,
+        binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
     )
@@ -129,7 +131,7 @@ def test_claude_opener_builds_options_through_an_overridable_seam() -> None:
         def build_options(
             self,
             *,
-            binding: TurnToolBinding[BaseModel] | None,
+            binding: SubmissionBindingSource,
             resume: str | None,
             session_id: str | None,
         ) -> "claude.ClaudeAgentOptions":
@@ -142,7 +144,7 @@ def test_claude_opener_builds_options_through_an_overridable_seam() -> None:
     opener = IsolatedOpener(ClaudeSessionConfig(model="claude"))
     state = opener.create_state(None)
     options = state.opener.build_options(
-        binding=None, resume=None, session_id=state.session_id
+        binding=lambda: None, resume=None, session_id=state.session_id
     )
 
     assert state.opener is opener
@@ -163,7 +165,7 @@ def test_claude_native_subagents_and_reported_cost_are_preserved() -> None:
                 )
             ],
         ),
-        binding=None,
+        binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
     )
@@ -484,7 +486,7 @@ async def test_claude_latest_turn_fork_preserves_a_typed_session_handle(
 
 
 @pytest.mark.asyncio
-async def test_claude_binder_rebinds_schema_store_and_gate_across_turns(
+async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import claude_agent_sdk as claude
@@ -511,7 +513,7 @@ async def test_claude_binder_rebinds_schema_store_and_gate_across_turns(
     def submission_tool_is_bound() -> bool:
         options = build_claude_options(
             state.config,
-            binding=state.binding,
+            binding=state.current_binding,
             resume=None,
             session_id=state.session_id,
         )
@@ -559,11 +561,14 @@ async def test_claude_binder_rebinds_schema_store_and_gate_across_turns(
         return SubmissionDecision(accepted=True)
 
     refreshed_store = InMemorySubmittedOutputStore()
+    connected = state.client
     await binder.bind(
         TurnToolBinding(output_type=FirstOutput, store=refreshed_store, gate=gate)
     )
-    assert disconnects == 1
-    assert state.client is None
+    # The schema is unchanged, so the conversation the provider is holding
+    # survives the turn boundary instead of being spent reinstalling it.
+    assert disconnects == 0
+    assert state.client is connected
     refreshed_binding = current_binding()
     assert refreshed_binding is not None
     assert refreshed_binding.store is refreshed_store
@@ -578,16 +583,53 @@ async def test_claude_binder_rebinds_schema_store_and_gate_across_turns(
     await binder.bind(
         TurnToolBinding(output_type=SecondOutput, store=InMemorySubmittedOutputStore())
     )
-    assert disconnects == 2
+    # A different schema can only be advertised by reconnecting.
+    assert disconnects == 1
     second_binding = current_binding()
     assert second_binding is not None
     assert second_binding.output_type is SecondOutput
 
     await state.connect()
     await binder.bind(None)
-    assert disconnects == 3
+    assert disconnects == 2
     assert current_binding() is None
     assert not submission_tool_is_bound()
+
+
+@pytest.mark.asyncio
+async def test_claude_submission_server_serves_the_binding_installed_now() -> None:
+    """A connection outlives the turn that opened it, so its tool must too."""
+    from mcp import types as mcp_types
+
+    state = ClaudeConversationState(
+        ClaudeSessionOpener(ClaudeSessionConfig(model="claude")), None
+    )
+    binder = ClaudeTurnToolBinder(state)
+
+    opening_store = InMemorySubmittedOutputStore()
+    await binder.bind(
+        TurnToolBinding(output_type=FirstOutput, store=opening_store, gate=None)
+    )
+    # Built once, as a connection builds it, and never rebuilt afterwards.
+    server = build_submission_server(state.current_binding).server
+
+    later_store = InMemorySubmittedOutputStore()
+    await binder.bind(
+        TurnToolBinding(output_type=FirstOutput, store=later_store, gate=None)
+    )
+
+    handler = server.request_handlers[mcp_types.CallToolRequest]
+    await handler(
+        mcp_types.CallToolRequest(
+            method="tools/call",
+            params=mcp_types.CallToolRequestParams(
+                name="submit_output", arguments={"answer": "later"}
+            ),
+        )
+    )
+
+    assert later_store.read(FirstOutput) == FirstOutput(answer="later")
+    assert opening_store.read(FirstOutput) is None
 
 
 @pytest.mark.asyncio

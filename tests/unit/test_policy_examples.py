@@ -24,7 +24,9 @@ async def attempted_call(
     config: ClaudeSessionConfig, tool_name: str, tool_input: JsonObject
 ) -> claude_types.HookJSONOutput:
     """Answer one attempted tool call through the session's own hooks."""
-    options = build_claude_options(config, binding=None, resume=None, session_id=None)
+    options = build_claude_options(
+        config, binding=lambda: None, resume=None, session_id=None
+    )
     assert options.hooks is not None, "the example session registers no hooks"
     payload = claude_types.PreToolUseHookInput(
         hook_event_name="PreToolUse",
