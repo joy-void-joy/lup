@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -57,6 +58,8 @@ from lup.types import (
     SubagentSpec,
     Usage,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import claude_agent_sdk as claude
@@ -138,8 +141,6 @@ class ClaudeConversationState:
     async def connect(self) -> "claude.ClaudeSDKClient":
         if self.client is not None:
             return self.client
-        import claude_agent_sdk as claude
-
         # The runtime assigns the id and this state reads it off the first
         # result, mirroring `CodexTurnChannel.ensure_thread`. Dictating one
         # instead let the two adapters disagree about who owns a session's
@@ -150,9 +151,45 @@ class ClaudeConversationState:
             resume=self.resume,
             session_id=None,
         )
+        # Connecting is where a refused resume surfaces, and it is as much a
+        # failed turn as one that breaks midway — so it leaves through the
+        # portable error the rest of the runtime raises. Escaping as the SDK's
+        # own exception let it past every caller that handles a turn failing,
+        # which is how a resume the provider had lost ended whole runs.
+        try:
+            self.client = await self.connected(options)
+        except Exception as error:
+            if self.resume is None:
+                raise ProviderTurnError(TurnFailure(message=str(error))) from error
+            # The provider no longer holds what this state was resuming. A
+            # turn that cannot reach its history still beats one that cannot
+            # happen, so the conversation is forgotten rather than the run.
+            logger.warning(
+                "Claude refused to resume session %s (%s); continuing on a new one",
+                self.resume,
+                error,
+            )
+            self.resume = None
+            try:
+                self.client = await self.connected(
+                    self.opener.build_options(
+                        binding=self.binding, resume=None, session_id=None
+                    )
+                )
+            except Exception as fresh_error:
+                raise ProviderTurnError(
+                    TurnFailure(message=str(fresh_error))
+                ) from fresh_error
+        return self.client
+
+    async def connected(
+        self, options: "claude.ClaudeAgentOptions"
+    ) -> "claude.ClaudeSDKClient":
+        """One connected client for these options, or the failure that stopped it."""
+        import claude_agent_sdk as claude
+
         client = claude.ClaudeSDKClient(options=options)
         await client.connect()
-        self.client = client
         return client
 
     async def start_turn(self, text: str) -> AcceptedTurn:
