@@ -1,6 +1,5 @@
-# lup: defer[when the resolver's git authority is next revised]: `restore`,
-# `reset`, and the `prepare_join`/`commit_join` error branches carry the
-# authority a worker is refused by, and no test drives them failing.
+# lup: `restore`, `reset`, and the `prepare_join`/`commit_join` error branches
+# carry the authority a worker is refused by, and no test drives them failing.
 """Concrete lease, worktree, commit, and dependency-base orchestration."""
 
 from pathlib import Path

@@ -12,10 +12,9 @@ from lup_template.devtools.harness.content.catalog import (
 )
 from lup_template.devtools.subapps import subapp_summary
 
-# lup: defer[when the Type Safety conventions below are next rewritten]: state
-# that a consumer never holds or calls an implemented ABC directly. The ABC is
-# the swappable engine; the surface a caller touches is a concrete plain class
-# that composes it and can be parametrized. `ModelRouter.resolve` over the
+# lup: state that a consumer never holds or calls an implemented ABC directly.
+# The ABC is the swappable engine; the surface a caller touches is a concrete
+# plain class that composes it and can be parametrized. `ModelRouter.resolve` over the
 # `ModelMatcher` ABC in lup/runtime/routing.py is the shape, and `SessionFactory`
 # in lup/runtime/contracts.py is the violation being corrected under the
 # object-bound-entry-points concern. Belongs beside the compile-over-emit and

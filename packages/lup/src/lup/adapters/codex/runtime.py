@@ -1,6 +1,5 @@
-# lup: defer[when this module's notification decoding is next extended]: the
-# pinned cases are the failure paths; item-delta and approval-parameter shapes
-# are decoded without a test naming them.
+# lup: the pinned cases are the failure paths; item-delta and approval-parameter
+# shapes are decoded without a test naming them.
 """Codex app-server SessionFactory with live optional turn capabilities."""
 
 import asyncio

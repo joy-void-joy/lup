@@ -1,5 +1,5 @@
-# lup: defer[when this decoder next gains an operation shape]: the long tail of
-# operation shapes is decoded without a test naming each one.
+# lup: the long tail of operation shapes is decoded without a test naming each
+# one.
 # lup: ignore[own-model-dispatch]
 # The Claude*Operation models mirror Claude Code's PreToolUse tool_input shapes
 # — Edit, Write, Bash, WebFetch, WebSearch — so the arms of
