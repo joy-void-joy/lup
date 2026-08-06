@@ -141,14 +141,32 @@ class ClaudeConversationState:
         self.client: claude.ClaudeSDKClient | None = None
         self.binding: TurnToolBinding[BaseModel] | None = None
         self.schema_digest: str | None = None
+        self.completion: asyncio.Task[CompletedTurn] | None = None
 
     def current_binding(self) -> TurnToolBinding[BaseModel] | None:
         """Resolve the binding a live connection's submission tool should serve."""
         return self.binding
 
+    async def settle_reader(self) -> None:
+        """Unwind an unfinished turn's read before its transport goes away.
+
+        Leaving a session interrupts the active turn without awaiting it, so
+        the reader can still be suspended inside `receive_response()` when the
+        transport closes that generator underneath it. Cancelling is what
+        bounds the wait: awaiting the turn itself would hang teardown on any
+        turn that never terminates.
+        """
+        completion = self.completion
+        self.completion = None
+        if completion is None or completion.done():
+            return
+        completion.cancel()
+        await asyncio.wait([completion])
+
     async def disconnect(self) -> None:
         if self.client is None:
             return
+        await self.settle_reader()
         try:
             await self.client.disconnect()
         finally:
@@ -336,6 +354,7 @@ class ClaudeConversationState:
                 events.put_nowait(None)
 
         completion = asyncio.create_task(complete_with_events())
+        self.completion = completion
 
         def observe_completion(task: asyncio.Task[CompletedTurn]) -> None:
             if not task.cancelled():

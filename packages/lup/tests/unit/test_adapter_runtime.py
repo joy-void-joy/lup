@@ -1,6 +1,7 @@
 """Direct regression coverage for adapter-owned runtime construction."""
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -38,6 +39,7 @@ from lup.runtime.models import (
     SubmissionDecision,
     TurnInput,
     TurnMessage,
+    TurnRequest,
     TurnTextBlock,
     TurnToolBinding,
     TurnToolCallBlock,
@@ -755,3 +757,62 @@ async def test_codex_steer_targets_the_active_turn(
             },
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_closing_a_session_settles_the_reader_before_the_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Session exit interrupts an unfinished turn and does not await its read.
+
+    The reader is still suspended inside `receive_response()` when the
+    transport is torn down, so closing that generator raises `aclose():
+    asynchronous generator is already running`. Persistence has completed by
+    then, which makes a finished run read as a failed one.
+    """
+    import claude_agent_sdk as claude
+
+    class SuspendingClient:
+        def __init__(self, options: claude.ClaudeAgentOptions) -> None:
+            self.options = options
+            self.response: AsyncGenerator[object] | None = None
+            self.reading = asyncio.Event()
+
+        async def connect(self) -> None:
+            return None
+
+        async def interrupt(self) -> None:
+            return None
+
+        async def query(self, prompt: str, session_id: str = "default") -> None:
+            return None
+
+        def receive_response(self) -> AsyncGenerator[object]:
+            async def stream() -> AsyncGenerator[object]:
+                self.reading.set()
+                await asyncio.Event().wait()
+                yield object()
+
+            self.response = stream()
+            return self.response
+
+        async def disconnect(self) -> None:
+            # A transport closes the generator it handed out, and doing so
+            # while the reader still owns it is what raises.
+            if self.response is not None:
+                await self.response.aclose()
+
+    clients: list[SuspendingClient] = []
+
+    def track(options: claude.ClaudeAgentOptions) -> SuspendingClient:
+        clients.append(SuspendingClient(options))
+        return clients[-1]
+
+    monkeypatch.setattr(claude, "ClaudeSDKClient", track)
+    opener = ClaudeSessionOpener(ClaudeSessionConfig(model="claude"))
+
+    async with opener.open_session() as handle:
+        await handle.session.start(TurnRequest(input=TurnInput(text="hello")))
+        # An unfinished turn is torn down with its reader suspended inside the
+        # response generator, so wait until it is actually there.
+        await clients[-1].reading.wait()
