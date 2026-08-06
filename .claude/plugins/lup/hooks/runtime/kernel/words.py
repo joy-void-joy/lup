@@ -171,21 +171,6 @@ def is_trusted_script(word: str, roots: list[str]) -> bool:
     )
 
 
-def is_session_scratch_target(word: str) -> bool:
-    """Recognize a path confined to the session scratchpad.
-
-    ``$TMPDIR`` is the harness-provided scratch root and ``/tmp/claude-*`` its
-    host-side spelling, so writes there are scratch by definition. A suffix
-    that expands further or climbs out of the root stays unrecognized.
-    """
-    for prefix in ("$TMPDIR/", "${TMPDIR}/"):
-        if word.startswith(prefix):
-            suffix = word[len(prefix) :]
-            normalized = posixpath.normpath(suffix)
-            return "$" not in suffix and not normalized.startswith(("..", "/"))
-    return "$" not in word and posixpath.normpath(word).startswith("/tmp/claude-")
-
-
 GENERATED_PLUGIN_REFUSAL = (
     "a native plugin tree is compiled from typed source, and the running"
     " runtime already loaded it — edit the policy source, run"
@@ -306,7 +291,6 @@ def asks_before_removing_a_directory(
         for word in operands
         if word in (directory_targets or [])
         and path_role(word, path_roles) != "scratch"
-        and not is_session_scratch_target(word)
     ]
     if not named:
         return None
@@ -351,11 +335,7 @@ def confined_to_recoverable_roots(
     if not inert or not operands:
         return None
     targets = written_operands(executable, operands)
-    disposable = [
-        word
-        for word in targets
-        if path_role(word, path_roles) == "scratch" or is_session_scratch_target(word)
-    ]
+    disposable = [word for word in targets if path_role(word, path_roles) == "scratch"]
     restorable = [
         word
         for word in targets
