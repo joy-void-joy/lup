@@ -44,7 +44,7 @@ from lup.runtime.models import (
     TurnToolBinding,
     TurnToolCallBlock,
 )
-from lup.runtime.output import InMemorySubmittedOutputStore
+from lup.runtime.output import InMemorySubmittedOutputStore, TurnSubmission
 from lup.runtime.usage import per_mtok_usage_cost
 from lup.types import Usage
 
@@ -573,7 +573,7 @@ async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
     def submission_tool_is_bound() -> bool:
         options = build_claude_options(
             state.config,
-            binding=state.current_binding,
+            binding=state.current_submission,
             resume=None,
             session_id=state.session_id,
         )
@@ -584,11 +584,11 @@ async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
             and "mcp__lup-output__submit_output" in options.allowed_tools
         )
 
-    def current_binding() -> TurnToolBinding[BaseModel] | None:
-        return state.binding
+    def current_submission() -> TurnSubmission | None:
+        return state.submission
 
     await binder.bind(None)
-    assert current_binding() is None
+    assert current_submission() is None
     assert disconnects == 0
     assert not submission_tool_is_bound()
 
@@ -603,16 +603,14 @@ async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
         TurnToolBinding(output_type=FirstOutput, store=first_store, gate=first_gate)
     )
     await state.connect()
-    first_binding = current_binding()
-    assert first_binding is not None
-    assert first_binding.output_type is FirstOutput
-    assert first_binding.store is first_store
+    first_submission = current_submission()
+    assert first_submission is not None
+    assert first_submission.schema == FirstOutput.model_json_schema()
     assert submission_tool_is_bound()
-    first_erased = first_binding.gate
-    assert first_erased is not None
-    first_decision = await first_erased(FirstOutput(answer="first"))
-    assert first_decision.accepted
+    first_response = await first_submission.submit({"answer": "first"})
+    assert first_response.accepted
     assert first_gated == [FirstOutput(answer="first")]
+    assert first_store.value == FirstOutput(answer="first")
 
     gated: list[FirstOutput] = []
 
@@ -629,15 +627,16 @@ async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
     # survives the turn boundary instead of being spent reinstalling it.
     assert disconnects == 0
     assert state.client is connected
-    refreshed_binding = current_binding()
-    assert refreshed_binding is not None
-    assert refreshed_binding.store is refreshed_store
-    assert refreshed_binding.gate is not first_binding.gate
-    erased_gate = refreshed_binding.gate
-    assert erased_gate is not None
-    decision = await erased_gate(FirstOutput(answer="checked"))
-    assert decision.accepted
+    refreshed = current_submission()
+    assert refreshed is not None
+    assert refreshed is not first_submission
+    response = await refreshed.submit({"answer": "checked"})
+    assert response.accepted
+    # The store and gate the later turn installed are the ones reached, not
+    # the pair that happened to be bound when the connection opened.
     assert gated == [FirstOutput(answer="checked")]
+    assert refreshed_store.value == FirstOutput(answer="checked")
+    assert first_gated == [FirstOutput(answer="first")]
 
     await state.connect()
     await binder.bind(
@@ -645,14 +644,14 @@ async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
     )
     # A different schema can only be advertised by reconnecting.
     assert disconnects == 1
-    second_binding = current_binding()
-    assert second_binding is not None
-    assert second_binding.output_type is SecondOutput
+    second_submission = current_submission()
+    assert second_submission is not None
+    assert second_submission.schema == SecondOutput.model_json_schema()
 
     await state.connect()
     await binder.bind(None)
     assert disconnects == 2
-    assert current_binding() is None
+    assert current_submission() is None
     assert not submission_tool_is_bound()
 
 
@@ -671,7 +670,7 @@ async def test_claude_submission_server_serves_the_binding_installed_now() -> No
         TurnToolBinding(output_type=FirstOutput, store=opening_store, gate=None)
     )
     # Built once, as a connection builds it, and never rebuilt afterwards.
-    server = build_submission_server(state.current_binding).server
+    server = build_submission_server(state.current_submission).server
 
     later_store = InMemorySubmittedOutputStore()
     await binder.bind(
@@ -710,8 +709,11 @@ async def test_codex_binder_refreshes_same_schema_turns_and_fails_before_input(
 
     refreshed_store = InMemorySubmittedOutputStore()
     await binder.bind(TurnToolBinding(output_type=FirstOutput, store=refreshed_store))
-    assert state.binding is not None
-    assert state.binding.store is refreshed_store
+    installed = state.submission
+    assert installed is not None
+    assert (await installed.submit({"answer": "refreshed"})).accepted
+    assert refreshed_store.read(FirstOutput) == FirstOutput(answer="refreshed")
+    assert first_store.read(FirstOutput) is None
 
     digest = state.schema_digest
     with pytest.raises(CodexSchemaRebindingError, match="thread/start"):
@@ -722,7 +724,7 @@ async def test_codex_binder_refreshes_same_schema_turns_and_fails_before_input(
         )
     with pytest.raises(CodexSchemaRebindingError, match="thread/start"):
         await binder.bind(None)
-    assert state.binding.store is refreshed_store
+    assert state.submission is installed
     assert state.schema_digest == digest
 
 

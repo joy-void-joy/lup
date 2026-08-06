@@ -260,13 +260,9 @@ async def bind_output[T: BaseModel](
 ) -> SubmittedOutputStore:
     """Create a fresh store and preserve T through the generic binder call."""
     store = store_factory()
-    erased_gate = gate_resolver(output_type) if gate_resolver is not None else None
-
-    async def gate(value: T) -> SubmissionDecision:
-        if erased_gate is None:
-            return SubmissionDecision(accepted=True)
-        return await erased_gate(value)
-
+    # A gate that accepts the base accepts this turn's T, so the resolved one
+    # is installed as it is rather than wrapped in a closure that only forwards.
+    gate = gate_resolver(output_type) if gate_resolver is not None else None
     binding = TurnToolBinding[T](output_type=output_type, store=store, gate=gate)
     await binder.bind(binding)
     return store
@@ -275,14 +271,21 @@ async def bind_output[T: BaseModel](
 def submission_gate_resolver[T: BaseModel](
     output_type: type[T], gate: SubmissionGate[T]
 ) -> SubmissionGateResolver:
-    """Resolve one typed submission gate without putting it on turn input."""
+    """Resolve one typed submission gate without putting it on turn input.
+
+    The erasure below is the cost of that choice, not a necessity: a session
+    is configured before any turn names an output type, so the lookup is
+    dynamic and `candidate is output_type` refines nothing for the checker.
+    Revalidating earns the narrowing a `cast` would merely assert. Moving the
+    gate onto `TurnRequest` beside `output_type` would remove it entirely.
+    """
 
     def resolve(candidate: type[BaseModel]) -> SubmissionGate[BaseModel] | None:
         if candidate is not output_type:
             return None
 
         async def erased(
-            value: BaseModel,  # lup: ignore[bare-basemodel] — typed erasure boundary
+            value: BaseModel,  # lup: ignore[bare-basemodel] — the dynamic lookup above
         ) -> SubmissionDecision:
             typed = output_type.model_validate(value.model_dump(mode="json"))
             return await gate(typed)

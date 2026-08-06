@@ -1,7 +1,6 @@
 """Claude SessionFactory composition with per-turn MCP tool rebinding."""
 
 import asyncio
-import hashlib
 import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
@@ -41,7 +40,6 @@ from lup.runtime.models import (
     MessageCompletedEvent,
     SessionHandle,
     SessionId,
-    SubmissionDecision,
     SubmissionGateResolver,
     AnyTurnBlock,
     TurnIdentifiers,
@@ -53,7 +51,7 @@ from lup.runtime.models import (
     TurnToolBinding,
 )
 from lup.runtime.transcript import fold_blocks, fold_transcript
-from lup.runtime.output import submission_schema, submit_output
+from lup.runtime.output import TurnSubmission, bound_submission
 from lup.types import (
     EnvVars,
     JsonObject,
@@ -122,7 +120,7 @@ class ClaudeSessionConfig(BaseModel):
     )
 
 
-type SubmissionBindingSource = Callable[[], TurnToolBinding[BaseModel] | None]
+type SubmissionBindingSource = Callable[[], TurnSubmission | None]
 
 
 def turn_error(interrupt: "ClaudeInterrupt") -> type[TurnError]:
@@ -139,13 +137,13 @@ class ClaudeConversationState:
         self.resume = resume.value if resume is not None else None
         self.session_id = self.resume or str(uuid4())
         self.client: claude.ClaudeSDKClient | None = None
-        self.binding: TurnToolBinding[BaseModel] | None = None
+        self.submission: TurnSubmission | None = None
         self.schema_digest: str | None = None
         self.completion: asyncio.Task[CompletedTurn] | None = None
 
-    def current_binding(self) -> TurnToolBinding[BaseModel] | None:
-        """Resolve the binding a live connection's submission tool should serve."""
-        return self.binding
+    def current_submission(self) -> TurnSubmission | None:
+        """Resolve the submission a live connection's tool should serve."""
+        return self.submission
 
     async def settle_reader(self) -> None:
         """Unwind an unfinished turn's read before its transport goes away.
@@ -181,7 +179,7 @@ class ClaudeConversationState:
         # identity, and only one of them can be right about a conversation the
         # provider is the one persisting.
         options = self.opener.build_options(
-            binding=self.current_binding,
+            binding=self.current_submission,
             resume=self.resume,
             session_id=None,
         )
@@ -207,7 +205,7 @@ class ClaudeConversationState:
             try:
                 self.client = await self.connected(
                     self.opener.build_options(
-                        binding=self.current_binding, resume=None, session_id=None
+                        binding=self.current_submission, resume=None, session_id=None
                     )
                 )
             except Exception as fresh_error:
@@ -426,33 +424,14 @@ class ClaudeTurnToolBinder(TurnToolBinder):
         self.state = state
 
     async def bind[T: BaseModel](self, binding: TurnToolBinding[T] | None) -> None:
-        if binding is None and self.state.binding is None:
+        if binding is None and self.state.submission is None:
             return
-        digest = (
-            hashlib.sha256(submission_schema(binding).encode("utf-8")).hexdigest()
-            if binding is not None
-            else None
-        )
+        submission = bound_submission(binding) if binding is not None else None
+        digest = submission.digest if submission is not None else None
         if digest != self.state.schema_digest:
             await self.state.disconnect()
         self.state.schema_digest = digest
-        if binding is None:
-            self.state.binding = None
-            return
-
-        async def gate(
-            value: BaseModel,  # lup: ignore[bare-basemodel] — adapter-local generic erasure
-        ) -> SubmissionDecision:
-            if binding.gate is None:
-                return SubmissionDecision(accepted=True)
-            typed = binding.output_type.model_validate(value.model_dump(mode="json"))
-            return await binding.gate(typed)
-
-        self.state.binding = TurnToolBinding[BaseModel](
-            output_type=binding.output_type,
-            store=binding.store,
-            gate=gate if binding.gate is not None else None,
-        )
+        self.state.submission = submission
 
 
 class ClaudeInterrupt(Interrupt):
@@ -575,14 +554,14 @@ def build_submission_server(
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
-        binding = current()
-        if binding is None:
+        submission = current()
+        if submission is None:
             return []
         return [
             Tool(
                 name="submit_output",
                 description="Submit the final validated result for this turn.",
-                inputSchema=binding.output_type.model_json_schema(),
+                inputSchema=submission.schema,
             )
         ]
 
@@ -590,8 +569,8 @@ def build_submission_server(
     async def call_tool(name: str, arguments: JsonObject) -> CallToolResult:
         if name != "submit_output":
             raise ValueError(f"unknown output tool {name!r}")
-        binding = current()
-        if binding is None:
+        submission = current()
+        if submission is None:
             return CallToolResult(
                 content=[
                     TextContent(
@@ -601,7 +580,7 @@ def build_submission_server(
                 ],
                 isError=True,
             )
-        response = await submit_output(binding, arguments)
+        response = await submission.submit(arguments)
         return CallToolResult(
             content=[TextContent(type="text", text=response.message)],
             isError=not response.accepted,

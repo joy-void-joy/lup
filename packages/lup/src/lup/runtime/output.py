@@ -1,6 +1,8 @@
 """Portable submitted-output validation and turn-scoped stores."""
 
+import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -8,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from lup.runtime.contracts import SubmittedOutputStore
 from lup.runtime.errors import ValidationAttempt
 from lup.runtime.models import SubmissionDecision, TurnToolBinding
-from lup.types import JsonValue
+from lup.types import JsonObject, JsonValue
 
 
 class SubmissionResponse(BaseModel):
@@ -126,10 +128,36 @@ async def submit_output[T: BaseModel](
     return SubmissionResponse(accepted=True, message="Output accepted.")
 
 
-def submission_schema[T: BaseModel](binding: TurnToolBinding[T]) -> str:
-    """Serialize the exact Pydantic schema without native string interpolation."""
-    return json.dumps(
-        binding.output_type.model_json_schema(),
-        sort_keys=True,
-        separators=(",", ":"),
+type SubmissionHandler = Callable[[JsonValue], Awaitable[SubmissionResponse]]
+
+
+class TurnSubmission:
+    """The submission tool one turn installed, holding its own output type.
+
+    A native tool advertises a single schema for the life of a connection, so
+    what the connection stores cannot be generic in the turn's output type.
+    Storing the bound submission rather than a widened `TurnToolBinding`
+    is what keeps that type from being erased to `BaseModel` and then
+    revalidated back into itself before every gate.
+    """
+
+    def __init__(self, schema: JsonObject, submit: SubmissionHandler) -> None:
+        self.schema = schema
+        self.submit = submit
+        # Serialized without native string interpolation, so a binder can tell
+        # a schema that actually moved from a turn reinstalling the same one.
+        self.digest = hashlib.sha256(
+            json.dumps(schema, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+
+def bound_submission[T: BaseModel](binding: TurnToolBinding[T]) -> TurnSubmission:
+    """Bind one turn's typed submission behind a handle that is not generic."""
+
+    async def submit(arguments: JsonValue) -> SubmissionResponse:
+        return await submit_output(binding, arguments)
+
+    return TurnSubmission(
+        schema=binding.output_type.model_json_schema(),
+        submit=submit,
     )

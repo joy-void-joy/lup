@@ -3,7 +3,6 @@
 """Codex app-server SessionFactory with live optional turn capabilities."""
 
 import asyncio
-import hashlib
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -32,7 +31,6 @@ from lup.runtime.models import (
     MessageCompletedEvent,
     SessionHandle,
     SessionId,
-    SubmissionDecision,
     SubmissionGateResolver,
     AnyTurnBlock,
     TurnCompletedEvent,
@@ -44,7 +42,7 @@ from lup.runtime.models import (
     TurnMessage,
     TurnToolBinding,
 )
-from lup.runtime.output import submission_schema, submit_output
+from lup.runtime.output import TurnSubmission, bound_submission
 from lup.runtime.transcript import fold_transcript
 from lup.types import EnvVars, JsonObject, JsonValue, Usage
 
@@ -354,7 +352,7 @@ class CodexConversationState:
         self.server = server
         self.resume = resume
         self.thread_id: str | None = None
-        self.binding: TurnToolBinding[BaseModel] | None = None
+        self.submission: TurnSubmission | None = None
         self.schema_digest: str | None = None
         self.channel: CodexTurnChannel | None = None
         self.server.server_request_handler = self.handle_server_request
@@ -376,8 +374,8 @@ class CodexConversationState:
             result = await self.server.request("thread/resume", params)
         else:
             params = self.thread_parameters()
-            if self.binding is not None:
-                params["dynamicTools"] = [dynamic_tool(self.binding)]
+            if self.submission is not None:
+                params["dynamicTools"] = [dynamic_tool(self.submission)]
             result = await self.server.request("thread/start", params)
         response = CodexThreadResponse.model_validate(result)
         self.thread_id = response.thread.id
@@ -446,8 +444,8 @@ class CodexConversationState:
         if message.method != "item/tool/call":
             raise RuntimeError(f"unsupported app-server request {message.method!r}")
         call = DynamicToolCall.model_validate(message.params)
-        binding = self.binding
-        if binding is None or call.tool != "submit_output":
+        submission = self.submission
+        if submission is None or call.tool != "submit_output":
             return {
                 "contentItems": [
                     {
@@ -464,7 +462,7 @@ class CodexConversationState:
                 ],
                 "success": False,
             }
-        response = await submit_output(binding, call.arguments)
+        response = await submission.submit(call.arguments)
         return {
             "contentItems": [{"type": "inputText", "text": response.message}],
             "success": response.accepted,
@@ -499,21 +497,15 @@ class CodexTurnToolBinder(TurnToolBinder):
         self.state = state
 
     async def bind[T: BaseModel](self, binding: TurnToolBinding[T] | None) -> None:
-        digest = (
-            hashlib.sha256(submission_schema(binding).encode("utf-8")).hexdigest()
-            if binding is not None
-            else None
-        )
+        submission = bound_submission(binding) if binding is not None else None
+        digest = submission.digest if submission is not None else None
         if self.state.schema_digest is not None and digest != self.state.schema_digest:
             raise CodexSchemaRebindingError(
                 "the installed Codex app-server exposes dynamicTools only on "
                 "thread/start; changing or removing submit_output would lose "
                 "conversation identity"
             )
-        if binding is None:
-            self.state.binding = None
-        else:
-            self.state.binding = erased_binding(binding)
+        self.state.submission = submission
         self.state.schema_digest = digest
 
 
@@ -607,37 +599,14 @@ def create_codex_session_factory(config: CodexSessionConfig) -> SessionFactory:
     return SessionFactory(CodexSessionOpener(config).open_session)
 
 
-def dynamic_tool(binding: TurnToolBinding[BaseModel]) -> JsonObject:
+def dynamic_tool(submission: TurnSubmission) -> JsonObject:
     """Render the exact Pydantic schema into the experimental native tool spec."""
     return {
         "name": "submit_output",
         "description": "Submit the final validated result for this turn.",
-        "inputSchema": binding.output_type.model_json_schema(),
+        "inputSchema": submission.schema,
         "deferLoading": False,
     }
-
-
-def erased_binding[T: BaseModel](
-    binding: TurnToolBinding[T],
-) -> TurnToolBinding[BaseModel]:
-    """Preserve the typed gate while storing a runtime-erased native binding."""
-    if binding.gate is None:
-        gate = None
-    else:
-        binding_gate = binding.gate
-
-        async def validate_gate(
-            value: BaseModel,  # lup: ignore[bare-basemodel] — adapter-local generic erasure
-        ) -> SubmissionDecision:
-            typed = binding.output_type.model_validate(value.model_dump(mode="json"))
-            return await binding_gate(typed)
-
-        gate = validate_gate
-    return TurnToolBinding[BaseModel](
-        output_type=binding.output_type,
-        store=binding.store,
-        gate=gate,
-    )
 
 
 def decode_usage(payload: JsonObject) -> Usage:
