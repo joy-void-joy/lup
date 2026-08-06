@@ -2139,9 +2139,22 @@ class ResolverCore:
                 self.leases.plan(concern.id, self.concern_branch(concern.id))
             concerns = [*state.concerns, *planned.concerns]
             ConcernGraph(concerns)
+            # An admitted concern's questions join the run's batch the way
+            # intake's do. Returning them without recording them left the
+            # concern admitted and unanswerable: no door could see a question
+            # that was never written, and the gate it names can never pass.
+            admitted = self.pending_questions(planned.concerns)
+            self.queue_questions(admitted, "admission")
             widened = state.model_copy(
                 update={
                     "concerns": concerns,
+                    "questions": QuestionBatch(
+                        run_id=state.run_id,
+                        questions=[
+                            *(state.questions.questions if state.questions else []),
+                            *admitted,
+                        ],
+                    ),
                     "progress": [
                         *state.progress,
                         *[
@@ -2156,7 +2169,7 @@ class ResolverCore:
                 run_id=state.run_id,
                 phase=self.require_state().phase,
                 concerns=planned.concerns,
-                questions=self.pending_questions(planned.concerns),
+                questions=admitted,
             )
 
     def concern_branch(self, concern_id: str) -> str:

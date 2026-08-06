@@ -2095,6 +2095,12 @@ async def test_a_concern_admitted_into_a_parked_run_finishes_beside_the_original
     assert [item.id for item in widened.concerns] == ["a", "b"]
     assert widened.answers == before.answers
     assert widened.phase == before.phase
+    # The questions join the run's batch, not just the admission's reply: a
+    # concern admitted with its gates unwritten is one nothing can answer.
+    assert widened.questions is not None
+    assert {"b-shape", "integration-approval-b"} <= {
+        question.id for question in widened.questions.questions
+    }
 
     ungated = build_core()
     seed_offer(ungated, "a-dynamic", "durable")
