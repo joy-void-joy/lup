@@ -17,7 +17,6 @@ from .rows import PathRoleRow
 from .words import (
     SCRATCH_VERB_FLAGS,
     effective_command,
-    is_session_scratch_target,
     path_verb_operands,
     refuses_generated_plugin_target,
 )
@@ -550,8 +549,6 @@ def resolve_redirection(
     if refused is not None:
         return Redirection(decision=refused, resume=target + 1)
     if path_role(tokens[target].text, path_roles or []) == "scratch":
-        return Redirection(decision=None, resume=target + 1)
-    if is_session_scratch_target(tokens[target].text):
         return Redirection(decision=None, resume=target + 1)
     if (
         existing_targets is not None
