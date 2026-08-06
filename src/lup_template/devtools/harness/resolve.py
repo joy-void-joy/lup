@@ -379,8 +379,17 @@ def report_admission(admission: ConcernAdmission, adapter: str, run_id: str) -> 
         f"at phase {admission.phase}."
     )
     report_questions(admission.questions, admission.concerns)
+    for problem in admission.rejected:
+        typer.echo(f"  rejected: {problem}")
+    answered = len(admission.questions) - len(admission.outstanding)
+    if answered:
+        typer.echo(f"Applied {answered} answer(s) supplied with this admission.")
+    if not admission.outstanding:
+        typer.echo("Every admitted question is answered; rerun to drive the run on:")
+        typer.echo(f"  {rerun_recipe(adapter, run_id, [])}")
+        return
     typer.echo("Relay the new questions to the human, then rerun:")
-    typer.echo(f"  {rerun_recipe(adapter, run_id, admission.questions)}")
+    typer.echo(f"  {rerun_recipe(adapter, run_id, admission.outstanding)}")
 
 
 def resolver_git(

@@ -676,6 +676,8 @@ class ConcernAdmission(BaseModel):
     phase: ResolvePhase
     concerns: list[Concern]
     questions: list[MaterialQuestion]
+    outstanding: list[MaterialQuestion] = Field(default_factory=list)
+    rejected: list[str] = Field(default_factory=list)
 
 
 class ResolverConfig(BaseModel):

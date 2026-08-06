@@ -2145,6 +2145,12 @@ class ResolverCore:
             # that was never written, and the gate it names can never pass.
             admitted = self.pending_questions(planned.concerns)
             self.queue_questions(admitted, "admission")
+            # An answer offered in the same invocation is offered before the
+            # question exists, so only promoting here can match the two. The
+            # run's own rerun recipe hands out `--answer` flags, which made
+            # combining them with `--admit` the obvious thing to try and
+            # silently discarded every one of them.
+            problems = self.promote_offers()
             widened = state.model_copy(
                 update={
                     "concerns": concerns,
@@ -2154,6 +2160,10 @@ class ResolverCore:
                             *(state.questions.questions if state.questions else []),
                             *admitted,
                         ],
+                    ),
+                    "answers": AnswerBatch(
+                        run_id=state.run_id,
+                        answers=[record.answer for record in self.mailbox.answers()],
                     ),
                     "progress": [
                         *state.progress,
@@ -2170,6 +2180,12 @@ class ResolverCore:
                 phase=self.require_state().phase,
                 concerns=planned.concerns,
                 questions=admitted,
+                outstanding=[
+                    question
+                    for question in admitted
+                    if question.id not in self.mailbox.answered_ids()
+                ],
+                rejected=problems,
             )
 
     def concern_branch(self, concern_id: str) -> str:

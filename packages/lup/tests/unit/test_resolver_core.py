@@ -2133,6 +2133,78 @@ async def test_a_concern_admitted_into_a_parked_run_finishes_beside_the_original
 
 
 @pytest.mark.asyncio
+async def test_an_answer_offered_with_an_admission_settles_its_new_question(
+    tmp_path: Path,
+) -> None:
+    """The run's own rerun recipe hands out the flags this combines.
+
+    An answer offered beside an admission is offered before the question it
+    names exists, so only the admission that creates the question can settle
+    it. Leaving it unpromoted admitted the concern and discarded the answer.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def build_core() -> ResolverCore:
+        return admitting_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "admit-answered",
+            implementing_worker(
+                {"a": "a-dynamic"}, tmp_path / "state", "admit-answered"
+            ),
+            planning_reviewer(
+                admitted_plan(
+                    admitted_concern(
+                        "b",
+                        questions=[
+                            {
+                                "id": "b-shape",
+                                "concern_id": "b",
+                                "prompt": "Which shape?",
+                                "choices": ["a method"],
+                            }
+                        ],
+                    )
+                )
+            ),
+        )
+
+    parked = build_core()
+    seed_approvals(parked, [concern("a")])
+    with pytest.raises(ResolverAwaitingAnswers):
+        await parked.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    admitting = build_core()
+    seed_offer(admitting, "b-shape", "a method")
+    admission = await admitting.admit(
+        AdmissionRequest(statements=["the relay answered while admitting"])
+    )
+
+    assert admission.rejected == []
+    assert [question.id for question in admission.questions] == [
+        "b-shape",
+        "integration-approval-b",
+    ]
+    # Only the gate the flag did not name is still owed to the human.
+    assert [question.id for question in admission.outstanding] == [
+        "integration-approval-b"
+    ]
+    persisted = build_core().repository.load()
+    assert persisted.answers is not None
+    assert {
+        answer.question_id: answer.value for answer in persisted.answers.answers
+    } | {"b-shape": "a method"} == {
+        answer.question_id: answer.value for answer in persisted.answers.answers
+    }
+
+
+@pytest.mark.asyncio
 async def test_an_admitted_concern_bases_on_a_completed_concerns_recorded_commit(
     tmp_path: Path,
 ) -> None:
