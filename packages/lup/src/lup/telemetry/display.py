@@ -52,9 +52,10 @@ def format_duration(seconds: float) -> str:
 
     Sub-minute durations keep tenths (``42.3s``); anything longer reads
     as minutes plus whole seconds (``3m 7s``) — session runs routinely
-    cross the minute mark, where raw seconds stop being scannable.
+    cross the minute mark, where raw seconds stop being scannable. The
+    split rounds first, so a remainder never reads as a full ``60s``.
     """
-    minutes, remainder = divmod(seconds, 60)
+    minutes, remainder = divmod(round(seconds), 60)
     if minutes >= 1:
         return f"{int(minutes)}m {remainder:.0f}s"
     return f"{seconds:.1f}s"

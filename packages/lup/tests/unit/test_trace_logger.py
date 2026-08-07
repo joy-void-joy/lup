@@ -1,22 +1,35 @@
-"""Trace formatting and the TraceLogger save path.
+"""Trace formatting, the TraceLogger save path, and the console display.
 
 The trace file is the feedback loop's raw material: if block formatting,
 entry accumulation, or the save round-trip break, every downstream
-analysis reads garbage. Also pins the tool-use/result color pairing,
-which is stateful (a result must pop its use's color, not leak it),
-and the entries-as-single-store rendering contract.
+analysis reads garbage. The console is the other half of the same
+traversal — one call feeds both sinks — so the display assembly is
+covered here too, against the text it actually wrote rather than against
+the fact that writing it raised nothing.
 """
 
+import json
 from pathlib import Path
 
+import pytest
+
 from lup.telemetry.blocks import JsonValue, format_tool_result, truncate_str_fields
-from lup.telemetry.display import resolve_color_tag
+from lup.telemetry.display import (
+    TOOL_COLORS,
+    ColorAssigner,
+    format_duration,
+    print_block,
+    print_message,
+    resolve_color_tag,
+)
 from lup.telemetry.trace import (
     TraceLogger,
     format_block_markdown,
     read_trace_events,
 )
 from lup.types import (
+    LupAssistantMessage,
+    LupSystemMessage,
     LupTextBlock,
     LupThinkingBlock,
     LupToolResultBlock,
@@ -91,30 +104,82 @@ def test_block_markdown_fences_by_block_type() -> None:
     assert "[redacted]" in thinking
 
 
-def test_color_tag_pairs_use_with_result() -> None:
-    use_tag = resolve_color_tag(LupToolUseBlock(id="pair-1", name="Read", input={}))
-    result_tag = resolve_color_tag(
-        LupToolResultBlock(tool_use_id="pair-1", content="x")
+# ── console display ───────────────────────────────────────────────────────
+#
+# What a watching human reads. Rendering the wrong prefix, the wrong tool
+# name, or an untruncated payload raises nothing, so these assert the text
+# the display wrote — captured off both console streams — and the pairing
+# state behind it, which must not leak between concurrent streams.
+
+
+def displayed(capsys: pytest.CaptureFixture[str]) -> str:
+    """Everything the display wrote, across both console streams."""
+    captured = capsys.readouterr()
+    return captured.out + captured.err
+
+
+def test_duration_keeps_tenths_below_the_minute() -> None:
+    assert format_duration(42.34) == "42.3s"
+
+
+def test_duration_reads_as_minutes_from_the_boundary_up() -> None:
+    assert format_duration(60.0) == "1m 0s"
+    assert format_duration(187.0) == "3m 7s"
+
+
+def test_duration_rounds_before_splitting_off_the_minutes() -> None:
+    """A remainder that rounds up to a whole minute carries into the minutes
+    instead of reading as the ``3m 60s`` no clock shows."""
+    assert format_duration(239.7) == "4m 0s"
+    assert format_duration(59.7) == "1m 0s"
+
+
+def test_tool_use_takes_the_next_color_and_its_result_pops_it() -> None:
+    colors = ColorAssigner(palette=["cyan", "green"])
+
+    first = resolve_color_tag(LupToolUseBlock(id="a", name="Read"), colors)
+    second = resolve_color_tag(LupToolUseBlock(id="b", name="Grep"), colors)
+    paired = resolve_color_tag(LupToolResultBlock(tool_use_id="a", content="x"), colors)
+
+    assert first is not None and second is not None and paired is not None
+    assert [first.color, second.color] == ["cyan", "green"]
+    assert paired.color == first.color
+    # The closing block pops its pairing; the still-open one keeps its color.
+    assert colors.by_id == {"b": "green"}
+
+
+def test_result_without_an_open_call_falls_back_to_default() -> None:
+    colors = ColorAssigner()
+
+    orphan = resolve_color_tag(
+        LupToolResultBlock(tool_use_id="never-opened", content="x"), colors
     )
-    orphan_tag = resolve_color_tag(
-        LupToolResultBlock(tool_use_id="pair-1", content="x")
-    )
 
-    assert use_tag is not None and result_tag is not None and orphan_tag is not None
-    assert result_tag.color == use_tag.color
-    # The pairing is popped on first use; an orphan result gets the default
-    assert orphan_tag.color == "default"
-    assert resolve_color_tag(LupTextBlock(text="plain")) is None
+    assert orphan is not None
+    assert orphan.color == "default"
+    # A block that neither opens nor closes a pairing carries no tag at all.
+    assert resolve_color_tag(LupTextBlock(text="plain"), colors) is None
 
 
-def test_separate_color_assigners_isolate_pairings() -> None:
-    """Concurrent streams with their own assigners can't cross-pair: an
-    assigner that never saw a tool use resolves its result to default."""
-    from lup.telemetry.display import ColorAssigner
+def test_palette_wraps_at_its_end() -> None:
+    colors = ColorAssigner()
 
+    rotation = [
+        resolve_color_tag(LupToolUseBlock(id=f"t{n}", name="Read"), colors)
+        for n in range(len(TOOL_COLORS) + 1)
+    ]
+
+    assert [tag.color for tag in rotation if tag] == [*TOOL_COLORS, TOOL_COLORS[0]]
+
+
+def test_assigners_rotate_and_pair_independently() -> None:
+    """Concurrent streams each hold their own rotation: two assigners open at
+    the same color, and a result resolved against the wrong one can't pair."""
     own = ColorAssigner()
     other = ColorAssigner()
-    use_tag = resolve_color_tag(LupToolUseBlock(id="iso-1", name="Read", input={}), own)
+
+    mine = resolve_color_tag(LupToolUseBlock(id="iso-1", name="Read"), own)
+    theirs = resolve_color_tag(LupToolUseBlock(id="iso-2", name="Read"), other)
     crossed = resolve_color_tag(
         LupToolResultBlock(tool_use_id="iso-1", content="x"), other
     )
@@ -122,9 +187,129 @@ def test_separate_color_assigners_isolate_pairings() -> None:
         LupToolResultBlock(tool_use_id="iso-1", content="x"), own
     )
 
-    assert use_tag is not None and crossed is not None and paired is not None
+    assert mine is not None and theirs is not None
+    assert crossed is not None and paired is not None
+    # Neither assigner advanced the other's cycle, so both opened at the head.
+    assert mine.color == theirs.color == TOOL_COLORS[0]
     assert crossed.color == "default"
-    assert paired.color == use_tag.color
+    assert paired.color == mine.color
+
+
+def test_orphan_result_still_renders(capsys: pytest.CaptureFixture[str]) -> None:
+    print_block(
+        LupToolResultBlock(tool_use_id="never-opened", content="data"),
+        colors=ColorAssigner(),
+    )
+
+    shown = displayed(capsys)
+    assert "📋 Result" in shown
+    assert "[never-opened]" in shown
+    assert "data" in shown
+
+
+def test_tool_use_renders_prefix_name_and_pairing_tag(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    print_block(
+        LupToolUseBlock(id="call-1", name="Read", input={"file_path": "x.py"}),
+        prefix="  ",
+        colors=ColorAssigner(),
+    )
+
+    shown = displayed(capsys)
+    assert shown.startswith("  🔧 Tool: Read ")
+    assert "[call-1]" in shown
+    assert '"file_path": "x.py"' in shown
+
+
+def test_tool_result_renders_formatted_and_truncated_payload(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    colors = ColorAssigner()
+    payload = json.dumps({"body": "x" * 600})
+
+    print_block(LupToolUseBlock(id="call-1", name="Read"), colors=colors)
+    print_block(
+        LupToolResultBlock(tool_use_id="call-1", content=payload), colors=colors
+    )
+
+    shown = displayed(capsys)
+    # The result carries the tag of the call it closes, so a reader pairs the
+    # two by eye.
+    assert shown.count("[call-1]") == 2
+    assert "📋 Result" in shown
+    # JSON is re-indented rather than echoed as the one line it arrived on,
+    # and its long field is cut back to a truncation signal.
+    assert '{\n  "body"' in shown
+    assert "..." in shown
+    assert "x" * 600 not in shown
+
+
+def test_prose_blocks_render_their_glyph_and_body(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    print_block(LupTextBlock(text="hello there"), prefix="| ")
+    print_block(LupThinkingBlock(thinking="weighing it"))
+    print_block(LupThinkingBlock(thinking="", redacted=True))
+
+    shown = displayed(capsys)
+    assert "| 💬 hello there" in shown
+    assert "💭 weighing it" in shown
+    assert "💭 [redacted]" in shown
+
+
+def test_message_renders_every_block_in_order(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    message = LupAssistantMessage(
+        content=[
+            LupTextBlock(text="reading it"),
+            LupToolUseBlock(id="m-1", name="Grep", input={"pattern": "x"}),
+        ]
+    )
+
+    print_message(message, prefix="> ", colors=ColorAssigner())
+
+    shown = displayed(capsys)
+    assert "> 💬 reading it" in shown
+    assert "> 🔧 Tool: Grep " in shown
+    assert shown.index("reading it") < shown.index("Tool: Grep")
+
+
+def test_message_without_blocks_prints_nothing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    print_message(LupSystemMessage(subtype="status", data="init"))
+
+    assert displayed(capsys) == ""
+
+
+def test_trace_argument_accumulates_what_it_printed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One call feeds both sinks: whatever reached the console reached the
+    trace, from that same traversal rather than a second one."""
+    trace = TraceLogger(trace_path=tmp_path / "t.md", title="S")
+    header = len(trace.entries)
+    message = LupAssistantMessage(
+        content=[
+            LupTextBlock(text="reading it"),
+            LupToolUseBlock(id="fan-1", name="Read", input={"file_path": "x.py"}),
+            LupToolResultBlock(tool_use_id="fan-1", content="done"),
+        ]
+    )
+
+    print_message(message, trace=trace, colors=ColorAssigner())
+
+    shown = displayed(capsys)
+    # One entry per block, paired positionally: a trace written from its own
+    # second walk could drift in count or order without the console noticing.
+    for block, entry in zip(
+        message.content_blocks, trace.entries[header:], strict=True
+    ):
+        assert block.display_body in shown
+        assert block.display_label in entry.content
+        assert block.display_body in entry.content
 
 
 def test_tool_result_formatting_truncates_inside_json() -> None:
@@ -157,7 +342,7 @@ def test_truncate_keeps_list_limit_in_nested_structures() -> None:
 
 
 def test_truncate_shortens_nested_strings() -> None:
-    data: JsonValue = {"a": {"b": ["y" * 100]}}
+    data: JsonValue = {"a": {"b": ["y" * 100, 7]}}
 
     result = truncate_str_fields(data, max_len=10, max_len_list=5)
 
@@ -167,6 +352,8 @@ def test_truncate_shortens_nested_strings() -> None:
     b = a["b"]
     assert isinstance(b, list)
     assert b[0] == "y" * 10 + "..."
+    # A scalar has no length to cap, so it passes through as itself.
+    assert b[1] == 7
 
 
 # ── structured JSONL sidecar ──────────────────────────────────────────────
