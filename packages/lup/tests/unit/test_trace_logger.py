@@ -108,8 +108,10 @@ def test_block_markdown_fences_by_block_type() -> None:
 #
 # What a watching human reads. Rendering the wrong prefix, the wrong tool
 # name, or an untruncated payload raises nothing, so these assert the text
-# the display wrote — captured off both console streams — and the pairing
-# state behind it, which must not leak between concurrent streams.
+# the display wrote. Capture is taken off the process streams, where the
+# plain prints and the rich console both land, so it reads what a terminal
+# would get and no caller added later can route around it. Behind the text
+# sits the pairing state, which must not leak between concurrent streams.
 
 
 def displayed(capsys: pytest.CaptureFixture[str]) -> str:
@@ -287,15 +289,16 @@ def test_message_without_blocks_prints_nothing(
 def test_trace_argument_accumulates_what_it_printed(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """One call feeds both sinks: whatever reached the console reached the
-    trace, from that same traversal rather than a second one."""
+    """One call feeds both sinks: every block reaches the trace in the order
+    the console showed it, each sink rendering that block by its own rule."""
     trace = TraceLogger(trace_path=tmp_path / "t.md", title="S")
     header = len(trace.entries)
+    payload = "y" * 600
     message = LupAssistantMessage(
         content=[
             LupTextBlock(text="reading it"),
             LupToolUseBlock(id="fan-1", name="Read", input={"file_path": "x.py"}),
-            LupToolResultBlock(tool_use_id="fan-1", content="done"),
+            LupToolResultBlock(tool_use_id="fan-1", content=payload),
         ]
     )
 
@@ -307,9 +310,14 @@ def test_trace_argument_accumulates_what_it_printed(
     for block, entry in zip(
         message.content_blocks, trace.entries[header:], strict=True
     ):
-        assert block.display_body in shown
+        assert block.display_emoji in shown
         assert block.display_label in entry.content
         assert block.display_body in entry.content
+    # The sinks part only where their jobs do: a reader gets the payload cut
+    # to a signal, the archive keeps it whole. A payload short enough to
+    # survive truncation would let the two agree by accident.
+    assert payload not in shown
+    assert payload[:500] + "..." in shown
 
 
 def test_tool_result_formatting_truncates_inside_json() -> None:

@@ -1,3 +1,6 @@
+# lup: solved: assembly is largely unexercised. Lowest stakes of the ranked
+# coverage gaps — a wrong line here misinforms a watching human rather than
+# changing what a run does.
 """Color-coded console display of agent content blocks.
 
 Real-time output for interactive sessions: tool use and tool result blocks
@@ -50,10 +53,11 @@ TOOL_COLORS = [
 def format_duration(seconds: float) -> str:
     """Format a duration for console display.
 
-    Sub-minute durations keep tenths (``42.3s``); anything longer reads
-    as minutes plus whole seconds (``3m 7s``) — session runs routinely
-    cross the minute mark, where raw seconds stop being scannable. The
-    split rounds first, so a remainder never reads as a full ``60s``.
+    Durations that round to under a minute keep tenths (``42.3s``);
+    anything longer reads as minutes plus whole seconds (``3m 7s``) —
+    session runs routinely cross the minute mark, where raw seconds stop
+    being scannable. Rounding precedes the split, so no remainder reads
+    as a full ``60s`` and ``59.7`` crosses over to ``1m 0s``.
     """
     minutes, remainder = divmod(round(seconds), 60)
     if minutes >= 1:
