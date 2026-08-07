@@ -1005,10 +1005,10 @@ class ResolverCore:
                 f"resolve: join dependencies for {concern.title}",
             )
             base = builder.build(concern, commits, joined_commit=joined)
-            await self.record_dependency_base(base)
+            base = await self.record_dependency_base(base)
         else:
             base = builder.build(concern, commits)
-            await self.record_dependency_base(base)
+            base = await self.record_dependency_base(base)
             if not lease.root.exists():
                 self.worktrees.create(lease, base.commit)
 
@@ -2480,8 +2480,16 @@ class ResolverCore:
             )
         return moved
 
-    async def record_dependency_base(self, base: DependencyBase) -> None:
-        """Persist one immutable dependency base before worker execution."""
+    async def record_dependency_base(self, base: DependencyBase) -> DependencyBase:
+        """Persist one dependency base, or adopt the one already recorded.
+
+        A base is immutable in its dependency shape, not in its commit:
+        `record_note_clearance` advances the commit by design. So a concern
+        retried after an interruption re-derives the pre-clearance commit and
+        must adopt what this run recorded, rather than read its own clearance
+        as the base moving underneath it — which failed every concern that had
+        a note to clear, leaving only admitted ones able to resume.
+        """
         async with self.state_lock:
             state = self.require_state()
             existing = next(
@@ -2492,12 +2500,14 @@ class ResolverCore:
                 ),
                 None,
             )
-            if existing is not None and existing != base:
-                raise ResolverInvariantError(
-                    f"dependency base changed for {base.concern_id}"
-                )
-            if existing is None:
-                self.persist(state.model_copy(update={"bases": [*state.bases, base]}))
+            if existing is not None:
+                if existing.model_copy(update={"commit": base.commit}) != base:
+                    raise ResolverInvariantError(
+                        f"dependency base changed for {base.concern_id}"
+                    )
+                return existing
+            self.persist(state.model_copy(update={"bases": [*state.bases, base]}))
+            return base
 
     def require_state(self) -> ResolveState:
         if self.state is None:

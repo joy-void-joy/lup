@@ -1084,6 +1084,67 @@ def test_a_base_moves_onto_the_commit_that_cleared_its_notes(
     assert core.repository.load().bases == [moved]
 
 
+def test_a_retried_concern_adopts_the_base_its_own_clearance_advanced(
+    tmp_path: Path,
+) -> None:
+    """A resumed concern re-derives the base its clearance already moved past.
+
+    `record_note_clearance` advances a recorded base by design, so a concern
+    retried after an interruption offers the pre-clearance commit again.
+    Reading that as the base changing failed every concern that had a note to
+    clear — which is every concern an inventory finds — so only admitted
+    concerns, whose clearance commits nothing, could survive a resume.
+    """
+    run_id = "retried"
+    derived = DependencyBase(
+        concern_id="a", parent_concerns=[], parent_commits=[], commit="base-sha"
+    )
+    cleared = derived.model_copy(update={"commit": "clearance-sha"})
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=tmp_path,
+            worktree_root=tmp_path / "worktrees",
+            run_id=run_id,
+            integration_branch=f"resolve/{run_id}/review",
+            verification_commands=[
+                VerificationCommand(name="tests", arguments=["pytest"])
+            ],
+        ),
+        resolve_spec(),
+        lambda _cwd: unused_session_factory(),
+        lambda _cwd: unused_session_factory(),
+        UnusedInvocationRenderer(),
+        missing_branch_launcher(),
+    )
+    core.persist(
+        ResolveState(
+            config_digest="config-sha",
+            run_id=run_id,
+            phase=ResolvePhase.WORKERS,
+            source=SourceSnapshot(branch="feature", commit="source-sha"),
+            spec=resolve_spec(),
+            concerns=[concern("a")],
+            progress=[ConcernProgress(concern_id="a")],
+            bases=[cleared],
+        )
+    )
+
+    adopted = asyncio.run(core.record_dependency_base(derived))
+
+    assert adopted == cleared
+    assert core.repository.load().bases == [cleared]
+
+    # A base whose dependency shape moved is still the invariant it was
+    # written to catch, and the commit is what clearance is allowed to move.
+    with pytest.raises(ResolverInvariantError, match="dependency base changed"):
+        asyncio.run(
+            core.record_dependency_base(
+                derived.model_copy(update={"parent_commits": ["other-sha"]})
+            )
+        )
+
+
 def test_releasing_a_run_cleans_concern_branches_and_keeps_the_review_one(
     tmp_path: Path,
 ) -> None:
