@@ -50,6 +50,7 @@ from lup.resolver.models import (
     AnswerBatch,
     AcceptanceCriterion,
     Concern,
+    ConcernAllowance,
     ConcernInventory,
     ConcernOrigin,
     ConcernOutcome,
@@ -206,6 +207,40 @@ def test_dag_rejects_missing_nodes_and_cycles_and_filters_unapproved_ancestry() 
 def test_a_question_id_must_name_one_mailbox_file() -> None:
     with pytest.raises(ValueError, match="not a path-safe name"):
         MaterialQuestion(id="nested/id", concern_id="a", prompt="Decide?")
+
+
+def test_a_question_cannot_offer_a_gate_its_concern_was_not_granted() -> None:
+    """The unapprovable option is unplannable, not merely disclaimed.
+
+    A choice whose text admits it needs a gate still gets picked, and the
+    run still spends a lease discovering the worker is denied on arrival.
+    """
+    gated = MaterialQuestion(
+        id="roster-home",
+        concern_id="a",
+        prompt="Where should the roster live?",
+        choices=["Existing page", "A new published page"],
+        allowances=[ConcernAllowance.NEW_DEVTOOLS_MODULE],
+    )
+
+    with pytest.raises(ValueError, match="does not request"):
+        Concern(
+            id="a",
+            title="A",
+            spec="Resolve a",
+            criteria=[AcceptanceCriterion(id="a-done", description="done")],
+            questions=[gated],
+        )
+
+    granted = Concern(
+        id="a",
+        title="A",
+        spec="Resolve a",
+        criteria=[AcceptanceCriterion(id="a-done", description="done")],
+        questions=[gated],
+        allowances=[ConcernAllowance.NEW_DEVTOOLS_MODULE],
+    )
+    assert granted.questions[0].allowances == [ConcernAllowance.NEW_DEVTOOLS_MODULE]
 
 
 def test_a_missing_approval_answer_is_a_named_invariant() -> None:

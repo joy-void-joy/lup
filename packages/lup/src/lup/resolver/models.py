@@ -127,6 +127,14 @@ class MaterialQuestion(BaseModel):
     concern_id: str
     prompt: str
     choices: list[str] = Field(default_factory=list)
+    allowances: list[ConcernAllowance] = Field(
+        default_factory=list,
+        description=(
+            "Every edit gate some choice here would need. An option the "
+            "concern has no grant for is an option whose worker is denied, "
+            "so naming the gate here is what makes the concern carry it."
+        ),
+    )
     recommendation: str | None = None
     closed_choices: bool = Field(
         default=False,
@@ -234,6 +242,31 @@ class ConcernShape(BaseModel):
                 raise ValueError(f"concern {self.id!r} has duplicate {label}")
         if self.id in self.dependencies:
             raise ValueError(f"concern {self.id!r} cannot depend on itself")
+        return self
+
+    @model_validator(mode="after")
+    def offered_choices_carry_their_gates(self) -> "ConcernShape":
+        """A question cannot offer what this concern was not granted.
+
+        The answer to a material question becomes a worker's assignment, so
+        an option needing a gate the concern lacks dispatches a worker that
+        is denied on arrival. Prose inside the choice text disclosing that
+        is not a gate — the human still picks it, and the run still spends a
+        lease finding out. Requiring the concern to carry the grant makes
+        the unapprovable option unplannable instead.
+        """
+        for question in self.questions:
+            ungranted = [
+                allowance
+                for allowance in dict.fromkeys(question.allowances)
+                if allowance not in self.allowances
+            ]
+            if ungranted:
+                raise ValueError(
+                    f"question {question.id!r} offers a choice needing "
+                    f"{', '.join(sorted(ungranted))}, which concern "
+                    f"{self.id!r} does not request"
+                )
         return self
 
 
