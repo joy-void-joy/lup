@@ -15,6 +15,8 @@ already carries.
 
 from collections.abc import Callable
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from lup.hooks import (
     LupHookInput,
     LupHookMatcher,
@@ -86,11 +88,29 @@ composition root supplies this — ``lup.adapters.claude.hooks`` has the
 decoder for Claude sessions."""
 
 
+class NativeSemantics(BaseModel):
+    """One runtime's call decoder together with the tools it has rules for.
+
+    The two are one fact, and a caller asked for them separately can supply
+    a decoder with no routed set. That mismatch is silent and inverts the
+    enforcement: registered against nothing, the hook judges every call, and
+    a tool this vocabulary cannot classify reaches the conservative ``ask``
+    that then outranks an ``allow`` a directory ACL beside it granted. An
+    adapter exports the pair it means, and an empty routed set — the shape
+    that disables enforcement while looking like configuration — is refused
+    at construction.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    decode: SemanticDecoder
+    routed_tools: list[str] = Field(min_length=1)
+
+
 def create_policy_hooks(
     policy: DecisionPolicy[SemanticTool],
-    decode: SemanticDecoder,
+    semantics: NativeSemantics,
     *,
-    routed_tools: list[str],
     tag: str = "semantic_policy",
 ) -> LupHooksConfig:
     """Create a PreToolUse hook that enforces *policy* on the tools it judges.
@@ -108,19 +128,19 @@ def create_policy_hooks(
     here it is the session's answer, produced by the same policy objects
     the generated dispatchers erase into rows.
 
-    **Why scoped:** *routed_tools* is what keeps this the same enforcement
-    the plugin performs rather than a stricter one. Unregistered elsewhere,
-    this hook sees every call, and a tool with no rule surface reaches
-    :class:`UnknownToolPolicy`, whose conservative ``ask`` then outranks an
-    ``allow`` a directory ACL beside it already granted — so composing this
-    with an ACL denies the reads that ACL exists to permit.
+    **Why scoped:** the routed set carried by *semantics* is what keeps this
+    the same enforcement the plugin performs rather than a stricter one.
+    Unregistered elsewhere, this hook sees every call, and a tool with no
+    rule surface reaches :class:`UnknownToolPolicy`, whose conservative
+    ``ask`` then outranks an ``allow`` a directory ACL beside it already
+    granted — so composing this with an ACL denies the reads that ACL exists
+    to permit.
 
     Args:
         policy: The judge for one decoded tool, typically a
             :class:`SemanticToolPolicy` over the fetch, shell, and edit rules.
-        decode: The adapter's native-call decoder.
-        routed_tools: The native tool names this policy has rules for — the
-            same list the adapter's :class:`DispatcherDeclaration` registers.
+        semantics: The adapter's decoder and the native tool names this
+            policy has rules for, as the adapter exports them.
         tag: Matcher tag for adapter dispatch.
 
     Returns:
@@ -132,10 +152,14 @@ def create_policy_hooks(
         # vocabulary, so this reads a lup spelling rather than a provider's.
         if event.event != "PreToolUse":  # lup: ignore[native-spelling]
             return LupHookOutput()
-        return policy_hook_output(policy.decide(decode(event)))
+        return policy_hook_output(policy.decide(semantics.decode(event)))
 
     return LupHooksConfig(
         pre_tool_use=[
-            LupHookMatcher(hook=policy_hook, matcher="|".join(routed_tools), tag=tag)
+            LupHookMatcher(
+                hook=policy_hook,
+                matcher="|".join(semantics.routed_tools),
+                tag=tag,
+            )
         ]
     )

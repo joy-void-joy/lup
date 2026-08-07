@@ -18,6 +18,8 @@ from lup.hooks import (
     LupHookOutput,
     LupHooksConfig,
 )
+from lup.adapters.claude.harness import CLAUDE_DISPATCHER
+from lup.policy.enforcement import NativeSemantics
 from lup.policy.models import SemanticTool
 from lup.types import JsonObject, ToolName
 from lup.workspace.paths import extract_glob_dir
@@ -51,6 +53,17 @@ def claude_hook_semantic_tool(event: LupHookInput) -> SemanticTool:
     """
     payload = ClaudeHookPayload(tool_name=event.tool_name, tool_input=event.tool_input)
     return ClaudeEventDecoder().decode(parse_claude_before_tool(payload)).tool
+
+
+CLAUDE_SEMANTICS = NativeSemantics(
+    decode=claude_hook_semantic_tool,
+    routed_tools=CLAUDE_DISPATCHER.routed_tools,
+)
+"""What an in-process Claude session hands a semantic policy.
+
+The routed set is the dispatcher's own, so the tools the plugin registers
+the hook for and the tools this path enforces over cannot drift apart.
+"""
 
 
 def build_claude_hook_handler(

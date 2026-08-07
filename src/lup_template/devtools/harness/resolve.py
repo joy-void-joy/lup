@@ -593,8 +593,7 @@ def run_resolve(
             create_codex_session_factory,
         )
         from lup_template.agent.config import engine_for_model, settings
-        from lup.adapters.claude.harness import CLAUDE_DISPATCHER
-        from lup.adapters.claude.hooks import claude_hook_semantic_tool
+        from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
         from lup.harness.enforcement import semantic_policy_for
         from lup.hooks import (
             LupHooksConfig,
@@ -785,8 +784,7 @@ def run_resolve(
                 semantic_policy_for(
                     declared_hook_set(), autonomous=True, interactive=False
                 ),
-                claude_hook_semantic_tool,
-                routed_tools=CLAUDE_DISPATCHER.routed_tools,
+                CLAUDE_SEMANTICS,
             )
 
         def reviewer_factory(cwd: Path) -> SessionFactory:

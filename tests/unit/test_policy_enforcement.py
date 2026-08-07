@@ -9,13 +9,15 @@ asks rather than passes.
 
 from pathlib import Path
 
-from pydantic import AnyHttpUrl
+import pytest
+from pydantic import AnyHttpUrl, ValidationError
 
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER
-from lup.adapters.claude.hooks import claude_hook_semantic_tool
+from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
 from lup.adapters.codex.native import CodexDecisionRenderer
 from lup.hooks import LupHookInput, LupHookOutput
 from lup.policy.enforcement import (
+    NativeSemantics,
     SemanticToolPolicy,
     create_policy_hooks,
     policy_hook_output,
@@ -124,8 +126,7 @@ def test_router_asks_rather_than_allows_what_no_policy_covers() -> None:
 async def test_hook_refuses_a_denied_call_and_leaves_other_events_alone() -> None:
     hooks = create_policy_hooks(
         SemanticToolPolicy(fetch=docs_fetch_policy()),
-        claude_hook_semantic_tool,
-        routed_tools=CLAUDE_DISPATCHER.routed_tools,
+        CLAUDE_SEMANTICS,
     )
     matcher = hooks.pre_tool_use[0]
     assert matcher.tag == "semantic_policy"
@@ -159,11 +160,25 @@ def test_hook_is_scoped_to_the_tools_the_policy_has_rules_for() -> None:
     """
     hooks = create_policy_hooks(
         SemanticToolPolicy(fetch=docs_fetch_policy()),
-        claude_hook_semantic_tool,
-        routed_tools=CLAUDE_DISPATCHER.routed_tools,
+        CLAUDE_SEMANTICS,
     )
     matched = hooks.pre_tool_use[0].matcher or ""
 
     assert set(matched.split("|")) == set(CLAUDE_DISPATCHER.routed_tools)
     for unruled in ("Read", "Skill", "mcp__lup-output__submit_output"):
         assert unruled not in matched.split("|")
+
+
+def test_a_decoder_cannot_be_enforced_over_no_tools_at_all() -> None:
+    """The scope is carried with the decoder, and an empty one is refused.
+
+    Handing the routed set in separately let a caller supply a decoder and
+    no scope, which reads as configuration and silently inverts the
+    enforcement: matched against nothing the hook judges every call, and the
+    conservative ``ask`` an unclassified tool earns outranks the ``allow``
+    beside it. There is no such pair to construct.
+    """
+    assert CLAUDE_SEMANTICS.routed_tools == CLAUDE_DISPATCHER.routed_tools
+
+    with pytest.raises(ValidationError):
+        NativeSemantics(decode=CLAUDE_SEMANTICS.decode, routed_tools=[])

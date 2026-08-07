@@ -14,8 +14,7 @@ import asyncio
 
 from pydantic import AnyHttpUrl
 
-from lup.adapters.claude.harness import CLAUDE_DISPATCHER
-from lup.adapters.claude.hooks import claude_hook_semantic_tool
+from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
 from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
     create_claude_session_factory,
@@ -44,8 +43,7 @@ def policy_hooks() -> LupHooksConfig:
     )
     return create_policy_hooks(
         SemanticToolPolicy(fetch=policy),
-        claude_hook_semantic_tool,
-        routed_tools=CLAUDE_DISPATCHER.routed_tools,
+        CLAUDE_SEMANTICS,
     )
 
 
