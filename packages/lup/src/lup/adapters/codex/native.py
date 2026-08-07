@@ -1,5 +1,3 @@
-# lup: the long tail of operation shapes is decoded without a test naming each
-# one.
 # lup: ignore[own-model-dispatch]
 # The Codex*Operation models mirror Codex app-server and hook payloads — the
 # apply_patch file-change list, Bash, web_fetch, web_search — so the arms of
