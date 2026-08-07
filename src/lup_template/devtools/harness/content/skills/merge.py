@@ -14,7 +14,7 @@ SKILL = models.Skill(
         ),
     ],
     tools=[
-        "Bash(git:*, uv run lup-devtools:*)",
+        "Bash(git:*, uv run lup-devtools:*, .venv/bin/lup-devtools:*)",
         "Read",
         "Grep",
         "Glob",
@@ -230,10 +230,12 @@ Summarize:
 
 When invoked without a target branch, detect and resolve conflicts from an in-progress merge, rebase, or cherry-pick.
 
+These commands are spelled without `uv run` — and must stay that way — because `uv` parses `pyproject.toml` before it runs anything, so an integration merge that conflicts the manifest takes the whole conflict toolchain down with it. `.venv/bin/lup-devtools` is the console script in this project's environment: it imports the package directly and starts whatever the manifest currently says.
+
 ### 1. Assess the situation
 
 ```bash
-uv run lup-devtools dev conflict status --json
+.venv/bin/lup-devtools dev conflict status --json
 ```
 
 This reports the operation type (merge/rebase/cherry-pick), conflicted files, and commits on both sides.
@@ -257,7 +259,7 @@ For each file in `conflicted_files`:
 After resolving all conflicts but **before completing the merge**:
 
 ```bash
-uv run lup-devtools dev conflict audit <conflicted-files> --json
+.venv/bin/lup-devtools dev conflict audit <conflicted-files> --json
 ```
 
 Review the audit output. If any files have `warning: true`, check that the removals are intentional. Fix unjustified deletions before completing.
@@ -265,7 +267,7 @@ Review the audit output. If any files have `warning: true`, check that the remov
 ### 5. Complete
 
 ```bash
-uv run lup-devtools dev conflict complete
+.venv/bin/lup-devtools dev conflict complete
 ```
 
 ---
