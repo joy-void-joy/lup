@@ -280,50 +280,11 @@ instead. Personal cache, trust, and session state are never committed.
 
 ### Lup Skills & Agents
 
-Both lists below are rendered from the typed declarations in
+`docs/harness.md` carries the roster of every skill and agent this plugin
+ships, each with the one line that describes it. Both lists are rendered from
+the typed declarations in
 `src/lup_template/devtools/harness/content/catalog.py` — change the catalog,
 then regenerate.
-
-**Skills:**
-
-- /lup:add-command — Create a new slash command in the lup plugin
-- /lup:brainstorm — Pre-init design exploration — brainstorm architecture, MCP tools, and agent design
-- /lup:bump — Review changes since last bump and bump agent version
-- /lup:close — Check PR review status, merge if approved, and clean up branches
-- /lup:commit — Review all diffs and create atomic commits
-- /lup:create-investigator — Create a new diagnostic/investigator command (like /debug)
-- /lup:debug — Trace an error through logs to find root cause
-- /lup:fb-analyze — Aggregate tool health, capability gaps, and reasoning patterns across sessions
-- /lup:fb-implement — Implement prioritized changes from feedback loop analysis
-- /lup:fb-investigate — Deep trace reading and error classification for selected sessions
-- /lup:fb-reflect — Meta and meta-meta reflection on the feedback loop process itself
-- /lup:fb-status — Feedback loop entry point — status, targets, and previous session context
-- /lup:feedback-loop — Full feedback loop — orchestrates status, investigation, analysis, reflection, and implementation
-- /lup:hooks — Inspect and modify the canonical semantic permission policy
-- /lup:implementer — Implement one resolver concern inside its leased worktree
-- /lup:import — Import a specific pattern from a tracked downstream repo
-- /lup:init — Initialize the self-improvement loop for a specific domain
-- /lup:install — Install lup plugin and scaffolding into a target repo
-- /lup:land — Land every branch that has not reached the integration branch, and clear the ones that have
-- /lup:merge — Merge a branch or resolve existing merge conflicts
-- /lup:meta — Review and modify the generated harness trees, brainstorm improvements interactively
-- /lup:modify-command — Modify an existing slash command based on a description or delta
-- /lup:principle — Propagate a general principle across the entire repo
-- /lup:rebase — Clean up commit history on the feature branch and open/update a PR
-- /lup:refactor — Rewrite a file or folder from scratch while respecting coding conventions
-- /lup:refactor-tools — Audit SDK agent tools and subagents — find gaps, overlaps, and refactoring opportunities
-- /lup:resolve — Resolve inline feedback through isolated work
-- /lup:resolve-reviewer — Review one resolver concern against its acceptance criteria
-- /lup:review — Review a session trace for workflow quality, tool usage, and improvement opportunities
-- /lup:update — Review upstream template commits and apply improvements
-- /lup:verify-solved — Check every claimed-resolved note against what it actually asked
-
-**Agents:**
-
-- `implementer` — Implement production changes against established acceptance tests
-- `trace-explorer` — Investigate trace evidence without changing production files
-- `version-explorer` — Inventory version-impact evidence across the repository
-- `version-reviewer` — Independently review a proposed version change
 
 ### Permission Hooks
 

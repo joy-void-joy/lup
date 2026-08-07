@@ -6,10 +6,6 @@ import lup.harness.models as models
 
 import lup_template.devtools.harness.content.conventions as conventions
 
-from lup_template.devtools.harness.content.catalog import (
-    agent_roster_text,
-    skill_roster_parts,
-)
 from lup_template.devtools.subapps import subapp_summary
 
 # lup: state that a consumer never holds or calls an implemented ABC directly.
@@ -326,22 +322,12 @@ instead. Personal cache, trust, and session state are never committed.
 
 ### Lup Skills & Agents
 
-Both lists below are rendered from the typed declarations in
+`docs/harness.md` carries the roster of every skill and agent this plugin
+ships, each with the one line that describes it. Both lists are rendered from
+the typed declarations in
 `src/lup_template/devtools/harness/content/catalog.py` — change the catalog,
 then regenerate.
 
-**Skills:**
-
-"""
-        ),
-        *skill_roster_parts(),
-        models.TextPart(
-            text=r"""
-**Agents:**
-
-"""
-            + agent_roster_text()
-            + r"""
 ### Permission Hooks
 
 Permissions come from the canonical semantic policies in `lup.policy` and the
