@@ -22,7 +22,6 @@ Run it via ``lup-devtools dev plugin name``; ``rename_package`` calls it so
 """
 
 import json
-import tomllib
 from pathlib import Path
 from typing import TypedDict
 
@@ -30,6 +29,8 @@ import typer
 from pydantic import ConfigDict, TypeAdapter, with_config
 
 from lup.workspace.paths import find_project_root
+
+from lup_template.devtools.harness.catalog import portable_harness
 
 PLUGIN_NAME = "lup"
 SELF_PATH = "./.claude/plugins"
@@ -78,15 +79,14 @@ def settings_file(root: Path) -> Path:
 
 
 def default_marketplace_name(root: Path) -> str:
-    """Marketplace name defaults to the project's package name ([project].name)."""
-    with (root / "pyproject.toml").open("rb") as f:
-        data = tomllib.load(f)
-    name = data.get("project", {}).get("name")
-    if not name:
-        raise typer.BadParameter(
-            "No [project].name in pyproject.toml; pass a marketplace name explicitly"
-        )
-    return name
+    """The name the plugin declaration already carries, so the two agree.
+
+    Generation renders `Plugin.marketplace` into `marketplace.json`. A second
+    default computed here would let this command and `harness generate`
+    disagree, and each would silently undo the other's name on the next run —
+    which is how a repo ends up registered under a name it never chose.
+    """
+    return str(portable_harness(root=root).plugins[0].marketplace)
 
 
 def validate_name(name: str) -> str:

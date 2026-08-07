@@ -10,10 +10,14 @@ Fake executables on disk stand in for the real CLIs, so every branch
 runs offline.
 """
 
+import json
 from pathlib import Path
 
 import pytest
 
+from lup.adapters.claude.harness import ClaudePluginManifestRenderer
+from lup.adapters.codex.harness import CodexPluginManifestRenderer
+from lup.harness.models import Plugin
 from lup.adapters.claude.harness_runtime import ClaudeCapabilityProbe
 from lup.adapters.codex.harness_runtime import (
     CodexCapabilityProbe,
@@ -205,3 +209,30 @@ class TestPluginInstallGate:
 
         with pytest.raises(FileNotFoundError, match="plugin source does not exist"):
             CodexPluginInstaller(config, idle_cli).ensure(tmp_path / "ghost", tmp_path)
+
+
+def test_both_adapters_name_the_marketplace_the_plugin_declares() -> None:
+    """A marketplace name is per-project, and every adapter must honour it.
+
+    Claude Code keys its machine-wide marketplace registry by name, so a
+    library rendering one fixed name hands every adopter the same key. Two
+    lup projects on one machine then resolve each other's plugin, and a
+    session is judged by a gate its own worktree does not contain.
+    """
+    plugin = Plugin(
+        id="plugin.lup",
+        name="lup",
+        marketplace="acme-repository",
+        version="0.1.0",
+        description="fixture",
+        skills=[],
+        agents=[],
+    )
+
+    for renderer in (ClaudePluginManifestRenderer(), CodexPluginManifestRenderer()):
+        names = [
+            json.loads(artifact.content)["name"]
+            for artifact in renderer.render(plugin).artifacts
+            if artifact.path.name == "marketplace.json"
+        ]
+        assert names == ["acme-repository"], type(renderer).__name__

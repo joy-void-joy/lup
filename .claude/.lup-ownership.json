@@ -16,7 +16,7 @@
     {
       "path": ".claude/plugins/.claude-plugin/marketplace.json",
       "category": "generated",
-      "sha256": "8ac84a6104c5ec1e5bc61d0506ee83699c32c3017133b55ce48ac8c35b26a612",
+      "sha256": "53980400b8647d00019124e0a56d1a113dba3305a1a66d3eb472936e18fdd7f9",
       "semantic_id": "plugin.lup",
       "executable": false
     },
@@ -394,7 +394,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "9d084f024d454ae9da04cd3227718bb0727a8b449a93dc793152ba4dde1796ea",
+      "sha256": "ca226c2043eafa52bbaa387cdaf725cd3105f9b62b9545a9b3f43ecd7d0464a2",
       "semantic_id": "harness.project-settings",
       "executable": false
     },

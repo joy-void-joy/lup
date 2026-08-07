@@ -5,18 +5,16 @@ from urllib.parse import urlsplit
 from lup.harness.models import HookSet, HookUrlScope, Plugin
 from lup.types import JsonObject, JsonValue
 
+OFFICIAL_PLUGINS: dict[str, JsonValue] = {
+    "agent-sdk-dev@claude-plugins-official": True,
+    "claude-md-management@claude-plugins-official": True,
+    "github@claude-plugins-official": True,
+}
+
 SETTINGS: JsonObject = {
     "coauthorship": False,
-    "enabledPlugins": {
-        "agent-sdk-dev@claude-plugins-official": True,
-        "claude-md-management@claude-plugins-official": True,
-        "github@claude-plugins-official": True,
-        "lup@lup-template": True,
-    },
+    "enabledPlugins": OFFICIAL_PLUGINS,
     "env": {"ENABLE_TOOL_SEARCH": "false"},
-    "extraKnownMarketplaces": {
-        "lup-template": {"source": {"path": "./.claude/plugins", "source": "directory"}}
-    },
     "fileSuggestion": {
         "command": ".claude/plugins/lup/scripts/file_suggest.sh",
         "type": "command",
@@ -86,6 +84,20 @@ def project_settings(plugin: Plugin | None) -> JsonObject:
     credential paths become sandbox read denials.
     """
     settings: JsonObject = dict(SETTINGS)
+    if plugin is not None:
+        # Marketplace names share one global namespace, so this must be the
+        # per-project name the declaration carries. A literal here would
+        # register every adopter under one key, and whichever repo installed
+        # last would serve its plugin to all of them.
+        settings["extraKnownMarketplaces"] = {
+            str(plugin.marketplace): {
+                "source": {"path": "./.claude/plugins", "source": "directory"}
+            }
+        }
+        settings["enabledPlugins"] = {
+            **OFFICIAL_PLUGINS,
+            f"{plugin.name}@{plugin.marketplace}": True,
+        }
     settings["permissions"] = {
         "allow": [*ALLOWED, *(served_tool_grants(plugin) if plugin else [])],
         "deny": DENIED,

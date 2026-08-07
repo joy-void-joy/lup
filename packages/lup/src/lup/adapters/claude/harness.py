@@ -264,7 +264,7 @@ class ClaudePluginManifestRenderer(ArtifactRenderer[Plugin]):
             "description": source.description,
         }
         marketplace = {
-            "name": "lup-template",
+            "name": source.marketplace,
             "owner": {"name": "Lup"},
             "plugins": [
                 {
