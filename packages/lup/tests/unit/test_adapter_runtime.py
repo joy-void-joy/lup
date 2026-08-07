@@ -962,6 +962,59 @@ NOTIFICATION_CASES = [
         ],
     ),
     NotificationCase(
+        # The whole reason `message_role` exists, asserted where it is read
+        # rather than only on the helper: a call and its result are the model's
+        # act and the environment's reply, so they reach a transcript as a tool
+        # message carrying both blocks. Replace `message_role(item)` at the call
+        # site with the literal "assistant" and this is what refuses. It is also
+        # the only case that drives the block loop round more than once.
+        name="item/completed-as-a-tool-message",
+        method="item/completed",
+        params={
+            "turnId": "turn-1",
+            "item": {
+                "type": "commandExecution",
+                "id": "c1",
+                "command": "uv run pytest",
+                "aggregatedOutput": "2 passed",
+                "status": "completed",
+            },
+        },
+        events=[
+            BlockCompletedEvent(
+                identifiers=turn_identifiers(),
+                block=TurnToolCallBlock(
+                    id="c1", name="ShellCommand", arguments={"command": "uv run pytest"}
+                ),
+            ),
+            BlockCompletedEvent(
+                identifiers=turn_identifiers(),
+                block=TurnToolResultBlock(tool_call_id="c1", content="2 passed"),
+            ),
+            MessageCompletedEvent(
+                identifiers=turn_identifiers(),
+                message=TurnMessage(
+                    role="tool",
+                    blocks=[
+                        TurnToolCallBlock(
+                            id="c1",
+                            name="ShellCommand",
+                            arguments={"command": "uv run pytest"},
+                        ),
+                        TurnToolResultBlock(tool_call_id="c1", content="2 passed"),
+                    ],
+                ),
+            ),
+        ],
+    ),
+    NotificationCase(
+        # An item no arm decodes publishes nothing at all — not even an empty
+        # message, which is the `if completed:` guard rather than the loop.
+        name="item/completed-with-an-undecodable-item",
+        method="item/completed",
+        params={"turnId": "turn-1", "item": {"type": "mcpTool", "id": "m1"}},
+    ),
+    NotificationCase(
         # Usage is folded into the channel rather than published, so this arm
         # is the one whose whole effect is invisible on the event stream.
         name="thread/tokenUsage/updated",
@@ -1048,6 +1101,26 @@ COMPLETED_ITEM_CASES = [
                 arguments={"changes": [{"path": "a.py", "kind": "update"}]},
             ),
             TurnToolResultBlock(tool_call_id="f1", content="completed"),
+        ],
+    ),
+    CompletedItemCase(
+        # The status is the result content here rather than a stream of output,
+        # so a refused patch carries the word it was refused with.
+        name="fileChange-that-failed",
+        arm="(type=fileChange, id, changes, status)",
+        payload={
+            "type": "fileChange",
+            "id": "f2",
+            "changes": [{"path": "a.py", "kind": "update"}],
+            "status": "rejected",
+        },
+        blocks=[
+            TurnToolCallBlock(
+                id="f2",
+                name="EditBatch",
+                arguments={"changes": [{"path": "a.py", "kind": "update"}]},
+            ),
+            TurnToolResultBlock(tool_call_id="f2", content="rejected", is_error=True),
         ],
     ),
     CompletedItemCase(
@@ -1314,7 +1387,20 @@ def test_each_completed_item_decodes_to_the_blocks_it_names(
     assert decode_completed_item(case.payload) == case.blocks
 
 
-@pytest.mark.parametrize("item_type", decoder_arms(message_role)[0].discriminators)
+def test_every_message_role_arm_is_named_by_a_case() -> None:
+    """Both arms spelled out, so a third cannot be added in silence.
+
+    Order is asserted rather than sorted away, unlike the gates over disjoint
+    class patterns: here the wildcard's position is the behaviour. Promote it
+    above the first arm and every item becomes an assistant message.
+    """
+    assert arm_labels(message_role) == [
+        "(type=commandExecution) | (type=fileChange) | (type=mcpTool)",
+        "_",
+    ]
+
+
+@pytest.mark.parametrize("item_type", ["commandExecution", "fileChange", "mcpTool"])
 def test_an_environment_reply_item_is_a_tool_message(item_type: str) -> None:
     assert message_role({"type": item_type}) == "tool"
 
