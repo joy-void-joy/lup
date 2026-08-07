@@ -516,6 +516,7 @@ class ClaudeSessionOpener:
             starter=state.start_turn,
             binder=ClaudeTurnToolBinder(state),
             gate_resolver=self.config.submission_gate_resolver,
+            submission_tool=SUBMISSION_TOOL,
         )
         try:
             yield SessionHandle(session=session, fork=ClaudeFork(state))

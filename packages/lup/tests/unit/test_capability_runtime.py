@@ -230,6 +230,7 @@ async def test_post_completion_failure_preserves_partial_evidence() -> None:
         BrokenStore(),
         lambda: None,
         TurnLifecycle(),
+        "submit_output",
     )
 
     with pytest.raises(ProviderTurnError) as raised:

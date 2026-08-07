@@ -21,6 +21,7 @@ from lup.runtime.composition import (
 from lup.runtime.errors import (
     BudgetExceededError,
     ProviderTurnError,
+    StructuredOutputError,
     TurnFailure,
     TurnTimeoutError,
 )
@@ -34,6 +35,8 @@ from lup.runtime.models import (
     TurnId,
     TurnInput,
     TurnTextBlock,
+    TurnToolCallBlock,
+    TurnToolResultBlock,
     turn_request,
 )
 from lup.runtime.wrappers import (
@@ -209,6 +212,54 @@ async def test_correction_rebinds_a_fresh_store_and_aggregates_usage() -> None:
     assert result.output == WrappedOutput(value=7)
     assert result.usage.input_tokens == 3
     assert len(binder.stores) == len(dict.fromkeys(binder.stores)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_refused_submission_fails_instead_of_spending_corrections() -> None:
+    """Re-prompting a refused submission reproduces the refusal.
+
+    A worker denied its submission tool reported the same empty store every
+    cycle, so every configured correction was spent reaching the failure the
+    first turn already had — and reported it as a turn that never submitted,
+    which reads as a model mistake rather than a permission one.
+    """
+    binder = RecordingBinder()
+    sequence = 0
+
+    async def start(_text: str) -> AcceptedTurn:
+        nonlocal sequence
+        sequence += 1
+
+        async def complete() -> CompletedTurn:
+            return CompletedTurn(
+                blocks=[
+                    TurnToolCallBlock(id="call-1", name="submit_output"),
+                    TurnToolResultBlock(
+                        tool_call_id="call-1",
+                        content="unclassified tool 'submit_output'",
+                        is_error=True,
+                    ),
+                ]
+            )
+
+        return accepted(sequence, complete)
+
+    session = DecoratingSession(
+        ComposedSession(start, binder),
+        timeout=None,
+        budget=None,
+        recovery=None,
+        correction=CorrectionConfig(cycles=3),
+        persistence=None,
+    )
+    handle = await session.start(turn_request("typed", WrappedOutput))
+
+    with pytest.raises(StructuredOutputError) as raised:
+        await handle.turn.result()
+
+    assert sequence == 1
+    assert "unclassified tool 'submit_output'" in raised.value.failure.message
+    assert raised.value.failure.correctable is False
 
 
 @pytest.mark.asyncio

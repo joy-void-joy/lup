@@ -28,6 +28,15 @@ class TurnFailure(BaseModel):
     identifiers: TurnIdentifiers | None = None
     validation_history: list[ValidationAttempt] = Field(default_factory=list)
 
+    correctable: bool = True
+    """Whether re-prompting could produce a different outcome.
+
+    A correction cycle re-sends the turn with an instruction appended, which
+    is worth doing when the model could have answered and did not. When the
+    submission tool was refused rather than misused, the same prompt meets
+    the same refusal, so the cycles only delay the failure they report.
+    """
+
 
 class TurnError(Exception):
     """Base for failures carrying complete available partial evidence."""

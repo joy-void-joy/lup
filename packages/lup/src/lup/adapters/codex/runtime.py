@@ -339,6 +339,10 @@ class CodexLiveEventStream(EventStream):
         return self.iterate()
 
 
+SUBMISSION_TOOL = "submit_output"
+"""What the app-server advertises this turn's dynamic submission tool as."""
+
+
 class CodexConversationState:
     """One app-server connection, thread, and current turn binding."""
 
@@ -445,7 +449,7 @@ class CodexConversationState:
             raise RuntimeError(f"unsupported app-server request {message.method!r}")
         call = DynamicToolCall.model_validate(message.params)
         submission = self.submission
-        if submission is None or call.tool != "submit_output":
+        if submission is None or call.tool != SUBMISSION_TOOL:
             return {
                 "contentItems": [
                     {
@@ -584,6 +588,7 @@ class CodexSessionOpener:
             state.start_turn,
             CodexTurnToolBinder(state),
             gate_resolver=self.config.submission_gate_resolver,
+            submission_tool=SUBMISSION_TOOL,
         )
         try:
             yield SessionHandle(session=session, fork=CodexFork(state))
@@ -602,7 +607,7 @@ def create_codex_session_factory(config: CodexSessionConfig) -> SessionFactory:
 def dynamic_tool(submission: TurnSubmission) -> JsonObject:
     """Render the exact Pydantic schema into the experimental native tool spec."""
     return {
-        "name": "submit_output",
+        "name": SUBMISSION_TOOL,
         "description": "Submit the final validated result for this turn.",
         "inputSchema": submission.schema,
         "deferLoading": False,

@@ -104,6 +104,16 @@ class TurnBlock(BaseModel):
         """The arguments this block invokes its tool with, if it invokes one."""
         return None
 
+    @property
+    def invoked_call_id(self) -> str | None:
+        """The id of the call this block makes, if it makes one."""
+        return None
+
+    @property
+    def refusal(self) -> "ToolRefusal | None":
+        """The refused call this block reports, if it reports one."""
+        return None
+
 
 class TurnTextBlock(TurnBlock):
     """One completed assistant text block."""
@@ -152,6 +162,19 @@ class TurnToolCallBlock(TurnBlock):
     def tool_arguments(self) -> JsonObject | None:
         return self.arguments
 
+    @property
+    def invoked_call_id(self) -> str | None:
+        return self.id
+
+
+class ToolRefusal(BaseModel):
+    """One tool call that returned an error instead of a result."""
+
+    model_config = FROZEN
+
+    call_id: str
+    detail: str
+
 
 class TurnToolResultBlock(TurnBlock):
     """One completed tool result."""
@@ -160,6 +183,12 @@ class TurnToolResultBlock(TurnBlock):
     tool_call_id: str
     content: str
     is_error: bool = False
+
+    @property
+    def refusal(self) -> ToolRefusal | None:
+        if not self.is_error:
+            return None
+        return ToolRefusal(call_id=self.tool_call_id, detail=self.content)
 
     @property
     def telemetry_block(self) -> LupContentBlock:

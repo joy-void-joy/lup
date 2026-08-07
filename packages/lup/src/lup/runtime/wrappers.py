@@ -329,7 +329,7 @@ class ResilientTurn[T: BaseModel | None](Turn[T]):
                     cycles = (
                         self.correction.cycles if self.correction is not None else 0
                     )
-                    if correction_cycles >= cycles:
+                    if not error.failure.correctable or correction_cycles >= cycles:
                         raise StructuredOutputError(
                             combined_failure(error.failure, failures)
                         ) from error
