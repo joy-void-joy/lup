@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from lup.codescan.symbols import DefinedSymbol, defined_symbols, symbols_lost
-from lup.harness.process import LaunchRequest, ProcessLauncher
+from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import WorktreePreparer
 from lup.resolver.notes import clear_concern_notes
 from lup.resolver.models import (
@@ -124,8 +124,24 @@ class WorktreeOrchestrator:
         self.workspace = workspace
         self.preparer = preparer
 
+    def require(self, request: LaunchRequest, failure: str) -> ExitStatus:
+        """Launch one step whose failure refuses the run, in git's own words.
+
+        A sequence reported under one message cannot say which of its steps
+        failed, and a bare status code names neither the step nor anything
+        to act on. Raising at the step also stops the sequence there, so a
+        later step never runs against a tree an earlier one failed to make.
+        """
+        status = self.launcher.launch(request)
+        if status.code != 0:
+            raise RuntimeError(
+                f"{failure}: `{' '.join(request.arguments)}` exited "
+                f"{status.code}: {status.stderr.strip()}"
+            )
+        return status
+
     def create(self, lease: WritableRootLease, base_commit: str) -> None:
-        status = self.launcher.launch(
+        self.require(
             LaunchRequest(
                 arguments=[
                     "git",
@@ -137,10 +153,9 @@ class WorktreeOrchestrator:
                     base_commit,
                 ],
                 cwd=self.workspace,
-            )
+            ),
+            f"failed to create worktree for {lease.concern_id}",
         )
-        if status.code != 0:
-            raise RuntimeError(f"failed to create worktree for {lease.concern_id}")
         if self.preparer is not None:
             self.preparer.prepare(lease.root)
 
@@ -336,14 +351,13 @@ class WorktreeOrchestrator:
 
     def restore(self, lease: WritableRootLease) -> None:
         """Restore a persisted branch into its persisted writable root."""
-        status = self.launcher.launch(
+        self.require(
             LaunchRequest(
                 arguments=["git", "worktree", "add", str(lease.root), lease.branch],
                 cwd=self.workspace,
-            )
+            ),
+            f"failed to restore worktree for {lease.concern_id}",
         )
-        if status.code != 0:
-            raise RuntimeError(f"failed to restore worktree for {lease.concern_id}")
         if self.preparer is not None:
             self.preparer.prepare(lease.root)
 
@@ -398,33 +412,42 @@ class WorktreeOrchestrator:
         return lines[0]
 
     def reset(self, lease: WritableRootLease, commit: str) -> None:
-        """Discard an uncommitted attempt before safely retrying a concern."""
-        reset = self.launcher.launch(
+        """Discard an uncommitted attempt before safely retrying a concern.
+
+        The rewind runs alone before the sweep, because sweeping a tree that
+        `git reset --hard` failed to rewind destroys untracked work without
+        achieving the discard that removal was part of.
+        """
+        self.require(
             LaunchRequest(
                 arguments=["git", "reset", "--hard", commit],
                 cwd=lease.root,
-            )
+            ),
+            f"failed to reset worktree for {lease.concern_id}",
         )
-        cleaned = self.launcher.launch(
+        self.require(
             LaunchRequest(
                 arguments=["git", "clean", "-fd"],
                 cwd=lease.root,
-            )
+            ),
+            f"failed to reset worktree for {lease.concern_id}",
         )
-        if reset.code != 0 or cleaned.code != 0:
-            raise RuntimeError(f"failed to reset worktree for {lease.concern_id}")
 
     def head(self, lease: WritableRootLease) -> str:
         """Read the exact current commit identity for an orchestrated worktree."""
-        identified = self.launcher.launch(
+        identified = self.require(
             LaunchRequest(
                 arguments=["git", "rev-parse", "HEAD"],
                 cwd=lease.root,
-            )
+            ),
+            f"failed to identify worktree {lease.concern_id}",
         )
         lines = identified.stdout.splitlines()
-        if identified.code != 0 or len(lines) != 1 or not lines[0]:
-            raise RuntimeError(f"failed to identify worktree {lease.concern_id}")
+        if len(lines) != 1 or not lines[0]:
+            raise RuntimeError(
+                f"failed to identify worktree {lease.concern_id}: `git rev-parse "
+                f"HEAD` named {len(lines)} commits: {identified.stdout.strip()!r}"
+            )
         return lines[0]
 
     def prepare_join(self, lease: WritableRootLease, parent_commits: list[str]) -> bool:
@@ -459,7 +482,8 @@ class WorktreeOrchestrator:
         )
         if status.code not in {0, 1}:
             raise RuntimeError(
-                f"failed to prepare semantic join for {lease.concern_id}"
+                f"failed to prepare semantic join for {lease.concern_id}: "
+                f"`git merge` exited {status.code}: {status.stderr.strip()}"
             )
         return status.code == 1
 
@@ -632,8 +656,9 @@ class WorktreeOrchestrator:
                 f"semantic join for {lease.concern_id} still has "
                 f"invalid changes: {checked.stdout.strip() or unresolved.stderr.strip()}"
             )
-        status = self.launcher.launch(
-            LaunchRequest(arguments=["git", "status", "--porcelain"], cwd=lease.root)
+        status = self.require(
+            LaunchRequest(arguments=["git", "status", "--porcelain"], cwd=lease.root),
+            f"failed to inspect semantic join for {lease.concern_id}",
         )
         merge_head = self.launcher.launch(
             LaunchRequest(
@@ -641,37 +666,20 @@ class WorktreeOrchestrator:
                 cwd=lease.root,
             )
         )
-        if status.code != 0:
-            raise RuntimeError(
-                f"failed to inspect semantic join for {lease.concern_id}"
-            )
         if not status.stdout.splitlines() and merge_head.code != 0:
             return self.head(lease)
-        added = self.launcher.launch(
-            LaunchRequest(arguments=["git", "add", "-A"], cwd=lease.root)
+        self.require(
+            LaunchRequest(arguments=["git", "add", "-A"], cwd=lease.root),
+            f"failed to stage semantic join for {lease.concern_id}",
         )
-        committed = self.launcher.launch(
+        self.require(
             LaunchRequest(
                 arguments=["git", "commit", "-m", title],
                 cwd=lease.root,
-            )
+            ),
+            f"failed to commit semantic join for {lease.concern_id}",
         )
-        identified = self.launcher.launch(
-            LaunchRequest(
-                arguments=["git", "rev-parse", "HEAD"],
-                cwd=lease.root,
-            )
-        )
-        lines = identified.stdout.splitlines()
-        if (
-            added.code != 0
-            or committed.code != 0
-            or identified.code != 0
-            or len(lines) != 1
-            or not lines[0]
-        ):
-            raise RuntimeError(f"failed to commit semantic join for {lease.concern_id}")
-        return lines[0]
+        return self.head(lease)
 
 
 class DependencyBaseBuilder:
