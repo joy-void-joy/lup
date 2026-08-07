@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "a90f4b836d6628e8f2350aa483ce7b8b0501dd2b802a93e282d39368eed602ae",
+  "source_digest": "41114e32aec5b2188cd50e653e535ce0d7592a4ef9bd551d87b592ea2323bd94",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -394,7 +394,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "a0b7341dccb474f05e278f570c842e84ca95d39e6778ca1b8b98fc7dfc16c161",
+      "sha256": "54f0a6226cc377aaddb31e0dfeb0ba2d886acc77073e1d640334a76f77e59ec8",
       "semantic_id": "harness.guidance",
       "executable": false
     }

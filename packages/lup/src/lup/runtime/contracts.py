@@ -95,7 +95,11 @@ class ForkSession(ABC):
 
 
 class SubmittedOutputStore(ABC):
-    """Persist and retrieve validated per-turn submitted output."""
+    """Persist and retrieve validated per-turn submitted output.
+
+    An injected engine with no consumer-facing surface: a store is created per
+    turn and handed to ``ComposedTurn``, which reads it. No caller holds one.
+    """
 
     @abstractmethod
     def write(
@@ -110,7 +114,11 @@ class SubmittedOutputStore(ABC):
 
 
 class TurnToolBinder(ABC):
-    """Install, replace, or remove the portable submission tool."""
+    """Install, replace, or remove the portable submission tool.
+
+    An injected engine with no consumer-facing surface: adapters fill it and
+    ``ComposedSession`` is the surface that binds through it.
+    """
 
     @abstractmethod
     async def bind[T: BaseModel](self, binding: TurnToolBinding[T] | None) -> None:
