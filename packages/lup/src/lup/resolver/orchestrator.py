@@ -336,7 +336,7 @@ class WorktreeOrchestrator:
                 cwd=self.workspace,
             )
         )
-        notes: list[str] = []  # lup: ignore[empty-collection] — report detail
+        notes: list[str] = []
         if status.code != 0:
             if lease.root.exists():
                 return WorktreeRemoval(freed=False, detail=status.stderr.strip())
