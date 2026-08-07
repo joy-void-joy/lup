@@ -392,7 +392,7 @@ def comments_cmd(
         bool,
         typer.Option(
             "--wake",
-            help="With --clear: also strip defer[...] notes whose wake condition is met",
+            help="With --clear: also strip the defer notes named, waking them",
         ),
     ] = False,
 ) -> None:

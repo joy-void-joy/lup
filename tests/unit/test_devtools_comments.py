@@ -3,9 +3,10 @@
 Runs against a throwaway git repo: `scan_tracked(find_feedback)` must report
 tracked notes with their read-context window, and `clear_markers` must strip
 exactly the targeted spans — inline markers keep their code, standalone
-blocks vanish whole — only ever on a `resolve/*` branch, and never a
-`defer[...]` note without `--wake`. The `dev check` comments gate and the
-listing renderer must keep deferred notes visible in their own section.
+blocks vanish whole — only ever on a `resolve/*` branch, and never a `defer`
+note without `--wake`, whether or not it stated a gate. The `dev check`
+comments gate and the listing renderer must keep deferred notes visible in
+their own section.
 """
 
 from pathlib import Path
@@ -110,28 +111,39 @@ zeta = 6
 """
 
 
-def tracked_defer_file(repo: Path) -> Path:
+BARE_DEFER_SOURCE = """\
+epsilon = 5
+# lup: defer: revisit epsilon
+zeta = 6
+"""
+
+PARKED_SOURCES = [DEFER_SOURCE, BARE_DEFER_SOURCE]
+
+
+def tracked_defer_file(repo: Path, source: str) -> Path:
     git = sh.Command("git").bake("-C", str(repo), _tty_out=False)
     path = repo / "parked.py"
-    path.write_text(DEFER_SOURCE, encoding="utf-8")
+    path.write_text(source, encoding="utf-8")
     git("add", "parked.py")
     git("commit", "-m", "chore: park work")
     git("checkout", "-b", "resolve/x")
     return path
 
 
-def test_clear_skips_a_deferred_note_without_wake(repo: Path) -> None:
-    path = tracked_defer_file(repo)
+@pytest.mark.parametrize("source", PARKED_SOURCES)
+def test_clear_skips_a_deferred_note_without_wake(repo: Path, source: str) -> None:
+    path = tracked_defer_file(repo, source)
 
     comments.clear_markers(["parked.py:2"])
 
     assert (
-        path.read_text(encoding="utf-8") == DEFER_SOURCE
+        path.read_text(encoding="utf-8") == source
     )  # parked work survives an ordinary sweep
 
 
-def test_clear_strips_a_deferred_note_with_wake(repo: Path) -> None:
-    path = tracked_defer_file(repo)
+@pytest.mark.parametrize("source", PARKED_SOURCES)
+def test_clear_strips_a_deferred_note_with_wake(repo: Path, source: str) -> None:
+    path = tracked_defer_file(repo, source)
 
     comments.clear_markers(["parked.py:2"], wake=True)
 
@@ -169,13 +181,15 @@ def test_inline_notes_list_deferred_after_unresolved() -> None:
                 condition="until branches merge",
                 text="purge notes history",
             ),
+            note_at("c.py", 5, kind="defer", text="parked with no gate"),
         ]
     )
 
     assert lines == [
-        "inline notes: 1 unresolved, 1 deferred (advisory)",
+        "inline notes: 1 unresolved, 2 deferred (advisory)",
         "  a.py:3-3",
         "  deferred[until branches merge] .gitignore:9-9",
+        "  deferred c.py:5-5",
     ]
 
 
@@ -195,12 +209,14 @@ def test_render_separates_the_deferred_section(
         [
             note_at("a.py", 3, kind="defer", condition="until v2", text="parked work"),
             note_at("b.py", 7, text="open feedback"),
+            note_at("c.py", 5, kind="defer", text="parked with no gate"),
         ],
         as_json=False,
         empty="none",
     )
 
     out = capsys.readouterr().out
-    assert "Deferred — parked until each wake condition is met:" in out
-    assert out.index("open feedback") < out.index("defer[until v2] parked work")
-    assert "2 comment(s) in 2 file(s) (1 deferred)" in out
+    assert "Deferred — parked until explicitly woken:" in out
+    assert out.index("open feedback") < out.index("defer[until v2]: parked work")
+    assert "defer: parked with no gate" in out
+    assert "3 comment(s) in 3 file(s) (2 deferred)" in out
