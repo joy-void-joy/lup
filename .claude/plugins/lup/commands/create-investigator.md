@@ -1,6 +1,6 @@
 ---
 description: "Create a new diagnostic/investigator command (like /debug)"
-allowed-tools: Write, Read, Glob, Grep, AskUserQuestion
+allowed-tools: Write, Read, AskUserQuestion
 argument-hint: "[command-name] [brief description of what it investigates]"
 ---
 

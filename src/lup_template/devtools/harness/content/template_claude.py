@@ -100,8 +100,8 @@ The `pyright-lsp` plugin provides code intelligence. **Use these actively** -- t
 | Find where a function is defined | `go-to-definition` |                  |
 | Find all callers of a function   | `find-references`  |                  |
 | Rename a variable/function/class | `rename-symbol`    |                  |
-| Search for a string literal      |                    | `Grep`           |
-| Search across non-Python files   |                    | `Grep`           |
+| Search for a string literal      |                    | `Bash` + `grep`  |
+| Search across non-Python files   |                    | `Bash` + `grep`  |
 | Change logic within a function   |                    | `Edit`           |
 | Add new code                     |                    | `Edit` / `Write` |
 

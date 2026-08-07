@@ -2,6 +2,7 @@
 
 import json
 import shlex
+from collections.abc import Sequence
 from pathlib import Path
 from lup.harness.banner import PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
@@ -173,6 +174,24 @@ class ClaudeSpellings(NativeSpellings):
                 return Atom(f"{root}/TEMPLATE_CLAUDE.md")
 
 
+CLAUDE_ABSENT_TOOLS = ("Glob", "Grep")
+"""Built-ins the portable vocabulary names that Claude Code does not ship.
+
+The vocabulary is deliberately a superset — adapters translate their own
+tool identities onto it — so a name in it is a request, not a promise. A
+granted name the runtime has no tool for grants nothing while reading as a
+capability the agent has, and an agent that believes it spends a turn per
+attempt discovering otherwise. Filtered where the runtime is known, so a
+declaration keeps naming the portable set and a runtime that ships these
+again needs one edit here rather than one per declaration.
+"""
+
+
+def claude_granted_tools(tools: Sequence[str]) -> list[str]:
+    """Keep only the grants this runtime can actually honor."""
+    return [tool for tool in tools if tool not in CLAUDE_ABSENT_TOOLS]
+
+
 class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
     """Render one portable skill as a Claude command Markdown artifact."""
 
@@ -182,8 +201,9 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
 
     def render(self, source: Skill) -> ArtifactTree:
         frontmatter = [f"description: {json.dumps(source.description)}"]
-        if source.tools:
-            frontmatter.append("allowed-tools: " + ", ".join(source.tools))
+        granted = claude_granted_tools(source.tools)
+        if granted:
+            frontmatter.append("allowed-tools: " + ", ".join(granted))
         if source.argument_hint is not None:
             frontmatter.append(f"argument-hint: {json.dumps(source.argument_hint)}")
         elif source.arguments:
@@ -224,7 +244,7 @@ class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
         self.spellings = spellings
 
     def render(self, source: Agent) -> ArtifactTree:
-        tools = ", ".join(source.tools)
+        tools = ", ".join(claude_granted_tools(source.tools))
         alias = (
             None if source.model is None else self.spellings.model_alias(source.model)
         )

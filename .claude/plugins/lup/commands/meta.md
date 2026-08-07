@@ -1,6 +1,6 @@
 ---
 description: "Review and modify the generated harness trees, brainstorm improvements interactively"
-allowed-tools: Bash(ls:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, Agent, AskUserQuestion
+allowed-tools: Bash(ls:*, uv run lup-devtools:*), Read, Edit, Write, Agent, AskUserQuestion
 arguments:
   - name: arguments
     description: "Optional arguments supplied with the skill invocation"

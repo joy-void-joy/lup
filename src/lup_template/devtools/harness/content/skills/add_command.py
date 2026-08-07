@@ -145,7 +145,7 @@ SKILL = models.Skill(
 )
 ```
 
-Its prompt body walks the agent through finding relevant files with Glob, searching for patterns with Grep, reading the key files, and reporting findings in a structured format.
+Its prompt body walks the agent through finding relevant files and searching for patterns with `Bash`, reading the key files, and reporting findings in a structured format.
 
 ### Skill with arguments:
 

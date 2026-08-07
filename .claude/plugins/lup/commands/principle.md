@@ -1,6 +1,6 @@
 ---
 description: "Propagate a general principle across the entire repo"
-allowed-tools: Bash(uv run lup-devtools:*), Read, Write, Edit, Glob, Grep, AskUserQuestion, Agent
+allowed-tools: Bash(uv run lup-devtools:*), Read, Write, Edit, AskUserQuestion, Agent
 argument-hint: "<principle description>"
 ---
 

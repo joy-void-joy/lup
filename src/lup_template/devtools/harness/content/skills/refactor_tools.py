@@ -57,7 +57,7 @@ For remote/external MCP servers:
 - Read `src/lup_template/agent/core.py` for `McpServerConfig` or server lists
 - Read `src/lup_template/agent/config.py` for MCP-related settings
 - Check `pyproject.toml` for MCP server dependencies
-- Grep for `npx`, `uvx`, or other MCP server launch patterns
+- Search with `grep` for `npx`, `uvx`, or other MCP server launch patterns
 
 Present as a grouped outline:
 

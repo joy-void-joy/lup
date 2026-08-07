@@ -1,6 +1,6 @@
 ---
 description: "Rewrite a file or folder from scratch while respecting coding conventions"
-allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Write, Edit, Glob, Grep, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Write, Edit, AskUserQuestion
 argument-hint: "<path>"
 ---
 
@@ -23,7 +23,7 @@ Resolve relative paths against the current working directory.
 ### 1. Validate the target
 
 - Confirm the path exists (file or directory)
-- If it's a directory, list all files that will be refactored using Glob
+- If it's a directory, list all files that will be refactored using `find`
 - Show the user what will be refactored and ask for confirmation
 
 ### 2. Create a backup
@@ -46,7 +46,7 @@ For each file being refactored:
 - Identify its **public interface**: exports, function signatures, class APIs
 - Identify its **dependencies**: imports, external calls
 - Identify its **side effects**: file I/O, network calls, state mutations
-- Note any tests that import from or test this file (use Grep to find references)
+- Note any tests that import from or test this file (use `find_references` to resolve them)
 
 ### 4. Read coding conventions
 

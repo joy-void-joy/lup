@@ -1,6 +1,6 @@
 ---
 description: "Create a new slash command in the lup plugin"
-allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, AskUserQuestion
 argument-hint: "[name] [description]"
 ---
 
@@ -101,7 +101,7 @@ SKILL = models.Skill(
 )
 ```
 
-Its prompt body walks the agent through finding relevant files with Glob, searching for patterns with Grep, reading the key files, and reporting findings in a structured format.
+Its prompt body walks the agent through finding relevant files and searching for patterns with `Bash`, reading the key files, and reporting findings in a structured format.
 
 ### Skill with arguments:
 

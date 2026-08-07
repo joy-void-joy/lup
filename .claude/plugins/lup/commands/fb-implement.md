@@ -1,6 +1,6 @@
 ---
 description: "Implement prioritized changes from feedback loop analysis"
-allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run lup:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, WebSearch, WebFetch
+allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run lup:*), Read, Edit, Write, AskUserQuestion, WebSearch, WebFetch
 ---
 
 # Implement: Make Changes

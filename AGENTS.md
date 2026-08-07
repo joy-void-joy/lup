@@ -363,7 +363,7 @@ The `codeintel` tool group answers questions about code by *resolving* it, throu
 - **list_symbols** — every symbol a file declares, instead of grepping for `def ` or `class `
 - **rename_symbol** — plans a workspace-wide rename and reports the files it would touch, without writing. **Always prefer it over `Edit` with `replace_all`**, which cannot tell one scope from another; apply the reported edits yourself.
 
-Grep is still right for what is genuinely characters: a string literal, a comment, a non-Python file.
+`grep` through `Bash` is still right for what is genuinely characters: a string literal, a comment, a non-Python file.
 
 ---
 

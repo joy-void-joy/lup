@@ -1,6 +1,6 @@
 ---
 description: "Modify an existing slash command based on a description or delta"
-allowed-tools: Read, Edit, Write, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Edit, Write, AskUserQuestion
 argument-hint: "[command-name] [delta or description] [--args hint1 hint2]"
 ---
 

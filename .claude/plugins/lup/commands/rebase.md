@@ -1,6 +1,6 @@
 ---
 description: "Clean up commit history on the feature branch and open/update a PR"
-allowed-tools: Bash(uv run lup-devtools:*, git:*), Read, Glob, Grep, AskUserQuestion, Skill(lup:commit)
+allowed-tools: Bash(uv run lup-devtools:*, git:*), Read, AskUserQuestion, Skill(lup:commit)
 argument-hint: "[target-branch]"
 ---
 

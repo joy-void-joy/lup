@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "487f4f3f89fe64c04ec2db4e02646be21a99e38c62f6f9a0f979aca6254ae4a6",
+  "source_digest": "2080d3c91b7b2ba549527361dcfb9b6901aad6aee969b99e9fee4e1e30fc8c24",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -170,7 +170,7 @@
     {
       "path": ".codex/plugins/lup/skills/add-command/SKILL.md",
       "category": "generated",
-      "sha256": "8175acea05856282c9e70e8d49caed3f760ed4d60aa9172df99fd4e90b2c2125",
+      "sha256": "ea587efb9f680998bc61675635bb4f0c53079ab800018c28437c57cc7266a266",
       "semantic_id": "skill.add-command",
       "executable": false
     },
@@ -212,7 +212,7 @@
     {
       "path": ".codex/plugins/lup/skills/debug/SKILL.md",
       "category": "generated",
-      "sha256": "658708f17262462500f6a0a56647031f5a463a755782a32e30d774fd49ef207c",
+      "sha256": "98133fa3f8569b30956fce0ead14094b27beca62eadb18a65fce157e040ca9cb",
       "semantic_id": "skill.debug",
       "executable": false
     },
@@ -275,7 +275,7 @@
     {
       "path": ".codex/plugins/lup/skills/import/SKILL.md",
       "category": "generated",
-      "sha256": "8223e40e1eccdea0a2b10eedae2296ac170c9e65d971017c500570650f1ba47e",
+      "sha256": "a7bd61ef29391c774b64ad51b8aa56c521330ad629a5758356f3af30c1ef2e19",
       "semantic_id": "skill.import",
       "executable": false
     },
@@ -338,14 +338,14 @@
     {
       "path": ".codex/plugins/lup/skills/refactor-tools/SKILL.md",
       "category": "generated",
-      "sha256": "61d1cd4d36349a2e50044b5ab4461f037b65188a4b0b44f1ae752fa490ef1ebf",
+      "sha256": "463a6e2b39ddba41fc336ea1f7a6caf896facacfe620fa32e6899f77648f1c67",
       "semantic_id": "skill.refactor-tools",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/refactor/SKILL.md",
       "category": "generated",
-      "sha256": "2e855de0c0ac7a284d9dce8826cc974bb3c4ade205c02eacb9f1b4fd320dead9",
+      "sha256": "d526f3f12e9ff61cc49c257155c137df58876cbdd70ec825d747c67acb3a2b9c",
       "semantic_id": "skill.refactor",
       "executable": false
     },
@@ -394,7 +394,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "21408746c6e750ed99fe80ef70d7ca7c4c37228e16cf0aecfb66d65b11122515",
+      "sha256": "60ee799fed297774aa3b42c2d494519918ff2bbe4bb1dffc3cfa6bb9af48f54e",
       "semantic_id": "harness.guidance",
       "executable": false
     }

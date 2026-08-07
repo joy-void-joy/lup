@@ -1,6 +1,6 @@
 ---
 description: "Merge a branch or resolve existing merge conflicts"
-allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, Skill(lup:commit)
+allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Edit, Write, AskUserQuestion, Skill(lup:commit)
 argument-hint: "[target]"
 ---
 

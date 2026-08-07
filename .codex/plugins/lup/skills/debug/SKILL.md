@@ -28,7 +28,7 @@ Then search traces for the specific error text:
 uv run lup-devtools trace search "<distinctive part of error>"
 ```
 
-If devtools search doesn't find it, fall back to Grep on `logs/` with the most specific substring from the error.
+If devtools search doesn't find it, fall back to `grep` over `logs/` with the most specific substring from the error.
 
 ### 2. Find the right log file
 
@@ -46,7 +46,7 @@ Once you find the log file containing the error:
 
 1. **Read the traceback** -- Find the full exception chain. Read 50-100 lines around the error to see the complete traceback and what led to it.
 2. **Trace backwards** -- What was the agent doing when the error occurred? Read earlier in the log to find the tool call or action that triggered it.
-3. **Check the source** -- Use Read/Grep to find the exact line in the source code (`src/`) where the exception was raised or where the failing logic lives.
+3. **Check the source** -- Use `Read` and `find_definition` to reach the exact line in the source code (`src/`) where the exception was raised or where the failing logic lives.
 
 ### 4. Report findings
 

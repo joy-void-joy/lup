@@ -1,6 +1,6 @@
 ---
 description: "Install lup plugin and scaffolding into a target repo"
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
+allowed-tools: Bash, Read, Write, Edit, AskUserQuestion
 argument-hint: "[target-repo] [--interactive]"
 ---
 

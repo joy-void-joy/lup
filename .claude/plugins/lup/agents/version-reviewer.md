@@ -1,7 +1,7 @@
 ---
 name: version-reviewer
 description: "Independently review a proposed version change"
-tools: Read, Grep, Glob, Bash
+tools: Read, Bash
 model: sonnet
 color: yellow
 ---
