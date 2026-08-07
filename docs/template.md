@@ -47,6 +47,25 @@ interactive domain deletes.
 
 The boundary is deliberate: outside events arrive here, and only here.
 
+## Configuration
+
+`.env` holds the template's committed defaults; `.env.local` holds secrets
+and personal overrides and is gitignored. `.env.local` wins where both
+declare a value. `ANTHROPIC_API_KEY` is read straight from the environment by
+the SDK; everything else is loaded through pydantic-settings in
+`agent/config.py`, which is the only module that reads the environment.
+
+```bash
+# .env.local — secrets and overrides
+
+# AGENT_MODEL=claude-opus-5
+# AGENT_MAX_BUDGET_USD=5.00
+# AGENT_MAX_TURNS=50
+# AGENT_SANDBOX_ENABLED=false   # run without Docker (disables code execution tools)
+# AGENT_NOTES_PATH=./notes      # relocate session data
+# AGENT_LOGS_PATH=./logs        # relocate trace logs
+```
+
 ## `devtools/` — the development CLI
 
 `lup-devtools` is the second entry point. Its sub-apps are declared once in
@@ -77,8 +96,10 @@ use daily:
 
 If you run the same shell incantation twice, add a command here instead. The
 CLI is written with [typer](https://typer.tiangolo.com/), and shells out with
-[sh](https://sh.readthedocs.io/) rather than `subprocess`. One-off scripts
-belong in `tmp/`.
+[sh](https://sh.readthedocs.io/) rather than `subprocess`. One-off work goes
+through the reviewable ladder in
+[contributing.md](contributing.md) rather than a script in `tmp/`, which is
+gitignored and so reaches no diff and no reviewer.
 
 ### `devtools/harness/` — the declaration graph
 
