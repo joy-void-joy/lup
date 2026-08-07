@@ -32,6 +32,7 @@ page.
 | Page | Answers |
 | --- | --- |
 | [contributing.md](contributing.md) | How to get set up, where a change of each kind belongs, and what has to be green before it lands. |
+| [conventions.md](conventions.md) | The lookup behind each code-convention rule: which library, which typed stand-in for a dict, which parser, which resolver tool. |
 | [quality-pipeline.md](quality-pipeline.md) | The three check layers, and what each one uniquely catches. |
 | [dev-tooling-decisions.md](dev-tooling-decisions.md) | The architectural decisions behind the development tooling, each stated against the current system. |
 
