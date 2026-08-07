@@ -95,6 +95,37 @@ def test_claude_session_defaults_and_hooks_reach_native_options(
     assert options.include_partial_messages
 
 
+def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
+    """A session names the tree it is judged by, the way a launch does.
+
+    An interactive launch passes `--plugin-dir`. A session opened through the
+    SDK named nothing, so it resolved plugins through the settings at its
+    working directory — and those register a marketplace under a name shared
+    by every checkout declaring it. The plugin a worktree actually loaded was
+    therefore whichever tree registered that name last, which is how a worker
+    came to be refused an edit its own tree's policy kernel allows.
+    """
+    lease = tmp_path / "lease" / ".claude" / "plugins" / "lup"
+    options = build_claude_options(
+        ClaudeSessionConfig(
+            model="claude", cwd=tmp_path / "lease", plugin_dirs=[lease]
+        ),
+        binding=lambda: None,
+        resume=None,
+        session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
+    )
+
+    assert options.plugins == [{"type": "local", "path": str(lease)}]
+
+    unnamed = build_claude_options(
+        ClaudeSessionConfig(model="claude"),
+        binding=lambda: None,
+        resume=None,
+        session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
+    )
+    assert unnamed.plugins == []
+
+
 def test_claude_isolation_knobs_reach_native_options() -> None:
     options = build_claude_options(
         ClaudeSessionConfig(

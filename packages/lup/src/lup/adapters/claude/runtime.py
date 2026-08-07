@@ -108,6 +108,15 @@ class ClaudeSessionConfig(BaseModel):
     effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
     cwd: Path | None = None
     add_dirs: list[Path] = Field(default_factory=list)
+    plugin_dirs: list[Path] = Field(default_factory=list)
+    """Plugin directories this session loads, the way `--plugin-dir` does.
+
+    A session given none of these resolves plugins through the project
+    settings at `cwd` instead, and those name a marketplace by a key shared
+    across every checkout that declares it — so a session opened in one
+    worktree can be judged by a plugin generated from another's commit.
+    Naming the directory is what makes a session load the tree it is in.
+    """
     environment: EnvVars = Field(default_factory=dict)
     sandbox: ClaudeSandboxConfig | None = None
     hooks: LupHooksConfig | None = None
@@ -670,6 +679,10 @@ def build_claude_options(
         effort=config.effort,
         cwd=config.cwd,
         add_dirs=[str(path) for path in config.add_dirs],
+        plugins=[
+            claude_types.SdkPluginConfig(type="local", path=str(path))
+            for path in config.plugin_dirs
+        ],
         env=config.environment,
         sandbox=sandbox,
         hooks=(

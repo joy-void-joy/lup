@@ -17,6 +17,7 @@ import typer
 from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.markers import find_feedback
+from lup_template.devtools.dev.plugin import PLUGIN_NAME
 from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
 from lup.policy.identity import (
     agent_identity_environment,
@@ -94,6 +95,20 @@ def resolver_intake(comments: list[FoundComment]) -> ResolverIntake:
             if comment.kind == "defer"
         ],
     )
+
+
+def lease_plugin_dir(root: Path) -> Path:
+    """The plugin a session opened in *root* is judged by: that tree's own.
+
+    An interactive launch names its directory with `--plugin-dir` and is
+    immune to this; a session the SDK opens names nothing, so it resolves
+    plugins through the settings at its working directory. Those settings
+    register a marketplace under a name, and a name is one global namespace
+    shared by every checkout declaring it — so the plugin a lease actually
+    loaded was whichever tree registered that name last, and a worker was
+    refused an edit by a policy kernel generated from another commit.
+    """
+    return root / ".claude" / "plugins" / PLUGIN_NAME
 
 
 class FeatureWorktreePreparer(WorktreePreparer):
@@ -717,6 +732,7 @@ def run_resolve(
                         system_prompt="Execute the persisted Lup resolver assignment.",
                         cwd=cwd,
                         add_dirs=[cwd, *toolchain_writable_paths()],
+                        plugin_dirs=[lease_plugin_dir(cwd)],
                         sandbox=ClaudeSandboxConfig(),
                         environment=concern_environment,
                         tool_servers={"resolver": server},
@@ -797,6 +813,7 @@ def run_resolve(
                         ),
                         cwd=cwd,
                         add_dirs=[cwd],
+                        plugin_dirs=[lease_plugin_dir(cwd)],
                         environment=reviewer_environment,
                         hooks=create_permission_hooks([], [cwd]),
                     )
