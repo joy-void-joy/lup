@@ -1,10 +1,9 @@
-# lup: the pinned cases are the failure paths; item-delta and approval-parameter
-# shapes are decoded without a test naming them.
+# lup: solved: the pinned cases are the failure paths; item-delta and approval-parameter shapes are decoded without a test naming them.
 """Codex app-server SessionFactory with live optional turn capabilities."""
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -164,6 +163,22 @@ def notification_turn_id(notification: RpcNotification) -> str | None:
 class CodexTurnChannel:
     """Route one turn's notifications into live events and completed replay."""
 
+    notifications: Sequence[str] = (
+        "turn/started",
+        "item/agentMessage/delta",
+        "item/completed",
+        "thread/tokenUsage/updated",
+        "turn/completed",
+    )
+    """Every notification method :meth:`decode` answers.
+
+    Those arms narrow vendor method strings, which no union of ours enumerates,
+    so the roster is declared here beside them and gates the match rather than
+    describing it. A method that gains an arm without gaining an entry never
+    reaches it, and the suite naming each shape fails instead of a renamed
+    notification passing as one this turn had no interest in.
+    """
+
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         self.turn_id: str | None = None
@@ -220,6 +235,8 @@ class CodexTurnChannel:
             if self.turn_id is not None and candidate != self.turn_id:
                 return
             self.turn_id = candidate
+        if notification.method not in self.notifications:
+            return
         match notification.method, notification.params:
             case "turn/started", {"turn": {"id": str()}}:
                 self.events.put_nowait(TurnStartedEvent(identifiers=self.identifiers()))
