@@ -737,6 +737,25 @@ def test_every_codex_operation_model_is_named_by_a_decoded_case() -> None:
     ) == sorted(union_members(CodexOperation))
 
 
+def test_the_claude_decoder_answers_each_operation_model_in_one_arm() -> None:
+    """The union is the roster on both sides, so neither can grow alone.
+
+    Reading the union alone would let an arm for something outside it pass
+    unnoticed, since a case with no member behind it has no case here to
+    contradict. Reading the arms alone would miss a member that never gained
+    one. Naming both against the union closes each gap with the other.
+    """
+    assert sorted(arm_labels(ClaudeEventDecoder.decode)) == sorted(
+        union_members(ClaudeOperation)
+    )
+
+
+def test_the_codex_decoder_answers_each_operation_model_in_one_arm() -> None:
+    assert sorted(arm_labels(CodexEventDecoder.decode)) == sorted(
+        union_members(CodexOperation)
+    )
+
+
 @pytest.mark.parametrize(
     "case", CLAUDE_HOOK_CASES, ids=[case.name for case in CLAUDE_HOOK_CASES]
 )
