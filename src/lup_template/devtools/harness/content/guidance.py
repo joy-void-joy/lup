@@ -222,7 +222,7 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the 
 |---|---|
 | `# lup: <text>` — open feedback | **denied**; resolve it into a claim instead |
 | `# lup: solved: <text>` — a claim you addressed it | **denied**; only the verify-solved review pass retires one |
-| `# lup: defer[<cond>]: <text>` — parked work (§ Deferred Work) | **denied** while its condition is unmet |
+| `# lup: defer: <text>` — parked work (§ Deferred Work) | **denied** while parked |
 | `# lup: ignore[<rule>]` — an anti-pattern hatch (§ Type Safety), not feedback | fine once the violation is gone |
 
 Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/contributing.md` carries the full lifecycle (use `"""
@@ -233,7 +233,7 @@ Resolve open feedback by fixing what it points at, or, for a question, by answer
 
 ### Deferred Work
 
-**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places: a `# lup: defer[<wake condition>]: <text>` note at the site it concerns, where `dev check` keeps it visible until its condition is met; or a question to the user, when whether to defer is itself the open question. `docs/contributing.md` carries both, and the one exception — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
+**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places: a `# lup: defer: <text>` note at the site it concerns, where `dev check` keeps it visible; or a question to the user, when whether to defer is itself the open question. Default to the bare `defer:`; a bracket states a real, externally-checkable gate, never that this code might change again. `docs/contributing.md` carries both, and the one exception — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
 
 ### DRY: Don't Repeat Yourself
 

@@ -4,8 +4,8 @@
 - Review notes (`# lup:` / `// lup:`): actionable feedback left in the code;
   the `ignore` keyword — inline or standalone file-level — is the
   anti-pattern escape hatch, never a note and never a reason to hide one. A
-  `defer[<wake condition>]:` head marks the note as parked work rather than
-  open feedback; the scanner classifies it and parses the condition out. The
+  `defer:` head marks the note as parked work rather than open feedback; the
+  scanner classifies it and parses out the gate a bracketed one states. The
   `lup-devtools dev comments` scanner uses this to list unresolved feedback;
   the edit-permission hook makes the same note/suppression split, prompting
   whenever an edit changes the note count or adds a suppression.
@@ -45,25 +45,48 @@ from lup.codescan.common import LineCursor, PythonContext
 from lup.policy.kernel.edit import IGNORE_RE
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
-# `# lup: defer[<wake condition>]: <text>`. The bracket syntax deliberately
+# lup: solved: make the wake condition optional — `# lup: defer: <text>` should
+# parse as parked work alongside `defer[<condition>]: <text>`. Nothing
+# evaluates a condition mechanically: it is parsed, validated, and printed by
+# `dev check`, and nothing more, so requiring one buys display formatting at
+# the cost of inviting invention. All eight defers this repository actually
+# carried named a self-referential gate ("when this decoder next gains an
+# operation shape", "when this display is next reworked") that encodes nothing
+# a triage pass can check; one named something other than its own file, so "the
+# file is untouched" silently gave the wrong answer. Relax DEFER_HEAD_RE, drop
+# the `("defer", None) | ("defer", "")` arm from `coherent_kind`, keep
+# `condition` optional on the model, and cover the bare spelling in the marker
+# tests. Then say in the guidance, `docs/contributing`, and the resolve and
+# implementer skills that a bare `defer:` is the default and a bracket is for a
+# real, externally-checkable gate ("until the v2 API ships") — never for
+# restating that this code might change again.
+
+# `# lup: defer: <text>` parks work; a `defer[<gate>]: <text>` head parks it
+# behind a gate somebody other than this note can check ("until the v2 API
+# ships"). The bare spelling is the default, because nothing evaluates a
+# condition mechanically: one that only restates that this code might change
+# again is invention dressed as a trigger. The optional bracket deliberately
 # mirrors the typed `# lup: ignore[rule-id]` escape hatch — which means a
 # condition may itself contain brackets (`defer[when ignore[dict-get] sites
 # migrate]: ...`), so the head ends at the first `]` that is followed by a
-# colon, and the colon is required. A head that never closes with `]:` is
-# malformed and the note stays an ordinary (red, visible) review note. The
-# head is matched against a note's text (the part after the marker), so the
-# `ignore` keyword — which never reaches note classification — is untouched.
-DEFER_HEAD_RE = re.compile(r"^defer\s*\[(?P<condition>.+?)\]\s*:\s*", re.IGNORECASE)
-# Customization todos are shouty and case-sensitive (like TODO:/FIXME:), so
-# prose about "the template" never matches. The comment prefix is optional
-# because a docstring todo carries no `#`; group 1 still captures the
-# introducer when present, as the scan expects.
+# colon, and the colon is required either way. A head that opens a bracket it
+# never closes with `]:` is malformed and the note stays an ordinary (red,
+# visible) review note. The head is matched against a note's text (the part
+# after the marker), so the `ignore` keyword — which never reaches note
+# classification — is untouched.
+DEFER_HEAD_RE = re.compile(
+    r"^defer\s*(?:\[(?P<condition>.+?)\])?\s*:\s*", re.IGNORECASE
+)
 # A resolution claim: `# lup: solved: <the note's original text>`. An agent
 # that has addressed a note converts it rather than deleting it, so the claim
 # is an artifact in the tree instead of an absence nobody can review. No
 # bracket, because the head carries no parameter — what it needs to say is
 # said by keeping the note's own words after it.
 SOLVED_HEAD_RE = re.compile(r"^solved\s*:\s*", re.IGNORECASE)
+# Customization todos are shouty and case-sensitive (like TODO:/FIXME:), so
+# prose about "the template" never matches. The comment prefix is optional
+# because a docstring todo carries no `#`; group 1 still captures the
+# introducer when present, as the scan expects.
 TEMPLATE_MARKER_RE = re.compile(r"(?:(#|//)\s*)?TEMPLATE\s*:")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
@@ -110,7 +133,7 @@ def scan_mode_for(path: Path) -> str:
 
 
 # The closed vocabulary of review-note flavors: an ordinary actionable note,
-# deferred work parked behind an explicit wake condition, or a claim that a
+# parked work — behind a stated gate or simply parked — or a claim that a
 # note has been addressed and is waiting to be checked.
 type NoteKind = Literal["note", "defer", "solved"]
 
@@ -118,9 +141,11 @@ type NoteKind = Literal["note", "defer", "solved"]
 class MarkerComment(BaseModel):
     """One actionable note: the source span plus a window worth reading.
 
-    ``kind`` classifies the note; a ``defer`` note carries its wake
-    ``condition`` parsed out of the `defer[...]` head, and ``text`` holds only
-    the message that follows it. An ordinary note has no condition, and a
+    ``kind`` classifies the note; a ``defer`` note that stated a gate carries
+    it as ``condition``, parsed out of the `defer[...]` head, and ``text``
+    holds only the message that follows the head. A defer that stated none —
+    the default spelling — parks with ``condition`` absent, read against the
+    tree by whoever triages it. An ordinary note has no condition, and a
     ``solved`` note carries the original note's words unchanged — that is what
     makes the claim checkable against what was actually asked.
     """
@@ -136,18 +161,22 @@ class MarkerComment(BaseModel):
     @model_validator(mode="after")
     def coherent_kind(self) -> Self:
         match (self.kind, self.condition):
-            case ("defer", None) | ("defer", ""):
-                raise ValueError("a defer note requires a wake condition")
             case ("note", str()) | ("solved", str()):
                 raise ValueError("only a defer note carries a wake condition")
             case _:
                 return self
 
+    def deferral_label(self) -> str:
+        """How a parked note is labelled in a listing, gate included if stated."""
+        return f"deferred[{self.condition}]" if self.condition else "deferred"
+
     def marker_text(self) -> str:
         """The note body as written after its marker, any head included."""
         match self.kind:
-            case "defer":
+            case "defer" if self.condition:
                 return f"defer[{self.condition}]: {self.text}"
+            case "defer":
+                return f"defer: {self.text}"
             case "solved":
                 return f"solved: {self.text}"
             case "note":
@@ -275,15 +304,16 @@ def find_markers(
 
 
 def classify_deferral(note: MarkerComment) -> MarkerComment:
-    """Split a `defer[...]:` or `solved:` head off one review note, if present.
+    """Split a `defer:` or `solved:` head off one review note, if present.
 
-    A matching note comes back with the head's kind, a deferral's wake
-    condition parsed out, and ``text`` reduced to the message after the head.
-    Any other note — including prose that merely starts with the word
-    "defer", a head whose condition is empty, or a head that never closes
-    with `]:` — is returned unchanged as an ordinary ``note``, so a malformed
-    head degrades to visible open feedback instead of a silently mangled
-    condition or a claim nobody made.
+    A matching note comes back with the head's kind, the gate a bracketed
+    deferral stated parsed out, and ``text`` reduced to the message after the
+    head. Any other note — including prose that merely starts with the word
+    "defer", a bracket left empty, or a bracket that never closes with `]:` —
+    is returned unchanged as an ordinary ``note``, so a malformed head
+    degrades to visible open feedback instead of a silently mangled condition
+    or a claim nobody made. A bracket opened is a bracket that has to say
+    something; writing none at all is the ordinary way to park work.
     """
     solved = SOLVED_HEAD_RE.match(note.text)
     if solved is not None:
@@ -293,9 +323,13 @@ def classify_deferral(note: MarkerComment) -> MarkerComment:
     head = DEFER_HEAD_RE.match(note.text)
     if head is None:
         return note
-    condition = head.group("condition").strip()
-    if not condition:
-        return note
+    match head.group("condition"):
+        case None:
+            condition = None
+        case stated if stated.strip():
+            condition = stated.strip()
+        case _:
+            return note
     return note.model_copy(
         update={
             "kind": "defer",
@@ -313,8 +347,8 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     covers the standalone file-level `# lup: ignore` too: it disables
     anti-pattern checks (see `lup.codescan.antipatterns`), never note gathering,
     so feedback in an opted-out file still surfaces. Each surviving note is
-    then classified through :func:`classify_deferral`, so deferred work carries
-    its wake condition as data.
+    then classified through :func:`classify_deferral`, so parked work is
+    parked in the data rather than only in the prose.
     """
     notes = find_markers(text, mode, marker=MARKER_RE, ignore=IGNORE_RE)
     return [classify_deferral(note) for note in notes]
@@ -378,10 +412,11 @@ def remove_notes(
 ) -> NoteRemoval:
     """Strip each target's note from one file's text.
 
-    A `defer[...]` note is parked work rather than open feedback, so a target
-    landing on one leaves it in place unless *wake* is set. A target whose
-    note is absent is reported rather than raised — the code a note sat on may
-    already be gone, which is an outcome to record, not a failure.
+    A `defer` note is parked work rather than open feedback, whether or not it
+    stated a gate, so a target landing on one leaves it in place unless *wake*
+    is set. A target whose note is absent is reported rather than raised — the
+    code a note sat on may already be gone, which is an outcome to record, not
+    a failure.
     """
     candidates = find_feedback(text, mode)
     lines = text.splitlines()

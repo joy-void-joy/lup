@@ -75,8 +75,8 @@ class ResolverIntake(BaseModel):
     """The scan partitioned at the resolver boundary.
 
     Deferred notes never enter the resolver inventory — waking one is an
-    explicit edit that removes its `defer[...]` head — so an editor can
-    never be assigned parked work. ``carried`` reports each parked note.
+    explicit edit that removes its `defer` head — so an editor can never be
+    assigned parked work. ``carried`` reports each parked note.
     """
 
     actionable: list[FoundComment]
@@ -88,7 +88,7 @@ def resolver_intake(comments: list[FoundComment]) -> ResolverIntake:
     return ResolverIntake(
         actionable=[comment for comment in comments if comment.kind == "note"],
         carried=[
-            f"carrying deferred[{comment.condition}] "
+            f"carrying {comment.deferral_label()} "
             f"{comment.file}:{comment.start_line}-{comment.end_line}"
             for comment in comments
             if comment.kind == "defer"

@@ -94,11 +94,15 @@ def intake_note(kind: NoteKind = "note", condition: str | None = None) -> FoundC
 def test_resolver_intake_excludes_deferred_notes_from_the_inventory() -> None:
     open_note = intake_note()
     parked = intake_note(kind="defer", condition="until v2 lands")
+    bare = intake_note(kind="defer")
 
-    intake = resolver_intake([open_note, parked])
+    intake = resolver_intake([open_note, parked, bare])
 
     assert intake.actionable == [open_note]
-    assert intake.carried == ["carrying deferred[until v2 lands] parked.py:2-2"]
+    assert intake.carried == [
+        "carrying deferred[until v2 lands] parked.py:2-2",
+        "carrying deferred parked.py:2-2",
+    ]
 
 
 def test_note_targets_parse_a_path_and_a_line() -> None:

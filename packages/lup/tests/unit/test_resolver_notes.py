@@ -135,6 +135,28 @@ def test_a_deferred_note_is_never_cleared(tmp_path: Path) -> None:
     assert len(clearance.missing) == 1
 
 
+def test_a_bare_deferred_note_is_never_cleared(tmp_path: Path) -> None:
+    """Work parked behind no stated gate parks like work that named one."""
+    module = tmp_path / "module.py"
+    module.write_text("# lup: defer: rework the cache\nvalue = 1\n", encoding="utf-8")
+    clearance = clear_concern_notes(
+        tmp_path,
+        concern_with(
+            [
+                ReviewNote(
+                    file=Path("module.py"),
+                    line=1,
+                    text="defer: rework the cache",
+                )
+            ]
+        ),
+    )
+
+    assert "defer: rework the cache" in module.read_text(encoding="utf-8")
+    assert clearance.cleared == []
+    assert len(clearance.missing) == 1
+
+
 def test_an_inline_note_keeps_its_code(tmp_path: Path) -> None:
     module = tmp_path / "module.py"
     module.write_text("value = compute()  # lup: name this better\n", encoding="utf-8")
