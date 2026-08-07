@@ -22,6 +22,7 @@ import lup_template.devtools.harness.drift as drift
 import lup_template.devtools.harness.launch as launch
 import lup_template.devtools.harness.reconcile as reconcile
 import lup_template.devtools.harness.resolve as resolve
+from lup_template.devtools.harness.composition import ADAPTER_CONSTRUCTORS
 from lup_template.devtools.supervisor.app import serve_supervisor
 from lup_template.devtools.supervisor.doors import (
     answer_questions,
@@ -203,13 +204,21 @@ def resolve_command(
     """Drive the shared persisted resolver through one explicit native adapter."""
     if context.invoked_subcommand is not None:
         return
-    if adapter is None:
-        raise typer.BadParameter("--adapter is required to drive a resolver run")
     if detach:
+        if adapter is None:
+            raise typer.BadParameter("--adapter is required to drive a resolver run")
         resolve.detach_resolve(adapter, run_id, answer or [])
         return
+    # Ending a run reads its recorded state and frees its worktrees; no turn
+    # is taken and no skill invocation is rendered, so the one thing an
+    # adapter decides never comes up.
+    if adapter is None and abort is None:
+        raise typer.BadParameter("--adapter is required to drive a resolver run")
     resolve.run_resolve(
-        adapter,
+        # An abort needs no adapter, and asking for one reads as a bug. The
+        # core still holds a composition, so ending a run without the flag
+        # takes the first declared adapter and never asks it for anything.
+        adapter or next(iter(ADAPTER_CONSTRUCTORS)),
         run_id,
         answer or [],
         abort,

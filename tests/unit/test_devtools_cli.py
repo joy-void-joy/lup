@@ -138,3 +138,20 @@ def test_annotated_downstream_config_raises_a_typed_recovery_error(
 
     with pytest.raises(typer.BadParameter, match="not valid JSON"):
         load_json(path)
+
+
+def test_ending_a_run_needs_no_adapter_but_driving_one_still_does() -> None:
+    """An abort takes no turn, so the flag that picks a runtime is not its own.
+
+    Ending a run reads recorded state and frees worktrees; nothing renders a
+    skill invocation, so demanding the adapter refused the one operation a
+    run in trouble most needs.
+    """
+    ended = runner.invoke(
+        app, ["harness", "resolve", "--abort", "reason", "--run-id", "absent-run"]
+    )
+    assert "--adapter is required" not in ended.output
+    assert "no resolver run 'absent-run' to abort" in ended.output
+
+    driven = runner.invoke(app, ["harness", "resolve", "--run-id", "absent-run"])
+    assert "--adapter is required" in driven.output

@@ -114,12 +114,16 @@ EVERY_TARGET = "all"
 artifacts that belong to no single one of them."""
 
 
+ADAPTER_CONSTRUCTORS: dict[str, Callable[[Path], NativeHarnessComposition]] = {
+    "claude": claude_composition,
+    "codex": codex_composition,
+}
+"""Every native adapter a CLI selector can name, in declaration order."""
+
+
 def harness_compositions(value: str) -> list[NativeHarnessComposition]:
     """Parse a generic CLI selector into already concrete compositions."""
-    constructors: dict[str, Callable[[Path], NativeHarnessComposition]] = {
-        "claude": claude_composition,
-        "codex": codex_composition,
-    }
+    constructors = ADAPTER_CONSTRUCTORS
     root = project_root()
     if value == EVERY_TARGET:
         return [constructor(root) for constructor in constructors.values()]
