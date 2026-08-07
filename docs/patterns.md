@@ -109,8 +109,16 @@ config: nothing to home, so applications stack transforms directly.
 The second is a seam that is genuinely engine-only: implemented and injected,
 never held. `TurnToolBinder` and `SubmittedOutputStore`
 (`packages/lup/src/lup/runtime/contracts.py`) are filled by adapters and
-handed to `ComposedSession`, which is itself the surface. Say that in the
-ABC's own docstring, where the next reader is already looking. A marker or a
+handed to `ComposedSession`, which is itself the surface. `Session` is the
+case worth reading twice, because it qualifies without being handle-only: a
+driver takes one as a parameter and runs a turn inside its own concern —
+signal handling in `send_interruptible`, a mailbox in `run_relay_session` —
+and those two share only start-then-result, which `SessionFactory.query`
+already homes. Both drivers hold a handle and narrow to `.session` on
+purpose: taking the whole handle would fold them under the carrier exemption
+instead, but a driver that only starts turns should not also demand `fork`.
+Injected, not held, either way. Say that in the ABC's own docstring, where
+the next reader is already looking. A marker or a
 rule cannot carry it: composing an ABC and holding one are spelled
 identically at the import site, so a check would flag every composing class or
 catch nothing.
