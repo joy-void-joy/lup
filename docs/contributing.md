@@ -197,21 +197,6 @@ They are feedback to act on, not lint to clear: a note comes out when the code
 or structure it points at has actually changed. /lup:resolve runs that pass;
 [resolver.md](resolver.md) describes what it does.
 
-Four flavors share the prefix and differ only in what it takes to remove one:
-
-| Marker | Removing it |
-| --- | --- |
-| Open feedback — the bare prefix and a note | Denied; resolve it into a claim instead |
-| A `solved:` claim that you addressed it | Denied; only the verify-solved review pass retires one |
-| `defer[<wake condition>]:` parked work | Denied while the condition is unmet |
-| A typed suppression marker — an anti-pattern hatch, not feedback | Fine once the violation is gone |
-
-Resolve open feedback by fixing what it points at, or, for a question, by
-answering it definitively in the code, the docs, or a recorded user decision.
-Then rewrite the marker as a `solved:` claim carrying the note's original
-words unchanged, so it sits beside what it asserts and can be checked against
-what was asked.
-
 ## Native evidence and the release gate
 
 Deterministic fixtures run on every change. A scheduled workflow additionally
