@@ -84,13 +84,39 @@ def manifest_table(pyproject: Path) -> JsonObject | None:
         return None
 
 
+def declares_lup(table: JsonObject | None) -> bool:
+    """Whether a parsed manifest carries the ``[tool.lup]`` table."""
+    match table:
+        case {"tool": {"lup": _}}:
+            return True
+    return False
+
+
 def declared_project_root(start: Path) -> Path | None:
-    """The nearest enclosing directory whose pyproject declares ``[tool.lup]``."""
-    for parent in [start, *start.parents]:
-        match manifest_table(parent / "pyproject.toml"):
-            case {"tool": {"lup": _}}:
-                return parent
-    return None
+    """The nearest enclosing directory whose pyproject declares ``[tool.lup]``.
+
+    A manifest that does not parse cannot be asked what it declares, and it is
+    the project's own manifest that a merge conflicts. Refusing it there does
+    not make the answer safer, it only moves the failure: the walk continues
+    past the project, finds no other ``[tool.lup]``, and the toolchain that
+    exists to repair the conflict stops importing. So an unreadable manifest
+    answers for the root it sits in — it is a manifest, in a directory, and
+    while it is being repaired it is the only candidate in reach.
+
+    It answers last, though. A manifest that does say ``[tool.lup]`` is a
+    better answer wherever it sits, so the whole chain is read before an
+    unreadable one is taken: a broken manifest in a subpackage must not
+    shadow the project root above it.
+    """
+    tables = [
+        (parent, manifest_table(parent / "pyproject.toml"))
+        for parent in [start, *start.parents]
+        if (parent / "pyproject.toml").exists()
+    ]
+    for parent, table in tables:
+        if declares_lup(table):
+            return parent
+    return next((parent for parent, table in tables if table is None), None)
 
 
 def find_project_root() -> Path:
@@ -129,7 +155,10 @@ def read_agent_version(root: Path) -> str:
 
     Returns "0.0.0" when the file or the [tool.lup] table is absent, so
     :func:`configure` accepts roots that are not lup projects (e.g. test
-    fixtures or scratch directories).
+    fixtures or scratch directories). A manifest that does not parse is
+    absent for this purpose too — :func:`resolve_state` reads the version
+    the moment it has a root, so a conflicted manifest would otherwise take
+    down every path the toolchain resolves while repairing it.
     """
     match manifest_table(root / "pyproject.toml"):
         case {"tool": {"lup": {"agent_version": str(version)}}}:
@@ -140,10 +169,12 @@ def read_agent_version(root: Path) -> str:
 def read_project_name(root: Path) -> str:
     """Read the distribution name from [project] in pyproject.toml.
 
-    Returns "lup" when the file or the [project] table is absent, so roots
-    that are not Python projects still yield a usable identifier. Callers
-    that need a portable declaration name validate through ``NativeName``,
-    which rejects a distribution name that is not already one.
+    Returns "lup" when the file or the [project] table is absent — or when
+    the manifest does not parse — so roots that are not Python projects, and
+    projects whose manifest a merge stopped inside, still yield a usable
+    identifier. Callers that need a portable declaration name validate
+    through ``NativeName``, which rejects a distribution name that is not
+    already one.
     """
     match manifest_table(root / "pyproject.toml"):
         case {"project": {"name": str(name)}}:
