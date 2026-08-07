@@ -31,6 +31,7 @@ from lup.adapters.claude.config import (
     ClaudeProfileRegistry,
     ClaudeProfileResolver,
     ClaudeProfileSelection,
+    claude_profile_selector,
 )
 from lup.adapters.claude.native import (
     ClaudeBeforeToolEvent,
@@ -53,6 +54,7 @@ from lup.adapters.codex.config import (
     CodexProfileRegistry,
     CodexProfileResolver,
     CodexProfileSelection,
+    codex_profile_selector,
 )
 from lup.adapters.codex.native import (
     CodexBeforeToolEvent,
@@ -78,6 +80,7 @@ from lup.policy.models import (
     ToolIdentity,
     UnknownTool,
 )
+from lup.runtime.config import ProfileSelector
 from lup.runtime.factory import SessionFactory
 from lup.runtime.routing import (
     ExactModelMatcher,
@@ -223,6 +226,49 @@ def test_claude_profile_precedence_and_immutability(tmp_path: Path) -> None:
     assert "CLAUDE_CONFIG_DIR" not in original.environment
     with pytest.raises(KeyError, match="unknown Claude profile"):
         resolver.resolve("missing")
+
+
+class RecordingBuilder:
+    """Capture the configuration a selector hands to its factory builder."""
+
+    def __init__(self) -> None:
+        self.config: ClaudeSessionConfig | None = None
+
+    def build(self, config: ClaudeSessionConfig) -> SessionFactory:
+        self.config = config
+        return SessionFactory(RecordingOpener().session_context)
+
+
+def test_profile_selector_resolves_applies_then_constructs(tmp_path: Path) -> None:
+    registry = ClaudeProfileRegistry(
+        profiles={"work": ClaudeProfileSelection(config_directory=tmp_path / "work")}
+    )
+    builder = RecordingBuilder()
+    selector = ProfileSelector(ClaudeProfileResolver(registry), builder.build)
+    base = ClaudeSessionConfig(model="claude", environment={"KEEP": "1"})
+    selector.session_factory(base, "work")
+
+    assert builder.config is not None
+    assert builder.config.environment["CLAUDE_CONFIG_DIR"] == str(tmp_path / "work")
+    assert builder.config.environment["KEEP"] == "1"
+    assert "CLAUDE_CONFIG_DIR" not in base.environment
+
+
+def test_adapter_selectors_expose_the_resolved_transform(tmp_path: Path) -> None:
+    claude = claude_profile_selector(
+        ClaudeProfileRegistry(default=ClaudeProfileSelection(config_directory=tmp_path))
+    )
+    codex = codex_profile_selector(
+        CodexProfileRegistry(default=CodexProfileSelection(codex_home=tmp_path))
+    )
+
+    claude_config = claude.transform().apply(ClaudeSessionConfig(model="claude"))
+    codex_config = codex.transform().apply(
+        CodexSessionConfig(model="gpt", cwd=tmp_path)
+    )
+
+    assert claude_config.environment["CLAUDE_CONFIG_DIR"] == str(tmp_path)
+    assert codex_config.environment["CODEX_HOME"] == str(tmp_path)
 
 
 def test_claude_compatible_endpoint_owns_auth_and_aliases() -> None:

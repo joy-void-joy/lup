@@ -15,7 +15,7 @@ compatibility facade exists.
 | `Session.interrupt()` | optional `TurnHandle.interrupt.interrupt()` |
 | `LupResponse.output(Model)` | strict `TurnResult[Model].output` |
 | `output_schema` / `output_format` | `TurnRequest(output_type=Model)` and turn-bound `submit_output` |
-| `Engine.profiles()` / `Profile.select()` | adapter `ProfileResolver.session_factory(base, name)`, or `resolve(name)` plus immutable `ConfigTransform.apply()` |
+| `Engine.profiles()` / `Profile.select()` | adapter `ProfileSelector.session_factory(base, name)`, or `transform(name)` plus immutable `ConfigTransform.apply()` |
 | `Engine.background()` / `BackgroundDriver` | `runtime.background.BackgroundAgent(factory, state_to_request, …)` |
 | `Engine.builtin_tools()` / provider tables | adapter `NativeEventDecoder` plus semantic events |
 | `claude-compat` / `openai-compat` engines | `ClaudeCompatibilityTransform` / `CodexCompatibilityTransform` |

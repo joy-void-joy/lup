@@ -103,14 +103,9 @@ The guidance spells both; this is what each one does.
   with a reason.
 - The typed suppression marker, `lup: ignore[<rule-id>]` as a comment on the
   offending line, silences exactly the anti-pattern it names and no other, so
-  the site still trips every rule it left unnamed. It must sit on the line
-  that trips the rule — one line above is reported as spurious while the
-  violation stays uncovered. Comma-separate rule ids to cover several at one
-  site. The bare, untyped form stays valid but is itself flagged, to nudge
-  migration. Within a file's first ten lines the marker applies file-wide:
-  standalone it disables the anti-pattern audit for the whole file, and with
-  a rule id it disables only that rule, the way a file-level pyright
-  directive scopes.
+  the site still trips every rule it left unnamed. [contributing.md](contributing.md)
+  carries the scoping — where the marker must sit, comma-separated ids, the
+  flagged bare form, and the file-wide placement.
 
 Each rule id is shown in the deny message that cites it, and indexed in
 [rules.md](rules.md).

@@ -9,8 +9,7 @@ from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
     create_claude_session_factory,
 )
-from lup.runtime.config import ConfigTransform, ProfileResolver
-from lup.runtime.factory import SessionFactory
+from lup.runtime.config import ConfigTransform, ProfileResolver, ProfileSelector
 
 CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
 PLACEHOLDER_CREDENTIAL = "dummy"
@@ -57,13 +56,6 @@ class ClaudeProfileResolver(ProfileResolver[ClaudeSessionConfig]):
         self.registry = registry
 
     def resolve(self, name: str | None) -> ConfigTransform[ClaudeSessionConfig]:
-        """Resolve the selection as a transform, before any construction.
-
-        The transform is the primitive rather than an intermediate step:
-        selections compose with other config transforms and can be inspected
-        or dry-run while no provider resource exists yet. Callers that only
-        want the configured session use :meth:`session_factory`.
-        """
         selected = name or self.registry.active
         if selected is None:
             return ClaudeConfigDirectoryTransform(self.registry.default)
@@ -73,11 +65,14 @@ class ClaudeProfileResolver(ProfileResolver[ClaudeSessionConfig]):
             raise KeyError(f"unknown Claude profile {selected!r}") from error
         return ClaudeConfigDirectoryTransform(profile)
 
-    def session_factory(
-        self, base: ClaudeSessionConfig, name: str | None = None
-    ) -> SessionFactory:
-        """Resolve the selection, apply it to the base config, and construct."""
-        return create_claude_session_factory(self.resolve(name).apply(base))
+
+def claude_profile_selector(
+    registry: ClaudeProfileRegistry,
+) -> ProfileSelector[ClaudeSessionConfig]:
+    """The surface a consumer holds over Claude account selection."""
+    return ProfileSelector(
+        ClaudeProfileResolver(registry), create_claude_session_factory
+    )
 
 
 class ClaudeCompatibleEndpoint(BaseModel):

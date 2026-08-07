@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "ed30d794e420dddc85e1df2dbe69f62171b1f68f4e691508be46c05e788629c6",
+  "source_digest": "da7ab3eefcb5272586dfe91d0a442de4120dfe1105f81928c6f4b283f8af968f",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "259cfcd7934ef7169f4430fe46023b86719dbda9e2e9861f409418b15b3f85fe",
+      "sha256": "b4cf41bd86d5db219a298b1cd183686af97f03ff523af18b529e5b25c6b8f490",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -408,14 +408,14 @@
     {
       "path": "docs/architecture.md",
       "category": "generated",
-      "sha256": "17c7cc90b2ff296d36e7c6afb42ced94afd735b349ec1a2e8c4ca1506a9fec74",
+      "sha256": "922f679a303b123dd0ea5f9ef070390c2116cce3de1a2425d1a29124eaefca33",
       "semantic_id": "docs.architecture",
       "executable": false
     },
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "ae67a7458e57829fe38b3ca89e5c8b44918516d10c909a6442884f441b8797cd",
+      "sha256": "780865fa950d02692da8694198196b2a0bc6ac4c3d5d6ea7945eeb069970dfad",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -464,14 +464,14 @@
     {
       "path": "docs/patterns.md",
       "category": "generated",
-      "sha256": "100f5917abde64b4b56df0485b352f2e8b8019b50358253981177e4a623d995f",
+      "sha256": "eaceb66c9d6480ad404c155fdeaaa0ca2368c5541626fbf46259906d1381be63",
       "semantic_id": "docs.patterns",
       "executable": false
     },
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "5eff7c2719b40fd423297cad2f935b25eff225fad79b2c6c7151ed0c6c3685dd",
+      "sha256": "5d993a3b6da6c29a3e6b6f75eff04b39b44a62eec55e6efd3f694fc7b91d93e9",
       "semantic_id": "docs.permissions",
       "executable": false
     },

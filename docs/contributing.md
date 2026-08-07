@@ -152,6 +152,24 @@ Two conventions catch most first-time review comments:
 the module that enforces it. A denial names its rule id, so you rarely need to
 read it first.
 
+### The `# lup: ignore` escape hatch
+
+When `Any` or another anti-pattern is genuinely needed — an untyped library
+boundary, MCP — an inline ignore requests user approval rather than silencing
+the check on its own authority.
+
+Prefer the typed, pyright-style `# lup: ignore[rule-id]`, comma-separating a
+list (`# lup: ignore[dict-get, tuple-shape]`), so a site silences exactly the
+rule it needs and still trips the others. The bare `# lup: ignore` stays
+valid, but the auditor flags it as untyped to nudge migration. The marker must
+sit on the line that trips the rule: one line above is reported as spurious
+while the violation stays uncovered.
+
+In a file's first 10 lines the marker goes file-wide — a standalone
+`# lup: ignore` disables anti-pattern checks for the whole file, and
+`# lup: ignore[rule-id]` disables only that rule, the way `# pyright: ignore`
+works for files.
+
 ## Tests
 
 One standard decides whether a test earns its place: **would it catch a
