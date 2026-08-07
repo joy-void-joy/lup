@@ -67,9 +67,9 @@ class LocalProcessLauncher(ProcessLauncher):
         }
         result = command(
             *arguments,
-            _cwd=Path(request.cwd),
+            _cwd=str(request.cwd),
             _env=environment,
-            _ok_code=range(256),
+            _ok_code=list(range(256)),
             _return_cmd=True,
             _tty_out=False,
         )

@@ -192,16 +192,16 @@ def fixture_repository(root: Path) -> Path:
     repo = root / "fixture-repo"
     repo.mkdir()
     git = sh.Command("git")
-    git("init", "--initial-branch=main", _cwd=repo)
-    git("config", "user.email", "smoke@example.invalid", _cwd=repo)
-    git("config", "user.name", "Native Smoke", _cwd=repo)
+    git("init", "--initial-branch=main", _cwd=str(repo))
+    git("config", "user.email", "smoke@example.invalid", _cwd=str(repo))
+    git("config", "user.name", "Native Smoke", _cwd=str(repo))
     module = repo / "greeting.py"
     module.write_text(
         '# lup: rename GREETING_TEXT to WELCOME_TEXT\nGREETING_TEXT = "hello"\n',
         encoding="utf-8",
     )
-    git("add", ".", _cwd=repo)
-    git("commit", "-m", "chore: seed fixture", _cwd=repo)
+    git("add", ".", _cwd=str(repo))
+    git("commit", "-m", "chore: seed fixture", _cwd=str(repo))
     return repo
 
 
@@ -266,7 +266,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
     )
     stop = asyncio.Event()
     answering = asyncio.create_task(answer_every_question(core, stop))
-    head = str(sh.Command("git")("rev-parse", "HEAD", _cwd=repo)).strip()
+    head = str(sh.Command("git")("rev-parse", "HEAD", _cwd=str(repo))).strip()
     manifest = await core.run(
         ResolveRequest(
             source=SourceSnapshot(branch="main", commit=head),
@@ -286,7 +286,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
 
     assert manifest.run_id == run_id
     assert manifest.review_branch
-    branches = str(sh.Command("git")("branch", "--list", _cwd=repo))
+    branches = str(sh.Command("git")("branch", "--list", _cwd=str(repo)))
     assert manifest.review_branch in branches
 
 
@@ -303,7 +303,7 @@ def codex_edit_fixture(root: Path) -> CodexEditFixture:
     """Create a repository whose requested edit violates the Lup policy."""
     repo = root / "codex-edit-fixture"
     repo.mkdir()
-    sh.Command("git")("init", "--initial-branch=main", _cwd=repo)
+    sh.Command("git")("init", "--initial-branch=main", _cwd=str(repo))
     module = repo / "module.py"
     module.write_text('VALUE = "safe"\n', encoding="utf-8")
     return CodexEditFixture(repository=repo, module=module)

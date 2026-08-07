@@ -199,7 +199,7 @@ class CodexPluginInstaller:
             "marketplace",
             "remove",
             self.config.marketplace,
-            _cwd=cwd,
+            _cwd=str(cwd),
             _env=environment,
             _ok_code=[0, 1],
         )
@@ -208,7 +208,7 @@ class CodexPluginInstaller:
             "marketplace",
             "add",
             str(cwd),
-            _cwd=cwd,
+            _cwd=str(cwd),
             _env=environment,
         )
         selector = f"{self.config.plugin}@{self.config.marketplace}"
@@ -217,7 +217,7 @@ class CodexPluginInstaller:
                 "plugin",
                 "remove",
                 selector,
-                _cwd=cwd,
+                _cwd=str(cwd),
                 _env=environment,
                 _ok_code=[0, 1],
             )
@@ -226,7 +226,7 @@ class CodexPluginInstaller:
             "add",
             selector,
             "--json",
-            _cwd=cwd,
+            _cwd=str(cwd),
             _env=environment,
         )
         after = plugin_cache_evidence(source_root, self.config)

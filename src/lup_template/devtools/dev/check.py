@@ -158,7 +158,7 @@ def run_checks(fix: bool, no_test: bool, scope: list[str] | None = None) -> None
             ("pytest (lup)", Path("packages/lup")),
         ):
             try:
-                uv("run", "pytest", "-n", str(TEST_WORKERS), _cwd=directory)
+                uv("run", "pytest", "-n", str(TEST_WORKERS), _cwd=str(directory))
                 typer.echo(f"{name}: ok")
                 results.append(CheckOutcome(name=name, passed=True))
             except sh.ErrorReturnCode as e:

@@ -123,7 +123,9 @@ class TestDecodeStderr:
         from lup_template.devtools.utils import decode_stderr
 
         err = sh.ErrorReturnCode.__new__(sh.ErrorReturnCode)
-        err.stderr = "already text"
+        # sh 2.4 declares `stderr` read-only, and this pins the branch that
+        # runs when it holds text rather than the bytes the type promises.
+        object.__setattr__(err, "stderr", "already text")
         assert decode_stderr(err) == "already text"
 
 

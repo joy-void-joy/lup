@@ -66,8 +66,8 @@ def apply_proposal(proposal_id: str) -> None:
     if not typer.confirm("Apply this canonical source patch and regenerate?"):
         raise typer.Abort()
     try:
-        sh.Command("git")("apply", "--check", str(patch), _cwd=project_root())
-        sh.Command("git")("apply", str(patch), _cwd=project_root())
+        sh.Command("git")("apply", "--check", str(patch), _cwd=str(project_root()))
+        sh.Command("git")("apply", str(patch), _cwd=str(project_root()))
     except sh.ErrorReturnCode as error:
         raise typer.BadParameter("reconciliation patch no longer applies") from error
     for composition in harness_compositions("all"):

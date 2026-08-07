@@ -1403,7 +1403,7 @@ def test_generated_dispatcher_resolves_its_runtime_from_anywhere(
         "-I",
         str(SHIPPED_DISPATCHERS[target].script.resolve()),
         _in='{"tool_name":"Bash","tool_input":{"command":"python -c 1"}}',
-        _cwd=tmp_path,
+        _cwd=str(tmp_path),
         _env={},
         _ok_code=[0, 2],
         _return_cmd=True,
