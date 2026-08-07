@@ -2953,3 +2953,42 @@ def test_every_created_and_restored_worktree_is_prepared(tmp_path: Path) -> None
     )
     orchestrator.restore(lease)
     assert preparer.prepared == [lease.root, lease.root, lease.root]
+
+
+def test_a_worktree_already_gone_is_freed_rather_than_reported_as_dirty(
+    tmp_path: Path,
+) -> None:
+    """`git worktree remove` refuses a dirty tree and a missing one alike.
+
+    Reading that one refusal as uncommitted work told a human three
+    worktrees held work they had to remove by hand, and the directory it
+    named was not there. What is on disk decides, and git's own refusal is
+    what a genuinely retained worktree reports.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    source = snapshot(workspace, launcher)
+    orchestrator = WorktreeOrchestrator(launcher, workspace)
+    leases = WritableRootLeases(tmp_path / "resolver-worktrees")
+
+    vanished = leases.acquire("gone", "resolve/removal/gone")
+    orchestrator.create(vanished, source.commit)
+    launcher.launch(
+        LaunchRequest(
+            arguments=["git", "worktree", "remove", str(vanished.root)],
+            cwd=workspace,
+        )
+    )
+    assert not vanished.root.exists()
+
+    freed = orchestrator.remove(vanished)
+    assert freed.freed
+    assert freed.detail == "worktree was already gone"
+
+    dirty = leases.acquire("dirty", "resolve/removal/dirty")
+    orchestrator.create(dirty, source.commit)
+    (dirty.root / "unstaged.txt").write_text("held\n", encoding="utf-8")
+
+    retained = orchestrator.remove(dirty)
+    assert not retained.freed
+    assert "untracked" in retained.detail

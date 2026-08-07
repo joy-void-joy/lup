@@ -16,6 +16,7 @@ from lup.resolver.models import (
     NoteClearanceCommit,
     SourceSnapshot,
     WorkerReport,
+    WorktreeRemoval,
     WritableRootLease,
 )
 
@@ -319,22 +320,41 @@ class WorktreeOrchestrator:
             commit=commit_lines[0],
         )
 
-    def remove(self, lease: WritableRootLease) -> bool:
+    def remove(self, lease: WritableRootLease) -> WorktreeRemoval:
+        """Free a lease's worktree, reporting what actually stands in the way.
+
+        An exit status cannot tell a dirty worktree from one that is no
+        longer there — `git worktree remove` refuses both — so reading the
+        refusal as uncommitted work sent a human to directories that did not
+        exist and described work that was not being held. What remains on
+        disk is observable, so it is observed rather than inferred, and the
+        refusal git gave is carried instead of a guess at it.
+        """
         status = self.launcher.launch(
             LaunchRequest(
                 arguments=["git", "worktree", "remove", str(lease.root)],
                 cwd=self.workspace,
             )
         )
+        notes: list[str] = []  # lup: ignore[empty-collection] — report detail
         if status.code != 0:
-            return False
+            if lease.root.exists():
+                return WorktreeRemoval(freed=False, detail=status.stderr.strip())
+            self.launcher.launch(
+                LaunchRequest(
+                    arguments=["git", "worktree", "prune"], cwd=self.workspace
+                )
+            )
+            notes.append("worktree was already gone")
         deleted = self.launcher.launch(
             LaunchRequest(
                 arguments=["git", "branch", "-D", lease.branch],
                 cwd=self.workspace,
             )
         )
-        return deleted.code == 0
+        if deleted.code != 0:
+            notes.append(f"branch retained: {deleted.stderr.strip()}")
+        return WorktreeRemoval(freed=True, detail="; ".join(notes))
 
     def restore(self, lease: WritableRootLease) -> None:
         """Restore a persisted branch into its persisted writable root."""

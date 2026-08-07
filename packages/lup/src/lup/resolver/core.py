@@ -2266,15 +2266,22 @@ class ResolverCore:
 
     def abort_lease(self, lease: WritableRootLease) -> CleanupRecord:
         """Free one concern lease, reporting a dirty tree instead of forcing it."""
-        removed = self.worktrees.remove(lease)
+        removal = self.worktrees.remove(lease)
+        if not removal.freed:
+            return CleanupRecord(
+                path=lease.root,
+                branch=lease.branch,
+                action="retained",
+                reason=f"worktree not freed; remove manually: {removal.detail}",
+            )
         return CleanupRecord(
             path=lease.root,
             branch=lease.branch,
-            action="removed" if removed else "retained",
-            reason=(
-                "concern worktree freed by abort"
-                if removed
-                else "worktree holds uncommitted work; remove manually"
+            action="removed",
+            reason="; ".join(
+                part
+                for part in ["concern worktree freed by abort", removal.detail]
+                if part
             ),
         )
 
@@ -2345,7 +2352,7 @@ class ResolverCore:
                     )
                 )
                 continue
-            removed = self.worktrees.remove(lease)
+            removal = self.worktrees.remove(lease)
             # A concern that failed keeps saying so. Cleaning its worktree is
             # housekeeping, and relabelling it CLEANED would erase the one
             # thing the run is evidence of.
@@ -2353,17 +2360,22 @@ class ResolverCore:
                 progress = self.progress_state(
                     progress,
                     [lease.concern_id],
-                    ConcernStatus.CLEANED if removed else ConcernStatus.RETAINED,
+                    ConcernStatus.CLEANED if removal.freed else ConcernStatus.RETAINED,
                 )
             cleanup.append(
                 CleanupRecord(
                     path=lease.root,
                     branch=lease.branch,
-                    action="removed" if removed else "retained",
-                    reason=(
-                        "concern worktree cleaned after review"
-                        if removed
-                        else "automatic cleanup failed; remove manually"
+                    action="removed" if removal.freed else "retained",
+                    reason="; ".join(
+                        part
+                        for part in [
+                            "concern worktree cleaned after review"
+                            if removal.freed
+                            else "automatic cleanup failed; remove manually",
+                            removal.detail,
+                        ]
+                        if part
                     ),
                 )
             )

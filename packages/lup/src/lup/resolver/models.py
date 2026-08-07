@@ -584,6 +584,15 @@ class VerificationRecord(BaseModel):
     exit_code: int
 
 
+class WorktreeRemoval(BaseModel):
+    """Whether a lease's worktree is gone, and what stands in the way if not."""
+
+    model_config = FROZEN
+
+    freed: bool
+    detail: str = ""
+
+
 class CleanupRecord(BaseModel):
     model_config = FROZEN
 
