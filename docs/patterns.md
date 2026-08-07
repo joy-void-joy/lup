@@ -105,3 +105,56 @@ declared at the wrong level. `GUIDANCE_BYTE_BUDGET`
 mirrors a real vendor default, so the number is not arbitrary — but *which*
 number a given project wants is still its own call, so it is a parameter with
 that default rather than a constant.
+
+## Read The Thing You Are Checking Moved
+
+A check that catches movement compares two values. Derive them from two
+different places and the check stops testing what it was written to test: it
+fires when the *sources* disagree, which they eventually will for reasons
+that have nothing to do with the movement being guarded.
+
+The resolver validated a worker's turn against a commit carried in a local,
+seeded once at loop entry from the note clearance and advanced only by that
+loop. Within one process the two agreed. A concern resumed in a second
+process re-entered at the clearance while its lease already held a round the
+first process had committed, so the guard read the orchestrator's own commit
+as the worker seizing commit authority and failed the concern for work the
+orchestrator did itself. Three defects of this exact shape were fixed
+separately before the shape was named.
+
+The rule is one line: **read the current value from its own source at the
+moment you compare, and never carry a copy across a boundary that can also
+move it.** `execute_concern_inner`
+(`packages/lup/src/lup/resolver/core.py`) reads `worktrees.head(lease)` at
+the top of each round; `join_commits` beside it was already written this way.
+
+Two things follow. A value that must be captured *before* an operation — a
+pre-turn head, a pre-edit digest — is captured as close to that operation as
+the code allows, not hoisted. And because this class only appears once a
+process boundary is crossed, the covering test is a **resume** test: run to
+a committed intermediate state, build a fresh instance over the same
+persisted state, and continue. A single-process test passes either way.
+
+## An Instruction Is A Claim About What Is Permitted
+
+Telling an agent to do something asserts the system will let it. When the
+assertion is false the agent cannot comply and cannot proceed: it reasons
+correctly, finds two authorities in contradiction, and spends a round asking
+which one wins — or worse, complies with the one that was wrong.
+
+Four instances, each patched on its own before the shape was named: a
+question offered an option needing a gate its concern had never been
+granted; a correction loop re-prompted a submission the runtime had refused
+and would refuse identically; an acceptance criterion asked a worker to
+convert a review note the orchestrator had already deleted, against a
+standing instruction never to write one; and a worker was told to use a
+plugin its worktree did not contain.
+
+The fix is not to warn the agent about the conflict. It is to **check the
+instruction against the authority that would refuse it, at the point the
+instruction is declared** — so an impossible one cannot be handed out. A
+question now names the gates its options need and a concern that asks for
+more than it requests fails to validate, which is the shape to copy. Where
+the conflict is genuine and intended, the carve-out belongs in the standing
+instruction rather than in the agent's judgement: say which of the two rules
+governs, so there is nothing left to adjudicate.
