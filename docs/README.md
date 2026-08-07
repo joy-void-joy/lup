@@ -9,7 +9,7 @@ touching.
 | --- | --- | --- |
 | `packages/lup` | The reusable, provider-neutral library. Session and turn engine, harness compiler, permission kernel, resolver, code scanner. Published standalone; never imports the application. | [library.md](library.md) |
 | `src/lup_template` | The application template. The agent you customize, the `lup-devtools` CLI, and the environment that runs a session. Built on the library. | [template.md](template.md) |
-| `.claude/`, `.codex/`, `.agents/`, `AGENTS.md` | The harness — the native plugin trees. Compiler output from typed Python, committed so a checkout is launchable with no build step. | [harness.md](harness.md) |
+| `.claude/`, `.codex/`, `.agents/`, `AGENTS.md` | The harness — the native plugin trees. Compiler output from typed Python, committed so a checkout is launchable with no build step. Carries the roster of every skill and agent the plugin ships. | [harness.md](harness.md) |
 
 ## Reference
 

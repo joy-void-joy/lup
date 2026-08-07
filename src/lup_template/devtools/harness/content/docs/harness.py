@@ -4,11 +4,16 @@
 
 import lup.harness.models as models
 
+from lup_template.devtools.harness.content.catalog import (
+    agent_roster_text,
+    skill_roster_parts,
+)
+
 DOCUMENT = models.PromptDocument(
     source=__name__,
     parts=[
         models.TextPart(
-            text=r'''# The harness
+            text=r"""# The harness
 
 The committed `.claude/`, `.codex/`, `.agents/`, and root `AGENTS.md` trees are
 build products. Skills, agents, guidance, permission policy, and this
@@ -156,6 +161,24 @@ Each module under `src/lup_template/devtools/harness/` owns one concern:
 - `resolve.py` — persisted-resolver glue: broker, snapshots, factories
 - `launch.py` — runtime preflight and the native launchers
 
+## What the plugin ships
+
+Both rosters are rendered from the typed declarations in
+`src/lup_template/devtools/harness/content/catalog.py` — change the catalog,
+then regenerate.
+
+**Skills:**
+
+"""
+        ),
+        *skill_roster_parts(),
+        models.TextPart(
+            text=r"""
+**Agents:**
+
+"""
+            + agent_roster_text()
+            + r'''
 ## Authoring
 
 ### Add a skill
@@ -351,6 +374,6 @@ native hooks surface after generation.
 Commit generated artifacts together with the catalog changes that produced
 them. [contributing.md](contributing.md) covers what review looks for.
 '''
-        )
+        ),
     ],
 )
