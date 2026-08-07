@@ -1,13 +1,14 @@
 """Direct regression coverage for adapter-owned runtime construction."""
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from lup.adapters.claude.runtime import (
     SESSION_THINKING_TOKENS,
@@ -22,31 +23,50 @@ from lup.adapters.claude.runtime import (
     claude_usage,
     convert_claude_block,
 )
-from lup.adapters.codex.app_server import CodexAppServer, RpcMessage
+from lup.adapters.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
 from lup.adapters.codex.runtime import (
     CodexConversationState,
     CodexMcpServerConfig,
     CodexSchemaRebindingError,
     CodexSessionConfig,
     CodexSteer,
+    CodexTurnChannel,
     CodexTurnToolBinder,
+    DynamicToolCall,
+    McpElicitationRequest,
+    decode_completed_item,
     decode_usage,
+    message_role,
+    notification_turn_id,
 )
 from lup.hooks import create_permission_hooks
 from lup.runtime.errors import ProviderTurnError, TurnInterruptedError
 from lup.types import JsonObject, JsonValue, SubagentSpec
 from lup.runtime.models import (
+    AnyTurnBlock,
+    BlockCompletedEvent,
+    BlockDeltaEvent,
+    LiveTurnEvent,
+    MessageCompletedEvent,
+    SessionId,
     SubmissionDecision,
+    TurnCompletedEvent,
+    TurnId,
+    TurnIdentifiers,
     TurnInput,
     TurnMessage,
     TurnRequest,
+    TurnStartedEvent,
     TurnTextBlock,
+    TurnThinkingBlock,
     TurnToolBinding,
     TurnToolCallBlock,
+    TurnToolResultBlock,
 )
 from lup.runtime.output import InMemorySubmittedOutputStore, TurnSubmission
 from lup.runtime.usage import per_mtok_usage_cost
 from lup.types import Usage
+from tests.unit.test_adapter_transforms import arm_labels, decoder_arms
 
 if TYPE_CHECKING:
     import claude_agent_sdk as claude
@@ -818,3 +838,574 @@ async def test_closing_a_session_settles_the_reader_before_the_transport(
         # An unfinished turn is torn down with its reader suspended inside the
         # response generator, so wait until it is actually there.
         await clients[-1].reading.wait()
+
+
+# -- app-server decoding: every notification, item, and parameter shape --
+#
+# `CodexTurnChannel.decode` and its helpers narrow app-server payloads with no
+# union of ours to enumerate, so each roster below is read back out of the arms
+# themselves. A notification method, an item type, or a payload key that
+# changes without a case naming it fails here rather than reaching the ignored
+# default and being reported as a turn that simply said nothing.
+
+
+def turn_identifiers() -> TurnIdentifiers:
+    """The identity every notification in this section is routed under."""
+    return TurnIdentifiers(
+        session=SessionId(value="thread-1"), turn=TurnId(value="turn-1")
+    )
+
+
+def routed_channel() -> CodexTurnChannel:
+    """One channel already bound to the turn its notifications name."""
+    channel = CodexTurnChannel("thread-1")
+    channel.turn_id = "turn-1"
+    return channel
+
+
+def published(channel: CodexTurnChannel) -> list[LiveTurnEvent]:
+    """Everything one channel published, up to its end-of-turn sentinel."""
+
+    def events() -> Iterator[LiveTurnEvent]:
+        while not channel.events.empty():
+            match channel.events.get_nowait():
+                case None:
+                    return
+                case event:
+                    yield event
+
+    return list(events())
+
+
+class TurnIdentityCase(BaseModel):
+    """One shape ``notification_turn_id`` reads a native turn identity from."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    arm: str
+    params: JsonObject
+    turn_id: str | None = None
+
+
+class NotificationCase(BaseModel):
+    """One app-server notification and everything its channel does with it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    method: str
+    params: JsonObject
+    events: list[LiveTurnEvent] = Field(default_factory=list)
+    usage: Usage = Usage()
+
+
+class CompletedItemCase(BaseModel):
+    """One completed app-server item and the blocks it decodes into."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    arm: str
+    payload: JsonObject
+    blocks: list[AnyTurnBlock] = Field(default_factory=list)
+
+
+TURN_IDENTITY_CASES = [
+    TurnIdentityCase(
+        name="a-flat-turn-id",
+        arm="(turnId)",
+        params={"turnId": "turn-1", "delta": "hel"},
+        turn_id="turn-1",
+    ),
+    TurnIdentityCase(
+        name="a-nested-turn-reference",
+        arm="(turn)",
+        params={"turn": {"id": "turn-1", "status": "completed"}},
+        turn_id="turn-1",
+    ),
+    TurnIdentityCase(
+        name="a-notification-claiming-no-turn",
+        arm="_",
+        params={"threadId": "thread-1"},
+    ),
+]
+
+
+NOTIFICATION_CASES = [
+    NotificationCase(
+        name="turn/started",
+        method="turn/started",
+        params={"turn": {"id": "turn-1"}},
+        events=[TurnStartedEvent(identifiers=turn_identifiers())],
+    ),
+    NotificationCase(
+        name="item/agentMessage/delta",
+        method="item/agentMessage/delta",
+        params={"turnId": "turn-1", "delta": "hel"},
+        events=[BlockDeltaEvent(identifiers=turn_identifiers(), delta="hel")],
+    ),
+    NotificationCase(
+        name="item/completed",
+        method="item/completed",
+        params={"turnId": "turn-1", "item": {"type": "agentMessage", "text": "hello"}},
+        events=[
+            BlockCompletedEvent(
+                identifiers=turn_identifiers(), block=TurnTextBlock(text="hello")
+            ),
+            MessageCompletedEvent(
+                identifiers=turn_identifiers(),
+                message=TurnMessage(
+                    role="assistant", blocks=[TurnTextBlock(text="hello")]
+                ),
+            ),
+        ],
+    ),
+    NotificationCase(
+        # Usage is folded into the channel rather than published, so this arm
+        # is the one whose whole effect is invisible on the event stream.
+        name="thread/tokenUsage/updated",
+        method="thread/tokenUsage/updated",
+        params={
+            "turnId": "turn-1",
+            "tokenUsage": {
+                "last": {"inputTokens": 120, "outputTokens": 8, "cachedInputTokens": 90}
+            },
+        },
+        usage=Usage(input_tokens=120, output_tokens=8, cache_read_input_tokens=90),
+    ),
+    NotificationCase(
+        name="turn/completed",
+        method="turn/completed",
+        params={"turn": {"id": "turn-1", "status": "completed", "durationMs": 40}},
+        events=[TurnCompletedEvent(identifiers=turn_identifiers())],
+    ),
+]
+
+
+COMPLETED_ITEM_CASES = [
+    CompletedItemCase(
+        name="agentMessage",
+        arm="(type=agentMessage, text)",
+        payload={"type": "agentMessage", "text": "hello"},
+        blocks=[TurnTextBlock(text="hello")],
+    ),
+    CompletedItemCase(
+        name="reasoning",
+        arm="(type=reasoning, content)",
+        payload={"type": "reasoning", "content": ["step one", "step two"]},
+        blocks=[TurnThinkingBlock(thinking="step one\nstep two")],
+    ),
+    CompletedItemCase(
+        name="commandExecution",
+        arm="(type=commandExecution, id, command, aggregatedOutput, status)",
+        payload={
+            "type": "commandExecution",
+            "id": "c1",
+            "command": "uv run pytest",
+            "aggregatedOutput": "2 passed",
+            "status": "completed",
+        },
+        blocks=[
+            TurnToolCallBlock(
+                id="c1", name="ShellCommand", arguments={"command": "uv run pytest"}
+            ),
+            TurnToolResultBlock(tool_call_id="c1", content="2 passed"),
+        ],
+    ),
+    CompletedItemCase(
+        # A non-terminal status is the error flag, and output the vendor left
+        # unset reaches the transcript as empty rather than as the word None.
+        name="commandExecution-that-failed",
+        arm="(type=commandExecution, id, command, aggregatedOutput, status)",
+        payload={
+            "type": "commandExecution",
+            "id": "c2",
+            "command": "uv run pytest",
+            "aggregatedOutput": None,
+            "status": "failed",
+        },
+        blocks=[
+            TurnToolCallBlock(
+                id="c2", name="ShellCommand", arguments={"command": "uv run pytest"}
+            ),
+            TurnToolResultBlock(tool_call_id="c2", content="", is_error=True),
+        ],
+    ),
+    CompletedItemCase(
+        name="fileChange",
+        arm="(type=fileChange, id, changes, status)",
+        payload={
+            "type": "fileChange",
+            "id": "f1",
+            "changes": [{"path": "a.py", "kind": "update"}],
+            "status": "completed",
+        },
+        blocks=[
+            TurnToolCallBlock(
+                id="f1",
+                name="EditBatch",
+                arguments={"changes": [{"path": "a.py", "kind": "update"}]},
+            ),
+            TurnToolResultBlock(tool_call_id="f1", content="completed"),
+        ],
+    ),
+    CompletedItemCase(
+        name="dynamicToolCall",
+        arm="(type=dynamicToolCall, id, tool, arguments, status)",
+        payload={
+            "type": "dynamicToolCall",
+            "id": "d1",
+            "tool": "submit_output",
+            "arguments": {"answer": "x"},
+            "status": "completed",
+        },
+        blocks=[
+            TurnToolCallBlock(id="d1", name="submit_output", arguments={"answer": "x"}),
+            TurnToolResultBlock(
+                tool_call_id="d1",
+                content=(
+                    '{"arguments": {"answer": "x"}, "id": "d1", '
+                    '"status": "completed", "tool": "submit_output", '
+                    '"type": "dynamicToolCall"}'
+                ),
+            ),
+        ],
+    ),
+    CompletedItemCase(
+        # Arguments the vendor did not send as an object are kept whole under
+        # one name rather than dropped for not being a mapping.
+        name="dynamicToolCall-with-opaque-arguments",
+        arm="(type=dynamicToolCall, id, tool, arguments, status)",
+        payload={
+            "type": "dynamicToolCall",
+            "id": "d2",
+            "tool": "submit_output",
+            "arguments": "raw",
+            "status": "failed",
+        },
+        blocks=[
+            TurnToolCallBlock(
+                id="d2", name="submit_output", arguments={"value": "raw"}
+            ),
+            TurnToolResultBlock(
+                tool_call_id="d2",
+                content=(
+                    '{"arguments": "raw", "id": "d2", "status": "failed", '
+                    '"tool": "submit_output", "type": "dynamicToolCall"}'
+                ),
+                is_error=True,
+            ),
+        ],
+    ),
+    CompletedItemCase(
+        # `message_role` reads this type as the environment's reply, and no arm
+        # here decodes it, so it reaches a transcript as nothing at all.
+        name="an-item-type-with-no-arm",
+        arm="_",
+        payload={"type": "mcpTool", "id": "m1", "status": "completed"},
+    ),
+    CompletedItemCase(
+        name="an-item-missing-the-field-its-arm-reads",
+        arm="_",
+        payload={"type": "agentMessage"},
+    ),
+]
+
+
+def test_every_turn_identity_arm_is_named_by_a_case() -> None:
+    assert sorted({case.arm for case in TURN_IDENTITY_CASES}) == sorted(
+        arm_labels(notification_turn_id)
+    )
+
+
+@pytest.mark.parametrize(
+    "case", TURN_IDENTITY_CASES, ids=[case.name for case in TURN_IDENTITY_CASES]
+)
+def test_each_turn_identity_shape_reads_the_turn_it_names(
+    case: TurnIdentityCase,
+) -> None:
+    notification = RpcNotification(method="turn/completed", params=case.params)
+
+    assert notification_turn_id(notification) == case.turn_id
+
+
+def test_the_declared_notification_roster_is_exactly_the_arms_it_names() -> None:
+    arms = decoder_arms(CodexTurnChannel.decode)
+
+    assert [method for arm in arms for method in arm.discriminators] == list(
+        CodexTurnChannel.notifications
+    )
+    assert arms[-1].label == "_"
+
+
+def test_every_declared_notification_is_named_by_a_case() -> None:
+    assert sorted({case.method for case in NOTIFICATION_CASES}) == sorted(
+        CodexTurnChannel.notifications
+    )
+
+
+@pytest.mark.parametrize(
+    "case", NOTIFICATION_CASES, ids=[case.name for case in NOTIFICATION_CASES]
+)
+async def test_each_notification_arm_publishes_what_it_names(
+    case: NotificationCase,
+) -> None:
+    channel = routed_channel()
+
+    channel.feed(RpcNotification(method=case.method, params=case.params))
+
+    assert published(channel) == case.events
+    assert channel.usage == case.usage
+
+
+async def test_a_completed_turn_replays_its_transcript_blocks_and_usage() -> None:
+    channel = routed_channel()
+
+    channel.feed(
+        RpcNotification(
+            method="thread/tokenUsage/updated",
+            params={
+                "turnId": "turn-1",
+                "tokenUsage": {
+                    "last": {
+                        "inputTokens": 120,
+                        "outputTokens": 8,
+                        "cachedInputTokens": 90,
+                    }
+                },
+            },
+        )
+    )
+    channel.feed(
+        RpcNotification(
+            method="item/completed",
+            params={
+                "turnId": "turn-1",
+                "item": {"type": "agentMessage", "text": "hello"},
+            },
+        )
+    )
+    channel.feed(
+        RpcNotification(
+            method="turn/completed",
+            params={"turn": {"id": "turn-1", "status": "completed", "durationMs": 40}},
+        )
+    )
+
+    completed = await channel.completed
+
+    assert completed.blocks == [TurnTextBlock(text="hello")]
+    assert completed.messages == [
+        TurnMessage(role="assistant", blocks=[TurnTextBlock(text="hello")])
+    ]
+    assert completed.usage == Usage(
+        input_tokens=120, output_tokens=8, cache_read_input_tokens=90
+    )
+    assert completed.duration == timedelta(milliseconds=40)
+
+
+@pytest.mark.parametrize(
+    "status", ["interrupted", "cancelled", "canceled", "Cancelled"]
+)
+async def test_a_stopped_turn_is_a_typed_interruption(status: str) -> None:
+    channel = routed_channel()
+
+    channel.feed(
+        RpcNotification(
+            method="turn/completed",
+            params={"turn": {"id": "turn-1", "status": status}},
+        )
+    )
+
+    with pytest.raises(TurnInterruptedError) as raised:
+        await channel.completed
+    assert raised.value.failure.message == f"Codex turn ended with status {status}"
+
+
+async def test_a_failed_turn_carries_the_native_message_and_its_evidence() -> None:
+    channel = routed_channel()
+    channel.blocks.append(TurnTextBlock(text="partial"))
+
+    channel.feed(
+        RpcNotification(
+            method="turn/completed",
+            params={
+                "turn": {
+                    "id": "turn-1",
+                    "status": "failed",
+                    "error": {"message": "model overloaded"},
+                }
+            },
+        )
+    )
+
+    with pytest.raises(ProviderTurnError) as raised:
+        await channel.completed
+    assert raised.value.failure.message == "model overloaded"
+    assert raised.value.failure.blocks == [TurnTextBlock(text="partial")]
+
+
+async def test_a_failed_turn_without_a_native_message_names_its_status() -> None:
+    channel = routed_channel()
+
+    channel.feed(
+        RpcNotification(
+            method="turn/completed",
+            params={"turn": {"id": "turn-1", "status": "failed"}},
+        )
+    )
+
+    with pytest.raises(ProviderTurnError) as raised:
+        await channel.completed
+    assert raised.value.failure.message == "Codex turn ended with status failed"
+
+
+async def test_an_undeclared_notification_is_ignored_rather_than_raising() -> None:
+    channel = routed_channel()
+
+    channel.feed(RpcNotification(method="turn/thinking", params={"turnId": "turn-1"}))
+
+    assert published(channel) == []
+    assert not channel.completed.done()
+
+
+async def test_a_declared_notification_with_an_unmatched_payload_is_ignored() -> None:
+    channel = routed_channel()
+
+    channel.feed(
+        RpcNotification(
+            method="item/agentMessage/delta",
+            params={"turnId": "turn-1", "text": "hel"},
+        )
+    )
+
+    assert published(channel) == []
+    assert not channel.completed.done()
+
+
+async def test_a_notification_naming_another_turn_never_reaches_the_arms() -> None:
+    channel = routed_channel()
+
+    channel.feed(
+        RpcNotification(
+            method="turn/completed",
+            params={"turn": {"id": "turn-2", "status": "completed"}},
+        )
+    )
+
+    assert channel.turn_id == "turn-1"
+    assert published(channel) == []
+    assert not channel.completed.done()
+
+
+def test_every_completed_item_arm_is_named_by_a_case() -> None:
+    assert sorted({case.arm for case in COMPLETED_ITEM_CASES}) == sorted(
+        arm_labels(decode_completed_item)
+    )
+
+
+@pytest.mark.parametrize(
+    "case", COMPLETED_ITEM_CASES, ids=[case.name for case in COMPLETED_ITEM_CASES]
+)
+def test_each_completed_item_decodes_to_the_blocks_it_names(
+    case: CompletedItemCase,
+) -> None:
+    assert decode_completed_item(case.payload) == case.blocks
+
+
+@pytest.mark.parametrize("item_type", decoder_arms(message_role)[0].discriminators)
+def test_an_environment_reply_item_is_a_tool_message(item_type: str) -> None:
+    assert message_role({"type": item_type}) == "tool"
+
+
+@pytest.mark.parametrize("item_type", ["agentMessage", "reasoning"])
+def test_a_model_act_item_is_an_assistant_message(item_type: str) -> None:
+    assert message_role({"type": item_type}) == "assistant"
+
+
+def test_a_dynamic_tool_call_item_is_recorded_as_the_model_speaking() -> None:
+    """The split names three item types as the environment's reply.
+
+    A dynamic tool call decodes to a call block and its result the same way a
+    command execution does, and is still folded under the assistant. That is
+    what this pins, not what it endorses.
+    """
+    assert message_role({"type": "dynamicToolCall"}) == "assistant"
+
+
+def test_an_item_naming_no_type_is_an_assistant_message() -> None:
+    assert message_role({"id": "m1"}) == "assistant"
+
+
+def test_the_usage_breakdown_maps_every_native_count() -> None:
+    assert decode_usage(
+        {"inputTokens": 120, "outputTokens": 8, "cachedInputTokens": 90}
+    ) == Usage(input_tokens=120, output_tokens=8, cache_read_input_tokens=90)
+
+
+def test_a_usage_breakdown_missing_a_count_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        decode_usage({"inputTokens": 120, "outputTokens": 8})
+
+
+def test_a_dynamic_tool_call_reads_the_native_call_identity() -> None:
+    call = DynamicToolCall.model_validate(
+        {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "callId": "call-1",
+            "tool": "submit_output",
+            "arguments": {"answer": "x"},
+        }
+    )
+
+    assert call.thread_id == "thread-1"
+    assert call.turn_id == "turn-1"
+    assert call.call_id == "call-1"
+    assert call.tool == "submit_output"
+    assert call.arguments == {"answer": "x"}
+
+
+def test_a_dynamic_tool_call_missing_the_call_it_answers_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        DynamicToolCall.model_validate(
+            {
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "tool": "submit_output",
+                "arguments": {"answer": "x"},
+            }
+        )
+
+
+def test_a_dynamic_tool_call_spelled_in_snake_case_is_refused() -> None:
+    """The wire spelling is the vendor's, so only the vendor's is accepted."""
+    with pytest.raises(ValidationError):
+        DynamicToolCall.model_validate(
+            {
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "call_id": "call-1",
+                "tool": "submit_output",
+                "arguments": {"answer": "x"},
+            }
+        )
+
+
+def test_an_elicitation_reads_the_server_it_names() -> None:
+    request = McpElicitationRequest.model_validate(
+        {
+            "threadId": "thread-1",
+            "serverName": "notes",
+            "_meta": {"codex_approval_kind": "mcp_tool_call"},
+        }
+    )
+
+    assert request.thread_id == "thread-1"
+    assert request.server_name == "notes"
+
+
+def test_an_elicitation_without_the_server_it_names_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        McpElicitationRequest.model_validate({"threadId": "thread-1"})
