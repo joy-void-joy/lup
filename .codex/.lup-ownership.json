@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "9c5dcc5da1e1857dd1c35a36908b6aa5146796f89c3811cb1be3141ae1a294e2",
+  "source_digest": "487f4f3f89fe64c04ec2db4e02646be21a99e38c62f6f9a0f979aca6254ae4a6",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -268,7 +268,7 @@
     {
       "path": ".codex/plugins/lup/skills/implementer/SKILL.md",
       "category": "generated",
-      "sha256": "5c2eaed78f37493587cf8a7cc43f68c506f1f0901bf58d600c48e953073cd86e",
+      "sha256": "083a731147bdcdc1718394bedc0142359d4290cdbf75d7f0de10d89ab1bfc525",
       "semantic_id": "skill.implementer",
       "executable": false
     },
@@ -352,7 +352,7 @@
     {
       "path": ".codex/plugins/lup/skills/resolve-reviewer/SKILL.md",
       "category": "generated",
-      "sha256": "62b9f640ad1061909d081e1b5994416f58c8d4e1206f2fcca7c4d656cc6e734e",
+      "sha256": "1ac811e30cec23d9e8beae0b48fe899be035ffeb40990d8a88388c275e248cc5",
       "semantic_id": "skill.resolve-reviewer",
       "executable": false
     },

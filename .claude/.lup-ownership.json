@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "9c5dcc5da1e1857dd1c35a36908b6aa5146796f89c3811cb1be3141ae1a294e2",
+  "source_digest": "487f4f3f89fe64c04ec2db4e02646be21a99e38c62f6f9a0f979aca6254ae4a6",
   "target_requirements": [
     "claude-code"
   ],
@@ -170,7 +170,7 @@
     {
       "path": ".claude/plugins/lup/commands/implementer.md",
       "category": "generated",
-      "sha256": "d88aa8b30f191cc4a57b8d2f8b2e6025131b2629b647d5c8f4ecea37d48a8645",
+      "sha256": "7b77adc55143eaf5d200535c6a7928b2e23c05755d35d4c13b57deb6b147d01c",
       "semantic_id": "skill.implementer",
       "executable": false
     },
@@ -254,7 +254,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve-reviewer.md",
       "category": "generated",
-      "sha256": "6924e4d4b59495bc0ce211f0449e0da5c66ab88fc591f74e19d925726c2eaa68",
+      "sha256": "e149fe24ff52bfa658cdd6ef62b82ba4167ab9e76d9d8308b4d53f4b60a531e7",
       "semantic_id": "skill.resolve-reviewer",
       "executable": false
     },
