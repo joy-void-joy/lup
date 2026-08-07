@@ -1,13 +1,6 @@
 # lup: ignore[import-re, re-call]
 # Diff hunks are semi-structured text with no parser — significance detection
 # is alternation over diff lines, so the regex rules are opted out file-wide.
-# lup: every one of these commands is reached through `uv run`, which parses
-# `pyproject.toml` before it will run anything. So the moment the conflict is
-# *in* that file the whole conflict toolchain is unavailable, precisely when a
-# resolver worker is assigned to settle it — the tooling withdraws exactly where
-# the manifest that configures the project is at stake, and the worker falls back
-# to bare `git`. Reach these through an entry point that does not re-read the
-# manifest, or detect the case and say so rather than failing to start.
 """Conflict scope classification, audit, and completion for merge/rebase conflicts.
 
 After a failed merge or rebase, classifies conflicted files as in-scope
