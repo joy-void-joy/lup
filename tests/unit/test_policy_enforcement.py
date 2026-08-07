@@ -33,7 +33,7 @@ from lup.policy.models import (
     ToolIdentity,
     UnknownTool,
 )
-from lup.policy.rules import FetchPolicy, ShellPolicy, UrlScope
+from lup.policy.rules import EditPolicy, FetchPolicy, ShellPolicy, UrlScope
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 DOCS_ORIGIN = AnyHttpUrl("https://docs.example.com")
@@ -121,6 +121,37 @@ def test_router_asks_rather_than_allows_what_no_policy_covers() -> None:
         ).effect
         == "ask"
     )
+
+
+async def test_hook_judges_an_edit_by_the_documents_it_would_produce(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The hook splices fragments before judging, as the dispatchers do.
+
+    Repo-relative path on purpose: the scratchpad role skips the marker
+    gate, and this test needs the gate reading the spliced document.
+    """
+    monkeypatch.chdir(tmp_path)
+    Path("content.py").write_text(
+        'TABLE = """\nA note spells itself as # lup: fix this here.\n"""\n',
+        encoding="utf-8",
+    )
+    hooks = create_policy_hooks(
+        SemanticToolPolicy(edit=EditPolicy(protected=[])),
+        CLAUDE_SEMANTICS,
+    )
+    allowed = await hooks.pre_tool_use[0].hook(
+        LupHookInput(
+            event="PreToolUse",
+            tool_name="Edit",
+            tool_input={
+                "file_path": "content.py",
+                "old_string": "A note spells itself as # lup: fix this here.\n",
+                "new_string": "",
+            },
+        )
+    )
+    assert allowed.decision == "allow"
 
 
 async def test_hook_refuses_a_denied_call_and_leaves_other_events_alone() -> None:

@@ -1823,6 +1823,33 @@ def test_a_granted_new_devtools_allowance_releases_exactly_that_gate() -> None:
     assert granted.decide(creation).effect == "allow"
 
 
+def test_fragment_edits_are_judged_as_the_documents_they_produce(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A marker mentioned inside a string literal is prose, not feedback.
+
+    The path is repo-relative because the session scratchpad is exempt from
+    the marker gate by role, and the gate is what this test drives.
+    """
+    monkeypatch.chdir(tmp_path)
+    Path("content.py").write_text(
+        'TABLE = """\nA note spells itself as # lup: fix this here.\n"""\n',
+        encoding="utf-8",
+    )
+    fragment = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("content.py"),
+                before="A note spells itself as # lup: fix this here.\n",
+                after="",
+            )
+        ]
+    )
+    policy = EditPolicy(protected=[])
+    assert policy.decide(fragment).effect == "deny"
+    assert policy.decide(fragment.as_documents()).effect == "allow"
+
+
 def test_semantic_policy_threads_allowances_into_the_edit_gate() -> None:
     """The composed policy honours the same grants the dispatchers read."""
     creation = EditBatch(

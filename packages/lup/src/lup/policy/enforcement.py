@@ -152,7 +152,7 @@ def create_policy_hooks(
         # vocabulary, so this reads a lup spelling rather than a provider's.
         if event.event != "PreToolUse":  # lup: ignore[native-spelling]
             return LupHookOutput()
-        return policy_hook_output(policy.decide(semantics.decode(event)))
+        return policy_hook_output(policy.decide(semantics.decode(event).as_documents()))
 
     return LupHooksConfig(
         pre_tool_use=[
