@@ -28,6 +28,8 @@ Examples::
 
 import typer
 
+from lup.workspace.paths import find_nearest_pyproject
+from lup_template.devtools.dev import conflicts
 from lup_template.devtools.agent import app as agent_app
 from lup_template.devtools.dashboard.app import app as dashboard_app
 from lup_template.devtools.py.app import app as py_app
@@ -67,3 +69,18 @@ if set(SUBAPP_TYPERS) != declared:  # lup: ignore[set-shape] — roster equality
 
 for subapp in SUBAPPS:
     app.add_typer(SUBAPP_TYPERS[subapp.name], name=subapp.name, help=subapp.help)
+
+
+@app.callback()
+def report_a_conflicted_manifest() -> None:
+    """Say what to run when `uv` is about to stop being able to start.
+
+    Every other command here is documented as ``uv run lup-devtools ...``, and
+    a conflicted ``pyproject.toml`` turns all of them into a parse error from
+    a tool that never reached this program. This runs on whichever invocation
+    does get through, so the diagnosis reaches the session before the failure
+    does rather than after.
+    """
+    root = find_nearest_pyproject()
+    if root is not None and conflicts.manifest_conflicted(root):
+        typer.echo(conflicts.conflicted_manifest_notice(), err=True)

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "9c5dcc5da1e1857dd1c35a36908b6aa5146796f89c3811cb1be3141ae1a294e2",
+  "source_digest": "d660f4f530d24a7bfb5934bfe0ccda5ea5d4788dc6cd76abe2fe093a2845b8c2",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -156,7 +156,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "56e32229cb704b2679191a9e01091c37bb09c79fd192b4548b0601a069678975",
+      "sha256": "f7ac2f3ed1456e8e7ef3df3025ab743273e797630bc2a684489b027afba8c878",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -303,7 +303,7 @@
     {
       "path": ".codex/plugins/lup/skills/merge/SKILL.md",
       "category": "generated",
-      "sha256": "c221308d0eb9f9f9723e81dff5bc1faede6d40f39091654a518a88b6c4f386ea",
+      "sha256": "e5d6c68efa1880ca08669ff9ca824bb8b92feeb92d99e6a37bb1ec99534a0c87",
       "semantic_id": "skill.merge",
       "executable": false
     },
@@ -387,7 +387,7 @@
     {
       "path": ".codex/rules/lup.rules",
       "category": "generated",
-      "sha256": "375e8eb0ca259720ac1db46d99140548381d31f1cabff59101b8c70b516201ac",
+      "sha256": "f221af287a945f518931dbe90cd33f85654057863175e46729bf1a09c234a2a2",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

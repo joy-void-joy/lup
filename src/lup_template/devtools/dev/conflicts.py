@@ -10,13 +10,20 @@ The `conflicts`, `conflict_status`, `conflict_audit`, and `conflict_complete`
 entry points back the `lup-devtools dev conflict` subcommands wired in
 `lup_template.devtools.dev.app`.
 
+Alone among this project's commands these are spelled without ``uv run``,
+which parses ``pyproject.toml`` before it will run anything: the moment the
+conflict is *in* that file, ``uv`` refuses to start and the whole conflict
+toolchain withdraws exactly where the manifest that configures the project is
+at stake. ``LAUNCHER`` names the console script in the project's own
+environment, which imports this package directly and reads no manifest.
+
 Examples::
 
-    $ uv run lup-devtools dev conflict list
-    $ uv run lup-devtools dev conflict list --json
-    $ uv run lup-devtools dev conflict status --json
-    $ uv run lup-devtools dev conflict audit src/lup/agent/core.py --json
-    $ uv run lup-devtools dev conflict complete --dry-run
+    $ .venv/bin/lup-devtools dev conflict list
+    $ .venv/bin/lup-devtools dev conflict list --json
+    $ .venv/bin/lup-devtools dev conflict status --json
+    $ .venv/bin/lup-devtools dev conflict audit src/lup/agent/core.py --json
+    $ .venv/bin/lup-devtools dev conflict complete --dry-run
 """
 
 import logging
@@ -37,6 +44,41 @@ from lup_template.devtools.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+LAUNCHER = ".venv/bin/lup-devtools"
+"""How the conflict workflow reaches this toolchain, named by path.
+
+A ``PATH`` lookup would let a sibling worktree's environment answer, and
+``uv run`` would parse the manifest that is under repair; the console script
+in this project's own environment does neither.
+"""
+
+MANIFEST = "pyproject.toml"
+"""The file ``uv`` must parse before it will run anything."""
+
+
+def invocation(*words: str) -> str:
+    """Spell one command so it starts while the manifest holds conflicts."""
+    return " ".join([LAUNCHER, *words])
+
+
+def manifest_conflicted(root: Path) -> bool:
+    """Whether a merge left markers in the manifest ``uv`` has to parse."""
+    try:
+        content = (root / MANIFEST).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return "<<<<<<<" in content and ">>>>>>>" in content
+
+
+def conflicted_manifest_notice() -> str:
+    """What to run instead, once the toolchain notices it is mid-conflict."""
+    return (
+        f"{MANIFEST} holds conflict markers, so `uv` cannot parse it and every "
+        f"`uv run ...` command will fail to start until the merge is settled. "
+        f"Reach this toolchain as `{LAUNCHER} ...` meanwhile — "
+        f"`{invocation('dev', 'conflict', 'status', '--json')}`."
+    )
 
 
 class ConflictFile(TypedDict):

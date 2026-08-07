@@ -51,6 +51,7 @@ Examples:
 """
 
 import functools
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -58,17 +59,37 @@ from pathlib import Path
 import tomllib
 from pydantic import BaseModel
 
+from lup.types import JsonObject
+
+logger = logging.getLogger(__name__)
+
+
+def manifest_table(pyproject: Path) -> JsonObject | None:
+    """Parse one ``pyproject.toml``, or answer that it declares nothing.
+
+    A manifest a merge stopped inside holds conflict markers and does not
+    parse. Every path this module resolves reads one, and the workflow for
+    repairing a conflicted manifest is reached through this same package, so
+    a decode error escaping here takes the whole toolchain down at exactly
+    the moment it is needed. A file that cannot be read declares nothing,
+    which is the answer a missing one already gives.
+    """
+    if not pyproject.exists():
+        return None
+    try:
+        with pyproject.open("rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError:
+        logger.warning("%s does not parse, so it declares nothing", pyproject)
+        return None
+
 
 def declared_project_root(start: Path) -> Path | None:
     """The nearest enclosing directory whose pyproject declares ``[tool.lup]``."""
     for parent in [start, *start.parents]:
-        pyproject = parent / "pyproject.toml"
-        if pyproject.exists():
-            with pyproject.open("rb") as f:
-                data = tomllib.load(f)
-            match data:
-                case {"tool": {"lup": _}}:
-                    return parent
+        match manifest_table(parent / "pyproject.toml"):
+            case {"tool": {"lup": _}}:
+                return parent
     return None
 
 
@@ -110,12 +131,7 @@ def read_agent_version(root: Path) -> str:
     :func:`configure` accepts roots that are not lup projects (e.g. test
     fixtures or scratch directories).
     """
-    pyproject = root / "pyproject.toml"
-    if not pyproject.exists():
-        return "0.0.0"
-    with pyproject.open("rb") as f:
-        data = tomllib.load(f)
-    match data:
+    match manifest_table(root / "pyproject.toml"):
         case {"tool": {"lup": {"agent_version": str(version)}}}:
             return version
     return "0.0.0"
@@ -129,12 +145,7 @@ def read_project_name(root: Path) -> str:
     that need a portable declaration name validate through ``NativeName``,
     which rejects a distribution name that is not already one.
     """
-    pyproject = root / "pyproject.toml"
-    if not pyproject.exists():
-        return "lup"
-    with pyproject.open("rb") as f:
-        data = tomllib.load(f)
-    match data:
+    match manifest_table(root / "pyproject.toml"):
         case {"project": {"name": str(name)}}:
             return name.lower()
     return "lup"
