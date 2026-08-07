@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pydantic import AnyHttpUrl
 
+from lup.adapters.claude.harness import CLAUDE_DISPATCHER
 from lup.adapters.claude.hooks import claude_hook_semantic_tool
 from lup.adapters.codex.native import CodexDecisionRenderer
 from lup.hooks import LupHookInput, LupHookOutput
@@ -122,7 +123,9 @@ def test_router_asks_rather_than_allows_what_no_policy_covers() -> None:
 
 async def test_hook_refuses_a_denied_call_and_leaves_other_events_alone() -> None:
     hooks = create_policy_hooks(
-        SemanticToolPolicy(fetch=docs_fetch_policy()), claude_hook_semantic_tool
+        SemanticToolPolicy(fetch=docs_fetch_policy()),
+        claude_hook_semantic_tool,
+        routed_tools=CLAUDE_DISPATCHER.routed_tools,
     )
     matcher = hooks.pre_tool_use[0]
     assert matcher.tag == "semantic_policy"
@@ -144,3 +147,23 @@ async def test_hook_refuses_a_denied_call_and_leaves_other_events_alone() -> Non
         )
     )
     assert after == LupHookOutput()
+
+
+def test_hook_is_scoped_to_the_tools_the_policy_has_rules_for() -> None:
+    """A tool with no rule surface must never reach this hook.
+
+    Composed beside a directory ACL, an unscoped hook answers ``ask`` for
+    every read the ACL allows, and ``ask`` outranks ``allow`` — which is
+    what denied resolver workers their own leases. The matcher is the same
+    list the generated plugin registers, so both paths judge one set.
+    """
+    hooks = create_policy_hooks(
+        SemanticToolPolicy(fetch=docs_fetch_policy()),
+        claude_hook_semantic_tool,
+        routed_tools=CLAUDE_DISPATCHER.routed_tools,
+    )
+    matched = hooks.pre_tool_use[0].matcher or ""
+
+    assert set(matched.split("|")) == set(CLAUDE_DISPATCHER.routed_tools)
+    for unruled in ("Read", "Skill", "mcp__lup-output__submit_output"):
+        assert unruled not in matched.split("|")

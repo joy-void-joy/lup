@@ -593,6 +593,7 @@ def run_resolve(
             create_codex_session_factory,
         )
         from lup_template.agent.config import engine_for_model, settings
+        from lup.adapters.claude.harness import CLAUDE_DISPATCHER
         from lup.adapters.claude.hooks import claude_hook_semantic_tool
         from lup.harness.enforcement import semantic_policy_for
         from lup.hooks import (
@@ -768,13 +769,13 @@ def run_resolve(
         def worker_policy_hooks() -> LupHooksConfig:
             """Judge a worker's calls by the policy every plugin enforces.
 
-            The directory ACL beside this bounds where a worker may write and
-            says nothing about what it may read, fetch, or run — so reads,
-            egress and every non-filesystem act passed unjudged, with the OS
-            sandbox as the only floor. What blocked this before was that a
-            denial had nowhere to go; the `ask` verdict reaches the mailbox
-            now, so a worker meeting a genuine need outside the vocabulary
-            asks for it instead of failing.
+            The directory ACL beside this bounds the worker's filesystem
+            reach and says nothing about what it may fetch or run — so
+            egress and shell passed unjudged, with the OS sandbox as the
+            only floor. This supplies exactly those verdicts, scoped to the
+            tools it has rules for: a headless worker has no human to answer
+            an `ask`, so judging a tool this vocabulary cannot classify
+            would deny it, and would outrank the ACL's own grant.
 
             The worker is autonomous because its edits are reviewed by an
             actor of this run, which is the same fact the generated tree
@@ -785,6 +786,7 @@ def run_resolve(
                     declared_hook_set(), autonomous=True, interactive=False
                 ),
                 claude_hook_semantic_tool,
+                routed_tools=CLAUDE_DISPATCHER.routed_tools,
             )
 
         def reviewer_factory(cwd: Path) -> SessionFactory:

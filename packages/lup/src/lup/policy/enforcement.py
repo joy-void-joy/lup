@@ -90,9 +90,10 @@ def create_policy_hooks(
     policy: DecisionPolicy[SemanticTool],
     decode: SemanticDecoder,
     *,
+    routed_tools: list[str],
     tag: str = "semantic_policy",
 ) -> LupHooksConfig:
-    """Create a PreToolUse hook that enforces *policy* on every tool call.
+    """Create a PreToolUse hook that enforces *policy* on the tools it judges.
 
     **What:** Decodes each attempted call into its semantic tool, asks
     *policy* for a verdict, and answers with the portable decision that
@@ -107,10 +108,19 @@ def create_policy_hooks(
     here it is the session's answer, produced by the same policy objects
     the generated dispatchers erase into rows.
 
+    **Why scoped:** *routed_tools* is what keeps this the same enforcement
+    the plugin performs rather than a stricter one. Unregistered elsewhere,
+    this hook sees every call, and a tool with no rule surface reaches
+    :class:`UnknownToolPolicy`, whose conservative ``ask`` then outranks an
+    ``allow`` a directory ACL beside it already granted — so composing this
+    with an ACL denies the reads that ACL exists to permit.
+
     Args:
         policy: The judge for one decoded tool, typically a
             :class:`SemanticToolPolicy` over the fetch, shell, and edit rules.
         decode: The adapter's native-call decoder.
+        routed_tools: The native tool names this policy has rules for — the
+            same list the adapter's :class:`DispatcherDeclaration` registers.
         tag: Matcher tag for adapter dispatch.
 
     Returns:
@@ -124,4 +134,8 @@ def create_policy_hooks(
             return LupHookOutput()
         return policy_hook_output(policy.decide(decode(event)))
 
-    return LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=policy_hook, tag=tag)])
+    return LupHooksConfig(
+        pre_tool_use=[
+            LupHookMatcher(hook=policy_hook, matcher="|".join(routed_tools), tag=tag)
+        ]
+    )
