@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "060b342593907f4f9b511e555bfc274604af2cedc5c27efd48a7796f6cd7d804",
+  "source_digest": "ed30d794e420dddc85e1df2dbe69f62171b1f68f4e691508be46c05e788629c6",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "a1caaf53a8460f7fc896479d023e241ce6e0a03b9bfc87fc48727d509fb880a5",
+      "sha256": "259cfcd7934ef7169f4430fe46023b86719dbda9e2e9861f409418b15b3f85fe",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -401,7 +401,7 @@
     {
       "path": "docs/README.md",
       "category": "generated",
-      "sha256": "27176da0e10474da3848154f95b5d687b91b732c5c04e11b0d7068f1b4e21976",
+      "sha256": "466a2f79f27cda59a3f96c7f70cb64870dd47b2ba31c51fc1fe5f3d1b8f2ae9c",
       "semantic_id": "docs.README",
       "executable": false
     },
@@ -415,8 +415,15 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "89f35b333eeec381b2774e62c68e0869abdba3d6dadeb5d5464652b7f85f384b",
+      "sha256": "ae67a7458e57829fe38b3ca89e5c8b44918516d10c909a6442884f441b8797cd",
       "semantic_id": "docs.contributing",
+      "executable": false
+    },
+    {
+      "path": "docs/conventions.md",
+      "category": "generated",
+      "sha256": "1f5def3828d7f33554226f5bbbe07c279543f013980feae9bfb7481a26d201fe",
+      "semantic_id": "docs.conventions",
       "executable": false
     },
     {
@@ -464,7 +471,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "588aca7fc9222e36ce8c4e80db70b01d64ea66454195c125782a99059d1ad1a9",
+      "sha256": "5eff7c2719b40fd423297cad2f935b25eff225fad79b2c6c7151ed0c6c3685dd",
       "semantic_id": "docs.permissions",
       "executable": false
     },
@@ -506,7 +513,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "431ea0efcc11c6f59e6c9e34e170f124be549e72726308cac24a7adb37a0f795",
+      "sha256": "dd502d184c09d57b60ca96b80458478ffd31242953788875d6a5a91350f258d5",
       "semantic_id": "docs.template",
       "executable": false
     }
