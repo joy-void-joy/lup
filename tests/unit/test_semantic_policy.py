@@ -35,7 +35,8 @@ from lup.adapters.codex.native import (
     CodexUnknownOperation,
     CodexDecisionRenderer,
 )
-from lup.harness.enforcement import declared_path_rules
+from lup.harness.enforcement import declared_path_rules, semantic_policy_for
+from lup.harness.models import HookSet
 from lup.policy.chain import UnknownToolPolicy
 from lup.policy.bundle import (
     bundled_antipattern_rows,
@@ -1796,3 +1797,46 @@ def test_content_prose_examples_do_not_trip_code_or_marker_gates() -> None:
     )
 
     assert decision.effect == "allow"
+
+
+def test_a_granted_new_devtools_allowance_releases_exactly_that_gate() -> None:
+    """A concern's grant skips the new-devtools ask and nothing adjacent."""
+    rule = PathRule(
+        kind="new_devtools",
+        value="src",
+        reason="new devtools module requires approval",
+    )
+    creation = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("src/app/devtools/harness/content/docs/newborn.py"),
+                after='"""Newborn."""\n',
+            )
+        ]
+    )
+    ungranted = EditPolicy(protected=[rule], autonomous=True).decide(creation)
+    assert ungranted.effect == "ask"
+    assert "new devtools module" in ungranted.reason
+    granted = EditPolicy(
+        protected=[rule], autonomous=True, allowances=["new-devtools-module"]
+    )
+    assert granted.decide(creation).effect == "allow"
+
+
+def test_semantic_policy_threads_allowances_into_the_edit_gate() -> None:
+    """The composed policy honours the same grants the dispatchers read."""
+    creation = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("src/app/devtools/newborn.py"),
+                after='"""Newborn."""\n',
+            )
+        ]
+    )
+    hooks = HookSet(id="test", policy_ids=["edit"])
+    withheld = semantic_policy_for(hooks, autonomous=True)
+    assert withheld.decide(creation).effect == "ask"
+    released = semantic_policy_for(
+        hooks, autonomous=True, allowances=["new-devtools-module"]
+    )
+    assert released.decide(creation).effect == "allow"

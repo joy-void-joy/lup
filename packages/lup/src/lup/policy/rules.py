@@ -267,8 +267,10 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         maximum_added_lines: int = 3,
         autonomous: bool = False,
         path_roles: list[PathRoleRow] | None = None,
+        allowances: list[str] | None = None,
     ) -> None:
         self.path_roles = path_roles or []
+        self.allowances = allowances or []
         self.protected = list(protected)
         self.maximum_added_lines = maximum_added_lines
         self.autonomous = autonomous
@@ -299,6 +301,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 path_roles=self.path_roles,
                 maximum_added_lines=self.maximum_added_lines,
                 autonomous=self.autonomous,
+                allowances=self.allowances,
                 python_source=suffix in (".py", ".pyi"),
             )
         )

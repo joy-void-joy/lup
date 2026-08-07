@@ -710,11 +710,10 @@ def run_resolve(
             )
             # Grants are per-concern: a lease carries only what the human
             # approved with the concern it was leased for.
+            granted = [allowance.value for allowance in context.allowances]
             concern_environment = {
                 **worker_environment,
-                **concern_allowances_environment(
-                    [allowance.value for allowance in context.allowances]
-                ),
+                **concern_allowances_environment(granted),
             }
             if adapter == "claude":
                 server = create_mcp_server(
@@ -744,7 +743,7 @@ def run_resolve(
                             merge_hooks(
                                 merge_hooks(
                                     create_permission_hooks([cwd], []),
-                                    worker_policy_hooks(),
+                                    worker_policy_hooks(granted),
                                 ),
                                 create_git_inspection_hook(),
                             ),
@@ -781,7 +780,7 @@ def run_resolve(
                 )
             )
 
-        def worker_policy_hooks() -> LupHooksConfig:
+        def worker_policy_hooks(granted: list[str]) -> LupHooksConfig:
             """Judge a worker's calls by the policy every plugin enforces.
 
             The directory ACL beside this bounds the worker's filesystem
@@ -795,10 +794,17 @@ def run_resolve(
             The worker is autonomous because its edits are reviewed by an
             actor of this run, which is the same fact the generated tree
             derives its autonomous list from.
+
+            ``granted`` carries the concern's approved allowances, the same
+            list the session environment declares — so this judge and the
+            lease's deployed dispatcher release exactly the same gates.
             """
             return create_policy_hooks(
                 semantic_policy_for(
-                    declared_hook_set(), autonomous=True, interactive=False
+                    declared_hook_set(),
+                    autonomous=True,
+                    interactive=False,
+                    allowances=granted,
                 ),
                 CLAUDE_SEMANTICS,
             )

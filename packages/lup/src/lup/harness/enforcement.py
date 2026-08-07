@@ -93,6 +93,7 @@ def semantic_policy_for(
     interactive: bool = True,
     autonomous: bool = False,
     trusted_script_roots: list[str] | None = None,
+    allowances: list[str] | None = None,
 ) -> SemanticToolPolicy:
     """Compose the fetch, shell, and edit policies one hook set declares.
 
@@ -120,5 +121,6 @@ def semantic_policy_for(
             declared_path_rules(hooks),
             autonomous=autonomous,
             path_roles=roles,
+            allowances=allowances,
         ),
     )
