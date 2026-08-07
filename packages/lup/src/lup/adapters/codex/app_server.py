@@ -124,6 +124,7 @@ class CodexAppServer:
             _out=receive_output,
             _err=receive_error,
             _bg=True,
+            _bg_exc=False,
             _encoding="utf-8",
             _env=environment,
         )
@@ -168,9 +169,9 @@ class CodexAppServer:
         if process is not None:
             try:
                 process.terminate()
-            except sh.ErrorReturnCode:
-                # A signal exit is the expected result of terminating this child.
-                process = None
+            except ProcessLookupError:
+                # A child that already exited is shut down, not a failed close.
+                pass
             except Exception as error:
                 close_error = close_error or error
         watcher = self.watcher

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from lup.workspace import paths
+from tests.unit.doubles import FakeAppServer
 
 LUP_PROJECT_VERSION = "1.2.3"
 
@@ -21,3 +22,9 @@ def tmp_lup_project(tmp_path: Path) -> Iterator[Path]:
     paths.configure(root=tmp_path)
     yield tmp_path
     paths.configure(root=old_root)
+
+
+@pytest.fixture
+def fake_app_server(tmp_path: Path) -> FakeAppServer:
+    """A scriptable app-server child, rooted in this test's temporary directory."""
+    return FakeAppServer(root=tmp_path)
