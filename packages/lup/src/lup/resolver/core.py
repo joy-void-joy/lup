@@ -1029,18 +1029,25 @@ class ResolverCore:
             answers=answers,
         )
         rounds: list[AgentRound] = []  # lup: ignore[empty-collection]
-        current_base = cleared.commit
         feedback = ""
         maximum_round = self.config.max_revision_rounds + 1
         for round_number in range(1, maximum_round + 1):
             await self.transition_concern(concern.id, ConcernStatus.RUNNING)
+            # The commit a turn is measured from is the lease's own head at the
+            # moment the turn opens, read rather than carried. A carried value
+            # is derived from the clearance while the check compares against
+            # the worktree, so the two can disagree the instant anything but
+            # this loop advances the branch — a concern resumed in a second
+            # process re-entered at the clearance and failed for the commit the
+            # first process had itself made.
+            round_base = self.worktrees.head(lease)
             worker = await self.worker_turn(assignment, feedback, round_number)
             outstanding = await self.unanswered_for(concern.id)
             if outstanding:
                 raise ResolverAwaitingAnswers(outstanding, [])
             await self.transition_concern(concern.id, ConcernStatus.VALIDATING)
             diff = self.worktrees.validate_and_commit(
-                concern, worker, lease, current_base, self.leases
+                concern, worker, lease, round_base, self.leases
             )
             if not diff.valid or diff.commit is None:
                 review = ReviewReport(
@@ -1096,8 +1103,6 @@ class ResolverCore:
                 )
             )
             self.repository.write_round(rounds[-1])
-            if diff.commit is not None:
-                current_base = diff.commit
             if review.accepted and diff.commit is not None:
                 await self.transition_concern(concern.id, ConcernStatus.VERIFIED)
                 return ConcernExecution(

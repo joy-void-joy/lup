@@ -1918,6 +1918,108 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
 
 
 @pytest.mark.asyncio
+async def test_a_concern_resumed_past_a_committed_round_keeps_that_round_as_its_base(
+    tmp_path: Path,
+) -> None:
+    """A second process measures a turn from the lease, not from loop entry.
+
+    The commit a turn is measured from is only the clearance for a lease
+    nothing has committed to yet. A concern resumed after a rejected round
+    re-enters with its lease already holding that round, so a base taken at
+    loop entry names a commit HEAD has moved past — and the very next
+    validation reads the orchestrator's own commit as the worker having
+    seized commit authority, failing the concern for work it did itself.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_calls: Counter[str] = Counter()
+    review_calls: Counter[str] = Counter()
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        if output_name != WorkerReport.__name__:
+            raise AssertionError(output_name)
+        worker_calls["a"] += 1
+        if worker_calls["a"] == 2:
+            worker_asks(
+                QuestionMailbox(tmp_path / "state" / "resumed-base"),
+                "resumed-base",
+                dynamic_question("a"),
+            )
+            return {
+                "concern_id": "a",
+                "changed": False,
+                "summary": "parked awaiting a material choice",
+            }
+        (root / "a.txt").write_text(f"round {worker_calls['a']}\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def reviewer_response(_root: Path, output_name: str) -> JsonObject:
+        assert output_name == ReviewReport.__name__
+        review_calls["a"] += 1
+        if review_calls["a"] == 1:
+            return {
+                "concern_id": "a",
+                "accepted": False,
+                "generalized": False,
+                "reason": "wants one more pass",
+                "residual": ["revise"],
+            }
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    def build_core() -> ResolverCore:
+        return failure_leg_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "resumed-base",
+            worker_response,
+            reviewer_response,
+        )
+
+    parked_core = build_core()
+    seed_approvals(parked_core, [concern("a")])
+    with pytest.raises(ResolverAwaitingAnswers):
+        await parked_core.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    # The first process committed its rejected round, so the lease head has
+    # moved past both the recorded base and the clearance it came from.
+    parked = parked_core.repository.load()
+    committed = launcher.launch(
+        LaunchRequest(
+            arguments=["git", "rev-parse", "HEAD"],
+            cwd=parked_core.leases.leases["a"].root,
+        )
+    ).stdout.strip()
+    assert committed not in [base.commit for base in parked.bases]
+
+    resumed = build_core()
+    seed_offer(resumed, "a-dynamic", "durable")
+    manifest = await resumed.resume()
+
+    outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
+    assert [round.diff.reason for round in outcomes["a"].rounds] == [""]
+    assert outcomes["a"].verified is True
+    assert all(record.passed for record in manifest.verification)
+
+
+@pytest.mark.asyncio
 async def test_a_finished_run_releases_itself_without_a_human_gate(
     tmp_path: Path,
 ) -> None:
