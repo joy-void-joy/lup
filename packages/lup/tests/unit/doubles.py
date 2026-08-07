@@ -1,4 +1,4 @@
-"""Shared process doubles for the tests that drive a git boundary.
+"""Shared process doubles for the tests that drive a native boundary.
 
 Every resolver test that needed a launcher wrote the same class: dispatch on
 the two words a git invocation starts with, answer that probe, remember the
@@ -10,14 +10,34 @@ orchestrator's probes had to be found in nine places.
 once. A test declares the probes it cares about and inherits recording; a
 probe it does not declare succeeds silently, which is what the hand-rolled
 doubles all did with their trailing `return ExitStatus(code=0)`.
+
+A launcher answers probes; the Codex app-server is a conversation, so its
+double has to be an actual child process. This module is that child: run as a
+script it speaks the app-server's newline-framed JSON-RPC from an
+:class:`AppServerTranscript`, and imported it hands a test
+:class:`FakeAppServer` to script one with. See :func:`converse`.
 """
 
+import os
+import signal
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from lup.adapters.codex.app_server import (
+    CodexAppServer,
+    OutgoingRpcMessage,
+    RpcError,
+    RpcFailure,
+    RpcMessage,
+    RpcNotification,
+    RpcSuccess,
+)
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.runtime.contracts import Session, Turn
 from lup.runtime.factory import SessionFactory
@@ -28,7 +48,7 @@ from lup.runtime.models import (
     TurnIdentifiers,
     TurnResult,
 )
-from lup.types import Usage
+from lup.types import EnvVars, JsonValue, Usage
 
 PROBE_WORDS = 2
 """How many words after the executable name identify a git probe."""
@@ -143,3 +163,196 @@ class FailingLauncher(ProcessLauncher):
     def launch(self, request: LaunchRequest) -> ExitStatus:
         self.requests.append(request)
         return ExitStatus(code=self.code, stderr=f"failed: {request.arguments}")
+
+
+class ChildEnvironment(BaseSettings):
+    """The two halves of the environment, as only the child can report them.
+
+    `CodexAppServer.start` overlays the caller's declared variables onto the
+    ambient ones, and a child that sees both is the whole of that claim.
+    `PATH` stands for the ambient half because nothing in the transport
+    declares it.
+    """
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    lup_fake_declared: str = ""
+    path: str = ""
+
+
+class ChildExit(BaseModel):
+    """How a scripted child ends its own process, instead of answering."""
+
+    model_config = ConfigDict(frozen=True)
+
+    status: int = 1
+    stderr: str = ""
+
+
+class ScriptedReply(BaseModel):
+    """What the app-server double does when one client method arrives.
+
+    A reply that is neither silent nor an exit answers the request — with
+    `error` when the transcript declares one, and with `result` otherwise.
+    Notifications follow the answer, so a silent reply is still observable
+    from the client side without one being owed.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    result: JsonValue = None
+    error: RpcError | None = None
+    notifications: list[RpcNotification] = Field(default_factory=list)
+    exits: ChildExit | None = None
+    silent: bool = False
+
+
+class AppServerTranscript(BaseModel):
+    """One scripted app-server session, keyed by the method each reply answers.
+
+    A child ordinarily ends when its stdin does, which is a clean exit and so
+    never the signal exit that terminating a live child produces. `lingers`
+    keeps it running past that, leaving `close` a child that is genuinely
+    still there to terminate.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    replies: dict[str, ScriptedReply] = Field(default_factory=dict)
+    otherwise: ScriptedReply = ScriptedReply()
+    lingers: bool = False
+
+
+class AppServerRecord(BaseModel):
+    """What one child saw: how it was launched, and what reached it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    pid: int
+    arguments: list[str]
+    environment: ChildEnvironment
+    received: list[RpcMessage] = Field(default_factory=list)
+
+
+def emit(message: OutgoingRpcMessage) -> None:
+    """Write one JSON-RPC line, flushed so a pipe delivers it now."""
+    sys.stdout.write(message.model_dump_json(by_alias=True, exclude_none=True) + "\n")
+    sys.stdout.flush()
+
+
+def answer(reply: ScriptedReply, message: RpcMessage) -> None:
+    """Reply to one request, where the transcript grants it a reply at all."""
+    if reply.silent or reply.exits is not None or message.id is None:
+        return
+    if reply.error is not None:
+        emit(RpcFailure(id=message.id, error=reply.error))
+        return
+    emit(RpcSuccess(id=message.id, result=reply.result))
+
+
+def converse(transcript: AppServerTranscript, record: Path) -> int:
+    """Answer what arrives until stdin ends or the transcript says to exit.
+
+    This is the child half of :class:`FakeAppServer`, reached by running this
+    module as a script. Everything it saw goes to `record` as it arrives, so
+    a child that is about to be terminated or to exit has already reported.
+    """
+    seen = AppServerRecord(
+        pid=os.getpid(), arguments=sys.argv, environment=ChildEnvironment()
+    )
+    record.write_text(seen.model_dump_json(), encoding="utf-8")
+    for line in iter(sys.stdin.readline, ""):
+        message = RpcMessage.model_validate_json(line)
+        seen = seen.model_copy(update={"received": [*seen.received, message]})
+        record.write_text(seen.model_dump_json(), encoding="utf-8")
+        reply = (
+            transcript.replies[message.method]
+            if message.method in transcript.replies
+            else transcript.otherwise
+        )
+        answer(reply, message)
+        for notification in reply.notifications:
+            emit(notification)
+        if reply.exits is not None:
+            sys.stderr.write(reply.exits.stderr)
+            sys.stderr.flush()
+            return reply.exits.status
+    if transcript.lingers:
+        signal.pause()
+    return 0
+
+
+PROGRAM = Path(__file__).resolve()
+"""This module's own path, handed to the interpreter as the child program."""
+
+
+def alive(pid: int) -> bool:
+    """Whether a recorded child is still a process, rather than a reaped id."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+class FakeAppServer(BaseModel):
+    """A `CodexAppServer` bound to a scripted child instead of an installed CLI.
+
+    The child is this interpreter running this module, so it needs no execute
+    bit, no shebang, and no `codex` on PATH: the transport already takes an
+    `executable` plus leading `arguments`, which is exactly enough to express
+    it. Nothing here knows which of the transport's legs a test is after, so
+    a suite that wants the turn lifecycle offline scripts `thread/start` and
+    `turn/start` the same way this one scripts `initialize`.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    root: Path
+
+    @property
+    def transcript_path(self) -> Path:
+        """Where the child reads its script from."""
+        return self.root / "transcript.json"
+
+    @property
+    def record_path(self) -> Path:
+        """Where the child writes down how it was launched and what arrived."""
+        return self.root / "record.json"
+
+    def attach(
+        self,
+        transcript: AppServerTranscript,
+        *,
+        arguments: list[str] | None = None,
+        environment: EnvVars | None = None,
+    ) -> CodexAppServer:
+        """A transport whose child is this transcript, run by this interpreter."""
+        self.transcript_path.write_text(transcript.model_dump_json(), encoding="utf-8")
+        return CodexAppServer(
+            Path(sys.executable),
+            arguments=[
+                str(PROGRAM),
+                str(self.transcript_path),
+                str(self.record_path),
+                *(arguments or []),
+            ],
+            environment=environment,
+        )
+
+    def observed(self) -> AppServerRecord:
+        """What the child recorded, read back after the exchange."""
+        return AppServerRecord.model_validate_json(
+            self.record_path.read_text(encoding="utf-8")
+        )
+
+
+if __name__ == "__main__":
+    sys.exit(
+        converse(
+            AppServerTranscript.model_validate_json(
+                Path(sys.argv[1]).read_text(encoding="utf-8")
+            ),
+            Path(sys.argv[2]),
+        )
+    )

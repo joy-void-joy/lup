@@ -1,4 +1,4 @@
-"""Codex app-server JSON-RPC routing under a live reader, no process attached.
+"""Codex app-server JSON-RPC routing, and the legs that hold a real child.
 
 Every Codex turn — and every native approval request the policy layer
 answers — rides this transport. These tests drive the wire queues
@@ -7,6 +7,12 @@ envelopes must surface as :class:`AppServerError`, server-initiated
 requests must always receive a reply (success, failure, or
 no-handler-installed), notifications must reach the installed handler,
 and a disconnect must fail every pending future rather than hang them.
+
+Those run with nothing attached. The legs that exist only because a child
+does — spawning it, the `initialize`/`initialized` exchange, waking the reader
+when it dies, terminating it on close, unwinding a start that failed halfway —
+run against the scripted child in :mod:`tests.unit.doubles`, which speaks the
+same framing without an installed `codex` and can be told to fail on purpose.
 """
 
 import asyncio
@@ -15,14 +21,26 @@ import json
 from pathlib import Path
 
 import pytest
+import sh
 
 from lup.adapters.codex.app_server import (
     AppServerError,
     CodexAppServer,
+    RpcError,
     RpcMessage,
     RpcNotification,
 )
 from lup.types import JsonObject
+from tests.unit.doubles import (
+    AppServerTranscript,
+    ChildExit,
+    FakeAppServer,
+    ScriptedReply,
+    alive,
+)
+
+SPAWN_TIMEOUT = 30.0
+"""How long a scripted child gets before the suite calls the transport hung."""
 
 
 def sent_lines(server: CodexAppServer) -> list[JsonObject]:
@@ -198,3 +216,231 @@ async def test_request_after_idle_disconnect_fails_fast_instead_of_hanging() -> 
         await reader
     with pytest.raises(RuntimeError, match="boom"):
         await asyncio.wait_for(server.request("thread/start", {}), timeout=1)
+
+
+async def test_start_hands_the_child_its_launch_and_completes_the_handshake(
+    fake_app_server: FakeAppServer,
+) -> None:
+    """Everything `start` composes is only observable from inside the child."""
+    ready = asyncio.Event()
+    server = fake_app_server.attach(
+        AppServerTranscript(
+            replies={
+                "initialize": ScriptedReply(result={"userAgent": "fake"}),
+                "initialized": ScriptedReply(
+                    notifications=[RpcNotification(method="fake/ready")]
+                ),
+            }
+        ),
+        arguments=["--profile", "smoke"],
+        environment={"LUP_FAKE_DECLARED": "overlaid"},
+    )
+    server.notification_handler = lambda _notification: ready.set()
+
+    await asyncio.wait_for(server.start(), timeout=SPAWN_TIMEOUT)
+    await asyncio.wait_for(ready.wait(), timeout=SPAWN_TIMEOUT)
+    child = fake_app_server.observed()
+
+    assert child.arguments[-3:] == ["--profile", "smoke", "app-server"]
+    assert child.environment.lup_fake_declared == "overlaid"
+    # The ambient half of the overlay: nothing here declares PATH.
+    assert child.environment.path
+    assert [message.method for message in child.received] == [
+        "initialize",
+        "initialized",
+    ]
+    client = child.received[0].params["clientInfo"]
+    assert isinstance(client, dict) and client["name"] == "lup"
+    assert child.received[0].params["capabilities"] == {"experimentalApi": True}
+    assert server.reader is not None and not server.reader.done()
+    assert server.watcher is not None and not server.watcher.done()
+    await asyncio.wait_for(server.close(), timeout=SPAWN_TIMEOUT)
+
+
+async def test_initialized_is_withheld_until_initialize_resolves(
+    fake_app_server: FakeAppServer,
+) -> None:
+    """A server that accepts the connection and answers nothing gets no follow-up.
+
+    Ordering is the claim, and a recorded pair proves only that stdin has an
+    order. A child that has demonstrably heard `initialize` and has still not
+    heard `initialized` is the same claim with the reply withheld.
+    """
+    heard = asyncio.Event()
+    server = fake_app_server.attach(
+        AppServerTranscript(
+            replies={
+                "initialize": ScriptedReply(
+                    notifications=[RpcNotification(method="fake/heard")], silent=True
+                )
+            }
+        )
+    )
+    server.notification_handler = lambda _notification: heard.set()
+    starting = asyncio.create_task(server.start())
+
+    await asyncio.wait_for(heard.wait(), timeout=SPAWN_TIMEOUT)
+
+    assert not starting.done()
+    child = fake_app_server.observed()
+    assert [message.method for message in child.received] == ["initialize"]
+    starting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await starting
+    await asyncio.wait_for(server.close(), timeout=SPAWN_TIMEOUT)
+
+
+async def test_an_initialize_error_leaves_nothing_attached(
+    fake_app_server: FakeAppServer,
+) -> None:
+    """A refused handshake unwinds rather than raising over a live child."""
+    server = fake_app_server.attach(
+        AppServerTranscript(
+            replies={
+                "initialize": ScriptedReply(
+                    error=RpcError(code=-32001, message="no experimental api")
+                )
+            }
+        )
+    )
+
+    with pytest.raises(AppServerError, match="no experimental api"):
+        await asyncio.wait_for(server.start(), timeout=SPAWN_TIMEOUT)
+
+    assert server.reader is None
+    assert server.watcher is None
+    assert server.process is None
+    assert not alive(fake_app_server.observed().pid)
+
+
+async def test_a_child_that_dies_during_initialize_leaves_nothing_attached(
+    fake_app_server: FakeAppServer,
+) -> None:
+    """The same unwind when the child never answers because it is gone."""
+    server = fake_app_server.attach(
+        AppServerTranscript(
+            replies={
+                "initialize": ScriptedReply(
+                    exits=ChildExit(status=3, stderr="fake app-server refused")
+                )
+            }
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="exited with status 3"):
+        await asyncio.wait_for(server.start(), timeout=SPAWN_TIMEOUT)
+
+    assert server.reader is None
+    assert server.watcher is None
+    assert server.process is None
+    assert not alive(fake_app_server.observed().pid)
+
+
+async def test_close_unwinds_the_reader_the_child_and_every_pending_request(
+    fake_app_server: FakeAppServer,
+) -> None:
+    """Close is the whole unwind, and closing an already-closed server is safe.
+
+    The child lingers past its stdin so that terminating it is a real signal
+    exit rather than a clean one already banked — that exit is this close's
+    own doing, and treating it as a failure would make every close raise.
+    """
+    server = fake_app_server.attach(
+        AppServerTranscript(
+            replies={
+                "initialize": ScriptedReply(result={"userAgent": "fake"}),
+                "thread/start": ScriptedReply(silent=True),
+            },
+            lingers=True,
+        )
+    )
+    await asyncio.wait_for(server.start(), timeout=SPAWN_TIMEOUT)
+    unanswered = asyncio.create_task(server.request("thread/start", {}))
+    await asyncio.sleep(0)
+
+    await asyncio.wait_for(server.close(), timeout=SPAWN_TIMEOUT)
+
+    with pytest.raises(RuntimeError, match="connection closed"):
+        await unanswered
+    assert server.pending == {}
+    assert server.connection_error is not None
+    assert server.reader is None and server.watcher is None and server.process is None
+    assert not alive(fake_app_server.observed().pid)
+    # The signal exit is this close's own doing, so it is never reported as a
+    # death, and the reader is still woken rather than left on a dead child.
+    assert server.exit_error is None
+    assert None in [server.output.get_nowait() for _ in range(server.output.qsize())]
+    await asyncio.wait_for(server.close(), timeout=SPAWN_TIMEOUT)
+
+
+async def test_a_child_that_dies_while_open_wakes_the_reader_with_its_stderr(
+    fake_app_server: FakeAppServer,
+) -> None:
+    """An unexpected exit reaches whoever waited, carrying the child's own words.
+
+    The watcher is what reaps the child, so the signal `close` sends afterwards
+    lands on an id no process answers to. Awaiting the watcher states that
+    ordering here rather than leaving it inferred from when the reader woke.
+    Closing a server whose child already ended is the ordinary shape, and it
+    must still report the death rather than the missing process.
+    """
+    server = fake_app_server.attach(
+        AppServerTranscript(
+            replies={
+                "initialize": ScriptedReply(result={"userAgent": "fake"}),
+                "turn/start": ScriptedReply(
+                    exits=ChildExit(status=7, stderr="fake app-server crashed")
+                ),
+            }
+        )
+    )
+    await asyncio.wait_for(server.start(), timeout=SPAWN_TIMEOUT)
+    watcher = server.watcher
+    assert watcher is not None
+
+    with pytest.raises(RuntimeError, match="fake app-server crashed"):
+        await asyncio.wait_for(server.request("turn/start", {}), timeout=SPAWN_TIMEOUT)
+
+    assert server.exit_error is not None
+    assert "exited with status 7" in str(server.exit_error)
+    assert server.reader is not None and server.reader.done()
+    await asyncio.wait_for(watcher, timeout=SPAWN_TIMEOUT)
+    assert not alive(fake_app_server.observed().pid)
+    with pytest.raises(RuntimeError, match="exited with status 7"):
+        await asyncio.wait_for(server.close(), timeout=SPAWN_TIMEOUT)
+
+
+async def test_the_attached_lifecycle_needs_no_codex_on_path(
+    fake_app_server: FakeAppServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The offline claim, stated rather than inherited from whoever runs this.
+
+    Every other test here would pass unchanged on a machine that happens to
+    have `codex` installed, so none of them can tell the difference. Emptying
+    `PATH` removes the possibility: what is left to find the child with is the
+    interpreter's own absolute path, which is all the fixture ever used.
+    """
+    ready = asyncio.Event()
+    monkeypatch.setenv("PATH", "")
+    with pytest.raises(sh.CommandNotFound):
+        sh.Command("codex")
+    server = fake_app_server.attach(
+        AppServerTranscript(
+            replies={
+                "initialize": ScriptedReply(result={"userAgent": "fake"}),
+                "initialized": ScriptedReply(
+                    notifications=[RpcNotification(method="fake/ready")]
+                ),
+            }
+        )
+    )
+    server.notification_handler = lambda _notification: ready.set()
+
+    await asyncio.wait_for(server.start(), timeout=SPAWN_TIMEOUT)
+    await asyncio.wait_for(ready.wait(), timeout=SPAWN_TIMEOUT)
+
+    assert [message.method for message in fake_app_server.observed().received] == [
+        "initialize",
+        "initialized",
+    ]
+    await asyncio.wait_for(server.close(), timeout=SPAWN_TIMEOUT)
