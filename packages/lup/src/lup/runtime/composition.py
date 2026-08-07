@@ -48,6 +48,14 @@ class CompletedTurn(BaseModel):
     blocks: list[AnyTurnBlock] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)
     duration: timedelta = timedelta()
+    identifiers: TurnIdentifiers | None = Field(
+        default=None,
+        description=(
+            "Identifiers as the provider settled them during the turn — a "
+            "runtime that adopts the persisted session id reports it here; "
+            "None means the accepted identifiers stand"
+        ),
+    )
 
 
 type CompleteTurn = Callable[[], Awaitable[CompletedTurn]]
@@ -184,7 +192,7 @@ class ComposedTurn[T: BaseModel | None](Turn[T]):
                     "blocks": completed.blocks,
                     "usage": completed.usage,
                     "duration": completed.duration,
-                    "identifiers": self.accepted.identifiers,
+                    "identifiers": completed.identifiers or self.accepted.identifiers,
                 }
             )
         except TurnError:

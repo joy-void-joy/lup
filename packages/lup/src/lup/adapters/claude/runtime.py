@@ -247,6 +247,7 @@ class ClaudeConversationState:
         async def complete() -> CompletedTurn:
             from claude_agent_sdk import types as claude_types
 
+            nonlocal identifiers
             durable: list[TurnEvent] = []  # lup: ignore[empty-collection]
             result: claude_types.ResultMessage | None = None
             started = perf_counter()
@@ -296,6 +297,18 @@ class ClaudeConversationState:
                             )
                         case claude_types.ResultMessage() as terminal:
                             result = terminal
+                        # The CLI persists the transcript under its own id,
+                        # not the channel id this side minted — adopting it is
+                        # what lets a later resume name a conversation that
+                        # actually exists on disk.
+                        case claude_types.SystemMessage(
+                            subtype="init", data={"session_id": str(adopted)}
+                        ) if adopted != self.session_id:
+                            self.session_id = adopted
+                            self.resume = adopted
+                            identifiers = identifiers.model_copy(
+                                update={"session": SessionId(value=adopted)}
+                            )
                         case claude_types.StreamEvent(event=event):
                             match event:
                                 case {
@@ -351,6 +364,7 @@ class ClaudeConversationState:
                 blocks=blocks,
                 usage=usage,
                 duration=duration,
+                identifiers=identifiers,
             )
 
         async def complete_with_events() -> CompletedTurn:

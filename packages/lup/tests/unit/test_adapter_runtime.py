@@ -399,6 +399,68 @@ async def test_claude_partial_events_are_live_and_completed_replay_is_preserved(
     ]
 
 
+async def test_claude_adopts_the_session_id_the_cli_persists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Completion identifiers and resume follow the init-reported session id.
+
+    The CLI persists its transcript under an id of its own, not under the
+    channel id this side minted — a record built from the minted id names a
+    conversation that never existed, which is exactly how a parked run loses
+    its workers' context on resume.
+    """
+    import claude_agent_sdk as claude
+    from claude_agent_sdk import types as claude_types
+
+    class InitReportingClient:
+        def __init__(self, options: claude.ClaudeAgentOptions) -> None:
+            self.options = options
+
+        async def connect(self) -> None:
+            return None
+
+        async def disconnect(self) -> None:
+            return None
+
+        async def interrupt(self) -> None:
+            return None
+
+        async def query(self, prompt: str, session_id: str = "default") -> None:
+            assert session_id
+
+        async def receive_response(
+            self,
+        ) -> AsyncIterator[claude_types.SystemMessage | claude_types.ResultMessage]:
+            yield claude_types.SystemMessage(
+                subtype="init",
+                data={"session_id": "persisted-by-the-cli"},
+            )
+            yield claude_types.ResultMessage(
+                subtype="success",
+                duration_ms=4,
+                duration_api_ms=3,
+                is_error=False,
+                num_turns=1,
+                session_id="persisted-by-the-cli",
+                usage={"input_tokens": 1, "output_tokens": 1},
+            )
+
+    monkeypatch.setattr(claude, "ClaudeSDKClient", InitReportingClient)
+    state = ClaudeConversationState(
+        ClaudeSessionOpener(ClaudeSessionConfig(model="claude")), None
+    )
+    minted = state.session_id
+
+    accepted = await state.start_turn("hello")
+    completed = await accepted.complete()
+
+    assert minted != "persisted-by-the-cli"
+    assert completed.identifiers is not None
+    assert completed.identifiers.session.value == "persisted-by-the-cli"
+    assert state.session_id == "persisted-by-the-cli"
+    assert state.resume == "persisted-by-the-cli"
+
+
 @pytest.mark.asyncio
 async def test_an_interrupted_claude_turn_is_not_a_retryable_provider_failure(
     monkeypatch: pytest.MonkeyPatch,
