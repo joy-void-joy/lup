@@ -513,6 +513,17 @@ def test_an_unanswered_question_parks_a_run_that_stopped_moving() -> None:
     assert quiet.status is RunStatus.PARKED
 
 
+def test_an_aborted_run_is_neither_live_nor_running() -> None:
+    """Aborted is terminal: a recent write must not dress it as moving."""
+    aborted = persisted_state(phase=ResolvePhase.ABORTED)
+
+    assert not run_is_live(aborted, activity=100.0, now=100.0)
+    projected = supervisor_state(
+        aborted, QuestionMailbox(Path("/nonexistent")), "claude", now=100.0
+    )
+    assert projected.status is RunStatus.ABORTED
+
+
 def projection(
     phase: ResolvePhase = ResolvePhase.WORKERS, status: ConcernStatus | None = None
 ) -> SupervisorState:
@@ -703,6 +714,7 @@ def test_the_page_posts_only_routes_the_app_serves() -> None:
     assert sorted(dict.fromkeys(posted)) == [
         "answers",
         "events",
+        "journal",
         "messages",
         "park",
         "resume",

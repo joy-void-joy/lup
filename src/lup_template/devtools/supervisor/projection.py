@@ -43,6 +43,7 @@ class RunStatus(StrEnum):
     AWAITING_ANSWERS = "awaiting_answers"
     PARKED = "parked"
     COMPLETE = "complete"
+    ABORTED = "aborted"
     FAILED = "failed"
 
 
@@ -345,7 +346,11 @@ def run_is_live(state: ResolveState, activity: float, now: float) -> bool:
     exclusive one, so the page would break the very runs it reports on. A
     run is live when it has not finished and something wrote recently.
     """
-    if state.phase in {ResolvePhase.COMPLETE, ResolvePhase.FAILED}:
+    if state.phase in {
+        ResolvePhase.COMPLETE,
+        ResolvePhase.ABORTED,
+        ResolvePhase.FAILED,
+    }:
         return False
     return now - activity <= LIVENESS_WINDOW_SECONDS
 
@@ -364,6 +369,8 @@ def persisted_status(
             return RunStatus.FAILED
         case ResolvePhase.COMPLETE:
             return RunStatus.COMPLETE
+        case ResolvePhase.ABORTED:
+            return RunStatus.ABORTED
         case _:
             if not unanswered_questions(views):
                 return RunStatus.RUNNING

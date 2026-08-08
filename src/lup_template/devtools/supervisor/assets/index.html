@@ -8,6 +8,7 @@
       :root {
         color-scheme: dark;
         --bg: #090b10;
+        --rail: #0c0f16;
         --panel: #11151d;
         --panel-raised: #171c26;
         --border: #272e3d;
@@ -16,7 +17,9 @@
         --accent: #9b8cff;
         --accent-strong: #b9adff;
         --ok: #64d6a2;
+        --warn: #f0c674;
         --danger: #ff8292;
+        --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
       }
 
       * { box-sizing: border-box; }
@@ -34,16 +37,115 @@
 
       button, input, select { font: inherit; }
 
-      .shell {
-        width: min(1000px, calc(100% - 32px));
+      .app {
+        display: grid;
+        grid-template-columns: 290px minmax(0, 1fr);
+        gap: 24px;
+        width: min(1480px, calc(100% - 32px));
         margin: 0 auto;
-        padding: 48px 0 72px;
+        padding: 24px 0 72px;
+        align-items: start;
       }
 
-      header { margin-bottom: 26px; }
+      /* ---- runs rail ---- */
+
+      .rail {
+        position: sticky;
+        top: 24px;
+        max-height: calc(100vh - 48px);
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--rail);
+        overflow: hidden;
+      }
+
+      .rail-head {
+        padding: 14px 16px 10px;
+        font-size: 12px;
+        font-weight: 750;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: var(--accent-strong);
+      }
+
+      #run-list { overflow-y: auto; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 4px; }
+
+      .run-item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 8px 10px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: none;
+        color: var(--text);
+        cursor: pointer;
+      }
+
+      .run-item:hover { background: var(--panel-raised); }
+      .run-item.current { border-color: var(--accent); background: var(--panel-raised); }
+      .run-name { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+      .run-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-left: 6px;
+        border-radius: 50%;
+        background: var(--muted);
+        vertical-align: baseline;
+      }
+
+      .dot.tone-ok { background: var(--ok); }
+      .dot.tone-run { background: var(--accent); }
+      .dot.tone-wait { background: var(--warn); }
+      .dot.tone-danger { background: var(--danger); }
+      .dot.tone-idle { background: var(--muted); }
+
+      .dot.pulse {
+        background: var(--ok);
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: .35; }
+      }
+
+      .count {
+        float: right;
+        min-width: 20px;
+        padding: 0 6px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #14101f;
+        font-size: 12px;
+        font-weight: 700;
+        text-align: center;
+      }
+
+      .rail .muted { padding: 0 16px 14px; }
+
+      /* ---- stage ---- */
+
+      .stage { min-width: 0; }
+
+      .masthead {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        margin: 0 -8px;
+        padding: 16px 8px 12px;
+        background: color-mix(in srgb, var(--bg) 82%, transparent);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--border);
+      }
 
       .eyebrow {
-        margin: 0 0 6px;
+        margin: 0 0 4px;
         color: var(--accent-strong);
         font-size: 12px;
         font-weight: 750;
@@ -51,16 +153,16 @@
         text-transform: uppercase;
       }
 
-      h1 { margin: 0; font-size: clamp(26px, 5vw, 40px); letter-spacing: -.045em; }
-      h2 { margin: 0 0 14px; font-size: 20px; letter-spacing: -.02em; }
+      h1 { margin: 0; font-size: clamp(20px, 3.4vw, 30px); letter-spacing: -.035em; font-family: var(--mono); word-break: break-all; }
+      h2 { margin: 0 0 14px; font-size: 19px; letter-spacing: -.02em; }
       p { margin: 0; }
 
-      .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+      .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
 
       .pill {
         border: 1px solid var(--border);
         border-radius: 999px;
-        padding: 4px 12px;
+        padding: 3px 11px;
         background: var(--panel-raised);
         color: var(--muted);
         font-size: 13px;
@@ -68,7 +170,38 @@
 
       .pill.strong { color: var(--text); border-color: var(--accent); }
       .pill.ok { color: var(--ok); border-color: var(--ok); }
+      .pill.warn { color: var(--warn); border-color: var(--warn); }
       .pill.danger { color: var(--danger); border-color: var(--danger); }
+
+      #tally-bar { display: flex; gap: 3px; margin-top: 12px; }
+      .seg { height: 6px; border-radius: 3px; background: var(--muted); min-width: 6px; }
+      .seg.tone-ok { background: var(--ok); }
+      .seg.tone-run { background: var(--accent); }
+      .seg.tone-wait { background: var(--warn); }
+      .seg.tone-danger { background: var(--danger); }
+      .seg.tone-idle { background: #3a4356; }
+
+      #progress-line { margin-top: 6px; color: var(--muted); font-size: 13px; }
+
+      #phase-chips { margin-top: 10px; }
+
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+      .chip {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 3px 9px;
+        color: var(--muted);
+        font-size: 12px;
+        background: none;
+      }
+
+      .chip.done { color: var(--ok); border-color: #2c5a46; }
+      .chip.current { color: var(--text); background: var(--panel-raised); border-color: var(--accent); }
+      button.chip { cursor: pointer; }
+      button.chip:hover { color: var(--text); border-color: var(--accent); }
+
+      .banner { margin-top: 12px; color: var(--warn); }
 
       section {
         margin-top: 22px;
@@ -80,21 +213,76 @@
 
       section[hidden] { display: none; }
 
-      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      #questions-section.attention { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+      .section-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+      .section-head h2 { margin: 0; }
+      .qid { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+      .q-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; align-items: center; }
+      .chip.tone-warn { color: var(--warn); border-color: var(--warn); }
 
-      .chip {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 3px 9px;
-        color: var(--muted);
-        font-size: 12px;
-      }
+      .table-scroll { overflow-x: auto; }
 
+      table { width: 100%; border-collapse: collapse; font-size: 14px; }
+      th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+      td.reason { color: var(--muted); }
+      tr:last-child td { border-bottom: 0; }
       tr.openable { cursor: pointer; }
       tr.openable:hover td { background: var(--panel-raised); }
-      #trace-body { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; max-height: 60vh; overflow-y: auto; }
+      .mono { font-family: var(--mono); font-size: 12.5px; }
+
+      /* ---- trace ---- */
+
+      .trace-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+      .trace-controls input[type="search"] {
+        flex: 1;
+        min-width: 160px;
+        padding: 6px 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #0c1017;
+        color: var(--text);
+      }
+      .trace-controls select {
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #0c1017;
+        color: var(--text);
+      }
+
+      .chip-row { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+      .chip-row > .muted { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; min-width: 4.5em; }
+
+      .trace-wrap { position: relative; }
+
+      #trace-body {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 6px;
+        max-height: 62vh;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+
+      #follow-chip {
+        position: absolute;
+        right: 14px;
+        bottom: 12px;
+        padding: 5px 12px;
+        border: 1px solid var(--accent);
+        border-radius: 999px;
+        background: var(--panel-raised);
+        color: var(--accent-strong);
+        font-size: 12px;
+        cursor: pointer;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, .45);
+      }
+
       .entry { border-left: 2px solid var(--border); padding-left: 10px; }
       .entry.note { border-left-color: var(--accent); }
+      .entry.unknown { border-left-color: var(--danger); }
       .entry-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; font-size: 12px; }
       .say { white-space: pre-wrap; }
       .think { white-space: pre-wrap; color: var(--muted); font-style: italic; }
@@ -103,6 +291,7 @@
       .result pre { color: var(--muted); }
       .result.bad pre { color: var(--danger); }
       .entry pre { margin: 4px 0 0; padding: 6px 8px; background: var(--panel-raised); border-radius: 6px; overflow-x: auto; font-size: 12px; max-height: 16em; }
+
       .pre-body {
         margin: 4px 0 0;
         padding: 6px 8px;
@@ -110,16 +299,13 @@
         border-radius: 6px;
         overflow-x: auto;
         font-size: 12px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-family: var(--mono);
         white-space: pre-wrap;
       }
-      .chip.done { color: var(--ok); border-color: #2c5a46; }
-      .chip.current { color: var(--text); background: var(--panel-raised); border-color: var(--accent); }
-      .chip-row { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; }
-      .chip-row > .muted { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; min-width: 4.5em; }
+
       .boundary { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 11px; }
       .boundary::after { content: ""; flex: 1; border-top: 1px dashed var(--border); }
-      .entry.unknown { border-left-color: var(--danger); }
+
       .expand {
         margin-top: 4px;
         padding: 1px 8px;
@@ -130,14 +316,9 @@
         font-size: 11px;
         cursor: pointer;
       }
+
       .expand:hover { color: var(--text); border-color: var(--accent); }
       .target { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
-
-      table { width: 100%; border-collapse: collapse; font-size: 14px; }
-      th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
-      th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-      td.reason { color: var(--muted); }
-      tr:last-child td { border-bottom: 0; }
 
       fieldset {
         margin: 0 0 16px;
@@ -149,7 +330,12 @@
 
       legend { padding: 0 6px; color: var(--accent-strong); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
 
-      .prompt { margin-bottom: 10px; }
+      .prompt { margin-bottom: 4px; white-space: pre-wrap; }
+
+      details.answered { margin-bottom: 8px; }
+      details.answered summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+      details.answered summary strong { color: var(--ok); }
+      details.answered[open] summary { margin-bottom: 6px; }
 
       .choice { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; }
       .choice input { margin-top: 4px; }
@@ -172,7 +358,7 @@
         color: var(--text);
       }
 
-      .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+      .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; align-items: center; }
 
       button {
         border: 1px solid var(--border);
@@ -186,10 +372,13 @@
       button.primary { background: var(--accent); border-color: var(--accent); color: #14101f; font-weight: 650; }
       button.danger { border-color: var(--danger); color: var(--danger); }
       button:disabled { opacity: .5; cursor: not-allowed; }
+      button.small { padding: 4px 10px; font-size: 12px; }
+
+      .recipe-row { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; }
 
       code {
         display: block;
-        margin-top: 10px;
+        flex: 1;
         padding: 11px 13px;
         border: 1px solid var(--border);
         border-radius: 9px;
@@ -203,95 +392,124 @@
 
       .error { margin-top: 10px; color: var(--danger); }
       .muted { color: var(--muted); }
-      .banner { margin-top: 12px; color: var(--muted); }
       footer { margin-top: 26px; display: flex; justify-content: space-between; align-items: center; gap: 16px; color: var(--muted); font-size: 13px; }
+
+      @media (max-width: 960px) {
+        .app { grid-template-columns: 1fr; }
+        .rail { position: static; max-height: 220px; }
+      }
     </style>
   </head>
   <body>
-    <div class="shell">
-      <header>
-        <p class="eyebrow">Resolver supervision</p>
-        <h1 id="run-id">—</h1>
-        <div class="pills">
-          <span class="pill strong" id="phase-pill">—</span>
-          <span class="pill" id="status-pill">—</span>
-          <span class="pill" id="progress-pill">—</span>
-          <span class="pill" id="connection-pill">connecting</span>
-        </div>
-        <p class="banner" id="banner" hidden></p>
-      </header>
-
-      <section id="runs-section">
-        <h2>Runs</h2>
-        <table>
-          <thead>
-            <tr><th>Run</th><th>Phase</th><th>Concerns</th><th>Pending</th></tr>
-          </thead>
-          <tbody id="run-rows"></tbody>
-        </table>
+    <div class="app">
+      <aside class="rail">
+        <div class="rail-head">Runs</div>
+        <nav id="run-list"></nav>
         <p class="muted" id="runs-empty" hidden>No runs recorded under .lup/resolve.</p>
-      </section>
+      </aside>
 
-      <section id="phases-section">
-        <h2>Phases</h2>
-        <div class="chips" id="phase-chips"></div>
-      </section>
+      <main class="stage">
+        <header class="masthead">
+          <p class="eyebrow">Resolver supervision</p>
+          <h1 id="run-id">—</h1>
+          <div class="pills">
+            <span class="pill strong" id="phase-pill">—</span>
+            <span class="pill" id="status-pill">—</span>
+            <span class="pill" id="connection-pill">connecting</span>
+            <span class="pill" id="last-event">no events yet</span>
+          </div>
+          <div id="tally-bar"></div>
+          <p id="progress-line"></p>
+          <div class="chips" id="phase-chips"></div>
+          <p class="banner" id="banner" hidden></p>
+        </header>
 
-      <section id="concerns-section">
-        <h2>Concerns</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Concern</th><th>Status</th><th>Reason</th>
-              <th>Depends on</th><th>Branch</th><th>Rounds</th>
-            </tr>
-          </thead>
-          <tbody id="concern-rows"></tbody>
-        </table>
-        <p class="muted" id="concerns-empty" hidden>No concerns planned yet.</p>
-      </section>
+        <section id="empty-section" hidden>
+          <h2>Pick a run</h2>
+          <p class="muted">
+            Every run recorded under <span class="mono">.lup/resolve</span> is listed on the
+            left — moving, parked, or finished, all through the same page.
+            Start one with
+            <span class="mono">uv run lup-devtools harness resolve</span>.
+          </p>
+        </section>
 
-      <section id="trace-section">
-        <h2>Trace</h2>
-        <div class="chip-row"><span class="muted">Scope</span><div class="chips" id="scope-chips"></div></div>
-        <div class="chip-row"><span class="muted">Actor</span><div class="chips" id="actor-chips"></div></div>
-        <div id="trace-body"></div>
-        <p class="muted" id="trace-empty">Nothing recorded yet.</p>
-        <div class="actions">
-          <input id="message-text" type="text" placeholder="Say something — it decides nothing and never parks the run" />
-          <button class="primary" type="button" id="message-button">Send</button>
-          <button type="button" id="redirect-button" title="Refuse this actor's next tool call and hand it this text as the reason">Redirect</button>
-        </div>
-        <p class="target" id="message-target"></p>
-        <p class="error" id="message-error" hidden></p>
-      </section>
+        <section id="questions-section" hidden>
+          <div class="section-head">
+            <h2>Pending questions</h2>
+            <span class="muted" id="questions-count"></span>
+          </div>
+          <form id="questions-form"></form>
+          <div class="actions" id="questions-actions">
+            <button class="primary" type="submit" form="questions-form">Submit answers</button>
+            <button type="button" id="park-button">Park run</button>
+            <button type="button" id="resume-button" hidden>Resume run</button>
+          </div>
+          <p class="error" id="questions-error" hidden></p>
+          <div class="recipe-row" id="recipe-row" hidden>
+            <code id="rerun-recipe"></code>
+            <button type="button" class="small" id="copy-recipe">copy</button>
+          </div>
+        </section>
 
-      <section id="questions-section" hidden>
-        <h2>Pending questions</h2>
-        <form id="questions-form"></form>
-        <div class="actions" id="questions-actions">
-          <button class="primary" type="submit" form="questions-form">Submit answers</button>
-          <button type="button" id="park-button">Park run</button>
-          <button type="button" id="resume-button" hidden>Resume run</button>
-        </div>
-        <p class="error" id="questions-error" hidden></p>
-        <code id="rerun-recipe" hidden></code>
-      </section>
+        <section id="concerns-section">
+          <h2>Concerns</h2>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Concern</th><th>Status</th><th>Reason</th>
+                  <th>Depends on</th><th>Branch</th><th>Rounds</th>
+                </tr>
+              </thead>
+              <tbody id="concern-rows"></tbody>
+            </table>
+          </div>
+          <p class="muted" id="concerns-empty" hidden>No concerns planned yet.</p>
+        </section>
 
-      <section id="review-section" hidden>
-        <h2>Review branch</h2>
-        <div id="review-body"></div>
-        <p class="muted" id="review-hand-off"></p>
-      </section>
+        <section id="trace-section">
+          <h2>Trace</h2>
+          <div class="trace-controls">
+            <input id="trace-search" type="search" placeholder="Search the record…" autocomplete="off" />
+            <select id="trace-kind" title="Which entries to show">
+              <option value="all">everything</option>
+              <option value="notes">run events only</option>
+              <option value="errors">errors only</option>
+            </select>
+            <button type="button" class="small" id="load-earlier">load earlier record</button>
+          </div>
+          <div class="chip-row"><span class="muted">Scope</span><div class="chips" id="scope-chips"></div></div>
+          <div class="chip-row"><span class="muted">Actor</span><div class="chips" id="actor-chips"></div></div>
+          <div class="trace-wrap">
+            <div id="trace-body"></div>
+            <button type="button" id="follow-chip" hidden></button>
+          </div>
+          <p class="muted" id="trace-empty">Nothing recorded yet.</p>
+          <div class="actions">
+            <input id="message-text" type="text" placeholder="Say something — it decides nothing and never parks the run" />
+            <button class="primary" type="button" id="message-button">Send</button>
+            <button type="button" id="redirect-button" title="Refuse this actor's next tool call and hand it this text as the reason">Redirect</button>
+          </div>
+          <p class="target" id="message-target"></p>
+          <p class="error" id="message-error" hidden></p>
+        </section>
 
-      <section id="failures-section" hidden>
-        <h2>Failures</h2>
-        <div id="failure-list"></div>
-      </section>
+        <section id="review-section" hidden>
+          <h2>Review branch</h2>
+          <div id="review-body"></div>
+          <p class="muted" id="review-hand-off"></p>
+        </section>
 
-      <footer>
-        <span id="footer-url"></span>
-      </footer>
+        <section id="failures-section" hidden>
+          <h2>Failures</h2>
+          <div id="failure-list"></div>
+        </section>
+
+        <footer>
+          <span id="footer-url"></span>
+        </footer>
+      </main>
     </div>
 
     <script>
@@ -304,6 +522,14 @@
       // run in different rounds, so opening a concern has to mean all of them
       // or it silently shows whichever happened to come first.
       let scope = { kind: "merged" };
+      let query = "";
+      let kindFilter = "all";
+      // Following means the newest entry is what the reader wants to see.
+      // Scrolling up is how they say otherwise, so arrivals stop moving the
+      // view and are counted into a chip instead of yanking them back down.
+      let follow = true;
+      let unseen = 0;
+      let exhausted = false;
 
       const element = (id) => document.getElementById(id);
 
@@ -315,6 +541,27 @@
           .replaceAll('"', "&quot;")
           .replaceAll("'", "&#039;");
       }
+
+      // Presentation only: an unknown status renders neutral rather than
+      // failing, so the page never has to be told about a new status to
+      // keep drawing every concern that carries one.
+      const STATUS_TONES = {
+        verified: "ok",
+        integrated: "ok",
+        cleaned: "ok",
+        failed: "danger",
+        ineligible: "danger",
+        leased: "run",
+        running: "run",
+        validating: "run",
+        reviewing: "run",
+        revising: "run",
+        integrating: "run",
+        waiting_for_answers: "wait",
+        retained: "wait",
+      };
+
+      const tone = (status) => STATUS_TONES[status] ?? "idle";
 
       function draftKey() {
         return `lup-supervisor:${state.run_id}`;
@@ -343,10 +590,31 @@
         return answers;
       }
 
+      function questionMeta(question) {
+        const parts = [`<span class="qid">${escapeHtml(question.id)}</span>`];
+        if (question.allowances.length) {
+          parts.push(
+            `<span class="chip tone-warn" title="Edit gates an answer here grants to this concern's sessions">grants: ${escapeHtml(question.allowances.join(", "))}</span>`
+          );
+        }
+        if (question.criteria.length) {
+          parts.push(
+            `<span class="chip" title="The lost criteria this re-check is about">criteria: ${escapeHtml(question.criteria.join(", "))}</span>`
+          );
+        }
+        return `<div class="q-meta">${parts.join(" ")}</div>`;
+      }
+
+      function cutText(text, limit) {
+        return text.length <= limit ? text : text.slice(0, limit) + "…";
+      }
+
       function questionMarkup(view, draft) {
         const question = view.question;
         if (view.answered !== null) {
-          return `<div class="prompt">${escapeHtml(question.prompt)}</div><p class="muted">Answered <strong>${escapeHtml(view.answered)}</strong></p>`;
+          // A settled question is record, not work. One line keeps a long
+          // run's decisions scannable; opening it shows the exchange whole.
+          return `<details class="answered"><summary>${escapeHtml(cutText(question.prompt, 140))} <span class="muted">— answered</span> <strong>${escapeHtml(cutText(view.answered, 60))}</strong> <span class="qid">${escapeHtml(question.id)}</span></summary><div class="prompt">${escapeHtml(question.prompt)}</div><p class="muted">Answered <strong>${escapeHtml(view.answered)}</strong></p></details>`;
         }
         const chosen = draft[question.id] ?? view.offer ?? undefined;
         const offered = view.offer !== null ? '<span class="badge">offered</span>' : "";
@@ -357,7 +625,7 @@
               return `<label class="choice"><input type="radio" name="${escapeHtml(question.id)}" data-question="${escapeHtml(question.id)}" value="${escapeHtml(choice)}"${checked ? " checked" : ""} /><span>${escapeHtml(choice)}${badge}</span></label>`;
             }).join("")
           : `<input type="text" data-question="${escapeHtml(question.id)}" value="${escapeHtml(chosen ?? question.recommendation ?? "")}" autocomplete="off" />`;
-        return `<div class="prompt">${escapeHtml(question.prompt)}${offered}</div>${body}`;
+        return `<div class="prompt">${escapeHtml(question.prompt)}${offered}</div>${questionMeta(question)}${body}`;
       }
 
       function renderQuestions() {
@@ -365,10 +633,23 @@
         const pending = state.pending;
         const outstanding = pending.filter((view) => view.answered === null);
         section.hidden = pending.length === 0;
+        section.classList.toggle("attention", outstanding.length > 0);
+        element("questions-count").textContent = outstanding.length
+          ? `${outstanding.length} waiting on you`
+          : "all answered";
         element("questions-actions").hidden = outstanding.length === 0;
-        element("rerun-recipe").hidden = outstanding.length === 0;
+        element("recipe-row").hidden = outstanding.length === 0;
         element("rerun-recipe").textContent = state.rerun_recipe;
         element("resume-button").hidden = state.live;
+        // The form is rebuilt only when the question set itself moved.
+        // Retyping a draft is not a set change, and a rebuild under a
+        // keystroke would steal the focus mid-word.
+        const shape = JSON.stringify(
+          pending.map((view) => [view.question.id, view.answered, view.offer])
+        );
+        const form = element("questions-form");
+        if (form.dataset.shape === shape) return;
+        form.dataset.shape = shape;
         const draft = readDraft();
         const grouped = new Map();
         for (const view of pending) {
@@ -376,7 +657,11 @@
           if (!grouped.has(concern)) grouped.set(concern, []);
           grouped.get(concern).push(view);
         }
-        element("questions-form").innerHTML = [...grouped.entries()]
+        // Groups still waiting on a decision come first: the section exists
+        // to be answered, and the answered record should not bury the ask.
+        const waiting = (views) => views.some((view) => view.answered === null);
+        form.innerHTML = [...grouped.entries()]
+          .sort((a, b) => Number(waiting(b[1])) - Number(waiting(a[1])))
           .map(([concern, views]) =>
             `<fieldset><legend>${escapeHtml(concern)}</legend>${views.map((view) => questionMarkup(view, draft)).join("")}</fieldset>`
           )
@@ -385,12 +670,20 @@
 
       function renderRuns() {
         const rows = runs.map((run) => {
-          const badge = run.live ? ' <span class="badge">live</span>' : "";
-          const detail = run.unreadable ? `<div class="error">${escapeHtml(run.detail)}</div>` : "";
-          const current = run.run_id === state?.run_id ? " strong" : "";
-          return `<tr><td><button type="button" class="pill${current}" data-run="${escapeHtml(run.run_id)}">${escapeHtml(run.run_id)}</button>${badge}${detail}</td><td class="muted">${escapeHtml(run.phase || "—")}</td><td>${run.concerns}</td><td>${run.pending_questions}</td></tr>`;
+          const current = run.run_id === state?.run_id;
+          const live = run.live ? '<span class="dot pulse" title="moving"></span>' : "";
+          const bad = run.unreadable
+            ? `<span class="dot tone-danger" title="${escapeHtml(run.detail)}"></span>`
+            : "";
+          const pending = run.pending_questions
+            ? `<span class="count" title="unanswered questions">${run.pending_questions}</span>`
+            : "";
+          const meta = run.unreadable
+            ? "unreadable"
+            : `${escapeHtml(run.phase || "—")} · ${run.concerns} concern${run.concerns === 1 ? "" : "s"}`;
+          return `<button type="button" class="run-item${current ? " current" : ""}" data-run="${escapeHtml(run.run_id)}"><span class="run-name">${escapeHtml(run.run_id)}</span>${live}${bad}${pending}<span class="run-meta">${meta}</span></button>`;
         });
-        element("run-rows").innerHTML = rows.join("");
+        element("run-list").innerHTML = rows.join("");
         element("runs-empty").hidden = rows.length > 0;
       }
 
@@ -398,7 +691,7 @@
         const rows = state.concerns.map((concern) => {
           const failure = concern.failure ? `<div class="error">${escapeHtml(concern.failure)}</div>` : "";
           const approved = concern.integration_approved ? "" : ' <span class="badge">deferred</span>';
-          return `<tr data-concern="${escapeHtml(concern.id)}" class="openable"><td><strong>${escapeHtml(concern.id)}</strong>${approved}<div class="muted">${escapeHtml(concern.title)}</div></td><td>${escapeHtml(concern.status)}</td><td class="reason">${escapeHtml(concern.reason || concern.eligibility_reason || "")}${failure}</td><td class="muted">${escapeHtml(concern.dependencies.join(", ") || "—")}</td><td class="muted">${escapeHtml(concern.branch || "—")}</td><td>${concern.rounds}</td></tr>`;
+          return `<tr data-concern="${escapeHtml(concern.id)}" class="openable"><td><strong>${escapeHtml(concern.id)}</strong>${approved}<div class="muted">${escapeHtml(concern.title)}</div></td><td><span class="dot tone-${tone(concern.status)}"></span> ${escapeHtml(concern.status)}</td><td class="reason">${escapeHtml(concern.reason || concern.eligibility_reason || "")}${failure}</td><td class="muted">${escapeHtml(concern.dependencies.join(", ") || "—")}</td><td class="muted mono">${escapeHtml(concern.branch || "—")}</td><td>${concern.rounds}</td></tr>`;
         });
         element("concern-rows").innerHTML = rows.join("");
         element("concerns-empty").hidden = rows.length > 0;
@@ -406,6 +699,11 @@
 
       function actorLabel(actor) {
         return `${actor.kind}:${actor.id}#${actor.round}`;
+      }
+
+      // The run's own entries would otherwise wear the run id twice over.
+      function actorDisplay(actor) {
+        return actor.kind === "run" ? "run" : actorLabel(actor);
       }
 
       // A body is shown whole once someone asks for it. Until then it is cut
@@ -459,7 +757,7 @@
       function entryMarkup(entry) {
         const event = entry.event;
         const stamp = new Date(entry.at).toLocaleTimeString();
-        const who = actorLabel(entry.actor);
+        const who = actorDisplay(entry.actor);
         const head = `<div class="entry-head"><span class="muted">${escapeHtml(stamp)}</span> <span class="pill">${escapeHtml(who)}</span></div>`;
         const boundary = (text) =>
           `<div class="boundary"><span>${escapeHtml(stamp)}</span><span>${escapeHtml(who)}</span><span>${escapeHtml(text)}</span></div>`;
@@ -486,7 +784,7 @@
           case "message_posted":
             return `<div class="entry note"><div class="entry-head"><span class="muted">${escapeHtml(stamp)}</span> <span class="pill strong">${escapeHtml(event.door)} ${event.redirect ? "redirected" : "→"} ${escapeHtml(who)}</span></div><div class="say">${escapeHtml(event.text)}</div></div>`;
           case "join_completed":
-            return `<div class="entry note">${head}<div>joined <code>${escapeHtml(event.parent.slice(0, 12))}</code>${event.conflicted ? " (conflicted)" : ""}${event.broke.length ? ` — broke: ${escapeHtml(event.broke.join(", "))}` : ""}</div></div>`;
+            return `<div class="entry note">${head}<div>joined <span class="mono">${escapeHtml(event.parent.slice(0, 12))}</span>${event.conflicted ? " (conflicted)" : ""}${event.broke.length ? ` — broke: ${escapeHtml(event.broke.join(", "))}` : ""}</div></div>`;
           case "join_audit":
             return `<div class="entry note">${head}<div>audited ${event.parents.length} parent(s), ${event.outstanding} outstanding</div></div>`;
           case "review_residual":
@@ -511,6 +809,63 @@
         }
       }
 
+      // Turn content is what an actor's session said and did; everything else
+      // is the run speaking. Listing the turn kinds rather than the run kinds
+      // means an event added later lands on the run side — shown under the
+      // narrower filter rather than hidden by it.
+      const TURN_CONTENT = [
+        "message_completed",
+        "turn_started",
+        "turn_completed",
+        "block_started",
+        "block_completed",
+      ];
+
+      function isRunEvent(entry) {
+        return !TURN_CONTENT.includes(entry.event.type);
+      }
+
+      function carriesError(entry) {
+        const event = entry.event;
+        switch (event.type) {
+          case "run_failed":
+            return true;
+          case "concern_progressed":
+            return event.progress.status === "failed";
+          case "message_completed":
+            return event.message.blocks.some(
+              (block) => block.type === "tool_result" && block.is_error
+            );
+          default:
+            return false;
+        }
+      }
+
+      function matchesKind(entry) {
+        switch (kindFilter) {
+          case "notes":
+            return isRunEvent(entry);
+          case "errors":
+            return carriesError(entry);
+          default:
+            return true;
+        }
+      }
+
+      function matchesQuery(entry) {
+        return !query || JSON.stringify(entry).toLowerCase().includes(query);
+      }
+
+      function visibleNow(entry) {
+        return inScope(entry) && matchesKind(entry) && matchesQuery(entry);
+      }
+
+      // Which entries currently own a node. The trim removes one DOM child
+      // per drawn entry it drops, so membership here is what keeps the list
+      // and the DOM the same length; a rebuild starts a fresh set because
+      // the filters that decided the old one may just have changed.
+      let drawnEntries = new WeakSet();
+
       // Which actors the actor row offers: every one under the open concern,
       // or every one in the run when nothing is narrowed. Selecting an actor
       // keeps the concern it belongs to, so the two rows read as one path in.
@@ -528,11 +883,15 @@
       const chipMarkup = (label, text, active, key) =>
         `<button type="button" class="chip${active ? " current" : ""}" data-${key}="${escapeHtml(label)}">${escapeHtml(text)}</button>`;
 
+      let knownScopes = "";
+      let knownActors = "";
+
       function renderScopes() {
         const ids = [];
         for (const entry of entries) {
           if (!ids.includes(entry.actor.id)) ids.push(entry.actor.id);
         }
+        knownScopes = ids.join("\n");
         element("scope-chips").innerHTML = [
           chipMarkup("", "merged", scope.kind === "merged", "scope"),
           ...ids.map((id) => chipMarkup(id, id, scope.id === id, "scope")),
@@ -541,6 +900,7 @@
 
       function renderActors() {
         const labels = scopedActors();
+        knownActors = labels.join("\n");
         const all =
           scope.kind === "merged"
             ? []
@@ -553,23 +913,138 @@
         ].join("");
       }
 
+      function renderEarlier() {
+        const button = element("load-earlier");
+        if (entries.length && entries[0].seq === 0) exhausted = true;
+        button.disabled = exhausted || entries.length === 0;
+        button.textContent = exhausted ? "at the start of the record" : "load earlier record";
+      }
+
+      function renderUnseen() {
+        const chip = element("follow-chip");
+        chip.hidden = unseen === 0;
+        chip.textContent = `${unseen} new ↓`;
+      }
+
       function renderTrace() {
-        const shown = entries.filter(inScope);
-        element("trace-body").innerHTML = shown.map(entryMarkup).join("");
-        element("trace-empty").hidden = shown.length > 0;
+        const body = element("trace-body");
+        drawnEntries = new WeakSet();
+        const parts = [];
+        for (const entry of entries) {
+          if (!visibleNow(entry)) continue;
+          const markup = entryMarkup(entry);
+          if (markup === "") continue;
+          drawnEntries.add(entry);
+          parts.push(markup);
+        }
+        body.innerHTML = parts.join("");
+        element("trace-empty").hidden = parts.length > 0;
         renderScopes();
         renderActors();
         renderTarget();
+        renderEarlier();
+        if (follow) body.scrollTop = body.scrollHeight;
+      }
+
+      // A long run outlives what a page can hold, so the oldest entries are
+      // dropped rather than accumulated until the tab dies. The record on
+      // disk is complete either way — this bounds the reader, not the run.
+      const RETAINED_ENTRIES = 4000;
+      const EARLIER_PAGE = 200;
+
+      // Setting scrollTop forces a layout, so a burst of arrivals scrolls
+      // once per frame rather than once per entry.
+      let followScrollQueued = false;
+
+      function queueFollowScroll() {
+        if (followScrollQueued) return;
+        followScrollQueued = true;
+        requestAnimationFrame(() => {
+          followScrollQueued = false;
+          if (!follow) return;
+          const body = element("trace-body");
+          body.scrollTop = body.scrollHeight;
+        });
+      }
+
+      // One arriving entry appends one node. Rebuilding the whole list per
+      // event is quadratic in the run's length, which is a freeze with extra
+      // steps; the full rebuild is reserved for the moments the shape of the
+      // list actually changes — filters, scope, a run switch, older record.
+      function appendEntry(entry) {
+        entries.push(entry);
+        if (entries.length > RETAINED_ENTRIES) {
+          const dropped = entries.shift();
+          if (drawnEntries.has(dropped)) element("trace-body").firstElementChild?.remove();
+        }
+        const newActor = !knownScopes.split("\n").includes(entry.actor.id) ||
+          !knownActors.split("\n").includes(actorLabel(entry.actor));
+        if (newActor) {
+          renderScopes();
+          renderActors();
+        }
+        if (!visibleNow(entry)) return;
+        const markup = entryMarkup(entry);
+        if (markup === "") return;
+        drawnEntries.add(entry);
+        element("trace-body").insertAdjacentHTML("beforeend", markup);
+        element("trace-empty").hidden = true;
+        renderEarlier();
+        if (follow) {
+          queueFollowScroll();
+        } else {
+          unseen += 1;
+          renderUnseen();
+        }
+      }
+
+      async function loadEarlier() {
+        if (exhausted || entries.length === 0 || !state) return;
+        const anchor = entries[0].seq;
+        const response = await fetch(
+          `/api/runs/${state.run_id}/journal?before=${anchor}&count=${EARLIER_PAGE}`
+        );
+        if (!response.ok) return;
+        const page = await response.json();
+        if (page.length < EARLIER_PAGE) exhausted = true;
+        if (!page.length) {
+          renderEarlier();
+          return;
+        }
+        entries = [...page, ...entries];
+        const body = element("trace-body");
+        const keep = body.scrollHeight - body.scrollTop;
+        follow = false;
+        renderTrace();
+        body.scrollTop = body.scrollHeight - keep;
       }
 
       function renderPhases() {
-        const current = state.phases.indexOf(state.phase);
-        element("phase-chips").innerHTML = state.phases
+        // The two terminal failure phases sit in the enum after `complete`;
+        // showing them as forever-unreached steps would read as work left.
+        const strip = state.phases.filter(
+          (phase) => !["aborted", "failed"].includes(phase) || phase === state.phase
+        );
+        const current = strip.indexOf(state.phase);
+        element("phase-chips").innerHTML = strip
           .map((phase, index) => {
-            const kind = phase === state.phase ? "current" : index < current ? "done" : "";
-            return `<span class="chip ${kind}">${escapeHtml(phase)}</span>`;
+            const mark = phase === state.phase ? "current" : index < current ? "done" : "";
+            return `<span class="chip ${mark}">${escapeHtml(phase)}</span>`;
           })
           .join("");
+      }
+
+      function renderTally() {
+        const counts = new Map();
+        for (const concern of state.concerns) {
+          counts.set(concern.status, (counts.get(concern.status) ?? 0) + 1);
+        }
+        element("tally-bar").innerHTML = [...counts.entries()]
+          .map(([status, count]) =>
+            `<span class="seg tone-${tone(status)}" style="flex:${count}" title="${escapeHtml(status)}: ${count}"></span>`
+          )
+          .join("");
+        element("progress-line").textContent = state.progress_line;
       }
 
       function renderReview() {
@@ -577,10 +1052,10 @@
         element("review-section").hidden = !review;
         if (!review) return;
         const checks = review.verification
-          .map((check) => `<tr><td>${escapeHtml(check.name)}</td><td>${check.passed ? "passed" : "failed"}</td><td class="muted">exit ${check.exit_code}</td></tr>`)
+          .map((check) => `<tr><td>${escapeHtml(check.name)}</td><td class="${check.passed ? "" : "error"}">${check.passed ? "passed" : "failed"}</td><td class="muted">exit ${check.exit_code}</td></tr>`)
           .join("");
         element("review-body").innerHTML =
-          `<p><code>${escapeHtml(review.review_branch)}</code></p><table><tbody>${checks}</tbody></table>`;
+          `<p><code>${escapeHtml(review.review_branch)}</code></p><div class="table-scroll"><table><tbody>${checks}</tbody></table></div>`;
         element("review-hand-off").textContent =
           "This branch is yours to land. What is recorded here is mechanical — " +
           "whether the merged concerns are jointly right is read from the trace above.";
@@ -593,23 +1068,31 @@
           .join("");
       }
 
-      function render() {
+      function renderState() {
         if (!state) return;
+        element("empty-section").hidden = true;
         element("run-id").textContent = state.run_id;
         element("phase-pill").textContent = state.phase;
-        element("progress-pill").textContent = state.progress_line;
         const statusPill = element("status-pill");
         statusPill.textContent = state.status.replaceAll("_", " ");
-        statusPill.className = `pill ${state.status === "failed" ? "danger" : state.status === "complete" ? "ok" : ""}`;
+        statusPill.className = `pill ${
+          state.status === "failed"
+            ? "danger"
+            : state.status === "complete"
+              ? "ok"
+              : state.status === "awaiting_answers" || state.status === "aborted"
+                ? "warn"
+                : ""
+        }`;
         const banner = element("banner");
         banner.hidden = state.live;
         banner.textContent = state.live
           ? ""
           : "This run is not moving. Answers you submit are held for its next run.";
+        renderTally();
         renderRuns();
         renderPhases();
         renderConcerns();
-        renderTrace();
         renderQuestions();
         renderReview();
         renderFailures();
@@ -621,31 +1104,46 @@
         pill.className = `pill ${kind}`;
       }
 
-      async function hydrate() {
+      async function refreshRuns() {
         const listing = await fetch("/api/runs");
-        if (listing.ok) runs = (await listing.json()).runs;
+        if (!listing.ok) return;
+        runs = (await listing.json()).runs;
+        renderRuns();
+      }
+
+      async function hydrate() {
+        await refreshRuns();
         const path = state ? `/api/runs/${state.run_id}` : "/api/state";
         const response = await fetch(path);
         if (!response.ok) {
-          renderRuns();
+          element("empty-section").hidden = false;
           setConnection("select a run", "");
           return;
         }
         state = await response.json();
-        render();
+        renderState();
       }
 
       async function selectRun(runId) {
-        const response = await fetch(`/api/runs/${runId}`);
+        const response = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
         if (!response.ok) return;
         state = await response.json();
         entries = [];
         expanded.clear();
         scope = { kind: "merged" };
+        follow = true;
+        unseen = 0;
+        exhausted = false;
+        element("questions-form").dataset.shape = "";
+        element("last-event").textContent = "no events yet";
+        if (decodeURIComponent(location.hash.slice(1)) !== runId) {
+          location.hash = encodeURIComponent(runId);
+        }
         if (source) source.close();
         connect();
-        render();
+        renderState();
         renderTrace();
+        renderUnseen();
       }
 
       // Applying the record directly is what removed the re-project-and-diff
@@ -655,21 +1153,38 @@
       // an offer and cannot have recorded it.
       const REPROJECTS = ["question_asked", "answer_settled", "run_failed"];
 
-      // A long run outlives what a page can hold, so the oldest entries are
-      // dropped rather than accumulated until the tab dies. The record on
-      // disk is complete either way — this bounds the reader, not the run.
-      const RETAINED_ENTRIES = 4000;
+      // A replayed catch-up delivers a run's worth of these in one burst.
+      // What the page needs afterwards is one reprojection of now, not one
+      // per event it just caught up on — reprojecting per event stalled the
+      // very tab the stream was feeding.
+      let hydrateTimer = 0;
+
+      function queueHydrate() {
+        clearTimeout(hydrateTimer);
+        hydrateTimer = setTimeout(hydrate, 250);
+      }
+
+      let statePaintQueued = false;
+
+      function queueStatePaint() {
+        if (statePaintQueued) return;
+        statePaintQueued = true;
+        requestAnimationFrame(() => {
+          statePaintQueued = false;
+          renderState();
+        });
+      }
 
       function apply(entry) {
-        entries.push(entry);
-        if (entries.length > RETAINED_ENTRIES) entries.shift();
-        renderTrace();
+        appendEntry(entry);
+        element("last-event").textContent =
+          `last event ${new Date(entry.at).toLocaleTimeString()}`;
         if (!state) return;
         const event = entry.event;
         switch (event.type) {
           case "phase_changed":
             state = { ...state, phase: event.phase };
-            render();
+            queueStatePaint();
             break;
           case "concern_progressed":
             state = {
@@ -680,10 +1195,10 @@
                   : concern
               ),
             };
-            render();
+            queueStatePaint();
             break;
         }
-        if (REPROJECTS.includes(event.type)) hydrate();
+        if (REPROJECTS.includes(event.type)) queueHydrate();
       }
 
       async function post(path, body) {
@@ -715,13 +1230,13 @@
         try {
           state = await post(`/api/runs/${state.run_id}/answers`, { answers: collectAnswers() });
           localStorage.removeItem(draftKey());
-          render();
+          renderState();
         } catch (error) {
           showError("questions-error", error);
         }
       });
 
-      element("run-rows").addEventListener("click", (event) => {
+      element("run-list").addEventListener("click", (event) => {
         const target = event.target.closest("[data-run]");
         if (target) selectRun(target.dataset.run);
       });
@@ -730,7 +1245,7 @@
         element("questions-error").hidden = true;
         try {
           state = await post(`/api/runs/${state.run_id}/resume`, {});
-          render();
+          renderState();
         } catch (error) {
           showError("questions-error", error);
         }
@@ -740,7 +1255,19 @@
         element("questions-error").hidden = true;
         try {
           state = await post(`/api/runs/${state.run_id}/park`, {});
-          render();
+          renderState();
+        } catch (error) {
+          showError("questions-error", error);
+        }
+      });
+
+      element("copy-recipe").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(state.rerun_recipe);
+          element("copy-recipe").textContent = "copied";
+          setTimeout(() => {
+            element("copy-recipe").textContent = "copy";
+          }, 1200);
         } catch (error) {
           showError("questions-error", error);
         }
@@ -782,6 +1309,43 @@
         expanded.add(chosen.dataset.expand);
         renderTrace();
       });
+
+      element("trace-body").addEventListener("scroll", () => {
+        const body = element("trace-body");
+        const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
+        if (atBottom && !follow) {
+          follow = true;
+          unseen = 0;
+          renderUnseen();
+        } else if (!atBottom) {
+          follow = false;
+        }
+      });
+
+      element("follow-chip").addEventListener("click", () => {
+        const body = element("trace-body");
+        follow = true;
+        unseen = 0;
+        renderUnseen();
+        body.scrollTop = body.scrollHeight;
+      });
+
+      let searchTimer = 0;
+
+      element("trace-search").addEventListener("input", (event) => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          query = event.target.value.trim().toLowerCase();
+          renderTrace();
+        }, 150);
+      });
+
+      element("trace-kind").addEventListener("change", (event) => {
+        kindFilter = event.target.value;
+        renderTrace();
+      });
+
+      element("load-earlier").addEventListener("click", loadEarlier);
 
       // A message reaches one actor or all of them; the mailbox addresses an
       // exact label or broadcasts, and has nothing in between. A concern scope
@@ -826,11 +1390,25 @@
         source.onmessage = (message) => apply(JSON.parse(message.data));
       }
 
+      window.addEventListener("hashchange", () => {
+        const wanted = decodeURIComponent(location.hash.slice(1));
+        if (wanted && wanted !== state?.run_id) selectRun(wanted);
+      });
+
       element("footer-url").textContent = window.location.origin;
 
-      hydrate().then(() => {
-        if (state) connect();
-      });
+      setInterval(() => {
+        if (!document.hidden) refreshRuns();
+      }, 30000);
+
+      (async () => {
+        const wanted = decodeURIComponent(location.hash.slice(1));
+        if (wanted) await selectRun(wanted);
+        if (!state) {
+          await hydrate();
+          if (state) connect();
+        }
+      })();
     </script>
   </body>
 </html>
