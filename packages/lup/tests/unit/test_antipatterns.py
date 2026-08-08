@@ -495,6 +495,20 @@ def test_audit_skips_attribute_docstrings() -> None:
     assert audit_text(data, PYTHON_ANTI_PATTERNS) == []
 
 
+def test_audit_skips_fstring_prose_but_not_its_interpolations() -> None:
+    # An f-string lexes as start/middle/end tokens since 3.12; masking only
+    # the STRING type left its prose scanned as code, so converting a prompt
+    # r-string to an rf-string exposed its English to the rule set. Middle
+    # fragments are data; the interpolations between them are code and stay
+    # audited.
+    prose = 'text = rf"the words re.split(x) here are prose {name}"\n'
+    assert audit_text(prose, PYTHON_ANTI_PATTERNS) == []
+    code = "text = f\"total {name.replace('-', '_')}\"\n"
+    assert [f.rule_id for f in audit_text(code, PYTHON_ANTI_PATTERNS)] == [
+        "string-replace"
+    ]
+
+
 def test_atomic_renames_are_exempt_from_replace_rule() -> None:
     # Path-receiver `.replace` is an atomic rename, not string surgery, so the
     # string-replace rule leaves it alone. (os.replace is redirected to

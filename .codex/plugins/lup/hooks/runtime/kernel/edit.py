@@ -84,6 +84,23 @@ def docstring_lines(source: str) -> set[int]:
     return lines
 
 
+STRING_TOKEN_TYPES = (
+    tokenize.STRING,
+    tokenize.FSTRING_START,
+    tokenize.FSTRING_MIDDLE,
+    tokenize.FSTRING_END,
+)
+"""Every token type whose characters are string text, not code.
+
+An f-string stopped being one STRING token in 3.12: it lexes as a start
+marker, literal middle fragments, and an end marker, with real code tokens
+between them for each interpolation. Masking only STRING left f-string
+prose readable as code — converting a prompt's r-string to an rf-string
+exposed its English to the anti-pattern rules — while the interpolations
+stay visible here because they are code.
+"""
+
+
 def string_literal_lines(source: str) -> set[int]:
     """Return every line touched by a Python string token."""
     tokens = python_tokens(source)
@@ -91,7 +108,7 @@ def string_literal_lines(source: str) -> set[int]:
         return set()
     lines: set[int] = set()
     for token in tokens:
-        if token.type == tokenize.STRING:
+        if token.type in STRING_TOKEN_TYPES:
             lines.update(range(token.start[0], token.end[0] + 1))
     return lines
 
@@ -103,7 +120,7 @@ def mask_python_string_literals(source: str) -> list[str]:
     if tokens is None:
         return source.splitlines()
     for token in tokens:
-        if token.type != tokenize.STRING:
+        if token.type not in STRING_TOKEN_TYPES:
             continue
         start_line, start_column = token.start
         end_line, end_column = token.end
@@ -112,7 +129,8 @@ def mask_python_string_literals(source: str) -> list[str]:
             first = start_column if line_number == start_line else 0
             last = end_column if line_number == end_line else len(line)
             line[first:last] = [" "] * (last - first)
-            if line_number == start_line and last - first >= 2:
+            opens_string = token.type in (tokenize.STRING, tokenize.FSTRING_START)
+            if line_number == start_line and last - first >= 2 and opens_string:
                 line[first : first + 2] = ["'", "'"]
     return ["".join(line) for line in lines]
 

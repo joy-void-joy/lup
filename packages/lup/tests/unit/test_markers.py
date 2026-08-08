@@ -399,6 +399,13 @@ def test_marker_comment_rejects_incoherent_kind_condition_pairs() -> None:
     assert build("defer", None).condition is None
 
 
+def test_fstring_contents_are_code_not_notes() -> None:
+    # Since 3.12 an f-string lexes as start/middle/end tokens; only STRING
+    # used to be masked, so marker text inside an f-string read as a comment.
+    source = 'message = f"# lup: not feedback {value}"\n'
+    assert find_feedback(source, ScanMode.PYTHON) == []
+
+
 CLAIMS_SOURCE = """\
 alpha = 1
 # lup: solved: rework this section
