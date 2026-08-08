@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "da7ab3eefcb5272586dfe91d0a442de4120dfe1105f81928c6f4b283f8af968f",
+  "source_digest": "e2062503f753d140f577f2dd5c8f9badbdaf49645cee4ad022440a9b4da21941",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "b4cf41bd86d5db219a298b1cd183686af97f03ff523af18b529e5b25c6b8f490",
+      "sha256": "f7f19f71d6431b9bf2951ef9df64978427e8e47d9c2a41a89892e1e388edc0d5",
       "semantic_id": "harness.guidance",
       "executable": false
     },

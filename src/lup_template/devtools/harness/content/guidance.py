@@ -255,8 +255,9 @@ read it first: a denial names what tripped and how to recover.
 - `# lup: ignore[<rule-id>]` on the offending line suppresses exactly that
   anti-pattern, and no other.
 
-`docs/permissions.md` carries how each marker scopes, and the recovery path
-when work is denied as unjudged.
+`docs/permissions.md` carries how the escalation marker scopes and the recovery
+path when work is denied as unjudged; `docs/contributing.md` carries the
+suppression marker's scoping.
 
 Use `"""
         ),
