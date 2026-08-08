@@ -31,6 +31,7 @@ from lup.resolver.mailbox import (
     PendingQuestion,
     QuestionMailbox,
 )
+from lup.policy.identity import ConcernAllowance
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
     ResolverObserver,
@@ -50,7 +51,6 @@ from lup.resolver.models import (
     AnswerBatch,
     AcceptanceCriterion,
     Concern,
-    ConcernAllowance,
     ConcernInventory,
     ConcernOrigin,
     ConcernOutcome,
@@ -72,8 +72,10 @@ from lup.resolver.models import (
     ReviewReport,
     SourceSnapshot,
     VerificationCommand,
+    WorkerContext,
     WorkerReport,
     WritableRootLease,
+    allowance_question_id,
 )
 from lup.resolver.orchestrator import (
     DependencyBaseBuilder,
@@ -2927,6 +2929,82 @@ async def test_a_concern_with_no_notes_clears_nothing(tmp_path: Path) -> None:
     outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
     assert outcome.verified, outcome.failure
     assert outcome.notes_cleared == []
+
+
+@pytest.mark.asyncio
+async def test_a_granted_allowance_reaches_the_sessions_launched_next(
+    tmp_path: Path,
+) -> None:
+    """A "grant" answer to `request_allowance` is machinery, not a wish.
+
+    The concern declared no allowance at plan time; the grant arrives
+    through the mailbox, so every session launched after its promotion —
+    here the first worker — carries the gate in its context, where before
+    the answer reached nobody.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    carried: list[list[ConcernAllowance]] = []
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        (root / "a.txt").write_text("implemented\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def recording_worker_factory(context: WorkerContext) -> SessionFactory:
+        carried.append(list(context.allowances))
+        return resolver_test_factory(context.root, worker_response)
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="mid-run-grant",
+            integration_branch="resolve/mid-run-grant/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        recording_worker_factory,
+        lambda root: resolver_test_factory(root, accepting_reviewer),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    gate = allowance_question_id("a", ConcernAllowance.ANTIPATTERN_SUPPRESSION)
+    worker_asks(
+        core.mailbox,
+        "mid-run-grant",
+        MaterialQuestion(
+            id=gate,
+            concern_id="a",
+            prompt="Grant `antipattern-suppression` to a?",
+            choices=["grant", "refuse"],
+            closed_choices=True,
+        ),
+    )
+    seed_offer(core, gate, "grant")
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    assert concern("a").allowances == []
+    assert carried and all(
+        ConcernAllowance.ANTIPATTERN_SUPPRESSION in launch for launch in carried
+    )
 
 
 class RecordingPreparer(WorktreePreparer):

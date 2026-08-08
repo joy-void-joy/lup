@@ -30,6 +30,7 @@ from lup.resolver.journal import (
     RunFailedEvent,
 )
 from lup.channels.models import utc_now
+from lup.policy.identity import ConcernAllowance
 from lup.resolver.mailbox import (
     ANSWER_POLL_SECONDS,
     PendingQuestion,
@@ -49,7 +50,6 @@ from lup.resolver.models import (
     ConcernInventory,
     ConcernOrigin,
     ConcernProgress,
-    ConcernAllowance,
     ConcernStatus,
     DropCandidate,
     ConcernExecution,
@@ -75,6 +75,7 @@ from lup.resolver.models import (
     WorkerContext,
     WorkerReport,
     WritableRootLease,
+    allowance_question_id,
 )
 from lup.resolver.orchestrator import (
     DependencyBaseBuilder,
@@ -1173,7 +1174,7 @@ class ResolverCore:
                 WorkerContext(
                     root=assignment.lease.root,
                     concern_id=assignment.concern.id,
-                    allowances=assignment.concern.allowances,
+                    allowances=self.granted_for(assignment.concern),
                 )
             ),
         ).turn(turn_request(TurnInput(text=prompt), WorkerReport))
@@ -1778,6 +1779,30 @@ class ResolverCore:
                 )
             )
 
+    def granted_for(self, concern: Concern) -> list[ConcernAllowance]:
+        """Every gate this concern may pass: planned grants plus mid-run ones.
+
+        A `request_allowance` question a human answered "grant" extends the
+        concern's authority from that answer on: the next session launched
+        for the concern — a revision round, a merge, a remediation — carries
+        it in its environment and its in-process judge. Without this reader,
+        the tool's question had no machinery behind either answer.
+        """
+        granted = list(concern.allowances)
+        state = self.state
+        if state is None or state.answers is None:
+            return granted
+        answered = {
+            answer.question_id: answer.value for answer in state.answers.answers
+        }
+        for allowance in ConcernAllowance:
+            if allowance in granted:
+                continue
+            key = allowance_question_id(concern.id, allowance)
+            if key in answered and answered[key] == "grant":
+                granted.append(allowance)
+        return granted
+
     def merge_allowances(self) -> list[ConcernAllowance]:
         """Every gate the joined concerns were approved to pass.
 
@@ -1794,7 +1819,7 @@ class ResolverCore:
             dict.fromkeys(
                 allowance
                 for concern in state.concerns
-                for allowance in concern.allowances
+                for allowance in self.granted_for(concern)
             )
         )
 

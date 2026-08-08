@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lup.codescan.symbols import DefinedSymbol
 from lup.harness.models import ResolveSpec
+from lup.policy.identity import ConcernAllowance
 
 FROZEN = ConfigDict(frozen=True)
 FROZEN_STRICT = ConfigDict(frozen=True, extra="forbid")
@@ -74,18 +75,6 @@ class ReviewNote(BaseModel):
     file: Path
     line: int = Field(ge=1)
     text: str
-
-
-class ConcernAllowance(StrEnum):
-    """One edit gate a concern's plan needs, granted with the concern itself.
-
-    These gates exist because the decision is a human's. Naming them at plan
-    time moves that decision to where the human is already deciding, instead
-    of parking the run to ask again for work they just approved.
-    """
-
-    NEW_DEVTOOLS_MODULE = "new-devtools-module"
-    ANTIPATTERN_SUPPRESSION = "antipattern-suppression"
 
 
 class NoteClearance(BaseModel):
@@ -164,6 +153,16 @@ class MaterialQuestion(BaseModel):
                 f"question {self.id!r} recommendation is not one of its choices"
             )
         return self
+
+
+def allowance_question_id(concern_id: str, allowance: ConcernAllowance) -> str:
+    """The composed id a `request_allowance` question is recorded under.
+
+    The worker's tool asks with the bare `allow-<gate>` id and the binding
+    prefixes its concern, so this spelling is the contract between the ask
+    and the run-side reader that turns a "grant" answer into authority.
+    """
+    return f"{concern_id}-allow-{allowance}"
 
 
 class QuestionBatch(BaseModel):

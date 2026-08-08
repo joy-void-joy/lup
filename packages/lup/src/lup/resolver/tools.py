@@ -35,7 +35,8 @@ from lup.resolver.mailbox import (
     QuestionMailbox,
     wait_for_answers,
 )
-from lup.resolver.models import ConcernAllowance, MaterialQuestion
+from lup.policy.identity import ConcernAllowance
+from lup.resolver.models import MaterialQuestion
 from lup.types import EnvVars
 
 RESOLVER_RUN_DIR_ENV = "LUP_RESOLVER_RUN_DIR"
