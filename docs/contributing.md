@@ -215,7 +215,16 @@ and both halves are reviewed together. What to look for:
 
 Unresolved `# lup:` review notes stay visible in a full local `dev check`.
 They are feedback to act on, not lint to clear: a note comes out when the code
-or structure it points at has actually changed. /lup:resolve runs that pass;
+or structure it points at has actually changed. Resolving one is a rewrite,
+not a removal: fix what the note points at — or, for a question, answer it
+definitively in code, docs, or a recorded user decision — then restate the
+marker as `# lup: solved: <the note's original words>`, text unchanged, so
+the claim sits beside what it claims to fix and can be checked against what
+was asked. A `solved:` claim is retired only by the verify-solved review
+pass, through `dev comments --retire`; the edit gate refuses a hand-deletion
+or rewording for everyone, agent and human alike. `defer:` notes park work
+at the site until deliberately resumed, and `ignore[<rule-id>]` hatches are
+not feedback at all — they come out with the violation they cover. /lup:resolve runs that pass;
 [resolver.md](resolver.md) describes what it does.
 
 ## Native evidence and the release gate

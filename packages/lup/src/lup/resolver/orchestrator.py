@@ -431,6 +431,10 @@ class WorktreeOrchestrator:
             raise RuntimeError(f"worktree branch changed for {lease.concern_id}")
         return lines[0]
 
+    # lup: reset lost its production caller when restore_worktree chose to
+    # preserve the interrupted turn (a park is a pause, not an abandonment);
+    # decide whether any retry path still owes a hard discard, or remove
+    # this method and the three tests that exercise it.
     def reset(self, lease: WritableRootLease, commit: str) -> None:
         """Discard an uncommitted attempt before safely retrying a concern.
 
