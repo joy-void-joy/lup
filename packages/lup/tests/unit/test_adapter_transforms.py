@@ -164,6 +164,8 @@ def pattern_label(pattern: ast.pattern | None) -> str:
             return " | ".join(pattern_label(part) for part in alternatives)
         case ast.MatchClass(cls=ast.Name(id=name)):
             return name
+        case ast.MatchClass(cls=ast.Attribute(attr=name)):
+            return name
         case ast.MatchAs(pattern=inner) if inner is not None:
             return pattern_label(inner)
         case _:

@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 from uuid import UUID
 
 import pytest
@@ -297,6 +297,57 @@ async def test_mcp_elicitation_accepts_composed_servers_declines_others(
 
     assert accepted == {"action": "accept"}
     assert declined == {"action": "decline"}
+
+
+def test_every_sdk_content_block_kind_has_a_conversion_arm() -> None:
+    """The SDK's own union is the roster, so a block kind it grows fails here.
+
+    The wildcard keeps conversion total, which means a new kind would
+    otherwise land in transcripts as its repr — recorded, but unreadable —
+    and nothing else in the suite would say so.
+    """
+    from claude_agent_sdk.types import ContentBlock
+
+    members = [member.__name__ for member in get_args(ContentBlock)]
+    arms = arm_labels(convert_claude_block)
+
+    assert members
+    assert [name for name in members if name not in arms] == []
+    assert arms[-1] == "_"
+
+
+def test_every_conversion_arm_converts_a_direct_fixture() -> None:
+    import claude_agent_sdk as claude
+    from claude_agent_sdk import types as claude_types
+
+    assert convert_claude_block(
+        claude.ThinkingBlock(thinking="weighing options", signature="sig")
+    ) == TurnThinkingBlock(thinking="weighing options")
+    assert convert_claude_block(
+        claude.ThinkingBlock(thinking="", signature="sig")
+    ) == TurnThinkingBlock(thinking="", redacted=True)
+    assert convert_claude_block(
+        claude.ToolResultBlock(tool_use_id="call", content="2 passed")
+    ) == TurnToolResultBlock(tool_call_id="call", content="2 passed")
+    assert convert_claude_block(
+        claude.ToolResultBlock(
+            tool_use_id="call", content=[{"type": "text", "text": "chunk"}]
+        )
+    ) == TurnToolResultBlock(
+        tool_call_id="call", content='[{"type": "text", "text": "chunk"}]'
+    )
+    assert convert_claude_block(
+        claude_types.ServerToolUseBlock(
+            id="srv", name="web_search", input={"query": "lup"}
+        )
+    ) == TurnToolCallBlock(id="srv", name="web_search", arguments={"query": "lup"})
+    assert convert_claude_block(
+        claude_types.ServerToolResultBlock(
+            tool_use_id="srv", content={"type": "web_search_result"}
+        )
+    ) == TurnToolResultBlock(
+        tool_call_id="srv", content="{'type': 'web_search_result'}"
+    )
 
 
 def test_claude_message_and_usage_translation_has_direct_fixtures() -> None:
