@@ -649,7 +649,9 @@ def message_role(payload: JsonObject) -> Literal["user", "assistant", "tool", "s
     """
     match payload:
         case (
-            {"type": "commandExecution"} | {"type": "fileChange"} | {"type": "mcpTool"}
+            {"type": "commandExecution"}
+            | {"type": "fileChange"}
+            | {"type": "mcpToolCall"}
         ):
             return "tool"
         case _:
@@ -707,6 +709,32 @@ def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
                 TurnToolResultBlock(
                     tool_call_id=identifier,
                     content=str(status),
+                    is_error=status != "completed",
+                ),
+            ]
+            return blocks
+        case {
+            "type": "mcpToolCall",
+            "id": str(identifier),
+            "server": str(server),
+            "tool": str(tool),
+            "arguments": arguments,
+            "status": status,
+        }:
+            encoded_arguments: JsonObject = (
+                {str(key): value for key, value in arguments.items()}
+                if isinstance(arguments, dict)
+                else {"value": arguments}
+            )
+            blocks = [
+                TurnToolCallBlock(
+                    id=identifier,
+                    name=f"mcp__{server}__{tool}",
+                    arguments=encoded_arguments,
+                ),
+                TurnToolResultBlock(
+                    tool_call_id=identifier,
+                    content=json.dumps(payload, sort_keys=True),
                     is_error=status != "completed",
                 ),
             ]

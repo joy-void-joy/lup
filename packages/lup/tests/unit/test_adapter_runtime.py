@@ -1105,7 +1105,7 @@ NOTIFICATION_CASES = [
         # message, which is the `if completed:` guard rather than the loop.
         name="item/completed-with-an-undecodable-item",
         method="item/completed",
-        params={"turnId": "turn-1", "item": {"type": "mcpTool", "id": "m1"}},
+        params={"turnId": "turn-1", "item": {"type": "unheardOf", "id": "m1"}},
     ),
     NotificationCase(
         # Usage is folded into the channel rather than published, so this arm
@@ -1265,11 +1265,62 @@ COMPLETED_ITEM_CASES = [
         ],
     ),
     CompletedItemCase(
-        # `message_role` reads this type as the environment's reply, and no arm
-        # here decodes it, so it reaches a transcript as nothing at all.
+        name="mcpToolCall",
+        arm="(type=mcpToolCall, id, server, tool, arguments, status)",
+        payload={
+            "type": "mcpToolCall",
+            "id": "m1",
+            "server": "notes",
+            "tool": "review",
+            "arguments": {"confidence": 0.7},
+            "status": "completed",
+        },
+        blocks=[
+            TurnToolCallBlock(
+                id="m1", name="mcp__notes__review", arguments={"confidence": 0.7}
+            ),
+            TurnToolResultBlock(
+                tool_call_id="m1",
+                content=(
+                    '{"arguments": {"confidence": 0.7}, "id": "m1", '
+                    '"server": "notes", "status": "completed", '
+                    '"tool": "review", "type": "mcpToolCall"}'
+                ),
+            ),
+        ],
+    ),
+    CompletedItemCase(
+        # Arguments the vendor did not send as an object are kept whole under
+        # one name rather than dropped for not being a mapping.
+        name="mcpToolCall-with-opaque-arguments",
+        arm="(type=mcpToolCall, id, server, tool, arguments, status)",
+        payload={
+            "type": "mcpToolCall",
+            "id": "m2",
+            "server": "notes",
+            "tool": "review",
+            "arguments": "raw",
+            "status": "failed",
+        },
+        blocks=[
+            TurnToolCallBlock(
+                id="m2", name="mcp__notes__review", arguments={"value": "raw"}
+            ),
+            TurnToolResultBlock(
+                tool_call_id="m2",
+                content=(
+                    '{"arguments": "raw", "id": "m2", "server": "notes", '
+                    '"status": "failed", "tool": "review", '
+                    '"type": "mcpToolCall"}'
+                ),
+                is_error=True,
+            ),
+        ],
+    ),
+    CompletedItemCase(
         name="an-item-type-with-no-arm",
         arm="_",
-        payload={"type": "mcpTool", "id": "m1", "status": "completed"},
+        payload={"type": "unheardOf", "id": "m1", "status": "completed"},
     ),
     CompletedItemCase(
         name="an-item-missing-the-field-its-arm-reads",
@@ -1488,12 +1539,14 @@ def test_every_message_role_arm_is_named_by_a_case() -> None:
     above the first arm and every item becomes an assistant message.
     """
     assert arm_labels(message_role) == [
-        "(type=commandExecution) | (type=fileChange) | (type=mcpTool)",
+        "(type=commandExecution) | (type=fileChange) | (type=mcpToolCall)",
         "_",
     ]
 
 
-@pytest.mark.parametrize("item_type", ["commandExecution", "fileChange", "mcpTool"])
+@pytest.mark.parametrize(
+    "item_type", ["commandExecution", "fileChange", "mcpToolCall"]
+)
 def test_an_environment_reply_item_is_a_tool_message(item_type: str) -> None:
     assert message_role({"type": item_type}) == "tool"
 
