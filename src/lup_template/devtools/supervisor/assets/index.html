@@ -215,6 +215,7 @@
         <div class="pills">
           <span class="pill strong" id="phase-pill">—</span>
           <span class="pill" id="status-pill">—</span>
+          <span class="pill" id="progress-pill">—</span>
           <span class="pill" id="connection-pill">connecting</span>
         </div>
         <p class="banner" id="banner" hidden></p>
@@ -488,6 +489,10 @@
             return `<div class="entry note">${head}<div>joined <code>${escapeHtml(event.parent.slice(0, 12))}</code>${event.conflicted ? " (conflicted)" : ""}${event.broke.length ? ` — broke: ${escapeHtml(event.broke.join(", "))}` : ""}</div></div>`;
           case "join_audit":
             return `<div class="entry note">${head}<div>audited ${event.parents.length} parent(s), ${event.outstanding} outstanding</div></div>`;
+          case "review_residual":
+            return `<div class="entry note">${head}<div>residual beside round ${event.round}'s acceptance: ${escapeHtml(event.residual.join("; "))}</div></div>`;
+          case "recheck_repeated":
+            return `<div class="entry note">${head}<div><strong>${escapeHtml(event.concern_id)}</strong> reproduced a settled finding (${escapeHtml(event.criteria.join(", "))}) at ${escapeHtml(event.occasion)}</div></div>`;
           case "run_failed":
             return `<div class="entry note">${head}<div class="error">${escapeHtml(event.reason)}</div></div>`;
           default:
@@ -592,6 +597,7 @@
         if (!state) return;
         element("run-id").textContent = state.run_id;
         element("phase-pill").textContent = state.phase;
+        element("progress-pill").textContent = state.progress_line;
         const statusPill = element("status-pill");
         statusPill.textContent = state.status.replaceAll("_", " ");
         statusPill.className = `pill ${state.status === "failed" ? "danger" : state.status === "complete" ? "ok" : ""}`;

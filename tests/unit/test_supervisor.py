@@ -164,6 +164,7 @@ async def test_a_run_reads_back_from_its_mailbox(tmp_path: Path) -> None:
     assert state.pending[0].answered is None
     assert state.concerns[0].status is ConcernStatus.DISCOVERED
     assert "--answer q1=<value>" in state.rerun_recipe
+    assert state.progress_line == "discovered 1 of 1"
 
 
 async def test_browser_answers_become_offers_a_promoter_can_take(
@@ -553,6 +554,41 @@ async def test_a_reconnect_replays_only_what_it_missed(tmp_path: Path) -> None:
 
     assert frames[0].startswith("retry:")
     assert frames[1].startswith("id: 1\n")
+
+
+async def test_a_fresh_reader_gets_a_bounded_tail_not_the_whole_run(
+    tmp_path: Path,
+) -> None:
+    """Replaying a long run whole froze the page; state comes from the
+    projection, so a fresh page needs recent context, not the record."""
+    journal = Journal(tmp_path / "run-1")
+    for _ in range(6):
+        journal.record(PhaseChangedEvent(phase=ResolvePhase.REVIEW))
+
+    body = stream(journal, interval=0.0, heartbeat=0.0, catchup=2)
+    opening = await anext(body)
+    frames = [await anext(body) for _ in range(2)]
+    await body.aclose()
+
+    assert opening.startswith("retry:")
+    assert [frame.split("\n")[0] for frame in frames] == ["id: 4", "id: 5"]
+
+
+async def test_a_resuming_reader_is_never_bounded(tmp_path: Path) -> None:
+    """A named sequence is a promise: everything after it, exactly."""
+    journal = Journal(tmp_path / "run-1")
+    for _ in range(6):
+        journal.record(PhaseChangedEvent(phase=ResolvePhase.REVIEW))
+
+    body = stream(journal, after_seq=0, interval=0.0, heartbeat=0.0, catchup=2)
+    opening = await anext(body)
+    frames = [await anext(body) for _ in range(5)]
+    await body.aclose()
+
+    assert opening.startswith("retry:")
+    assert [frame.split("\n")[0] for frame in frames] == [
+        f"id: {seq}" for seq in range(1, 6)
+    ]
 
 
 async def test_the_stream_keeps_a_quiet_connection_alive(tmp_path: Path) -> None:

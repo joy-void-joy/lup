@@ -21,6 +21,16 @@ from lup.resolver.journal import Journal, JournalEntry
 HEARTBEAT_SECONDS = 15.0
 RETRY_MILLISECONDS = 3000
 WATCH_INTERVAL_SECONDS = 0.5
+FRESH_CATCHUP_ENTRIES = 200
+"""How much recent record a reader with no resume point is handed.
+
+A long run's journal passes tens of thousands of entries with individual
+lines running to megabytes; replaying it whole into a page that renders per
+event froze the browser the stream exists to serve. A fresh page reads the
+projection for current state and this much recent record for context; a
+reconnecting reader still resumes exactly from what it last saw, and the
+per-entry endpoint serves any older sequence whole.
+"""
 
 
 def frame(entry: JournalEntry) -> str:
@@ -38,12 +48,14 @@ async def stream(
     after_seq: int = -1,
     interval: float = WATCH_INTERVAL_SECONDS,
     heartbeat: float = HEARTBEAT_SECONDS,
+    catchup: int = FRESH_CATCHUP_ENTRIES,
 ) -> AsyncGenerator[str, None]:
     """Replay what this reader missed, then follow the journal as it grows.
 
-    The catch-up pass reads the whole file once and the follow reads only
-    what is new, so a page open for a long run costs the size of what
-    arrives rather than the size of what has accumulated.
+    A reader that names a sequence gets exactly what it missed. One that
+    names nothing is a fresh page: it gets the last ``catchup`` entries
+    rather than the run from sequence zero, because its current state comes
+    from the projection and the whole record is what froze it.
 
     The tick drives both the events and the keep-alive, so no await is ever
     cancelled to deliver a heartbeat — an async generator interrupted that
@@ -52,9 +64,13 @@ async def stream(
     """
     yield f"retry: {RETRY_MILLISECONDS}\n\n"
     caught_up = journal.tail(0)
-    for entry in caught_up.entries:
-        if entry.seq > after_seq:
-            yield frame(entry)
+    missed = (
+        caught_up.entries[-catchup:]
+        if after_seq < 0
+        else [entry for entry in caught_up.entries if entry.seq > after_seq]
+    )
+    for entry in missed:
+        yield frame(entry)
     offset = caught_up.offset
     silent = 0.0
     while True:
