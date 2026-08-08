@@ -1595,9 +1595,7 @@ def test_every_message_role_arm_is_named_by_a_case() -> None:
     ]
 
 
-@pytest.mark.parametrize(
-    "item_type", ["commandExecution", "fileChange", "mcpToolCall"]
-)
+@pytest.mark.parametrize("item_type", ["commandExecution", "fileChange", "mcpToolCall"])
 def test_an_environment_reply_item_is_a_tool_message(item_type: str) -> None:
     assert message_role({"type": item_type}) == "tool"
 
