@@ -84,6 +84,7 @@ def docstring_lines(source: str) -> set[int]:
     return lines
 
 
+# lup: ignore[library-default] — Python's own token taxonomy for string text
 STRING_TOKEN_TYPES = (
     tokenize.STRING,
     tokenize.FSTRING_START,
