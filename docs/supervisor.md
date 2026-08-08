@@ -20,10 +20,11 @@ uv run lup-devtools harness resolve supervise
 uv run lup-devtools harness resolve supervise --run-id resolve-a45d2cd2c321
 ```
 
-Without a run id the page opens on the run list over `/api/runs`, which
-reports an unreadable run as its own row rather than hiding it. Selecting a
-run streams its transitions, presents its open questions as a form grouped by
-concern, and takes the accept/reject decision on its review branch.
+Without a run id the page opens on the runs rail alone, which reports an
+unreadable run as its own row rather than hiding it. Selecting a run streams
+its record, puts its open questions first — grouped by concern, groups still
+waiting sorted ahead of settled ones, settled ones folded to one-line records
+— and takes the accept/reject decision on its review branch.
 
 `harness resolve --supervise` is sugar for a long `--wait` plus a spawned
 `harness resolve supervise`, terminated when the run exits unless
@@ -88,10 +89,21 @@ make a concurrently starting run's `LOCK_EX | LOCK_NB` fail, so a viewer must
 never touch it. Liveness only changes how a run is displayed; every run is
 answerable regardless.
 
-Transitions reach the page as a watcher task that diffs the projection on a
-tick and emits one event per observed difference. There is no hub and no
-cross-thread hand-off, because there is no publisher: the run writes files and
-the page reads them.
+Transitions reach the page from the run's own journal: the record is the
+stream. `/api/runs/{id}/events` follows `journal.jsonl` over SSE — a
+reconnecting reader resumes exactly from the last sequence it saw, and a
+fresh one is handed a bounded recent tail rather than the run from zero,
+because its current state comes from the projection and replaying a long
+record whole is what froze the reader the stream exists to serve. Record
+older than that tail stays reachable through the paged journal route, one
+bounded page at a time. There is no hub and no cross-thread hand-off,
+because there is no publisher: the run writes files and the page reads them.
+
+The trace draws every event either union can record — a roster test reads
+the switch arms back out of the page, so a new event fails there rather than
+in a record someone is trying to read — follows the newest entry until the
+reader scrolls away, and narrows by concern, actor, text, or kind. An event
+the page has never heard of is drawn raw rather than dropped.
 
 ## Security
 
