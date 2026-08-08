@@ -45,21 +45,6 @@ from lup.codescan.common import LineCursor, PythonContext
 from lup.policy.kernel.edit import IGNORE_RE
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
-# lup: solved: make the wake condition optional — `# lup: defer: <text>` should
-# parse as parked work alongside `defer[<condition>]: <text>`. Nothing
-# evaluates a condition mechanically: it is parsed, validated, and printed by
-# `dev check`, and nothing more, so requiring one buys display formatting at
-# the cost of inviting invention. All eight defers this repository actually
-# carried named a self-referential gate ("when this decoder next gains an
-# operation shape", "when this display is next reworked") that encodes nothing
-# a triage pass can check; one named something other than its own file, so "the
-# file is untouched" silently gave the wrong answer. Relax DEFER_HEAD_RE, drop
-# the `("defer", None) | ("defer", "")` arm from `coherent_kind`, keep
-# `condition` optional on the model, and cover the bare spelling in the marker
-# tests. Then say in the guidance, `docs/contributing`, and the resolve and
-# implementer skills that a bare `defer:` is the default and a bracket is for a
-# real, externally-checkable gate ("until the v2 API ships") — never for
-# restating that this code might change again.
 
 # `# lup: defer: <text>` parks work; a `defer[<gate>]: <text>` head parks it
 # behind a gate somebody other than this note can check ("until the v2 API

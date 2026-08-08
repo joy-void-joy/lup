@@ -1,4 +1,3 @@
-# lup: solved: the pinned cases are the failure paths; item-delta and approval-parameter shapes are decoded without a test naming them.
 """Codex app-server SessionFactory with live optional turn capabilities."""
 
 import asyncio

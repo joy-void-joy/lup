@@ -1,6 +1,3 @@
-# lup: solved: `start` and `close` run only in the native smokes. A fake
-# executable speaking the initialize exchange would pin the process-attached
-# legs offline.
 """Typed JSON-RPC transport for the Codex app-server stdio boundary."""
 
 import asyncio
