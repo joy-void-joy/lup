@@ -57,6 +57,72 @@ where a regex would have encoded the same intent in punctuation that no
 reader, and no type checker, can check. A new matching strategy is a new
 class, not an edit to the router.
 
+## An ABC Is An Engine, Not A Surface
+
+A capability ABC declares a seam that several implementations fill. It is not
+the thing a caller holds. What a caller holds is a concrete plain class that
+*composes* the seam and is parametrized by which implementation fills it.
+
+The scope is capability seams, not every abstract base. A union whose subtypes
+answer for themselves — `TurnBlock`, where a consumer holds the variant and
+calls `text_payload` on it — is Closed By Construction above, and holding the
+variant directly is the whole point there. This section is about the seam a
+consumer would otherwise reach past a missing surface to reach.
+
+`ModelRouter` (`packages/lup/src/lup/runtime/routing.py`) is the shape, and it
+is the previous section seen from the consumer's side: `ModelMatcher` is the
+engine, `ExactModelMatcher` and `PrefixModelMatcher` fill it, and nobody
+outside the router calls `matches`. Callers hold the router and ask
+`resolve`. `SessionFactory` (`packages/lup/src/lup/runtime/factory.py`) is the
+same arrangement one level up — a plain class parametrized by a single
+`SessionOpener`, which adapters, wrappers, and tests each supply differently.
+The engine there is a callable rather than an ABC, which is the point: what
+makes something a surface is that it holds shared behaviour, not what kind of
+seam sits behind it.
+
+What goes wrong without the surface is that the shared behaviour has nowhere
+to live. When the seam is all there is, every consumer writes the part the
+seam does not cover — opening a session, running one turn on it, closing it
+whatever happened — and writes it slightly differently. There is no one place
+to fix a bug in it, because there is no one place at all. The concrete class
+is where that behaviour goes, and parametrizing it is what keeps the
+implementation swappable anyway.
+
+`ProfileResolver` (`packages/lup/src/lup/runtime/config.py`) is what that
+looks like caught in the act. The seam resolves a profile name to a
+`ConfigTransform`, but every consumer wants the configured session, so both
+`ClaudeProfileResolver` and `CodexProfileResolver` grew the same
+resolve-apply-construct method on the side — the same four lines twice, in
+two adapters that must never learn about each other. `ProfileSelector` is
+that behaviour given a home: one plain class parametrized by the resolver and
+by the factory builder its provider supplies.
+
+Two kinds of seam are exempt, for two different reasons that meet at the same
+question: is there shared behaviour with no home? A frozen value that only
+carries capabilities is a transparent carrier rather than a caller-facing
+surface, so reaching through one is conforming — `handle.session.start(...)`
+and `turn.turn.result()` go through `SessionHandle` and `TurnHandle`
+(`packages/lup/src/lup/runtime/models.py`), which hold seams and no behaviour
+of their own. `ConfigTransform` is the same answer for a pure function over
+config: nothing to home, so applications stack transforms directly.
+
+The second is a seam that is genuinely engine-only: implemented and injected,
+never held. `TurnToolBinder` and `SubmittedOutputStore`
+(`packages/lup/src/lup/runtime/contracts.py`) are filled by adapters and
+handed to `ComposedSession`, which is itself the surface. `Session` is the
+case worth reading twice, because it qualifies without being handle-only: a
+driver takes one as a parameter and runs a turn inside its own concern —
+signal handling in `send_interruptible`, a mailbox in `run_relay_session` —
+and those two share only start-then-result, which `SessionFactory.query`
+already homes. Both drivers hold a handle and narrow to `.session` on
+purpose: taking the whole handle would fold them under the carrier exemption
+instead, but a driver that only starts turns should not also demand `fork`.
+Injected, not held, either way. Say that in the ABC's own docstring, where
+the next reader is already looking. A marker or a
+rule cannot carry it: composing an ABC and holding one are spelled
+identically at the import site, so a check would flag every composing class or
+catch nothing.
+
 ---
 
 ## Compiling Is Stronger Than Emitting

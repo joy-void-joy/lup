@@ -19,6 +19,7 @@ from lup.harness.models import PromptDocument
 from lup_template.devtools.harness.content.docs import (
     architecture,
     contributing,
+    conventions,
     decisions,
     harness,
     index,
@@ -85,6 +86,7 @@ DOCUMENTS = [
     ),
     published("self_improvement", "self-improvement.md", self_improvement.DOCUMENT),
     published("contributing", "contributing.md", contributing.DOCUMENT),
+    published("conventions", "conventions.md", conventions.DOCUMENT),
     published("quality_pipeline", "quality-pipeline.md", quality_pipeline.DOCUMENT),
     published("decisions", "dev-tooling-decisions.md", decisions.DOCUMENT),
     published("orchestration", "orchestration.md", orchestration.DOCUMENT),

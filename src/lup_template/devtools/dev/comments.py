@@ -4,7 +4,7 @@ Backs two `lup-devtools dev` commands (wired in
 `lup_template.devtools.dev.app`):
 
 - `dev comments` lists unresolved `# lup:` / `// lup:` feedback notes, with
-  deferred (`defer[<wake condition>]:`) notes in their own section;
+  deferred (`defer:`) notes in their own section;
   `report`, `commit_prompts`, and `clear_markers` back its default listing
   and its `--commit` / `--clear` modes.
 - `dev todos` lists `TEMPLATE:` customization markers — the template's
@@ -83,9 +83,9 @@ def clear_markers(targets: list[str], *, wake: bool = False) -> None:
     its match survives drift. A standalone comment line is dropped whole; an
     inline trailing marker keeps its code and loses only the comment.
 
-    A `defer[...]` note is parked work, not open feedback: a target that
-    lands on one is skipped unless *wake* is set, so a concern sweeping its
-    own notes can never strip a deferral whose condition it does not meet.
+    A `defer` note is parked work, not open feedback: a target that lands on
+    one is skipped unless *wake* is set, so a concern sweeping its own notes
+    can never strip a deferral it was not asked to wake.
 
     Refuses to run unless HEAD is a disposable `resolve/*` branch, so a note
     can never be silently stripped from a real checkout — there, a note is
@@ -181,10 +181,10 @@ def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
         typer.echo(location_line(comment))
         typer.echo(f"    {comment.text}")
     if deferred:
-        typer.echo("\nDeferred — parked until each wake condition is met:")
+        typer.echo("\nDeferred — parked until explicitly woken:")
         for comment in deferred:
             typer.echo(location_line(comment))
-            typer.echo(f"    defer[{comment.condition}] {comment.text}")
+            typer.echo(f"    {comment.marker_text()}")
     if solved:
         typer.echo("\nClaimed resolved — awaiting review of each claim:")
         for comment in solved:

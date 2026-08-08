@@ -42,7 +42,7 @@ uv run lup-devtools harness codex
 | Anything only this application needs | `src/lup_template/` | [template.md](template.md) |
 | A skill, agent, guidance, permission policy, or a page under `docs/` | `src/lup_template/devtools/harness/content/` | [harness.md](harness.md) |
 | Repeated shell incantations | a new `lup-devtools` command | [template.md](template.md) |
-| A one-off script | `tmp/` | — |
+| A one-off computation | `lup-devtools py eval`, or a new command | below |
 
 The placement question between the first two rows is the one that matters, and
 it has a single test: *would another project built on lup want this?* If yes,
@@ -51,11 +51,29 @@ library never imports the application, so a utility placed wrongly in
 `src/lup_template/` is unreachable from `packages/lup/` and will have to move
 later.
 
+`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a
+reviewer, or a human — which is why it does not execute. One-off work takes
+the first of these that fits:
+
+1. `uv run lup-devtools py eval '<expression>'`, which auto-imports and needs
+   no file, for anything expressible as one expression.
+2. The sandbox, where the work allows it.
+3. A new `lup-devtools` command — reviewable, because `devtools/` lands in
+   the diff.
+4. As a last resort, an inline heredoc behind an escalation marker
+   ([permissions.md](permissions.md)).
+
+The argument is reviewability, not power: an agent may already edit
+`devtools/` and run it.
+
 Never create a tracking file. A `TODO.md`, backlog, or roadmap parks a
 decision where no workflow surfaces it again. Deferred work lives as a
-`# lup: defer[<wake condition>]: <text>` note at the site it concerns — where
-`dev comments` lists it and `dev check` stays red until it is resolved — or as
-a question to the user.
+`# lup: defer: <text>` note at the site it concerns — where `dev comments`
+lists it in its own parked section and `dev check` keeps it visible until
+somebody wakes it — or as a question to the user. That bare spelling is the
+default: nothing evaluates a wake condition mechanically, so a bracketed
+`defer[<gate>]: <text>` is for a real, externally-checkable gate ("until the
+v2 API ships"), never for restating that this code might change again.
 
 ## Git workflow
 
@@ -67,10 +85,28 @@ uv run lup-devtools dev worktree create feat-name
 ```
 
 The worktree is created as a sibling under `tree/`. Never nest one inside
-another checkout. Commit early, commit often, and keep commits atomic — if the
-message needs an "and", it is two commits. The format is
-`type(scope): description`, with `meta` for harness content and the trees it
-generates.
+another checkout. `git checkout -b` would make a branch and switch the
+current directory in place; `git worktree add` gives the branch a directory
+of its own, which is what keeps several live at once. `worktrees/` and
+`refs/` are gitignored, the latter holding symlinks to downstream projects.
+
+Commit early, commit often, and keep commits atomic — if the message needs an
+"and", it is two commits. The format is `type(scope): description`:
+
+| Type | Use |
+| --- | --- |
+| `feat` | New feature or capability |
+| `fix` | Bug fix |
+| `refactor` | Neither fixes a bug nor adds a feature |
+| `docs` | Documentation only |
+| `test` | Adding or updating tests |
+| `chore` | Maintenance — dependencies, build config |
+| `meta` | Harness content and the trees it generates: guidance, settings, skills, hooks |
+| `data` | Generated data and outputs |
+
+A `data` commit of generated outputs may go straight to `dev`; code never
+does. Session data under `notes/` is gitignored here, so such commits arise
+only in a repository that opted into the commit-loop pattern at init.
 
 Two branches: `dev` is the integration branch feature work merges into, and
 `main` is stable and receives only reviewed pull requests from `dev`. Never
@@ -79,15 +115,28 @@ commit code directly to `dev`.
 """
         ),
         models.SkillInvocation(plugin="lup", skill="rebase"),
-        models.TextPart(text=r""" cleans up history and opens the pull request; """),
+        models.TextPart(
+            text=r""" pushes, opens the pull request, and rebuilds history
+with `git reset --soft main` and a force-push; re-run it after each round of
+review fixes. """
+        ),
         models.SkillInvocation(plugin="lup", skill="close"),
-        models.TextPart(text=r""" merges an approved one and cleans up. """),
+        models.TextPart(text=r""" merges the approved one and cleans up. """),
         models.SkillInvocation(plugin="lup", skill="merge"),
         models.TextPart(
             text=r""" guides conflict
 resolution — and during a merge the bias is toward inclusion: audit the result
 against both parents and confirm every removed function, parameter, or command
 was removed deliberately rather than lost to a conflict side.
+
+Generated artifacts are regenerated, never hand-merged. A digest manifest
+(`.lup-ownership.json`) conflicts on every parallel branch because each field
+is derived, so `.gitattributes` gives it a driver that keeps one side, and
+`lup-devtools dev merge-driver` registers that driver in a clone that has not
+run `worktree create`. Reconciling such a file hunk by hunk produces a proof
+matching neither tree: take either side, run
+`lup-devtools harness generate all`, and let `harness check all` confirm it
+settled.
 
 ## What has to be green
 
@@ -118,6 +167,24 @@ Two conventions catch most first-time review comments:
 [rules.md](rules.md) indexes every executable rule with its matching shape and
 the module that enforces it. A denial names its rule id, so you rarely need to
 read it first.
+
+### The `# lup: ignore` escape hatch
+
+When `Any` or another anti-pattern is genuinely needed — an untyped library
+boundary, MCP — an inline ignore requests user approval rather than silencing
+the check on its own authority.
+
+Prefer the typed, pyright-style `# lup: ignore[rule-id]`, comma-separating a
+list (`# lup: ignore[dict-get, tuple-shape]`), so a site silences exactly the
+rule it needs and still trips the others. The bare `# lup: ignore` stays
+valid, but the auditor flags it as untyped to nudge migration. The marker must
+sit on the line that trips the rule: one line above is reported as spurious
+while the violation stays uncovered.
+
+In a file's first 10 lines the marker goes file-wide — a standalone
+`# lup: ignore` disables anti-pattern checks for the whole file, and
+`# lup: ignore[rule-id]` disables only that rule, the way `# pyright: ignore`
+works for files.
 
 ## Tests
 

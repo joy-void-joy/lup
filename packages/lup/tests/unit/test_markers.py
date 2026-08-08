@@ -214,6 +214,14 @@ def test_defer_note_parses_kind_condition_and_text() -> None:
     assert note.text == "rework the cache layer"
 
 
+def test_bare_defer_parks_without_a_condition() -> None:
+    source = "# lup: defer: rework the cache layer\n"
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "defer"
+    assert note.condition is None
+    assert note.text == "rework the cache layer"
+
+
 def test_ordinary_note_has_note_kind_and_no_condition() -> None:
     source = "# lup: plain feedback\n"
     (note,) = find_feedback(source, ScanMode.PYTHON)
@@ -221,12 +229,34 @@ def test_ordinary_note_has_note_kind_and_no_condition() -> None:
     assert note.condition is None
 
 
-def test_defer_head_requires_brackets() -> None:
-    # Prose that merely starts with "defer" is ordinary feedback; the bracket
-    # syntax (mirroring `# lup: ignore[rule-id]`) is the discriminator.
+def test_defer_head_requires_its_colon() -> None:
+    # Prose that merely starts with "defer" is ordinary feedback; the head's
+    # colon — after a bracketed gate (whose syntax mirrors
+    # `# lup: ignore[rule-id]`) or on its own — is the discriminator.
     source = "# lup: defer this until later\n# lup: deferred work is tracked inline\n"
     notes = find_feedback(source, ScanMode.MARKDOWN)
     assert [note.kind for note in notes] == ["note", "note"]
+
+
+def test_bare_defer_parks_in_a_slash_comment() -> None:
+    source = "const x = 1;  // lup: defer: split this module\n"
+    (note,) = find_feedback(source, ScanMode.JS)
+    assert (note.kind, note.condition) == ("defer", None)
+    assert note.text == "split this module"
+
+
+def test_bare_defer_parks_inside_a_docstring() -> None:
+    source = '"""Module summary.\n\n#lup: defer: fold both scanners\n"""\n'
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert (note.kind, note.condition) == ("defer", None)
+    assert note.text == "fold both scanners"
+
+
+def test_bare_defer_continuation_lines_merge_into_the_message() -> None:
+    source = "# lup: defer: fold both scanners\n# into one shared pass\nx = 1\n"
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert (note.kind, note.condition) == ("defer", None)
+    assert note.text == "fold both scanners into one shared pass"
 
 
 def test_defer_condition_may_contain_bracketed_rule_ids() -> None:
@@ -251,6 +281,8 @@ def test_defer_head_ends_at_the_first_bracket_colon_delimiter() -> None:
 
 
 def test_defer_with_empty_condition_stays_an_ordinary_note() -> None:
+    # A bracket opened is a bracket that has to say something; parking behind
+    # no gate at all is spelled `defer:` and parks like any other deferral.
     source = "# lup: defer[]: no wake condition given\n# lup: defer[ ]: blank\n"
     notes = find_feedback(source, ScanMode.MARKDOWN)
     assert [note.kind for note in notes] == ["note", "note"]
@@ -261,6 +293,16 @@ def test_defer_head_without_a_colon_stays_an_ordinary_note() -> None:
     # never closes with `]:` degrades to an ordinary red note rather than
     # a silently mangled condition.
     source = "# lup: defer[until v2] rework the cache\n"
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "note"
+    assert note.condition is None
+
+
+def test_defer_head_with_an_unclosed_bracket_stays_an_ordinary_note() -> None:
+    # An optional bracket must not let a half-written gate fall back to the
+    # bare spelling: the colon the bare head needs sits inside the bracket
+    # that was opened, so the head is malformed and stays visible.
+    source = "# lup: defer[until v2 ships: rework the cache\n"
     (note,) = find_feedback(source, ScanMode.PYTHON)
     assert note.kind == "note"
     assert note.condition is None
@@ -301,9 +343,14 @@ def test_gitignore_style_hash_comment_carries_a_defer_note() -> None:
 
 
 def test_marker_text_reconstitutes_the_defer_head() -> None:
-    source = "# lup: defer[until launch]: tighten the budget\n# lup: plain note\n"
-    deferred, plain = find_feedback(source, ScanMode.MARKDOWN)
-    assert deferred.marker_text() == "defer[until launch]: tighten the budget"
+    source = (
+        "# lup: defer[until launch]: tighten the budget\n"
+        "# lup: defer: tighten the budget\n"
+        "# lup: plain note\n"
+    )
+    gated, bare, plain = find_feedback(source, ScanMode.MARKDOWN)
+    assert gated.marker_text() == "defer[until launch]: tighten the budget"
+    assert bare.marker_text() == "defer: tighten the budget"
     assert plain.marker_text() == "plain note"
 
 
@@ -315,10 +362,16 @@ def test_template_todos_are_never_classified_as_deferred() -> None:
 
 
 def test_defer_classification_survives_model_roundtrip() -> None:
-    source = "# lup: defer[until reviewed]: keep this parked\n"
-    (note,) = find_feedback(source, ScanMode.PYTHON)
-    restored = MarkerComment.model_validate_json(note.model_dump_json())
-    assert restored == note
+    source = (
+        "# lup: defer[until reviewed]: keep this parked\n"
+        "# lup: defer: keep this parked\n"
+    )
+    parked = find_feedback(source, ScanMode.MARKDOWN)
+    assert [note.condition for note in parked] == ["until reviewed", None]
+    for note in parked:
+        restored = MarkerComment.model_validate_json(note.model_dump_json())
+        assert restored == note
+        assert restored.marker_text() == note.marker_text()
 
 
 def test_marker_comment_rejects_incoherent_kind_condition_pairs() -> None:
@@ -336,9 +389,8 @@ def test_marker_comment_rejects_incoherent_kind_condition_pairs() -> None:
         )
 
     with pytest.raises(ValidationError):
-        build("defer", None)
-    with pytest.raises(ValidationError):
-        build("defer", "")
-    with pytest.raises(ValidationError):
         build("note", "until then")
+    with pytest.raises(ValidationError):
+        build("solved", "until then")
     assert build("defer", "until then").condition == "until then"
+    assert build("defer", None).condition is None

@@ -699,15 +699,21 @@ def merging_launcher(merge_head: str) -> ScriptedLauncher:
     )
 
 
+def joined_lease(tmp_path: Path) -> WritableRootLease:
+    """The integration lease an orchestrator driven directly operates on."""
+    return WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+
+
 def test_preparing_the_same_join_twice_leaves_the_open_merge_alone(
     tmp_path: Path,
 ) -> None:
     launcher = merging_launcher("parent-sha")
     orchestrator = WorktreeOrchestrator(launcher, tmp_path)
-    lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+    lease = joined_lease(tmp_path)
 
-    orchestrator.prepare_join(lease, ["head-sha", "parent-sha"])
-
+    # The open merge is the one a turn was already resolving, so preparing it
+    # again reports the conflict that turn was invoked over.
+    assert orchestrator.prepare_join(lease, ["head-sha", "parent-sha"])
     assert ["git", "merge", "--no-commit", "--no-ff", "parent-sha"] not in (
         launcher.arguments
     )
@@ -716,7 +722,7 @@ def test_preparing_the_same_join_twice_leaves_the_open_merge_alone(
 def test_preparing_a_different_join_still_opens_the_merge(tmp_path: Path) -> None:
     launcher = merging_launcher("")
     orchestrator = WorktreeOrchestrator(launcher, tmp_path)
-    lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+    lease = joined_lease(tmp_path)
 
     orchestrator.prepare_join(lease, ["head-sha", "parent-sha"])
 
@@ -730,7 +736,7 @@ def test_preparing_a_different_join_still_opens_the_merge(tmp_path: Path) -> Non
 
 
 def test_already_joined_reports_containment_from_merge_base(tmp_path: Path) -> None:
-    lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+    lease = joined_lease(tmp_path)
 
     contained = ancestry_launcher(is_ancestor=True)
     assert WorktreeOrchestrator(contained, tmp_path).already_joined(lease, "sha")
@@ -746,7 +752,7 @@ def test_join_accepts_a_resolved_path_the_merger_left_unstaged(
     tmp_path: Path,
 ) -> None:
     orchestrator = WorktreeOrchestrator(join_launcher(marker_check_code=0), tmp_path)
-    lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+    lease = joined_lease(tmp_path)
 
     assert orchestrator.commit_join(lease, "resolve: integrate") == "joined-sha"
 
@@ -755,9 +761,9 @@ def test_join_still_refuses_a_path_whose_content_carries_markers(
     tmp_path: Path,
 ) -> None:
     orchestrator = WorktreeOrchestrator(join_launcher(marker_check_code=2), tmp_path)
-    lease = WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
+    lease = joined_lease(tmp_path)
 
-    with pytest.raises(RuntimeError, match="invalid changes"):
+    with pytest.raises(RuntimeError, match="invalid changes: leftover marker"):
         orchestrator.commit_join(lease, "resolve: integrate")
 
 
@@ -2992,3 +2998,227 @@ def test_a_worktree_already_gone_is_freed_rather_than_reported_as_dirty(
     retained = orchestrator.remove(dirty)
     assert not retained.freed
     assert "untracked" in retained.detail
+
+
+def test_a_restore_git_refused_prepares_no_root(tmp_path: Path) -> None:
+    """A root git never created has nothing to prepare and no lease to hand out."""
+    lease = joined_lease(tmp_path)
+    preparer = RecordingPreparer()
+    launcher = ScriptedLauncher(
+        {"worktree add": out(code=128, stderr="fatal: 'resolve/i' is already used")}
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(launcher, tmp_path, preparer).restore(lease)
+
+    assert "failed to restore worktree for integration" in str(raised.value)
+    assert "is already used" in str(raised.value)
+    assert preparer.prepared == []
+
+
+def test_a_restored_root_is_the_one_the_preparer_receives(tmp_path: Path) -> None:
+    lease = joined_lease(tmp_path)
+    preparer = RecordingPreparer()
+    launcher = ScriptedLauncher()
+
+    WorktreeOrchestrator(launcher, tmp_path, preparer).restore(lease)
+
+    assert launcher.arguments == [
+        ["git", "worktree", "add", str(lease.root), lease.branch]
+    ]
+    assert preparer.prepared == [lease.root]
+
+
+def test_a_discard_rewinds_before_it_sweeps(tmp_path: Path) -> None:
+    launcher = ScriptedLauncher()
+    lease = joined_lease(tmp_path)
+
+    WorktreeOrchestrator(launcher, tmp_path).reset(lease, "base-sha")
+
+    assert launcher.arguments == [
+        ["git", "reset", "--hard", "base-sha"],
+        ["git", "clean", "-fd"],
+    ]
+
+
+def test_a_rewind_that_failed_is_not_followed_by_a_sweep(tmp_path: Path) -> None:
+    """Sweeping a tree still holding the attempt discards neither half of it."""
+    launcher = ScriptedLauncher(
+        {"reset --hard": out(code=128, stderr="fatal: ambiguous argument 'base-sha'")}
+    )
+    lease = joined_lease(tmp_path)
+
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(launcher, tmp_path).reset(lease, "base-sha")
+
+    assert "failed to reset worktree for integration" in str(raised.value)
+    assert "`git reset --hard base-sha` exited 128" in str(raised.value)
+    assert "ambiguous argument" in str(raised.value)
+    assert ["git", "clean", "-fd"] not in launcher.arguments
+
+
+def test_a_sweep_that_failed_names_itself_and_not_the_rewind(tmp_path: Path) -> None:
+    launcher = ScriptedLauncher(
+        {"clean -fd": out(code=1, stderr="warning: failed to remove build/")}
+    )
+    lease = joined_lease(tmp_path)
+
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(launcher, tmp_path).reset(lease, "base-sha")
+
+    assert "`git clean -fd` exited 1" in str(raised.value)
+    assert "failed to remove build/" in str(raised.value)
+
+
+def preparing_launcher(code: int = 0, stderr: str = "") -> ScriptedLauncher:
+    """No merge left open, and the `git merge` that follows exiting as chosen."""
+    return ScriptedLauncher(
+        {
+            "rev-parse -q": out(code=1),
+            "merge --no-commit": out(code=code, stderr=stderr),
+        }
+    )
+
+
+def test_preparing_a_join_reports_a_conflict_only_when_git_left_one(
+    tmp_path: Path,
+) -> None:
+    """The answer is what decides whether a merger turn is spent at all."""
+    lease = joined_lease(tmp_path)
+
+    assert not WorktreeOrchestrator(preparing_launcher(), tmp_path).prepare_join(
+        lease, ["head-sha", "parent-sha"]
+    )
+    assert WorktreeOrchestrator(preparing_launcher(code=1), tmp_path).prepare_join(
+        lease, ["head-sha", "parent-sha"]
+    )
+
+
+def test_a_merge_git_could_not_begin_refuses_in_gits_own_words(tmp_path: Path) -> None:
+    launcher = preparing_launcher(code=128, stderr="fatal: not something we can merge")
+    lease = joined_lease(tmp_path)
+
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(launcher, tmp_path).prepare_join(lease, ["head", "parent"])
+
+    assert "failed to prepare semantic join for integration" in str(raised.value)
+    assert "`git merge` exited 128" in str(raised.value)
+    assert "not something we can merge" in str(raised.value)
+
+
+def test_one_join_step_joins_exactly_two_commits(tmp_path: Path) -> None:
+    orchestrator = WorktreeOrchestrator(ScriptedLauncher(), tmp_path)
+    lease = joined_lease(tmp_path)
+
+    with pytest.raises(ValueError, match="exactly two commits"):
+        orchestrator.prepare_join(lease, ["only-one"])
+
+
+def test_a_settled_join_commits_nothing_and_reports_the_head_it_found(
+    tmp_path: Path,
+) -> None:
+    """A clean tree with no open MERGE_HEAD is a join an earlier turn committed."""
+    launcher = ScriptedLauncher(
+        {
+            "status --porcelain": out(),
+            "rev-parse -q": out(code=1),
+            "rev-parse HEAD": out("settled-sha\n"),
+        }
+    )
+    lease = joined_lease(tmp_path)
+
+    joined = WorktreeOrchestrator(launcher, tmp_path).commit_join(lease, "resolve: j")
+
+    assert joined == "settled-sha"
+    assert ["git", "commit", "-m", "resolve: j"] not in launcher.arguments
+
+
+def test_a_join_whose_unmerged_paths_git_could_not_list_refuses(
+    tmp_path: Path,
+) -> None:
+    """The guard reports git's own complaint when git is what failed, not a marker."""
+    broken = "fatal: index file smaller than expected"
+    launcher = ScriptedLauncher({"diff --name-only": out(code=128, stderr=broken)})
+    lease = joined_lease(tmp_path)
+
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(launcher, tmp_path).commit_join(lease, "resolve: j")
+
+    assert "semantic join for integration still has invalid changes" in str(
+        raised.value
+    )
+    assert broken in str(raised.value)
+
+
+def test_a_join_whose_status_cannot_be_read_refuses_before_it_stages(
+    tmp_path: Path,
+) -> None:
+    launcher = ScriptedLauncher(
+        {"status --porcelain": out(code=128, stderr="fatal: index file corrupt")}
+    )
+    lease = joined_lease(tmp_path)
+
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(launcher, tmp_path).commit_join(lease, "resolve: j")
+
+    assert "failed to inspect semantic join for integration" in str(raised.value)
+    assert "index file corrupt" in str(raised.value)
+    assert ["git", "add", "-A"] not in launcher.arguments
+
+
+def test_a_join_that_could_not_be_staged_is_not_committed_anyway(
+    tmp_path: Path,
+) -> None:
+    """Committing over a failed `git add -A` records a tree without the resolution."""
+    launcher = ScriptedLauncher(
+        {
+            "status --porcelain": out("UU src/module.py\n"),
+            "add -A": out(code=128, stderr="fatal: unable to write new index file"),
+        }
+    )
+    lease = joined_lease(tmp_path)
+
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(launcher, tmp_path).commit_join(lease, "resolve: j")
+
+    assert "failed to stage semantic join for integration" in str(raised.value)
+    assert "unable to write new index file" in str(raised.value)
+    assert ["git", "commit", "-m", "resolve: j"] not in launcher.arguments
+
+
+def test_a_join_commit_git_refused_names_what_it_was_refused_for(
+    tmp_path: Path,
+) -> None:
+    unmerged = "error: Committing is not possible because you have unmerged files."
+    launcher = ScriptedLauncher(
+        {
+            "status --porcelain": out("UU src/module.py\n"),
+            "commit -m": out(code=1, stderr=unmerged),
+        }
+    )
+    lease = joined_lease(tmp_path)
+
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(launcher, tmp_path).commit_join(lease, "resolve: j")
+
+    assert "failed to commit semantic join for integration" in str(raised.value)
+    assert "you have unmerged files" in str(raised.value)
+
+
+def test_a_join_commit_without_one_identity_is_not_reported_as_one(
+    tmp_path: Path,
+) -> None:
+    """A commit that cannot be named cannot become anyone's dependency base."""
+    launcher = ScriptedLauncher(
+        {
+            "status --porcelain": out("UU src/module.py\n"),
+            "rev-parse HEAD": out("first-sha\nsecond-sha\n"),
+        }
+    )
+    lease = joined_lease(tmp_path)
+
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(launcher, tmp_path).commit_join(lease, "resolve: j")
+
+    assert "failed to identify worktree integration" in str(raised.value)
+    assert "named 2 commits: 'first-sha\\nsecond-sha'" in str(raised.value)

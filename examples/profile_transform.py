@@ -5,8 +5,8 @@ from pathlib import Path
 
 from lup.adapters.claude.config import (
     ClaudeProfileRegistry,
-    ClaudeProfileResolver,
     ClaudeProfileSelection,
+    claude_profile_selector,
 )
 from lup.adapters.claude.runtime import ClaudeSessionConfig
 
@@ -26,7 +26,7 @@ async def main() -> None:
         },
         active="work",
     )
-    factory = ClaudeProfileResolver(registry).session_factory(base)
+    factory = claude_profile_selector(registry).session_factory(base)
     result = await factory.query("Describe immutable configuration.", Summary)
     print(result.output.summary)
 

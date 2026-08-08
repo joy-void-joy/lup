@@ -48,8 +48,8 @@ def inline_notes_lines(found: list[FoundComment]) -> list[str]:
     the tree is expected to carry open ones for as long as the work they name
     is open. Failing on them would make every branch red for a condition its
     author chose deliberately, so this reports and the reader decides. Their
-    `deferred[<wake condition>]` lines render after the unresolved ones, so
-    what is still being asked reads first.
+    `deferred` lines render after the unresolved ones, carrying the gate a
+    bracketed deferral stated, so what is still being asked reads first.
     """
     unresolved = [comment for comment in found if comment.kind != "defer"]
     deferred = [comment for comment in found if comment.kind == "defer"]
@@ -62,7 +62,7 @@ def inline_notes_lines(found: list[FoundComment]) -> list[str]:
         for comment in unresolved
     )
     lines.extend(
-        f"  deferred[{comment.condition}] "
+        f"  {comment.deferral_label()} "
         f"{comment.file}:{comment.start_line}-{comment.end_line}"
         for comment in deferred
     )

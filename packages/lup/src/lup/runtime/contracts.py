@@ -24,7 +24,23 @@ if TYPE_CHECKING:
 
 
 class Session(ABC):
-    """Start one acknowledged turn in a conversation."""
+    """Start one acknowledged turn in a conversation.
+
+    An injected engine with no consumer-facing surface. It reaches consumers
+    two ways, neither of them holding: carried transparently by
+    ``SessionHandle``, and injected as a parameter into a driver that runs one
+    turn inside its own concern — ``send_interruptible`` around signal
+    handling, ``run_relay_session`` around a mailbox. Those two share only
+    start-then-result, which ``SessionFactory.query`` already homes for
+    callers that want it, so there is no further shared behaviour for a
+    composing surface to hold.
+
+    Both drivers do hold a ``SessionHandle`` and narrow to ``.session`` on
+    purpose. Taking the handle instead would fold them under the transparent
+    carrier above and retire this paragraph, but a driver that only starts
+    turns should not also demand ``fork``; the narrow parameter is the reason
+    this exemption exists rather than an oversight that created it.
+    """
 
     @abstractmethod
     async def start[T: BaseModel | None](
@@ -95,7 +111,11 @@ class ForkSession(ABC):
 
 
 class SubmittedOutputStore(ABC):
-    """Persist and retrieve validated per-turn submitted output."""
+    """Persist and retrieve validated per-turn submitted output.
+
+    An injected engine with no consumer-facing surface: a store is created per
+    turn and handed to ``ComposedTurn``, which reads it. No caller holds one.
+    """
 
     @abstractmethod
     def write(
@@ -110,7 +130,11 @@ class SubmittedOutputStore(ABC):
 
 
 class TurnToolBinder(ABC):
-    """Install, replace, or remove the portable submission tool."""
+    """Install, replace, or remove the portable submission tool.
+
+    An injected engine with no consumer-facing surface: adapters fill it and
+    ``ComposedSession`` is the surface that binds through it.
+    """
 
     @abstractmethod
     async def bind[T: BaseModel](self, binding: TurnToolBinding[T] | None) -> None:

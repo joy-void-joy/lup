@@ -473,6 +473,41 @@ def docker_rule() -> ShellCommandRule:
     )
 
 
+def lup_devtools_rule() -> ShellCommandRule:
+    """Admit this toolchain reached without `uv`, only where it has to be.
+
+    `uv run lup-devtools` is the entry point everywhere else and stays one:
+    parsing `pyproject.toml` is how it guarantees a synced environment. The
+    conflict workflow is the single place that guarantee cannot be paid for,
+    because its commands exist to repair the merge that left the manifest
+    unparseable — so those are documented as `.venv/bin/lup-devtools`, and a
+    documented invocation the classifier does not resolve is a denial rather
+    than a fix. The rows match on the executable's name, which is what a
+    console script named by path still presents. Every other subcommand
+    bounces back naming the spelling that is admitted, which is what an agent
+    reaching past `uv` for no reason should be told.
+    """
+    reach_through_uv = (
+        "reach this toolchain through `uv run lup-devtools`, which guarantees"
+        " the environment it runs in — only the conflict workflow, whose"
+        " commands must start while the manifest does not parse, is documented"
+        " without it"
+    )
+    return ShellCommandRule(
+        name="lup-devtools",
+        default_effect="deny",
+        subcommands=[
+            ShellSubcommandRule(
+                name="dev",
+                effect="deny",
+                operations=[ShellOperationRule(name="conflict", effect="allow")],
+                reason=reach_through_uv,
+            )
+        ],
+        reason=reach_through_uv,
+    )
+
+
 SHELL_RULES: list[ShellCommandRule] = [
     *[ShellCommandRule(name=name) for name in READ_ONLY_COMMANDS],
     *[
@@ -536,6 +571,7 @@ SHELL_RULES: list[ShellCommandRule] = [
         reason="a mutating find action requires approval",
     ),
     ShellCommandRule(name="cd", reason="directory navigation"),
+    lup_devtools_rule(),
     git_rule(),
     gh_rule(),
     docker_rule(),

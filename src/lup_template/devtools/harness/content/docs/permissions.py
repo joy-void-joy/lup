@@ -2,9 +2,9 @@
 
 Rendered to ``docs/permissions.md`` rather than the always-loaded guidance:
 the dispatcher denies at the moment of violation and its message already
-names the recovery, so the full lattice is reference material. The two
-markers an agent needs *before* it can open this file — ``# lup: escalate``
-and ``# lup: ignore`` — stay in the guidance itself.
+names the recovery, so the lattice, the edit mechanics, and the two markers
+that change a decision are all material a reader opens once a denial has told
+them which one applies. The guidance keeps the rule and points here.
 """
 
 import lup.harness.models as models
@@ -15,9 +15,9 @@ DOCUMENT = models.PromptDocument(
         models.TextPart(
             text=r"""# Permission Policy
 
-How the generated hooks decide allow, ask, defer, or deny. For the daily
-summary and the escalation syntax, see
-[.claude/CLAUDE.md](../.claude/CLAUDE.md) § Permission Hooks.
+How the generated hooks decide allow, ask, defer, or deny, and the two
+markers that change a decision. The guidance carries the rule; this page
+carries the mechanism a denial sends you to.
 
 ## Sources of truth
 
@@ -67,7 +67,17 @@ without being readable sources.
 
 Edit decisions cover protected paths, marker changes, size, and the canonical
 anti-pattern audit. An edit over the size gate alone is deferred — the hook
-emits no decision, so auto-accept applies while hard gates stay explicit. The
+emits no decision, so auto-accept applies while hard gates stay explicit.
+
+Size is counted in *real* changed lines per change block, and an edit of
+three or fewer auto-allows. Imports, comments, whitespace, blank lines,
+docstrings, string literals, type annotations, and TypedDict/BaseModel bodies
+are not real lines. Pure deletions and single-line `replace_all` renames
+auto-allow outright; a multi-line `replace_all` falls through to the size
+gate, and a full-file write never auto-allows. The anti-pattern audit runs
+before any auto-allow, so keeping an edit small cannot outrun it.
+
+The
 resolver's worker receives only its declared autonomous edit exceptions;
 temporary paths, human-owned files like `README.md`, marker changes, and
 anti-pattern violations retain their guardrails in every mode.
@@ -81,6 +91,24 @@ merge a session's environment over the launching process's, so silence would
 inherit whatever the operator had exported. A hook script is spawned by the
 runtime with the runtime's environment, so an agent exporting the variable
 inside a shell tool call never reaches the dispatcher that judges it.
+
+## Two markers change a decision
+
+The guidance spells both; this is what each one does.
+
+- The escalation marker, `lup: escalate: <why>` as the leading comment line
+  of a shell command, promotes a classified deny or ask into an approval
+  question carrying that reason. It is the recovery path when work is denied
+  as unjudged: reshape the command into the allowed vocabulary, or escalate
+  with a reason.
+- The typed suppression marker, `lup: ignore[<rule-id>]` as a comment on the
+  offending line, silences exactly the anti-pattern it names and no other, so
+  the site still trips every rule it left unnamed. [contributing.md](contributing.md)
+  carries the scoping — where the marker must sit, comma-separated ids, the
+  flagged bare form, and the file-wide placement.
+
+Each rule id is shown in the deny message that cites it, and indexed in
+[rules.md](rules.md).
 
 ## How one decision reaches two runtimes
 

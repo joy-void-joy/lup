@@ -151,6 +151,20 @@ SHELL_POLICY_CASES = [
     DecisionCase(
         input="uv run lup-devtools dev worktree create feature", effect="allow"
     ),
+    # The conflict workflow is documented without `uv run`, whose manifest
+    # parse is exactly what a conflicted manifest defeats, so the classifier
+    # resolves the launcher named by path. Nothing else about the toolchain is
+    # admitted that way — it bounces back naming the spelling that is.
+    DecisionCase(
+        input=".venv/bin/lup-devtools dev conflict status --json", effect="allow"
+    ),
+    DecisionCase(
+        input=".venv/bin/lup-devtools dev conflict audit pyproject.toml", effect="allow"
+    ),
+    DecisionCase(input=".venv/bin/lup-devtools dev conflict complete", effect="allow"),
+    DecisionCase(input="lup-devtools dev conflict list", effect="allow"),
+    DecisionCase(input=".venv/bin/lup-devtools dev check", effect="deny"),
+    DecisionCase(input=".venv/bin/lup-devtools harness generate all", effect="deny"),
     # Redirections: discards and fd duplication are stripped; file writes ask.
     DecisionCase(input="grep x f 2>&1", effect="allow"),
     DecisionCase(input="grep x f > /dev/null", effect="allow"),

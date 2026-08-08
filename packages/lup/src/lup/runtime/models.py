@@ -409,7 +409,13 @@ class TurnResult[T: BaseModel | None](BaseModel):
 
 
 class SessionHandle(BaseModel):
-    """Transparent composition of a session and optional fork capability."""
+    """Transparent composition of a session and optional fork capability.
+
+    Reaching a capability through this handle is not a consumer holding an
+    ABC: the handle carries capabilities and no behaviour of its own, so
+    there is nothing for a composing surface to home. ``SessionFactory`` is
+    the behavioural surface over these seams.
+    """
 
     model_config = FROZEN_ARBITRARY
 
@@ -418,7 +424,12 @@ class SessionHandle(BaseModel):
 
 
 class TurnHandle[T: BaseModel | None](BaseModel):
-    """Transparent composition of an accepted turn's capabilities."""
+    """Transparent composition of an accepted turn's capabilities.
+
+    A carrier on the same terms as :class:`SessionHandle`: it holds seams and
+    no behaviour, so ``turn.result()`` reaches an engine rather than calling a
+    surface that should have owned shared behaviour.
+    """
 
     model_config = FROZEN_ARBITRARY
 

@@ -8,8 +8,7 @@ from lup.adapters.codex.runtime import (
     CodexSessionConfig,
     create_codex_session_factory,
 )
-from lup.runtime.config import ConfigTransform, ProfileResolver
-from lup.runtime.factory import SessionFactory
+from lup.runtime.config import ConfigTransform, ProfileResolver, ProfileSelector
 from lup.types import JsonObject
 
 OPENAI_COMPAT_API_KEY_ENV = "LUP_OPENAI_COMPAT_API_KEY"
@@ -59,13 +58,6 @@ class CodexProfileResolver(ProfileResolver[CodexSessionConfig]):
         self.registry = registry
 
     def resolve(self, name: str | None) -> ConfigTransform[CodexSessionConfig]:
-        """Resolve the selection as a transform, before any construction.
-
-        The transform is the primitive rather than an intermediate step:
-        selections compose with other config transforms and can be inspected
-        or dry-run while no provider resource exists yet. Callers that only
-        want the configured session use :meth:`session_factory`.
-        """
         selected = name or self.registry.active
         if selected is None:
             return CodexProfileTransform(self.registry.default)
@@ -75,11 +67,12 @@ class CodexProfileResolver(ProfileResolver[CodexSessionConfig]):
             raise KeyError(f"unknown Codex profile {selected!r}") from error
         return CodexProfileTransform(profile)
 
-    def session_factory(
-        self, base: CodexSessionConfig, name: str | None = None
-    ) -> SessionFactory:
-        """Resolve the selection, apply it to the base config, and construct."""
-        return create_codex_session_factory(self.resolve(name).apply(base))
+
+def codex_profile_selector(
+    registry: CodexProfileRegistry,
+) -> ProfileSelector[CodexSessionConfig]:
+    """The surface a consumer holds over Codex profile selection."""
+    return ProfileSelector(CodexProfileResolver(registry), create_codex_session_factory)
 
 
 class CodexCompatibleEndpoint(BaseModel):

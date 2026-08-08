@@ -1,24 +1,25 @@
-# lup: ignore[native-spelling]
-# This portable guide discusses native hook vocabulary as its subject matter.
 """Canonical repository guidance."""
 
 import lup.harness.models as models
 
 import lup_template.devtools.harness.content.conventions as conventions
 
-from lup_template.devtools.harness.content.catalog import (
-    agent_roster_text,
-    skill_roster_parts,
-)
-from lup_template.devtools.subapps import subapp_summary
-
-# lup: state that a consumer never holds or calls an implemented ABC directly.
+# lup: solved: state that a consumer never holds or calls an implemented ABC directly.
 # The ABC is the swappable engine; the surface a caller touches is a concrete
 # plain class that composes it and can be parametrized. `ModelRouter.resolve` over the
 # `ModelMatcher` ABC in lup/runtime/routing.py is the shape, and `SessionFactory`
 # in lup/runtime/contracts.py is the violation being corrected under the
 # object-bound-entry-points concern. Belongs beside the compile-over-emit and
 # overridable-default principles, not as a standalone bullet.
+# lup: solved: state that a consumer never holds or calls an implemented ABC
+# directly. The ABC is the swappable engine; the surface a caller touches is a
+# concrete plain class that composes it and can be parametrized.
+# `ModelRouter.resolve` over the `ModelMatcher` ABC in lup/runtime/routing.py
+# is the shape, and `SessionFactory` in lup/runtime/contracts.py is the
+# violation being corrected under the object-bound-entry-points concern.
+# Belongs beside the compile-over-emit and overridable-default principles, not
+# as a standalone bullet.
+
 DOCUMENT = models.PromptDocument(
     source=__name__,
     parts=[
@@ -44,93 +45,39 @@ Two kinds of delegated agents look alike and must not be conflated:
 - A **native subagent** ("subagent" for short) is dispatched by the harness: its delegation tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics.
 - A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool.
 
-Guidance that says "subagent" unqualified means the native kind. `docs/orchestration.md` carries the full delegation catalog — subagent, nested, background, deferred tool schemas — and when to reach for each. `docs/patterns.md` carries the recurring *code* shapes: declaration-plus-renderer, closed-by-construction, and the typed-matcher router.
+Guidance that says "subagent" unqualified means the native kind. `docs/orchestration.md` carries the full delegation catalog — subagent, nested, background, deferred tool schemas — and when to reach for each. `docs/patterns.md` carries the recurring *code* shapes: declaration-plus-renderer, closed-by-construction, the typed-matcher router, and the engine-versus-surface split.
 
 ## Development Workflow
 
 ### Git Workflow
 
-This project uses **git worktrees** (not regular branches) to develop multiple features in parallel.
-
-**IMPORTANT:** Never commit _code_ directly to `dev`. Always work in a worktree for code changes.
-
-**Exception:** Data commits (`data(outputs):`) can go directly to `dev` — generated outputs don't need review. In this repo session data under `notes/` is gitignored (traces stay local), so such commits arise only for repos that opted into the commit-loop pattern via """
+Work in a **git worktree**, not a branch switched in place, and never commit _code_ directly to `dev`. Create one with `uv run lup-devtools dev worktree create feat-name` — it lands as a sibling under `tree/`, never nested inside another checkout — and then """
         ),
-        models.SkillInvocation(plugin="lup", skill="init"),
+        models.RelocateSession(path="the path it prints"),
         models.TextPart(
-            text=r""".
+            text=r""", because creating a worktree does not move the session, and edits left in the old checkout never reach the branch.
 
-### Two-Tier Branch Model
-
-- **`dev`** = integration branch. Feature PRs merge here. Day-to-day development target.
-- **`main`** = stable branch. Only receives PRs from `dev`. Branch-protected on GitHub.
-
-Worktrees typically branch from `dev`, but can also branch from other feature branches. Feature PRs target `dev` (or the branch they diverged from). Periodically, `dev` is merged into `main` via a reviewed PR.
-
-**Worktrees vs branches:**
-
-- `git checkout -b` — Creates a branch, stays in same directory. Switching changes all files in place.
-- `git worktree add` — Creates a new directory with its own working copy. Multiple branches simultaneously.
-
-**If already in a worktree:** Check with `git worktree list`. If you're in a feature worktree, just work directly — no need to create another.
-
-**Feature workflow:**
-
-1. `uv run lup-devtools dev worktree create feat-name`
-   This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/dev`) and syncs dependencies. Generate and launch the native plugin with `lup-devtools harness claude` or `harness codex`. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
-2. """
-        ),
-        models.RelocateSession(path="the path step 1 prints"),
-        models.TextPart(
-            text=r""" — creating a worktree does not move the session, and edits left in the old checkout never reach the branch.
-3. Commit regularly and atomically
-4. Push when complete (or periodically for backup)
-5. `"""
-        ),
-        models.SkillInvocation(plugin="lup", skill="rebase"),
-        models.TextPart(
-            text=r"""` — Push, open PR, clean up history with `git reset --soft main` and force-push
-6. Review — Fix issues, re-run `"""
-        ),
-        models.SkillInvocation(plugin="lup", skill="rebase"),
-        models.TextPart(
-            text=r"""` to rebuild history
-7. `"""
-        ),
-        models.SkillInvocation(plugin="lup", skill="close"),
-        models.TextPart(
-            text=r"""` — Merge approved PR and clean up
-
-**Note:** The `worktrees/` and `refs/` directories are gitignored. `refs/` contains symlinks to downstream projects.
+`docs/contributing.md` carries the two-tier branch model, the commit-type table, and the loop from a fresh worktree to a merged pull request.
 
 """
         ),
         *conventions.MERGE_CONFLICT_RESOLUTION,
         models.TextPart(
-            text=r"""**Generated artifacts are regenerated, never hand-merged.** A digest manifest (`.lup-ownership.json`) conflicts on every parallel branch because each field is derived, so `.gitattributes` gives it a driver that keeps one side; `lup-devtools dev merge-driver` registers it in a clone that has not run `worktree create`. Reconciling such a file hunk by hunk produces a proof that matches neither tree — take either side, then `lup-devtools harness generate all` and let `harness check all` confirm it settled.
+            text=r"""**Generated artifacts are regenerated, never hand-merged.** Take either side of the conflict, regenerate, and let the drift check confirm it settled; `docs/contributing.md` carries the manifest driver and the recovery.
 
 """
         ),
         *conventions.COMMIT_GUIDELINES,
         models.TextPart(
-            text=r"""| Type       | Use                                                                  |
-| ---------- | -------------------------------------------------------------------- |
-| `feat`     | New feature or capability                                            |
-| `fix`      | Bug fix                                                              |
-| `refactor` | Code change that neither fixes a bug nor adds a feature              |
-| `docs`     | Documentation only (README, standalone docs)                         |
-| `test`     | Adding or updating tests                                             |
-| `chore`    | Maintenance (dependencies, build config)                             |
-| `meta`     | Changes to harness content and the trees it generates (guidance, settings, skills, hooks) |
-| `data`     | Generated data and outputs                                           |
+            text=r"""`docs/contributing.md` carries the type vocabulary.
 
 ### Editing Style
 
-**Prefer small, atomic edits.** A PreToolUse hook counts "real" changed lines (ignoring imports, comments, whitespace, blank lines, docstrings, string literals, type annotations, and TypedDict/BaseModel bodies) and auto-allows edits with <=3 real changes per change block. Pure deletions and single-line `replace_all` renames are auto-allowed; multi-line `replace_all` falls through to the size gate. Anti-pattern detection runs before any auto-allow, and `Write` (full-file rewrites) never auto-allows. An edit that trips only the size gate is *deferred* rather than surfaced — the hook emits no decision, so auto-accept mode applies it while other modes still prompt; protected paths, anti-patterns, marker changes, and full-file writes stay explicit approvals in every mode.
+**Prefer small, atomic edits.** The edit hook auto-allows a change block of at most three "real" changed lines. `docs/permissions.md` carries what counts as real, and which gates stay explicit approvals in every mode.
 
 - Split large changes into multiple small edits (<=3 real lines per Edit call)
 - Separate concerns — imports in one edit, logic in another
-- Use `rename-symbol` for identifier renames instead of `Edit` with `replace_all`
+- Use `rename_symbol` for identifier renames instead of `Edit` with `replace_all`
 
 ---
 
@@ -138,9 +85,7 @@ Worktrees typically branch from `dev`, but can also branch from other feature br
 
 ### Primary Libraries
 
-- **claude-agent-sdk**: Primary framework for building agents (use `query()` for one-shot LLM calls with structured output)
-- **pydantic**: For data validation and settings
-- **pydantic-settings**: For configuration (not dotenv)
+Build on claude-agent-sdk and pydantic; `docs/conventions.md` names each library and what it is for.
 
 ### Model Selection
 
@@ -151,32 +96,23 @@ Default to the **strongest** tier for the main agent, every subagent, reviewer, 
 - **Never silently swallow exceptions** — no `except ...: pass`, no `contextlib.suppress`; log with `logger.exception()`, handle meaningfully, or re-raise. Catch-all `except Exception` is fine at boundaries (task loops, subagent delegation) that do so; bare `except:` and `except BaseException` are never fine
 - **Every function must specify input and output types**
 - **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** — Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types
-  - **JSON-shaped data**: use `JsonValue` / `JsonObject` from `lup.types` for data whose schema lives elsewhere (tool arguments, JSON Schemas, structured outputs, vendor payloads)
-  - **MCP tool inputs**: `BaseModel.model_validate(args)` immediately — don't pass around raw dicts
-  - **MCP tool outputs**: Define a `TypedDict` for the return dict
-  - **SDK hooks**: Return `SyncHookJSONOutput` from `claude_agent_sdk.types`. Use typed hook inputs (`PreToolUseHookInput`, etc.) and specific output types (`PreToolUseHookSpecificOutput`, etc.)
-  - **SDK types to prefer**: `HookMatcher`, `AgentDefinition`, `ClaudeAgentOptions`, `McpServerConfig`, `PermissionResultAllow`/`Deny`, `ContentBlock`, `Message`, `TextBlock`, `ToolUseBlock`, `ToolResultBlock`. Import from top-level `claude_agent_sdk` when available; `SyncHookJSONOutput`, `HookEvent`, and hook-specific types require `claude_agent_sdk.types`.
+  - `docs/conventions.md` maps each origin of dict-shaped data to its typed stand-in, and lists the SDK types to prefer
 - **Python 3.12+ generics**: `class A[T]`, not `Generic[T]`
 - Use `TypedDict` and Pydantic models for structured data
 - Never manually parse agent output — use structured outputs via Pydantic
 - **Never use `# type: ignore`** — Ask the user how to properly fix type errors
-- **`# lup: ignore` escape hatch** — When `Any` or another anti-pattern is genuinely needed (untyped library boundaries, MCP), add an inline ignore to request user approval. Prefer the typed, pyright-style `# lup: ignore[rule-id]` (comma-separate a list — `# lup: ignore[dict-get, tuple-shape]`) so a site silences exactly the rule it needs and still trips the others; the bare `# lup: ignore` stays valid but the auditor flags it as untyped to nudge migration. A standalone `# lup: ignore` in the first 10 lines disables anti-pattern checks for the whole file, while `# lup: ignore[rule-id]` there disables only that rule file-wide (like `# pyright: ignore` for files). Each rule's id is shown in its deny message; the generated `docs/rules.md` indexes every rule family with the `lup.codescan` module that defines it.
+- **`# lup: ignore` escape hatch** — when `Any` or another anti-pattern is genuinely needed at an untyped boundary, an inline ignore requests user approval instead of silencing the check; prefer the typed `# lup: ignore[rule-id]` over the bare form (`docs/contributing.md`), and `docs/rules.md` indexes every rule id a denial can cite
 - **Use Pydantic BaseModel instead of dataclasses**
 - **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
 - **Never dispatch on the type of our own models** — no `isinstance` over a union we declare, no `case ClassName()` arms, no `assert_never` net. The union's base declares the operation and each subtype answers or declines it, so a new variant is one class instead of an edit to every walk that would have to notice it, and a filter cannot go stale by omission. Narrowing untyped data at a boundary — a vendor payload, a `JsonValue` — is the different case where `isinstance` is right, because those alternatives are not ours to give a method to. The `own-model-dispatch` rule enforces exactly this line: it fires only on classes we define that inherit `BaseModel`
 - **Compiling is stronger than emitting** — build an artifact from a typed declaration and it cannot diverge; transport checked source and a checker can only warn once it already has. When tempted to add a check that two things still match, ask whether one can be derived from the other instead (`docs/patterns.md`)
 - **A constant should probably be an overridable default** — a canonical value (a native tool's real name, a vendor's field) is fine hardcoded; a non-canonical one (an allowlist, a ceiling, a retry count) is our judgement, so give it a default a caller can override rather than a constant they must fork to change (`docs/patterns.md`)
+- **A capability ABC is an engine, not a surface** — a consumer never holds or calls one directly; it holds a concrete plain class that composes the seam and is parametrized by which implementation fills it. `ModelRouter` over `ModelMatcher` is the shape, `SessionFactory` over a `SessionOpener` the surface. The test is behaviour: a frozen value that only carries capabilities is a transparent carrier, and a seam that is only ever injected says so in its own docstring (`docs/patterns.md`)
 - **Use `for`/comprehensions over `while`** — reach for structured iteration whenever the iteration space is expressible (a range, a sequence, an iterator, `enumerate`/`zip`); reserve `while` for genuinely unbounded, condition-driven loops
 
 ### Tool Input Schemas
 
-Define tool inputs as BaseModel classes with `Field(description=...)`:
-
-| Do This                                                               | Not This                       |
-| --------------------------------------------------------------------- | ------------------------------ |
-| `class SearchInput(BaseModel): query: str = Field(description="...")` | `{"query": str, "limit": int}` |
-| `SearchInput.model_json_schema()` for `@tool` schema                  | Hand-written dict schemas      |
-| `SearchInput.model_validate(args)` then `params.query`                | `args.get("query", "")`        |
+Define tool inputs as BaseModel classes with `Field(description=...)`, and take both the `@tool` schema and the validation from that model. `docs/conventions.md` puts each form beside the raw dict it replaces.
 
 ### Error Handling
 
@@ -188,15 +124,7 @@ Define tool inputs as BaseModel classes with `Field(description=...)`:
 
 ### Structured Data, Not Strings
 
-If you're reaching for `re`, `.replace()`, `.split()`, or string slicing to process structured data, something is wrong:
-
-- **Web pages**: `trafilatura` for text extraction, `beautifulsoup4` for DOM
-- **XML**: `xml.etree.ElementTree` or `lxml`
-- **JSON**: `json.loads()`, not regex
-- **SDK objects**: Filter `ContentBlock` lists by type and attribute
-- **Dates**: Parse to `datetime`, don't compare strings
-- **URLs**: `urllib.parse`, not splitting
-- **Paths**: `pathlib.Path`, not concatenation
+If you're reaching for `re`, `.replace()`, `.split()`, or string slicing to process structured data, something is wrong. `docs/conventions.md` names the parser to reach for, per format.
 
 `import re` is a code smell — look for the structured API first.
 
@@ -222,7 +150,7 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the 
 |---|---|
 | `# lup: <text>` — open feedback | **denied**; resolve it into a claim instead |
 | `# lup: solved: <text>` — a claim you addressed it | **denied**; only the verify-solved review pass retires one |
-| `# lup: defer[<cond>]: <text>` — parked work (§ Deferred Work) | **denied** while its condition is unmet |
+| `# lup: defer: <text>` — parked work (§ Deferred Work) | **denied** while parked |
 | `# lup: ignore[<rule>]` — an anti-pattern hatch (§ Type Safety), not feedback | fine once the violation is gone |
 
 Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/contributing.md` carries the full lifecycle (use `"""
@@ -233,7 +161,7 @@ Resolve open feedback by fixing what it points at, or, for a question, by answer
 
 ### Deferred Work
 
-**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places: a `# lup: defer[<wake condition>]: <text>` note at the site it concerns, where `dev check` keeps it visible until its condition is met; or a question to the user, when whether to defer is itself the open question. `docs/contributing.md` carries both, and the one exception — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
+**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places: a `# lup: defer: <text>` note at the site it concerns, where `dev check` keeps it visible; or a question to the user, when whether to defer is itself the open question. Default to the bare `defer:`; a bracket states a real, externally-checkable gate, never that this code might change again. `docs/contributing.md` carries both, and the one exception — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
 
 ### DRY: Don't Repeat Yourself
 
@@ -263,19 +191,9 @@ The placement test applies to values, not only to code. `packages/lup` may decla
 
 **Never use `_` prefixes** on functions, methods, classes, or constants. Nothing is private.
 
-- Module-level functions: just name them `build_options`, not `_build_options`
-- Class methods: `remove_stale_container`, not `_remove_stale_container`
-- Constants: `PACE_THRESHOLDS`, not `_PACE_THRESHOLDS`
-- Classes: `PendingReminder`, not `_PendingReminder`
+This holds for module-level functions, class methods, constants, and classes alike; `docs/conventions.md` shows each form beside the prefixed name it replaces.
 
-**If a helper truly shouldn't pollute the module namespace**, nest it inside its only caller:
-
-```python
-def build_display(usage, stats):
-    def place_label(text, position, width):
-        ...
-    # use place_label here
-```
+**If a helper truly shouldn't pollute the module namespace**, nest it inside its only caller rather than marking it private.
 
 **Avoid useless mini-wrappers.** If a function's only purpose is to call another function with no additional logic, inline it.
 
@@ -287,9 +205,7 @@ def build_display(usage, stats):
 
 ### Package Tools
 
-- **uv**: Package manager. Use `uv add <package>` (never edit pyproject.toml directly)
-- **ruff**: Formatting and linting
-- **pyright**: Type checking
+`uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Formatting and linting are ruff, type checking is pyright; `docs/contributing.md` carries the commands that have to be green.
 
 ### lup-devtools
 
@@ -297,51 +213,28 @@ All development tooling lives in `src/lup_template/devtools/` and is exposed as 
 
 If you find yourself running the same command repeatedly, **add a command** to `src/lup_template/devtools/`.
 
-`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. For one-off work, in order: `lup-devtools py eval '<expression>'` for anything that fits one expression, which auto-imports and needs no file; run it in the sandbox where the work allows; add a `lup-devtools` command, which is reviewable because `devtools/` lands in the diff; or, as a last resort, `python3 <<<EOF` behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
-
-**Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLIs. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
+`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. Reach first for `lup-devtools py eval '<expression>'`, which auto-imports and needs no file; `docs/contributing.md` carries the rest of the ladder, down to a heredoc behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
 
 """
         ),
         models.TextPart(
-            text="Sub-apps: "
-            + subapp_summary()
-            + ". Run `uv run lup-devtools --help` for the full command tree — the"
-            " list above is rendered from the typed sub-app roster in"
-            " `src/lup_template/devtools/subapps.py`.\n"
-        ),
-        models.TextPart(
-            text=r"""
-`lup-devtools harness generate all` regenerates and reconciles every native
-plugin; `harness <runtime>` regenerates one and launches it. `lup-devtools
-usage <runtime>` reports usage, and profiles — named per-runtime config homes —
-are managed with `lup-devtools setup profile`.
+            text=r"""Run `uv run lup-devtools --help` for the command tree;
+`docs/template.md` lists the sub-apps, rendered from the same typed roster the
+CLI itself wires.
 
-Each repo names its plugin marketplace after the project. How a launch reaches
-the plugin differs per runtime: one verifies the local directory in place, the
-other seeds a persistent per-worktree home from personal authentication and
-settings, installs the verified plugin there, and checks its digest first. A
-runtime flag or an inherited environment variable selects an explicit home
-instead. Personal cache, trust, and session state are never committed.
+`lup-devtools harness generate all` regenerates and reconciles every native
+plugin; `harness <runtime>` regenerates one and launches it. `docs/harness.md`
+carries the rest of the loop and how a launch reaches the plugin on each
+runtime. Personal cache, trust, and session state are never committed.
 
 ### Lup Skills & Agents
 
-Both lists below are rendered from the typed declarations in
+`docs/harness.md` carries the roster of every skill and agent this plugin
+ships, each with the one line that describes it. Both lists are rendered from
+the typed declarations in
 `src/lup_template/devtools/harness/content/catalog.py` — change the catalog,
 then regenerate.
 
-**Skills:**
-
-"""
-        ),
-        *skill_roster_parts(),
-        models.TextPart(
-            text=r"""
-**Agents:**
-
-"""
-            + agent_roster_text()
-            + r"""
 ### Permission Hooks
 
 Permissions come from the canonical semantic policies in `lup.policy` and the
@@ -358,13 +251,13 @@ read it first: a denial names what tripped and how to recover.
 **Two markers change a decision, so keep them in mind before you are stopped:**
 
 - `# lup: escalate: <why>` as the leading line of a shell command promotes a
-  classified deny or ask into an approval question carrying that reason. This
-  is the recovery path when work is denied as unjudged — reshape the command
-  into the allowed vocabulary, or escalate with a reason.
+  classified deny or ask into an approval question carrying that reason.
 - `# lup: ignore[<rule-id>]` on the offending line suppresses exactly that
-  anti-pattern (see § Type Safety). It must sit on the line that
-  trips the rule — a marker one line above is reported as spurious while the
-  violation stays uncovered.
+  anti-pattern, and no other.
+
+`docs/permissions.md` carries how the escalation marker scopes and the recovery
+path when work is denied as unjudged; `docs/contributing.md` carries the
+suppression marker's scoping.
 
 Use `"""
         ),
@@ -376,13 +269,9 @@ holds only native settings outside this semantic policy boundary.
 
 ### Code Intelligence
 
-The `codeintel` tool group answers questions about code by *resolving* it, through a language server. **Prefer these over grep for anything about a name** — a name has a definition, a scope, and a set of references, and only a resolver knows them.
+The `codeintel` tool group answers questions about code by *resolving* it, through a language server. **Prefer them over grep for anything about a name.** `docs/conventions.md` lists what each tool answers.
 
-- **find_definition** — where a symbol is declared, through the import or alias that names it
-- **find_references** — every use across the workspace, excluding look-alikes in other scopes
-- **hover** — the type the checker actually resolved, before you assume one
-- **list_symbols** — every symbol a file declares, instead of grepping for `def ` or `class `
-- **rename_symbol** — plans a workspace-wide rename and reports the files it would touch, without writing. **Always prefer it over `Edit` with `replace_all`**, which cannot tell one scope from another; apply the reported edits yourself.
+**Always prefer `rename_symbol` over `Edit` with `replace_all`**, which cannot tell one scope from another; apply the edits it reports yourself.
 
 `grep` through `Bash` is still right for what is genuinely characters: a string literal, a comment, a non-Python file.
 
@@ -390,23 +279,7 @@ The `codeintel` tool group answers questions about code by *resolving* it, throu
 
 ## Configuration
 
-### Environment Variables
-
-The `.env` file contains template configuration. Create `.env.local` for secrets (gitignored):
-
-```bash
-# .env.local - your secrets (ANTHROPIC_API_KEY is read directly by the SDK from env)
-
-# Optional overrides
-# AGENT_MODEL=claude-opus-5
-# AGENT_MAX_BUDGET_USD=5.00
-# AGENT_MAX_TURNS=50
-# AGENT_SANDBOX_ENABLED=false   # run without Docker (disables code execution tools)
-# AGENT_NOTES_PATH=./notes      # relocate session data
-# AGENT_LOGS_PATH=./logs        # relocate trace logs
-```
-
-Settings in `.env.local` override `.env`. Configuration is loaded via pydantic-settings — see `src/lup_template/agent/config.py`.
+`.env` holds template defaults; `.env.local` holds secrets, is gitignored, and overrides them. Configuration is loaded through pydantic-settings in `src/lup_template/agent/config.py`, which is the only module that reads the environment. `docs/template.md` lists the variables.
 
 Harness settings changes stay **project-level**, in the tree the harness owns ("""
         ),

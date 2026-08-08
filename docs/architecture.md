@@ -14,6 +14,13 @@ an optional `ForkSession`; `TurnHandle[T]` contains a `Turn[T]` and optional
 live events, interrupt, and steer capabilities. These frozen Pydantic values
 do not implement behavior or hide a provider. Unsupported behavior is absent.
 
+Reaching a capability through a handle is one of the two stated exceptions to
+the engine-versus-surface split (`docs/patterns.md`), and the criterion is
+behavior: a frozen value that only carries capabilities is a transparent
+carrier, not a caller-facing surface, so there is nothing for a composing
+class to home. `handle.session.start(...)` and `turn.turn.result()` are
+conforming. `SessionFactory` is the behavioral surface over these seams.
+
 The runtime sequence is:
 
 1. an application builds a validated Claude or Codex config;

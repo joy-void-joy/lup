@@ -9,7 +9,7 @@ SKILL = models.Skill(
     prompt=models.PromptDocument(
         parts=[
             models.TextPart(
-                text="""Deferred notes — `# lup: defer[<wake condition>]: <text>` — are parked work, not open feedback, and the resolver entry excludes them from its inventory, so an editor can never be assigned one. Triage them before launching the resolver: read each note's wake condition against the current state of the repository, and when one reads as met, propose waking it to the user. Waking is an explicit edit that removes the `defer[...]` head so the note re-enters open feedback on the next run; an unmet condition carries forward untouched, never re-litigated.
+                text="""Deferred notes — `# lup: defer: <text>` — are parked work, not open feedback, and the resolver entry excludes them from its inventory, so an editor can never be assigned one. That bare spelling is the default: nothing evaluates a wake condition mechanically, so `defer[<gate>]: <text>` is reserved for a real, externally-checkable gate ("until the v2 API ships") and never restates that this code might change again. Triage them before launching the resolver: read each note against the current state of the repository — its gate where it stated one, its own text where it did not — and when the work reads as due, propose waking it to the user. Waking is an explicit edit that removes the `defer` head so the note re-enters open feedback on the next run; anything still parked carries forward untouched, never re-litigated.
 
 """
             ),

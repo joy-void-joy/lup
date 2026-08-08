@@ -119,6 +119,7 @@ prefix_rule(pattern = ["id"], decision = "allow", justification = "Allowed by Lu
 prefix_rule(pattern = ["join"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["jq"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["ls"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
+prefix_rule(pattern = ["lup-devtools", "dev", "conflict"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["md5sum"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["mkdir"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["nl"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
