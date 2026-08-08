@@ -1491,8 +1491,13 @@ def test_converting_a_note_into_a_claim_is_the_way_through() -> None:
     assert policy.decide(claimed).effect == "allow"
 
 
-def test_only_the_review_pass_retires_a_claim() -> None:
-    """A claim is checked by someone other than whoever made it."""
+def test_no_allowance_retires_a_claim_through_the_edit_gate() -> None:
+    """A claim is checked by someone other than whoever made it.
+
+    The verify pass's authority lives in its own instrument
+    (`dev comments --retire/--restore`), never in a session environment —
+    so a grant claiming otherwise changes nothing here.
+    """
     change = EditChange(
         path=Path("a.py"),
         before="x = 1  # lup: solved: fix the cache",
@@ -1512,7 +1517,7 @@ def test_only_the_review_pass_retires_a_claim() -> None:
             allowances=["note-resolution"],
             python_source=True,
         ).effect
-        == "allow"
+        == "deny"
     )
 
 

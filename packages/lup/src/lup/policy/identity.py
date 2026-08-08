@@ -15,6 +15,7 @@ cannot reach the dispatcher that judges it.
 """
 
 import json
+from enum import StrEnum
 
 from lup.types import EnvVars
 
@@ -23,6 +24,22 @@ AGENT_IDENTITY_ENV = "LUP_AGENT_IDENTITY"
 
 CONCERN_ALLOWANCES_ENV = "LUP_CONCERN_ALLOWANCES"
 """Environment variable listing, as a JSON array, the edit gates granted."""
+
+
+class ConcernAllowance(StrEnum):
+    """One edit gate a concern's plan needs, granted with the concern itself.
+
+    These gates exist because the decision is a human's. Naming them at plan
+    time moves that decision to where the human is already deciding, instead
+    of parking the run to ask again for work they just approved.
+
+    This enum is the vocabulary's single source of truth: launchers declare
+    grants from it, the compiled dispatchers honour exactly its members, and
+    a name outside it in the environment is dropped rather than trusted.
+    """
+
+    NEW_DEVTOOLS_MODULE = "new-devtools-module"
+    ANTIPATTERN_SUPPRESSION = "antipattern-suppression"
 
 
 def concern_allowances_environment(allowances: list[str]) -> EnvVars:

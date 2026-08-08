@@ -142,10 +142,16 @@ def declared_identity(identity_env: str) -> str:
     return environ[identity_env] if identity_env in environ else ""
 
 
-def granted_allowances(allowances_env: str) -> list[str]:
-    """Edit gates a human approved for the concern this session is working."""
+def granted_allowances(allowances_env: str, known: list[str]) -> list[str]:
+    """Edit gates a human approved for the concern this session is working.
+
+    Only names in the compiled vocabulary count. The environment is a
+    transport, not an authority: a name no launcher can legitimately declare
+    — a typo, or a gate this policy never grants that way — is dropped
+    rather than honoured, so hand-setting the variable buys nothing.
+    """
     environ = os.environ  # lup: ignore[os-environ]
     if allowances_env not in environ:
         return []
     declared = json.loads(environ[allowances_env] or "[]")
-    return [str(name) for name in declared]
+    return [str(name) for name in declared if str(name) in known]

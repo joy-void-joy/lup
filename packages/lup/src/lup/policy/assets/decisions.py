@@ -41,6 +41,7 @@ from policy_data import (
     ANTI_PATTERN_ROWS,
     CONCERN_ALLOWANCES_ENV,
     DENIED_FETCH_SCOPES,
+    KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
     PATH_RULES,
@@ -108,6 +109,6 @@ def edit_decision(
         path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
-        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV),
+        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV, KNOWN_ALLOWANCES),
         python_source=suffix in (".py", ".pyi"),
     )

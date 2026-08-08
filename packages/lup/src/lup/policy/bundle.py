@@ -18,7 +18,11 @@ from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.antipatterns import AntiPatternSet
 from lup.harness.banner import REGENERATE_COMMAND, GeneratedBanner
-from lup.policy.identity import AGENT_IDENTITY_ENV, CONCERN_ALLOWANCES_ENV
+from lup.policy.identity import (
+    AGENT_IDENTITY_ENV,
+    CONCERN_ALLOWANCES_ENV,
+    ConcernAllowance,
+)
 import lup.policy.kernel as kernel
 from lup.policy.kernel.rows import (
     AntiPatternRow,
@@ -280,6 +284,8 @@ def render_policy_data(
             + string_rows_literal(autonomous_agent_identities),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
             "CONCERN_ALLOWANCES_ENV = " + json.dumps(CONCERN_ALLOWANCES_ENV),
+            "KNOWN_ALLOWANCES: list[str] = "
+            + string_rows_literal([member.value for member in ConcernAllowance]),
             "MAXIMUM_ADDED_LINES = 3",
             "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
             "RUNNER_TARGETS: list[str] = " + string_rows_literal(runner_targets),
