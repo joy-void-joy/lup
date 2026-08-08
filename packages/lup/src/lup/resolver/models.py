@@ -134,6 +134,14 @@ class MaterialQuestion(BaseModel):
             "integration gates, whose domain really is two words, close it."
         ),
     )
+    criteria: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The lost criterion ids a re-check question is about, carried as "
+            "data so an identical standing finding is recognized across "
+            "occasions instead of re-asked per join."
+        ),
+    )
 
     @model_validator(mode="after")
     def identity_is_path_safe(self) -> "MaterialQuestion":

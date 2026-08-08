@@ -27,6 +27,8 @@ from lup.resolver.journal import (
     Journal,
     PhaseChangedEvent,
     QuestionAskedEvent,
+    RecheckRepeatedEvent,
+    ReviewResidualEvent,
     RunFailedEvent,
 )
 from lup.channels.models import utc_now
@@ -448,7 +450,12 @@ class ResolverCore:
             "it names, so approving the concern approves what it actually needs. A "
             "question offering an option that would need a gate names it on the "
             "question too, and the concern must request it — an option the concern "
-            "cannot be granted is one to omit, not one to disclaim in its text. Do "
+            "cannot be granted is one to omit, not one to disclaim in its text. A "
+            "concern's own notes are stripped from its lease before the worker "
+            "starts, so never write a criterion demanding an in-place marker "
+            "conversion: the worker finishes by writing `# lup: solved: <the "
+            "note's original words>` fresh at the site, and the "
+            "do-not-reintroduce rule governs open feedback only. Do "
             "not decide eligibility or integration approval; the resolver asks the "
             f"user.{reserved}"
             f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
@@ -1077,21 +1084,38 @@ class ResolverCore:
                     )
                     if broke
                     else await self.review_turn(
-                        concern, worker, diff.commit, lease.root, round_number
+                        concern,
+                        worker,
+                        round_base,
+                        diff.commit,
+                        lease.root,
+                        round_number,
                     )
                 )
-                expected_criteria = {criterion.id for criterion in concern.criteria}
-                if (
-                    review.accepted
-                    and set(  # lup: ignore[set-shape] — identity comparison
-                        review.criteria_met
+                declared = {criterion.id: True for criterion in concern.criteria}
+                met = {identifier: True for identifier in review.criteria_met}
+                unaccounted = [
+                    identifier for identifier in declared if identifier not in met
+                ]
+                undeclared = [
+                    label for label in review.criteria_met if label not in declared
+                ]
+                if review.accepted and (unaccounted or undeclared):
+                    # The reviewer's own reason survives — the guard's
+                    # complaint is appended, never substituted, and it names
+                    # the exact ids so the next round can close the gap
+                    # instead of re-deriving it.
+                    complaint = (
+                        "criteria_met does not match the persisted acceptance criteria"
                     )
-                    != expected_criteria
-                ):
+                    if unaccounted:
+                        complaint += "; unaccounted: " + ", ".join(unaccounted)
+                    if undeclared:
+                        complaint += "; never declared: " + ", ".join(undeclared)
                     review = review.model_copy(
                         update={
                             "accepted": False,
-                            "reason": "review omitted persisted acceptance criteria",
+                            "reason": review.reason + "\n\n" + complaint,
                         }
                     )
             rounds.append(
@@ -1105,6 +1129,17 @@ class ResolverCore:
             )
             self.repository.write_round(rounds[-1])
             if review.accepted and diff.commit is not None:
+                if review.residual:
+                    # A residual on a rejection re-enters the worker's
+                    # feedback below; on an acceptance it used to reach
+                    # nobody, and this run's residuals carried real findings.
+                    self.journal.record(
+                        ReviewResidualEvent(
+                            concern_id=concern.id,
+                            round=round_number,
+                            residual=list(review.residual),
+                        )
+                    )
                 await self.transition_concern(concern.id, ConcernStatus.VERIFIED)
                 return ConcernExecution(
                     base=base,
@@ -1430,14 +1465,45 @@ class ResolverCore:
             ActorRef(kind="reviewer", id=concern.id),
             self.reviewer_factory(worktree),
         )
-        result = await reviewer.turn(
-            turn_request(TurnInput(text=situation), ReviewReport)
+        declared = {criterion.id: True for criterion in concern.criteria}
+        # The reviewer session may be fresh — a resumed run, a parked actor —
+        # so the concern record rides with the prompt rather than being
+        # assumed remembered. Criteria reconstructed by archaeology produced
+        # labels no declared id matched, and every mismatch read as a loss.
+        prompt = (
+            f"{situation}\n\n"
+            "Your concern's persisted record, including the acceptance "
+            f"criteria to re-check:\n{concern.model_dump_json(indent=2)}\n\n"
+            "Report criteria_met using exactly the declared criterion ids "
+            "above — echo an id verbatim when its criterion still holds, and "
+            "omit it when it does not."
         )
+        result = await reviewer.turn(turn_request(TurnInput(text=prompt), ReviewReport))
+        unknown = [
+            label for label in result.output.criteria_met if label not in declared
+        ]
+        if unknown:
+            correction = (
+                "Your report labelled criteria this concern never declared: "
+                + ", ".join(unknown)
+                + ". Resubmit with criteria_met drawn only from the declared "
+                "ids: " + ", ".join(declared)
+            )
+            result = await reviewer.turn(
+                turn_request(TurnInput(text=correction), ReviewReport)
+            )
         met = {identifier: True for identifier in result.output.criteria_met}
         lost = [
             criterion.id for criterion in concern.criteria if criterion.id not in met
         ]
         if not lost:
+            return
+        if self.standing_ruling_exists(concern.id, lost):
+            self.journal.record(
+                RecheckRepeatedEvent(
+                    concern_id=concern.id, occasion=occasion, criteria=sorted(lost)
+                )
+            )
             return
         self.queue_questions(
             [
@@ -1452,10 +1518,38 @@ class ResolverCore:
                     ),
                     choices=["superseded", "regression"],
                     closed_choices=True,
+                    criteria=sorted(lost),
                 )
             ],
             concern.id,
         )
+
+    def standing_ruling_exists(self, concern_id: str, lost: list[str]) -> bool:
+        """Whether this lost-criteria set was already put to the humans.
+
+        The same standing finding reproduced by join after join asked five
+        identical questions in one run. One open question, or one answered
+        "superseded", settles the set; only a "regression" ruling — whose
+        remediation makes a later identical loss a genuinely new fact —
+        lets the question be asked again.
+        """
+        state = self.state
+        if state is None or state.questions is None:
+            return False
+        lost_map = {identifier: True for identifier in lost}
+        answered = {
+            answer.question_id: answer.value
+            for answer in (state.answers.answers if state.answers else [])
+        }
+        for question in state.questions.questions:
+            if question.concern_id != concern_id or not question.criteria:
+                continue
+            if {identifier: True for identifier in question.criteria} != lost_map:
+                continue
+            ruling = answered[question.id] if question.id in answered else None
+            if ruling != "regression":
+                return True
+        return False
 
     def verify(self, root: Path) -> list[VerificationRecord]:
         """Run the whole verification set against one tree.
@@ -1562,21 +1656,54 @@ class ResolverCore:
             return 0
         return len(ConcernGraph(state.concerns).ancestors(owner))
 
+    def rulings_for(self, concern_id: str) -> str:
+        """The concern's mid-run Q&A, rendered for an actor's prompt.
+
+        Workers cite rulings in their reports; a reviewer that cannot read
+        the ruling can only take the citation on faith or spend its round
+        disputing settled questions. The record travels with the prompt.
+        """
+        state = self.state
+        if state is None or state.questions is None:
+            return ""
+        prompts = {
+            question.id: question.prompt
+            for question in state.questions.questions
+            if question.concern_id == concern_id
+        }
+        return "\n".join(
+            f"- {answer.question_id}: {prompts[answer.question_id]}\n"
+            f"  answered: {answer.value}"
+            for answer in (state.answers.answers if state.answers else [])
+            if answer.question_id in prompts
+        )
+
     async def review_turn(
         self,
         concern: Concern,
         worker: WorkerReport,
+        base: str,
         commit: str,
         worktree: Path,
         round_number: int,
     ) -> ReviewReport:
         invocation = self.invocation_renderer.render(self.spec.review_skill)
+        # The whole range, not the head: a round's work regularly spans
+        # several commits, and a reviewer handed one spent its round
+        # discovering the others.
+        span = f"Commits under review: {base[:12]}..{commit[:12]} — every one."
+        rulings = self.rulings_for(concern.id)
+        answered = (
+            f"\n\nQuestions this concern has had answered:\n{rulings}"
+            if rulings
+            else ""
+        )
         prompt = (
             "Independently review the committed concern against every persisted "
             "acceptance criterion.\n\n"
             f"{invocation}\n\nConcern:\n{concern.model_dump_json(indent=2)}\n\n"
             f"Worker report:\n{worker.model_dump_json(indent=2)}\n\n"
-            f"Commit: {commit}"
+            f"{span}{answered}"
         )
         if round_number > 1:
             # This reviewer wrote the criticism the worker was revising, so
@@ -1587,7 +1714,7 @@ class ResolverCore:
                 "updated work against the same acceptance criteria, and say "
                 "explicitly whether each point you raised was addressed.\n\n"
                 f"Worker report:\n{worker.model_dump_json(indent=2)}\n\n"
-                f"Commit: {commit}"
+                f"{span}{answered}"
             )
         result = await self.actors.session(
             ActorRef(kind="reviewer", id=concern.id, round=round_number),

@@ -63,6 +63,7 @@ from lup.resolver.models import (
     MaterialQuestion,
     MergeReport,
     QuestionAnswer,
+    QuestionBatch,
     ResolveInventory,
     ResolveRequest,
     ResolverConfig,
@@ -3005,6 +3006,404 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
     assert carried and all(
         ConcernAllowance.ANTIPATTERN_SUPPRESSION in launch for launch in carried
     )
+
+
+class PromptRecordingSession(ResolverTestSession):
+    """A scripted session that also records every prompt it was handed."""
+
+    def __init__(self, root: Path, response: ResolverResponse, log: list[str]) -> None:
+        super().__init__(root, response)
+        self.log = log
+
+    async def start[T: BaseModel | None](
+        self, request: TurnRequest[T]
+    ) -> TurnHandle[T]:
+        self.log.append(request.input.text)
+        return await super().start(request)
+
+
+def journal_events(core: ResolverCore, kind: str) -> list[JsonObject]:
+    dumps = [entry.event.model_dump(mode="json") for entry in core.journal.read()]
+    return [dump for dump in dumps if "type" in dump and dump["type"] == kind]
+
+
+def recheck_core(
+    tmp_path: Path, run_id: str, reviewer_response: ResolverResponse, log: list[str]
+) -> ResolverCore:
+    return ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=tmp_path,
+            worktree_root=tmp_path / "worktrees",
+            run_id=run_id,
+            integration_branch=f"resolve/{run_id}/review",
+            verification_commands=[
+                VerificationCommand(name="verify", arguments=["git", "diff"])
+            ],
+        ),
+        resolve_spec(),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
+        lambda root: session_factory(
+            PromptRecordingSession(root, reviewer_response, log)
+        ),
+        LiteralInvocationRenderer(),
+        recording_launcher(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_recheck_prompt_carries_the_record_and_corrects_foreign_labels(
+    tmp_path: Path,
+) -> None:
+    """The re-reviewer reads the declared criteria instead of reconstructing
+    them by archaeology, and a report labelled outside them is corrected once
+    on the same session rather than counted as every criterion lost."""
+    reports: list[JsonObject] = [
+        {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "all criteria hold",
+            "criteria_met": ["guidance-roster-done"],
+        },
+        {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "all criteria hold",
+            "criteria_met": ["a-done"],
+        },
+    ]
+    calls: list[str] = []
+    log: list[str] = []
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        calls.append("turn")
+        return reports[min(len(calls) - 1, 1)]
+
+    core = recheck_core(tmp_path, "recheck-record", reviewer_response, log)
+    await core.recheck_concern(
+        concern("a"),
+        tmp_path,
+        situation="Re-check after a sibling landed.",
+        occasion="join-abc123",
+        lost_because="once the sibling joined",
+    )
+
+    assert '"a-done"' in log[0]
+    assert "declared criterion ids" in log[0]
+    assert "never declared: guidance-roster-done" in log[1]
+    assert [item.question.id for item in core.mailbox.questions()] == []
+
+
+def standing_state(run_id: str, ruling: str | None) -> ResolveState:
+    asked = MaterialQuestion(
+        id="a-superseded-join-one",
+        concern_id="a",
+        prompt="a no longer meets a-done. Superseded or regression?",
+        choices=["superseded", "regression"],
+        closed_choices=True,
+        criteria=["a-done"],
+    )
+    return ResolveState(
+        config_digest="digest",
+        run_id=run_id,
+        phase=ResolvePhase.INTEGRATION,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("a")],
+        progress=[ConcernProgress(concern_id="a", status=ConcernStatus.VERIFIED)],
+        questions=QuestionBatch(run_id=run_id, questions=[asked]),
+        answers=AnswerBatch(
+            run_id=run_id,
+            answers=(
+                [QuestionAnswer(question_id=asked.id, value=ruling)]
+                if ruling is not None
+                else []
+            ),
+        ),
+    )
+
+
+def test_a_standing_ruling_settles_the_same_lost_set(tmp_path: Path) -> None:
+    """One open or superseded question holds the set; a regression ruling —
+    whose remediation makes a later identical loss a new fact — does not."""
+    core = planning_core(tmp_path, lambda *_: plan_of())
+
+    core.state = standing_state("rulings", "superseded")
+    assert core.standing_ruling_exists("a", ["a-done"])
+    assert not core.standing_ruling_exists("a", ["a-done", "a-extra"])
+    assert not core.standing_ruling_exists("b", ["a-done"])
+
+    core.state = standing_state("rulings", None)
+    assert core.standing_ruling_exists("a", ["a-done"])
+
+    core.state = standing_state("rulings", "regression")
+    assert not core.standing_ruling_exists("a", ["a-done"])
+
+
+@pytest.mark.asyncio
+async def test_an_identical_standing_finding_is_recorded_not_reasked(
+    tmp_path: Path,
+) -> None:
+    """The conflict-toolchain miss asked five identical questions in one run;
+    a settled lost-set now lands in the journal instead of the mailbox."""
+    log: list[str] = []
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        return {
+            "concern_id": "a",
+            "accepted": False,
+            "generalized": True,
+            "reason": "the criterion no longer holds",
+            "criteria_met": [],
+        }
+
+    core = recheck_core(tmp_path, "recheck-dedup", reviewer_response, log)
+    core.state = standing_state("recheck-dedup", "superseded")
+    await core.recheck_concern(
+        concern("a"),
+        tmp_path,
+        situation="Re-check after another join.",
+        occasion="join-def456",
+        lost_because="once the later join landed",
+    )
+
+    assert [item.question.id for item in core.mailbox.questions()] == []
+    repeated = journal_events(core, "recheck_repeated")
+    assert repeated and repeated[0]["criteria"] == ["a-done"]
+    assert repeated[0]["occasion"] == "join-def456"
+
+
+@pytest.mark.asyncio
+async def test_completeness_guard_appends_and_names_the_gap(tmp_path: Path) -> None:
+    """The reviewer's substantive reason survives the guard, and the exact
+    unmatched ids ride with it into the next round's feedback."""
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_prompts: list[str] = []
+    reviews: list[JsonObject] = [
+        {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "solid work overall",
+            "criteria_met": [],
+        },
+        {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        },
+    ]
+    handed: list[str] = []
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        handed.append("turn")
+        return reviews[min(len(handed) - 1, 1)]
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        with (root / "a.txt").open("a", encoding="utf-8") as handle:
+            handle.write("implemented\n")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="guard-append",
+            integration_branch="resolve/guard-append/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda context: session_factory(
+            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        ),
+        lambda root: resolver_test_factory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    revision = next(prompt for prompt in worker_prompts if "Review feedback" in prompt)
+    assert "solid work overall" in revision
+    assert "unaccounted: a-done" in revision
+
+
+@pytest.mark.asyncio
+async def test_accepted_review_residuals_reach_the_journal(tmp_path: Path) -> None:
+    """Observations beside an accepting verdict used to reach nobody."""
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        (root / "a.txt").write_text("implemented\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+            "residual": ["print_block styling is unpinned"],
+        }
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "residual-surface",
+        worker_response,
+        reviewer_response,
+    )
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    surfaced = journal_events(core, "review_residual")
+    assert surfaced and surfaced[0]["residual"] == ["print_block styling is unpinned"]
+    assert surfaced[0]["concern_id"] == "a"
+
+
+@pytest.mark.asyncio
+async def test_review_prompt_names_the_range_and_the_rulings(tmp_path: Path) -> None:
+    """A reviewer handed one commit spent its round discovering the others,
+    and three reviews could not verify rulings the workers cited."""
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    reviewer_prompts: list[str] = []
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        (root / "a.txt").write_text("implemented\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="review-range",
+            integration_branch="resolve/review-range/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda context: resolver_test_factory(context.root, worker_response),
+        lambda root: session_factory(
+            PromptRecordingSession(root, reviewer_response, reviewer_prompts)
+        ),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    worker_asks(
+        core.mailbox,
+        "review-range",
+        MaterialQuestion(
+            id="a-shape",
+            concern_id="a",
+            prompt="Which dispatch shape should the decoder keep?",
+        ),
+    )
+    seed_offer(core, "a-shape", "the flat one")
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    first = next(
+        prompt for prompt in reviewer_prompts if "Independently review" in prompt
+    )
+    assert "Commits under review: " in first
+    assert "Which dispatch shape should the decoder keep?" in first
+    assert "answered: the flat one" in first
+
+
+@pytest.mark.asyncio
+async def test_plan_prompt_states_the_marker_stripping_rule(tmp_path: Path) -> None:
+    """The planner is told notes leave the lease first, so it can no longer
+    mint note-resolved criteria the pipeline makes unsatisfiable-as-read."""
+    log: list[str] = []
+
+    def planner_response(_root: Path, _output_name: str) -> JsonObject:
+        return plan_of(concern_referencing([0, 1]))
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=tmp_path,
+            worktree_root=tmp_path / "worktrees",
+            run_id="plan-prompt",
+            integration_branch="resolve/plan-prompt/review",
+            verification_commands=[
+                VerificationCommand(name="verify", arguments=["git", "diff"])
+            ],
+        ),
+        resolve_spec(),
+        lambda context: resolver_test_factory(context.root, planner_response),
+        lambda root: session_factory(
+            PromptRecordingSession(root, planner_response, log)
+        ),
+        LiteralInvocationRenderer(),
+        recording_launcher(),
+    )
+    await core.plan_inventory(two_note_request())
+
+    assert "in-place marker" in log[0]
+    assert "# lup: solved:" in log[0]
 
 
 class RecordingPreparer(WorktreePreparer):

@@ -135,6 +135,39 @@ class JoinAuditEvent(BaseModel):
     commit: str
 
 
+class ReviewResidualEvent(BaseModel):
+    """Observations an accepting review recorded beside its verdict.
+
+    A residual on a rejected review re-enters the worker's feedback; on an
+    accepted one it previously reached nobody, and real findings sat unread
+    in the round records. The journal is where they surface — for the CLI,
+    the supervisor, and whoever files the follow-up work.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["review_residual"] = "review_residual"
+    concern_id: str
+    round: int
+    residual: list[str]
+
+
+class RecheckRepeatedEvent(BaseModel):
+    """A re-check reproduced a standing finding already put to the humans.
+
+    The same lost-criteria set for the same concern asks once; a later join
+    that reproduces it is recorded here instead of re-raising an identical
+    question per join.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["recheck_repeated"] = "recheck_repeated"
+    concern_id: str
+    occasion: str
+    criteria: list[str]
+
+
 class RunFailedEvent(BaseModel):
     """The run reached a terminal failure."""
 
@@ -152,6 +185,8 @@ type RunEvent = (
     | MessagePostedEvent
     | JoinCompletedEvent
     | JoinAuditEvent
+    | ReviewResidualEvent
+    | RecheckRepeatedEvent
     | RunFailedEvent
 )
 """What the run did, as opposed to what one actor's session did.
