@@ -197,7 +197,7 @@ def solved_note_count(source: str, python_source: bool = False) -> int:
 
 
 def marker_decision(
-    previous: str, updated: str, python_source: bool, granted: list[str]
+    previous: str, updated: str, python_source: bool
 ) -> KernelDecision | None:
     """Judge what this edit did to the file's review notes.
 
@@ -209,8 +209,11 @@ def marker_decision(
     front of the original words leaves the claim in the tree, against the
     text it claims to answer, for a later pass to check.
 
-    That later pass is the one holder of ``note-resolution``, and the only
-    thing that can retire a claim or send it back to being open feedback.
+    That later pass retires a claim — or sends it back to being open
+    feedback — through its own instrument, `dev comments --retire` and
+    `--restore`, which touches only `solved:` claims. No session's edits are
+    exempt here: an environment cannot carry this authority, so a grant that
+    claims to is ignored.
     """
     opened = open_note_count(updated, python_source) - open_note_count(
         previous, python_source
@@ -218,8 +221,6 @@ def marker_decision(
     claimed = solved_note_count(updated, python_source) - solved_note_count(
         previous, python_source
     )
-    if "note-resolution" in granted:
-        return None
     if opened < 0 and opened + claimed == 0:
         return None
     if opened < 0:
@@ -234,8 +235,9 @@ def marker_decision(
         return KernelDecision(
             "deny",
             "this edit removes a `# lup: solved:` claim. Only the review pass "
-            "retires one — it either confirms the claim and removes the note, "
-            "or restores it to open feedback",
+            "retires one — it either confirms the claim and removes the note "
+            "(`dev comments --retire file:line`), or restores it to open "
+            "feedback (`dev comments --restore file:line`)",
         )
     if opened > 0:
         return KernelDecision("ask", "edit adds inline review feedback")
@@ -873,7 +875,7 @@ def decide_edit(
     # owes. Scratch is the exception, and only because nothing there persists
     # to be read — a note in a disposable tree has no reader to protect.
     if role != "scratch":
-        marker = marker_decision(previous, updated, python_source, granted)
+        marker = marker_decision(previous, updated, python_source)
         if marker is not None:
             return marker
     if before is None and role == "production":

@@ -10,11 +10,13 @@ Run `uv run lup-devtools dev comments` and read the "Claimed resolved" section. 
 
 For each claim, one question: **does the tree now do what the note asked?** Not whether the code improved, not whether the claim is plausible, not whether the agent tried. Read the note's words, then read the code at that site as it stands now, and answer whether the specific thing asked for is true.
 
-Three answers, and no others:
+Three answers, and no others — each applied with the pass's own instrument, `uv run lup-devtools dev comments`, because the edit gate denies changing a claim marker in any session:
 
-- **Resolved.** The tree does what was asked. Delete the marker and its text entirely.
-- **Not resolved.** Restore it to open feedback: strip the `solved: ` head so it reads `# lup:` again. Add nothing — the original words are the note, and rewriting them loses what was actually asked. If your reading found something the note did not say, that is a *new* note, written separately.
-- **Partly resolved.** Restore it to open feedback and narrow its text to exactly the part still outstanding. A claim that answered two of three concerns is not resolved, and carrying forward the two already answered wastes the next reader's time.
+- **Resolved.** The tree does what was asked. Retire the claim: `dev comments --retire <file>:<line>` deletes the marker and its text entirely.
+- **Not resolved.** Restore it to open feedback: `dev comments --restore <file>:<line>` strips the `solved: ` head so it reads `# lup:` again, keeping the original words — rewriting them loses what was actually asked. If your reading found something the note did not say, that is a *new* note, written separately.
+- **Partly resolved.** Restore it narrowed: `dev comments --restore <file>:<line> --narrow "<the part still outstanding>"`. A claim that answered two of three concerns is not resolved, and carrying forward the two already answered wastes the next reader's time.
+
+Both flags refuse any target that is not a `solved:` claim, so neither can touch open feedback or parked work.
 
 Bias toward restoring. A claim you cannot confirm from the code is not confirmed, and leaving a note open costs one more pass while retiring one wrongly loses the concern permanently.
 

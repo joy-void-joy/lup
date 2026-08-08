@@ -32,6 +32,7 @@ from policy_data import (
     ANTI_PATTERN_ROWS,
     CONCERN_ALLOWANCES_ENV,
     DENIED_FETCH_SCOPES,
+    KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
     PATH_RULES,
@@ -161,13 +162,19 @@ def declared_identity(identity_env: str) -> str:
     return environ[identity_env] if identity_env in environ else ""
 
 
-def granted_allowances(allowances_env: str) -> list[str]:
-    """Edit gates a human approved for the concern this session is working."""
+def granted_allowances(allowances_env: str, known: list[str]) -> list[str]:
+    """Edit gates a human approved for the concern this session is working.
+
+    Only names in the compiled vocabulary count. The environment is a
+    transport, not an authority: a name no launcher can legitimately declare
+    — a typo, or a gate this policy never grants that way — is dropped
+    rather than honoured, so hand-setting the variable buys nothing.
+    """
     environ = os.environ  # lup: ignore[os-environ]
     if allowances_env not in environ:
         return []
     declared = json.loads(environ[allowances_env] or "[]")
-    return [str(name) for name in declared]
+    return [str(name) for name in declared if str(name) in known]
 
 
 def bash_decision(
@@ -228,7 +235,7 @@ def edit_decision(
         path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
-        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV),
+        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV, KNOWN_ALLOWANCES),
         python_source=suffix in (".py", ".pyi"),
     )
 
