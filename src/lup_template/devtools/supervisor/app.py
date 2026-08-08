@@ -17,7 +17,7 @@ from typing import Annotated
 
 import typer
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 from starlette.middleware.base import RequestResponseEndpoint
 from urllib.parse import urlsplit
@@ -34,7 +34,7 @@ from lup.resolver.mailbox import (
 from lup.resolver.models import QuestionAnswer
 from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.workspace.paths import project_root
-from lup_template.devtools.supervisor.events import stream
+from lup_template.devtools.supervisor.events import FRESH_CATCHUP_ENTRIES, stream
 from lup_template.devtools.supervisor.projection import (
     ActorIndex,
     AnswerSubmission,
@@ -226,6 +226,20 @@ def create_supervisor(
         if found is None:
             raise HTTPException(status_code=404, detail=f"no journal entry {seq}")
         return found
+
+    @supervisor.get("/api/runs/{selected}/journal")
+    async def read_earlier(
+        selected: str,
+        before: int,
+        count: Annotated[int, Query(ge=1, le=1000)] = FRESH_CATCHUP_ENTRIES,
+    ) -> list[JournalEntry]:
+        """One page of record older than ``before``, oldest first.
+
+        The stream hands a fresh reader a bounded tail, so this is how the
+        page walks further back — pulled one page at a time, instead of the
+        whole-run replay the bound exists to prevent.
+        """
+        return run_journal(state_root, selected).before(before, count)
 
     @supervisor.post("/api/runs/{selected}/answers")
     async def submit_answers(

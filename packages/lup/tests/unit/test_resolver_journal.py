@@ -137,6 +137,18 @@ def test_one_entry_is_readable_whole_for_an_expanding_reader(tmp_path: Path) -> 
     assert len(block.text) == 5000
 
 
+def test_the_record_before_a_sequence_is_paged_oldest_first(tmp_path: Path) -> None:
+    """A bounded tail leaves older record reachable one page at a time."""
+    journal = Journal(tmp_path)
+    for index in range(10):
+        journal.append(WORKER, block_event(f"entry {index}"))
+
+    assert [entry.seq for entry in journal.before(6, 3)] == [3, 4, 5]
+    assert [entry.seq for entry in journal.before(2, 100)] == [0, 1]
+    assert journal.before(0, 3) == []
+    assert journal.before(6, 0) == []
+
+
 def test_a_journal_never_refuses_to_record(tmp_path: Path) -> None:
     """The stream's cap is optional precisely so this one declares none."""
     journal = Journal(tmp_path)

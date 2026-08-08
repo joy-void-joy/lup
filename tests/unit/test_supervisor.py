@@ -23,7 +23,7 @@ from httpx import ASGITransport, AsyncClient
 
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.channels.models import utc_now
-from lup.resolver.journal import Journal, PhaseChangedEvent, RunEvent
+from lup.resolver.journal import Journal, JournalEntry, PhaseChangedEvent, RunEvent
 from lup.runtime.models import TurnEvent
 from lup.resolver.mailbox import (
     AnswerDoor,
@@ -597,6 +597,28 @@ async def test_the_stream_keeps_a_quiet_connection_alive(tmp_path: Path) -> None
     await body.aclose()
 
     assert frames[1] == ": keep-alive\n\n"
+
+
+async def test_record_older_than_the_tail_is_served_page_by_page(
+    tmp_path: Path,
+) -> None:
+    """What the bounded catch-up skipped stays reachable on demand."""
+    build_run(tmp_path)
+    journal = Journal(tmp_path / "run-1")
+    for _ in range(6):
+        journal.record(PhaseChangedEvent(phase=ResolvePhase.REVIEW))
+
+    async with client_for(tmp_path) as client:
+        page = await client.get(
+            "/api/runs/run-1/journal", params={"before": 4, "count": 2}
+        )
+        start = await client.get(
+            "/api/runs/run-1/journal", params={"before": 0, "count": 2}
+        )
+
+    served = [JournalEntry.model_validate(item) for item in page.json()]
+    assert [entry.seq for entry in served] == [2, 3]
+    assert start.json() == []
 
 
 class ElementIds(HTMLParser):

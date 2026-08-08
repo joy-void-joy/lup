@@ -274,6 +274,19 @@ class Journal:
         """One entry whole, for a reader expanding a truncated block."""
         return next((item for item in self.stream.read_all() if item.seq == seq), None)
 
+    def before(self, seq: int, count: int) -> list[JournalEntry]:
+        """The ``count`` entries just before ``seq``, oldest first.
+
+        A fresh follower starts from a bounded tail of the record, so the
+        run older than that tail is reached from here one page at a time —
+        on demand, rather than by replaying the whole run into the reader
+        the bound exists to protect.
+        """
+        if count <= 0:
+            return []
+        earlier = [entry for entry in self.stream.read_all() if entry.seq < seq]
+        return earlier[-count:]
+
     def actors(self) -> list[ActorRef]:
         """Every actor that has produced an entry, in first-seen order."""
         return list(dict.fromkeys(entry.actor for entry in self.stream.read_all()))
