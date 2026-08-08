@@ -313,10 +313,17 @@ async def test_an_initialize_error_leaves_nothing_attached(
     assert not alive(fake_app_server.observed().pid)
 
 
+@pytest.mark.filterwarnings("error::pytest.PytestUnhandledThreadExceptionWarning")
 async def test_a_child_that_dies_during_initialize_leaves_nothing_attached(
     fake_app_server: FakeAppServer,
 ) -> None:
-    """The same unwind when the child never answers because it is gone."""
+    """The same unwind when the child never answers because it is gone.
+
+    The escalated thread warning pins the watcher as the child's only
+    reaper: were sh's own background thread allowed to re-raise the exit
+    it would surface here as an unhandled thread exception, recording the
+    same death twice.
+    """
     server = fake_app_server.attach(
         AppServerTranscript(
             replies={
@@ -373,6 +380,7 @@ async def test_close_unwinds_the_reader_the_child_and_every_pending_request(
     await asyncio.wait_for(server.close(), timeout=SPAWN_TIMEOUT)
 
 
+@pytest.mark.filterwarnings("error::pytest.PytestUnhandledThreadExceptionWarning")
 async def test_a_child_that_dies_while_open_wakes_the_reader_with_its_stderr(
     fake_app_server: FakeAppServer,
 ) -> None:
