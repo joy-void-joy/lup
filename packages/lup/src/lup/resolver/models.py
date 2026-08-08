@@ -817,6 +817,51 @@ class ResolveState(BaseModel):
         return self
 
 
+class RunTally(BaseModel):
+    """Aggregate progress a watcher reads at a glance.
+
+    Reconstructing "how far along is this run" took a full read of the
+    record and the worktrees; every piece is already in state, so the
+    aggregation lives beside it and every surface prints the same one.
+    """
+
+    model_config = FROZEN
+
+    phase: ResolvePhase
+    total: int
+    by_status: dict[ConcernStatus, int]
+    joined: int
+    join_total: int
+
+    def concerns_line(self) -> str:
+        """The tally as one compact human line."""
+        counted = " · ".join(
+            f"{status} {count}" for status, count in self.by_status.items() if count
+        )
+        line = f"{counted or 'no concerns'} of {self.total}"
+        if self.join_total:
+            line += f" · joins {self.joined}/{self.join_total}"
+        return line
+
+
+def run_tally(state: ResolveState) -> RunTally:
+    """Fold one persisted state into the aggregate a watcher wants."""
+    statuses = [item.status for item in state.progress]
+    return RunTally(
+        phase=state.phase,
+        total=len(statuses),
+        by_status={
+            status: statuses.count(status) for status in dict.fromkeys(statuses)
+        },
+        joined=len(state.join_progress.joined) if state.join_progress else 0,
+        join_total=(
+            len([outcome for outcome in state.outcomes if outcome.commit is not None])
+            if state.join_progress
+            else 0
+        ),
+    )
+
+
 class ResolveManifest(BaseModel):
     model_config = FROZEN
 

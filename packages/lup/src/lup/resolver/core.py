@@ -78,6 +78,7 @@ from lup.resolver.models import (
     WorkerReport,
     WritableRootLease,
     allowance_question_id,
+    run_tally,
 )
 from lup.resolver.orchestrator import (
     DependencyBaseBuilder,
@@ -2590,6 +2591,10 @@ class ResolverCore:
             self.journal.record(ConcernProgressedEvent(progress=item))
             if self.observer is not None:
                 self.observer.concern_changed(item)
+        if self.observer is not None:
+            tally = run_tally(state)
+            if previous is None or run_tally(previous) != tally:
+                self.observer.tally_changed(tally)
 
     def progress_state(
         self,

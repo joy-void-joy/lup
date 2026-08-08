@@ -71,6 +71,7 @@ from lup.resolver.models import (
     ResolveState,
     ReviewNote,
     ReviewReport,
+    RunTally,
     SourceSnapshot,
     VerificationCommand,
     WorkerContext,
@@ -2679,12 +2680,16 @@ class RecordingObserver(ResolverObserver):
     def __init__(self) -> None:
         self.phases: list[ResolvePhase] = []
         self.transitions: list[ConcernProgress] = []
+        self.tallies: list[RunTally] = []
 
     def phase_changed(self, phase: ResolvePhase) -> None:
         self.phases.append(phase)
 
     def concern_changed(self, progress: ConcernProgress) -> None:
         self.transitions.append(progress)
+
+    def tally_changed(self, tally: RunTally) -> None:
+        self.tallies.append(tally)
 
 
 @pytest.mark.asyncio
@@ -2770,6 +2775,15 @@ async def test_observer_receives_every_persisted_transition_in_order(
         ConcernStatus.CLEANED,
     ]
     assert {item.concern_id for item in observer.transitions} == {"a"}
+    # Every status move above changed the aggregate, so the tally followed
+    # each one; the last word is the whole run accounted for, joins included.
+    assert observer.tallies, "aggregate progress never reached the observer"
+    final = observer.tallies[-1]
+    assert final.phase == ResolvePhase.COMPLETE
+    assert final.by_status == {ConcernStatus.CLEANED: 1}
+    # One concern joins without a pairwise sequence, so no join figures.
+    assert (final.joined, final.join_total) == (0, 0)
+    assert final.concerns_line() == "cleaned 1 of 1"
 
 
 def noted_workspace(tmp_path: Path, launcher: LocalProcessLauncher) -> Path:

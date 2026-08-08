@@ -3,7 +3,12 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from lup.resolver.models import ConcernProgress, MaterialQuestion, ResolvePhase
+from lup.resolver.models import (
+    ConcernProgress,
+    MaterialQuestion,
+    ResolvePhase,
+    RunTally,
+)
 
 
 class ResolverAwaitingAnswers(Exception):
@@ -34,6 +39,15 @@ class ResolverObserver(ABC):
     @abstractmethod
     def concern_changed(self, progress: ConcernProgress) -> None:
         """One concern status or reason was recorded."""
+
+    @abstractmethod
+    def tally_changed(self, tally: RunTally) -> None:
+        """The run's aggregate progress moved.
+
+        Per-concern lines say what just happened; this says where the run
+        stands — counts per status and joins landed — so a watcher stops
+        reconstructing the aggregate from the scroll.
+        """
 
 
 class WorktreePreparer(ABC):

@@ -42,6 +42,7 @@ from lup.resolver.models import (
     ResolvePhase,
     ResolveRequest,
     ResolverConfig,
+    RunTally,
     SourceSnapshot,
     VerificationCommand,
     WorkerContext,
@@ -142,6 +143,9 @@ class ConsoleResolverObserver(ResolverObserver):
         if progress.reason:
             line = f"{line} ({progress.reason})"
         typer.echo(line)
+
+    def tally_changed(self, tally: RunTally) -> None:
+        typer.echo(f"[resolve] progress: {tally.concerns_line()}")
 
 
 def parse_answer_flags(
