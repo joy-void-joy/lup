@@ -436,3 +436,118 @@ def remove_notes(
     return NoteRemoval(
         text="\n".join(lines) + trailing, removed=claimed, missing=missing
     )
+
+
+class ClaimRevision(BaseModel):
+    """Rewritten text, the claims acted on, and what could not be.
+
+    ``missing`` names targets that resolved to no note at all; ``refused``
+    names notes a target landed on that are not `solved:` claims, which the
+    claim instruments decline to touch.
+    """
+
+    text: str
+    revised: list[MarkerComment]
+    missing: list[NoteTarget]
+    refused: list[MarkerComment]
+
+
+class ClaimSelection(BaseModel):
+    """Targets resolved into claims, absent targets, and refused notes."""
+
+    claimed: list[MarkerComment]
+    missing: list[NoteTarget]
+    refused: list[MarkerComment]
+
+
+def solved_claims_only(
+    candidates: list[MarkerComment], targets: list[NoteTarget]
+) -> ClaimSelection:
+    """Resolve targets to claims, refusing any note that is not one.
+
+    The refusal is the claim instruments' whole safety: open feedback and
+    parked work stay untouchable through this path no matter what a target
+    names.
+    """
+    claimed: list[MarkerComment] = []
+    missing: list[NoteTarget] = []
+    refused: list[MarkerComment] = []
+    for target in targets:
+        note = resolve_note(
+            [note for note in candidates if note not in claimed], target
+        )
+        if note is None:
+            missing.append(target)
+            continue
+        match note.kind:
+            case "solved":
+                claimed.append(note)
+            case _:
+                refused.append(note)
+    return ClaimSelection(claimed=claimed, missing=missing, refused=refused)
+
+
+def retire_claims(text: str, mode: str, targets: list[NoteTarget]) -> ClaimRevision:
+    """Delete each target's `solved:` claim — the verify pass's confirming act.
+
+    Deleting a claim through the edit gate is denied for every session, so
+    this is the one designed instrument that removes one, and it removes
+    only claims: a target landing on open feedback or parked work is
+    refused, so the reviewer's instrument structurally cannot delete what
+    was never claimed solved.
+    """
+    selection = solved_claims_only(find_feedback(text, mode), targets)
+    lines = text.splitlines()
+    for note in sorted(
+        selection.claimed, key=lambda note: note.start_line, reverse=True
+    ):
+        without_note(lines, note)
+    trailing = "\n" if text.endswith("\n") else ""
+    return ClaimRevision(
+        text="\n".join(lines) + trailing,
+        revised=selection.claimed,
+        missing=selection.missing,
+        refused=selection.refused,
+    )
+
+
+def reopened_head(line: str) -> str:
+    """One claim's head line with the `solved:` head stripped back off."""
+    marker = MARKER_RE.search(line)
+    if marker is None:
+        return line
+    remainder = line[marker.end() :].lstrip()
+    head = SOLVED_HEAD_RE.match(remainder)
+    body = remainder[head.end() :] if head is not None else remainder
+    return f"{line[: marker.end()]} {body}"
+
+
+def restore_claims(
+    text: str, mode: str, targets: list[NoteTarget], narrowed: str | None = None
+) -> ClaimRevision:
+    """Reopen each target's claim as ordinary feedback, optionally narrowed.
+
+    A plain restore strips `solved: ` from the head line and keeps every
+    continuation line untouched, so the note reads exactly as it was first
+    written. A narrowed restore replaces the whole note with the outstanding
+    part, which is the partly-resolved verdict.
+    """
+    selection = solved_claims_only(find_feedback(text, mode), targets)
+    lines = text.splitlines()
+    for note in sorted(
+        selection.claimed, key=lambda note: note.start_line, reverse=True
+    ):
+        if narrowed is None:
+            lines[note.start_line - 1] = reopened_head(lines[note.start_line - 1])
+            continue
+        head = lines[note.start_line - 1]
+        marker = MARKER_RE.search(head)
+        end = marker.end() if marker is not None else 0
+        lines[note.start_line - 1 : note.end_line] = [f"{head[:end]} {narrowed}"]
+    trailing = "\n" if text.endswith("\n") else ""
+    return ClaimRevision(
+        text="\n".join(lines) + trailing,
+        revised=selection.claimed,
+        missing=selection.missing,
+        refused=selection.refused,
+    )

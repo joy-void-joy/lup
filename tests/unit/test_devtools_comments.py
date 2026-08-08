@@ -104,6 +104,57 @@ def test_clear_skips_malformed_and_missing_targets(repo: Path) -> None:
     assert (repo / "code.py").read_text(encoding="utf-8") == before
 
 
+CLAIMS_SOURCE = """\
+alpha = 1
+# lup: solved: rework this section
+# across the lines below
+beta = 2
+# lup: still open feedback
+gamma = 3
+"""
+
+
+def test_retire_deletes_a_claim_on_any_branch(repo: Path) -> None:
+    # The verify pass runs on real checkouts, so unlike --clear this path
+    # carries no resolve/* branch requirement — its safety is shape, not ref.
+    (repo / "claims.py").write_text(CLAIMS_SOURCE, encoding="utf-8")
+
+    comments.revise_claims(["claims.py:2"], retire=True)
+
+    text = (repo / "claims.py").read_text(encoding="utf-8")
+    assert "rework this section" not in text
+    assert "still open feedback" in text
+
+
+def test_retire_refuses_open_feedback(repo: Path) -> None:
+    (repo / "claims.py").write_text(CLAIMS_SOURCE, encoding="utf-8")
+
+    with pytest.raises(typer.Exit):
+        comments.revise_claims(["claims.py:5"], retire=True)
+
+    assert "still open feedback" in (repo / "claims.py").read_text(encoding="utf-8")
+
+
+def test_restore_reopens_a_claim_with_its_words(repo: Path) -> None:
+    (repo / "claims.py").write_text(CLAIMS_SOURCE, encoding="utf-8")
+
+    comments.revise_claims(["claims.py:2"], retire=False)
+
+    text = (repo / "claims.py").read_text(encoding="utf-8")
+    assert "# lup: rework this section" in text
+    assert "# across the lines below" in text
+
+
+def test_restore_narrowed_keeps_only_the_outstanding_part(repo: Path) -> None:
+    (repo / "claims.py").write_text(CLAIMS_SOURCE, encoding="utf-8")
+
+    comments.revise_claims(["claims.py:2"], retire=False, narrow="the second half")
+
+    text = (repo / "claims.py").read_text(encoding="utf-8")
+    assert "# lup: the second half" in text
+    assert "across the lines below" not in text
+
+
 DEFER_SOURCE = """\
 epsilon = 5
 # lup: defer[until the cache rework lands]: revisit epsilon

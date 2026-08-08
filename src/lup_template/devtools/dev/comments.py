@@ -33,6 +33,8 @@ from lup.codescan.markers import (
     find_feedback,
     find_markers,
     remove_notes,
+    restore_claims,
+    retire_claims,
     scan_mode_for,
 )
 from lup_template.devtools.utils import decode_stderr, git, output_json
@@ -75,6 +77,62 @@ def find_todos(text: str, mode: str) -> list[MarkerComment]:
     return find_markers(text, mode, marker=TEMPLATE_MARKER_RE)
 
 
+def targets_by_file(targets: list[str]) -> dict[str, list[int]]:
+    """Group `file:line` arguments per file, reporting malformed ones."""
+    by_file: defaultdict[str, list[int]] = defaultdict(list)
+    for target in targets:
+        rel, _, line_str = target.rpartition(":")  # lup: ignore[string-split] — CLI arg
+        if not rel or not line_str.isdigit():
+            typer.echo(f"Skipping malformed target: {target}", err=True)
+            continue
+        if int(line_str) not in by_file[rel]:
+            by_file[rel].append(int(line_str))
+    return dict(by_file)
+
+
+def revise_claims(
+    targets: list[str], *, retire: bool, narrow: str | None = None
+) -> None:
+    """Retire or restore `# lup: solved:` claims at `file:line` targets.
+
+    The verify-solved pass's instrument: the edit gate denies changing a
+    claim marker in any session, so confirmation and restoration go through
+    this command instead — loud in the transcript, visible in the diff, and
+    shape-restricted to claims. A target landing on open feedback, parked
+    work, or no note at all is refused rather than touched.
+    """
+    failed = False
+    for rel, wanted in targets_by_file(targets).items():
+        path = Path(rel)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            typer.echo(f"Skipping unreadable file: {rel}", err=True)
+            failed = True
+            continue
+        note_targets = [NoteTarget(line=line_no) for line_no in wanted]
+        revision = (
+            retire_claims(text, scan_mode_for(path), note_targets)
+            if retire
+            else restore_claims(text, scan_mode_for(path), note_targets, narrow)
+        )
+        for target in revision.missing:
+            typer.echo(f"No solved claim at {rel}:{target.line}", err=True)
+        for note in revision.refused:
+            typer.echo(
+                f"Refusing {rel}:{note.start_line}: a {note.kind} note is "
+                "not a solved claim",
+                err=True,
+            )
+        failed = failed or bool(revision.missing or revision.refused)
+        if revision.revised:
+            path.write_text(revision.text, encoding="utf-8")
+        verb = "Retired" if retire else "Restored"
+        typer.echo(f"{verb} {len(revision.revised)} claim(s) in {rel}")
+    if failed:
+        raise typer.Exit(1)
+
+
 def clear_markers(targets: list[str], *, wake: bool = False) -> None:
     """Remove specific feedback markers named as `file:line` targets.
 
@@ -103,16 +161,7 @@ def clear_markers(targets: list[str], *, wake: bool = False) -> None:
         )
         raise typer.Exit(1)
 
-    by_file: defaultdict[str, list[int]] = defaultdict(list)
-    for target in targets:
-        rel, _, line_str = target.rpartition(":")  # lup: ignore[string-split] — CLI arg
-        if not rel or not line_str.isdigit():
-            typer.echo(f"Skipping malformed target: {target}", err=True)
-            continue
-        if int(line_str) not in by_file[rel]:
-            by_file[rel].append(int(line_str))
-
-    for rel, wanted in by_file.items():
+    for rel, wanted in targets_by_file(targets).items():
         path = Path(rel)
         try:
             text = path.read_text(encoding="utf-8")

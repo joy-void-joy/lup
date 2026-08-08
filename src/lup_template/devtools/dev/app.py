@@ -395,13 +395,46 @@ def comments_cmd(
             help="With --clear: also strip the defer notes named, waking them",
         ),
     ] = False,
+    retire: Annotated[
+        bool,
+        typer.Option(
+            "--retire",
+            help="Delete the solved claims named as file:line (verify pass only)",
+        ),
+    ] = False,
+    restore: Annotated[
+        bool,
+        typer.Option(
+            "--restore",
+            help="Reopen the solved claims named as file:line as open feedback",
+        ),
+    ] = False,
+    narrow: Annotated[
+        str | None,
+        typer.Option(
+            "--narrow",
+            help="With --restore and one target: the still-outstanding text",
+        ),
+    ] = None,
 ) -> None:
-    """List unresolved `# lup:` feedback comments, or clear specific ones.
+    """List unresolved `# lup:` feedback comments, or act on specific ones.
 
     With --clear, removes each `file:line` marker named as an argument; used at
     fork time to strip a concern's own notes from an editor's worktree. Deferred
     notes are skipped unless --wake is passed as well.
+
+    With --retire or --restore, applies the verify-solved pass's verdicts to
+    `# lup: solved:` claims — and only to claims: any other note is refused.
     """
+    if sum([clear, retire, restore]) > 1:
+        typer.echo("--clear, --retire, and --restore are exclusive", err=True)
+        raise typer.Exit(2)
+    if narrow is not None and (not restore or len(targets or []) != 1):
+        typer.echo("--narrow needs --restore and exactly one target", err=True)
+        raise typer.Exit(2)
+    if retire or restore:
+        comments.revise_claims(targets or [], retire=retire, narrow=narrow)
+        return
     if clear:
         comments.clear_markers(targets or [], wake=wake)
         return

@@ -18,9 +18,12 @@ from lup.policy.kernel.edit import IGNORE_RE
 from lup.codescan.markers import (
     TEMPLATE_MARKER_RE,
     MarkerComment,
+    NoteTarget,
     ScanMode,
     find_feedback,
     find_markers,
+    restore_claims,
+    retire_claims,
     scan_mode_for,
 )
 
@@ -394,3 +397,75 @@ def test_marker_comment_rejects_incoherent_kind_condition_pairs() -> None:
         build("solved", "until then")
     assert build("defer", "until then").condition == "until then"
     assert build("defer", None).condition is None
+
+
+CLAIMS_SOURCE = """\
+alpha = 1
+# lup: solved: rework this section
+# across the lines below
+beta = 2
+# lup: still open feedback
+gamma = 3  # lup: solved: rename gamma
+# lup: defer: parked work
+delta = 4
+"""
+
+
+def test_retire_removes_only_solved_claims() -> None:
+    revision = retire_claims(
+        CLAIMS_SOURCE,
+        ScanMode.PYTHON,
+        [
+            NoteTarget(line=2),
+            NoteTarget(line=5),
+            NoteTarget(line=7),
+            NoteTarget(line=99),
+        ],
+    )
+    assert [note.start_line for note in revision.revised] == [2]
+    assert sorted(note.kind for note in revision.refused) == ["defer", "note"]
+    assert [target.line for target in revision.missing] == [99]
+    assert "rework this section" not in revision.text
+    assert "still open feedback" in revision.text
+    assert "defer: parked work" in revision.text
+
+
+def test_retire_inline_claim_keeps_its_code() -> None:
+    revision = retire_claims(CLAIMS_SOURCE, ScanMode.PYTHON, [NoteTarget(line=6)])
+    assert "gamma = 3" in revision.text
+    assert "rename gamma" not in revision.text
+
+
+def test_restore_strips_the_head_and_keeps_continuations() -> None:
+    revision = restore_claims(CLAIMS_SOURCE, ScanMode.PYTHON, [NoteTarget(line=2)])
+    restored = [
+        note
+        for note in find_feedback(revision.text, ScanMode.PYTHON)
+        if note.start_line == 2
+    ]
+    assert restored[0].kind == "note"
+    assert restored[0].text == "rework this section across the lines below"
+    assert "# across the lines below" in revision.text
+
+
+def test_restore_narrowed_keeps_only_the_outstanding_part() -> None:
+    revision = restore_claims(
+        CLAIMS_SOURCE, ScanMode.PYTHON, [NoteTarget(line=2)], "the second half"
+    )
+    restored = [
+        note
+        for note in find_feedback(revision.text, ScanMode.PYTHON)
+        if note.start_line == 2
+    ]
+    assert restored[0].kind == "note"
+    assert restored[0].text == "the second half"
+    assert "across the lines below" not in revision.text
+
+
+def test_restore_refuses_notes_that_are_not_claims() -> None:
+    revision = restore_claims(
+        CLAIMS_SOURCE, ScanMode.PYTHON, [NoteTarget(line=5), NoteTarget(line=7)]
+    )
+    assert revision.revised == []
+    assert sorted(note.kind for note in revision.refused) == ["defer", "note"]
+    assert revision.text == CLAIMS_SOURCE
