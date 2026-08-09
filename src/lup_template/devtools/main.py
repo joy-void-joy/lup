@@ -28,20 +28,32 @@ Examples::
 
 import typer
 
+from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
-from lup_template.devtools.dev import conflicts
 from lup_template.devtools.agent import app as agent_app
 from lup_template.devtools.dashboard.app import app as dashboard_app
-from lup_template.devtools.py.app import app as py_app
+from lup_template.devtools.dev import conflicts
 from lup_template.devtools.dev.app import app as dev_app
 from lup_template.devtools.feedback.app import app as feedback_app
 from lup_template.devtools.harness.app import app as harness_app
 from lup_template.devtools.setup import app as setup_app
-from lup_template.devtools.sync import app as sync_app
-from lup_template.devtools.subapps import SUBAPPS
-from lup_template.devtools.trace.app import app as trace_app
-from lup_template.devtools.usage.app import app as usage_app
-from lup_template.devtools.version import app as version_app
+from lup_template.devtools.subapps import APPLICATION_SPECS, INHERITED
+
+APPLICATION_APPS = {
+    "agent": agent_app,
+    "dashboard": dashboard_app,
+    "dev": dev_app,
+    "feedback": feedback_app,
+    "harness": harness_app,
+    "setup": setup_app,
+}
+"""Where each application spec meets the Typer app answering to its name.
+
+This module is the composition root and nothing imports it, which is what
+lets the apps be named here without the guidance that documents them coming
+along. A spec with no app raises on the first invocation rather than serving
+a CLI missing a command the docs promise.
+"""
 
 app = typer.Typer(
     help="lup-devtools: development and analysis tools",
@@ -49,26 +61,19 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-SUBAPP_TYPERS = {
-    "agent": agent_app,
-    "dashboard": dashboard_app,
-    "dev": dev_app,
-    "feedback": feedback_app,
-    "harness": harness_app,
-    "py": py_app,
-    "setup": setup_app,
-    "sync": sync_app,
-    "trace": trace_app,
-    "usage": usage_app,
-    "version": version_app,
-}
-
-declared = {subapp.name for subapp in SUBAPPS}
-if set(SUBAPP_TYPERS) != declared:  # lup: ignore[set-shape] — roster equality
-    raise ValueError("lup-devtools sub-app roster and Typer wiring disagree")
-
-for subapp in SUBAPPS:
-    app.add_typer(SUBAPP_TYPERS[subapp.name], name=subapp.name, help=subapp.help)
+compose(
+    app,
+    sorted(
+        [
+            *INHERITED,
+            *[
+                SubApp(spec=spec, app=APPLICATION_APPS[spec.name])
+                for spec in APPLICATION_SPECS
+            ],
+        ],
+        key=lambda entry: entry.spec.name,
+    ),
+)
 
 
 @app.callback()

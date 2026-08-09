@@ -47,7 +47,7 @@ from lup_template.devtools.feedback.state import (
     match_outcomes,
     save_analyzed,
 )
-from lup_template.devtools.utils import format_table, output_json
+from lup.devtools.utils import format_table, output_json
 
 logger = logging.getLogger(__name__)
 

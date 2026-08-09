@@ -6,8 +6,9 @@ import posixpath
 from typing import TypedDict
 
 from .decision import KernelDecision, SUBSTITUTION_SENTINEL
+from .edit import path_rule_matches
 from .roles import path_role
-from .rows import PathRoleRow
+from .rows import PathRoleRow, PathRuleRow
 
 
 class EffectiveCommand(TypedDict):
@@ -240,6 +241,44 @@ def written_operands(executable: str, operands: list[str]) -> list[str]:
     return operands
 
 
+def created_destination(
+    executable: str,
+    operands: list[str],
+    existing_targets: list[str] | None,
+    path_roles: list[PathRoleRow],
+) -> str | None:
+    """The operand a copy or move would bring into being, if it would.
+
+    Both verbs write their last operand and read the rest, so a destination
+    nothing occupies yet is a creation, and creating a file destroys nothing
+    — the same reason a redirection to a fresh path is written freely. That
+    is what leaves ``mv`` and ``rm`` agreeing about a tracked, clean file
+    instead of the move asking where the delete did not.
+
+    Destroying nothing is only half of it, because a create also *places*
+    content, and the edit gate reads every line that enters production.
+    Content already in production has passed it; content in a scratch root
+    never did, and arriving by rename is how it would skip it. So a source
+    there withholds the grant even though the destination is empty.
+
+    ``existing_targets`` of ``None`` means no caller established anything, so
+    every destination is treated as occupied. An expansion is never resolved:
+    it names a different path at run time than the one that was stat'd.
+    """
+    if executable not in ("cp", "mv") or len(operands) < 2:
+        return None
+    destination = operands[-1]
+    if existing_targets is None or destination in existing_targets:
+        return None
+    if opaque_argument(destination) or destination.startswith("~"):
+        return None
+    if path_role(destination, path_roles) != "scratch" and any(
+        path_role(source, path_roles) == "scratch" for source in operands[:-1]
+    ):
+        return None
+    return destination
+
+
 def refuses_generated_plugin_target(word: str) -> KernelDecision | None:
     """Refuse one path that would write inside a generated plugin tree.
 
@@ -301,11 +340,41 @@ def asks_before_removing_a_directory(
     )
 
 
+def protected_write_target(
+    targets: list[str], path_rules: list[PathRuleRow], path_exists: bool
+) -> KernelDecision | None:
+    """Ask before granting a write to a path the declared rules protect.
+
+    Every grant below answers "what would destroying this cost" — nothing,
+    for a scratch file; a checkout, for one Git can restore. That is the
+    wrong question for a file protected by who owns it rather than by what
+    it would cost to rebuild, and answering it anyway is how ``rm sync.json``
+    and ``cp x README.md`` passed a gate the Edit tool stops. The rules are
+    the edit gate's own, so the two cannot come to disagree about a path.
+
+    ``path_exists`` is the caller's own established fact, because the rule
+    kinds that fire only on a path that is not there yet — a new subtree, a
+    new devtools module — mean the opposite thing when it is. A grant over a
+    scratch or Git-clean operand has settled that it exists; a redirection
+    knows from the targets the host stat'd.
+    """
+    for word in targets:
+        matched = next(
+            (row for row in path_rules if path_rule_matches(word, path_exists, row)),
+            None,
+        )
+        if matched is not None:
+            return KernelDecision("ask", matched["reason"])
+    return None
+
+
 def confined_to_recoverable_roots(
     words: list[str],
     path_roles: list[PathRoleRow],
     recoverable_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
+    path_rules: list[PathRuleRow] | None = None,
+    existing_targets: list[str] | None = None,
 ) -> KernelDecision | None:
     """Recognize a path-taking judged-ask verb whose every target is disposable.
 
@@ -325,6 +394,11 @@ def confined_to_recoverable_roots(
     has to know to perform, so that grant is capped: past the limit a delete
     is a sweep, and a sweep is worth a question even when every file in it
     could be brought back.
+
+    A destination nothing occupies yet is neither: it is brought into being,
+    and the cap does not reach it because there is nothing there to restore
+    — provided the content arriving there already lives in production, where
+    the edit gate has read it.
     """
     executable = posixpath.basename(words[0])
     if executable not in SCRATCH_VERB_FLAGS:
@@ -335,16 +409,21 @@ def confined_to_recoverable_roots(
     if not inert or not operands:
         return None
     targets = written_operands(executable, operands)
+    created = created_destination(executable, operands, existing_targets, path_roles)
     disposable = [word for word in targets if path_role(word, path_roles) == "scratch"]
     restorable = [
         word
         for word in targets
         if word not in disposable and word in (recoverable_targets or [])
     ]
-    if len(disposable) + len(restorable) != len(targets):
+    fresh = [word for word in targets if word == created and word not in disposable]
+    if len(disposable) + len(restorable) + len(fresh) != len(targets):
         return None
     if len(restorable) > recoverable_target_limit:
         return None
+    protected = protected_write_target(targets, path_rules or [], True)
+    if protected is not None:
+        return protected
     return KernelDecision("allow", "confined to recoverable roots")
 
 

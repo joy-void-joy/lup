@@ -20,7 +20,7 @@ from lup.types import (
     LupToolUseBlock,
 )
 from lup_template.devtools.main import app
-from lup_template.devtools.trace.traces import (
+from lup.devtools.trace.traces import (
     scan_for_capability_gaps,
     scan_for_errors,
 )

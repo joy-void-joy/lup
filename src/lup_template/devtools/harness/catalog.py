@@ -133,6 +133,15 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 ),
                 HookUrlScope(origin=AnyHttpUrl("https://pypi.org")),
                 HookUrlScope(origin=AnyHttpUrl("https://files.pythonhosted.org")),
+                # This machine's own services: the setup dashboard, the
+                # resolver supervisor, and whatever a session is running to
+                # look at. Reaching one is how a session establishes that it
+                # came up at all, and asking for that is asking about a
+                # process the same session just started. No port is named
+                # because every one of these surfaces takes `--port`, and a
+                # scope that went stale on a flag would put the question back.
+                HookUrlScope(origin=AnyHttpUrl("http://127.0.0.1"), any_port=True),
+                HookUrlScope(origin=AnyHttpUrl("http://localhost"), any_port=True),
             ],
             protected_edit_roots=[
                 Path(".claude"),

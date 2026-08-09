@@ -10,7 +10,7 @@ import typer
 from pydantic import BaseModel, Field
 
 from lup_template.devtools.dev.remote_auth import check_remote_auth
-from lup_template.devtools.utils import (
+from lup.devtools.utils import (
     format_table,
     git,
     gh,

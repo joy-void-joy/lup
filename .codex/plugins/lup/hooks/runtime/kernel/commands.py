@@ -404,6 +404,27 @@ CURL_SAFE_FLAGS = (
     "-4",
     "-6",
 )
+# The single letters above, which curl accepts clustered as readily as apart.
+# `-sS` is one word to every shell and to curl, and reading it as an unknown
+# option refused the request's most ordinary spellings while admitting the
+# same flags written with spaces between them.
+CURL_SAFE_CLUSTER_LETTERS = "".join(
+    flag[1] for flag in CURL_SAFE_FLAGS if len(flag) == 2 and not flag[1].isdigit()
+)
+
+
+def curl_safe_flag(word: str) -> bool:
+    """Whether one curl word is a declared reporting flag, clustered or alone."""
+    if word in CURL_SAFE_FLAGS:
+        return True
+    return (
+        len(word) > 1
+        and word.startswith("-")
+        and not word.startswith("--")
+        and all(letter in CURL_SAFE_CLUSTER_LETTERS for letter in word[1:])
+    )
+
+
 CURL_VALUE_FLAGS = (  # lup: ignore[library-default] — curl's own value-taking flags; misreading one shifts the argument scan
     "-H",
     "--header",
@@ -449,7 +470,7 @@ def decide_curl_words(
         if word.startswith("--request="):
             method = word.partition("=")[2]
             continue
-        if word in CURL_SAFE_FLAGS:
+        if curl_safe_flag(word):
             continue
         if word in CURL_VALUE_FLAGS:
             expect_value = True

@@ -41,7 +41,7 @@ from importlib.metadata import version as installed_version
 from packaging.requirements import Requirement
 
 from lup.workspace.paths import find_project_root
-from lup_template.devtools.utils import git
+from lup.devtools.utils import git
 
 VENDORED_ROOT = "packages/lup"
 VENDORED_SRC = "packages/lup/src"

@@ -24,6 +24,14 @@ SETTINGS: JsonObject = {
 ALLOWED: list[JsonValue] = [
     "WebSearch",
     "Skill(lup:hooks)",
+    # The guidance sends every change through a worktree, so entering and
+    # leaving one is the first thing a session does and the last. Asking
+    # about the step the workflow mandates is asking whether to follow it.
+    # Neither tool writes: `EnterWorktree` moves this session into a tree
+    # `dev worktree create` already made, and `ExitWorktree` only removes one
+    # when asked to, which is its own question.
+    "EnterWorktree",
+    "ExitWorktree",
     "Read(./.claude/settings.json.local*)",
     "Read(./sync.json.local)",
     "Read(./downstream.json.local)",

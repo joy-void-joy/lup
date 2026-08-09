@@ -25,6 +25,8 @@
     "allow": [
       "WebSearch",
       "Skill(lup:hooks)",
+      "EnterWorktree",
+      "ExitWorktree",
       "Read(./.claude/settings.json.local*)",
       "Read(./sync.json.local)",
       "Read(./downstream.json.local)",
@@ -75,6 +77,8 @@
         "*.githubusercontent.com",
         "pypi.org",
         "files.pythonhosted.org",
+        "127.0.0.1",
+        "localhost",
         "api.anthropic.com"
       ]
     }

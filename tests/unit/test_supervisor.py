@@ -46,10 +46,10 @@ from lup.resolver.models import (
     SourceSnapshot,
 )
 from lup.resolver.state import ResolverStateRepository
-from lup_template.devtools.supervisor import doors
-from lup_template.devtools.supervisor.app import create_supervisor
-from lup_template.devtools.supervisor.events import stream
-from lup_template.devtools.supervisor.projection import (
+from lup.devtools.supervisor import doors
+from lup.devtools.supervisor.app import create_supervisor
+from lup.devtools.supervisor.events import stream
+from lup.devtools.supervisor.projection import (
     LIVENESS_WINDOW_SECONDS,
     RunIndex,
     RunStatus,
@@ -657,7 +657,7 @@ def test_every_element_the_script_reaches_for_exists_in_the_markup() -> None:
     passing and the page simply stops updating that region.
     """
     page = (
-        resources.files("lup_template.devtools.supervisor")
+        resources.files("lup.devtools.supervisor")
         .joinpath("assets/index.html")
         .read_text("utf-8")
     )
@@ -681,7 +681,7 @@ def test_the_page_draws_every_event_the_journal_can_record() -> None:
     here rather than in a trace somebody is trying to read.
     """
     page = (
-        resources.files("lup_template.devtools.supervisor")
+        resources.files("lup.devtools.supervisor")
         .joinpath("assets/index.html")
         .read_text("utf-8")
     )
@@ -703,7 +703,7 @@ def test_the_page_draws_every_event_the_journal_can_record() -> None:
 def test_the_page_posts_only_routes_the_app_serves() -> None:
     """The page and the app share no schema, so a renamed route is silent."""
     page = (
-        resources.files("lup_template.devtools.supervisor")
+        resources.files("lup.devtools.supervisor")
         .joinpath("assets/index.html")
         .read_text("utf-8")
     )

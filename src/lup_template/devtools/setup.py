@@ -22,7 +22,7 @@ Customization:
        ``setup_func`` returning ``EnvVars`` instead of declarative fields.
     3. Override status display with ``status_func`` when env-key presence
        isn't the whole story.
-    4. Shell helpers live in ``lup_template.devtools.utils`` (e.g.
+    4. Shell helpers live in ``lup.devtools.utils`` (e.g.
        ``copy_to_clipboard`` for wizard steps that hand the user a value)
 """
 

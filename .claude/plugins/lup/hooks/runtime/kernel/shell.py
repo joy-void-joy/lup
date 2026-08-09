@@ -13,7 +13,7 @@ from .decision import (
     SUBSTITUTION_SENTINEL,
     unjudged,
 )
-from .rows import PathRoleRow, ShellRuleRow, UrlScopeRow
+from .rows import PathRoleRow, PathRuleRow, ShellRuleRow, UrlScopeRow
 from .words import (
     INTERPRETERS,
     asks_before_removing_a_directory,
@@ -58,6 +58,8 @@ class ShellContext(TypedDict):
     denied_scopes: list[UrlScopeRow]
     trusted_script_roots: list[str]
     path_roles: list[PathRoleRow]
+    path_rules: list[PathRuleRow]
+    existing_targets: list[str] | None
     recoverable_targets: list[str]
     directory_targets: list[str]
     recoverable_target_limit: int
@@ -70,18 +72,27 @@ def shell_context(
     denied_scopes: list[UrlScopeRow] | None = None,
     trusted_script_roots: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
+    path_rules: list[PathRuleRow] | None = None,
+    existing_targets: list[str] | None = None,
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
     runner_targets: list[str] | None = None,
 ) -> ShellContext:
-    """Bundle one classification's declarations, normalizing absent lists."""
+    """Bundle one classification's declarations, normalizing absent lists.
+
+    ``existing_targets`` keeps its ``None``, because that is a fact about the
+    caller rather than an empty list of paths: nothing was established, so
+    every write target is treated as already there.
+    """
     return ShellContext(
         rows=rows,
         allowed_scopes=allowed_scopes or [],
         denied_scopes=denied_scopes or [],
         trusted_script_roots=trusted_script_roots or [],
         path_roles=path_roles or [],
+        path_rules=path_rules or [],
+        existing_targets=existing_targets,
         recoverable_targets=recoverable_targets or [],
         directory_targets=directory_targets or [],
         recoverable_target_limit=recoverable_target_limit,
@@ -186,6 +197,8 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
         context["path_roles"],
         context["recoverable_targets"],
         context["recoverable_target_limit"],
+        context["path_rules"],
+        context["existing_targets"],
     )
     if recoverable is not None:
         return recoverable
@@ -715,6 +728,7 @@ def classify_shell(
     denied_scopes: list[UrlScopeRow] | None = None,
     trusted_script_roots: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
+    path_rules: list[PathRuleRow] | None = None,
     existing_targets: list[str] | None = None,
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
@@ -722,7 +736,7 @@ def classify_shell(
     runner_targets: list[str] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
-    segments = parse_shell_words(command, 0, existing_targets, path_roles)
+    segments = parse_shell_words(command, 0, existing_targets, path_roles, path_rules)
     if isinstance(segments, KernelDecision):
         return segments
     context = shell_context(
@@ -731,6 +745,8 @@ def classify_shell(
         denied_scopes,
         trusted_script_roots,
         path_roles,
+        path_rules,
+        existing_targets,
         recoverable_targets,
         directory_targets,
         recoverable_target_limit,
@@ -757,6 +773,7 @@ def decide_shell(
     sandboxed: bool = False,
     trusted_script_roots: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
+    path_rules: list[PathRuleRow] | None = None,
     interactive: bool = True,
     existing_targets: list[str] | None = None,
     recoverable_targets: list[str] | None = None,
@@ -802,15 +819,16 @@ def decide_shell(
         inner = classify_shell(
             command[marker.end() :],
             rows,
-            allowed_scopes,
-            denied_scopes,
-            trusted_script_roots,
-            path_roles,
-            existing_targets,
-            recoverable_targets,
-            directory_targets,
-            recoverable_target_limit,
-            runner_targets,
+            allowed_scopes=allowed_scopes,
+            denied_scopes=denied_scopes,
+            trusted_script_roots=trusted_script_roots,
+            path_roles=path_roles,
+            path_rules=path_rules,
+            existing_targets=existing_targets,
+            recoverable_targets=recoverable_targets,
+            directory_targets=directory_targets,
+            recoverable_target_limit=recoverable_target_limit,
+            runner_targets=runner_targets,
         )
         if inner.effect == "allow":
             return inner
@@ -819,14 +837,15 @@ def decide_shell(
         classify_shell(
             command,
             rows,
-            allowed_scopes,
-            denied_scopes,
-            trusted_script_roots,
-            path_roles,
-            existing_targets,
-            recoverable_targets,
-            directory_targets,
-            recoverable_target_limit,
-            runner_targets,
+            allowed_scopes=allowed_scopes,
+            denied_scopes=denied_scopes,
+            trusted_script_roots=trusted_script_roots,
+            path_roles=path_roles,
+            path_rules=path_rules,
+            existing_targets=existing_targets,
+            recoverable_targets=recoverable_targets,
+            directory_targets=directory_targets,
+            recoverable_target_limit=recoverable_target_limit,
+            runner_targets=runner_targets,
         )
     )

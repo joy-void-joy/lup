@@ -68,7 +68,7 @@ from lup.policy.rules import (
     path_rule_row,
 )
 
-from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.catalog import declared_hook_set, portable_harness
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 
@@ -104,6 +104,13 @@ FIXTURE_PATH_ROLES = [
     PathRoleRow(root="tests", role="test"),
     PathRoleRow(root="tmp", role="scratch"),
 ]
+
+FIXTURE_PATH_RULES = declared_path_rules(declared_hook_set())
+"""The protected-path table this repository declares.
+
+Shared by the shell and edit fixtures rather than restated for each, because
+a table the two gates could be given differently is the drift these cases
+exist to catch."""
 
 FIXTURE_RECOVERABLE_LIMIT = 5
 FIXTURE_RUNNER_TARGETS = ["pyright", "pytest", "ruff", "lup-devtools"]
@@ -195,6 +202,39 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
+    # Publishing is how work becomes reviewable, so the verbs that put a
+    # branch and its pull request in front of a reader are ordinary. What
+    # keeps the ask is what a second attempt cannot restore, and what reaches
+    # another person rather than describing your own work.
+    DecisionCase(input="git push", effect="allow"),
+    DecisionCase(input="git push --force origin HEAD", effect="allow"),
+    DecisionCase(input="git push --delete origin feat", effect="ask"),
+    DecisionCase(input="gh pr create --fill", effect="allow"),
+    DecisionCase(input="gh pr ready 3", effect="allow"),
+    DecisionCase(input="gh pr comment 3 --body hi", effect="ask"),
+    DecisionCase(input="gh pr merge 3", effect="ask"),
+    # A default-method gh api call is a query; the flags that make it
+    # anything else carry the ask instead of the subcommand carrying it.
+    DecisionCase(input="gh api repos/o/r/pulls", effect="allow"),
+    DecisionCase(input="gh api -X POST repos/o/r/issues", effect="ask"),
+    DecisionCase(input="gh api -f title=x repos/o/r/issues", effect="ask"),
+    # Reading a repository is read-only however deep in git's own vocabulary
+    # the question is spelled.
+    DecisionCase(input="git ls-remote --heads origin", effect="allow"),
+    DecisionCase(input="git diff-tree -r HEAD", effect="allow"),
+    DecisionCase(input="git check-ignore -v build/x", effect="allow"),
+    DecisionCase(input="git submodule status", effect="allow"),
+    DecisionCase(input="git bisect log", effect="allow"),
+    DecisionCase(input="git bisect start", effect="ask"),
+    # A protected path is protected from the shell too. Creating a file
+    # destroys nothing, which is why an ordinary new target is written
+    # freely — but the rules that guard a path guard it by who owns it, not
+    # by what replacing it would cost, so they answer ahead of that grant and
+    # the shell cannot reach what the edit gate stops.
+    DecisionCase(input="echo x > README.md", effect="ask"),
+    DecisionCase(input="echo x > sync.json", effect="ask"),
+    DecisionCase(input="echo x > .env.local", effect="ask"),
+    DecisionCase(input="echo x > docs/fresh-note.md", effect="allow"),
     # Housekeeping confined to the disposable roots is as safe as writing
     # them; any long flag, opaque word, or outside target keeps the verb's ask.
     DecisionCase(input="rm tmp/oneoff.py", effect="allow"),
@@ -270,7 +310,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="[[ -n $(git status --porcelain) ]]", effect="allow"),
     DecisionCase(input="echo $(echo $(ls))", effect="allow"),
     DecisionCase(input="F=$(ls); echo $F", effect="allow"),
-    DecisionCase(input="echo $(git push)", effect="ask"),
+    DecisionCase(input="echo $(git push --delete origin feat)", effect="ask"),
     DecisionCase(input="echo $(rm -rf /)", effect="ask"),
     DecisionCase(input="git log $(cat names.txt)", effect="deny"),
     DecisionCase(input="F=$(ls); sed $F 's/a/b/' f", effect="deny"),
@@ -336,7 +376,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git stash drop", effect="ask"),
     DecisionCase(input="git reset --hard", effect="ask"),
     DecisionCase(input="git clean -fd", effect="ask"),
-    DecisionCase(input="git push --force", effect="ask"),
+    DecisionCase(input="git push --delete origin feat", effect="ask"),
     DecisionCase(input="git checkout -- file", effect="deny"),
     # Ref-sourced pathspec restores name their content's commit; the shell
     # option builtin is shell-local. Both anchor history-rebuild batches.
@@ -364,7 +404,7 @@ SHELL_POLICY_CASES = [
     # Global value flags are consumed, never read as the subcommand; globals
     # that change execution behavior ask.
     DecisionCase(input="git -C /other status", effect="allow"),
-    DecisionCase(input="git -C status push", effect="ask"),
+    DecisionCase(input="git -C status restore f", effect="ask"),
     DecisionCase(input="git -c core.pager=touch log", effect="ask"),
     DecisionCase(input="git --exec-path=/tmp/x status", effect="ask"),
     # Exec-bearing and file-writing flags on allowed subcommands ask.
@@ -374,7 +414,6 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git log --output=/tmp/f", effect="ask"),
     DecisionCase(input="git reflog", effect="allow"),
     DecisionCase(input="git reflog expire --expire=now --all", effect="ask"),
-    DecisionCase(input="git push", effect="ask"),
     DecisionCase(input="git pull", effect="allow"),
     DecisionCase(input="git clone https://x.test/r.git", effect="ask"),
     DecisionCase(input="git restore f", effect="ask"),
@@ -398,14 +437,14 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git apply $PATCH", effect="deny"),
     DecisionCase(input="git switch main", effect="allow"),
     DecisionCase(input="git checkout main", effect="deny"),
-    DecisionCase(input="git bisect start", effect="deny"),
+    DecisionCase(input="git filter-branch --tree-filter x", effect="deny"),
     DecisionCase(input="sort --compress-program=/tmp/x f", effect="ask"),
     # gh: read-only operations allow; mutating forms ask.
     DecisionCase(input="gh run view 1", effect="allow"),
     DecisionCase(input="gh repo view", effect="allow"),
     DecisionCase(input="gh pr close 1", effect="ask"),
     DecisionCase(input="gh api -X POST /repos", effect="ask"),
-    DecisionCase(input="gh pr create --title x", effect="ask"),
+    DecisionCase(input="gh issue create --title x", effect="ask"),
     DecisionCase(input="gh pr checkout 123", effect="allow"),
     DecisionCase(input="gh auth status", effect="allow"),
     DecisionCase(input="gh secret list", effect="deny"),
@@ -561,7 +600,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="sort $UNBOUND f", effect="defer", sandboxed=True),
     DecisionCase(input="foo() { cat x; }", effect="defer", sandboxed=True),
     DecisionCase(input="case $m in a) echo a;;", effect="defer", sandboxed=True),
-    DecisionCase(input="git push --force", effect="ask", sandboxed=True),
+    DecisionCase(input="git push --delete origin feat", effect="ask", sandboxed=True),
     DecisionCase(input="sed -i 's/a/b/' f", effect="deny", sandboxed=True),
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
@@ -577,9 +616,14 @@ SHELL_POLICY_CASES = [
     # A non-interactive host cannot put a question to a human: sandboxed, an
     # ask rides the OS boundary; unsandboxed it fails closed. A judged deny
     # is never rescued, and unjudged work defers exactly as it always did.
-    DecisionCase(input="git push --force", effect="deny", interactive=False),
     DecisionCase(
-        input="git push --force", effect="defer", sandboxed=True, interactive=False
+        input="git push --delete origin feat", effect="deny", interactive=False
+    ),
+    DecisionCase(
+        input="git push --delete origin feat",
+        effect="defer",
+        sandboxed=True,
+        interactive=False,
     ),
     DecisionCase(input="PYTHONPATH=src uv run pytest", effect="ask"),
     DecisionCase(
@@ -949,6 +993,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        case['input'], SHELL_RULES, sandboxed=case['sandboxed'],\n"
         "        interactive=case['interactive'],\n"
         "        path_roles=PATH_ROLES,\n"
+        "        path_rules=PATH_RULES,\n"
         "        existing_targets=case['existing'],\n"
         "        runner_targets=RUNNER_TARGETS,\n"
         "    )\n"
@@ -1115,12 +1160,127 @@ def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
         return policy.decide(ShellCommand(command=command)).effect
 
     assert effect("curl -s https://docs.example.com/api/one") == "allow"
-    assert effect("curl -sI https://docs.example.com/") == "deny"
+    # A cluster is one word to the shell and to curl, so it is judged as the
+    # flags it spells rather than as an option nobody declared.
+    assert effect("curl -sI https://docs.example.com/") == "allow"
     assert effect("curl -s -I https://docs.example.com/") == "allow"
+    assert effect("curl -sSf https://docs.example.com/") == "allow"
+    # Only the declared reporting letters cluster. One that follows redirects
+    # or carries a body reaches past the scopes, so it stays unclassified
+    # wherever it is spelled.
+    assert effect("curl -fsSL https://docs.example.com/") == "deny"
+    assert effect("curl -sd a=b https://docs.example.com/api") == "deny"
     assert effect("curl -s https://internal.example.com/x") == "deny"
     assert effect("curl -s https://elsewhere.example.com/") == "ask"
     assert effect("curl -X DELETE https://docs.example.com/api") == "ask"
     assert effect("curl -d a=b https://docs.example.com/api") == "deny"
+
+
+def test_a_scope_may_cover_every_port_on_one_host() -> None:
+    """A local service is the same service at whatever port it was started on.
+
+    Every surface this repository serves takes `--port`, so a scope pinned to
+    one number puts the question back the first time somebody moves it —
+    while the reason loopback is grantable at all, that nothing off this
+    machine can reach it, holds at every port equally.
+    """
+    policy = FetchPolicy(
+        [
+            UrlScope(origin=AnyHttpUrl("http://127.0.0.1"), any_port=True),
+            UrlScope(origin=AnyHttpUrl("https://pinned.example.com:8443")),
+        ],
+        [],
+    )
+
+    def effect(url: str) -> str:
+        return policy.decide(FetchUrl(url=AnyHttpUrl(url))).effect
+
+    assert effect("http://127.0.0.1:8765/api/runs") == "allow"
+    assert effect("http://127.0.0.1:9999/") == "allow"
+    assert effect("http://127.0.0.1/") == "allow"
+    assert effect("https://pinned.example.com:8443/x") == "allow"
+    assert effect("https://pinned.example.com:9000/x") == "ask"
+
+
+def committed_tree(root: Path, *names: str) -> None:
+    """A repository whose every named file is tracked with nothing pending.
+
+    The recoverable grant is the host's answer to a Git question, so a case
+    about it needs a real repository rather than a stub: what is being tested
+    is that `ls-files` and `status --porcelain` agree a path costs a checkout.
+    """
+    sh.Command("git")("init", "-q", str(root))
+    for name in names:
+        (root / name).write_text("body\n", encoding="utf-8")
+    git = sh.Command("git").bake(
+        "-C", str(root), "-c", "user.email=t@e", "-c", "user.name=t"
+    )
+    git("add", "-A")
+    git("commit", "-qm", "in")
+
+
+def test_a_recoverable_grant_never_covers_a_protected_path(tmp_path: Path) -> None:
+    """Git restoring a file says nothing about who is allowed to replace it.
+
+    The grant answers what destroying a path costs, which is the wrong
+    question for one protected by ownership: a clean tracked `README.md` is
+    exactly as restorable as any other file, and exactly as off-limits. The
+    two gates read one table so they cannot come to differ about a path.
+    """
+    committed_tree(tmp_path, "README.md", "notes.md")
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_rules=[human_owned_path_rule("README.md")],
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("rm notes.md") == "allow"
+    assert effect("rm README.md") == "ask"
+    assert effect("cp notes.md README.md") == "ask"
+
+
+def test_moving_a_recoverable_file_costs_what_deleting_it_costs(
+    tmp_path: Path,
+) -> None:
+    """A move is a delete and a create, and neither half is worth a question.
+
+    The verb wrote both operands, so a destination that did not exist yet
+    failed the recoverable test and took the whole command to an ask — which
+    left `mv` asking about a file `rm` would have removed without one, for
+    the sake of a path that holds nothing.
+    """
+    committed_tree(tmp_path, "notes.md", "other.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("rm notes.md") == "allow"
+    assert effect("mv notes.md renamed.md") == "allow"
+    assert effect("cp notes.md copy.md") == "allow"
+    # Replacing a tracked, clean file still costs only a checkout; replacing
+    # one the host cannot vouch for costs whatever was in it.
+    assert effect("mv notes.md other.md") == "allow"
+    (tmp_path / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
+    assert effect("mv notes.md dirty.md") == "ask"
+    # Content leaving a scratch root enters production without the edit gate
+    # ever having read it, so an empty destination is not the whole question.
+    scratch = ShellPolicy(
+        SHELL_RULES,
+        path_roles=FIXTURE_PATH_ROLES,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "tmp" / "draft.md").write_text("draft\n", encoding="utf-8")
+    assert (
+        scratch.decide(
+            ShellCommand(command="mv tmp/draft.md arrived.md", cwd=tmp_path)
+        ).effect
+        == "ask"
+    )
 
 
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
@@ -1167,12 +1327,14 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     policy = ShellPolicy(
         SHELL_RULES,
         path_roles=FIXTURE_PATH_ROLES,
+        path_rules=FIXTURE_PATH_RULES,
         runner_targets=FIXTURE_RUNNER_TARGETS,
     )
     sandboxed_policy = ShellPolicy(
         SHELL_RULES,
         sandbox_active=True,
         path_roles=FIXTURE_PATH_ROLES,
+        path_rules=FIXTURE_PATH_RULES,
         runner_targets=FIXTURE_RUNNER_TARGETS,
     )
 
@@ -1185,6 +1347,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
                 sandbox_active=case.sandboxed,
                 interactive=False,
                 path_roles=FIXTURE_PATH_ROLES,
+                path_rules=FIXTURE_PATH_RULES,
                 runner_targets=FIXTURE_RUNNER_TARGETS,
             )
         # Each case judges a tree of its own, so a file one case declares
@@ -1203,6 +1366,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             sandboxed=case.sandboxed,
             interactive=case.interactive,
             path_roles=FIXTURE_PATH_ROLES,
+            path_rules=policy.path_rules,
             existing_targets=case.existing,
             runner_targets=FIXTURE_RUNNER_TARGETS,
         ).effect
@@ -1247,12 +1411,12 @@ def test_sandbox_escape_reenters_the_deny_lattice() -> None:
 def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     """Codex hooks cannot complete the approval flow, so they never name it."""
     interactive = ShellPolicy(SHELL_RULES).decide(
-        ShellCommand(command="git push --force")
+        ShellCommand(command="git push --delete origin feat")
     )
     assert interactive.effect == "ask"
 
     blocked = ShellPolicy(SHELL_RULES, interactive=False).decide(
-        ShellCommand(command="git push --force")
+        ShellCommand(command="git push --delete origin feat")
     )
     assert blocked.effect == "deny"
     assert "escalate" not in blocked.reason

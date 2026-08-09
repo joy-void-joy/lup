@@ -25,7 +25,7 @@ from lup.resolver.mailbox import (
 )
 from lup.workspace.paths import project_root
 from lup_template.devtools.harness.resolve import parse_answer_flags
-from lup_template.devtools.supervisor.projection import PendingQuestionView
+from lup.devtools.supervisor.projection import PendingQuestionView
 
 
 def resolve_state_root() -> Path:

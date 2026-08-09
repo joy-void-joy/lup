@@ -11,8 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 from rich.console import Console
 
-from lup_template.devtools.usage.api import StatsCache, UsageResponse
-from lup_template.devtools.usage.render import build_display, build_snapshot
+from lup.adapters.claude.usage.api import StatsCache, UsageResponse
+from lup.adapters.claude.usage.render import build_display, build_snapshot
 
 
 def recent_stats() -> StatsCache:

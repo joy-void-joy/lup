@@ -19,6 +19,10 @@ class UrlScopeRow(TypedDict):
 
     ``include_subdomains`` widens ``host`` to cover names beneath it, so a
     scope can name a documentation site once instead of every subdomain.
+    ``any_port`` widens it the other way, for a host whose port is the
+    caller's to choose — a local service started with ``--port`` is the same
+    service at every one of them, and a scope pinned to one would put the
+    question back the first time somebody moved it.
     """
 
     scheme: str
@@ -27,6 +31,7 @@ class UrlScopeRow(TypedDict):
     path_prefix: str
     reason: str
     include_subdomains: bool
+    any_port: bool
 
 
 class PathRuleRow(TypedDict):

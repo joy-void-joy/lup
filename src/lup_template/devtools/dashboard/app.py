@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from lup.types import EnvVars
+from lup.web.loopback import guard_loopback_host, refuse_non_loopback
 from lup_template.devtools import setup
 
 
@@ -122,9 +123,16 @@ def save_integration(command: str, update: IntegrationUpdate) -> DashboardState:
     return dashboard_state()
 
 
-def create_dashboard() -> FastAPI:
-    """Build the local FastAPI app over the canonical setup registry."""
+def create_dashboard(url: str) -> FastAPI:
+    """Build the local FastAPI app over the canonical setup registry.
+
+    The page writes environment values, including the fields declared secret,
+    so it keeps the supervisor's posture rather than a weaker one: what a
+    surface is worth attacking is decided by what it writes, and this one
+    writes the user's credentials.
+    """
     dashboard = FastAPI(title="Lup setup", docs_url=None, redoc_url=None)
+    guard_loopback_host(dashboard, url)
     html = (
         resources.files("lup_template.devtools.dashboard")
         .joinpath("assets/index.html")
@@ -165,8 +173,12 @@ def serve_dashboard(
     """Run the setup dashboard from the same registry as the CLI wizard."""
     if context.invoked_subcommand is not None:
         return
+    try:
+        refuse_non_loopback(host, "setup dashboard")
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
     url = f"http://{host}:{port}"
     typer.echo(f"Lup setup dashboard: {url}")
     if open_page:
         webbrowser.open(url)
-    uvicorn.run(create_dashboard(), host=host, port=port)
+    uvicorn.run(create_dashboard(url), host=host, port=port)

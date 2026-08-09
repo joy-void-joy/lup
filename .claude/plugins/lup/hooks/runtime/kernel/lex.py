@@ -13,11 +13,12 @@ from .decision import (
     unjudged,
 )
 from .roles import path_role
-from .rows import PathRoleRow
+from .rows import PathRoleRow, PathRuleRow
 from .words import (
     SCRATCH_VERB_FLAGS,
     effective_command,
     path_verb_operands,
+    protected_write_target,
     refuses_generated_plugin_target,
 )
 
@@ -511,6 +512,7 @@ def resolve_redirection(
     heredoc_fed: bool = False,
     existing_targets: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
+    path_rules: list[PathRuleRow] | None = None,
 ) -> Redirection:
     """Classify one redirection, consuming its target and stripping safe forms.
 
@@ -548,6 +550,13 @@ def resolve_redirection(
     refused = refuses_generated_plugin_target(tokens[target].text)
     if refused is not None:
         return Redirection(decision=refused, resume=target + 1)
+    protected = protected_write_target(
+        [tokens[target].text],
+        path_rules or [],
+        existing_targets is None or tokens[target].text in existing_targets,
+    )
+    if protected is not None:
+        return Redirection(decision=protected, resume=target + 1)
     if path_role(tokens[target].text, path_roles or []) == "scratch":
         return Redirection(decision=None, resume=target + 1)
     if (
@@ -576,6 +585,7 @@ def parse_shell_words(
     depth: int = 0,
     existing_targets: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
+    path_rules: list[PathRuleRow] | None = None,
 ) -> list[list[str]] | KernelDecision:
     """Group lexed tokens into command segments, resolving safe redirections.
 
@@ -592,7 +602,9 @@ def parse_shell_words(
     def substituted_segments(text: str) -> list[list[str]] | KernelDecision:
         if depth >= 2:
             return unjudged("command substitution nests too deeply")
-        return parse_shell_words(text, depth + 1, existing_targets, path_roles)
+        return parse_shell_words(
+            text, depth + 1, existing_targets, path_roles, path_rules
+        )
 
     heredoc_fed = any(
         token.kind == "op" and "<<" in token.text and "<<<" not in token.text
@@ -645,7 +657,7 @@ def parse_shell_words(
             if depth >= 2:
                 return unjudged("process substitution nests too deeply")
             inner = parse_shell_words(
-                token.text, depth + 1, existing_targets, path_roles
+                token.text, depth + 1, existing_targets, path_roles, path_rules
             )
             if isinstance(inner, KernelDecision):
                 return inner
@@ -667,7 +679,7 @@ def parse_shell_words(
             index += 1
             continue
         redirection = resolve_redirection(
-            tokens, index, heredoc_fed, existing_targets, path_roles
+            tokens, index, heredoc_fed, existing_targets, path_roles, path_rules
         )
         index = redirection["resume"]
         verdict = redirection["decision"]

@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from rich.panel import Panel
 from rich.text import Text
 
-from lup_template.devtools.usage.api import (
+from lup.adapters.claude.usage.api import (
     DailyBreakdown,
     ExtraUsage,
     ModelUsageEntry,

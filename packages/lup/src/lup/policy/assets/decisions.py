@@ -57,8 +57,13 @@ def bash_decision(
     """Judge one shell command against the declared vocabulary.
 
     The kernel reads no filesystem, so every fact about the paths this command
-    would touch is resolved here and passed as data: which redirection targets
-    already exist, which operands Git could restore, and which are directories.
+    would touch is resolved here and passed as data: which of the paths it
+    would write already exist, which operands Git could restore, and which
+    are directories.
+
+    Existence covers redirection targets and path-verb operands alike, because
+    the question they ask of it is the same one — whether writing here brings
+    something into being or replaces it.
     """
     acted_on = shell_path_verb_targets(command)
     return decide_shell(
@@ -69,7 +74,10 @@ def bash_decision(
         sandboxed=sandboxed,
         trusted_script_roots=managed_script_roots(managed_root),
         path_roles=PATH_ROLES,
-        existing_targets=existing_write_targets(shell_write_targets(command)),
+        path_rules=PATH_RULES,
+        existing_targets=existing_write_targets(
+            [*shell_write_targets(command), *acted_on]
+        ),
         recoverable_targets=recoverable_write_targets(acted_on),
         directory_targets=directory_write_targets(acted_on),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,

@@ -101,9 +101,12 @@ def application_roots() -> ApplicationRoots:
             "packages/lup/tests/",
             "examples/",
             f"{package}/agent/core.py",
+            # Which backend's sub-apps this project takes is a composition
+            # decision like any other: `usage` reads Claude Code's own
+            # credentials, and a project on another backend leaves it out.
+            f"{package}/devtools/subapps.py",
             harness,
             f"{package}/devtools/setup.py",
-            f"{package}/devtools/usage/app.py",
         ],
         portable_prose=[f"{harness}content/"],
     )

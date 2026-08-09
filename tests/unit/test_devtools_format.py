@@ -8,7 +8,7 @@ header is never clipped), per-column alignment is honored, and short shas come
 from one width so every table abbreviates identically.
 """
 
-from lup_template.devtools.utils import SHORT_SHA_LENGTH, format_table, short_sha
+from lup.devtools.utils import SHORT_SHA_LENGTH, format_table, short_sha
 
 
 def test_columns_fit_the_widest_cell() -> None:

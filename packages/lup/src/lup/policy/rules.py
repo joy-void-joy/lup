@@ -64,6 +64,7 @@ class UrlScope(BaseModel):
     path_prefix: UrlPathPrefix = "/"
     reason: str = ""
     include_subdomains: bool = False
+    any_port: bool = False
 
 
 def url_scope_row(scope: UrlScope) -> UrlScopeRow:
@@ -78,6 +79,7 @@ def url_scope_row(scope: UrlScope) -> UrlScopeRow:
         path_prefix=scope.path_prefix,
         reason=scope.reason,
         include_subdomains=scope.include_subdomains,
+        any_port=scope.any_port,
     )
 
 
@@ -137,9 +139,11 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
+        path_rules: list["PathRule"] | None = None,
         recoverable_target_limit: int = 5,
         runner_targets: list[str] | None = None,
     ) -> None:
+        self.path_rules = [path_rule_row(rule) for rule in path_rules or []]
         self.path_roles = path_roles or []
         self.recoverable_target_limit = recoverable_target_limit
         self.runner_targets = runner_targets or []
@@ -162,10 +166,11 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 sandboxed=self.sandbox_active and not event.unsandboxed,
                 trusted_script_roots=self.trusted_script_roots,
                 path_roles=self.path_roles,
+                path_rules=self.path_rules,
                 interactive=self.interactive,
                 existing_targets=[
                     target
-                    for target in shell_write_targets(event.command)
+                    for target in [*shell_write_targets(event.command), *acted_on]
                     if (root / target).exists()
                 ],
                 recoverable_targets=recoverable_write_targets(acted_on, root),
@@ -185,6 +190,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     self.denied_scopes,
                     self.trusted_script_roots,
                     self.path_roles,
+                    self.path_rules,
                 ),
             )
         )

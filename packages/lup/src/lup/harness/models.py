@@ -588,6 +588,13 @@ class HookUrlScope(BaseModel):
             "*.host wildcard in the OS sandbox network allowlist"
         ),
     )
+    any_port: bool = Field(
+        default=False,
+        description=(
+            "Extend the scope to every port on the origin, for a host whose "
+            "port the caller chooses rather than the service"
+        ),
+    )
 
 
 class HookPathRole(BaseModel):

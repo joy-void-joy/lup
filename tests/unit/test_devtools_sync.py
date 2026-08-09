@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from lup_template.devtools import sync
+from lup.devtools import sync
 
 
 def write_registry(path: Path) -> None:

@@ -50,9 +50,7 @@ from lup.codescan.registry import RULE_REFERENCE
 from lup.policy.kernel.roles import path_role
 from lup.policy.kernel.rows import PathRoleRow
 from lup_template.devtools.dev.pyright_oracle import default_oracle
-from lup_template.devtools.harness.catalog import portable_harness
-from lup_template.devtools.harness.composition import application_roots
-from lup_template.devtools.utils import git, output_json
+from lup.devtools.utils import git, output_json
 
 
 def scanned_roots() -> AbstractSet[str]:
@@ -65,8 +63,15 @@ def scanned_roots() -> AbstractSet[str]:
     return PACKAGE_ROOTS | {Path(__file__).resolve().parents[2].name}
 
 
+# lup: defer: these commands are workflow, not domain, and belong beside the
+# rest of the CLI in `lup.devtools` — which they cannot join while they reach
+# into this application's harness declaration by name. The import is deferred
+# to the call so the roster can carry its own Typer apps without a cycle; the
+# fix is a typed project seam the application supplies, not a later import.
 def declared_path_roles() -> list[PathRoleRow]:
     """The path roles this repository's hook set declares."""
+    from lup_template.devtools.harness.catalog import portable_harness
+
     hooks = portable_harness().plugins[0].hooks
     if hooks is None:
         return []
@@ -166,6 +171,8 @@ def scan_antipatterns() -> AntiPatternScan:
             *audit_isinstance_chains(sources),
         ]
     )
+    from lup_template.devtools.harness.composition import application_roots
+
     roots = application_roots()
     boundary_findings = [
         (source.path, finding)

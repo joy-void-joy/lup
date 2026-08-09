@@ -81,6 +81,7 @@ def runtime_url_scope(
     path_prefix: str,
     reason: str = "",
     include_subdomains: bool = False,
+    any_port: bool = False,
 ) -> UrlScopeRow:
     """Normalize one validated hook scope into a primitive runtime row."""
     parsed = urllib.parse.urlsplit(origin)
@@ -93,6 +94,7 @@ def runtime_url_scope(
         path_prefix=path_prefix,
         reason=reason,
         include_subdomains=include_subdomains,
+        any_port=any_port,
     )
 
 
@@ -159,6 +161,7 @@ def url_scope_rows_literal(rows: list[UrlScopeRow]) -> str:
                 f'"path_prefix": {json.dumps(row["path_prefix"])}',
                 f'"reason": {json.dumps(row["reason"])}',
                 f'"include_subdomains": {row["include_subdomains"]}',
+                f'"any_port": {row["any_port"]}',
             ]
             for row in rows
         ]

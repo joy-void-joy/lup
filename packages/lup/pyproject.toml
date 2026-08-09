@@ -19,12 +19,14 @@ classifiers = [
 dependencies = [
     "httpx>=0.28.1",
     "mcp>=1.27.0",
+    "packaging>=26.2",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.14.1",
     "rich>=14.3.1",
     "sh>=2.2.2",
     "tenacity>=9.0.0",
     "tomlkit>=0.15.0",
+    "typer>=0.21.1",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +35,10 @@ claude = [
 ]
 codex = []
 docker = ["docker>=7.1.0"]
+web = [
+    "fastapi>=0.139.0",
+    "uvicorn[standard]>=0.49.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/joy-void-joy/lup"
@@ -51,6 +57,7 @@ lup = ["py.typed"]
 "lup.adapters.claude" = ["assets/*.py"]
 "lup.adapters.codex" = ["assets/*.py"]
 "lup.policy" = ["assets/*.py"]
+"lup.devtools.supervisor" = ["assets/*.html"]
 
 # Independent of the workspace-root selection, and deliberately so: run from
 # this directory the suite sees `src` alone, so a library test that reached

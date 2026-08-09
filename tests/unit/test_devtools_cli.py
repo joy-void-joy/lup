@@ -20,7 +20,7 @@ from typer.testing import CliRunner
 
 from lup_template.devtools.dev import pr
 from lup_template.devtools.main import app
-from lup_template.devtools.sync import load_json
+from lup.devtools.sync import load_json
 
 runner = CliRunner()
 
