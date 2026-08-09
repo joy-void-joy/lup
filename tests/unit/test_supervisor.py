@@ -11,7 +11,9 @@ mailbox. Every test therefore builds a run on disk and drives the app over
 it, exactly as a page drives a run nothing in this process is attached to.
 """
 
+import os
 import re  # lup: ignore[import-re] — extracting identifiers from packaged JS
+import time
 from html.parser import HTMLParser
 from importlib import resources
 from pathlib import Path
@@ -54,6 +56,7 @@ from lup_template.devtools.supervisor.projection import (
     RunIndex,
     RunStatus,
     SupervisorState,
+    concern_views,
     run_is_live,
     supervisor_state,
 )
@@ -719,3 +722,46 @@ def test_the_page_posts_only_routes_the_app_serves() -> None:
         "park",
         "resume",
     ]
+
+
+def test_a_concern_without_a_progress_row_still_projects() -> None:
+    """A reader can arrive between a concern being written and its progress."""
+    state = persisted_state().model_copy(update={"progress": []})
+
+    views = concern_views(state)
+
+    assert [view.id for view in views] == ["alpha"]
+    assert views[0].reason == "no progress recorded yet"
+
+
+async def test_one_malformed_run_costs_its_own_row_and_no_others(
+    tmp_path: Path,
+) -> None:
+    """The rail is what an operator opens when a run went wrong."""
+    build_run(tmp_path)
+    broken = tmp_path / "run-0"
+    broken.mkdir()
+    (broken / "state.json").write_text("{not json", encoding="utf-8")
+
+    async with client_for(tmp_path) as client:
+        response = await client.get("/api/runs")
+
+    assert response.status_code == 200
+    rows = RunIndex.model_validate(response.json()).runs
+    assert sorted(row.run_id for row in rows) == ["run-0", "run-1"]
+    assert [row.run_id for row in rows if row.unreadable] == ["run-0"]
+
+
+async def test_the_rail_is_ordered_by_activity_not_by_run_id(tmp_path: Path) -> None:
+    """Run ids are commit digests, so name order is arbitrary in time."""
+    for name, age in (("run-1", 0.0), ("run-0", 5000.0), ("run-2", 50.0)):
+        state = persisted_state().model_copy(update={"run_id": name})
+        ResolverStateRepository(tmp_path, name).save(state)
+        stamp = time.time() - age
+        os.utime(tmp_path / name / "state.json", (stamp, stamp))
+
+    async with client_for(tmp_path) as client:
+        response = await client.get("/api/runs")
+
+    rows = RunIndex.model_validate(response.json()).runs
+    assert [row.run_id for row in rows] == ["run-1", "run-2", "run-0"]
