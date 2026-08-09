@@ -201,4 +201,28 @@ the pattern misses is caught by `harness check all` in CI. The pattern
 matches the whole `lup` package rather than an enumerated import closure so
 a new generation dependency cannot silently escape it.
 
+## ADR-014: Judge devtools placement by what an adopter keeps receiving
+
+Context: `lup` is a published dependency and `src/<project>` is a copied,
+renamed template, so the two halves reach a downstream project by different
+routes: a library change arrives through `uv lock --upgrade-package lup`,
+while a template change arrives only through a hand-reviewed replay of
+upstream commits onto a diverged copy. The devtools CLI grew entirely on the
+template side without that difference ever being decided — thirteen prior
+records govern generation, policy, and the resolver, and none of them
+mentions where the tooling lives.
+
+Decision: Placement is judged by the placement test the conventions already
+state — would another project built on this template want this module — and
+the `application placement` row in `dev check` reports every devtools module
+whose imports never reach the application package. Declared prose and the
+harness declaration are exempt, because a module holding this project's own
+judgement as data is exactly where it belongs when it imports nothing.
+
+Consequences: The row is advisory and names debt rather than failing, since
+moving a module is a change with its own review. It is the mirror of
+`library placement`, which asks whether a library module baked in a choice
+an adopter cannot replace; together they bound the boundary from both sides
+instead of only the one a library author notices.
+
 [README.md](README.md) indexes every guide these decisions govern.

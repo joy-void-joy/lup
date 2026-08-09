@@ -13,6 +13,7 @@ from lup.harness.models import GUIDANCE_BYTE_BUDGET, document_byte_size
 from lup_template.devtools.dev.antipatterns import scan_antipatterns
 from lup_template.devtools.dev.boundaries import (
     scan_boundaries,
+    scan_application_placement,
     scan_library_placement,
 )
 from lup_template.devtools.dev.branches import unlanded_siblings
@@ -206,6 +207,15 @@ def run_checks(fix: bool, no_test: bool, scope: list[str] | None = None) -> None
     else:
         typer.echo("library placement: ok")
         results.append(CheckOutcome(name="library placement", passed=True))
+
+    portable = scan_application_placement()
+    if portable:
+        typer.echo(f"application placement: {len(portable)} portable module(s)")
+        for module in portable:
+            typer.echo(f"  {module.file}")
+    else:
+        typer.echo("application placement: ok")
+    results.append(CheckOutcome(name="application placement", passed=True))
 
     stale = [report for report in drift_reports(EVERY_TARGET) if not report.clean]
     repository_is_current = clean_repository_artifacts()
