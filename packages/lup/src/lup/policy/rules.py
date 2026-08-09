@@ -170,7 +170,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 interactive=self.interactive,
                 existing_targets=[
                     target
-                    for target in shell_write_targets(event.command)
+                    for target in [*shell_write_targets(event.command), *acted_on]
                     if (root / target).exists()
                 ],
                 recoverable_targets=recoverable_write_targets(acted_on, root),

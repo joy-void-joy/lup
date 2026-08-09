@@ -59,6 +59,7 @@ class ShellContext(TypedDict):
     trusted_script_roots: list[str]
     path_roles: list[PathRoleRow]
     path_rules: list[PathRuleRow]
+    existing_targets: list[str] | None
     recoverable_targets: list[str]
     directory_targets: list[str]
     recoverable_target_limit: int
@@ -72,12 +73,18 @@ def shell_context(
     trusted_script_roots: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
     path_rules: list[PathRuleRow] | None = None,
+    existing_targets: list[str] | None = None,
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
     runner_targets: list[str] | None = None,
 ) -> ShellContext:
-    """Bundle one classification's declarations, normalizing absent lists."""
+    """Bundle one classification's declarations, normalizing absent lists.
+
+    ``existing_targets`` keeps its ``None``, because that is a fact about the
+    caller rather than an empty list of paths: nothing was established, so
+    every write target is treated as already there.
+    """
     return ShellContext(
         rows=rows,
         allowed_scopes=allowed_scopes or [],
@@ -85,6 +92,7 @@ def shell_context(
         trusted_script_roots=trusted_script_roots or [],
         path_roles=path_roles or [],
         path_rules=path_rules or [],
+        existing_targets=existing_targets,
         recoverable_targets=recoverable_targets or [],
         directory_targets=directory_targets or [],
         recoverable_target_limit=recoverable_target_limit,
@@ -190,6 +198,7 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
         context["recoverable_targets"],
         context["recoverable_target_limit"],
         context["path_rules"],
+        context["existing_targets"],
     )
     if recoverable is not None:
         return recoverable
@@ -737,6 +746,7 @@ def classify_shell(
         trusted_script_roots,
         path_roles,
         path_rules,
+        existing_targets,
         recoverable_targets,
         directory_targets,
         recoverable_target_limit,

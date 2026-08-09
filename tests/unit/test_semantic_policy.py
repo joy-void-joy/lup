@@ -1202,6 +1202,23 @@ def test_a_scope_may_cover_every_port_on_one_host() -> None:
     assert effect("https://pinned.example.com:9000/x") == "ask"
 
 
+def committed_tree(root: Path, *names: str) -> None:
+    """A repository whose every named file is tracked with nothing pending.
+
+    The recoverable grant is the host's answer to a Git question, so a case
+    about it needs a real repository rather than a stub: what is being tested
+    is that `ls-files` and `status --porcelain` agree a path costs a checkout.
+    """
+    sh.Command("git")("init", "-q", str(root))
+    for name in names:
+        (root / name).write_text("body\n", encoding="utf-8")
+    git = sh.Command("git").bake(
+        "-C", str(root), "-c", "user.email=t@e", "-c", "user.name=t"
+    )
+    git("add", "-A")
+    git("commit", "-qm", "in")
+
+
 def test_a_recoverable_grant_never_covers_a_protected_path(tmp_path: Path) -> None:
     """Git restoring a file says nothing about who is allowed to replace it.
 
@@ -1210,21 +1227,7 @@ def test_a_recoverable_grant_never_covers_a_protected_path(tmp_path: Path) -> No
     exactly as restorable as any other file, and exactly as off-limits. The
     two gates read one table so they cannot come to differ about a path.
     """
-    sh.Command("git")("init", "-q", str(tmp_path))
-    for name in ("README.md", "notes.md"):
-        (tmp_path / name).write_text("body\n", encoding="utf-8")
-    sh.Command("git")("-C", str(tmp_path), "add", "-A")
-    sh.Command("git")(
-        "-C",
-        str(tmp_path),
-        "-c",
-        "user.email=t@e",
-        "-c",
-        "user.name=t",
-        "commit",
-        "-qm",
-        "in",
-    )
+    committed_tree(tmp_path, "README.md", "notes.md")
     policy = ShellPolicy(
         SHELL_RULES,
         path_rules=[human_owned_path_rule("README.md")],
@@ -1237,6 +1240,47 @@ def test_a_recoverable_grant_never_covers_a_protected_path(tmp_path: Path) -> No
     assert effect("rm notes.md") == "allow"
     assert effect("rm README.md") == "ask"
     assert effect("cp notes.md README.md") == "ask"
+
+
+def test_moving_a_recoverable_file_costs_what_deleting_it_costs(
+    tmp_path: Path,
+) -> None:
+    """A move is a delete and a create, and neither half is worth a question.
+
+    The verb wrote both operands, so a destination that did not exist yet
+    failed the recoverable test and took the whole command to an ask — which
+    left `mv` asking about a file `rm` would have removed without one, for
+    the sake of a path that holds nothing.
+    """
+    committed_tree(tmp_path, "notes.md", "other.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("rm notes.md") == "allow"
+    assert effect("mv notes.md renamed.md") == "allow"
+    assert effect("cp notes.md copy.md") == "allow"
+    # Replacing a tracked, clean file still costs only a checkout; replacing
+    # one the host cannot vouch for costs whatever was in it.
+    assert effect("mv notes.md other.md") == "allow"
+    (tmp_path / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
+    assert effect("mv notes.md dirty.md") == "ask"
+    # Content leaving a scratch root enters production without the edit gate
+    # ever having read it, so an empty destination is not the whole question.
+    scratch = ShellPolicy(
+        SHELL_RULES,
+        path_roles=FIXTURE_PATH_ROLES,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "tmp" / "draft.md").write_text("draft\n", encoding="utf-8")
+    assert (
+        scratch.decide(
+            ShellCommand(command="mv tmp/draft.md arrived.md", cwd=tmp_path)
+        ).effect
+        == "ask"
+    )
 
 
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
