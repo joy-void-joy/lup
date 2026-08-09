@@ -17,10 +17,8 @@ from typing import Annotated
 
 import typer
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
-from starlette.middleware.base import RequestResponseEndpoint
-from urllib.parse import urlsplit
 
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry
@@ -33,6 +31,7 @@ from lup.resolver.mailbox import (
 )
 from lup.resolver.models import QuestionAnswer
 from lup.resolver.state import ResolverStateRepository, StateCorruptionError
+from lup.web.loopback import guard_loopback_host, refuse_non_loopback
 from lup.workspace.paths import project_root
 from lup_template.devtools.supervisor.events import FRESH_CATCHUP_ENTRIES, stream
 from lup_template.devtools.supervisor.projection import (
@@ -48,25 +47,10 @@ from lup_template.devtools.supervisor.projection import (
     unanswered_questions,
 )
 
-LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "::1"]
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
     "X-Accel-Buffering": "no",
 }
-
-
-def allowed_host_values(url: str) -> list[str]:
-    """Every Host header this app will answer to.
-
-    A loopback bind stops remote packets but not DNS rebinding, where the
-    browser treats this origin as the attacker's and the same-origin policy
-    therefore does not apply. The Host header is what still differs.
-    """
-    port = urlsplit(url).port
-    return [
-        *LOOPBACK_HOSTS,
-        *(f"{host}:{port}" for host in LOOPBACK_HOSTS),
-    ]
 
 
 def run_mailbox(state_root: Path, run_id: str) -> QuestionMailbox:
@@ -169,16 +153,7 @@ def create_supervisor(
         .joinpath("assets/index.html")
         .read_text("utf-8")
     )
-    allowed = allowed_host_values(url)
-
-    @supervisor.middleware("http")
-    async def guard_host(
-        request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        header = request.headers.get("host", "")  # lup: ignore[dict-get] — header map
-        if header not in allowed:
-            return Response(status_code=421, content="unexpected Host header")
-        return await call_next(request)
+    guard_loopback_host(supervisor, url)
 
     def selected_run() -> str:
         if run_id is None:
@@ -328,11 +303,10 @@ def serve_supervisor(
     ] = True,
 ) -> None:
     """Answer any run under ``.lup/resolve``, live or parked."""
-    if host not in LOOPBACK_HOSTS:
-        raise typer.BadParameter(
-            f"the supervisor binds loopback only; {host!r} is not one of: "
-            + ", ".join(LOOPBACK_HOSTS)
-        )
+    try:
+        refuse_non_loopback(host, "supervisor")
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
     url = f"http://{host}:{port}"
     state_root = project_root() / ".lup" / "resolve"
     typer.echo(f"Resolver supervisor: {url}")

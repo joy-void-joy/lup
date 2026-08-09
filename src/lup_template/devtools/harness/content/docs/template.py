@@ -123,11 +123,14 @@ later maintenance. Browser forms are generated only for declarative
 environment fields, from an explicit per-integration allowlist, so the page
 cannot write an arbitrary variable; anything needing OAuth or bespoke
 validation routes to its existing CLI command. FastAPI serves one packaged
-HTML asset — zero build, no Node — and `--no-open`, `--host`, and `--port`
-cover the cases where the defaults do not fit.
+HTML asset — zero build, no Node — and `--no-open` and `--port` cover the
+cases where the defaults do not fit.
 
-The resolver's supervisor page is a separate surface with a stricter posture;
-see [supervisor.md](supervisor.md).
+`--host` takes only a loopback address, and every request's `Host` header is
+checked against one. The page writes credentials into `.env.local`, and a
+local bind alone leaves that reachable by DNS rebinding from any page the
+browser has open. Both halves are `lup.web.loopback`, shared with the
+resolver's supervisor page; see [supervisor.md](supervisor.md).
 
 ### The sync registry
 

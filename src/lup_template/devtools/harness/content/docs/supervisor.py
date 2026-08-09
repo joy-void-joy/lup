@@ -113,16 +113,19 @@ the page has never heard of is drawn raw rather than dropped.
 
 ## Security
 
-The supervisor binds loopback and refuses anything else outright. That is a
-stronger posture than the setup dashboard's, and deliberately so: this
-surface answers a resolver's questions and decides its review branch, where
-the dashboard only writes the user's own environment variables.
+The supervisor binds loopback and refuses anything else outright. Middleware
+additionally rejects any request whose `Host` header is not `127.0.0.1:<port>`
+or `localhost:<port>`. A loopback bind stops remote packets, but not DNS
+rebinding — where the browser treats this origin as the attacker's own, so the
+same-origin policy does not apply and CORS cannot help. The `Host` header is
+what still differs.
 
-Middleware additionally rejects any request whose `Host` header is not
-`127.0.0.1:<port>` or `localhost:<port>`. A loopback bind stops remote
-packets, but not DNS rebinding — where the browser treats this origin as the
-attacker's own, so the same-origin policy does not apply and CORS cannot
-help. The `Host` header is what still differs.
+Both halves live in `lup.web.loopback` and the setup dashboard keeps the same
+posture, because what a local surface is worth attacking is decided by what it
+writes: this one answers a resolver's questions and decides its review branch,
+and that one writes the user's credentials into `.env.local`. A surface that
+took the bind without the header check was reachable by any page the user
+happened to have open, and had no way of knowing it.
 
 CSRF needs no separate defense: mutating routes take JSON bodies, a
 cross-origin `fetch` with `application/json` is preflighted, and no CORS
