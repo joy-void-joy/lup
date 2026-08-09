@@ -69,6 +69,7 @@ def bash_decision(
         sandboxed=sandboxed,
         trusted_script_roots=managed_script_roots(managed_root),
         path_roles=PATH_ROLES,
+        path_rules=PATH_RULES,
         existing_targets=existing_write_targets(shell_write_targets(command)),
         recoverable_targets=recoverable_write_targets(acted_on),
         directory_targets=directory_write_targets(acted_on),

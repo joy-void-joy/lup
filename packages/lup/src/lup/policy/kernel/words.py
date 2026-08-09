@@ -6,8 +6,9 @@ import posixpath
 from typing import TypedDict
 
 from .decision import KernelDecision, SUBSTITUTION_SENTINEL
+from .edit import path_rule_matches
 from .roles import path_role
-from .rows import PathRoleRow
+from .rows import PathRoleRow, PathRuleRow
 
 
 class EffectiveCommand(TypedDict):
@@ -301,11 +302,40 @@ def asks_before_removing_a_directory(
     )
 
 
+def protected_write_target(
+    targets: list[str], path_rules: list[PathRuleRow], path_exists: bool
+) -> KernelDecision | None:
+    """Ask before granting a write to a path the declared rules protect.
+
+    Every grant below answers "what would destroying this cost" — nothing,
+    for a scratch file; a checkout, for one Git can restore. That is the
+    wrong question for a file protected by who owns it rather than by what
+    it would cost to rebuild, and answering it anyway is how ``rm sync.json``
+    and ``cp x README.md`` passed a gate the Edit tool stops. The rules are
+    the edit gate's own, so the two cannot come to disagree about a path.
+
+    ``path_exists`` is the caller's own established fact, because the rule
+    kinds that fire only on a path that is not there yet — a new subtree, a
+    new devtools module — mean the opposite thing when it is. A grant over a
+    scratch or Git-clean operand has settled that it exists; a redirection
+    knows from the targets the host stat'd.
+    """
+    for word in targets:
+        matched = next(
+            (row for row in path_rules if path_rule_matches(word, path_exists, row)),
+            None,
+        )
+        if matched is not None:
+            return KernelDecision("ask", matched["reason"])
+    return None
+
+
 def confined_to_recoverable_roots(
     words: list[str],
     path_roles: list[PathRoleRow],
     recoverable_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
+    path_rules: list[PathRuleRow] | None = None,
 ) -> KernelDecision | None:
     """Recognize a path-taking judged-ask verb whose every target is disposable.
 
@@ -345,6 +375,9 @@ def confined_to_recoverable_roots(
         return None
     if len(restorable) > recoverable_target_limit:
         return None
+    protected = protected_write_target(targets, path_rules or [], True)
+    if protected is not None:
+        return protected
     return KernelDecision("allow", "confined to recoverable roots")
 
 

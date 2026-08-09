@@ -68,7 +68,7 @@ from lup.policy.rules import (
     path_rule_row,
 )
 
-from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.catalog import declared_hook_set, portable_harness
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 
@@ -104,6 +104,13 @@ FIXTURE_PATH_ROLES = [
     PathRoleRow(root="tests", role="test"),
     PathRoleRow(root="tmp", role="scratch"),
 ]
+
+FIXTURE_PATH_RULES = declared_path_rules(declared_hook_set())
+"""The protected-path table this repository declares.
+
+Shared by the shell and edit fixtures rather than restated for each, because
+a table the two gates could be given differently is the drift these cases
+exist to catch."""
 
 FIXTURE_RECOVERABLE_LIMIT = 5
 FIXTURE_RUNNER_TARGETS = ["pyright", "pytest", "ruff", "lup-devtools"]
@@ -195,6 +202,15 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
+    # A protected path is protected from the shell too. Creating a file
+    # destroys nothing, which is why an ordinary new target is written
+    # freely — but the rules that guard a path guard it by who owns it, not
+    # by what replacing it would cost, so they answer ahead of that grant and
+    # the shell cannot reach what the edit gate stops.
+    DecisionCase(input="echo x > README.md", effect="ask"),
+    DecisionCase(input="echo x > sync.json", effect="ask"),
+    DecisionCase(input="echo x > .env.local", effect="ask"),
+    DecisionCase(input="echo x > docs/fresh-note.md", effect="allow"),
     # Housekeeping confined to the disposable roots is as safe as writing
     # them; any long flag, opaque word, or outside target keeps the verb's ask.
     DecisionCase(input="rm tmp/oneoff.py", effect="allow"),
@@ -949,6 +965,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        case['input'], SHELL_RULES, sandboxed=case['sandboxed'],\n"
         "        interactive=case['interactive'],\n"
         "        path_roles=PATH_ROLES,\n"
+        "        path_rules=PATH_RULES,\n"
         "        existing_targets=case['existing'],\n"
         "        runner_targets=RUNNER_TARGETS,\n"
         "    )\n"
@@ -1123,6 +1140,43 @@ def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
     assert effect("curl -d a=b https://docs.example.com/api") == "deny"
 
 
+def test_a_recoverable_grant_never_covers_a_protected_path(tmp_path: Path) -> None:
+    """Git restoring a file says nothing about who is allowed to replace it.
+
+    The grant answers what destroying a path costs, which is the wrong
+    question for one protected by ownership: a clean tracked `README.md` is
+    exactly as restorable as any other file, and exactly as off-limits. The
+    two gates read one table so they cannot come to differ about a path.
+    """
+    sh.Command("git")("init", "-q", str(tmp_path))
+    for name in ("README.md", "notes.md"):
+        (tmp_path / name).write_text("body\n", encoding="utf-8")
+    sh.Command("git")("-C", str(tmp_path), "add", "-A")
+    sh.Command("git")(
+        "-C",
+        str(tmp_path),
+        "-c",
+        "user.email=t@e",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-qm",
+        "in",
+    )
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_rules=[human_owned_path_rule("README.md")],
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("rm notes.md") == "allow"
+    assert effect("rm README.md") == "ask"
+    assert effect("cp notes.md README.md") == "ask"
+
+
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
     policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
 
@@ -1167,12 +1221,14 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     policy = ShellPolicy(
         SHELL_RULES,
         path_roles=FIXTURE_PATH_ROLES,
+        path_rules=FIXTURE_PATH_RULES,
         runner_targets=FIXTURE_RUNNER_TARGETS,
     )
     sandboxed_policy = ShellPolicy(
         SHELL_RULES,
         sandbox_active=True,
         path_roles=FIXTURE_PATH_ROLES,
+        path_rules=FIXTURE_PATH_RULES,
         runner_targets=FIXTURE_RUNNER_TARGETS,
     )
 
@@ -1185,6 +1241,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
                 sandbox_active=case.sandboxed,
                 interactive=False,
                 path_roles=FIXTURE_PATH_ROLES,
+                path_rules=FIXTURE_PATH_RULES,
                 runner_targets=FIXTURE_RUNNER_TARGETS,
             )
         # Each case judges a tree of its own, so a file one case declares
@@ -1203,6 +1260,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             sandboxed=case.sandboxed,
             interactive=case.interactive,
             path_roles=FIXTURE_PATH_ROLES,
+            path_rules=policy.path_rules,
             existing_targets=case.existing,
             runner_targets=FIXTURE_RUNNER_TARGETS,
         ).effect

@@ -137,9 +137,11 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
+        path_rules: list["PathRule"] | None = None,
         recoverable_target_limit: int = 5,
         runner_targets: list[str] | None = None,
     ) -> None:
+        self.path_rules = [path_rule_row(rule) for rule in path_rules or []]
         self.path_roles = path_roles or []
         self.recoverable_target_limit = recoverable_target_limit
         self.runner_targets = runner_targets or []
@@ -162,6 +164,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 sandboxed=self.sandbox_active and not event.unsandboxed,
                 trusted_script_roots=self.trusted_script_roots,
                 path_roles=self.path_roles,
+                path_rules=self.path_rules,
                 interactive=self.interactive,
                 existing_targets=[
                     target
@@ -185,6 +188,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     self.denied_scopes,
                     self.trusted_script_roots,
                     self.path_roles,
+                    self.path_rules,
                 ),
             )
         )
