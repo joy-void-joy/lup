@@ -27,6 +27,7 @@ from lup.harness.models import (
     SkillInvocation,
 )
 from lup.workspace.paths import project_root, read_project_name
+from lup_template.devtools.layout import DASHBOARD_PORT, SUPERVISOR_PORT
 from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
@@ -133,6 +134,18 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 ),
                 HookUrlScope(origin=AnyHttpUrl("https://pypi.org")),
                 HookUrlScope(origin=AnyHttpUrl("https://files.pythonhosted.org")),
+                # This project's own local services. Reading one is how a
+                # session finds out whether the dashboard or the supervisor
+                # is up, which is a question about this machine rather than
+                # egress — and it was the one routine act with no allowed
+                # spelling at all, since `ss` and `lsof` are unclassified.
+                # A scope carries one concrete port, so each service that
+                # wants reading names itself here.
+                *(
+                    HookUrlScope(origin=AnyHttpUrl(f"http://{host}:{port}"))
+                    for port in (DASHBOARD_PORT, SUPERVISOR_PORT)
+                    for host in ("127.0.0.1", "localhost")
+                ),
             ],
             protected_edit_roots=[
                 Path(".claude"),
@@ -143,7 +156,21 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             path_roles=[
                 HookPathRole(root=Path("tests"), role="test"),
                 HookPathRole(root=Path("packages/lup/tests"), role="test"),
+                # Scratch is "disposable by construction", and a build product
+                # qualifies as squarely as a scratchpad does: every one of
+                # these is reproduced by a command, so destroying one costs
+                # the command rather than any information. Leaving them
+                # production made `rm` and `cp` ask about caches and virtual
+                # environments, which is an approval that teaches nobody
+                # anything.
                 HookPathRole(root=Path("tmp"), role="scratch"),
+                HookPathRole(root=Path(".venv"), role="scratch"),
+                HookPathRole(root=Path(".ruff_cache"), role="scratch"),
+                HookPathRole(root=Path(".pytest_cache"), role="scratch"),
+                HookPathRole(root=Path("build"), role="scratch"),
+                HookPathRole(root=Path("dist"), role="scratch"),
+                HookPathRole(root=Path("htmlcov"), role="scratch"),
+                HookPathRole(root=Path("node_modules"), role="scratch"),
             ],
             human_owned_files=[Path("README.md")],
             shell_rules=SHELL_RULES,

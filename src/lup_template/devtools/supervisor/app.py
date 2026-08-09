@@ -35,6 +35,7 @@ from lup.resolver.mailbox import (
 from lup.resolver.models import QuestionAnswer
 from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.workspace.paths import project_root
+from lup_template.devtools.layout import SUPERVISOR_PORT
 from lup_template.devtools.supervisor.events import FRESH_CATCHUP_ENTRIES, stream
 from lup_template.devtools.supervisor.projection import (
     ActorIndex,
@@ -337,7 +338,7 @@ def serve_supervisor(
         AdapterName, typer.Option("--adapter", help="Adapter named in the rerun recipe")
     ] = AdapterName.CLAUDE,
     host: Annotated[str, typer.Option(help="Interface to bind")] = "127.0.0.1",
-    port: Annotated[int, typer.Option(help="TCP port to bind")] = 8766,
+    port: Annotated[int, typer.Option(help="TCP port to bind")] = SUPERVISOR_PORT,
     open_page: Annotated[
         bool, typer.Option("--open/--no-open", help="Open the page in a browser")
     ] = True,

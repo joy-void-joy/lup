@@ -23,6 +23,7 @@ SUBAPPS = [
     SubApp(name="dev", help="Worktrees, branches, and pre-flight checks"),
     SubApp(name="feedback", help="Feedback state, metrics, and commits"),
     SubApp(name="harness", help="Generate and launch the native harnesses"),
+    SubApp(name="hooks", help="Query the permission policy"),
     SubApp(name="py", help="Python module introspection"),
     SubApp(name="setup", help="Interactive setup wizard"),
     SubApp(name="sync", help="Track sync.json repos and review their commits"),

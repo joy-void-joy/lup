@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "f0ec36dd17d746b049aa45089474f155e7c997afbce79fc9a7f8a552b05d4e50",
+  "source_digest": "6b3c9903f61aa4580ff0629b32528d105f3d916953c1601c670b983e18171965",
   "target_requirements": [
     "claude-code"
   ],
@@ -191,7 +191,7 @@
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "40f852d9663bcd226f9dc1777bf597870418f151e2f787d85a119a8ffe60c711",
+      "sha256": "bb04eba34f19f14d77287f8859620707a2463f3c6f499be133c6d253c9bc2e4c",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -310,7 +310,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "0cb6b37a367fb3972b3cf72c1ff37e9c68c8977a580a4cd8366658c06ed4767e",
+      "sha256": "ece870d94767a0d4adde89cce389f344fc0c85ade2f3d1398c35e19e71416274",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -359,7 +359,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "2352bdf3af8506756acf55c0e7e89416f90864fcc734f2774f94e7519527699a",
+      "sha256": "342d8eb5cbb2c34c75e33e6adf88a9a92c8828885786cdb4ce811429056c9fa8",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -373,7 +373,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "e1501286b41ad81623c9835d7ae2385f8b41e964cf10337cc6e5749fc3bced88",
+      "sha256": "4289af51f5dc6e6ec0a18f883dac374ddaf74c510ee5dcb401937233abcd2db9",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -394,7 +394,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "ca226c2043eafa52bbaa387cdaf725cd3105f9b62b9545a9b3f43ecd7d0464a2",
+      "sha256": "8a14fbe579a5094858caab36724212decc1763aa1eac798919cd7d0f938219c1",
       "semantic_id": "harness.project-settings",
       "executable": false
     },
@@ -513,7 +513,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "dd502d184c09d57b60ca96b80458478ffd31242953788875d6a5a91350f258d5",
+      "sha256": "5ee642d1e48ca67bf693960a50b75a55b3e23b4d32c2d97ee3e74ce265ea36f0",
       "semantic_id": "docs.template",
       "executable": false
     }

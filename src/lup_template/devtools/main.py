@@ -36,6 +36,7 @@ from lup_template.devtools.py.app import app as py_app
 from lup_template.devtools.dev.app import app as dev_app
 from lup_template.devtools.feedback.app import app as feedback_app
 from lup_template.devtools.harness.app import app as harness_app
+from lup_template.devtools.hooks.app import app as hooks_app
 from lup_template.devtools.setup import app as setup_app
 from lup_template.devtools.sync import app as sync_app
 from lup_template.devtools.subapps import SUBAPPS
@@ -55,6 +56,7 @@ SUBAPP_TYPERS = {
     "dev": dev_app,
     "feedback": feedback_app,
     "harness": harness_app,
+    "hooks": hooks_app,
     "py": py_app,
     "setup": setup_app,
     "sync": sync_app,

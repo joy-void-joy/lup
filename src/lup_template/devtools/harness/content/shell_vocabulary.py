@@ -104,19 +104,12 @@ JUDGED_ASK_COMMANDS = (
     ("truncate", "truncating files requires approval"),
     ("kill", "terminating processes requires approval"),
     ("pkill", "terminating processes requires approval"),
-    ("tar", "archive operations write files — requires approval"),
-    ("unzip", "archive extraction writes files — requires approval"),
-    ("zip", "archive creation writes files — requires approval"),
-    ("gzip", "compression rewrites files — requires approval"),
-    ("gunzip", "decompression rewrites files — requires approval"),
     ("sudo", "privilege escalation requires approval"),
     ("doas", "privilege escalation requires approval"),
     ("ssh", "remote access requires approval"),
     ("scp", "remote copies require approval"),
     ("rsync", "remote sync requires approval"),
     ("wget", "downloading files requires approval — prefer curl or WebFetch"),
-    ("make", "make executes arbitrary recipes — requires approval"),
-    ("npm", "package tools fetch and execute code — requires approval"),
     ("npx", "package tools fetch and execute code — requires approval"),
     ("pnpm", "package tools fetch and execute code — requires approval"),
     ("yarn", "package tools fetch and execute code — requires approval"),
@@ -571,6 +564,65 @@ SHELL_RULES: list[ShellCommandRule] = [
         reason="a mutating find action requires approval",
     ),
     ShellCommandRule(name="cd", reason="directory navigation"),
+    # Each of these writes in its ordinary form and inspects in one declared
+    # one, so the ask belongs to the verb and not to the command. Declared as
+    # a bare `(name, reason)` pair they had no way to say that, which made
+    # listing an archive as much of an approval as extracting one.
+    ShellCommandRule(
+        # tar spells its mode as one clustered word, and a cluster cannot be
+        # screened character by character without `-xzvft` reading as a list
+        # because a `t` appears in it. So the list-mode spellings are named
+        # whole — tar's own, from its manual, not a taste.
+        name="tar",
+        default_effect="ask",
+        read_verbs=["-t", "--list", "-tf", "-tvf", "-tzf", "-tzvf", "-tjf", "-tJf"],
+        reason="archive operations write files — requires approval",
+    ),
+    ShellCommandRule(
+        name="unzip",
+        default_effect="ask",
+        read_verbs=["-l", "-t", "-v", "-z"],
+        reason="archive extraction writes files — requires approval",
+    ),
+    ShellCommandRule(
+        name="zip",
+        default_effect="ask",
+        read_verbs=["-sf", "--show-files"],
+        reason="archive creation writes files — requires approval",
+    ),
+    ShellCommandRule(
+        name="gzip",
+        default_effect="ask",
+        read_verbs=["-l", "--list", "-t", "--test"],
+        reason="compression rewrites files — requires approval",
+    ),
+    ShellCommandRule(
+        name="gunzip",
+        default_effect="ask",
+        read_verbs=["-l", "--list", "-t", "--test"],
+        reason="decompression rewrites files — requires approval",
+    ),
+    ShellCommandRule(
+        name="make",
+        default_effect="ask",
+        read_verbs=["-n", "--dry-run", "--just-print", "-q", "--question"],
+        reason="make executes arbitrary recipes — requires approval",
+    ),
+    ShellCommandRule(
+        name="npm",
+        default_effect="ask",
+        read_verbs=["ls", "list", "view", "outdated", "why", "explain"],
+        reason="package tools fetch and execute code — requires approval",
+    ),
+    ShellCommandRule(
+        # Listening sockets are a fact about this machine, not egress, and
+        # `ss` is how a session finds out whether a service it started came
+        # up. Every flag here selects or formats what is reported; the
+        # mutating forms (-K/--kill, -E) fall through to the deny.
+        name="ss",
+        ask_flags=["-K", "--kill", "-E", "--events"],
+        reason="closing or streaming sockets requires approval",
+    ),
     lup_devtools_rule(),
     git_rule(),
     gh_rule(),

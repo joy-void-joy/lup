@@ -84,6 +84,7 @@ class ShellCommandRule(BaseModel):
     default_effect: CommandEffect = "allow"
     ask_flags: list[str] = Field(default_factory=list)
     allow_flags: list[str] = Field(default_factory=list)
+    read_verbs: list[str] = Field(default_factory=list)
     value_flags: list[str] = Field(default_factory=list)
     subcommands: list[ShellSubcommandRule] = Field(default_factory=list)
     reason: str = ""
@@ -136,7 +137,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             effect=command.default_effect,
             ask_flags=list(command.ask_flags),
             allow_flags=list(command.allow_flags),
-            read_verbs=[],
+            read_verbs=list(command.read_verbs),
             value_flags=list(command.value_flags),
             reason=command.reason,
         )

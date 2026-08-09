@@ -23,6 +23,7 @@ import pytest
 import typer
 from httpx import ASGITransport, AsyncClient
 
+from lup.adapters.harness import AdapterName
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry, PhaseChangedEvent, RunEvent
@@ -487,7 +488,9 @@ def test_a_finished_run_falls_back_to_the_state_file_fold(tmp_path: Path) -> Non
             run_id="run-1", answers=[QuestionAnswer(question_id="q1", value="yes")]
         ),
     )
-    projected = supervisor_state(state, QuestionMailbox(tmp_path / "empty"), "claude")
+    projected = supervisor_state(
+        state, QuestionMailbox(tmp_path / "empty"), AdapterName.CLAUDE
+    )
 
     assert [view.question.id for view in projected.pending] == ["q1"]
     assert projected.pending[0].answered == "yes"
@@ -509,7 +512,7 @@ def test_an_unanswered_question_parks_a_run_that_stopped_moving() -> None:
         questions=QuestionBatch(run_id="run-1", questions=[question("q1", None)]),
     )
     quiet = supervisor_state(
-        state, QuestionMailbox(Path("/nonexistent")), "claude", now=1e12
+        state, QuestionMailbox(Path("/nonexistent")), AdapterName.CLAUDE, now=1e12
     )
 
     assert not quiet.live
@@ -522,7 +525,7 @@ def test_an_aborted_run_is_neither_live_nor_running() -> None:
 
     assert not run_is_live(aborted, activity=100.0, now=100.0)
     projected = supervisor_state(
-        aborted, QuestionMailbox(Path("/nonexistent")), "claude", now=100.0
+        aborted, QuestionMailbox(Path("/nonexistent")), AdapterName.CLAUDE, now=100.0
     )
     assert projected.status is RunStatus.ABORTED
 
@@ -535,7 +538,9 @@ def projection(
         state = state.model_copy(
             update={"progress": [ConcernProgress(concern_id="alpha", status=status)]}
         )
-    return supervisor_state(state, QuestionMailbox(Path("/nonexistent")), "claude")
+    return supervisor_state(
+        state, QuestionMailbox(Path("/nonexistent")), AdapterName.CLAUDE
+    )
 
 
 async def test_the_stream_replays_the_record_then_follows_it(tmp_path: Path) -> None:
