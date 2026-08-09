@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from lup.channels.models import publish_atomic
 from lup.runtime.contracts import SubmittedOutputStore
 from lup.runtime.errors import ValidationAttempt
 from lup.runtime.models import SubmissionDecision, TurnToolBinding
@@ -52,10 +53,7 @@ class FileSubmittedOutputStore(SubmittedOutputStore):
         self,
         value: BaseModel,  # lup: ignore[bare-basemodel] — generic output-store boundary
     ) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(f".{self.path.name}.tmp")
-        temporary.write_text(value.model_dump_json(indent=2) + "\n", encoding="utf-8")
-        temporary.replace(self.path)  # lup: ignore[string-replace]
+        publish_atomic(self.path, value)
 
     def read[T: BaseModel](self, output_type: type[T]) -> T | None:
         if not self.path.exists():

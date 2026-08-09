@@ -12,6 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from lup.channels.models import write_atomic
 from lup.harness.reconciliation import source_patch_base_digest
 
 
@@ -58,6 +59,4 @@ class ReconciliationProposalWriter:
         """Atomically create one proposal member when it is not already exact."""
         if path.exists():
             return
-        temporary = path.with_name(f".{path.name}.tmp")
-        temporary.write_bytes(content)
-        temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
+        write_atomic(path, content)

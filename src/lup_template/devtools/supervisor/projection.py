@@ -205,7 +205,13 @@ class MessageSubmission(BaseModel):
 def answer_recipe(
     adapter: AdapterName, run_id: str, questions: list[MaterialQuestion]
 ) -> str:
-    """Build the flag-carrying rerun that answers exactly these questions."""
+    """Build the flag-carrying rerun that answers exactly these questions.
+
+    One definition, because this is the CLI's own interface restated as
+    text: the page prints it and the parked run prints it, and a change to
+    `harness resolve`'s flags that reached only one of them would have the
+    other teaching a command that no longer exists.
+    """
     return " ".join(
         [
             "uv run lup-devtools harness resolve",

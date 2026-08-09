@@ -70,7 +70,9 @@ from lup_template.devtools.dev.worktree import (
     copy_gitignored_extras,
     sync_dependencies,
 )
+from lup.adapters.harness import AdapterName
 from lup_template.devtools.harness.composition import harness_compositions
+from lup_template.devtools.supervisor.projection import answer_recipe as rerun_recipe
 
 
 class ResolverIntake(BaseModel):
@@ -293,7 +295,7 @@ class SupervisorSpawn(BaseModel):
 
 @asynccontextmanager
 async def spawned_supervisor(
-    spawn: SupervisorSpawn, run_id: str, adapter: str
+    spawn: SupervisorSpawn, run_id: str, adapter: AdapterName
 ) -> AsyncGenerator[None]:
     """Run the supervisor page beside this run, as a separate process.
 
@@ -365,21 +367,9 @@ def report_questions(
                 typer.echo("  (choices are suggestions; any answer is accepted)")
 
 
-def rerun_recipe(adapter: str, run_id: str, questions: list[MaterialQuestion]) -> str:
-    """The exact command that answers these questions and drives the run on."""
-    return " ".join(
-        [
-            "uv run lup-devtools harness resolve",
-            f"--adapter {adapter}",
-            f"--run-id {run_id}",
-            *(f"--answer {question.id}=<value>" for question in questions),
-        ]
-    )
-
-
 def report_awaiting(
     parked: ResolverAwaitingAnswers,
-    adapter: str,
+    adapter: AdapterName,
     run_id: str,
     concerns: list[Concern],
 ) -> None:
@@ -392,7 +382,9 @@ def report_awaiting(
     typer.echo(f"  {rerun_recipe(adapter, run_id, parked.pending)}")
 
 
-def report_admission(admission: ConcernAdmission, adapter: str, run_id: str) -> None:
+def report_admission(
+    admission: ConcernAdmission, adapter: AdapterName, run_id: str
+) -> None:
     """Print what joined the run and the gates it still has to pass."""
     typer.echo(
         f"Admitted {len(admission.concerns)} concern(s) into {run_id} "
@@ -502,7 +494,9 @@ def integration_branch(launcher: ProcessLauncher, root: Path, run_id: str) -> st
     return f"resolve/{run_id}{REVIEW_BRANCH_SUFFIX}"
 
 
-def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None:
+def detach_resolve(
+    adapter: AdapterName, run_id: str | None, answers: list[str]
+) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
     A blocking run holds the launching agent's only turn, so nothing could
@@ -559,7 +553,7 @@ def admission_request(
 
 
 def run_resolve(
-    adapter: str,
+    adapter: AdapterName,
     run_id: str | None,
     answers: list[str],
     abort_reason: str | None = None,
