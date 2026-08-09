@@ -9,9 +9,17 @@ project declares its own table and never edits lup to change a verdict.
 take and how each one erases into the rows the kernel reads.
 
 The table is deliberately generous for read-only and reversible-local work and
-conservative for anything destructive or networked: a destructive form
-(``git push``, ``git reset --hard``, ``git branch -D``, ``gh pr close``) stays
-an approval question.
+conservative for anything destructive: a form that loses something
+(``git reset --hard``, ``git branch -D``, ``git push --delete``,
+``gh pr close``) stays an approval question.
+
+Networked is not itself the line. Publishing is how work here becomes
+reviewable and happens many times a session, so ``git push`` and the pull
+request verbs that open and describe one are ordinary; what stays guarded is
+the direction that removes something a second attempt cannot restore. Reading
+a remote is ordinary for the same reason it is locally — ``gh api`` without a
+method or a field is a query, and it is the flags that make it anything else
+that carry the ask.
 """
 
 from lup.policy.shell_rules import (
@@ -138,8 +146,10 @@ GIT_READ_ONLY_SUBCOMMANDS = (
     "rev-parse",
     "ls-files",
     "ls-tree",
+    "ls-remote",
     "cat-file",
     "blame",
+    "annotate",
     "describe",
     "shortlog",
     "rev-list",
@@ -151,6 +161,16 @@ GIT_READ_ONLY_SUBCOMMANDS = (
     "count-objects",
     "cherry",
     "range-diff",
+    "diff-tree",
+    "diff-index",
+    "diff-files",
+    "check-ignore",
+    "check-attr",
+    "check-mailmap",
+    "show-branch",
+    "verify-commit",
+    "verify-tag",
+    "var",
     "version",
     "help",
 )
@@ -204,9 +224,15 @@ def git_rule() -> ShellCommandRule:
             reason="overriding the transport program requires approval",
         ),
         ShellSubcommandRule(
+            # Publishing a branch is how work here becomes reviewable, and
+            # this project's own rebase flow republishes one with `--force`
+            # every round — so the force is ordinary and the ask it earned
+            # landed on the common case. What stays guarded is the direction
+            # a second push cannot undo: removing a remote ref, rather than
+            # replacing what it points at.
             name="push",
-            effect="ask",
-            reason="publishing to the remote requires approval",
+            ask_flags=["--delete", "--mirror", "--prune"],
+            reason="removing a remote ref requires approval",
         ),
         ShellSubcommandRule(
             name="clone",
@@ -272,6 +298,24 @@ def git_rule() -> ShellCommandRule:
             name="branch",
             ask_flags=["-d", "-D", "--delete", "-m", "-M", "--move"],
             reason="deleting or moving a branch requires approval",
+        ),
+        ShellSubcommandRule(
+            name="bisect",
+            effect="ask",
+            operations=[
+                ShellOperationRule(name="log", effect="allow"),
+                ShellOperationRule(name="view", effect="allow"),
+            ],
+            reason="a bisect step moves HEAD across commits",
+        ),
+        ShellSubcommandRule(
+            name="submodule",
+            effect="ask",
+            operations=[
+                ShellOperationRule(name="status", effect="allow"),
+                ShellOperationRule(name="summary", effect="allow"),
+            ],
+            reason="submodule operations fetch and check out external code",
         ),
         ShellSubcommandRule(
             name="tag",
@@ -398,9 +442,24 @@ def gh_rule() -> ShellCommandRule:
         default_effect="deny",
         subcommands=[
             group(
+                # Opening a pull request, retitling it, and marking it ready
+                # are the author describing their own work, and the rebase
+                # flow does all three every round. Commenting and reviewing
+                # reach other people; merging and closing change what the
+                # repository is. Those keep the ask.
                 "pr",
-                ["list", "view", "diff", "status", "checks", "checkout"],
-                ["create", "edit", "comment", "review", "merge", "ready", "close"],
+                [
+                    "list",
+                    "view",
+                    "diff",
+                    "status",
+                    "checks",
+                    "checkout",
+                    "create",
+                    "edit",
+                    "ready",
+                ],
+                ["comment", "review", "merge", "close"],
             ),
             group(
                 "issue",
@@ -413,10 +472,39 @@ def gh_rule() -> ShellCommandRule:
             group("cache", ["list"], ["delete"]),
             group("workflow", ["list", "view"], ["run", "enable", "disable"]),
             group("auth", ["status"]),
+            group(
+                "search",
+                ["repos", "issues", "prs", "code", "commits"],
+            ),
+            group("label", ["list"], ["create", "edit", "delete", "clone"]),
+            group("gist", ["list", "view"], ["create", "edit", "delete", "clone"]),
+            group(
+                "project",
+                ["list", "view", "item-list", "field-list"],
+                ["create", "edit", "close", "delete", "item-add", "item-delete"],
+            ),
+            group("variable", ["list", "get"], ["set", "delete"]),
+            group("ruleset", ["list", "view", "check"]),
+            group("config", ["get", "list"], ["set"]),
+            ShellSubcommandRule(name="status"),
+            ShellSubcommandRule(name="browse"),
             ShellSubcommandRule(
+                # The default method is GET, so the unguarded form is a read.
+                # Every way of making it something else — naming a method,
+                # attaching a field, reading a body from a file — is guarded,
+                # which leaves the mutation ask exactly where it belongs
+                # instead of on every query that shares the subcommand.
                 name="api",
-                effect="ask",
-                reason="gh api can read or mutate anything — requires approval",
+                ask_flags=[
+                    "-X",
+                    "--method",
+                    "-f",
+                    "--field",
+                    "-F",
+                    "--raw-field",
+                    "--input",
+                ],
+                reason="gh api can mutate anything — requires approval",
             ),
         ],
         reason="this gh command is not classified",

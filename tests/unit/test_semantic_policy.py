@@ -202,6 +202,30 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
+    # Publishing is how work becomes reviewable, so the verbs that put a
+    # branch and its pull request in front of a reader are ordinary. What
+    # keeps the ask is what a second attempt cannot restore, and what reaches
+    # another person rather than describing your own work.
+    DecisionCase(input="git push", effect="allow"),
+    DecisionCase(input="git push --force origin HEAD", effect="allow"),
+    DecisionCase(input="git push --delete origin feat", effect="ask"),
+    DecisionCase(input="gh pr create --fill", effect="allow"),
+    DecisionCase(input="gh pr ready 3", effect="allow"),
+    DecisionCase(input="gh pr comment 3 --body hi", effect="ask"),
+    DecisionCase(input="gh pr merge 3", effect="ask"),
+    # A default-method gh api call is a query; the flags that make it
+    # anything else carry the ask instead of the subcommand carrying it.
+    DecisionCase(input="gh api repos/o/r/pulls", effect="allow"),
+    DecisionCase(input="gh api -X POST repos/o/r/issues", effect="ask"),
+    DecisionCase(input="gh api -f title=x repos/o/r/issues", effect="ask"),
+    # Reading a repository is read-only however deep in git's own vocabulary
+    # the question is spelled.
+    DecisionCase(input="git ls-remote --heads origin", effect="allow"),
+    DecisionCase(input="git diff-tree -r HEAD", effect="allow"),
+    DecisionCase(input="git check-ignore -v build/x", effect="allow"),
+    DecisionCase(input="git submodule status", effect="allow"),
+    DecisionCase(input="git bisect log", effect="allow"),
+    DecisionCase(input="git bisect start", effect="ask"),
     # A protected path is protected from the shell too. Creating a file
     # destroys nothing, which is why an ordinary new target is written
     # freely — but the rules that guard a path guard it by who owns it, not
@@ -286,7 +310,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="[[ -n $(git status --porcelain) ]]", effect="allow"),
     DecisionCase(input="echo $(echo $(ls))", effect="allow"),
     DecisionCase(input="F=$(ls); echo $F", effect="allow"),
-    DecisionCase(input="echo $(git push)", effect="ask"),
+    DecisionCase(input="echo $(git push --delete origin feat)", effect="ask"),
     DecisionCase(input="echo $(rm -rf /)", effect="ask"),
     DecisionCase(input="git log $(cat names.txt)", effect="deny"),
     DecisionCase(input="F=$(ls); sed $F 's/a/b/' f", effect="deny"),
@@ -352,7 +376,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git stash drop", effect="ask"),
     DecisionCase(input="git reset --hard", effect="ask"),
     DecisionCase(input="git clean -fd", effect="ask"),
-    DecisionCase(input="git push --force", effect="ask"),
+    DecisionCase(input="git push --delete origin feat", effect="ask"),
     DecisionCase(input="git checkout -- file", effect="deny"),
     # Ref-sourced pathspec restores name their content's commit; the shell
     # option builtin is shell-local. Both anchor history-rebuild batches.
@@ -380,7 +404,7 @@ SHELL_POLICY_CASES = [
     # Global value flags are consumed, never read as the subcommand; globals
     # that change execution behavior ask.
     DecisionCase(input="git -C /other status", effect="allow"),
-    DecisionCase(input="git -C status push", effect="ask"),
+    DecisionCase(input="git -C status restore f", effect="ask"),
     DecisionCase(input="git -c core.pager=touch log", effect="ask"),
     DecisionCase(input="git --exec-path=/tmp/x status", effect="ask"),
     # Exec-bearing and file-writing flags on allowed subcommands ask.
@@ -390,7 +414,6 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git log --output=/tmp/f", effect="ask"),
     DecisionCase(input="git reflog", effect="allow"),
     DecisionCase(input="git reflog expire --expire=now --all", effect="ask"),
-    DecisionCase(input="git push", effect="ask"),
     DecisionCase(input="git pull", effect="allow"),
     DecisionCase(input="git clone https://x.test/r.git", effect="ask"),
     DecisionCase(input="git restore f", effect="ask"),
@@ -414,14 +437,14 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git apply $PATCH", effect="deny"),
     DecisionCase(input="git switch main", effect="allow"),
     DecisionCase(input="git checkout main", effect="deny"),
-    DecisionCase(input="git bisect start", effect="deny"),
+    DecisionCase(input="git filter-branch --tree-filter x", effect="deny"),
     DecisionCase(input="sort --compress-program=/tmp/x f", effect="ask"),
     # gh: read-only operations allow; mutating forms ask.
     DecisionCase(input="gh run view 1", effect="allow"),
     DecisionCase(input="gh repo view", effect="allow"),
     DecisionCase(input="gh pr close 1", effect="ask"),
     DecisionCase(input="gh api -X POST /repos", effect="ask"),
-    DecisionCase(input="gh pr create --title x", effect="ask"),
+    DecisionCase(input="gh issue create --title x", effect="ask"),
     DecisionCase(input="gh pr checkout 123", effect="allow"),
     DecisionCase(input="gh auth status", effect="allow"),
     DecisionCase(input="gh secret list", effect="deny"),
@@ -577,7 +600,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="sort $UNBOUND f", effect="defer", sandboxed=True),
     DecisionCase(input="foo() { cat x; }", effect="defer", sandboxed=True),
     DecisionCase(input="case $m in a) echo a;;", effect="defer", sandboxed=True),
-    DecisionCase(input="git push --force", effect="ask", sandboxed=True),
+    DecisionCase(input="git push --delete origin feat", effect="ask", sandboxed=True),
     DecisionCase(input="sed -i 's/a/b/' f", effect="deny", sandboxed=True),
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
@@ -593,9 +616,14 @@ SHELL_POLICY_CASES = [
     # A non-interactive host cannot put a question to a human: sandboxed, an
     # ask rides the OS boundary; unsandboxed it fails closed. A judged deny
     # is never rescued, and unjudged work defers exactly as it always did.
-    DecisionCase(input="git push --force", effect="deny", interactive=False),
     DecisionCase(
-        input="git push --force", effect="defer", sandboxed=True, interactive=False
+        input="git push --delete origin feat", effect="deny", interactive=False
+    ),
+    DecisionCase(
+        input="git push --delete origin feat",
+        effect="defer",
+        sandboxed=True,
+        interactive=False,
     ),
     DecisionCase(input="PYTHONPATH=src uv run pytest", effect="ask"),
     DecisionCase(
@@ -1339,12 +1367,12 @@ def test_sandbox_escape_reenters_the_deny_lattice() -> None:
 def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     """Codex hooks cannot complete the approval flow, so they never name it."""
     interactive = ShellPolicy(SHELL_RULES).decide(
-        ShellCommand(command="git push --force")
+        ShellCommand(command="git push --delete origin feat")
     )
     assert interactive.effect == "ask"
 
     blocked = ShellPolicy(SHELL_RULES, interactive=False).decide(
-        ShellCommand(command="git push --force")
+        ShellCommand(command="git push --delete origin feat")
     )
     assert blocked.effect == "deny"
     assert "escalate" not in blocked.reason
