@@ -24,12 +24,14 @@ import typer
 from lup.workspace.history import parse_semver
 from lup.workspace.paths import agent_version
 
-from lup_template.devtools.utils import git, output_json, short_sha
+from lup.devtools.subapps import subapp
+from lup.devtools.utils import git, output_json, short_sha
 
 
 ChangelogCategory = Literal["behavior", "data", "infrastructure"]
 
 app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
+SUBAPP = subapp("version", "Agent version, changelog, and bump", app)
 
 
 class VersionInfo(TypedDict):
@@ -52,8 +54,14 @@ class ChangelogReport(TypedDict):
     infrastructure: list[ChangelogEntry]
 
 
-BEHAVIOR_PREFIXES = ("feat", "fix", "refactor")
-DATA_PREFIXES = ("data",)
+DEFAULT_BEHAVIOR_PREFIXES = ("feat", "fix", "refactor")
+"""Commit types whose changes an agent's behaviour can be read from.
+
+A default rather than a rule: the vocabulary is a project's own, and one that
+spells its types differently classifies its changelog by passing its own."""
+
+DEFAULT_DATA_PREFIXES = ("data",)
+"""Commit types that carry generated output rather than a change to it."""
 
 
 def get_latest_tag() -> str | None:
@@ -63,7 +71,11 @@ def get_latest_tag() -> str | None:
         return None
 
 
-def classify_commit(message: str) -> ChangelogCategory:
+def classify_commit(
+    message: str,
+    behavior: tuple[str, ...] = DEFAULT_BEHAVIOR_PREFIXES,
+    data: tuple[str, ...] = DEFAULT_DATA_PREFIXES,
+) -> ChangelogCategory:
     """Bucket a commit by the ``type(scope):`` prefix of its message.
 
     Commits in this repo follow the conventional ``type(scope): description``
@@ -79,12 +91,10 @@ def classify_commit(message: str) -> ChangelogCategory:
     decision it feeds; a richer taxonomy is `git log` itself.
     """
     lower = message.lower()
-    for prefix in BEHAVIOR_PREFIXES:
-        if lower.startswith(prefix):
-            return "behavior"
-    for prefix in DATA_PREFIXES:
-        if lower.startswith(prefix):
-            return "data"
+    if lower.startswith(behavior):
+        return "behavior"
+    if lower.startswith(data):
+        return "data"
     return "infrastructure"
 
 

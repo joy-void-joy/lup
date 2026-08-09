@@ -16,7 +16,7 @@ from pathlib import Path
 import typer
 from pydantic import BaseModel, Field, ValidationError
 
-from lup_template.devtools.utils import git
+from lup.devtools.utils import git
 
 CSS = (
     resources.files("lup_template.devtools.dev")

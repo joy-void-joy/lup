@@ -25,8 +25,7 @@ from lup.codescan.boundaries import (
     find_library_default_breaches,
     library_placement_path_is_audited,
 )
-from lup_template.devtools.harness.composition import application_roots
-from lup_template.devtools.utils import git, output_json
+from lup.devtools.utils import git, output_json
 
 
 class FoundBreach(BoundaryBreach):
@@ -91,6 +90,8 @@ def scan_library_placement() -> list[FoundBreach]:
 
 def scan_boundaries() -> list[FoundBreach]:
     """Every native import, spelling, and kernel-import breach in the tree."""
+    from lup_template.devtools.harness.composition import application_roots
+
     found: list[FoundBreach] = []  # lup: ignore[empty-collection]
     roots = application_roots()
     for source in tracked_python_sources():

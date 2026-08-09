@@ -35,7 +35,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup_template.devtools.utils import (
+from lup.devtools.utils import (
     format_table,
     git,
     decode_stderr,

@@ -443,7 +443,7 @@
     {
       "path": "docs/library.md",
       "category": "generated",
-      "sha256": "6c6b53497207e637cb5bc931e3d69ad3a2e96c63157a41f2ed0ff3703b6e9bd5",
+      "sha256": "f7df441f69e27fb0835207e404f35483b52ff3744151d6eec73707af7864dda7",
       "semantic_id": "docs.library",
       "executable": false
     },
@@ -513,7 +513,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "5b3aed516063cab6f8c9dd5729b9ee861f98c39a27ce757e90b07017a97b478c",
+      "sha256": "e7a025504065da194e4198dddbb8cdc81308ff96b5949c01248fb9d6d369ab66",
       "semantic_id": "docs.template",
       "executable": false
     }

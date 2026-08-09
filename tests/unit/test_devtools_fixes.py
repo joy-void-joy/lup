@@ -33,7 +33,7 @@ def isolated_root(tmp_path: Path) -> Iterator[Path]:
 
 class TestToolCallView:
     def test_renders_calls_from_the_events_sidecar(self, tmp_path: Path) -> None:
-        from lup_template.devtools.trace.traces import render_tool_calls
+        from lup.devtools.trace.traces import render_tool_calls
 
         trace_path = tmp_path / "t.md"
         trace = TraceLogger(trace_path=trace_path, title="t")
@@ -47,7 +47,7 @@ class TestToolCallView:
         assert "prose" not in out
 
     def test_no_tool_calls_recorded(self, tmp_path: Path) -> None:
-        from lup_template.devtools.trace.traces import render_tool_calls
+        from lup.devtools.trace.traces import render_tool_calls
 
         trace_path = tmp_path / "t.md"
         trace = TraceLogger(trace_path=trace_path, title="t")
@@ -77,7 +77,7 @@ class TestLegacyMarkdownErrorScan:
     """
 
     def test_healthy_result_is_not_an_error(self) -> None:
-        from lup_template.devtools.trace.traces import events_from_legacy_markdown
+        from lup.devtools.trace.traces import events_from_legacy_markdown
 
         events = events_from_legacy_markdown(
             legacy_trace('{"status": "reviewed", "is_error": false}')
@@ -88,7 +88,7 @@ class TestLegacyMarkdownErrorScan:
         assert call.tool == "search" and call.ok is True
 
     def test_failing_result_emits_error_paired_to_its_tool(self) -> None:
-        from lup_template.devtools.trace.traces import events_from_legacy_markdown
+        from lup.devtools.trace.traces import events_from_legacy_markdown
 
         events = events_from_legacy_markdown(
             legacy_trace('{"is_error": true, "content": "boom"}')
@@ -98,7 +98,7 @@ class TestLegacyMarkdownErrorScan:
         assert error.tool == "search"
 
     def test_capability_phrasing_in_response_text(self) -> None:
-        from lup_template.devtools.trace.traces import events_from_legacy_markdown
+        from lup.devtools.trace.traces import events_from_legacy_markdown
 
         trace = TraceLogger(trace_path=Path("/tmp/unused.md"), title="t")
         trace.log_block(LupTextBlock(text="A tool that searches PyPI would be useful."))
@@ -113,14 +113,14 @@ class TestLegacyMarkdownErrorScan:
 
 class TestDecodeStderr:
     def test_decodes_bytes_and_trims_framing(self) -> None:
-        from lup_template.devtools.utils import decode_stderr
+        from lup.devtools.utils import decode_stderr
 
         err = sh.ErrorReturnCode.__new__(sh.ErrorReturnCode)
         err.stderr = b"boom\n"
         assert decode_stderr(err) == "boom"
 
     def test_passes_through_str(self) -> None:
-        from lup_template.devtools.utils import decode_stderr
+        from lup.devtools.utils import decode_stderr
 
         err = sh.ErrorReturnCode.__new__(sh.ErrorReturnCode)
         # sh 2.4 declares `stderr` read-only, and this pins the branch that
@@ -220,19 +220,19 @@ class TestPrCreate:
 
 class TestDefinedIn:
     def test_imported_class_excluded(self) -> None:
-        from lup_template.devtools.py import common, info
+        from lup.devtools.py import common, info
 
         # common.py imports Path from pathlib; it is not defined there.
         assert not info.defined_in(common, "Path")
 
     def test_imported_module_excluded(self) -> None:
-        from lup_template.devtools.py import common, info
+        from lup.devtools.py import common, info
 
         # common.py imports the importlib module; it is not defined there.
         assert not info.defined_in(common, "importlib")
 
     def test_locally_defined_function_included(self) -> None:
-        from lup_template.devtools.py import common, info
+        from lup.devtools.py import common, info
 
         assert info.defined_in(common, "resolve_object")
 

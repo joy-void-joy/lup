@@ -14,14 +14,16 @@ from rich.panel import Panel
 from rich.text import Text
 
 from lup.adapters.claude.profile_store import ClaudeProfileStore
-from lup_template.devtools.usage.api import creds_path, fetch_usage, load_stats
-from lup_template.devtools.usage.render import (
+from lup.devtools.subapps import subapp
+from lup.adapters.claude.usage.api import creds_path, fetch_usage, load_stats
+from lup.adapters.claude.usage.render import (
     build_display,
     build_error_panel,
     build_snapshot,
 )
 
 app = typer.Typer(no_args_is_help=True)
+SUBAPP = subapp("usage", "Runtime usage display", app)
 console = Console()
 
 

@@ -13,7 +13,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup_template.devtools.utils import gh, git
+from lup.devtools.utils import gh, git
 
 
 class RemoteRef(BaseModel):

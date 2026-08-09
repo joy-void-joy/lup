@@ -16,7 +16,7 @@ from typing import cast
 import typer
 from pydantic import BaseModel
 
-from lup_template.devtools.py.common import find_module_path
+from lup.devtools.py.common import find_module_path
 
 
 def format_signature(obj: object, name: str) -> str:

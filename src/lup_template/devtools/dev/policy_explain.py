@@ -21,7 +21,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from lup.harness.enforcement import semantic_policy_for
 from lup.policy.models import EditBatch, EditChange, FetchUrl, ShellCommand
 from lup_template.devtools.harness.catalog import declared_hook_set
-from lup_template.devtools.utils import output_json
+from lup.devtools.utils import output_json
 
 EFFECT_STYLES = {
     "allow": typer.colors.GREEN,

@@ -31,10 +31,11 @@ from lup.resolver.mailbox import (
 )
 from lup.resolver.models import QuestionAnswer
 from lup.resolver.state import ResolverStateRepository, StateCorruptionError
+from lup.types import StringMap
 from lup.web.loopback import guard_loopback_host, refuse_non_loopback
 from lup.workspace.paths import project_root
-from lup_template.devtools.supervisor.events import FRESH_CATCHUP_ENTRIES, stream
-from lup_template.devtools.supervisor.projection import (
+from lup.devtools.supervisor.events import FRESH_CATCHUP_ENTRIES, stream
+from lup.devtools.supervisor.projection import (
     ActorIndex,
     AnswerSubmission,
     MessageSubmission,
@@ -47,10 +48,18 @@ from lup_template.devtools.supervisor.projection import (
     unanswered_questions,
 )
 
-SSE_HEADERS = {
+DEFAULT_SSE_HEADERS: StringMap = {
     "Cache-Control": "no-cache",
     "X-Accel-Buffering": "no",
 }
+"""What the event stream asks of whatever sits between it and the reader.
+
+``Cache-Control`` is the stream's own requirement — a cached event stream is
+not one. ``X-Accel-Buffering`` is nginx's documented opt-out from response
+buffering and means nothing to any other proxy, which is why this is a
+default rather than a constant: a deployment behind Caddy or Traefik replaces
+it, and the loopback bind this page ships with has no proxy to tell at all.
+"""
 
 
 def run_mailbox(state_root: Path, run_id: str) -> QuestionMailbox:
@@ -145,11 +154,12 @@ def create_supervisor(
     url: str,
     run_id: str | None = None,
     adapter: str = "claude",
+    sse_headers: StringMap = DEFAULT_SSE_HEADERS,
 ) -> FastAPI:
     """Build the supervisor app over every run under the state root."""
     supervisor = FastAPI(title="Lup resolver supervisor", docs_url=None, redoc_url=None)
     html = (
-        resources.files("lup_template.devtools.supervisor")
+        resources.files("lup.devtools.supervisor")
         .joinpath("assets/index.html")
         .read_text("utf-8")
     )
@@ -186,7 +196,7 @@ def create_supervisor(
         return StreamingResponse(
             stream(run_journal(state_root, selected), last_seq(resume)),
             media_type="text/event-stream",
-            headers=SSE_HEADERS,
+            headers=sse_headers,
         )
 
     @supervisor.get("/api/runs/{selected}/actors")

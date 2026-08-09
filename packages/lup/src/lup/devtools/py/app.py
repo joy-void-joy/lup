@@ -8,32 +8,34 @@ from typing import Annotated
 import typer
 
 from lup.workspace.paths import find_nearest_pyproject
-from lup_template.devtools.py.common import fail, find_module_path, resolve_object
-from lup_template.devtools.py.evaluate import (
-    DANGEROUS_MODULES,
+from lup.devtools.py.common import fail, find_module_path, resolve_object
+from lup.devtools.py.evaluate import (
+    DEFAULT_DANGEROUS_MODULES,
     auto_import_namespace,
     check_eval_safety,
     format_eval_result,
 )
-from lup_template.devtools.py.imports import (
+from lup.devtools.py.imports import (
     ImportEntry,
     collect_imports_from_source,
     find_reverse_imports,
     format_import_entry,
 )
-from lup_template.devtools.py.info import (
+from lup.devtools.py.info import (
     show_callable_info,
     show_class,
     show_module,
     show_value_info,
 )
-from lup_template.devtools.py.search import (
+from lup.devtools.py.search import (
     get_top_level_packages,
     scan_module_symbols,
 )
-from lup_template.devtools.py.source import format_tree
+from lup.devtools.py.source import format_tree
+from lup.devtools.subapps import subapp
 
 app = typer.Typer(no_args_is_help=True)
+SUBAPP = subapp("py", "Python module introspection", app)
 
 
 @app.command("info")
@@ -200,8 +202,10 @@ def eval_cmd(
         StopIteration,
         ImportError,
     ) as e:
-        if isinstance(e, NameError) and e.name in DANGEROUS_MODULES:
-            fail(f"Module {e.name!r} is not auto-imported: {DANGEROUS_MODULES[e.name]}")
+        if isinstance(e, NameError) and e.name in DEFAULT_DANGEROUS_MODULES:
+            fail(
+                f"Module {e.name!r} is not auto-imported: {DEFAULT_DANGEROUS_MODULES[e.name]}"
+            )
         fail(f"{type(e).__name__}: {e}")
 
     typer.echo(format_eval_result(result))

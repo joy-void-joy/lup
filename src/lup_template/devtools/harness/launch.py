@@ -29,7 +29,7 @@ from lup_template.devtools.harness.composition import (
     codex_composition,
 )
 from lup_template.devtools.harness.drift import generate_with_report
-from lup_template.devtools.layout import get_tree_dir
+from lup.devtools.layout import get_tree_dir
 
 
 class RelocationHint(BaseModel):

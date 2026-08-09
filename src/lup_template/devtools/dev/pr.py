@@ -26,9 +26,9 @@ from lup_template.devtools.dev.branches import (
     detect_base_branch,
     get_integration_branch,
 )
-from lup_template.devtools.layout import get_tree_dir
+from lup.devtools.layout import get_tree_dir
 
-from lup_template.devtools.utils import git, gh, decode_stderr, output_json
+from lup.devtools.utils import git, gh, decode_stderr, output_json
 
 logger = logging.getLogger(__name__)
 

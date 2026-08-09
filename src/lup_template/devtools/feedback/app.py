@@ -7,7 +7,7 @@ import typer
 
 import lup_template.devtools.feedback.analyze as analyze
 import lup_template.devtools.feedback.reports as reports
-from lup_template.devtools.utils import VERSION_OPT, ALL_VERSIONS_OPT, JSON_OPT
+from lup.devtools.utils import VERSION_OPT, ALL_VERSIONS_OPT, JSON_OPT
 
 app = typer.Typer(no_args_is_help=True)
 

@@ -14,7 +14,7 @@ from typing import TypedDict
 
 from lup_template.devtools.feedback.models import LoadedSession
 from lup_template.devtools.feedback.state import load_sessions_for_versions
-from lup_template.devtools.trace.traces import (
+from lup.devtools.trace.traces import (
     CapabilityRequest,
     scan_for_capability_gaps,
 )
@@ -135,7 +135,7 @@ def analyze(version: str | None, all_versions: bool, output: Path | None) -> Non
 
     import typer
 
-    from lup_template.devtools.utils import output_json
+    from lup.devtools.utils import output_json
 
     report = build_report(version, all_versions)
 

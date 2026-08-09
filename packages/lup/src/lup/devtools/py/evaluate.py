@@ -6,6 +6,8 @@ Named ``evaluate`` rather than ``eval`` to avoid shadowing the builtin.
 import ast
 import importlib
 import json
+
+from lup.types import Namespace, StringMap
 from pprint import pformat
 
 # ---------------------------------------------------------------------------
@@ -14,7 +16,7 @@ from pprint import pformat
 
 # Each blocked name maps to the reason shown when it is refused, so a
 # deny message explains itself instead of just naming the offender.
-BLOCKED_CALLS: dict[str, str] = {  # lup: ignore[dict-str-payload] — reason table
+DEFAULT_BLOCKED_CALLS: StringMap = {
     "exec": "executes arbitrary code",
     "eval": "evaluates arbitrary code",
     "compile": "builds executable code objects",
@@ -29,7 +31,7 @@ BLOCKED_CALLS: dict[str, str] = {  # lup: ignore[dict-str-payload] — reason ta
     "vars": "exposes raw namespaces",
 }
 
-BLOCKED_ATTRS: dict[str, str] = {  # lup: ignore[dict-str-payload] — reason table
+DEFAULT_BLOCKED_ATTRS: StringMap = {
     "__builtins__": "exposes the full builtin namespace",
     "__class__": "walks the type graph toward arbitrary code",
     "__subclasses__": "enumerates every loaded class",
@@ -45,7 +47,7 @@ BLOCKED_ATTRS: dict[str, str] = {  # lup: ignore[dict-str-payload] — reason ta
     "__spec__": "reaches the import machinery",
 }
 
-DANGEROUS_MODULES: dict[str, str] = {  # lup: ignore[dict-str-payload] — reason table
+DEFAULT_DANGEROUS_MODULES: StringMap = {
     "os": "process and filesystem control",
     "sys": "interpreter internals",
     "subprocess": "spawns processes",
@@ -70,7 +72,7 @@ DANGEROUS_MODULES: dict[str, str] = {  # lup: ignore[dict-str-payload] — reaso
     "builtins": "exposes the full builtin namespace",
 }
 
-SAFE_BUILTINS: dict[str, object] = {  # lup: ignore[dict-str-object] — live namespace
+DEFAULT_SAFE_BUILTINS: Namespace = {
     "True": True,
     "False": False,
     "None": None,
@@ -118,25 +120,31 @@ SAFE_BUILTINS: dict[str, object] = {  # lup: ignore[dict-str-object] — live na
 }
 
 
-def check_eval_safety(tree: ast.Expression) -> str | None:
+def check_eval_safety(
+    tree: ast.Expression,
+    blocked_calls: StringMap = DEFAULT_BLOCKED_CALLS,
+    blocked_attrs: StringMap = DEFAULT_BLOCKED_ATTRS,
+) -> str | None:
     """Return an error message if the expression contains blocked patterns."""
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr in BLOCKED_ATTRS:
-            return f"Blocked attribute .{node.attr}: {BLOCKED_ATTRS[node.attr]}"
+        if isinstance(node, ast.Attribute) and node.attr in blocked_attrs:
+            return f"Blocked attribute .{node.attr}: {blocked_attrs[node.attr]}"
         if isinstance(node, ast.Call):
             func = node.func
-            if isinstance(func, ast.Name) and func.id in BLOCKED_CALLS:
-                return f"Blocked call {func.id}(): {BLOCKED_CALLS[func.id]}"
-            if isinstance(func, ast.Attribute) and func.attr in BLOCKED_CALLS:
-                return f"Blocked call .{func.attr}(): {BLOCKED_CALLS[func.attr]}"
+            if isinstance(func, ast.Name) and func.id in blocked_calls:
+                return f"Blocked call {func.id}(): {blocked_calls[func.id]}"
+            if isinstance(func, ast.Attribute) and func.attr in blocked_calls:
+                return f"Blocked call .{func.attr}(): {blocked_calls[func.attr]}"
     return None
 
 
 def auto_import_namespace(
     tree: ast.Expression,
-) -> dict[str, object]:  # lup: ignore[dict-str-object] — live namespace
+    builtins: Namespace = DEFAULT_SAFE_BUILTINS,
+    dangerous: StringMap = DEFAULT_DANGEROUS_MODULES,
+) -> Namespace:
     """Build a namespace by importing modules referenced in the expression."""
-    namespace = dict(SAFE_BUILTINS)
+    namespace = dict(builtins)
 
     walked = list(ast.walk(tree.body))
     root_names = [
@@ -147,7 +155,7 @@ def auto_import_namespace(
     attr_nodes = [node for node in walked if isinstance(node, ast.Attribute)]
 
     for name in dict.fromkeys(root_names):
-        if name in DANGEROUS_MODULES:
+        if name in dangerous:
             continue
         try:
             namespace[name] = importlib.import_module(name)
@@ -169,7 +177,7 @@ def auto_import_namespace(
 
     for dotted in sorted(dict.fromkeys(dotted_paths)):
         root, _, _ = dotted.partition(".")  # lup: ignore[string-split] — dotted path
-        if root in DANGEROUS_MODULES:
+        if root in dangerous:
             continue
         try:
             importlib.import_module(dotted)

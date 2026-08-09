@@ -4,11 +4,13 @@ from typing import Annotated
 
 import typer
 
-import lup_template.devtools.trace.traces as traces
+import lup.devtools.trace.traces as traces
 from lup.workspace.history import resolve_version
-from lup_template.devtools.utils import VERSION_OPT, ALL_VERSIONS_OPT, JSON_OPT
+from lup.devtools.subapps import subapp
+from lup.devtools.utils import VERSION_OPT, ALL_VERSIONS_OPT, JSON_OPT
 
 app = typer.Typer(no_args_is_help=True)
+SUBAPP = subapp("trace", "Trace display, search, and analysis", app)
 
 
 @app.command("show")

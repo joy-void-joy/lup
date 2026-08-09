@@ -2,7 +2,8 @@
 
 import lup.harness.models as models
 
-from lup_template.devtools.subapps import subapp_bullets
+from lup.devtools.subapps import subapp_bullets
+from lup_template.devtools.subapps import SUBAPP_SPECS
 
 DOCUMENT = models.PromptDocument(
     source=__name__,
@@ -21,7 +22,7 @@ Three packages, split by what changes and how often.
 | --- | --- | --- |
 | `agent/` | Reasoning. Prompts, output schema, tools, subagents, tool policy. No I/O. | Every time the domain does |
 | `environment/` | I/O. The CLI that starts a run, the session lifecycle, what happens to a result. | When the surface changes |
-| `devtools/` | Development. The `lup-devtools` CLI, and the typed harness declarations. | When the workflow changes |
+| `devtools/` | Development. What this project adds to the inherited `lup-devtools` CLI, and the typed harness declarations. | When the workflow changes |
 
 Keeping the agent free of I/O is what makes it improvable: the self-improvement
 loop reads traces and changes prompts, tools, and models, and it never has to
@@ -76,13 +77,21 @@ the SDK; everything else is loaded through pydantic-settings in
 
 ## `devtools/` — the development CLI
 
-`lup-devtools` is the second entry point. Its sub-apps are declared once in
-`devtools/subapps.py`, which the root Typer app wires and every generated
-document renders from, so the CLI and the docs cannot disagree:
+`lup-devtools` is the second entry point, and most of it is not here. The
+workflow sub-apps live in `lup.devtools` and are *inherited*: an upgrade
+brings their improvements without a merge, which is the point — they are
+development tooling, not this domain, and a fork of them goes stale the day
+it is taken. `devtools/subapps.py` names the ones this project takes and
+declares the ones only it has; `devtools/main.py` is where each name meets
+the app answering to it.
+
+That is also where `usage` is decided. It reads Claude Code's own OAuth
+credentials, so it lives in `lup.adapters.claude` and a project on another
+backend simply leaves it out of the roster.
 
 """
         ),
-        models.TextPart(text=subapp_bullets()),
+        models.TextPart(text=subapp_bullets(SUBAPP_SPECS)),
         models.TextPart(
             text=r"""
 Run `uv run lup-devtools --help` for the full command tree. The three you will

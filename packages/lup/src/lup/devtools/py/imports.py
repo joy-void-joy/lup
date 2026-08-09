@@ -5,7 +5,7 @@ import typing
 from collections.abc import Iterator
 from pathlib import Path
 
-from lup_template.devtools.py.common import categorize_import
+from lup.devtools.py.common import categorize_import
 
 # ---------------------------------------------------------------------------
 # py imports — import graph exploration

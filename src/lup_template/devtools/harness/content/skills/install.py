@@ -2,7 +2,8 @@
 
 import lup.harness.models as models
 
-from lup_template.devtools.subapps import subapp_bullets, subapp_summary
+from lup.devtools.subapps import subapp_bullets, subapp_summary
+from lup_template.devtools.subapps import SUBAPP_SPECS
 
 SKILL = models.Skill(
     id="skill.install",
@@ -122,7 +123,7 @@ The `lup-devtools` CLI (`src/lup_template/devtools/`) gives the meta-agent struc
 - `src/lup_template/devtools/main.py` — root typer app composing sub-apps (entry point: `lup-devtools`)
 """
             ),
-            models.TextPart(text=subapp_bullets(indent="  ")),
+            models.TextPart(text=subapp_bullets(SUBAPP_SPECS, indent="  ")),
             models.TextPart(
                 text=r"""
 ### Configuration Patterns
@@ -221,7 +222,7 @@ If the target repo builds (or will build) a tool-using SDK agent, the **self-imp
 - **Session management**: CLI with `run` + `loop` commands, auto-commit, session storage
 - **DevTools**: The full `lup-devtools` CLI ("""
             ),
-            models.TextPart(text=subapp_summary()),
+            models.TextPart(text=subapp_summary(SUBAPP_SPECS)),
             models.TextPart(
                 text=r""")
 - **Version tracking**: `[tool.lup] agent_version` in pyproject.toml + `lup-devtools version bump` for tracking agent behavior changes

@@ -23,8 +23,8 @@ import lup_template.devtools.harness.launch as launch
 import lup_template.devtools.harness.reconcile as reconcile
 import lup_template.devtools.harness.resolve as resolve
 from lup_template.devtools.harness.composition import ADAPTER_CONSTRUCTORS
-from lup_template.devtools.supervisor.app import serve_supervisor
-from lup_template.devtools.supervisor.doors import (
+from lup.devtools.supervisor.app import serve_supervisor
+from lup.devtools.supervisor.doors import (
     answer_questions,
     list_actors,
     list_questions,

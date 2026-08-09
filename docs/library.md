@@ -154,6 +154,8 @@ is the map of every difference.
 
 | Package | Solves |
 | --- | --- |
+| `devtools` | The development CLI an adopter inherits rather than forks: worktrees and branches, trace and Python introspection, the resolver supervisor, the sync registry, version bookkeeping. Ships no roster — each sub-app declares itself beside its Typer app and an application composes the ones it wants. Requires the `web` extra for the supervisor. |
+| `web` | What a page served on this machine does to stay local-only: the loopback bind refusal and the `Host` check that DNS rebinding would otherwise walk past. |
 | `workspace` | Where a run's data lives: version-aware paths, the `SessionContext` that crosses a process boundary, session history, and the note directories a session may touch. |
 | `realtime` | The wake/act/sleep lifecycle for persistent agents. `scheduler.py` stands alone; `relay.py` layers a subprocess mailbox transport on top and is never imported by it. |
 | `telemetry` | What a run records about itself: markdown trace plus machine-readable sidecar, console rendering, per-tool metrics with a file-backed flush for subprocess tools. |

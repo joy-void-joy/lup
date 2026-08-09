@@ -30,8 +30,6 @@ from pydantic import ConfigDict, TypeAdapter, with_config
 
 from lup.workspace.paths import find_project_root
 
-from lup_template.devtools.harness.catalog import portable_harness
-
 PLUGIN_NAME = "lup"
 SELF_PATH = "./.claude/plugins"
 
@@ -86,6 +84,8 @@ def default_marketplace_name(root: Path) -> str:
     disagree, and each would silently undo the other's name on the next run —
     which is how a repo ends up registered under a name it never chose.
     """
+    from lup_template.devtools.harness.catalog import portable_harness
+
     return str(portable_harness(root=root).plugins[0].marketplace)
 
 

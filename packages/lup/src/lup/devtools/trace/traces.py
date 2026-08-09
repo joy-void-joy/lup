@@ -48,7 +48,7 @@ from lup.workspace.history import (
 )
 from lup.workspace.paths import parse_timestamp, project_root, traces_path
 
-from lup_template.devtools.utils import output_json
+from lup.devtools.utils import output_json
 
 
 class TraceRef(BaseModel):

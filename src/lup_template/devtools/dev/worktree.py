@@ -8,8 +8,8 @@ import typer
 from pydantic import BaseModel
 
 from lup_template.devtools.harness.launch import relocation_hint
-from lup_template.devtools.layout import get_tree_dir
-from lup_template.devtools.utils import (
+from lup.devtools.layout import get_tree_dir
+from lup.devtools.utils import (
     copy_to_clipboard,
     decode_stderr,
     format_table,

@@ -13,7 +13,7 @@ import typer
 
 from lup.workspace.history import iter_session_dirs, latest_session_record
 from lup.workspace.paths import project_root, traces_path
-from lup_template.devtools.utils import git
+from lup.devtools.utils import git
 
 logger = logging.getLogger(__name__)
 

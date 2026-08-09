@@ -17,14 +17,12 @@ from lup_template.devtools.dev.boundaries import (
 )
 from lup_template.devtools.dev.branches import unlanded_siblings
 from lup_template.devtools.dev.comments import FoundComment, scan_tracked
-from lup_template.devtools.harness.composition import EVERY_TARGET
-from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.drift import (
     clean_repository_artifacts,
     drift_reports,
     report_drift,
 )
-from lup_template.devtools.utils import git, uv
+from lup.devtools.utils import git, uv
 
 # The suite waits on git subprocesses and hook scripts far more than it
 # computes, so it parallelizes well — but each worker pays a full interpreter
@@ -206,6 +204,9 @@ def run_checks(fix: bool, no_test: bool, scope: list[str] | None = None) -> None
     else:
         typer.echo("library placement: ok")
         results.append(CheckOutcome(name="library placement", passed=True))
+
+    from lup_template.devtools.harness.composition import EVERY_TARGET
+    from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 
     stale = [report for report in drift_reports(EVERY_TARGET) if not report.clean]
     repository_is_current = clean_repository_artifacts()
