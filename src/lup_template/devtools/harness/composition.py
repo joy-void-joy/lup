@@ -22,6 +22,7 @@ from lup.adapters.codex.harness_runtime import (
     CodexCliEvidence,
     codex_capability_probes,
 )
+from lup.adapters.harness import AdapterName
 from lup.codescan.boundaries import ApplicationRoots, generated_tree_paths
 from lup.harness.contracts import NativeSpellings, SkillInvocationRenderer
 from lup.harness.models import CapabilityEvidence
@@ -114,9 +115,9 @@ EVERY_TARGET = "all"
 artifacts that belong to no single one of them."""
 
 
-ADAPTER_CONSTRUCTORS: dict[str, Callable[[Path], NativeHarnessComposition]] = {
-    "claude": claude_composition,
-    "codex": codex_composition,
+ADAPTER_CONSTRUCTORS: dict[AdapterName, Callable[[Path], NativeHarnessComposition]] = {
+    AdapterName.CLAUDE: claude_composition,
+    AdapterName.CODEX: codex_composition,
 }
 """Every native adapter a CLI selector can name, in declaration order."""
 
@@ -127,7 +128,21 @@ def harness_compositions(value: str) -> list[NativeHarnessComposition]:
     root = project_root()
     if value == EVERY_TARGET:
         return [constructor(root) for constructor in constructors.values()]
-    constructor = constructors.get(value)  # lup: ignore[dict-get]
-    if constructor is not None:
-        return [constructor(root)]
-    raise typer.BadParameter("target must be claude, codex, or all")
+    return [constructors[adapter_named(value)](root)]
+
+
+def adapter_named(value: str) -> AdapterName:
+    """Resolve one CLI selector into the adapter it names, or refuse it.
+
+    Refusing is the point: a selector nothing recognizes used to fall
+    through a chain of string comparisons into whichever branch sat last,
+    so a typo silently selected an adapter instead of reporting one.
+    """
+    try:
+        return AdapterName(value)
+    except ValueError:
+        raise typer.BadParameter(
+            "target must be "
+            + ", ".join(name.value for name in AdapterName)
+            + f", or {EVERY_TARGET}"
+        ) from None

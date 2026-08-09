@@ -22,6 +22,7 @@ import lup_template.devtools.harness.drift as drift
 import lup_template.devtools.harness.launch as launch
 import lup_template.devtools.harness.reconcile as reconcile
 import lup_template.devtools.harness.resolve as resolve
+from lup.adapters.harness import AdapterName
 from lup_template.devtools.harness.composition import ADAPTER_CONSTRUCTORS
 from lup_template.devtools.supervisor.app import serve_supervisor
 from lup_template.devtools.supervisor.doors import (
@@ -120,7 +121,7 @@ app.add_typer(resolve_app, name="resolve")
 def resolve_command(
     context: typer.Context,
     adapter: Annotated[
-        str | None, typer.Option("--adapter", help="claude or codex")
+        AdapterName | None, typer.Option("--adapter", help="claude or codex")
     ] = None,
     run_id: Annotated[
         str | None,
