@@ -14,6 +14,7 @@ import lup_template.devtools.dev.conflicts as conflicts
 import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.library as library
 import lup_template.devtools.dev.plugin as plugin
+import lup_template.devtools.dev.policy_explain as policy_explain
 import lup_template.devtools.dev.pr as pr
 import lup_template.devtools.dev.resolve_review as resolve_review
 import lup_template.devtools.dev.rules as rules
@@ -475,6 +476,33 @@ def rules_cmd(
     typer.echo(
         f"Lup rule reference {'verified' if check_only else 'written'}: {destination}"
     )
+
+
+@app.command("policy")
+def policy_cmd(
+    subjects: Annotated[
+        list[str],
+        typer.Argument(help="Commands, URLs, or paths to classify"),
+    ],
+    kind: Annotated[
+        str,
+        typer.Option("--kind", help="What the inputs are: shell, fetch, or edit"),
+    ] = "shell",
+    sandbox: Annotated[
+        bool,
+        typer.Option("--sandbox", help="Judge as an OS-sandboxed session would"),
+    ] = False,
+    autonomous: Annotated[
+        bool,
+        typer.Option("--autonomous", help="Judge as a self-reviewing identity would"),
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+) -> None:
+    """Show what the declared permission policy decides about an input, and why."""
+    if kind not in ("shell", "fetch", "edit"):
+        typer.echo(f"unknown kind {kind!r}: expected shell, fetch, or edit", err=True)
+        raise typer.Exit(2)
+    policy_explain.explain(subjects, kind, sandbox, autonomous, as_json)
 
 
 # -- init commands --
