@@ -1132,12 +1132,46 @@ def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
         return policy.decide(ShellCommand(command=command)).effect
 
     assert effect("curl -s https://docs.example.com/api/one") == "allow"
-    assert effect("curl -sI https://docs.example.com/") == "deny"
+    # A cluster is one word to the shell and to curl, so it is judged as the
+    # flags it spells rather than as an option nobody declared.
+    assert effect("curl -sI https://docs.example.com/") == "allow"
     assert effect("curl -s -I https://docs.example.com/") == "allow"
+    assert effect("curl -sSf https://docs.example.com/") == "allow"
+    # Only the declared reporting letters cluster. One that follows redirects
+    # or carries a body reaches past the scopes, so it stays unclassified
+    # wherever it is spelled.
+    assert effect("curl -fsSL https://docs.example.com/") == "deny"
+    assert effect("curl -sd a=b https://docs.example.com/api") == "deny"
     assert effect("curl -s https://internal.example.com/x") == "deny"
     assert effect("curl -s https://elsewhere.example.com/") == "ask"
     assert effect("curl -X DELETE https://docs.example.com/api") == "ask"
     assert effect("curl -d a=b https://docs.example.com/api") == "deny"
+
+
+def test_a_scope_may_cover_every_port_on_one_host() -> None:
+    """A local service is the same service at whatever port it was started on.
+
+    Every surface this repository serves takes `--port`, so a scope pinned to
+    one number puts the question back the first time somebody moves it —
+    while the reason loopback is grantable at all, that nothing off this
+    machine can reach it, holds at every port equally.
+    """
+    policy = FetchPolicy(
+        [
+            UrlScope(origin=AnyHttpUrl("http://127.0.0.1"), any_port=True),
+            UrlScope(origin=AnyHttpUrl("https://pinned.example.com:8443")),
+        ],
+        [],
+    )
+
+    def effect(url: str) -> str:
+        return policy.decide(FetchUrl(url=AnyHttpUrl(url))).effect
+
+    assert effect("http://127.0.0.1:8765/api/runs") == "allow"
+    assert effect("http://127.0.0.1:9999/") == "allow"
+    assert effect("http://127.0.0.1/") == "allow"
+    assert effect("https://pinned.example.com:8443/x") == "allow"
+    assert effect("https://pinned.example.com:9000/x") == "ask"
 
 
 def test_a_recoverable_grant_never_covers_a_protected_path(tmp_path: Path) -> None:

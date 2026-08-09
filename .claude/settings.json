@@ -75,6 +75,8 @@
         "*.githubusercontent.com",
         "pypi.org",
         "files.pythonhosted.org",
+        "127.0.0.1",
+        "localhost",
         "api.anthropic.com"
       ]
     }

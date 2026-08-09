@@ -29,7 +29,7 @@ def url_matches_scope(
     return (
         scheme == scope["scheme"]
         and host_matches_scope(hostname, scope["host"], scope["include_subdomains"])
-        and port == scope["port"]
+        and (scope["any_port"] or port == scope["port"])
         and path.startswith(scope["path_prefix"])
     )
 

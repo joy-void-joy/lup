@@ -64,6 +64,7 @@ class UrlScope(BaseModel):
     path_prefix: UrlPathPrefix = "/"
     reason: str = ""
     include_subdomains: bool = False
+    any_port: bool = False
 
 
 def url_scope_row(scope: UrlScope) -> UrlScopeRow:
@@ -78,6 +79,7 @@ def url_scope_row(scope: UrlScope) -> UrlScopeRow:
         path_prefix=scope.path_prefix,
         reason=scope.reason,
         include_subdomains=scope.include_subdomains,
+        any_port=scope.any_port,
     )
 
 

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "f0ec36dd17d746b049aa45089474f155e7c997afbce79fc9a7f8a552b05d4e50",
+  "source_digest": "8c6eab8b84af3eb26e2d6f479edef8228dcb6ba2fa6134dbb9271bcd951f0b39",
   "target_requirements": [
     "claude-code"
   ],
@@ -310,7 +310,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "0cb6b37a367fb3972b3cf72c1ff37e9c68c8977a580a4cd8366658c06ed4767e",
+      "sha256": "57a130f2a89f5f5cf4039d00003fb10181b0208fb05f9b3a46b282bf7d72f1ed",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -331,7 +331,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/fetch.py",
       "category": "generated",
-      "sha256": "d0a66b95c072b9129e080527ce580272e9987ce88f867685866c01c9e9d539a4",
+      "sha256": "7666dc1b70d370968d747b16ac8e538b1676bdf2724de89a38b85f15238ed2e4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -352,7 +352,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "289ee7b569d10d95a3e86f717ea690c2c5a0c977caab66864fc60e7dbecc71b2",
+      "sha256": "155d5586d3095154ac9d260687137ac7e5277b7b317c4bce19ed2bad99a99992",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -373,7 +373,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "e1501286b41ad81623c9835d7ae2385f8b41e964cf10337cc6e5749fc3bced88",
+      "sha256": "f915158247e245dfc9e22dab3d5cff77ba037ed7949b777593d838e10c16ab0f",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -394,7 +394,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "ca226c2043eafa52bbaa387cdaf725cd3105f9b62b9545a9b3f43ecd7d0464a2",
+      "sha256": "8a14fbe579a5094858caab36724212decc1763aa1eac798919cd7d0f938219c1",
       "semantic_id": "harness.project-settings",
       "executable": false
     },

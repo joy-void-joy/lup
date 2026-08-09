@@ -20,6 +20,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "http",
@@ -28,6 +29,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "https",
@@ -36,6 +38,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "http",
@@ -44,6 +47,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "https",
@@ -52,6 +56,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "http",
@@ -60,6 +65,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "https",
@@ -68,6 +74,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "http",
@@ -76,6 +83,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "https",
@@ -84,6 +92,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "http",
@@ -92,6 +101,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "https",
@@ -100,6 +110,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "http",
@@ -108,6 +119,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "https",
@@ -116,6 +128,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "https",
@@ -124,6 +137,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "https",
@@ -132,6 +146,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": True,
+        "any_port": False,
     },
     {
         "scheme": "https",
@@ -140,6 +155,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
     },
     {
         "scheme": "https",
@@ -148,6 +164,25 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "path_prefix": "/",
         "reason": "",
         "include_subdomains": False,
+        "any_port": False,
+    },
+    {
+        "scheme": "http",
+        "host": "127.0.0.1",
+        "port": None,
+        "path_prefix": "/",
+        "reason": "",
+        "include_subdomains": False,
+        "any_port": False,
+    },
+    {
+        "scheme": "http",
+        "host": "localhost",
+        "port": None,
+        "path_prefix": "/",
+        "reason": "",
+        "include_subdomains": False,
+        "any_port": False,
     },
 ]
 
