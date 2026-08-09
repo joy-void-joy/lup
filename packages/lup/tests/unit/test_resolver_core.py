@@ -3713,3 +3713,67 @@ def test_a_join_commit_without_one_identity_is_not_reported_as_one(
 
     assert "failed to identify worktree integration" in str(raised.value)
     assert "named 2 commits: 'first-sha\\nsecond-sha'" in str(raised.value)
+
+
+async def test_a_failing_promotion_round_is_retried_not_fatal(tmp_path: Path) -> None:
+    """The only writer of ``answers/`` must not be lost to one bad round.
+
+    A promoter that dies takes every door with it: later waits park on
+    questions a human already answered, and nothing says why.
+    """
+    core = planning_core(tmp_path, lambda *_: plan_of())
+    core.poll_interval_seconds = 0.01
+    rounds = Counter()
+
+    async def failing_once() -> list[str]:
+        rounds["called"] += 1
+        if rounds["called"] == 1:
+            raise OSError("offers/ is unreadable")
+        return []
+
+    core.apply_mailbox = failing_once
+    async with core.promoting():
+        await asyncio.sleep(0.05)
+
+    assert rounds["called"] > 1, "the promoter stopped after the failing round"
+    assert any("retried" in problem for problem in core.promoter_problems)
+
+
+async def test_a_promoter_failure_does_not_replace_the_bodys_exception(
+    tmp_path: Path,
+) -> None:
+    """The finally runs while the real failure is propagating through it."""
+    core = planning_core(tmp_path, lambda *_: plan_of())
+    core.poll_interval_seconds = 0.01
+
+    async def always_failing() -> list[str]:
+        raise OSError("offers/ is unreadable")
+
+    core.apply_mailbox = always_failing
+
+    with pytest.raises(ResolverInvariantError) as raised:
+        async with core.promoting():
+            raise ResolverInvariantError("what actually went wrong")
+
+    assert "what actually went wrong" in str(raised.value)
+
+
+async def test_a_park_report_names_a_broken_promoter(tmp_path: Path) -> None:
+    """ "Nobody answered" and "it never counted" look identical from outside."""
+    core = planning_core(tmp_path, lambda *_: plan_of())
+    core.state = standing_state("coverage", None)
+    core.promoter_problems.append("the answer promoter stopped early")
+
+    with pytest.raises(ResolverAwaitingAnswers) as raised:
+        await core.await_questions(
+            [
+                MaterialQuestion(
+                    id="q1",
+                    concern_id="concern-1",
+                    prompt="Which way?",
+                    choices=["left", "right"],
+                )
+            ]
+        )
+
+    assert any("promoter stopped early" in item for item in raised.value.problems)

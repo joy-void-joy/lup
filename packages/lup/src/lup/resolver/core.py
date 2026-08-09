@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import logging
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -90,6 +91,9 @@ from lup.resolver.tools import WAIT_CONTRACT
 from lup.runtime.factory import SessionFactory
 from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.wrappers import CorrectionConfig, decorated_session_factory
+
+
+logger = logging.getLogger(__name__)
 
 
 class ResolverInvariantError(RuntimeError):
@@ -402,6 +406,7 @@ class ResolverCore:
         self.journal = Journal(self.repository.root)
         self.actors = ActorSessions(self.repository.root, self.journal, self.mailbox)
         self.ledger: list[LedgerEntry] = []
+        self.promoter_problems: list[str] = []  # lup: ignore[empty-collection]
         self.wake = asyncio.Event()
         self.state_lock = asyncio.Lock()
         self.state: ResolveState | None = None
@@ -614,16 +619,41 @@ class ResolverCore:
         Every actor's session is released here too. A park is an exit like
         any other: the session ids are persisted on the way out, so resuming
         reattaches to the conversations rather than starting new ones.
+
+        The promoter is awaited for its exceptions rather than by re-raising
+        them, because this runs while the body's own exception is propagating:
+        raising here would replace the reason the operation ended with a
+        symptom of it ending. What the promoter could not do is already on
+        ``promoter_problems``, which every park report carries.
         """
         self.mailbox.clear_park()
+        self.promoter_problems.clear()
         stop = asyncio.Event()
         promoter = asyncio.create_task(self.promote_until(stop))
         try:
             yield
         finally:
             stop.set()
-            await promoter
+            outcome = await asyncio.gather(promoter, return_exceptions=True)
+            self.record_promoter_exit(outcome[0])
             await self.actors.close()
+
+    def record_promoter_exit(self, outcome: None | BaseException) -> None:
+        """Record a promoter that ended by raising rather than by being stopped.
+
+        ``promote_until`` handles its own errors, so anything arriving here
+        escaped that net — a cancellation, or a failure of the handling
+        itself. Either way the doors stopped being served at that moment, so
+        it is recorded as a problem the next park report carries rather than
+        discarded.
+        """
+        if outcome is None:
+            return
+        logger.exception("resolver promoter ended early", exc_info=outcome)
+        self.promoter_problems.append(
+            f"the answer promoter stopped early ({outcome!r}), so offers made "
+            "after that point were never taken"
+        )
 
     async def advance_exclusive(self, state: ResolveState) -> ResolveManifest:
         """Advance while a promoter is folding every door's answers in.
@@ -2105,18 +2135,44 @@ class ResolverCore:
         return problems
 
     async def promote_until(self, stop: asyncio.Event) -> None:
-        """Keep promoting for the lifetime of one advance."""
+        """Keep promoting for the lifetime of one advance.
+
+        This is the only writer of ``answers/``, so an unhandled failure here
+        would leave every later wait unsatisfiable by any door — parking the
+        run on questions a human had already answered, with nothing saying
+        why. One round failing is therefore recorded and retried rather than
+        ending the promoter: a malformed offer file, a full disk, or a state
+        read that lost a race are all conditions the next round may not meet.
+        """
         while not stop.is_set():
-            await self.apply_mailbox()
+            await self.promote_round()
             try:
                 async with asyncio.timeout(self.poll_interval_seconds):
                     await stop.wait()
             except TimeoutError:
                 continue
-        await self.apply_mailbox()
+        await self.promote_round()
+
+    async def promote_round(self) -> None:
+        """Fold the mailbox in once, recording rather than raising a failure."""
+        try:
+            await self.apply_mailbox()
+        except Exception:
+            logger.exception("resolver answer promotion failed")
+            self.promoter_problems.append(
+                "an answer-promotion round failed; offers are being retried "
+                "and the run log carries the reason"
+            )
 
     async def await_questions(self, questions: list[MaterialQuestion]) -> AnswerBatch:
-        """Wait for every named question, or park the run on what is missing."""
+        """Wait for every named question, or park the run on what is missing.
+
+        A park report carries what the promoter could not do alongside what
+        the doors got wrong, because the two are indistinguishable from
+        outside: both end as a question that looks unanswered. Naming the
+        broken promoter is what separates "nobody answered this" from
+        "somebody did and it never counted".
+        """
         if not questions:
             return AnswerBatch(run_id=self.config.run_id, answers=[])
         await self.apply_mailbox()
@@ -2135,7 +2191,7 @@ class ResolverCore:
                     for question in questions
                     if question.id in result.unanswered
                 ],
-                problems,
+                [*problems, *self.promoter_problems],
             )
         return AnswerBatch(
             run_id=self.config.run_id,
