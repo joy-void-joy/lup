@@ -16,6 +16,7 @@ import lup_template.devtools.dev.library as library
 import lup_template.devtools.dev.plugin as plugin
 import lup_template.devtools.dev.policy_explain as policy_explain
 import lup_template.devtools.dev.pr as pr
+import lup_template.devtools.dev.relocate as relocate_mod
 import lup_template.devtools.dev.resolve_review as resolve_review
 import lup_template.devtools.dev.rules as rules
 import lup_template.devtools.dev.worktree as worktree
@@ -476,6 +477,42 @@ def rules_cmd(
     typer.echo(
         f"Lup rule reference {'verified' if check_only else 'written'}: {destination}"
     )
+
+
+@app.command("relocate")
+def relocate_cmd(
+    moves: Annotated[
+        list[str],
+        typer.Argument(help="Module relocations, each spelled old.module=new.module"),
+    ],
+    root: Annotated[
+        list[Path] | None,
+        typer.Option("--root", help="Source root to rewrite (repeatable)"),
+    ] = None,
+) -> None:
+    """Repoint every import of a module that moved between the two halves."""
+
+    def parsed(move: str) -> relocate_mod.Relocation:
+        # This CLI's own flag grammar, not structured data with a parser.
+        old, separator, new = move.partition("=")  # lup: ignore[string-split]
+        sides = [relocate_mod.name_parts(old), relocate_mod.name_parts(new)]
+        if not separator or any(side is None for side in sides):
+            typer.echo(f"expected old.module=new.module; got {move!r}", err=True)
+            raise typer.Exit(2)
+        return relocate_mod.Relocation(old=sides[0] or [], new=sides[1] or [])
+
+    declared = [parsed(move) for move in moves]
+    candidates = root or [
+        Path("src"),
+        Path("packages"),
+        Path("tests"),
+        Path("examples"),
+    ]
+    roots = [path for path in candidates if path.exists()]
+    for edit in relocate_mod.relocate(roots, declared):
+        typer.echo(f"{edit.path}: {edit.imports} import(s)")
+    for mention in relocate_mod.surviving_mentions(roots, declared):
+        typer.echo(f"still mentions a moved module: {mention}", err=True)
 
 
 @app.command("policy")
