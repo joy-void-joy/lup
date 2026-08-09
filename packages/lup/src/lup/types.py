@@ -38,6 +38,23 @@ The keys are open and data-driven by nature (whatever variables exist), which
 is exactly the shape the dict-str-payload rule otherwise flags: annotate env
 maps with this alias instead of respelling ``dict[str, str]`` per site."""
 
+type StringMap = dict[str, str]  # lup: ignore[dict-str-payload] — open string map
+"""Any other open map of strings to strings — a reason table, response headers.
+
+The same shape as ``EnvVars`` and deliberately a separate name: what makes
+these keys open differs, and a header map annotated as environment variables
+reads as a mistake even where the checker cannot see one. Reach for it when
+the keys are data rather than a schema; a fixed set of fields is a
+``TypedDict`` or a model, not this."""
+
+type Namespace = dict[str, object]  # lup: ignore[dict-str-object] — live objects
+"""A live Python namespace: names bound to whatever objects they name.
+
+The one shape ``object`` is honest for, because the values genuinely are
+arbitrary objects rather than data with a schema somewhere — a module, a
+builtin, a class. Reach for ``JsonObject`` for anything that will be
+serialized; this is for what an interpreter holds."""
+
 type Decorator[T, R] = Callable[[T], R]
 """A decorator: applied with ``@`` to a `T`, yields an `R`. Names the intent
 at a signature (``-> Decorator[Handler, Tool]``) where a bare ``Callable`` of
