@@ -142,8 +142,14 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # A scope carries one concrete port, so each service that
                 # wants reading names itself here.
                 *(
-                    HookUrlScope(origin=AnyHttpUrl(f"http://{host}:{port}"))
-                    for port in (DASHBOARD_PORT, SUPERVISOR_PORT)
+                    HookUrlScope(
+                        origin=AnyHttpUrl(f"http://{host}:{port}"),
+                        reason=f"this project's own {name} page",
+                    )
+                    for port, name in (
+                        (DASHBOARD_PORT, "setup dashboard"),
+                        (SUPERVISOR_PORT, "resolver supervisor"),
+                    )
                     for host in ("127.0.0.1", "localhost")
                 ),
             ],

@@ -446,6 +446,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             runtime_url_scope(
                                 str(scope.origin),
                                 scope.path_prefix,
+                                reason=scope.reason,
                                 include_subdomains=scope.include_subdomains,
                             )
                             for scope in source.allowed_fetch
@@ -454,6 +455,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             runtime_url_scope(
                                 str(scope.origin),
                                 scope.path_prefix,
+                                reason=scope.reason,
                                 include_subdomains=scope.include_subdomains,
                             )
                             for scope in source.denied_fetch

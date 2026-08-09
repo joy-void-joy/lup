@@ -154,7 +154,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "host": "127.0.0.1",
         "port": 8765,
         "path_prefix": "/",
-        "reason": "",
+        "reason": "this project's own setup dashboard page",
         "include_subdomains": False,
     },
     {
@@ -162,7 +162,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "host": "localhost",
         "port": 8765,
         "path_prefix": "/",
-        "reason": "",
+        "reason": "this project's own setup dashboard page",
         "include_subdomains": False,
     },
     {
@@ -170,7 +170,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "host": "127.0.0.1",
         "port": 8766,
         "path_prefix": "/",
-        "reason": "",
+        "reason": "this project's own resolver supervisor page",
         "include_subdomains": False,
     },
     {
@@ -178,7 +178,7 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
         "host": "localhost",
         "port": 8766,
         "path_prefix": "/",
-        "reason": "",
+        "reason": "this project's own resolver supervisor page",
         "include_subdomains": False,
     },
 ]

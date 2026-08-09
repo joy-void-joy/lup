@@ -581,6 +581,14 @@ class HookUrlScope(BaseModel):
 
     origin: AnyHttpUrl
     path_prefix: UrlPathPrefix = "/"
+    reason: str = Field(
+        default="",
+        description=(
+            "Why this origin is reachable, carried into the decision the "
+            "kernel returns — the field the policy surface already had and "
+            "this declaration could not supply"
+        ),
+    )
     include_subdomains: bool = Field(
         default=False,
         description=(
