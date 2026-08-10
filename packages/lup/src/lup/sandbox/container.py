@@ -69,6 +69,7 @@ from lup.mcp import (
     lup_tool,
 )
 from lup.sandbox.models import (
+    MountMode,
     DEFAULT_PRE_INSTALL,
     CodeExecutionTimeoutError,
     DockerUnreachableError,
@@ -146,6 +147,8 @@ class Sandbox:
         timeout_seconds: int = 30,
         pre_install: Sequence[str] | None = DEFAULT_PRE_INSTALL,
         source_roots: Mapping[str, Path] | None = None,
+        read_only_mounts: Mapping[Path, str] | None = None,
+        rw_mounts: Mapping[Path, str] | None = None,
     ) -> None:
         suffix = session_id.replace("/", "-")  # lup: ignore[string-replace] — slug
         self.container_name = f"lup-sandbox-{suffix}"
@@ -157,6 +160,12 @@ class Sandbox:
         self.pre_install = list(pre_install) if pre_install is not None else None
         self.source_roots = {
             name: Path(root).resolve() for name, root in (source_roots or {}).items()
+        }
+        self.read_only_mounts = {
+            Path(host).resolve(): path for host, path in (read_only_mounts or {}).items()
+        }
+        self.rw_mounts = {
+            Path(host).resolve(): path for host, path in (rw_mounts or {}).items()
         }
         self.active_container: Container | None = None
         self.docker_client: docker.DockerClient | None = None
@@ -214,6 +223,33 @@ class Sandbox:
                 )
                 for name, root in sorted(self.source_roots.items())
             ],
+            *self.declared_mounts(),
+        ]
+
+    def declared_mounts(self) -> list[Mount]:
+        """Host directories the caller placed at container paths of its choosing.
+
+        Distinct from ``source_roots``, which are import roots this class puts
+        under one directory it names. These go where the caller says, because
+        what asks for them is a prompt that already names the path — mounting
+        the same tree somewhere else would leave every such instruction wrong.
+        """
+
+        def placed(mounts: Mapping[Path, str], mode: MountMode) -> list[Mount]:
+            return [
+                Mount(
+                    container_path=path,
+                    source=str(host),
+                    kind="bind",
+                    mode=mode,
+                    purpose=f"Host directory {host}, mounted {mode} by this session.",
+                )
+                for host, path in sorted(mounts.items())
+            ]
+
+        return [
+            *placed(self.read_only_mounts, "ro"),
+            *placed(self.rw_mounts, "rw"),
         ]
 
     def source_path(self) -> str:
@@ -569,6 +605,33 @@ class Sandbox:
             ),
         )
 
+    def run_shell(
+        self, command: Sequence[str], workdir: str | None = None
+    ) -> ExecuteCodeResult:
+        """Run one command in the container, outside the Python REPL.
+
+        The REPL is a Python process and holds the session's state; a
+        toolchain the image ships — a compiler, a converter — is a process of
+        its own, and running it here leaves that state untouched. A dead
+        container is rebuilt and the command retried, the way installing is.
+        """
+        started = time.time()
+        try:
+            result: ExecResult = self.container.exec_run(
+                list(command), workdir=workdir, demux=False
+            )
+        except NotFound:
+            logger.warning("Container gone during shell command, rebuilding")
+            self.rebuild_container()
+            result = self.container.exec_run(
+                list(command), workdir=workdir, demux=False
+            )
+        return ExecuteCodeResult(
+            exit_code=result.exit_code if result.exit_code is not None else -1,
+            stdout=decode_output(result.output),
+            duration_ms=round((time.time() - started) * 1000),
+        )
+
     def run_install(self, packages: list[str]) -> InstallPackageResult:
         """Install Python packages using uv.
 
@@ -598,16 +661,26 @@ class Sandbox:
 
     # --- MCP tool creation ---
 
-    def create_tools(self) -> list[LupMcpTool]:
+    def create_tools(self, usage_notes: str = "") -> list[LupMcpTool]:
         """Create MCP tools bound to this sandbox instance.
+
+        ``usage_notes`` is appended to the filesystem section of the
+        execute-code description. What a caller mounts is a caller's decision,
+        and only the caller knows what the files there are *for* — this class
+        can say a path exists and is writable, not that the plan lives in it.
 
         Returns:
             List of MCP tools for code execution and package installation.
         """
         timeout_seconds = self.timeout_seconds
         filesystem_text = "\n".join(
-            f"  {mount.container_path} ({mount.mode}) — {mount.purpose}"
-            for mount in self.mount_topology()
+            [
+                *(
+                    f"  {mount.container_path} ({mount.mode}) — {mount.purpose}"
+                    for mount in self.mount_topology()
+                ),
+                *([f"\n{usage_notes}"] if usage_notes else []),
+            ]
         )
         network_text = (
             "The container has network access. "
