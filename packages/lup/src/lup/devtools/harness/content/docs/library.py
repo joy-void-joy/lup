@@ -1,6 +1,12 @@
-<!-- Generated from lup.devtools.harness.content.docs.library by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+"""Guide to ``packages/lup``, the reusable provider-neutral library."""
 
-# The lup library
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    source=__name__,
+    parts=[
+        models.TextPart(
+            text=r"""# The lup library
 
 `packages/lup` is the reusable half of this repository: a standalone published
 package that knows how to run an agent turn, compile a harness, decide a
@@ -191,3 +197,7 @@ empty success.
 
 `src/lup_template` is the worked example of all three; see
 [template.md](template.md).
+"""
+        )
+    ],
+)

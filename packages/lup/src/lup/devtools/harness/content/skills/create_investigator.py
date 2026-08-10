@@ -1,21 +1,48 @@
----
-name: create-investigator
-description: "Create a new diagnostic/investigator command (like /debug)"
----
+"""Canonical declaration for the create-investigator skill."""
 
-# Create Investigator Command
+import lup.harness.models as models
+
+SKILL = models.Skill(
+    id="skill.create-investigator",
+    name="create-investigator",
+    description="Create a new diagnostic/investigator command (like /debug)",
+    arguments=[
+        models.Argument(
+            name="arguments",
+            description="Optional arguments supplied with the skill invocation",
+            required=False,
+        ),
+    ],
+    tools=["Write", "Read", "Glob", "Grep", "AskUserQuestion"],
+    argument_hint="[command-name] [brief description of what it investigates]",
+    prompt=models.PromptDocument(
+        parts=[
+            models.TextPart(
+                text=r"""# Create Investigator Command
 
 You are creating a new **investigator command** — a command where the user pastes raw output (logs, errors, console snippets, tool results) with minimal commentary, and the command guides you to trace the issue through code and logs and produce a diagnostic report.
 
-This is distinct from `$lup:add-command` which creates general-purpose commands. Investigator commands share a specific pattern: raw input in, traced diagnosis out.
+This is distinct from `"""
+            ),
+            models.SkillInvocation(plugin="lup", skill="add-command"),
+            models.TextPart(
+                text=r"""` which creates general-purpose commands. Investigator commands share a specific pattern: raw input in, traced diagnosis out.
 
-**Arguments provided**: the arguments supplied with this skill invocation
+**Arguments provided**: """
+            ),
+            models.ArgumentsRef(),
+            models.TextPart(
+                text=r"""
 
 ## Step 0: Parse arguments
 
 The first word is the **command name**. Everything after is a **brief description** of what the command investigates.
 
-If `the arguments supplied with this skill invocation` is empty, ask the user what the command should be called and what it investigates.
+If `"""
+            ),
+            models.ArgumentsRef(),
+            models.TextPart(
+                text=r"""` is empty, ask the user what the command should be called and what it investigates.
 
 ## Step 1: Understand the domain
 
@@ -41,7 +68,11 @@ Based on your exploration and the user's input, design the command. Existing inv
 
 **Philosophy**: "Don't hypothesize — trace." The command should guide you to find actual evidence, not speculate.
 
-**Input handling**: The input is **always raw pasted output** via `the arguments supplied with this skill invocation`. The user pastes trace logs, console output, error messages, or other raw text directly after the command. The command should never expect a file path, session ID, or structured input -- it works from whatever the user pastes. It should explain how to extract anchors (IDs, timestamps, tool names) from the pasted text and how to work with incomplete input.
+**Input handling**: The input is **always raw pasted output** via `"""
+            ),
+            models.ArgumentsRef(),
+            models.TextPart(
+                text=r"""`. The user pastes trace logs, console output, error messages, or other raw text directly after the command. The command should never expect a file path, session ID, or structured input -- it works from whatever the user pastes. It should explain how to extract anchors (IDs, timestamps, tool names) from the pasted text and how to work with incomplete input.
 
 **Investigation steps**: Domain-specific steps that trace from the pasted input to root cause. Each step should explain:
 
@@ -56,7 +87,11 @@ Based on your exploration and the user's input, design the command. Existing inv
 
 ## Step 3: Declare the skill
 
-Write the declaration to `content/skills/<command_name>.py` as a `models.Skill` — under `packages/lup/src/lup/devtools/harness/` when the investigation is one any project on lup would run, under `src/lup_template/devtools/harness/` when only this one would. Register it in that half's `content/catalog.py` (import `SKILL as SKILL_<NAME>`, add it to `LIBRARY_SKILLS` or `PROJECT_SKILLS`) and regenerate with `uv run lup-devtools harness generate all`. The artifacts under.claude/plugins/lup/commands/ under Claude Code, .codex/plugins/lup/skills/ under Codex are generated from this — never write them by hand.
+Write the declaration to `content/skills/<command_name>.py` as a `models.Skill` — under `packages/lup/src/lup/devtools/harness/` when the investigation is one any project on lup would run, under `src/lup_template/devtools/harness/` when only this one would. Register it in that half's `content/catalog.py` (import `SKILL as SKILL_<NAME>`, add it to `LIBRARY_SKILLS` or `PROJECT_SKILLS`) and regenerate with `uv run lup-devtools harness generate all`. The artifacts under"""
+            ),
+            models.PluginPath(plugin="lup", location="skills", scope="every_tree"),
+            models.TextPart(
+                text=r""" are generated from this — never write them by hand.
 
 **Tools**: Choose the `tools` list based on what the investigator needs. Every
 grant is a `ToolGrant` from `packages/lup/src/lup/types.py` — read that closed
@@ -69,7 +104,11 @@ a question grant if it may need clarification from the user.
 
 ## Step 4: Confirm and iterate
 
-Show the user what was created — the first draft is rarely perfect. Ask the user directly, offering concrete options, and wait for the answer: what needs adjusting, if anything
+Show the user what was created — the first draft is rarely perfect. """
+            ),
+            models.AskUser(question="what needs adjusting, if anything"),
+            models.TextPart(
+                text=r"""
 
 ## Rules
 
@@ -77,3 +116,8 @@ Show the user what was created — the first draft is rarely perfect. Ask the us
 - **Be specific** — Generic investigation steps ("search the logs") are useless. Point to specific directories, file patterns, scripts, and code locations.
 - **Encode domain knowledge** — The whole point of an investigator command is that it captures knowledge you'd otherwise have to rediscover each time. Bake in common failure modes, known gotchas, and relevant architecture.
 - **Keep it conversational** — ask when you need input. Don't assume.
+"""
+            ),
+        ]
+    ),
+)

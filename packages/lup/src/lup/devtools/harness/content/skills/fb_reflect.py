@@ -1,9 +1,24 @@
----
-name: fb-reflect
-description: "Meta and meta-meta reflection on the feedback loop process itself"
----
+"""Canonical declaration for the fb-reflect skill."""
 
-# Reflect: Process Quality Assessment
+import lup.harness.models as models
+
+SKILL = models.Skill(
+    id="skill.fb-reflect",
+    name="fb-reflect",
+    description="Meta and meta-meta reflection on the feedback loop process itself",
+    tools=[
+        "Bash(uv run lup-devtools:*)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "AskUserQuestion",
+    ],
+    prompt=models.PromptDocument(
+        parts=[
+            models.TextPart(
+                text=r"""# Reflect: Process Quality Assessment
 
 Two levels of reflection: is the agent tracking enough data (meta), and is the feedback loop itself working (meta-meta)?
 
@@ -42,3 +57,8 @@ Were the `/fb-*` subcommands helpful? Anything confusing, missing, or redundant?
 ### 6. Devtools assessment
 
 Any repetitive analysis that should be automated as a devtools command? Add it to `packages/lup/src/lup/devtools/` when another project on lup would want it, to `src/lup_template/devtools/` when only this one would.
+"""
+            ),
+        ]
+    ),
+)

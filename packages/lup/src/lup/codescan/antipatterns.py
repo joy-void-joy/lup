@@ -210,7 +210,8 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         # Flags every `.get(` — the user's explicit broad choice over a narrow
         # rule. On payload/TypedDict-shaped data use typed attribute access; on
-        # a genuinely open dict (a registry or cache) it is one comment.
+        # a genuinely open dict (a registry or cache) it is one comment; a
+        # typed non-mapping receiver takes none, since the audit refutes it.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
         refiner=Refiner(
@@ -219,7 +220,9 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         ),
         message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
         "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) "
-        "add `# lup: ignore[dict-get]`",
+        "add `# lup: ignore[dict-get]`. On a typed non-mapping receiver (an SDK client, a "
+        "route decorator) add nothing — the audit resolves the declaration and refutes it, "
+        "and a marker here is reported spurious",
     ),
     AntiPattern(
         id="bare-object",

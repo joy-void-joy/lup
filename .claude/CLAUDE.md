@@ -187,11 +187,11 @@ This holds for module-level functions, class methods, constants, and classes ali
 
 ### lup-devtools
 
-All development tooling lives in `src/lup_template/devtools/` and is exposed as the `lup-devtools` CLI entry point. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` — these are denied by the Bash permission hook.
+Development tooling is exposed as the `lup-devtools` CLI entry point, composed in `src/lup_template/devtools/main.py` from two halves: the workflow commands in `packages/lup/src/lup/devtools/`, and what only this repository has beside them. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` — these are denied by the Bash permission hook.
 
-If you find yourself running the same command repeatedly, **add a command** to `src/lup_template/devtools/`.
+If you find yourself running the same command repeatedly, **add a command** — to `packages/lup/src/lup/devtools/` when another project on lup would want it, to `src/lup_template/devtools/` when only this one would.
 
-`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. Reach first for `lup-devtools py eval '<expression>'`, which auto-imports and needs no file; `docs/contributing.md` carries the rest of the ladder, down to a heredoc behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
+`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. Match the rung to the question: to **read** code, `py info`/`py source`/`py search`/`py imports` plus the codeintel tools answer without running anything; to **compute** something, `lup-devtools py eval '<expression>'` auto-imports and evaluates in the sandbox; with no sandbox available, add a devtools command. `docs/contributing.md` carries the rest of the ladder, down to a heredoc behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
 
 Run `uv run lup-devtools --help` for the command tree;
 `docs/template.md` lists the sub-apps, rendered from the same typed roster the
@@ -206,9 +206,11 @@ runtime. Personal cache, trust, and session state are never committed.
 
 `docs/harness.md` carries the roster of every skill and agent this plugin
 ships, each with the one line that describes it. Both lists are rendered from
-the typed declarations in
-`src/lup_template/devtools/harness/content/catalog.py` — change the catalog,
-then regenerate.
+the typed declarations: the ones about agent work in
+`packages/lup/src/lup/devtools/harness/content/catalog.py`, the ones about
+being a template in
+`src/lup_template/devtools/harness/content/catalog.py`, which composes both.
+Change the catalog that owns the subject, then regenerate.
 
 ### Permission Hooks
 

@@ -1,6 +1,12 @@
-<!-- Generated from lup.devtools.harness.content.docs.patterns by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+"""Canonical code-structure design approaches."""
 
-# Design Patterns
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    source=__name__,
+    parts=[
+        models.TextPart(
+            text=r"""# Design Patterns
 
 The recurring *code* shapes in this repository: what each one is for, where to
 read a worked instance, and the reasoning that makes it the default. How work
@@ -225,3 +231,7 @@ more than it requests fails to validate, which is the shape to copy. Where
 the conflict is genuine and intended, the carve-out belongs in the standing
 instruction rather than in the agent's judgement: say which of the two rules
 governs, so there is nothing left to adjudicate.
+"""
+        ),
+    ],
+)

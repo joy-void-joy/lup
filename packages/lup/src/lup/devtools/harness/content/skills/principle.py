@@ -1,10 +1,33 @@
----
-description: "Propagate a general principle across the entire repo"
-allowed-tools: Bash(uv run lup-devtools:*), Read, Write, Edit, AskUserQuestion, Agent
-argument-hint: "<principle description>"
----
+"""Canonical declaration for the principle skill."""
 
-# Propagate Principle
+import lup.harness.models as models
+
+SKILL = models.Skill(
+    id="skill.principle",
+    name="principle",
+    description="Propagate a general principle across the entire repo",
+    arguments=[
+        models.Argument(
+            name="arguments",
+            description="Optional arguments supplied with the skill invocation",
+            required=False,
+        ),
+    ],
+    tools=[
+        "Bash(uv run lup-devtools:*)",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "AskUserQuestion",
+        "Agent",
+    ],
+    argument_hint="<principle description>",
+    prompt=models.PromptDocument(
+        parts=[
+            models.TextPart(
+                text=r"""# Propagate Principle
 
 Take a general principle and ensure the entire repo reflects it — documentation, commands, hook scripts, code templates, agent prompts, and library patterns.
 
@@ -12,7 +35,11 @@ The principle should be visible at every layer: the docs that describe how to wo
 
 ## User's Principle
 
-$ARGUMENTS
+"""
+            ),
+            models.ArgumentsRef(),
+            models.TextPart(
+                text=r"""
 
 ## Your Task
 
@@ -27,7 +54,11 @@ Before auditing files, articulate the principle precisely:
 3. **Check generality** — would this principle still apply if the domain changed completely? If not, it may be too specific.
 
 Show the principle statement, a "Do This / Not This" table (like the Bitter
-Lesson table in the guidance), and 2-3 concrete examples of it in action. Then Ask the user with the AskUserQuestion tool, offering concrete options plus a free-text choice: whether that formulation is the right one
+Lesson table in the guidance), and 2-3 concrete examples of it in action. Then """
+            ),
+            models.AskUser(question="whether that formulation is the right one"),
+            models.TextPart(
+                text=r"""
 
 ## Phase 2: Audit All Layers
 
@@ -47,10 +78,20 @@ Read every relevant file and categorize findings into three buckets:
      blocks, so fixing one there fixes the guidance, the downstream template,
      and the reference page at once
    - Look for existing principles that overlap or conflict
-   - .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex are generated from this module — read them for the rendered result, never edit them
+   - """
+            ),
+            models.NativePath(location="guidance_file", scope="every_tree"),
+            models.TextPart(
+                text=r""" are generated from this module — read them for the rendered result, never edit them
 
 2. **Template guidance** (`src/lup_template/devtools/harness/content/template_sections.py`)
-   - Same checks — this is what new projects inherit; the portable sections render into every flavor of .claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex from this one source
+   - Same checks — this is what new projects inherit; the portable sections render into every flavor of """
+            ),
+            models.PluginPath(
+                plugin="lup", location="guidance_template", scope="every_tree"
+            ),
+            models.TextPart(
+                text=r""" from this one source
 
 ### Layer B: Commands & Workflows
 
@@ -59,12 +100,22 @@ Read every relevant file and categorize findings into three buckets:
    or the sweep misses the twenty-five the library holds)
    - Read each skill's instructions, guidelines, and anti-patterns
    - Check if a skill encodes a workflow that violates the principle
-   - .claude/plugins/lup/commands/*.md under Claude Code, .codex/plugins/lup/skills/*/SKILL.md under Codex are generated from these — never edit them
+   - """
+            ),
+            models.PluginPath(
+                plugin="lup", location="skills", member="*", scope="every_tree"
+            ),
+            models.TextPart(
+                text=r""" are generated from these — never edit them
 
 ### Layer C: Semantic Policy & Enforcement
 
 4. **Canonical policy** (`packages/lup/src/lup/policy/` plus the `HookSet` in
-   `src/lup_template/devtools/harness/catalog.py`; everything under .claude/plugins/lup/hooks/ under Claude Code, .codex/plugins/lup/hooks/ under Codex is generated from these — never edit it directly)
+   `src/lup_template/devtools/harness/catalog.py`; everything under """
+            ),
+            models.PluginPath(plugin="lup", location="hooks", scope="every_tree"),
+            models.TextPart(
+                text=r""" is generated from these — never edit it directly)
    - Check if any policy rule contradicts the principle
    - Consider if a new policy rule could enforce the principle mechanically
 
@@ -99,7 +150,15 @@ Present findings and proposed changes one layer at a time. For each layer:
 
 1. **Show current state** — quote the relevant sections that need changes
 2. **Propose specific edits** — show what would change and why
-3. Request explicit user approval before applying that layer's edits. Reason: a principle sweep touches every layer and is hard to unpick once several have landed.
+3. """
+            ),
+            models.RequestApproval(
+                action="applying that layer's edits",
+                reason="a principle sweep touches every layer and is hard to unpick "
+                "once several have landed",
+            ),
+            models.TextPart(
+                text=r"""
 
 ### Layer order:
 
@@ -159,3 +218,8 @@ After all changes:
 - **Respect the structure** — each source has conventions. Guidance uses tables and sections, skills use phases, policy rules use pattern lists
 - **Less is more** — a principle mentioned in 3 right places is better than mentioned in 15 places where it becomes noise
 - **Enforcement > documentation** — a hook that prevents violations is worth more than a paragraph that describes the principle
+"""
+            ),
+        ]
+    ),
+)

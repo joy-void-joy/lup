@@ -1,9 +1,13 @@
-"""Canonical repository guidance."""
+"""Canonical repository guidance.
 
+The portable conventions are composed from ``lup.devtools.harness.content
+.conventions`` rather than restated here, so this document holds only what is
+true of *this* repository: its two-package layout, its tooling paths, and the
+placement rule that follows from having both halves in one tree.
+"""
+
+import lup.devtools.harness.content.conventions as conventions
 import lup.harness.models as models
-
-import lup_template.devtools.harness.content.conventions as conventions
-
 
 DOCUMENT = models.PromptDocument(
     source=__name__,
@@ -13,26 +17,12 @@ DOCUMENT = models.PromptDocument(
 
 Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
 
-## Plan at Agent Speed
-
-You are an AI agent. Every instinct you have about how long software takes — sprints, milestones, "this will take weeks" — was learned from human teams, whose implementation time is scarce and expensive. Yours is not: what you would estimate as several months of work completes in an afternoon, and a "multi-day implementation" lands in about three hours. Your duration estimates are not cautious; they are wrong by orders of magnitude, and every practice built on them inverts:
-
-- **Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. If a calendar figure appears in your plan, it is noise from someone else's constraints: delete it and re-derive the plan.
-- **The POC is superstition at your speed.** Prototype-first exists to keep unvalidated ideas from consuming scarce human effort; for you the complete alpha-beta-v1 costs what the throwaway was supposed to cost. Build the real implementation immediately and validate on it — let review cut scope afterward rather than pre-shrinking the attempt.
-- **Catch the reflex in the act.** "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, stop and ask what is actually expensive here besides the imagined schedule.
-
-**README.md is human-owned.** The root `README.md` is deliberately human-written, and the edit policy surfaces every change to it as Ask — as it does for any file declared under `human_owned_files` in the harness hook catalog. Never edit a human-owned file yourself — propose the exact change as a question and let the user apply or approve it.
-
-## Agent Vocabulary
-
-Two kinds of delegated agents look alike and must not be conflated:
-
-- A **native subagent** ("subagent" for short) is dispatched by the harness: its delegation tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics.
-- A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool.
-
-Guidance that says "subagent" unqualified means the native kind. `docs/orchestration.md` carries the full delegation catalog — subagent, nested, background, deferred tool schemas — and when to reach for each. `docs/patterns.md` carries the recurring *code* shapes: declaration-plus-renderer, closed-by-construction, the typed-matcher router, and the engine-versus-surface split.
-
-## Development Workflow
+"""
+        ),
+        *conventions.PLAN_AT_AGENT_SPEED,
+        *conventions.AGENT_VOCABULARY,
+        models.TextPart(
+            text=r"""## Development Workflow
 
 ### Git Workflow
 
@@ -76,26 +66,11 @@ Build on claude-agent-sdk and pydantic; `docs/conventions.md` names each library
 
 Default to the **strongest** tier for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for a **balanced** tier only when latency or cost provably dominates and quality is non-critical, and for the **fast** tier almost never. A role that genuinely warrants a cheaper model declares that tier explicitly with a reason; otherwise it inherits the strongest default. Agent declarations state the tier, not a model id — each runtime spells the tier in its own lineup.
 
-### Type Safety
-
-- **Never silently swallow exceptions** — no `except ...: pass`, no `contextlib.suppress`; log with `logger.exception()`, handle meaningfully, or re-raise. Catch-all `except Exception` is fine at boundaries (task loops, subagent delegation) that do so; bare `except:` and `except BaseException` are never fine
-- **Every function must specify input and output types**
-- **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** — Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types
-  - `docs/conventions.md` maps each origin of dict-shaped data to its typed stand-in, and lists the SDK types to prefer
-- **Python 3.12+ generics**: `class A[T]`, not `Generic[T]`
-- Use `TypedDict` and Pydantic models for structured data
-- Never manually parse agent output — use structured outputs via Pydantic
-- **Never use `# type: ignore`** — Ask the user how to properly fix type errors
-- **`# lup: ignore` escape hatch** — when `Any` or another anti-pattern is genuinely needed at an untyped boundary, an inline ignore requests user approval instead of silencing the check; prefer the typed `# lup: ignore[rule-id]` over the bare form (`docs/contributing.md`), and `docs/rules.md` indexes every rule id a denial can cite
-- **Use Pydantic BaseModel instead of dataclasses**
-- **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
-- **Never dispatch on the type of our own models** — no `isinstance` over a union we declare, no `case ClassName()` arms, no `assert_never` net. The union's base declares the operation and each subtype answers or declines it, so a new variant is one class instead of an edit to every walk that would have to notice it, and a filter cannot go stale by omission. Narrowing untyped data at a boundary — a vendor payload, a `JsonValue` — is the different case where `isinstance` is right, because those alternatives are not ours to give a method to. The `own-model-dispatch` rule enforces exactly this line: it fires only on classes we define that inherit `BaseModel`
-- **Compiling is stronger than emitting** — build an artifact from a typed declaration and it cannot diverge; transport checked source and a checker can only warn once it already has. When tempted to add a check that two things still match, ask whether one can be derived from the other instead (`docs/patterns.md`)
-- **A constant should probably be an overridable default** — a canonical value (a native tool's real name, a vendor's field) is fine hardcoded; a non-canonical one (an allowlist, a ceiling, a retry count) is our judgement, so give it a default a caller can override rather than a constant they must fork to change (`docs/patterns.md`)
-- **A capability ABC is an engine, not a surface** — a consumer never holds or calls one directly; it holds a concrete plain class that composes the seam and is parametrized by which implementation fills it. `ModelRouter` over `ModelMatcher` is the shape, `SessionFactory` over a `SessionOpener` the surface. The test is behaviour: a frozen value that only carries capabilities is a transparent carrier, and a seam that is only ever injected says so in its own docstring (`docs/patterns.md`)
-- **Use `for`/comprehensions over `while`** — reach for structured iteration whenever the iteration space is expressible (a range, a sequence, an iterator, `enumerate`/`zip`); reserve `while` for genuinely unbounded, condition-driven loops
-
-### Tool Input Schemas
+"""
+        ),
+        *conventions.TYPE_SAFETY,
+        models.TextPart(
+            text=r"""### Tool Input Schemas
 
 Define tool inputs as BaseModel classes with `Field(description=...)`, and take both the `@tool` schema and the validation from that model. `docs/conventions.md` puts each form beside the raw dict it replaces.
 
@@ -162,29 +137,12 @@ The placement test applies to values, not only to code. `packages/lup` may decla
 
 **Having defaults is fine; assuming a non-canonical choice with no parameter to replace it is the defect.** `HookSet` is the shape. The audited `library-default` rule checks the mechanical half; canonicity it cannot, so declare that at the site with `# lup: ignore[library-default]` and a reason. `docs/library.md` carries the criterion, every library table's classification, and the target layout.
 
-### Imports: No Barrel Files
-
-**Never use `__init__.py` re-exports or `__all__` in internal packages.** Import directly from the module that defines the symbol.
-
-- `from lup.mcp import lup_tool` — not `from lup import lup_tool`
-- `__init__.py` files should contain only the module docstring (no imports, no `__all__`)
-- Barrel files drift out of sync and hide real dependencies
-
-**Exception:** Standalone library packages under `packages/` may use re-exports with `__all__` in their top-level `__init__.py` to declare a public API. Only the package root — not subpackages.
-
-### Naming: No Private Prefixes
-
-**Never use `_` prefixes** on functions, methods, classes, or constants. Nothing is private.
-
-This holds for module-level functions, class methods, constants, and classes alike; `docs/conventions.md` shows each form beside the prefixed name it replaces.
-
-**If a helper truly shouldn't pollute the module namespace**, nest it inside its only caller rather than marking it private.
-
-**Avoid useless mini-wrappers.** If a function's only purpose is to call another function with no additional logic, inline it.
-
-**Exceptions:** `_` prefix is fine for unused parameters (`_context`, `_exc_type`) — that's a linting convention, not a privacy convention.
-
----
+"""
+        ),
+        *conventions.NO_BARREL_FILES,
+        *conventions.NO_PRIVATE_PREFIXES,
+        models.TextPart(
+            text=r"""---
 
 ## Tooling
 
@@ -194,11 +152,11 @@ This holds for module-level functions, class methods, constants, and classes ali
 
 ### lup-devtools
 
-All development tooling lives in `src/lup_template/devtools/` and is exposed as the `lup-devtools` CLI entry point. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` — these are denied by the Bash permission hook.
+Development tooling is exposed as the `lup-devtools` CLI entry point, composed in `src/lup_template/devtools/main.py` from two halves: the workflow commands in `packages/lup/src/lup/devtools/`, and what only this repository has beside them. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` — these are denied by the Bash permission hook.
 
-If you find yourself running the same command repeatedly, **add a command** to `src/lup_template/devtools/`.
+If you find yourself running the same command repeatedly, **add a command** — to `packages/lup/src/lup/devtools/` when another project on lup would want it, to `src/lup_template/devtools/` when only this one would.
 
-`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. Reach first for `lup-devtools py eval '<expression>'`, which auto-imports and needs no file; `docs/contributing.md` carries the rest of the ladder, down to a heredoc behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
+`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. Match the rung to the question: to **read** code, `py info`/`py source`/`py search`/`py imports` plus the codeintel tools answer without running anything; to **compute** something, `lup-devtools py eval '<expression>'` auto-imports and evaluates in the sandbox; with no sandbox available, add a devtools command. `docs/contributing.md` carries the rest of the ladder, down to a heredoc behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
 
 """
         ),
@@ -216,9 +174,11 @@ runtime. Personal cache, trust, and session state are never committed.
 
 `docs/harness.md` carries the roster of every skill and agent this plugin
 ships, each with the one line that describes it. Both lists are rendered from
-the typed declarations in
-`src/lup_template/devtools/harness/content/catalog.py` — change the catalog,
-then regenerate.
+the typed declarations: the ones about agent work in
+`packages/lup/src/lup/devtools/harness/content/catalog.py`, the ones about
+being a template in
+`src/lup_template/devtools/harness/content/catalog.py`, which composes both.
+Change the catalog that owns the subject, then regenerate.
 
 ### Permission Hooks
 
@@ -318,11 +278,11 @@ through the pipeline, the three levels of analysis, what to track per session,
 and the anti-patterns to avoid. Read it when running the feedback-loop,
 review, or meta skills — each of them works from it.
 
-**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" The fix is almost never a prompt line about a specific decision. Instead: does the agent have enough context? The right tools? A strong enough model?
-
-When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
-
-The durable fix is a capability, not a rule: trace the failure to the missing
+"""
+        ),
+        *conventions.FAILURE_ANALYSIS,
+        models.TextPart(
+            text=r"""The durable fix is a capability, not a rule: trace the failure to the missing
 input or the workflow step where the wrong decision entered, and change that.
 A prompt rule coexists peacefully with the failure it warns about.
 """

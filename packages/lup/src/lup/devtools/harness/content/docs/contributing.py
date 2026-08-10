@@ -1,6 +1,12 @@
-<!-- Generated from lup.devtools.harness.content.docs.contributing by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+"""How to contribute to this repository, whichever component you land in."""
 
-# Contributing
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    source=__name__,
+    parts=[
+        models.TextPart(
+            text=r"""# Contributing
 
 This page is for a contributor arriving cold. It covers getting a working
 checkout, deciding where a change belongs, and what has to be green before it
@@ -111,9 +117,19 @@ Two branches: `dev` is the integration branch feature work merges into, and
 `main` is stable and receives only reviewed pull requests from `dev`. Never
 commit code directly to `dev`.
 
-/lup:rebase pushes, opens the pull request, and rebuilds history
+"""
+        ),
+        models.SkillInvocation(plugin="lup", skill="rebase"),
+        models.TextPart(
+            text=r""" pushes, opens the pull request, and rebuilds history
 with `git reset --soft main` and a force-push; re-run it after each round of
-review fixes. /lup:close merges the approved one and cleans up. /lup:merge guides conflict
+review fixes. """
+        ),
+        models.SkillInvocation(plugin="lup", skill="close"),
+        models.TextPart(text=r""" merges the approved one and cleans up. """),
+        models.SkillInvocation(plugin="lup", skill="merge"),
+        models.TextPart(
+            text=r""" guides conflict
 resolution — and during a merge the bias is toward inclusion: audit the result
 against both parents and confirm every removed function, parameter, or command
 was removed deliberately rather than lost to a conflict side.
@@ -229,7 +245,11 @@ was asked. A `solved:` claim is retired only by the verify-solved review
 pass, through `dev comments --retire`; the edit gate refuses a hand-deletion
 or rewording for everyone, agent and human alike. `defer:` notes park work
 at the site until deliberately resumed, and `ignore[<rule-id>]` hatches are
-not feedback at all — they come out with the violation they cover. /lup:resolve runs that pass;
+not feedback at all — they come out with the violation they cover. """
+        ),
+        models.SkillInvocation(plugin="lup", skill="resolve"),
+        models.TextPart(
+            text=r""" runs that pass;
 [resolver.md](resolver.md) describes what it does.
 
 ## Native evidence and the release gate
@@ -252,3 +272,7 @@ consecutive scheduled nightly runs in which:
 
 Review the probe output together with the evidence ledger rather than updating
 the ledger mechanically.
+"""
+        ),
+    ],
+)
