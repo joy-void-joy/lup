@@ -53,7 +53,9 @@ The failure is quiet rather than loud, which is why it is stated here: a
 so it lands in the source and looks like it worked. Two habits prevent it:
 
 - Give every command the target explicitly — `git -C <target> …`, and
-  `uv run --project <target> lup-devtools …` for anything that writes state.
+  `uv run --directory <target> lup-devtools …` for anything that reads or
+  writes its state. `--directory` is the flag that changes the working
+  directory; `--project` only discovers a manifest and leaves you in the source.
 - Write files by absolute path under the target, never by a path relative to
   where you are standing.
 
@@ -151,7 +153,7 @@ Build a mental inventory of **portable capabilities** organized by category:
 Installing is one of two jobs this command does. The other is bringing a
 target that already has lup up to date, and the two look nothing alike — so
 decide which before reading anything else. Run
-`uv run --project <target> lup-devtools dev library status`; where that command
+`uv run --directory <target> lup-devtools dev library status`; where that command
 does not exist, look for a `lup` dependency in the target's `pyproject.toml`
 and for a vendored `packages/lup/`.
 
@@ -405,7 +407,7 @@ Steps 1-4, 6 and 7 repeat per selected tree; step 5 is tree-independent.
             models.TextPart(
                 text=r""" — section-level merge from that tree's template flavor (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
 8. **Hand off to generation**: everything written in steps 1-4, 6 and 7 becomes a generated artifact once the target's harness runs. From here on, the target edits its declarations under `src/<project>/devtools/harness/content/` and regenerates with `uv run lup-devtools harness generate all`; the installed files are outputs, and a hand edit to one is reverted the next time generation runs. Say so explicitly in the Phase 7 report.
-9. **Initialize upstream sync**: Run `uv run --project <target> lup-devtools sync mark-synced lup` — the project flag is what makes it baseline the *target's* sync state instead of this repository's — so `"""
+9. **Initialize upstream sync**: Run `uv run --directory <target> lup-devtools sync mark-synced lup` — `--directory` is what makes it baseline the *target's* sync state instead of this repository's — so `"""
             ),
             models.SkillInvocation(plugin="lup", skill="update"),
             models.TextPart(
