@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -123,6 +124,14 @@ class ClaudeSessionConfig(BaseModel):
     submission_gate_resolver: SubmissionGateResolver | None = None
     subagents: list[SubagentSpec] = Field(default_factory=list)
     max_buffer_size: int | None = None
+    stderr_tail_lines: int = Field(
+        default=50,
+        description=(
+            "How many trailing CLI stderr lines are kept to explain a dead "
+            "subprocess. Bounded because stderr is unbounded and only the "
+            "end of it says why the process stopped."
+        ),
+    )
     setting_sources: list[ClaudeSettingSource] | None = None
     extra_args: dict[str, str | None] = Field(  # lup: ignore[dict-str-payload]
         default_factory=dict
@@ -130,6 +139,37 @@ class ClaudeSessionConfig(BaseModel):
 
 
 type SubmissionBindingSource = Callable[[], TurnSubmission | None]
+
+
+def attach_cli_stderr(error: Exception, stderr_lines: deque[str]) -> None:
+    """Splice captured CLI stderr into the SDK's opaque process error.
+
+    The SDK raises ``ProcessError`` carrying a fixed "Check stderr output for
+    details" and never attaches the stderr it is pointing at, even when a
+    stderr callback is set — so the exception names where the answer would be
+    instead of carrying it, and every message built from it downstream
+    inherits the same blank. Rewriting the message from the captured tail
+    turns a blind ``exit code 1`` into the reason the process died, in place,
+    so callers that only ever read ``str(error)`` need to know nothing about
+    this. The ``exit code N`` token survives the rewrite, leaving exit-code
+    matching reading what it read before.
+
+    Anything that is not a ``ProcessError``, or a process that died saying
+    nothing, is left exactly as it arrived.
+    """
+    from claude_agent_sdk import ProcessError
+
+    if not isinstance(error, ProcessError):
+        return
+
+    tail = "\n".join(stderr_lines).strip()
+    if not tail:
+        return
+
+    error.stderr = tail
+    error.args = (
+        f"Command failed with exit code {error.exit_code}\nError output: {tail}",
+    )
 
 
 def turn_error(interrupt: "ClaudeInterrupt") -> type[TurnError]:
@@ -149,6 +189,7 @@ class ClaudeConversationState:
         self.submission: TurnSubmission | None = None
         self.schema_digest: str | None = None
         self.completion: asyncio.Task[CompletedTurn] | None = None
+        self.stderr_lines: deque[str] = deque(maxlen=self.config.stderr_tail_lines)
 
     def current_submission(self) -> TurnSubmission | None:
         """Resolve the submission a live connection's tool should serve."""
@@ -229,8 +270,13 @@ class ClaudeConversationState:
         """One connected client for these options, or the failure that stopped it."""
         import claude_agent_sdk as claude
 
+        options.stderr = self.stderr_lines.append
         client = claude.ClaudeSDKClient(options=options)
-        await client.connect()
+        try:
+            await client.connect()
+        except Exception as error:
+            attach_cli_stderr(error, self.stderr_lines)
+            raise
         return client
 
     async def start_turn(self, text: str) -> AcceptedTurn:
@@ -325,6 +371,7 @@ class ClaudeConversationState:
                                         )
                                     )
             except Exception as error:
+                attach_cli_stderr(error, self.stderr_lines)
                 raise turn_error(interrupt)(
                     TurnFailure(
                         message=str(error),

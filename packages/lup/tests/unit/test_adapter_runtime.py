@@ -1,6 +1,7 @@
 """Direct regression coverage for adapter-owned runtime construction."""
 
 import asyncio
+from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -18,6 +19,7 @@ from lup.adapters.claude.runtime import (
     ClaudeSessionOpener,
     ClaudeTurnToolBinder,
     SubmissionBindingSource,
+    attach_cli_stderr,
     build_claude_options,
     build_submission_server,
     claude_usage,
@@ -203,6 +205,55 @@ def test_claude_opener_builds_options_through_an_overridable_seam() -> None:
 
     assert state.opener is opener
     assert options.max_buffer_size == 4096
+
+
+def test_a_dead_cli_explains_itself_instead_of_pointing_at_stderr() -> None:
+    from claude_agent_sdk import ProcessError
+
+    state = ClaudeSessionOpener(ClaudeSessionConfig(model="claude")).create_state(None)
+    for line in ("loading plugin lup@local", "error: marketplace 'local' not found"):
+        state.stderr_lines.append(line)
+
+    error = ProcessError("Check stderr output for details", exit_code=1)
+    attach_cli_stderr(error, state.stderr_lines)
+
+    # The reason travels in the message, so every caller that only reads
+    # str(error) — the two TurnFailure paths included — inherits it.
+    assert "marketplace 'local' not found" in str(error)
+    assert "exit code 1" in str(error)
+    assert error.stderr is not None
+    assert "loading plugin lup@local" in error.stderr
+
+
+def test_a_process_that_died_saying_nothing_is_left_as_it_arrived() -> None:
+    from claude_agent_sdk import ProcessError
+
+    error = ProcessError("Check stderr output for details", exit_code=1)
+    before = str(error)
+
+    attach_cli_stderr(error, deque())
+
+    assert str(error) == before
+    assert error.stderr is None
+
+
+def test_only_the_sdk_s_process_error_is_rewritten() -> None:
+    error = RuntimeError("unrelated")
+
+    attach_cli_stderr(error, deque(["some stderr"]))
+
+    assert str(error) == "unrelated"
+
+
+def test_the_captured_tail_is_bounded_by_configuration() -> None:
+    config = ClaudeSessionConfig(model="claude", stderr_tail_lines=2)
+    state = ClaudeSessionOpener(config).create_state(None)
+
+    for line in ("first", "second", "third"):
+        state.stderr_lines.append(line)
+
+    # stderr is unbounded and only its end says why the process stopped.
+    assert list(state.stderr_lines) == ["second", "third"]
 
 
 def test_claude_native_subagents_and_reported_cost_are_preserved() -> None:
