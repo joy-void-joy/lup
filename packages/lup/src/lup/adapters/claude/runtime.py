@@ -84,6 +84,12 @@ class ClaudeSandboxConfig(BaseModel):
     allow_unsandboxed_commands: bool = False
 
 
+type ClaudePermissionMode = Literal[
+    "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"
+]
+"""Claude Code's own words for how much a session may do without asking."""
+
+
 class ClaudeSessionConfig(BaseModel):
     """Immutable Claude-only provider configuration."""
 
@@ -95,12 +101,7 @@ class ClaudeSessionConfig(BaseModel):
     tools: list[str] | None = None
     allowed_tools: list[str] = Field(default_factory=list)
     tool_servers: dict[str, McpServerEntry] = Field(default_factory=dict)
-    permission_mode: (
-        Literal[
-            "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"
-        ]
-        | None
-    ) = "bypassPermissions"
+    permission_mode: ClaudePermissionMode | None = "bypassPermissions"
     max_turns: int | None = None
     delta_streaming: bool = True
     """Whether partial-message deltas are streamed, which gates `live()`."""
