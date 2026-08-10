@@ -736,7 +736,9 @@ def classify_shell(
     runner_targets: list[str] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
-    segments = parse_shell_words(command, 0, existing_targets, path_roles, path_rules)
+    segments = parse_shell_words(
+        command, 0, existing_targets, path_roles, path_rules, recoverable_targets
+    )
     if isinstance(segments, KernelDecision):
         return segments
     context = shell_context(

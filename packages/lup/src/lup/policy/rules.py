@@ -173,7 +173,9 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     for target in [*shell_write_targets(event.command), *acted_on]
                     if (root / target).exists()
                 ],
-                recoverable_targets=recoverable_write_targets(acted_on, root),
+                recoverable_targets=recoverable_write_targets(
+                    [*shell_write_targets(event.command), *acted_on], root
+                ),
                 directory_targets=directory_write_targets(acted_on, root),
                 recoverable_target_limit=self.recoverable_target_limit,
                 runner_targets=self.runner_targets,

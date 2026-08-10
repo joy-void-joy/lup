@@ -61,9 +61,12 @@ def bash_decision(
     would write already exist, which operands Git could restore, and which
     are directories.
 
-    Existence covers redirection targets and path-verb operands alike, because
-    the question they ask of it is the same one — whether writing here brings
-    something into being or replaces it.
+    Existence and recoverability both cover redirection targets and path-verb
+    operands alike, because the questions they ask are the same ones —
+    whether writing here brings something into being or replaces it, and what
+    replacing it would cost. Resolving them for only one of the two writing
+    forms is what left ``rm f`` granted while ``echo x > f`` asked about the
+    same clean, tracked file.
     """
     acted_on = shell_path_verb_targets(command)
     return decide_shell(
@@ -78,7 +81,9 @@ def bash_decision(
         existing_targets=existing_write_targets(
             [*shell_write_targets(command), *acted_on]
         ),
-        recoverable_targets=recoverable_write_targets(acted_on),
+        recoverable_targets=recoverable_write_targets(
+            [*shell_write_targets(command), *acted_on]
+        ),
         directory_targets=directory_write_targets(acted_on),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,

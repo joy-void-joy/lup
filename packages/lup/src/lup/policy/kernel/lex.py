@@ -509,19 +509,27 @@ def shell_write_targets(command: str, depth: int = 0) -> list[str]:
 def resolve_redirection(
     tokens: list[ShellToken],
     index: int,
-    heredoc_fed: bool = False,
     existing_targets: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
     path_rules: list[PathRuleRow] | None = None,
+    recoverable_targets: list[str] | None = None,
 ) -> Redirection:
     """Classify one redirection, consuming its target and stripping safe forms.
 
-    A write that would overwrite an existing file is the destructive case: a
-    heredoc-fed one denies toward the Edit tool and tmp/*.py scripts, and any
-    other asks. Creating a file destroys nothing, so it passes once the
-    caller has established the target does not exist. ``existing_targets`` of
-    ``None`` means no caller established anything, and every target is
-    treated as already there.
+    What a write costs decides it, exactly as it decides for ``rm`` and
+    ``cp``. Creating a file destroys nothing, so it passes once the caller
+    has established the target is not there. Replacing one Git can restore
+    byte for byte costs a checkout rather than any information, so it passes
+    too. Anything else overwrites something no one can bring back, and asks.
+    ``existing_targets`` of ``None`` means no caller established anything,
+    and every target is treated as already there.
+
+    The shape of the writing command is deliberately not consulted. A heredoc
+    body and an ``echo`` argument author identical content, and the create
+    case already admits both — so gating one of them on an existing path drew
+    the line where the cost was lowest rather than where the risk was. What
+    the edit gate reads is content, and that gate is reached through Edit and
+    Write, not by re-deriving a weaker copy of it here.
 
     A generated plugin tree is refused ahead of every relaxation, including
     the create case: authoring a file there by hand is editing a build
@@ -565,15 +573,8 @@ def resolve_redirection(
         and tokens[target].text not in existing_targets
     ):
         return Redirection(decision=None, resume=target + 1)
-    if heredoc_fed:
-        return Redirection(
-            decision=KernelDecision(
-                "deny",
-                "authoring a file through a heredoc bypasses the edit policy"
-                " — write a tmp/*.py script or use the Edit tool",
-            ),
-            resume=target + 1,
-        )
+    if tokens[target].text in (recoverable_targets or []):
+        return Redirection(decision=None, resume=target + 1)
     return Redirection(
         decision=KernelDecision("ask", "file redirection is never auto-allowed"),
         resume=target + 1,
@@ -586,6 +587,7 @@ def parse_shell_words(
     existing_targets: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
     path_rules: list[PathRuleRow] | None = None,
+    recoverable_targets: list[str] | None = None,
 ) -> list[list[str]] | KernelDecision:
     """Group lexed tokens into command segments, resolving safe redirections.
 
@@ -599,17 +601,15 @@ def parse_shell_words(
     if isinstance(tokens, KernelDecision):
         return tokens
 
+    recoverable = recoverable_targets or []
+
     def substituted_segments(text: str) -> list[list[str]] | KernelDecision:
         if depth >= 2:
             return unjudged("command substitution nests too deeply")
         return parse_shell_words(
-            text, depth + 1, existing_targets, path_roles, path_rules
+            text, depth + 1, existing_targets, path_roles, path_rules, recoverable
         )
 
-    heredoc_fed = any(
-        token.kind == "op" and "<<" in token.text and "<<<" not in token.text
-        for token in tokens
-    )
     segments: list[list[str]] = []
     current: list[str] = []
     index = 0
@@ -657,7 +657,12 @@ def parse_shell_words(
             if depth >= 2:
                 return unjudged("process substitution nests too deeply")
             inner = parse_shell_words(
-                token.text, depth + 1, existing_targets, path_roles, path_rules
+                token.text,
+                depth + 1,
+                existing_targets,
+                path_roles,
+                path_rules,
+                recoverable,
             )
             if isinstance(inner, KernelDecision):
                 return inner
@@ -679,7 +684,7 @@ def parse_shell_words(
             index += 1
             continue
         redirection = resolve_redirection(
-            tokens, index, heredoc_fed, existing_targets, path_roles, path_rules
+            tokens, index, existing_targets, path_roles, path_rules, recoverable
         )
         index = redirection["resume"]
         verdict = redirection["decision"]
