@@ -22,7 +22,13 @@ from lup.devtools.dev import pr
 from lup_template.devtools.main import app
 from lup.devtools.sync import load_json
 
-runner = CliRunner()
+# Typer renders usage errors through Rich, which styles option tokens whenever
+# it believes it is writing to a terminal. That splits a flag name from the
+# prose beside it with escape codes, so output assertions only hold when the
+# console is plain: FORCE_COLOR is cleared and a dumb terminal is declared.
+PLAIN_CONSOLE = {"FORCE_COLOR": None, "NO_COLOR": "1", "TERM": "dumb"}
+
+runner = CliRunner(env=PLAIN_CONSOLE)
 
 
 def iter_command_paths(
