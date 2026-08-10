@@ -13,7 +13,9 @@ import pytest
 import sh
 import typer
 
-from lup_template.devtools.dev import branches, worktree
+from lup.devtools.dev import branches
+from lup.devtools.dev import worktree
+from lup.devtools.harness.launch import relocation_hint
 from tests.unit.repos import commit_file, initialized_repo
 
 
@@ -86,7 +88,13 @@ def test_worktree_create_records_the_base(
     monkeypatch.chdir(repo)
     monkeypatch.setattr(worktree, "get_tree_dir", lambda: tree_dir)
 
-    worktree.create("wt-topic", no_sync=True, no_copy_data=True, base_branch=None)
+    worktree.create(
+        "wt-topic",
+        no_sync=True,
+        no_copy_data=True,
+        base_branch=None,
+        launcher=relocation_hint,
+    )
 
     recorded = repo_git(repo)("config", "--get", "branch.wt-topic.lup-base")
     assert str(recorded).strip() == "main"

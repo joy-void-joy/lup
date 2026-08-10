@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup_template.devtools.dev import worktree
+from lup.devtools.dev import worktree
 from tests.unit.repos import initialized_repo
 
 ATTRIBUTES = Path(__file__).parents[2] / ".gitattributes"

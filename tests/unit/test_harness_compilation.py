@@ -103,23 +103,25 @@ from lup_template.devtools.agent.serve import (
     collect_tools_by_server,
     harness_session_context,
 )
-from lup_template.devtools.dev.rules import rule_reference_artifact
+from lup.devtools.dev.rules import rule_reference_artifact
 from lup_template.devtools.harness.catalog import HARNESS_SESSION, portable_harness
 from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
-from lup_template.devtools.harness import launch
-from lup_template.devtools.harness.launch import codex_sandbox_arguments
+from lup.devtools.harness import launch
+from lup.devtools.harness.launch import codex_sandbox_arguments
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
 from lup_template.devtools.harness.content.template_codex import (
     DOCUMENT as TEMPLATE_CODEX,
 )
-from lup_template.devtools.harness.generate import (
+from lup_template.devtools.harness.composition import (
+    claude_target,
+    codex_target,
+)
+from lup.devtools.harness.generate import (
     GenerationRecipe,
-    claude_generation_recipe,
-    codex_generation_recipe,
     current_reader,
     generate,
     inspect_generation,
@@ -256,8 +258,7 @@ def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
 
 def test_claude_tree_renders_every_typed_support_document() -> None:
     paths = {
-        artifact.path
-        for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
+        artifact.path for artifact in claude_target(Path.cwd()).recipe.desired.artifacts
     }
 
     assert Path("docs/orchestration.md") in paths
@@ -277,7 +278,7 @@ def test_every_published_document_is_generated_and_banners_itself() -> None:
     """
     artifacts = {
         artifact.path: artifact
-        for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
+        for artifact in claude_target(Path.cwd()).recipe.desired.artifacts
     }
     published = {document.path for document in DOCUMENTS}
     unmanaged = sorted(
@@ -331,7 +332,7 @@ def test_codex_config_states_the_same_ceiling_the_check_enforces() -> None:
     """A generated config that disagreed with the check would truncate silently."""
     config = next(
         artifact
-        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+        for artifact in codex_target(Path.cwd()).recipe.desired.artifacts
         if artifact.path.as_posix() == ".codex/config.toml"
     )
     assert f"project_doc_max_bytes = {GUIDANCE_BYTE_BUDGET}" in config.content
@@ -339,8 +340,7 @@ def test_codex_config_states_the_same_ceiling_the_check_enforces() -> None:
 
 def test_codex_tree_renders_the_agents_flavored_template() -> None:
     paths = {
-        artifact.path
-        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+        artifact.path for artifact in codex_target(Path.cwd()).recipe.desired.artifacts
     }
 
     assert Path(".codex/plugins/lup/TEMPLATE_AGENTS.md") in paths
@@ -370,7 +370,7 @@ def test_template_flavors_share_sections_and_differ_natively() -> None:
 
 
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
-    recipe = claude_generation_recipe(Path.cwd())
+    recipe = claude_target(Path.cwd()).recipe
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
 
     hook_config = artifacts[Path(".claude/plugins/lup/hooks/hooks.json")].content
@@ -382,7 +382,7 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
 
 
 def test_codex_recipe_registers_semantic_permission_approval() -> None:
-    recipe = codex_generation_recipe(Path.cwd())
+    recipe = codex_target(Path.cwd()).recipe
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
 
     hook_config = artifacts[Path(".codex/plugins/lup/hooks/hooks.json")].content
@@ -922,8 +922,8 @@ def test_every_commentable_generated_file_carries_the_one_banner_form() -> None:
     harness = portable_harness()
     root = Path.cwd()
     trees = [
-        claude_generation_recipe(root).desired,
-        codex_generation_recipe(root).desired,
+        claude_target(root).recipe.desired,
+        codex_target(root).recipe.desired,
         ArtifactTree(artifacts=[rule_reference_artifact()]),
     ]
     bannered = [
@@ -970,8 +970,8 @@ def test_a_banner_the_content_does_not_open_with_is_rejected() -> None:
 
 def test_repository_generated_harness_is_drift_clean() -> None:
     reports = [
-        inspect_generation(claude_generation_recipe(Path.cwd())),
-        inspect_generation(codex_generation_recipe(Path.cwd())),
+        inspect_generation(claude_target(Path.cwd()).recipe),
+        inspect_generation(codex_target(Path.cwd()).recipe),
     ]
 
     assert all(report.clean for report in reports)
@@ -2057,7 +2057,9 @@ def test_a_declared_tool_server_is_granted_rather_than_asked_about() -> None:
 
 def test_codex_sandbox_arguments_establish_the_envelope() -> None:
     environment: EnvVars = {}
-    arguments = codex_sandbox_arguments(environment, ["--model", "gpt-5.2"])
+    arguments = codex_sandbox_arguments(
+        portable_harness().plugins[0], environment, ["--model", "gpt-5.2"]
+    )
     assert arguments[:2] == ["--sandbox", "workspace-write"]
     assert environment["LUP_SANDBOX_ACTIVE"] == "1"
 
@@ -2068,7 +2070,7 @@ def test_codex_sandbox_widens_the_root_to_sibling_worktrees(
     """Codex roots writes at the launch cwd; the prescribed worktree is outside."""
     monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
     environment: EnvVars = {}
-    arguments = codex_sandbox_arguments(environment, [])
+    arguments = codex_sandbox_arguments(portable_harness().plugins[0], environment, [])
     roots = arguments[arguments.index("-c") + 1]
 
     assert roots.startswith("sandbox_workspace_write.writable_roots=")
@@ -2086,7 +2088,7 @@ def test_codex_sandbox_omits_the_root_outside_a_tree_layout(
     monkeypatch.setattr(launch, "get_tree_dir", no_tree)
     environment: EnvVars = {}
 
-    assert codex_sandbox_arguments(environment, []) == [
+    assert codex_sandbox_arguments(portable_harness().plugins[0], environment, []) == [
         "--sandbox",
         "workspace-write",
     ]
@@ -2103,7 +2105,12 @@ def test_codex_sandbox_arguments_defer_to_a_caller_envelope() -> None:
         ["--dangerously-bypass-approvals-and-sandbox"],
     ]
     for extra_args in caller_forms:
-        assert codex_sandbox_arguments(environment, extra_args) == []
+        assert (
+            codex_sandbox_arguments(
+                portable_harness().plugins[0], environment, extra_args
+            )
+            == []
+        )
     assert "LUP_SANDBOX_ACTIVE" not in environment
 
 

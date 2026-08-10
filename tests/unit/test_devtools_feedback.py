@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from lup_template.devtools.feedback import commits
+from lup.devtools.feedback import commits
 from lup_template.devtools.main import app
 from tests.unit.repos import initialized_repo
 

@@ -26,25 +26,51 @@ Examples::
     $ uv run lup-devtools usage claude --no-detail
 """
 
+from pathlib import Path
+
 import typer
 
+import lup_template.agent.prompts as prompts
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
 from lup_template.devtools.agent import app as agent_app
-from lup_template.devtools.dashboard.app import app as dashboard_app
-from lup_template.devtools.dev import conflicts
+from lup.devtools.dashboard.app import create_dashboard_app
+from lup.devtools.dev import conflicts
 from lup_template.devtools.dev.app import app as dev_app
-from lup_template.devtools.feedback.app import app as feedback_app
-from lup_template.devtools.harness.app import app as harness_app
+from lup.devtools.feedback.app import create_feedback_app
+from lup.devtools.feedback.models import AgentPrompt
+from lup.devtools.harness.app import create_harness_app
+from lup.devtools.harness.resolve import ConfiguredModel
+from lup_template.agent.config import engine_for_model, settings
+from lup_template.devtools.harness.composition import REPOSITORY_WIDE, TARGETS
+from lup_template.devtools.setup import INTEGRATIONS
 from lup_template.devtools.setup import app as setup_app
 from lup_template.devtools.subapps import APPLICATION_SPECS, INHERITED
 
+
+def assembled_prompt() -> AgentPrompt:
+    """This application's system prompt, as the health report weighs it.
+
+    The source is the module that renders the sections rather than a path
+    matched by shape, so renaming the package during initialization moves it.
+    """
+    return AgentPrompt(
+        sections=prompts.SECTIONS,
+        rendered=prompts.get_system_prompt(),
+        source=Path(prompts.__file__),
+    )
+
+
 APPLICATION_APPS = {
     "agent": agent_app,
-    "dashboard": dashboard_app,
+    "dashboard": create_dashboard_app(INTEGRATIONS),
     "dev": dev_app,
-    "feedback": feedback_app,
-    "harness": harness_app,
+    "feedback": create_feedback_app(assembled_prompt),
+    "harness": create_harness_app(
+        TARGETS,
+        REPOSITORY_WIDE,
+        ConfiguredModel(name=settings.model, adapter=engine_for_model(settings.model)),
+    ),
     "setup": setup_app,
 }
 """Where each application spec meets the Typer app answering to its name.

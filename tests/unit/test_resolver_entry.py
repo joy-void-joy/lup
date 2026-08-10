@@ -8,8 +8,8 @@ import typer
 from lup.codescan.markers import NoteKind
 from lup.resolver.mailbox import AnswerDoor, QuestionMailbox
 from lup.resolver.models import MaterialQuestion, QuestionBatch
-from lup_template.devtools.dev.comments import FoundComment
-from lup_template.devtools.harness.resolve import (
+from lup.devtools.dev.comments import FoundComment
+from lup.devtools.harness.resolve import (
     NoteTargetRef,
     admission_notes,
     admission_request,

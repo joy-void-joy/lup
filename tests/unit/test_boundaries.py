@@ -27,11 +27,12 @@ from lup.codescan.boundaries import (
     path_is_sanctioned,
 )
 
-from lup_template.devtools.harness.composition import (
+from lup_template.devtools.harness.catalog import (
     NATIVE_RUNTIMES,
     application_roots,
+    dev_project,
 )
-from lup_template.devtools.dev.boundaries import (
+from lup.devtools.dev.boundaries import (
     library_sources,
     overridable_names,
     scan_boundaries,
@@ -172,7 +173,7 @@ def test_policy_kernel_imports_are_pinned_to_hermetic_stdlib() -> None:
 
 
 def test_live_tree_has_zero_breaches() -> None:
-    assert scan_boundaries() == []
+    assert scan_boundaries(dev_project()) == []
 
 
 TABLE = 'READ_ONLY_COMMANDS = ("ls", "cat", "grep")\n'
@@ -251,14 +252,16 @@ def test_a_directive_two_lines_above_a_table_stays_spurious() -> None:
 SHELL_VOCABULARY = Path("src/lup_template/devtools/harness/content/shell_vocabulary.py")
 """Where this project's shell command tables live, outside the library."""
 
-MOVED_TABLES = [
-    "READ_ONLY_COMMANDS",
-    "JUDGED_ASK_COMMANDS",
-    "REDIRECTED_DENY_COMMANDS",
-    "GIT_READ_ONLY_SUBCOMMANDS",
-    "GIT_REVERSIBLE_SUBCOMMANDS",
-    "SHELL_RULES",
-]
+MOVED_TABLES = ["SHELL_RULES"]
+"""What still could not move, now that the words themselves have.
+
+The five word tables this once listed reached the library as parameter
+defaults on the groups in ``lup.policy.vocabulary``, so an adopter replaces a
+vocabulary by calling a group differently instead of editing lup. What is
+left is the composition — which groups this project takes and what it passes
+them — and that is the one thing that is genuinely its own judgement, so the
+rule naming it here is the rule working rather than a breach to clear.
+"""
 
 
 def test_the_shell_rule_models_declare_no_vocabulary_of_their_own() -> None:
@@ -273,10 +276,13 @@ def test_the_shell_rule_models_declare_no_vocabulary_of_their_own() -> None:
 
 
 def test_the_rule_names_every_table_if_the_vocabulary_returns_to_the_library() -> None:
-    """Judge the relocated source against the real library, as if it moved back.
+    """Judge the remaining source against the real library, as if it moved back.
 
-    Nothing in ``packages/lup`` reaches these names as a replaceable default,
-    so each one is a choice made for every adopter the moment it lands there.
+    This once named six tables, and the answer was that the vocabulary could
+    not move. Five of them since did, as parameter defaults an adopter passes
+    over. The composition is what the rule still stops, correctly: it is the
+    one thing in the file that a second project with the same intent would
+    write differently.
     """
     breaches = find_library_default_breaches(
         SHELL_VOCABULARY.read_text(encoding="utf-8"),

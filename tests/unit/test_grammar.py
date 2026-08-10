@@ -24,7 +24,7 @@ from lup.policy.kernel.edit import antipattern_decision
 from lup.policy.kernel.rows import AntiPatternRow
 
 from lup.codeintel.client import utf16_column
-from lup_template.devtools.dev.pyright_oracle import (
+from lup.devtools.dev.pyright_oracle import (
     PyrightOracle,
     locations_of,
 )

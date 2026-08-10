@@ -24,7 +24,7 @@ from lup.resolver.mailbox import (
     new_message,
 )
 from lup.workspace.paths import project_root
-from lup_template.devtools.harness.resolve import parse_answer_flags
+from lup.devtools.harness.resolve import parse_answer_flags
 from lup.devtools.supervisor.projection import PendingQuestionView
 
 

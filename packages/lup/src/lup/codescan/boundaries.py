@@ -37,6 +37,8 @@ NATIVE_SPELLING_RULE_ID = "native-spelling"
 KERNEL_IMPORT_RULE_ID = "kernel-imports"
 LIBRARY_DEFAULT_RULE_ID = "library-default"
 LIBRARY_ROOT = "packages/lup/src/lup/"
+KERNEL_ROOT = f"{LIBRARY_ROOT}policy/kernel/"
+"""Where the decision kernel ships, derived so it cannot drift from the root."""
 # lup: ignore[library-default] — the adapter packages this library ships, so the value follows lup.adapters
 NATIVE_PREFIXES = ("lup.adapters.claude", "lup.adapters.codex")
 # lup: ignore[library-default] — each key is literally what the provider calls the thing
@@ -123,12 +125,33 @@ class ApplicationRoots(BaseModel):
 NO_APPLICATION = ApplicationRoots()
 """What an adopter sanctions before it says so: nothing beyond the library."""
 
+# lup: ignore[library-default] — files of this library, which no adopter relocates
+LIBRARY_COMPOSITION = (
+    f"{LIBRARY_ROOT}devtools/harness/composition.py",
+    f"{LIBRARY_ROOT}devtools/harness/launch.py",
+    f"{LIBRARY_ROOT}devtools/harness/resolve.py",
+)
+"""The library's own CLI composition roots.
+
+A launcher starts a named runtime, the resolver entry drives one, and the
+composition builders assemble one, so all three compose concrete adapters the
+way an application's own root does. They are listed rather than sanctioned by
+directory: the engines beside them — generation, drift, reconciliation — read
+a declaration and must stay portable.
+"""
+
+
+def composes_natively(rel_path: Path) -> bool:
+    """Whether this path is a composition root of the library itself."""
+    posix = rel_path.as_posix()
+    return "lup/adapters/" in posix or posix in LIBRARY_COMPOSITION
+
 
 def path_is_sanctioned(
     rel_path: Path, application: ApplicationRoots = NO_APPLICATION
 ) -> bool:
     """Whether a path may import native implementations as a composition root."""
-    return "lup/adapters/" in rel_path.as_posix() or application.sanctions(rel_path)
+    return composes_natively(rel_path) or application.sanctions(rel_path)
 
 
 def library_placement_path_is_audited(rel_path: Path) -> bool:
@@ -145,9 +168,7 @@ def native_spelling_path_is_sanctioned(
     rel_path: Path, application: ApplicationRoots = NO_APPLICATION
 ) -> bool:
     """Whether a path may own provider wire spellings without a suppression."""
-    return "lup/adapters/" in rel_path.as_posix() or application.sanctions_spelling(
-        rel_path
-    )
+    return composes_natively(rel_path) or application.sanctions_spelling(rel_path)
 
 
 class BoundaryBreach(BaseModel):

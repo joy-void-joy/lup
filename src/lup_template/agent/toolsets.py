@@ -93,7 +93,7 @@ def build_session_toolset(
     from lup_template.agent.config import aux_model
     from lup_template.agent.tools.example import EXAMPLE_TOOLS
     from lup_template.agent.tools.reflect import create_reflect_tools
-    from lup_template.devtools.dev.pyright_oracle import langserver_path
+    from lup.devtools.dev.pyright_oracle import langserver_path
 
     reflect_kit = create_reflect_tools(
         session_dir=session_dir,

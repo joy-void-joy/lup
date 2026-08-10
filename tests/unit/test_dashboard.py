@@ -5,8 +5,9 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from lup_template.devtools import setup
-from lup_template.devtools.dashboard.app import DashboardState, create_dashboard
+from lup.devtools import setup
+from lup.devtools.dashboard.app import DashboardState, create_dashboard
+from lup_template.devtools.setup import INTEGRATIONS
 
 BASE_URL = "http://127.0.0.1:8765"
 
@@ -20,7 +21,8 @@ def isolated_dashboard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_dashboard_serves_packaged_wizard(isolated_dashboard: None) -> None:
     del isolated_dashboard
     async with AsyncClient(
-        transport=ASGITransport(app=create_dashboard(BASE_URL)), base_url=BASE_URL
+        transport=ASGITransport(app=create_dashboard(BASE_URL, INTEGRATIONS)),
+        base_url=BASE_URL,
     ) as client:
         response = await client.get("/")
 
@@ -34,15 +36,16 @@ async def test_dashboard_projects_cli_registry_status(
 ) -> None:
     del isolated_dashboard
     async with AsyncClient(
-        transport=ASGITransport(app=create_dashboard(BASE_URL)), base_url=BASE_URL
+        transport=ASGITransport(app=create_dashboard(BASE_URL, INTEGRATIONS)),
+        base_url=BASE_URL,
     ) as client:
         response = await client.get("/api/setup")
     state = DashboardState.model_validate(response.json())
 
     assert response.status_code == 200
-    assert state.total == len(setup.INTEGRATIONS)
+    assert state.total == len(INTEGRATIONS)
     assert {item.command for item in state.integrations} == {
-        item.command for item in setup.INTEGRATIONS
+        item.command for item in INTEGRATIONS
     }
     assert next(
         item for item in state.integrations if item.command == "google"
@@ -54,7 +57,8 @@ async def test_dashboard_writes_only_declared_integration_fields(
 ) -> None:
     del isolated_dashboard
     async with AsyncClient(
-        transport=ASGITransport(app=create_dashboard(BASE_URL)), base_url=BASE_URL
+        transport=ASGITransport(app=create_dashboard(BASE_URL, INTEGRATIONS)),
+        base_url=BASE_URL,
     ) as client:
         response = await client.put(
             "/api/setup/api-key",
@@ -74,7 +78,8 @@ async def test_dashboard_rejects_cross_integration_and_bespoke_writes(
 ) -> None:
     del isolated_dashboard
     async with AsyncClient(
-        transport=ASGITransport(app=create_dashboard(BASE_URL)), base_url=BASE_URL
+        transport=ASGITransport(app=create_dashboard(BASE_URL, INTEGRATIONS)),
+        base_url=BASE_URL,
     ) as client:
         cross_integration = await client.put(
             "/api/setup/api-key",
@@ -102,7 +107,7 @@ async def test_a_rebound_host_cannot_write_the_env_file(
     """
     del isolated_dashboard
     async with AsyncClient(
-        transport=ASGITransport(app=create_dashboard(BASE_URL)),
+        transport=ASGITransport(app=create_dashboard(BASE_URL, INTEGRATIONS)),
         base_url="http://evil.example",
     ) as client:
         page = await client.get("/")

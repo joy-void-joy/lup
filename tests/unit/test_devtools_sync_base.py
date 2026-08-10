@@ -13,7 +13,7 @@ import pytest
 import sh
 import typer
 
-from lup_template.devtools.dev import pr
+from lup.devtools.dev import pr
 from tests.unit.repos import commit_file, initialized_repo
 
 
