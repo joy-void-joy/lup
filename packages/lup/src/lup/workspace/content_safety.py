@@ -250,9 +250,9 @@ def spill_oversized_result[T: BaseModel](
     return result.model_copy(update=pointers)
 
 
-def guard_result[I: BaseModel, T: BaseModel](
+def guard_result[T: BaseModel](
     tool_name: str,
-    params: I,
+    params: BaseModel,  # lup: ignore[bare-basemodel] — any tool's input model
     result: T,
     directory: Path | None = None,
 ) -> T:
@@ -261,6 +261,11 @@ def guard_result[I: BaseModel, T: BaseModel](
     The entry point a tool boundary calls: it picks the label out of the
     validated input, so a spilled file is recognisable, and leaves the result
     untouched when nothing is over the threshold.
+
+    *params* is any model because every tool declares its own input type and
+    adopters declare more, so there is no union to name; the label is read by
+    iterating fields for whichever of :attr:`ContentSafetyConfig.label_fields`
+    that tool happens to carry, and never by touching one by name.
     """
     config = resolve_state()
     named = {name: value for name, value in params if isinstance(value, str) and value}
