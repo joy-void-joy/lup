@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.dev.rules by `uv run lup-devtools dev rules` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.devtools.dev.rules by `uv run lup-devtools dev rules` — edit the source, not this file. See docs/harness.md. -->
 
 # Lup rule reference
 
@@ -17,7 +17,7 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 ## Structural rules
 
 | Rule id | Family | Scope | Matching example | Diagnostic | Suppression | Defined in |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | `abc-capability` | architecture | Python architecture | <code>class Combined(Reader, Writer): ...</code> | Capability ABCs stay independently constructible and cohesive; implementations do not inherit multiple capabilities or reusable behavior. | typed directive | `lup.codescan.capabilities` |
 | `isinstance-chain` | architecture | Python architecture | <code>if isinstance(n, ast.Name): ... elif isinstance(n, ast.Attribute): ...</code> | Narrowing one subject again, in a later arm of the same if/elif chain, is a dispatch in the older spelling: each arm becomes a case pattern, an and conjunct becomes its guard, and the fallthrough becomes case _. A single narrowing is sanctioned and stays silent, as does isinstance in expression position, where match has no spelling at all. | **refused** | `lup.codescan.narrowing` |
 | `kernel-imports` | boundary | Policy kernel | <code>from pydantic import BaseModel</code> | The copied hook kernel imports only its pinned standard-library allowlist. | typed directive | `lup.codescan.boundaries` |
@@ -30,7 +30,7 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 ## Edit anti-patterns
 
 | Rule id | Family | Scope | Matching example | Diagnostic | Suppression | Defined in |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | `all-export` | anti-pattern | Python | <code>__all__\s*[=:]</code> | No __all__ — import directly from the defining module | typed directive | `lup.codescan.antipatterns` |
 | `any-type` | anti-pattern | Python | <code>\bAny\b</code> | Never use Any — use specific types, TypedDict, or BaseModel | typed directive | `lup.codescan.antipatterns` |
 | `argparse` | anti-pattern | Python | <code>\bimport\s+argparse\b&#124;\bfrom\s+argparse\s+import\b</code> | Use `typer` instead of argparse | typed directive | `lup.codescan.antipatterns` |
@@ -39,7 +39,7 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 | `bare-object` | anti-pattern | Python | <code>(?:(?&lt;!\w)(?!_)\w+\s*:&#124;-&gt;)\s*object\b</code> | Bare `object` says nothing about the value — use a concrete type, TypedDict, or BaseModel, and narrow at untyped boundaries | typed directive | `lup.codescan.antipatterns` |
 | `cast` | anti-pattern | Python | <code>\bcast\s*\(</code> | `cast(...)` is a code smell — narrow with isinstance or a type guard, or fix the annotation so the cast is unnecessary | typed directive | `lup.codescan.antipatterns` |
 | `dataclass` | anti-pattern | Python | <code>@dataclass&#124;\bimport\s+dataclasses\b&#124;\bfrom\s+dataclasses\s+import\b</code> | Use Pydantic BaseModel (or TypedDict) instead of dataclasses | typed directive | `lup.codescan.antipatterns` |
-| `dict-get` | anti-pattern | Python | <code>\.get\s*\(</code> | `.get(` on payload/TypedDict-shaped data hides the schema — use typed attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]` | typed directive | `lup.codescan.antipatterns` |
+| `dict-get` | anti-pattern | Python | <code>\.get\s*\(</code> | `.get(` on payload/TypedDict-shaped data hides the schema — use typed attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]`. On a typed non-mapping receiver (an SDK client, a route decorator) add nothing — the audit resolves the declaration and refutes it, and a marker here is reported spurious | typed directive | `lup.codescan.antipatterns` |
 | `dict-str-object` | anti-pattern | Python | <code>\b(?:dict&#124;Mapping)\[\s*str\s*,\s*object\s*\]</code> | Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel | typed directive | `lup.codescan.antipatterns` |
 | `dict-str-payload` | anti-pattern | Python | <code>\b(?:dict&#124;Mapping&#124;MutableMapping)\[\s*str\s*,\s*(?:str&#124;int&#124;float&#124;bool&#124;bytes&#124;complex)\b</code> | String-keyed dict with a scalar value hides shape when the keys are a CLOSED, enumerable set — use a BaseModel or dict[Literal[...], V]. When the keys are open and data-driven (a registry/cache/counter keyed by external data) this is legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value types (dict[str, SessionFactory]) are already accepted; JsonValue covers arbitrary JSON | typed directive | `lup.codescan.antipatterns` |
 | `empty-collection` | anti-pattern | Python | <code>(?&lt;![=!&lt;&gt;])=\s*(?:\{\}&#124;\[\]&#124;set\(\))</code> | Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an append/mutate loop — build the collection with a comprehension, or, when the loop carries control flow a comprehension cannot, `yield` the items from a nested function and let its caller collect them. Add `# lup: ignore[empty-collection]` only for a fold neither expresses | typed directive | `lup.codescan.antipatterns` |

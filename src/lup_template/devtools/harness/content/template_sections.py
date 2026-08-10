@@ -5,7 +5,7 @@
 
 import lup.harness.models as models
 
-import lup_template.devtools.harness.content.conventions as conventions
+import lup.devtools.harness.content.conventions as conventions
 
 SETUP_THROUGH_NAMING: list[models.PromptPart] = [
     models.TextPart(
@@ -854,11 +854,11 @@ SELF_IMPROVEMENT_THROUGH_END: list[models.PromptPart] = [
 
 See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-design-philosophy) above — these are the governing principles for all agent improvements.
 
-**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" If the agent made one bad decision, the fix is almost never a prompt line about that specific decision. Instead: does the agent have enough context? Does it have the right tools? Is the model strong enough?
-
-When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
-
-### Diagnosing Failures
+"""
+    ),
+    *conventions.FAILURE_ANALYSIS,
+    models.TextPart(
+        text=r"""### Diagnosing Failures
 
 When the agent fails, trace the failure through the pipeline before changing anything:
 

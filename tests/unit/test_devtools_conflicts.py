@@ -21,8 +21,8 @@ import sh
 from lup.adapters.harness import claude_prompt_renderer
 from lup.types import JsonObject
 from lup.workspace import paths
-from lup_template.devtools.dev import conflicts
-from lup_template.devtools.harness.content.skills.merge import SKILL as MERGE_SKILL
+from lup.devtools.dev import conflicts
+from lup.devtools.harness.content.skills.merge import SKILL as MERGE_SKILL
 from tests.unit.repos import commit_file, git_in, initialized_repo
 
 

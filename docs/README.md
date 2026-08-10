@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.index by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.devtools.harness.content.docs.index by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Lup documentation
 
@@ -13,12 +13,13 @@ touching.
 
 ## Reference
 
-Subjects that span the three components, or that are large enough to own a
-page.
+Subjects that span the three components, or that are large enough to own a page.
 
 | Page | Answers |
 | --- | --- |
 | [architecture.md](architecture.md) | Why the seams are where they are: one capability per ABC, adapters at the edge, structured output with one mechanism. |
+| [patterns.md](patterns.md) | The recurring code shapes: declaration-plus-renderer, closed-by-construction, the typed-matcher router, and the engine-versus-surface split. |
+| [orchestration.md](orchestration.md) | The delegation catalog: subagent, nested, background, and deferred tools, and when to reach for each. |
 | [permissions.md](permissions.md) | How a shell command, fetch, or edit becomes allow, ask, defer, or deny — and how the generated hooks decide identically without importing the library. |
 | [rules.md](rules.md) | Every executable Lup rule, its matching shape, its diagnostic, and the module that enforces it. |
 | [resolver.md](resolver.md) | How reviewed feedback becomes concerns, worktrees, workers, and an accepted integration branch. |
@@ -38,8 +39,10 @@ page.
 
 ## Every page here is generated
 
-Files under `docs/` are compiler output from typed Python under
-`src/lup_template/devtools/harness/content/docs/`, the same way the native
+Files under `docs/` are compiler output from typed Python — the pages about
+the library from `packages/lup/src/lup/devtools/harness/content/docs/`, the
+pages about this repository from
+`src/lup_template/devtools/harness/content/docs/` — the same way the native
 trees are. Each opens with a banner naming its source module. Edit the module
 and regenerate; a hand-edit is preserved and reported as a conflict rather
 than silently overwritten. [harness.md](harness.md) is the whole story.
