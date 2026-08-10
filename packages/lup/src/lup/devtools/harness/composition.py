@@ -37,7 +37,7 @@ type NativeCapabilityEvidence = (
 
 
 def claude_composition(
-    root: Path, content: ProjectContent, guidance: PromptDocument
+    root: Path, content: ProjectContent, guidance: PromptDocument | None = None
 ) -> NativeHarnessComposition:
     """Construct the Claude capabilities directly."""
     plugin = root / ".claude" / "plugins" / content.harness.plugins[0].name
@@ -53,7 +53,7 @@ def claude_composition(
 
 
 def codex_composition(
-    root: Path, content: ProjectContent, guidance: PromptDocument
+    root: Path, content: ProjectContent, guidance: PromptDocument | None = None
 ) -> NativeHarnessComposition:
     """Construct the Codex capabilities directly."""
 

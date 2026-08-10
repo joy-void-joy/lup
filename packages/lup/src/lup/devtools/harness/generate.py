@@ -175,6 +175,27 @@ def rendered_document(
     )
 
 
+def installer_guidance(
+    *, path: Path, document: PromptDocument | None, prompts: PromptRenderer
+) -> list[Artifact]:
+    """Render the guidance an installer merges into a target, if there is any.
+
+    Only a template has one: a project that is nobody's starting point has no
+    downstream to hand guidance to, so it publishes no such file rather than
+    advertising its own project guidance as something to install elsewhere.
+    """
+    if document is None:
+        return []
+    return [
+        rendered_document(
+            path=path,
+            document=document,
+            prompts=prompts,
+            semantic_id="harness.template-guidance",
+        )
+    ]
+
+
 def published_documents(
     prompts: PromptRenderer, documents: list[Document]
 ) -> list[Artifact]:
@@ -219,7 +240,7 @@ def current_reader(
 
 
 def claude_generation_recipe(
-    root: Path, content: ProjectContent, guidance: PromptDocument
+    root: Path, content: ProjectContent, guidance: PromptDocument | None = None
 ) -> GenerationRecipe:
     """Compose the complete Claude tree from canonical typed declarations."""
     source = content.harness
@@ -238,11 +259,8 @@ def claude_generation_recipe(
     ]
     support_artifacts = [
         *published_documents(prompts, content.documents),
-        rendered_document(
-            path=plugin / "TEMPLATE_CLAUDE.md",
-            document=guidance,
-            prompts=prompts,
-            semantic_id="harness.template-guidance",
+        *installer_guidance(
+            path=plugin / "TEMPLATE_CLAUDE.md", document=guidance, prompts=prompts
         ),
         *verbatim,
         Artifact(
@@ -273,19 +291,16 @@ def claude_generation_recipe(
 
 
 def codex_generation_recipe(
-    root: Path, content: ProjectContent, guidance: PromptDocument
+    root: Path, content: ProjectContent, guidance: PromptDocument | None = None
 ) -> GenerationRecipe:
     """Compose the Codex renderers, reader, and ownership location."""
     source = content.harness
     prompts = codex_prompt_renderer()
-    support_artifacts = [
-        rendered_document(
-            path=Path(".codex/plugins") / source.plugins[0].name / "TEMPLATE_AGENTS.md",
-            document=guidance,
-            prompts=prompts,
-            semantic_id="harness.template-guidance",
-        ),
-    ]
+    support_artifacts = installer_guidance(
+        path=Path(".codex/plugins") / source.plugins[0].name / "TEMPLATE_AGENTS.md",
+        document=guidance,
+        prompts=prompts,
+    )
     compiled = compile_codex(source)
     desired = validated_tree([*compiled.artifacts, *support_artifacts])
     manifest_path = root / ".codex" / ".lup-ownership.json"
