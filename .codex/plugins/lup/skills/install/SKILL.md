@@ -38,6 +38,14 @@ is clean. If the source changed, say so in the report rather than reverting
 silently — something wrote where it should not have, and which command did it
 is the useful part.
 
+That rule is about *accidental* writes — a command that acted on the wrong
+working directory. It does not forbid a deliberate contribution back. When the
+target's fork carries code that passes the library placement test — would
+another project built on lup want this? — folding it into the source is the
+correct outcome rather than a violation. Raise it as a decision; once the user
+approves, the source is writable for exactly that change, and the report names
+the commits you made to it alongside the ones you made to the target.
+
 ### The source branch is part of what you install
 
 Every phase below reads the source checkout as it stands, so the branch you are
@@ -124,7 +132,7 @@ and for a vendored `packages/lup/`.
 | --- | --- |
 | Nothing | Continue with the phases below — this is a first install. |
 | A published or linked `lup` dependency | Nothing to port. Update the release it resolves (`dev library use published`), regenerate its harness, and report. The library arrives as a package; only the target's own declarations are its business. |
-| A vendored `packages/lup/` copy | Do **not** overwrite it. Port the upstream commits through $lup:update, which reviews them one at a time against a tree that has diverged on purpose. Then offer `dev library use published` to end the fork, saying plainly that it is one-way and worth reviewing. |
+| A vendored `packages/lup/` copy | Do **not** overwrite it. Port the upstream commits through $lup:update, which reviews them one at a time against a tree that has diverged on purpose. Read the fork the other way too, before porting anything: run the library placement test over what it *added*, because a downstream that solved a framework problem is holding library code, and that folds back into lup rather than staying forked forever. Then offer to end the fork — `dev library use published` where a release exists, `dev library link` where it does not — saying plainly that it is one-way and worth reviewing. |
 | An old install with no sync baseline | Baseline it first (step 9 below, against the target), so the next review lists commits rather than the entire history. |
 
 A target that already has lup is the common case after the first year, and

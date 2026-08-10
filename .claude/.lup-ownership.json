@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "547fddf1a1cd40077dcc138aae02e076eef1b613873d01982a630f825dabe9fa",
+  "source_digest": "bc0854809daf0b5997477dbe213ee7eec8f27f224da8ecd5974cbe6576e4fbb0",
   "target_requirements": [
     "claude-code"
   ],
@@ -191,7 +191,7 @@
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "bca46fb398ee18b367be973634791161cd1a71bea449f1a2d511b0ce5f69405d",
+      "sha256": "480d398a579d97aed9ac8dadcbea08cdcf4c58597459c66e67a09fd777ea75c4",
       "semantic_id": "skill.install",
       "executable": false
     },

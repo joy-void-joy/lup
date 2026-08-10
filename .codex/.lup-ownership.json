@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "547fddf1a1cd40077dcc138aae02e076eef1b613873d01982a630f825dabe9fa",
+  "source_digest": "bc0854809daf0b5997477dbe213ee7eec8f27f224da8ecd5974cbe6576e4fbb0",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -289,7 +289,7 @@
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "3ecfc1da4abef0a3b33450b9b6397797f6a6a808797c51334875071567446c4f",
+      "sha256": "f789a11a5f1ff2d2f6c93b9af334051d5732c1aeaf9e787175dfe69457f51869",
       "semantic_id": "skill.install",
       "executable": false
     },
