@@ -13,7 +13,7 @@ import pytest
 
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
-from lup.resolver.core import merge_problems
+from lup.resolver.joins import merge_problems
 from lup.resolver.models import (
     AcceptanceCriterion,
     Concern,
@@ -29,7 +29,7 @@ from lup.resolver.models import (
 from lup.resolver.orchestrator import report_mismatch
 from lup.resolver.state import StateTransitionError, validate_concern_admission
 from lup.resolver.tools import agent_may_approve
-from lup_template.devtools.harness.resolve import integration_branch
+from lup.devtools.harness.resolve import integration_branch
 from tests.unit.repos import initialized_repo
 
 PARENT = "a1b2c3d4e5f6"

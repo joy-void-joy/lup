@@ -1,0 +1,204 @@
+"""Publishing a run's material questions, and collecting what answers them.
+
+A worker asks through its tools and waits there; a door — the supervisor
+page, a CLI flag, an agent writing the mailbox directly — offers a value
+whenever a human gets to it. Between the two sits this: the only writer of
+recorded answers, and the only thing that folds the mailbox into the state
+the run persists.
+
+It holds the run rather than the composer that owns every other phase, so
+what it can reach is exactly the state, the mailbox, and the journal.
+"""
+
+import asyncio
+
+from lup.channels.models import utc_now
+from lup.resolver.contracts import ResolverAwaitingAnswers
+from lup.resolver.journal import (
+    AnswerSettledEvent,
+    Journal,
+    QuestionAskedEvent,
+)
+from lup.resolver.mailbox import (
+    ANSWER_POLL_SECONDS,
+    PendingQuestion,
+    QuestionMailbox,
+    RecordedAnswer,
+    wait_for_answers,
+)
+from lup.resolver.models import (
+    AnswerBatch,
+    MaterialQuestion,
+    QuestionAnswer,
+    QuestionBatch,
+    ResolverConfig,
+)
+from lup.resolver.run import ResolveRun
+
+
+class QuestionBroker:
+    """The run's question desk: publish, promote, wait, and read back."""
+
+    def __init__(
+        self,
+        config: ResolverConfig,
+        run: ResolveRun,
+        mailbox: QuestionMailbox,
+        journal: Journal,
+        answer_wait_seconds: float = 0.0,
+        poll_interval_seconds: float = ANSWER_POLL_SECONDS,
+    ) -> None:
+        self.config = config
+        self.run = run
+        self.mailbox = mailbox
+        self.journal = journal
+        self.answer_wait_seconds = answer_wait_seconds
+        self.poll_interval_seconds = poll_interval_seconds
+
+    async def unanswered_for(self, concern_id: str) -> list[MaterialQuestion]:
+        """Questions this concern asked that no door has answered yet.
+
+        A worker asks through its tools and waits there, so reaching this
+        point with anything outstanding means the tool returned ``parked``
+        and the worker submitted rather than guessing. Reading the mailbox
+        is what turns that into the run's existing park.
+        """
+        await self.apply_mailbox()
+        answered = self.mailbox.answered_ids()
+        return [
+            item.question
+            for item in self.mailbox.questions()
+            if item.question.concern_id == concern_id
+            and item.question.id not in answered
+        ]
+
+    def queue_questions(self, questions: list[MaterialQuestion], asked_by: str) -> None:
+        """Publish questions so any door can answer them."""
+        for question in questions:
+            self.mailbox.queue(
+                PendingQuestion(
+                    run_id=self.config.run_id,
+                    question=question,
+                    asked_by=asked_by,
+                    asked_at=utc_now(),
+                )
+            )
+            self.journal.record(
+                QuestionAskedEvent(question=question, asked_by=asked_by)
+            )
+
+    def promote_offers(self) -> list[str]:
+        """Promote what the doors offered, and report what could not count.
+
+        This is the only writer of recorded answers. A design question's
+        choices are the planner's suggestions, so an answer in the human's own
+        words is recorded as given; only the reserved integration gates close
+        their domain, and an offer outside one is a correctable problem rather
+        than a fatal one — a door is a form, not a trusted caller.
+        """
+        questions = {
+            item.question.id: item.question for item in self.mailbox.questions()
+        }
+        answered = self.mailbox.answered_ids()
+        fresh = [
+            offer
+            for offer in sorted(self.mailbox.offers(), key=lambda item: item.offered_at)
+            if offer.question_id in questions and offer.question_id not in answered
+        ]
+        valid = [
+            offer
+            for offer in fresh
+            if not questions[offer.question_id].closed_choices
+            or offer.value in questions[offer.question_id].choices
+        ]
+        for offer in valid:
+            answer = QuestionAnswer(question_id=offer.question_id, value=offer.value)
+            self.mailbox.record(
+                RecordedAnswer(
+                    run_id=self.config.run_id,
+                    answer=answer,
+                    door=offer.door,
+                    answered_at=utc_now(),
+                )
+            )
+            self.journal.record(AnswerSettledEvent(answer=answer, door=offer.door))
+        return [
+            f"{offer.question_id} was answered {offer.value!r}, but that gate "
+            "accepts only: " + ", ".join(questions[offer.question_id].choices)
+            for offer in fresh
+            if offer not in valid
+        ]
+
+    async def apply_mailbox(self) -> list[str]:
+        """Promote the doors' offers and fold the mailbox into persisted state."""
+        problems = self.promote_offers()
+        async with self.run.lock:
+            state = self.run.require()
+            questions = QuestionBatch(
+                run_id=state.run_id,
+                questions=[item.question for item in self.mailbox.questions()],
+            )
+            answers = AnswerBatch(
+                run_id=state.run_id,
+                answers=[record.answer for record in self.mailbox.answers()],
+            )
+            if state.questions != questions or state.answers != answers:
+                self.run.persist(
+                    state.model_copy(
+                        update={"questions": questions, "answers": answers}
+                    )
+                )
+        self.run.wake.set()
+        return problems
+
+    async def promote_until(self, stop: asyncio.Event) -> None:
+        """Keep promoting for the lifetime of one advance."""
+        while not stop.is_set():
+            await self.apply_mailbox()
+            try:
+                async with asyncio.timeout(self.poll_interval_seconds):
+                    await stop.wait()
+            except TimeoutError:
+                continue
+        await self.apply_mailbox()
+
+    async def await_questions(self, questions: list[MaterialQuestion]) -> AnswerBatch:
+        """Wait for every named question, or park the run on what is missing."""
+        if not questions:
+            return AnswerBatch(run_id=self.config.run_id, answers=[])
+        await self.apply_mailbox()
+        result = await wait_for_answers(
+            self.mailbox,
+            [question.id for question in questions],
+            wait_seconds=self.answer_wait_seconds,
+            poll_interval_seconds=self.poll_interval_seconds,
+            wake=self.run.wake,
+        )
+        problems = await self.apply_mailbox()
+        if result.unanswered:
+            raise ResolverAwaitingAnswers(
+                [
+                    question
+                    for question in questions
+                    if question.id in result.unanswered
+                ],
+                problems,
+            )
+        return AnswerBatch(
+            run_id=self.config.run_id,
+            answers=[record.answer for record in result.answered],
+        )
+
+    def answers_for(self, concern_id: str) -> list[QuestionAnswer]:
+        """Every recorded answer to a question this concern asked."""
+        state = self.run.require()
+        question_ids = {
+            question.id
+            for question in (state.questions.questions if state.questions else [])
+            if question.concern_id == concern_id
+        }
+        return [
+            answer
+            for answer in (state.answers.answers if state.answers else [])
+            if answer.question_id in question_ids
+        ]
